@@ -331,6 +331,162 @@ let operation_projection ~base_path ~keeper_name =
   | Ok owner -> Ok (Keeper_owner.operation_projection owner)
 ;;
 
+let shutdown_operation_id ~base_path ~keeper_name =
+  match get ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner -> Ok (Keeper_owner.shutdown_operation_id owner)
+;;
+
+let shutdown_fence_error detail =
+  Command_rejected
+    (Keeper_owner.Store_unavailable ("shutdown intake fence conflict: " ^ detail))
+;;
+
+let begin_shutdown ~base_path ~keeper_name ~operation_id =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Eio.Cancel.protect (fun () ->
+      match Keeper_owner.begin_shutdown owner ~operation_id with
+      | Error error -> Error (Command_rejected error)
+      | Ok owner_result ->
+        let owner_id =
+          match owner_result with
+          | Keeper_owner.Shutdown_reserved reservation
+          | Keeper_owner.Shutdown_already_reserved reservation ->
+            reservation.operation_id
+        in
+        let fence_result =
+          Keeper_shutdown_intake_fence.begin_shutdown
+            ~base_path
+            ~keeper_name
+            ~operation_id:owner_id
+        in
+        let fence_id =
+          match fence_result with
+          | Keeper_shutdown_intake_fence.Reserved reservation
+          | Keeper_shutdown_intake_fence.Already_reserved reservation ->
+            reservation.operation_id
+        in
+        if Keeper_shutdown_types.Operation_id.equal owner_id fence_id
+        then Ok owner_result
+        else
+          Error
+            (shutdown_fence_error
+               (Printf.sprintf
+                  "keeper=%s owner=%s intake=%s"
+                  keeper_name
+                  (Keeper_shutdown_types.Operation_id.to_string owner_id)
+                  (Keeper_shutdown_types.Operation_id.to_string fence_id))))
+;;
+
+let rollback_shutdown ~base_path ~keeper_name ~operation_id =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Eio.Cancel.protect (fun () ->
+      match
+        Keeper_shutdown_intake_fence.rollback_shutdown
+          ~base_path
+          ~keeper_name
+          ~operation_id
+      with
+      | Keeper_shutdown_intake_fence.Reserved_by_other existing ->
+        Error
+          (shutdown_fence_error
+             (Printf.sprintf
+                "keeper=%s rollback_owner=%s intake_owner=%s"
+                keeper_name
+                (Keeper_shutdown_types.Operation_id.to_string operation_id)
+                (Keeper_shutdown_types.Operation_id.to_string existing)))
+      | Keeper_shutdown_intake_fence.Rolled_back
+      | Keeper_shutdown_intake_fence.Not_reserved ->
+        Keeper_owner.rollback_shutdown owner ~operation_id
+        |> Result.map_error (fun error -> Command_rejected error))
+;;
+
+let restore_shutdown ~base_path ~keeper_name ~operation_id =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Eio.Cancel.protect (fun () ->
+      match
+        Keeper_shutdown_intake_fence.restore_shutdown
+          ~base_path
+          ~keeper_name
+          ~operation_id
+      with
+      | Keeper_shutdown_intake_fence.Restore_conflict existing ->
+        Error
+          (shutdown_fence_error
+             (Printf.sprintf
+                "keeper=%s restore_owner=%s intake_owner=%s"
+                keeper_name
+                (Keeper_shutdown_types.Operation_id.to_string operation_id)
+                (Keeper_shutdown_types.Operation_id.to_string existing)))
+      | Keeper_shutdown_intake_fence.Restored
+      | Keeper_shutdown_intake_fence.Already_restored ->
+        Keeper_owner.restore_shutdown owner ~operation_id
+        |> Result.map_error (fun error -> Command_rejected error))
+;;
+
+let transition_shutdown
+      ~base_path
+      ~keeper_name
+      ~from_operation_id
+      ~to_operation_id
+  =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Eio.Cancel.protect (fun () ->
+      match
+        Keeper_owner.transition_shutdown owner ~from_operation_id ~to_operation_id
+      with
+      | Error error -> Error (Command_rejected error)
+      | Ok owner_result ->
+        ignore
+          (Keeper_shutdown_intake_fence.transition_shutdown
+             ~base_path
+             ~keeper_name
+             ~from_operation_id
+             ~to_operation_id
+            : Keeper_shutdown_intake_fence.transition_result);
+        let owner_id = Keeper_owner.shutdown_operation_id owner in
+        let fence_id =
+          Keeper_shutdown_intake_fence.shutdown_operation_id
+            ~base_path
+            ~keeper_name
+        in
+        let same_id =
+          match owner_id, fence_id with
+          | None, None -> true
+          | Some left, Some right ->
+            Keeper_shutdown_types.Operation_id.equal left right
+          | None, Some _ | Some _, None -> false
+        in
+        if same_id
+        then Ok owner_result
+        else
+          Error
+            (shutdown_fence_error
+               (Printf.sprintf "keeper=%s transition results diverged" keeper_name)))
+;;
+
+let await_idle_after_shutdown ~base_path ~keeper_name =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Eio.Cancel.protect (fun () ->
+      match Keeper_owner.await_idle_after_shutdown owner with
+      | Error error -> Error (Command_rejected error)
+      | Ok () ->
+        Keeper_shutdown_intake_fence.await_idle_after_shutdown
+          ~base_path
+          ~keeper_name;
+        Ok ())
+;;
+
 let run_autonomous_if_idle ~base_path ~keeper_name run =
   match get ~base_path ~keeper_name with
   | Error error -> Error (Command_lookup_failed error)

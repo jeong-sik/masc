@@ -582,7 +582,7 @@ let keeper_execution_snapshot config =
           | Error detail -> Error detail
         in
         let admission =
-          Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+          Keeper_owner_registry.shutdown_operation_id ~base_path ~keeper_name
         in
         let registry_entry = Keeper_registry.get ~base_path keeper_name in
         let runtime =
@@ -590,10 +590,15 @@ let keeper_execution_snapshot config =
             registry_entry
         in
         let truth =
-          Keeper_activation_readiness.classify_owner_execution
-            ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
-            ~runtime
-            meta_result
+          match admission with
+          | Error error ->
+            Keeper_activation_readiness.Unknown
+              (Keeper_owner_registry.lookup_error_to_string error)
+          | Ok shutdown_operation_id ->
+            Keeper_activation_readiness.classify_owner_execution
+              ~shutdown_operation_id
+              ~runtime
+              meta_result
         in
         {
           keeper_name;

@@ -2562,15 +2562,15 @@ let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
       Eio.Switch.run @@ fun outer_sw ->
       Eio.Fiber.fork ~sw:outer_sw (fun () ->
         (match
-           Masc.Keeper_turn_admission.run_durable_intake_if_open
+           Masc.Keeper_shutdown_intake_fence.run_durable_intake_if_open
              ~base_path:config.base_path
              ~keeper_name:name
              (fun _intake_token ->
                 Eio.Promise.resolve intake_started_u ();
                 Eio.Promise.await release_intake)
          with
-         | Masc.Keeper_turn_admission.Intake_committed () -> ()
-         | Masc.Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+         | Masc.Keeper_shutdown_intake_fence.Intake_committed () -> ()
+         | Masc.Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
            fail
              ("test intake unexpectedly saw shutdown reservation "
               ^ Shutdown_types.Operation_id.to_string operation_id));

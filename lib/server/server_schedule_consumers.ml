@@ -450,15 +450,21 @@ let activation_outcome_for_required_wake config ~base_path ~keeper_name =
           ^ Executor_pool_ref.strict_submit_error_to_string error))
   | Ok meta_result ->
     let admission =
-      Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+      Keeper_owner_registry.shutdown_operation_id ~base_path ~keeper_name
     in
     let runtime =
       Keeper_activation_readiness.owner_runtime_of_registry_entry
         (Keeper_registry.get ~base_path keeper_name)
     in
+    (match admission with
+     | Error error ->
+       Keeper_wake_activation_deferred
+         (Keeper_wake_activation_owner_unknown
+            (Keeper_owner_registry.lookup_error_to_string error))
+     | Ok shutdown_operation_id ->
     (match
        Keeper_activation_readiness.classify_durable_demand_execution
-         ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
+         ~shutdown_operation_id
          ~runtime
          meta_result
      with
@@ -502,7 +508,7 @@ let activation_outcome_for_required_wake config ~base_path ~keeper_name =
         | Keeper_registry.Deferred_lifecycle denial ->
           Keeper_wake_activation_deferred
             (Keeper_wake_activation_lifecycle_denied
-               (Keeper_lifecycle_admission.autonomous_denial_to_wire denial))))
+               (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))))
 ;;
 
 let log_activation_outcome ~schedule_id ~keeper_name = function
@@ -1018,13 +1024,13 @@ let dispatch_keeper_wake
       Ok (Schedule_runner.Work_accepted { detail; acceptance_commit })
   in
   match
-    Keeper_turn_admission.run_durable_intake_if_open
+    Keeper_shutdown_intake_fence.run_durable_intake_if_open
       ~base_path
       ~keeper_name:intake_owner
       dispatch_while_fenced
   with
-  | Keeper_turn_admission.Intake_committed result -> result
-  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+  | Keeper_shutdown_intake_fence.Intake_committed result -> result
+  | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
     retryable_dispatch_failure
       (Printf.sprintf
          "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"

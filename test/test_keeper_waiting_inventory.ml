@@ -310,24 +310,7 @@ let test_manual_compaction_waiting_row_has_typed_producer () =
        failf "expected one manual compaction waiting row, got %d" (List.length rows))
 ;;
 
-let test_turn_admission_waiter_row_is_absent () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "admission-no-waiter-keeper" in
-  ensure_keeper config keeper_name;
-  Keeper_turn_admission.For_testing.reset ();
-  Fun.protect
-    ~finally:(fun () -> Keeper_turn_admission.For_testing.reset ())
-    (fun () ->
-      let json = Server_keeper_waiting_inventory.dashboard_json config in
-      (match find_keeper json keeper_name with
-       | None -> fail "keeper row missing"
-       | Some keeper ->
-         check string "keeper state" "idle" (json_string_member "state" keeper);
-         check int "keeper waiting count" 0 (json_int_member "waiting_count" keeper))
-;;
-
-let test_turn_admission_shutdown_row_is_deferred () =
+let test_owner_shutdown_row_is_deferred () =
   with_workspace
   @@ fun config ->
   let keeper_name = "admission-shutdown-keeper" in
@@ -339,20 +322,22 @@ let test_turn_admission_shutdown_row_is_deferred () =
       let base_path = config.Workspace_utils_backend_setup.base_path in
       let operation_id = Keeper_shutdown_types.Operation_id.generate () in
       (match
-         Keeper_turn_admission.begin_shutdown
+         Keeper_owner_registry.begin_shutdown
            ~base_path
            ~keeper_name
            ~operation_id
        with
-       | Keeper_turn_admission.Shutdown_reserved reservation ->
+       | Ok (Masc.Keeper_owner.Shutdown_reserved reservation) ->
          check bool "shutdown reservation is idle" true
            (Option.is_none reservation.in_flight)
-       | Keeper_turn_admission.Shutdown_already_reserved _ ->
-         fail "fresh keeper unexpectedly had a shutdown reservation");
+       | Ok (Masc.Keeper_owner.Shutdown_already_reserved _) ->
+         fail "fresh keeper unexpectedly had a shutdown reservation"
+       | Error error ->
+         fail (Keeper_owner_registry.command_error_to_string error));
       let json = Server_keeper_waiting_inventory.dashboard_json config in
-      check_metric_float "turn admission shutdown metric"
+      check_metric_float "Owner shutdown metric"
         Otel_metric_store.metric_keeper_waiting_count
-        ~labels:[ "scope", "keeper"; "source", "turn_admission_shutdown" ]
+        ~labels:[ "scope", "keeper"; "source", "owner_shutdown" ]
         1.0;
       check_metric_float "deferred keeper metric"
         Otel_metric_store.metric_keeper_waiting_keeper_count
@@ -367,14 +352,14 @@ let test_turn_admission_shutdown_row_is_deferred () =
          check string "shutdown keeper is deferred" "deferred"
            (json_string_member "state" keeper);
          check int "shutdown source count" 1
-           U.(keeper |> member "sources" |> member "turn_admission_shutdown" |> to_int);
+           U.(keeper |> member "sources" |> member "owner_shutdown" |> to_int);
          (match U.(keeper |> member "waiting_on" |> to_list) with
           | [ row ] ->
-            check string "shutdown row source" "turn_admission_shutdown"
+            check string "shutdown row source" "owner_shutdown"
               (json_string_member "source" row);
             check string "shutdown row waiting_on" "shutdown"
               (json_string_member "waiting_on" row);
-            check string "shutdown row wake producer" "keeper_turn_admission"
+            check string "shutdown row wake producer" "keeper_owner_actor"
               (json_string_member "wake_producer" row);
             check string "shutdown row next action" "keeper_shutdown_finalize"
               (json_string_member "next_action" row);
@@ -391,15 +376,17 @@ let test_turn_admission_shutdown_row_is_deferred () =
               U.(row |> member "detail" |> member "in_flight" = `Null)
           | rows -> failf "expected one shutdown row, got %d" (List.length rows)));
       (match
-         Keeper_turn_admission.rollback_shutdown
+         Keeper_owner_registry.rollback_shutdown
            ~base_path
            ~keeper_name
            ~operation_id
        with
-       | Keeper_turn_admission.Shutdown_rolled_back -> ()
-       | Keeper_turn_admission.Shutdown_not_reserved
-       | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
-         fail "owned shutdown reservation did not roll back");
+       | Ok Masc.Keeper_owner.Shutdown_rolled_back -> ()
+       | Ok Masc.Keeper_owner.Shutdown_not_reserved
+       | Ok (Masc.Keeper_owner.Shutdown_reserved_by_other _) ->
+         fail "owned shutdown reservation did not roll back"
+       | Error error ->
+         fail (Keeper_owner_registry.command_error_to_string error));
       let reopened = Server_keeper_waiting_inventory.dashboard_json config in
       match find_keeper reopened keeper_name with
       | None -> fail "reopened keeper row missing"
@@ -765,10 +752,8 @@ let () =
             test_manual_compaction_waiting_row_has_typed_producer
         ; test_case "keeper-scoped projection excludes other keepers" `Quick
             test_keeper_scoped_projection_excludes_other_keepers
-        ; test_case "turn admission waiter row is absent" `Quick
-            test_turn_admission_waiter_row_is_absent
-        ; test_case "turn admission shutdown row is deferred" `Quick
-            test_turn_admission_shutdown_row_is_deferred
+        ; test_case "Owner shutdown row is deferred" `Quick
+            test_owner_shutdown_row_is_deferred
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick
             test_keeper_owned_schedule_waiting_rows_are_lane_scoped
         ; test_case "live turn keeper is busy without waiting rows" `Quick

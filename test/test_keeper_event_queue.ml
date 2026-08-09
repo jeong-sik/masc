@@ -1023,22 +1023,22 @@ let () =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         Masc.Keeper_shutdown_intake_fence.begin_shutdown
            ~base_path
            ~keeper_name:to_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+       | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
          Alcotest.fail "fresh target shutdown was already reserved");
       Fun.protect
         ~finally:(fun () ->
           ignore
-            (Masc.Keeper_turn_admission.rollback_shutdown
+            (Masc.Keeper_shutdown_intake_fence.rollback_shutdown
                ~base_path
                ~keeper_name:to_keeper
                ~operation_id:shutdown_operation_id
-              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+              : Masc.Keeper_shutdown_intake_fence.rollback_result))
         (fun () ->
            (match
               Masc.Keeper_registry_event_queue
@@ -1089,13 +1089,13 @@ let () =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         Masc.Keeper_shutdown_intake_fence.begin_shutdown
            ~base_path
            ~keeper_name:to_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+       | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
          Alcotest.fail "fresh post-purge target was already reserved");
       (match
          Masc.Keeper_meta_store.remove_snapshot config ~name:to_keeper
@@ -1103,14 +1103,14 @@ let () =
        | Ok () -> ()
        | Error error -> Alcotest.fail error);
       (match
-         Masc.Keeper_turn_admission.rollback_shutdown
+         Masc.Keeper_shutdown_intake_fence.rollback_shutdown
            ~base_path
            ~keeper_name:to_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_rolled_back -> ()
-       | Masc.Keeper_turn_admission.Shutdown_not_reserved
-       | Masc.Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+       | Masc.Keeper_shutdown_intake_fence.Rolled_back -> ()
+       | Masc.Keeper_shutdown_intake_fence.Not_reserved
+       | Masc.Keeper_shutdown_intake_fence.Reserved_by_other _ ->
          Alcotest.fail "post-purge target fence was not released");
       (match
          with_strict_executor
@@ -1178,22 +1178,22 @@ let () =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         Masc.Keeper_shutdown_intake_fence.begin_shutdown
            ~base_path
            ~keeper_name:from_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+       | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
          Alcotest.fail "fresh source shutdown was already reserved");
       Fun.protect
         ~finally:(fun () ->
           ignore
-            (Masc.Keeper_turn_admission.rollback_shutdown
+            (Masc.Keeper_shutdown_intake_fence.rollback_shutdown
                ~base_path
                ~keeper_name:from_keeper
                ~operation_id:shutdown_operation_id
-              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+              : Masc.Keeper_shutdown_intake_fence.rollback_result))
         (fun () ->
            (match
               Masc.Keeper_registry_event_queue.transfer_pending_accepted_result
@@ -1250,22 +1250,22 @@ let () =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         Masc.Keeper_shutdown_intake_fence.begin_shutdown
            ~base_path
            ~keeper_name:from_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+       | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
          Alcotest.fail "fresh source shutdown was already reserved");
       Fun.protect
         ~finally:(fun () ->
           ignore
-            (Masc.Keeper_turn_admission.rollback_shutdown
+            (Masc.Keeper_shutdown_intake_fence.rollback_shutdown
                ~base_path
                ~keeper_name:from_keeper
                ~operation_id:shutdown_operation_id
-              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+              : Masc.Keeper_shutdown_intake_fence.rollback_result))
         (fun () ->
            (match
               with_strict_executor
@@ -1318,22 +1318,22 @@ let () =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         Masc.Keeper_shutdown_intake_fence.begin_shutdown
            ~base_path
            ~keeper_name:to_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+       | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
          Alcotest.fail "fresh recovery target shutdown was already reserved");
       Fun.protect
         ~finally:(fun () ->
           ignore
-            (Masc.Keeper_turn_admission.rollback_shutdown
+            (Masc.Keeper_shutdown_intake_fence.rollback_shutdown
                ~base_path
                ~keeper_name:to_keeper
                ~operation_id:shutdown_operation_id
-              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+              : Masc.Keeper_shutdown_intake_fence.rollback_result))
         (fun () ->
            (match
               with_strict_executor

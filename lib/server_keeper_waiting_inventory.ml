@@ -6,7 +6,7 @@ type waiting_source =
   | External_attention
   | Fusion_running
   | Schedule_waiting
-  | Turn_admission_shutdown
+  | Owner_shutdown
   | Operator_pending_confirm
   | Read_error
 
@@ -27,7 +27,6 @@ type wake_producer =
   | External_attention_store
   | Schedule_store
   | Schedule_runner
-  | Keeper_turn_admission
   | Operator_pending_confirm_store
   | Keeper_goal_assignment
   | Keeper_goal_reconciliation
@@ -57,7 +56,7 @@ let source_to_string = function
   | External_attention -> "external_attention"
   | Fusion_running -> "fusion_running"
   | Schedule_waiting -> "schedule_waiting"
-  | Turn_admission_shutdown -> "turn_admission_shutdown"
+  | Owner_shutdown -> "owner_shutdown"
   | Operator_pending_confirm -> "operator_pending_confirm"
   | Read_error -> "read_error"
 ;;
@@ -70,7 +69,7 @@ let all_waiting_sources =
   ; External_attention
   ; Fusion_running
   ; Schedule_waiting
-  ; Turn_admission_shutdown
+  ; Owner_shutdown
   ; Operator_pending_confirm
   ; Read_error
   ]
@@ -96,7 +95,6 @@ let wake_producer_to_string = function
   | External_attention_store -> "external_attention_store"
   | Schedule_store -> "schedule_store"
   | Schedule_runner -> "schedule_runner"
-  | Keeper_turn_admission -> "keeper_turn_admission"
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
   | Keeper_goal_assignment -> "keeper_goal_assignment"
   | Keeper_goal_reconciliation -> "keeper_goal_reconciliation"
@@ -286,26 +284,47 @@ let chat_operation_rows ~base_path keeper_name =
     running @ queued
 ;;
 
-let turn_admission_rows ~base_path keeper_name =
-  let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
+let owner_shutdown_rows ~base_path keeper_name =
+  match Keeper_owner_registry.get ~base_path ~keeper_name with
+  | Error error ->
+    [ { keeper_name = Some keeper_name
+      ; source = Read_error
+      ; waiting_on = "keeper_owner"
+      ; wake_producer = Read_model_reader
+      ; since = None
+      ; due_at = None
+      ; next_action = "restart_keeper_owner"
+      ; detail =
+          `Assoc
+            [ "error", `String (Keeper_owner_registry.lookup_error_to_string error) ]
+      }
+    ]
+  | Ok owner ->
+  let in_flight = Keeper_owner.turn_in_flight owner in
   let in_flight_detail =
-    match snapshot.snapshot_in_flight with
+    match in_flight with
     | None -> `Null
-    | Some (info : Keeper_turn_admission.in_flight_info) ->
+    | Some (info : Keeper_owner.turn_in_flight) ->
+      let lane =
+        match info.lane with
+        | Keeper_owner.Autonomous -> "autonomous"
+        | Keeper_owner.Chat_operation -> "chat_operation"
+        | Keeper_owner.Maintenance -> "maintenance"
+      in
       `Assoc
-        [ "lane", `String (Keeper_turn_admission.lane_to_string info.lane)
+        [ "lane", `String lane
         ; "started_at", `Float info.started_at
         ; "started_at_iso", unix_iso_json (Some info.started_at)
         ]
   in
   let shutdown_rows =
-    match snapshot.snapshot_shutdown_operation_id with
+    match Keeper_owner.shutdown_operation_id owner with
     | None -> []
     | Some operation_id ->
       [ { keeper_name = Some keeper_name
-        ; source = Turn_admission_shutdown
+        ; source = Owner_shutdown
         ; waiting_on = "shutdown"
-        ; wake_producer = Keeper_turn_admission
+        ; wake_producer = Keeper_owner_actor
         ; since = None
         ; due_at = None
         ; next_action = "keeper_shutdown_finalize"
@@ -560,7 +579,7 @@ let row_state rows =
     List.exists
       (fun row ->
          row.source = Fusion_running
-         || row.source = Turn_admission_shutdown)
+         || row.source = Owner_shutdown)
       rows
   then Deferred
   else if rows <> []
@@ -773,7 +792,7 @@ let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms kee
     let rows =
       event_queue_rows ~base_path ~keeper_name
       @ chat_operation_rows ~base_path keeper_name
-      @ turn_admission_rows ~base_path keeper_name
+      @ owner_shutdown_rows ~base_path keeper_name
       @ hitl_rows keeper_name pending_approvals
       @ external_attention_rows
       @ fusion_rows keeper_name fusion_runs

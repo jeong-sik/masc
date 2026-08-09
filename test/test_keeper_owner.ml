@@ -1207,6 +1207,153 @@ let test_owner_linearizes_autonomous_and_chat_children () =
   check bool "Owner clears active turn projection" true (Option.is_none (Owner.turn_in_flight owner))
 ;;
 
+let test_owner_shutdown_linearizes_and_awaits_child () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let owner =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name:"shutdown-owner"
+         ~initial_meta:(Some (make_meta "shutdown-owner")))
+  in
+  let child_started, resolve_child_started = Eio.Promise.create () in
+  let release_child, resolve_release_child = Eio.Promise.create () in
+  let child_result = Eio.Stream.create 1 in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Stream.add
+      child_result
+      (Owner.run_autonomous_if_idle owner (fun () ->
+         Eio.Promise.resolve resolve_child_started ();
+         Eio.Promise.await release_child)));
+  Eio.Promise.await child_started;
+  let shutdown_id = Keeper_shutdown_types.Operation_id.generate () in
+  (match owner_ok (Owner.begin_shutdown owner ~operation_id:shutdown_id) with
+   | Owner.Shutdown_reserved
+       { operation_id = reserved
+       ; in_flight = Some { lane = Owner.Autonomous; _ }
+       } ->
+     check bool
+       "shutdown reserves the requested operation"
+       true
+       (Keeper_shutdown_types.Operation_id.equal reserved shutdown_id)
+   | Owner.Shutdown_reserved _ -> fail "shutdown lost the active Owner child"
+   | Owner.Shutdown_already_reserved _ -> fail "fresh Owner was already reserved");
+  check bool
+    "shutdown projection publishes the reservation"
+    true
+    (Option.exists
+       (Keeper_shutdown_types.Operation_id.equal shutdown_id)
+       (Owner.shutdown_operation_id owner));
+  (match Owner.run_maintenance_if_idle owner (fun () -> fail "shutdown admitted turn") with
+   | Ok (`Busy (Owner.Shutdown_requested reserved)) ->
+     check bool
+       "new turn sees typed shutdown owner"
+       true
+       (Keeper_shutdown_types.Operation_id.equal reserved shutdown_id)
+   | Ok (`Busy (Owner.Turn_busy _)) -> fail "shutdown was reported as ordinary busy"
+   | Ok (`Ran _) -> fail "shutdown admitted a new turn"
+   | Error error -> fail (Owner.error_to_string error));
+  (match
+     Owner.submit_operation
+       owner
+       ~operation_id:(operation_id "kmsg-shutdown-rejected")
+       ~source:operation_source
+       ~input:(operation_input "must reject")
+   with
+   | Error Owner.Owner_stopping -> ()
+   | Error error -> fail (Owner.error_to_string error)
+   | Ok _ -> fail "shutdown accepted a new operation");
+  let idle_joined = Atomic.make false in
+  Eio.Fiber.fork ~sw (fun () ->
+    owner_ok (Owner.await_idle_after_shutdown owner);
+    Atomic.set idle_joined true);
+  Eio.Fiber.yield ();
+  check bool "shutdown join waits for the preceding child" false (Atomic.get idle_joined);
+  Eio.Promise.resolve resolve_release_child ();
+  (match Eio.Stream.take child_result with
+   | Ok (`Ran ()) -> ()
+   | Ok (`Busy _) -> fail "admitted child became busy"
+   | Error error -> fail (Owner.error_to_string error));
+  while not (Atomic.get idle_joined) do
+    Eio.Fiber.yield ()
+  done;
+  (match owner_ok (Owner.rollback_shutdown owner ~operation_id:shutdown_id) with
+   | Owner.Shutdown_rolled_back -> ()
+   | Owner.Shutdown_not_reserved -> fail "shutdown reservation disappeared"
+   | Owner.Shutdown_reserved_by_other _ -> fail "shutdown owner changed");
+  match Owner.run_maintenance_if_idle owner (fun () -> 7) with
+  | Ok (`Ran 7) -> ()
+  | Ok (`Ran _) -> fail "wrong post-rollback value"
+  | Ok (`Busy _) -> fail "rollback did not reopen Owner turns"
+  | Error error -> fail (Owner.error_to_string error)
+;;
+
+let test_owner_shutdown_restore_and_transition_are_typed () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let owner =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name:"shutdown-restore-owner"
+         ~initial_meta:(Some (make_meta "shutdown-restore-owner")))
+  in
+  let first = Keeper_shutdown_types.Operation_id.generate () in
+  let successor = Keeper_shutdown_types.Operation_id.generate () in
+  (match owner_ok (Owner.restore_shutdown owner ~operation_id:first) with
+   | Owner.Shutdown_restored -> ()
+   | Owner.Shutdown_already_restored | Owner.Shutdown_restore_conflict _ ->
+     fail "fresh shutdown restore failed");
+  (match owner_ok (Owner.restore_shutdown owner ~operation_id:successor) with
+   | Owner.Shutdown_restore_conflict existing ->
+     check bool
+       "restore conflict preserves existing owner"
+       true
+       (Keeper_shutdown_types.Operation_id.equal existing first)
+   | Owner.Shutdown_restored | Owner.Shutdown_already_restored ->
+     fail "restore overwrote a different shutdown owner");
+  (match
+     owner_ok
+       (Owner.transition_shutdown
+          owner
+          ~from_operation_id:first
+          ~to_operation_id:(Some successor))
+   with
+   | Owner.Shutdown_transition_applied -> ()
+   | Owner.Shutdown_transition_already_applied
+   | Owner.Shutdown_transition_reserved_by_other _ ->
+     fail "shutdown successor transition failed");
+  (match
+     owner_ok
+       (Owner.transition_shutdown
+          owner
+          ~from_operation_id:first
+          ~to_operation_id:(Some successor))
+   with
+   | Owner.Shutdown_transition_already_applied -> ()
+   | Owner.Shutdown_transition_applied
+   | Owner.Shutdown_transition_reserved_by_other _ ->
+     fail "shutdown successor replay was not idempotent");
+  match
+    owner_ok
+      (Owner.transition_shutdown
+         owner
+         ~from_operation_id:successor
+         ~to_operation_id:None)
+  with
+  | Owner.Shutdown_transition_applied ->
+    check bool
+      "terminal transition clears shutdown projection"
+      true
+      (Option.is_none (Owner.shutdown_operation_id owner))
+  | Owner.Shutdown_transition_already_applied
+  | Owner.Shutdown_transition_reserved_by_other _ ->
+    fail "terminal shutdown transition failed"
+;;
+
 let test_autonomous_children_of_distinct_owners_do_not_cross_block () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -1876,6 +2023,14 @@ let () =
             "Owner linearizes autonomous and chat children"
             `Quick
             test_owner_linearizes_autonomous_and_chat_children
+        ; test_case
+            "Owner shutdown linearizes and awaits child"
+            `Quick
+            test_owner_shutdown_linearizes_and_awaits_child
+        ; test_case
+            "Owner shutdown restore and transition are typed"
+            `Quick
+            test_owner_shutdown_restore_and_transition_are_typed
         ; test_case
             "distinct Owner autonomous children do not cross-block"
             `Quick

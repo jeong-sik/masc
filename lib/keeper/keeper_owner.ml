@@ -29,6 +29,30 @@ type autonomous_block =
   | Turn_busy of turn_in_flight option
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
+type shutdown_reservation =
+  { operation_id : Keeper_shutdown_types.Operation_id.t
+  ; in_flight : turn_in_flight option
+  }
+
+type begin_shutdown_result =
+  | Shutdown_reserved of shutdown_reservation
+  | Shutdown_already_reserved of shutdown_reservation
+
+type rollback_shutdown_result =
+  | Shutdown_rolled_back
+  | Shutdown_not_reserved
+  | Shutdown_reserved_by_other of Keeper_shutdown_types.Operation_id.t
+
+type restore_shutdown_result =
+  | Shutdown_restored
+  | Shutdown_already_restored
+  | Shutdown_restore_conflict of Keeper_shutdown_types.Operation_id.t
+
+type transition_shutdown_result =
+  | Shutdown_transition_applied
+  | Shutdown_transition_already_applied
+  | Shutdown_transition_reserved_by_other of Keeper_shutdown_types.Operation_id.t
+
 type operation_acceptance =
   { operation : Chat_operation.t
   ; existing : bool
@@ -125,6 +149,21 @@ type _ command =
       ; run : unit -> 'a
       }
       -> ('a autonomous_response, error) result command
+  | Begin_shutdown :
+      { operation_id : Keeper_shutdown_types.Operation_id.t }
+      -> (begin_shutdown_result, error) result command
+  | Rollback_shutdown :
+      { operation_id : Keeper_shutdown_types.Operation_id.t }
+      -> (rollback_shutdown_result, error) result command
+  | Restore_shutdown :
+      { operation_id : Keeper_shutdown_types.Operation_id.t }
+      -> (restore_shutdown_result, error) result command
+  | Transition_shutdown :
+      { from_operation_id : Keeper_shutdown_types.Operation_id.t
+      ; to_operation_id : Keeper_shutdown_types.Operation_id.t option
+      }
+      -> (transition_shutdown_result, error) result command
+  | Await_idle_after_shutdown : (unit, error) result command
   | Child_finished : child_completion -> (unit, error) result command
   | Begin_stopping : (unit, error) result command
 
@@ -139,6 +178,7 @@ type t =
   ; projection : Keeper_owner_reducer.projection Atomic.t
   ; operation_projection : operation_projection Atomic.t
   ; turn_in_flight : turn_in_flight option Atomic.t
+  ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option Atomic.t
   ; operation_store : Chat_operation_store.t
   ; now : unit -> float
   ; closed : bool Atomic.t
@@ -147,6 +187,7 @@ type t =
   ; child_active : bool ref
   ; child_cancel : (unit -> unit) option Atomic.t
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
+  ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
   }
 
 let error_to_string = function
@@ -168,6 +209,7 @@ let operation_error_kind = function
 let projection t = Atomic.get t.projection
 let operation_projection t = Atomic.get t.operation_projection
 let turn_in_flight t = Atomic.get t.turn_in_flight
+let shutdown_operation_id t = Atomic.get t.shutdown_operation_id
 
 let turn_lane_to_string = function
   | Autonomous -> "autonomous"
@@ -330,6 +372,16 @@ let reject_if_stopping state f =
   if (Keeper_owner_reducer.projection state).stopping then Error Owner_stopping else f ()
 ;;
 
+let reject_if_shutdown shutdown_operation_id f =
+  match shutdown_operation_id with
+  | Some _ -> Error Owner_stopping
+  | None -> f ()
+;;
+
+let shutdown_reservation t operation_id =
+  { operation_id; in_flight = Atomic.get t.turn_in_flight }
+;;
+
 let start
       ~sw
       ~store
@@ -373,6 +425,7 @@ let start
     ; operation_projection =
         Atomic.make (operation_projection_of_inventory initial_operation_inventory)
     ; turn_in_flight = Atomic.make None
+    ; shutdown_operation_id = Atomic.make None
     ; operation_store
     ; now
     ; closed = Atomic.make false
@@ -381,6 +434,7 @@ let start
     ; child_active = ref false
     ; child_cancel = Atomic.make None
     ; stopping_waiters = ref []
+    ; shutdown_idle_waiters = ref []
     }
   in
   Eio.Switch.on_release sw (fun () ->
@@ -418,10 +472,11 @@ let start
             ~outcome_ref)
         |> Result.map (fun _ -> ())
     in
-    let rec start_child_if_needed state =
+    let rec start_child_if_needed state shutdown_operation_id =
       match operation_executor with
       | None -> ()
       | Some _ when !(t.child_active) -> ()
+      | Some _ when Option.is_some shutdown_operation_id -> ()
       | Some _ when (Keeper_owner_reducer.projection state).stopping -> ()
       | Some _ when Option.is_some !(t.store_error) -> ()
       | Some executor ->
@@ -483,62 +538,63 @@ let start
                     (Operation_child_finished
                        { claimed_operation_id = !claimed_operation_id; execution })))
           ))
-    and loop state =
+    and loop state shutdown_operation_id =
         match Eio.Stream.take t.mailbox with
         | Command (Exact_projection, resolve) ->
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
-          loop state
+          loop state shutdown_operation_id
         | Command (Apply_meta command, resolve) ->
           (match !(t.store_error) with
            | Some detail ->
              Eio.Promise.resolve resolve (Error (Store_unavailable detail));
-             loop state
+             loop state shutdown_operation_id
            | None ->
              (match Keeper_owner_reducer.apply_meta state command with
               | Error error ->
                 Eio.Promise.resolve resolve (Error (Reducer_rejected error));
-                loop state
+                loop state shutdown_operation_id
               | Ok transition ->
                 (match apply_transition t store state transition with
                  | Error (state, error) ->
                    Eio.Promise.resolve resolve (Error error);
-                   loop state
+                   loop state shutdown_operation_id
                  | Ok state ->
                    Eio.Promise.resolve
                      resolve
                      (Ok (Keeper_owner_reducer.projection state).meta);
-                   loop state)))
+                   loop state shutdown_operation_id)))
         | Command (Exact_operation operation_id, resolve) ->
           let response =
             run_operation_read t ~label:"lookup Keeper chat operation" (fun () ->
               Chat_operation_store.get t.operation_store operation_id)
           in
           Eio.Promise.resolve resolve response;
-          loop state
+          loop state shutdown_operation_id
         | Command (Submit_operation { operation_id; source; input }, resolve) ->
           let response =
-            reject_if_stopping state (fun () ->
-              match
-                run_operation_command t ~label:"submit Keeper chat operation" (fun () ->
-                  Chat_operation_store.submit
-                    t.operation_store
-                    ~now:(t.now ())
-                    ~operation_id
-                    ~source
-                    ~input)
-              with
-              | Error _ as error -> error
-              | Ok (admission, projection) ->
-                let operation, existing =
-                  match admission with
-                  | Chat_operation_store.Accepted operation -> operation, false
-                  | Existing operation -> operation, true
-                in
-                Ok { operation; existing; queued_count = projection.queued_count })
+            reject_if_shutdown shutdown_operation_id (fun () ->
+              reject_if_stopping state (fun () ->
+                match
+                  run_operation_command t ~label:"submit Keeper chat operation" (fun () ->
+                    Chat_operation_store.submit
+                      t.operation_store
+                      ~now:(t.now ())
+                      ~operation_id
+                      ~source
+                      ~input)
+                with
+                | Error _ as error -> error
+                | Ok (admission, projection) ->
+                  let operation, existing =
+                    match admission with
+                    | Chat_operation_store.Accepted operation -> operation, false
+                    | Existing operation -> operation, true
+                  in
+                  Ok { operation; existing; queued_count = projection.queued_count }))
           in
           Eio.Promise.resolve resolve response;
-          start_child_if_needed state;
-          loop state
+          start_child_if_needed state shutdown_operation_id;
+          loop state shutdown_operation_id
         | Command (List_queued_operations { after_sequence; limit }, resolve) ->
           let response =
             run_operation_read t ~label:"list queued Keeper chat operations" (fun () ->
@@ -548,7 +604,7 @@ let start
                 ~limit)
           in
           Eio.Promise.resolve resolve response;
-          loop state
+          loop state shutdown_operation_id
         | Command (Edit_queued_operation { operation_id; input }, resolve) ->
           let response =
             reject_if_stopping state (fun () ->
@@ -560,7 +616,7 @@ let start
               |> Result.map fst)
           in
           Eio.Promise.resolve resolve response;
-          loop state
+          loop state shutdown_operation_id
         | Command (Move_queued_operation_to_end operation_id, resolve) ->
           let response =
             reject_if_stopping state (fun () ->
@@ -574,7 +630,7 @@ let start
               |> Result.map fst)
           in
           Eio.Promise.resolve resolve response;
-          loop state
+          loop state shutdown_operation_id
         | Command (Cancel_queued_operation operation_id, resolve) ->
           let response =
             reject_if_stopping state (fun () ->
@@ -586,16 +642,17 @@ let start
               |> Result.map fst)
           in
           Eio.Promise.resolve resolve response;
-          loop state
+          loop state shutdown_operation_id
         | Command (Claim_next_operation, resolve) ->
           let response =
-            reject_if_stopping state (fun () ->
-              run_operation_command t ~label:"claim next Keeper chat operation" (fun () ->
-                Chat_operation_store.claim_next t.operation_store ~now:(t.now ()))
-              |> Result.map fst)
+            reject_if_shutdown shutdown_operation_id (fun () ->
+              reject_if_stopping state (fun () ->
+                run_operation_command t ~label:"claim next Keeper chat operation" (fun () ->
+                  Chat_operation_store.claim_next t.operation_store ~now:(t.now ()))
+                |> Result.map fst))
           in
           Eio.Promise.resolve resolve response;
-          loop state
+          loop state shutdown_operation_id
         | Command (Succeed_running_operation { operation_id; outcome_ref }, resolve) ->
           let response =
             run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
@@ -607,7 +664,7 @@ let start
             |> Result.map fst
           in
           Eio.Promise.resolve resolve response;
-          loop state
+          loop state shutdown_operation_id
         | Command
             ( Fail_running_operation
                 { operation_id; kind; detail; outcome_ref }
@@ -624,40 +681,120 @@ let start
             |> Result.map fst
           in
           Eio.Promise.resolve resolve response;
-          loop state
+          loop state shutdown_operation_id
+        | Command (Begin_shutdown { operation_id }, resolve) ->
+          (match shutdown_operation_id with
+           | None ->
+             Atomic.set t.shutdown_operation_id (Some operation_id);
+             Eio.Promise.resolve
+               resolve
+               (Ok (Shutdown_reserved (shutdown_reservation t operation_id)));
+             loop state (Some operation_id)
+           | Some existing ->
+             Eio.Promise.resolve
+               resolve
+               (Ok
+                  (Shutdown_already_reserved
+                     (shutdown_reservation t existing)));
+             loop state shutdown_operation_id)
+        | Command (Rollback_shutdown { operation_id }, resolve) ->
+          (match shutdown_operation_id with
+           | None ->
+             Eio.Promise.resolve resolve (Ok Shutdown_not_reserved);
+             loop state shutdown_operation_id
+           | Some existing
+             when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
+             Atomic.set t.shutdown_operation_id None;
+             Eio.Promise.resolve resolve (Ok Shutdown_rolled_back);
+             start_child_if_needed state None;
+             loop state None
+           | Some existing ->
+             Eio.Promise.resolve resolve (Ok (Shutdown_reserved_by_other existing));
+             loop state shutdown_operation_id)
+        | Command (Restore_shutdown { operation_id }, resolve) ->
+          (match shutdown_operation_id with
+           | None ->
+             Atomic.set t.shutdown_operation_id (Some operation_id);
+             Eio.Promise.resolve resolve (Ok Shutdown_restored);
+             loop state (Some operation_id)
+           | Some existing
+             when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
+             Eio.Promise.resolve resolve (Ok Shutdown_already_restored);
+             loop state shutdown_operation_id
+           | Some existing ->
+             Eio.Promise.resolve resolve (Ok (Shutdown_restore_conflict existing));
+             loop state shutdown_operation_id)
+        | Command
+            ( Transition_shutdown { from_operation_id; to_operation_id }
+            , resolve ) ->
+          let result, next_shutdown_operation_id =
+            match shutdown_operation_id, to_operation_id with
+            | Some existing, _
+              when Keeper_shutdown_types.Operation_id.equal
+                     existing
+                     from_operation_id ->
+              Shutdown_transition_applied, to_operation_id
+            | None, None -> Shutdown_transition_already_applied, None
+            | Some existing, Some successor
+              when Keeper_shutdown_types.Operation_id.equal existing successor ->
+              Shutdown_transition_already_applied, shutdown_operation_id
+            | None, Some successor -> Shutdown_transition_applied, Some successor
+            | Some existing, _ ->
+              Shutdown_transition_reserved_by_other existing, shutdown_operation_id
+          in
+          Atomic.set t.shutdown_operation_id next_shutdown_operation_id;
+          Eio.Promise.resolve resolve (Ok result);
+          if Option.is_none next_shutdown_operation_id
+          then start_child_if_needed state None;
+          loop state next_shutdown_operation_id
+        | Command (Await_idle_after_shutdown, resolve) ->
+          if !(t.child_active)
+          then (
+            t.shutdown_idle_waiters := resolve :: !(t.shutdown_idle_waiters);
+            loop state shutdown_operation_id)
+          else (
+            Eio.Promise.resolve resolve (Ok ());
+            loop state shutdown_operation_id)
         | Command (Run_if_idle { lane; run }, resolve) ->
-          (match reject_if_stopping state (fun () -> Ok ()) with
-           | Error error -> Eio.Promise.resolve resolve (Error error)
-           | Ok () ->
-             (match Atomic.get t.turn_in_flight with
-              | Some in_flight ->
-                Eio.Promise.resolve
-                  resolve
-                  (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
-              | None ->
-                t.child_active := true;
-                Atomic.set
-                  t.turn_in_flight
-                  (Some { lane; started_at = t.now () });
-                Eio.Fiber.fork ~sw (fun () ->
-                  let outcome =
-                    try
-                      Ok
-                        (Eio.Switch.run (fun child_sw ->
-                           Atomic.set
-                             t.child_cancel
-                             (Some (fun () -> Eio.Switch.fail child_sw Stop_active_child));
-                           run ()))
-                    with
-                    | exn -> Error (exn, Printexc.get_raw_backtrace ())
-                  in
-                  Atomic.set t.child_cancel None;
-                  ignore
-                    (request
-                       t
-                       (Child_finished
-                          (Autonomous_child_finished { outcome; resolve }))))));
-          loop state
+          (match shutdown_operation_id with
+           | Some operation_id ->
+             Eio.Promise.resolve
+               resolve
+               (Ok (Autonomous_busy (Shutdown_requested operation_id)))
+           | None ->
+             (match reject_if_stopping state (fun () -> Ok ()) with
+              | Error error -> Eio.Promise.resolve resolve (Error error)
+              | Ok () ->
+                (match Atomic.get t.turn_in_flight with
+                 | Some in_flight ->
+                   Eio.Promise.resolve
+                     resolve
+                     (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
+                 | None ->
+                   t.child_active := true;
+                   Atomic.set
+                     t.turn_in_flight
+                     (Some { lane; started_at = t.now () });
+                   Eio.Fiber.fork ~sw (fun () ->
+                     let outcome =
+                       try
+                         Ok
+                           (Eio.Switch.run (fun child_sw ->
+                              Atomic.set
+                                t.child_cancel
+                                (Some
+                                   (fun () -> Eio.Switch.fail child_sw Stop_active_child));
+                              run ()))
+                       with
+                       | exn -> Error (exn, Printexc.get_raw_backtrace ())
+                     in
+                     Atomic.set t.child_cancel None;
+                     ignore
+                       (request
+                          t
+                          (Child_finished
+                             (Autonomous_child_finished { outcome; resolve })))))));
+          loop state shutdown_operation_id
         | Command (Child_finished completion, resolve) ->
           let result =
             match completion with
@@ -678,14 +815,19 @@ let start
           let stopping_waiters = List.rev !(t.stopping_waiters) in
           t.stopping_waiters := [];
           List.iter (fun waiter -> Eio.Promise.resolve waiter result) stopping_waiters;
-          start_child_if_needed state;
-          loop state
+          let shutdown_idle_waiters = List.rev !(t.shutdown_idle_waiters) in
+          t.shutdown_idle_waiters := [];
+          List.iter
+            (fun waiter -> Eio.Promise.resolve waiter result)
+            shutdown_idle_waiters;
+          start_child_if_needed state shutdown_operation_id;
+          loop state shutdown_operation_id
         | Command (Begin_stopping, resolve) ->
           let transition = Keeper_owner_reducer.begin_stopping state in
           (match apply_transition t store state transition with
            | Error (state, error) ->
              Eio.Promise.resolve resolve (Error error);
-             loop state
+             loop state shutdown_operation_id
            | Ok state ->
              if !(t.child_active)
              then (
@@ -696,10 +838,10 @@ let start
                     | Invalid_argument _ -> ())
                  (Atomic.get t.child_cancel))
              else Eio.Promise.resolve resolve (Ok ());
-             loop state)
+             loop state shutdown_operation_id)
     in
-    start_child_if_needed initial_state;
-    loop initial_state);
+    start_child_if_needed initial_state None;
+    loop initial_state None);
   Ok t))
 ;;
 
@@ -745,6 +887,16 @@ let run_if_idle t lane run =
 
 let run_autonomous_if_idle t run = run_if_idle t Autonomous run
 let run_maintenance_if_idle t run = run_if_idle t Maintenance run
+
+let begin_shutdown t ~operation_id = request t (Begin_shutdown { operation_id })
+let rollback_shutdown t ~operation_id = request t (Rollback_shutdown { operation_id })
+let restore_shutdown t ~operation_id = request t (Restore_shutdown { operation_id })
+
+let transition_shutdown t ~from_operation_id ~to_operation_id =
+  request t (Transition_shutdown { from_operation_id; to_operation_id })
+;;
+
+let await_idle_after_shutdown t = request t Await_idle_after_shutdown
 
 let begin_stopping t = request t Begin_stopping
 

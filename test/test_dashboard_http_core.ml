@@ -413,7 +413,7 @@ let test_event_pending_projection_omits_non_rejection_payloads () =
 ;;
 
 let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  with_test_env @@ fun ~env:_ ~sw ~config ->
   let require_ok label = function
     | Ok value -> value
     | Error detail -> failf "%s: %s" label detail
@@ -564,6 +564,15 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
        |> require_ok "persist transfer source keeper metadata";
        Masc.Keeper_meta_store.replace_snapshot config target_meta
        |> require_ok "persist target keeper metadata";
+       (match
+          Masc.Keeper_owner_registry.install_from_store
+            ~sw
+            ~operation_executor:None
+            config
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail (Masc.Keeper_owner_registry.install_error_to_string error));
        ignore
          (Masc.Keeper_registry.For_testing.register
             ~base_path
@@ -637,26 +646,29 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
          Masc.Keeper_shutdown_types.Operation_id.generate ()
        in
        (match
-          Masc.Keeper_turn_admission.begin_shutdown
+          Masc.Keeper_owner_registry.begin_shutdown
             ~base_path
             ~keeper_name:target_keeper
             ~operation_id:target_shutdown_operation_id
         with
-        | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-        | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
-          fail "fresh target shutdown reservation was already owned");
+        | Ok (Masc.Keeper_owner.Shutdown_reserved _) -> ()
+        | Ok (Masc.Keeper_owner.Shutdown_already_reserved _) ->
+          fail "fresh target shutdown reservation was already owned"
+        | Error error ->
+          fail (Masc.Keeper_owner_registry.command_error_to_string error));
        let fenced_raw, _fenced_response =
          Fun.protect
            ~finally:(fun () ->
              match
-               Masc.Keeper_turn_admission.rollback_shutdown
+               Masc.Keeper_owner_registry.rollback_shutdown
                  ~base_path
                  ~keeper_name:target_keeper
                  ~operation_id:target_shutdown_operation_id
              with
-             | Masc.Keeper_turn_admission.Shutdown_rolled_back -> ()
-             | Masc.Keeper_turn_admission.Shutdown_not_reserved
-             | Masc.Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+             | Ok Masc.Keeper_owner.Shutdown_rolled_back -> ()
+             | Ok Masc.Keeper_owner.Shutdown_not_reserved
+             | Ok (Masc.Keeper_owner.Shutdown_reserved_by_other _)
+             | Error _ ->
                fail "target shutdown reservation was not released")
            (fun () ->
               post_event_operator

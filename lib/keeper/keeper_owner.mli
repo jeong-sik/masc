@@ -35,6 +35,30 @@ type autonomous_block =
   | Turn_busy of turn_in_flight option
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
+type shutdown_reservation =
+  { operation_id : Keeper_shutdown_types.Operation_id.t
+  ; in_flight : turn_in_flight option
+  }
+
+type begin_shutdown_result =
+  | Shutdown_reserved of shutdown_reservation
+  | Shutdown_already_reserved of shutdown_reservation
+
+type rollback_shutdown_result =
+  | Shutdown_rolled_back
+  | Shutdown_not_reserved
+  | Shutdown_reserved_by_other of Keeper_shutdown_types.Operation_id.t
+
+type restore_shutdown_result =
+  | Shutdown_restored
+  | Shutdown_already_restored
+  | Shutdown_restore_conflict of Keeper_shutdown_types.Operation_id.t
+
+type transition_shutdown_result =
+  | Shutdown_transition_applied
+  | Shutdown_transition_already_applied
+  | Shutdown_transition_reserved_by_other of Keeper_shutdown_types.Operation_id.t
+
 type operation_acceptance =
   { operation : Chat_operation.t
   ; existing : bool
@@ -93,6 +117,9 @@ val operation_projection : t -> operation_projection
 val turn_in_flight : t -> turn_in_flight option
 (** Lock-free immutable projection of the single Owner-owned child turn. *)
 
+val shutdown_operation_id : t -> Keeper_shutdown_types.Operation_id.t option
+(** Lock-free immutable projection of the lifecycle shutdown reservation. *)
+
 val autonomous_block_to_string : autonomous_block -> string
 val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
 
@@ -109,6 +136,31 @@ val run_maintenance_if_idle
   -> (unit -> 'a)
   -> ([ `Ran of 'a | `Busy of autonomous_block ], error) result
 (** Mailbox-linearized exclusive maintenance attempt. *)
+
+val begin_shutdown
+  :  t
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (begin_shutdown_result, error) result
+
+val rollback_shutdown
+  :  t
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (rollback_shutdown_result, error) result
+
+val restore_shutdown
+  :  t
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (restore_shutdown_result, error) result
+
+val transition_shutdown
+  :  t
+  -> from_operation_id:Keeper_shutdown_types.Operation_id.t
+  -> to_operation_id:Keeper_shutdown_types.Operation_id.t option
+  -> (transition_shutdown_result, error) result
+
+val await_idle_after_shutdown : t -> (unit, error) result
+(** Return after the Owner child that preceded the shutdown reservation has
+    completed. The actor remains responsive while the caller waits. *)
 
 val exact_projection
   :  t

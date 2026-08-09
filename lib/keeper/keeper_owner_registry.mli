@@ -62,6 +62,43 @@ val run_maintenance_if_idle
   -> ([ `Ran of 'a | `Busy of Keeper_owner.autonomous_block ], command_error) result
 (** Submit one exclusive maintenance attempt to the Keeper's Owner mailbox. *)
 
+val shutdown_operation_id
+  :  base_path:string
+  -> keeper_name:string
+  -> (Keeper_shutdown_types.Operation_id.t option, lookup_error) result
+
+val begin_shutdown
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (Keeper_owner.begin_shutdown_result, command_error) result
+
+val rollback_shutdown
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (Keeper_owner.rollback_shutdown_result, command_error) result
+
+val restore_shutdown
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> (Keeper_owner.restore_shutdown_result, command_error) result
+
+val transition_shutdown
+  :  base_path:string
+  -> keeper_name:string
+  -> from_operation_id:Keeper_shutdown_types.Operation_id.t
+  -> to_operation_id:Keeper_shutdown_types.Operation_id.t option
+  -> (Keeper_owner.transition_shutdown_result, command_error) result
+
+val await_idle_after_shutdown
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit, command_error) result
+(** Join the Owner child and durable intake that preceded its shutdown
+    reservation. *)
+
 val apply_meta
   :  ?lifecycle_token:Keeper_lifecycle_reservation.token
   -> base_path:string

@@ -53,20 +53,21 @@ let operation_requires_fence (operation : Keeper_shutdown_types.t) =
 
 let restore_admission ~config ~keeper_name ~operation_id =
   match
-    Keeper_turn_admission.restore_shutdown
+    Keeper_owner_registry.restore_shutdown
       ~base_path:config.Workspace.base_path
       ~keeper_name
       ~operation_id
   with
-  | Keeper_turn_admission.Shutdown_restored
-  | Keeper_turn_admission.Shutdown_already_restored -> Ok ()
-  | Keeper_turn_admission.Shutdown_restore_conflict existing ->
+  | Ok Keeper_owner.Shutdown_restored
+  | Ok Keeper_owner.Shutdown_already_restored -> Ok ()
+  | Ok (Keeper_owner.Shutdown_restore_conflict existing) ->
     Error
       (Printf.sprintf
          "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
          keeper_name
          (Operation_id.to_string operation_id)
          (Operation_id.to_string existing))
+  | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
 ;;
 
 let restore_inventory_admission ~config inventory =
@@ -509,22 +510,24 @@ let recover_operation_with_corrupt_owner_fence
         | Some fence -> fence.keeper_name, Some fence.operation_id
       in
       (match
-         Keeper_turn_admission.transition_shutdown
+         Keeper_owner_registry.transition_shutdown
            ~base_path:config.Workspace.base_path
            ~keeper_name
            ~from_operation_id:operation.operation_id
            ~to_operation_id:successor_operation_id
        with
-       | Keeper_turn_admission.Shutdown_transition_applied
-       | Keeper_turn_admission.Shutdown_transition_already_applied ->
+       | Ok Keeper_owner.Shutdown_transition_applied
+       | Ok Keeper_owner.Shutdown_transition_already_applied ->
          Ok recovered
-       | Keeper_turn_admission.Shutdown_transition_reserved_by_other existing ->
+       | Ok (Keeper_owner.Shutdown_transition_reserved_by_other existing) ->
          Error
            (Printf.sprintf
               "shutdown admission restore conflict: keeper=%s recovered=%s existing=%s"
               keeper_name
               (Operation_id.to_string operation.operation_id)
-              (Operation_id.to_string existing)))
+              (Operation_id.to_string existing))
+       | Error error ->
+         Error (Keeper_owner_registry.command_error_to_string error))
 ;;
 
 let recover_at_boot ~config =

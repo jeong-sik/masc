@@ -106,7 +106,7 @@ val cancel_pending_accepted_result :
     pending projection when the owner currently has a live registry lane. *)
 
 val transfer_pending_accepted_result :
-  ?intake_token:Keeper_turn_admission.intake_token ->
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   base_path:string ->
   string ->
   current_owner_nonce:int ->
@@ -150,11 +150,11 @@ val terminalize_pending_turn_attempt_result :
     retirement. A surrounding durable-intake fence supplies [intake_token];
     otherwise this function acquires the Keeper fence itself. *)
 val enqueue :
-  ?intake_token:Keeper_turn_admission.intake_token ->
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   base_path:string -> string -> Keeper_event_queue.stimulus -> unit
 
 val enqueue_durable_result :
-  ?intake_token:Keeper_turn_admission.intake_token
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token
   -> base_path:string
   -> string
   -> Keeper_event_queue.stimulus
@@ -173,7 +173,7 @@ type enqueue_if_missing_durable_result =
   | Storage_error of string
 
 val enqueue_if_missing_durable_result :
-  ?intake_token:Keeper_turn_admission.intake_token
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token
   -> base_path:string
   -> event_id:string
   -> string
@@ -212,7 +212,7 @@ type transfer_projection_result =
   | Transfer_projection_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 val enqueue_stimulus_durable_result :
-  ?intake_token:Keeper_turn_admission.intake_token
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token
   -> base_path:string
   -> string
   -> Keeper_event_queue.stimulus
@@ -225,7 +225,7 @@ val enqueue_stimulus_durable_result :
     opaque-event-id API above. *)
 
 val project_accepted_transfer_durable_result :
-  ?intake_token:Keeper_turn_admission.intake_token
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token
   -> base_path:string
   -> string
   -> transfer:accepted_transfer

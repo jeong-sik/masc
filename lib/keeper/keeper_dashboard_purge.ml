@@ -28,6 +28,10 @@ type resolve_error =
       ; agent_name : string
       ; detail : string
       }
+  | Keeper_owner_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
   | Keeper_operation_unreadable of
       { keeper_name : string
       ; operation_id : Keeper_shutdown_types.Operation_id.t
@@ -63,6 +67,11 @@ let resolve_error_to_string = function
       "dashboard Keeper purge metadata has an invalid agent owner: keeper=%s agent=%S error=%s"
       keeper_name
       agent_name
+      detail
+  | Keeper_owner_unavailable { keeper_name; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot read Owner shutdown state: keeper=%s error=%s"
+      keeper_name
       detail
   | Keeper_operation_unreadable { keeper_name; operation_id; detail } ->
     Printf.sprintf
@@ -126,13 +135,19 @@ let existing_operation (config : Workspace.config) requested_name =
   | Ok (_, None) -> Ok None
   | Ok (_, Some keeper_name) ->
     let snapshot =
-      Keeper_turn_admission.snapshot_for
+      Keeper_owner_registry.shutdown_operation_id
         ~base_path:config.base_path
         ~keeper_name
     in
-    (match snapshot.snapshot_shutdown_operation_id with
-     | None -> Ok None
-     | Some operation_id ->
+    (match snapshot with
+     | Error error ->
+       Error
+         (Keeper_owner_unavailable
+            { keeper_name
+            ; detail = Keeper_owner_registry.lookup_error_to_string error
+            })
+     | Ok None -> Ok None
+     | Ok (Some operation_id) ->
        (match Keeper_shutdown_store.load ~config ~keeper_name operation_id with
         | Error error ->
           Error

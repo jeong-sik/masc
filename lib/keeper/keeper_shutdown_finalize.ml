@@ -6,6 +6,7 @@ type error =
   | Finalization_blocked of Keeper_shutdown_types.t
   | Finalization_draining of Keeper_shutdown_types.t * string
   | Completion_failed of Keeper_shutdown_types.t * string
+  | Admission_release_failed of Keeper_shutdown_types.t * string
 
 let error_to_string = function
   | Store_error error -> Keeper_shutdown_store.error_to_string error
@@ -29,6 +30,11 @@ let error_to_string = function
   | Completion_failed (operation, detail) ->
     Printf.sprintf
       "Keeper shutdown completion delivery failed in operation %s: %s"
+      (Operation_id.to_string operation.operation_id)
+      detail
+  | Admission_release_failed (operation, detail) ->
+    Printf.sprintf
+      "Keeper shutdown admission release failed in operation %s: %s"
       (Operation_id.to_string operation.operation_id)
       detail
 ;;
@@ -577,20 +583,24 @@ let unregister_retired_exact ~base_path operation entry =
 
 let release_finalized_admission ~(config : Workspace.config) operation =
   match
-    Keeper_turn_admission.rollback_shutdown
+    Keeper_owner_registry.rollback_shutdown
       ~base_path:config.base_path
       ~keeper_name:operation.keeper_name
       ~operation_id:operation.operation_id
   with
-  | Keeper_turn_admission.Shutdown_rolled_back
-  | Keeper_turn_admission.Shutdown_not_reserved -> Ok operation
-  | Keeper_turn_admission.Shutdown_reserved_by_other operation_id ->
+  | Ok Keeper_owner.Shutdown_rolled_back
+  | Ok Keeper_owner.Shutdown_not_reserved -> Ok operation
+  | Ok (Keeper_owner.Shutdown_reserved_by_other operation_id) ->
     Log.Keeper.warn
       "finalized Keeper shutdown found a newer admission owner: keeper=%s finalized_operation=%s current_operation=%s"
       operation.keeper_name
       (Operation_id.to_string operation.operation_id)
-      (Operation_id.to_string operation_id);
+    (Operation_id.to_string operation_id);
     Ok operation
+  | Error error ->
+    Error
+      (Admission_release_failed
+         (operation, Keeper_owner_registry.command_error_to_string error))
 ;;
 
 let invoke_completion_handler ~config operation action =

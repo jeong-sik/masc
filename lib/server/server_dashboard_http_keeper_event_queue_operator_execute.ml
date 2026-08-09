@@ -257,18 +257,18 @@ let execute_transfer ~base_path ~keeper_name prepared =
          Ok (transfer.source, target_projection_failure_json source_result detail))
   in
   match
-    Keeper_turn_admission.run_transfer_intake_if_open
+    Keeper_shutdown_intake_fence.run_transfer_intake_if_open
       ~base_path
       ~from_keeper:keeper_name
       ~to_keeper:transfer.to_keeper
       execute_fenced
   with
-  | Keeper_turn_admission.Transfer_intake_committed result -> result
-  | Keeper_turn_admission.Transfer_intake_source_shutdown_reserved operation_id ->
+  | Keeper_shutdown_intake_fence.Transfer_intake_committed result -> result
+  | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved operation_id ->
     Error
       (Keeper_registry_event_queue.transfer_pending_error_to_string
          (Keeper_registry_event_queue.Transfer_pending_shutdown_reserved operation_id))
-  | Keeper_turn_admission.Transfer_intake_target_shutdown_reserved operation_id ->
+  | Keeper_shutdown_intake_fence.Transfer_intake_target_shutdown_reserved operation_id ->
     Error
       (Printf.sprintf
          "target Keeper shutdown owns durable intake operation=%s"

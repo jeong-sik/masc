@@ -632,13 +632,14 @@ let () =
       match target.Operator_pending_confirm.target_type, target.target_id with
       | Operator_action_constants.Keeper, Some keeper_name ->
         let admission =
-          Keeper_turn_admission.snapshot_for
+          Keeper_owner_registry.shutdown_operation_id
             ~base_path:config.Workspace.base_path
             ~keeper_name
         in
-        (match admission.snapshot_shutdown_operation_id with
-         | None -> Ok ()
-         | Some operation_id ->
+        (match admission with
+         | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
+         | Ok None -> Ok ()
+         | Ok (Some operation_id) ->
            Error
              (Printf.sprintf
                 "Keeper %s is shutting down under operation %s"

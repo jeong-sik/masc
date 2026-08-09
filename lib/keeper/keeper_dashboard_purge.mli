@@ -36,6 +36,10 @@ type resolve_error =
       ; agent_name : string
       ; detail : string
       }
+  | Keeper_owner_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
   | Keeper_operation_unreadable of
       { keeper_name : string
       ; operation_id : Keeper_shutdown_types.Operation_id.t

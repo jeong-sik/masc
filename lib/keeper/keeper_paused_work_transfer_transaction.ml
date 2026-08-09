@@ -554,7 +554,7 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
   | Ok token ->
     (try
        let outcome =
-         Keeper_turn_admission.run_transfer_intake_if_open
+         Keeper_shutdown_intake_fence.run_transfer_intake_if_open
            ~base_path:config.Workspace.base_path
            ~from_keeper
            ~to_keeper
@@ -569,17 +569,17 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
        in
        let reservation_release = Keeper_lifecycle_reservation.release token in
        (match outcome with
-        | Keeper_turn_admission.Transfer_intake_committed
+        | Keeper_shutdown_intake_fence.Transfer_intake_committed
             (Ok (receipt, commit_status, projection)) ->
           Ok { receipt; commit_status; projection; reservation_release }
-        | Keeper_turn_admission.Transfer_intake_committed (Error cause) ->
+        | Keeper_shutdown_intake_fence.Transfer_intake_committed (Error cause) ->
           Error { cause; reservation_release = Some reservation_release }
-        | Keeper_turn_admission.Transfer_intake_source_shutdown_reserved operation_id ->
+        | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved operation_id ->
           Error
             { cause = Source_transfer_shutdown_reserved operation_id
             ; reservation_release = Some reservation_release
             }
-        | Keeper_turn_admission.Transfer_intake_target_shutdown_reserved operation_id ->
+        | Keeper_shutdown_intake_fence.Transfer_intake_target_shutdown_reserved operation_id ->
           Error
             { cause = Target_transfer_shutdown_reserved operation_id
             ; reservation_release = Some reservation_release

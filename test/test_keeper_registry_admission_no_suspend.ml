@@ -1,5 +1,5 @@
 (** Regression: the closure handed to
-    [Keeper_turn_admission.commit_registration_if_open] must not suspend.
+    [Keeper_shutdown_intake_fence.commit_registration_if_open] must not suspend.
 
     That function evaluates its argument inside [Stdlib.Mutex.protect
     slot.state_mu]. [Stdlib.Mutex.lock] blocks the OS thread that runs the Eio
@@ -112,7 +112,7 @@ let () =
              while holding state_mu (Stdlib.Mutex), so the Eio scheduler \
              thread is blocked and the domain cannot make progress. Acquire \
              the lifecycle key lock outside \
-             Keeper_turn_admission.commit_registration_if_open.";
+             Keeper_shutdown_intake_fence.commit_registration_if_open.";
           exit 1)
         else (
           Unix.sleepf 0.05;

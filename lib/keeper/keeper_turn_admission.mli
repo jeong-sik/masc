@@ -60,23 +60,6 @@ type transition_shutdown_result =
   | Shutdown_transition_already_applied
   | Shutdown_transition_reserved_by_other of Keeper_shutdown_types.Operation_id.t
 
-type 'a registration_commit_result =
-  | Registration_committed of 'a
-  | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
-
-type 'a durable_intake_result =
-  | Intake_committed of 'a
-  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
-
-type 'a transfer_intake_result =
-  | Transfer_intake_committed of 'a
-  | Transfer_intake_source_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
-  | Transfer_intake_target_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
-
-type intake_token
-(** Opaque authority for one currently admitted durable intake. The token is
-    valid only inside the callback passed to [run_durable_intake_if_open]. *)
-
 type slot_snapshot =
   { snapshot_keeper_name : string
   ; snapshot_slot_created : bool
@@ -178,63 +161,7 @@ val transition_shutdown :
   to_operation_id:Keeper_shutdown_types.Operation_id.t option ->
   transition_shutdown_result
 
-(** Run the registry [commit] only while no shutdown operation owns the Keeper
-    admission fence. Shutdown reservation and same-name lane installation are
-    therefore totally ordered.
-
-    PRECONDITION — [commit] must not suspend the calling fiber. It runs inside
-    a [Stdlib.Mutex] critical section, and [Stdlib.Mutex.lock] blocks the OS
-    thread that runs the Eio scheduler: a fiber that suspends here can never be
-    resumed, so any other fiber on the domain that touches this slot wedges the
-    entire domain with no timeout and no diagnostic. Concretely, [commit] must
-    not acquire the per-keeper lifecycle key lock
-    ([Keeper_lifecycle_reservation.with_key_lock] suspends via
-    [Cross_context_mutex]); acquire that lock around this call instead, as
-    [Keeper_registry_setup] does. The type cannot express this — OCaml has no
-    effect annotation for "does not suspend" — so the obligation is on the
-    caller and is covered by
-    [test/test_keeper_registry_admission_no_suspend.ml]. *)
-val commit_registration_if_open :
-  base_path:string ->
-  keeper_name:string ->
-  (unit -> 'a) ->
-  'a registration_commit_result
-
-(** Serialize one suspending durable intake effect with shutdown join. The
-    shutdown fence is checked after the intake mutex is acquired: intake that
-    wins commits before [await_idle_after_shutdown] returns, while a shutdown
-    that wins prevents the effect from starting. *)
-val run_durable_intake_if_open :
-  base_path:string ->
-  keeper_name:string ->
-  (intake_token -> 'a) ->
-  'a durable_intake_result
-
-(** Hold both source and target durable-intake fences in canonical Keeper-name
-    order for one transfer effect. Opposing A-to-B and B-to-A operations
-    therefore cannot form an ABBA wait cycle. The callback receives live
-    owner-specific tokens and must complete every source and target durable
-    mutation before returning. *)
-val run_transfer_intake_if_open :
-  base_path:string ->
-  from_keeper:string ->
-  to_keeper:string ->
-  (source_intake_token:intake_token ->
-   target_intake_token:intake_token ->
-   'a) ->
-  'a transfer_intake_result
-
-val intake_token_matches :
-  intake_token ->
-  base_path:string ->
-  keeper_name:string ->
-  bool
-(** [true] only for a live token belonging to the requested Keeper. *)
-
-(** Join the current turn holder and any durable external intake after
-    admission has been closed. This waits without an invented timeout, then
-    immediately releases both slots. Never call from the same admitted turn
-    or intake. *)
+(** Join the current turn holder after admission has been closed. *)
 val await_idle_after_shutdown : base_path:string -> keeper_name:string -> unit
 
 val snapshot_for : base_path:string -> keeper_name:string -> slot_snapshot

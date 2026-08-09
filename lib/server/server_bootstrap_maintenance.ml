@@ -219,18 +219,22 @@ let recover_projected_durable_demand_owner
      | Ok None -> ()
      | Ok (Some meta) ->
        let admission =
-         Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+         Keeper_owner_registry.shutdown_operation_id ~base_path ~keeper_name
        in
        let runtime =
          Keeper_activation_readiness.owner_runtime_of_registry_entry
            (Keeper_registry.get ~base_path keeper_name)
        in
        let truth =
-         Keeper_activation_readiness.classify_durable_demand_execution
-           ~shutdown_operation_id:
-             admission.snapshot_shutdown_operation_id
-           ~runtime
-           (Ok meta)
+         match admission with
+         | Error error ->
+           Keeper_activation_readiness.Unknown
+             (Keeper_owner_registry.lookup_error_to_string error)
+         | Ok shutdown_operation_id ->
+           Keeper_activation_readiness.classify_durable_demand_execution
+             ~shutdown_operation_id
+             ~runtime
+             (Ok meta)
        in
        (match truth with
         | Keeper_activation_readiness.Executable -> ()

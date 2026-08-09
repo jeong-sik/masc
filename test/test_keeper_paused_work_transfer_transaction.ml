@@ -845,26 +845,30 @@ let test_stale_source_incarnation_has_no_receipt_or_target_effect () =
 let with_shutdown_reservation ~base_path ~keeper_name f =
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   (match
-     Keeper_turn_admission.begin_shutdown
+     Keeper_owner_registry.begin_shutdown
        ~base_path
        ~keeper_name
        ~operation_id
    with
-   | Keeper_turn_admission.Shutdown_reserved _ -> ()
-   | Keeper_turn_admission.Shutdown_already_reserved _ ->
-     Alcotest.fail "fresh transfer fixture already had a shutdown reservation");
+   | Ok (Keeper_owner.Shutdown_reserved _) -> ()
+   | Ok (Keeper_owner.Shutdown_already_reserved _) ->
+     Alcotest.fail "fresh transfer fixture already had a shutdown reservation"
+   | Error error ->
+     Alcotest.fail (Keeper_owner_registry.command_error_to_string error));
   Fun.protect
     ~finally:(fun () ->
       match
-        Keeper_turn_admission.rollback_shutdown
+        Keeper_owner_registry.rollback_shutdown
           ~base_path
           ~keeper_name
           ~operation_id
       with
-      | Keeper_turn_admission.Shutdown_rolled_back -> ()
-      | Keeper_turn_admission.Shutdown_not_reserved
-      | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
-        Alcotest.fail "transfer fixture did not own its shutdown reservation")
+      | Ok Keeper_owner.Shutdown_rolled_back -> ()
+      | Ok Keeper_owner.Shutdown_not_reserved
+      | Ok (Keeper_owner.Shutdown_reserved_by_other _) ->
+        Alcotest.fail "transfer fixture did not own its shutdown reservation"
+      | Error error ->
+        Alcotest.fail (Keeper_owner_registry.command_error_to_string error))
     (fun () -> f operation_id)
 ;;
 

@@ -88,11 +88,10 @@ let claude_failure_status = function
   | Turn_failed _ | Quota_blocked _ -> "probe_contract_error"
 ;;
 
-let probe_codex ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
+let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
     (config : Runtime_execution.codex_app_server) =
   let probe_config : Runtime_codex_app_server.config =
     { cli_path = config.cli_path
-    ; cwd
     ; model = config.model
     ; developer_instructions = None
     ; timeout_s = Float.min max_probe_timeout_s config.timeout_s
@@ -205,7 +204,6 @@ let probe_body ~base_path ~body =
       (probe_codex
          ~mgr
          ~clock
-         ~cwd:base_path
          ~process_cwd
          ~runtime_id
          ~model

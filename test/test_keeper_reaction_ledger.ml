@@ -118,7 +118,7 @@ let reaction_ledger_dir ~base_path ~keeper_name =
           (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
           keeper_name)
        "reaction-ledger")
-    "v5"
+    "v6"
 ;;
 
 let reaction_ledger_store ~base_path ~keeper_name =
@@ -186,7 +186,7 @@ let test_event_queue_stimulus_and_turn_reaction () =
   in
   check int "two rows persisted" 2 (List.length rows);
   let stimulus_row = List.nth rows 0 in
-  check_member_string "stimulus schema" "keeper.reaction_ledger.v5" "schema" stimulus_row;
+  check_member_string "stimulus schema" "keeper.reaction_ledger.v6" "schema" stimulus_row;
   check_member_string "stimulus record kind" "stimulus" "record_kind" stimulus_row;
   check_member_string "board stimulus id" "board:post-42" "stimulus_id" stimulus_row;
   check_member_string
@@ -264,7 +264,7 @@ let test_unknown_record_kind_is_quarantined_not_fatal () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v5"
+        [ "schema", `String "keeper.reaction_ledger.v6"
         ; "record_kind", `String "unexpected"
         ; "event_id", `String "krl:unknown-record-kind-fixture"
         ; "keeper_name", `String keeper_name
@@ -647,7 +647,7 @@ let test_unknown_reaction_is_quarantined_without_clearing_pending () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v5"
+        [ "schema", `String "keeper.reaction_ledger.v6"
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name
@@ -977,7 +977,7 @@ let test_missing_identity_does_not_claim_an_occurrence_identity () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v5"
+        [ "schema", `String "keeper.reaction_ledger.v6"
         ; "record_kind", `String "stimulus"
         ; "event_id", `String "unattributed-event"
         ; "keeper_name", `String keeper_name

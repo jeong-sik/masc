@@ -2,7 +2,7 @@
 
     Queue-visible stimuli and queue transition reactions are
     written to a replayable JSONL store under
-    [.masc/keepers/<keeper>/reaction-ledger/v5/YYYY-MM/DD.jsonl].  The
+    [.masc/keepers/<keeper>/reaction-ledger/v6/YYYY-MM/DD.jsonl].  The
     generation namespace is a hard boundary: older stores are neither read nor
     written by this module. *)
 

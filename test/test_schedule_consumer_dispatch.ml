@@ -68,7 +68,7 @@ let reaction_ledger_dir ~base_path ~keeper_name =
           (Common.keepers_runtime_dir_of_base ~base_path)
           keeper_name)
        "reaction-ledger")
-    "v5"
+    "v6"
 ;;
 
 let write_malformed_reaction_ledger_row ~base_path ~keeper_name =
@@ -1739,7 +1739,7 @@ let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
        ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
        ())
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v5"
+        [ "schema", `String "keeper.reaction_ledger.v6"
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name

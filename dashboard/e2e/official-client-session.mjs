@@ -41,17 +41,12 @@ const resolvedPayload = {
   session: {
     ...recoveryPayload.session,
     phase: {
-      kind: 'settled',
-      session_id: 'thread-verified',
-      turn_id: 'turn-verified',
+      kind: 'ready',
     },
     last_recovery_resolution: {
       recovery_id: recoveryId,
       failure: 'protocol_failed',
-      resolution: {
-        kind: 'adopt_verified',
-        settlement: { session_id: 'thread-verified', turn_id: 'turn-verified' },
-      },
+      resolution: { kind: 'restart_fresh' },
       resolved_by: 'dashboard',
       resolved_at: 1786230060,
     },
@@ -83,18 +78,14 @@ try {
   if (getRequests !== 1) throw new Error(`expected one session GET, got ${getRequests}`)
 
   await page.screenshot({ path: recoveryScreenshot, fullPage: true })
-  await page.getByTestId('official-client-session-adopt-session').fill('thread-verified')
-  await page.getByTestId('official-client-session-adopt-turn').fill('turn-verified')
-  await page.getByTestId('official-client-session-adopt-verified').click()
-  await page.getByTestId('official-client-session-phase').getByText('settled', { exact: true }).waitFor()
+  await page.getByTestId('official-client-session-restart-fresh').click()
+  await page.getByTestId('official-client-session-phase').getByText('ready', { exact: true }).waitFor()
   await page.getByTestId('official-client-session-last-resolution').getByText(/dashboard/).waitFor()
 
   const expectedBody = {
     keeper_name: 'sangsu',
     recovery_id: recoveryId,
-    resolution: 'adopt_verified',
-    session_id: 'thread-verified',
-    turn_id: 'turn-verified',
+    resolution: 'restart_fresh',
   }
   if (JSON.stringify(postedBody) !== JSON.stringify(expectedBody)) {
     throw new Error(`unexpected recovery body: ${JSON.stringify(postedBody)}`)

@@ -12,7 +12,6 @@ import { errorToString } from '../lib/format-string'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
-import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { StatusChip } from './common/status-chip'
 
@@ -39,8 +38,6 @@ export function OfficialClientSessionPanel() {
   const loading = useSignal(false)
   const resolving = useSignal(false)
   const error = useSignal<string | null>(null)
-  const adoptSessionId = useSignal('')
-  const adoptTurnId = useSignal('')
   const requestRevision = useSignal(0)
 
   const keeperNames = keepers.value
@@ -85,8 +82,6 @@ export function OfficialClientSessionPanel() {
     error.value = null
     try {
       response.value = await resolveOfficialClientSession(keeperName, recoveryId, decision)
-      adoptSessionId.value = ''
-      adoptTurnId.value = ''
     } catch (cause) {
       error.value = errorToString(cause)
       await load(keeperName)
@@ -100,7 +95,6 @@ export function OfficialClientSessionPanel() {
   const recoveryRequired = phase?.kind === 'recovery_required'
   const lastResolution = session?.last_recovery_resolution ?? null
   const transientRelease = session?.last_transient_release ?? null
-  const canAdopt = adoptSessionId.value.trim() !== '' && adoptTurnId.value.trim() !== ''
 
   return html`
     <${SectionCard}
@@ -175,7 +169,7 @@ export function OfficialClientSessionPanel() {
                   <div>observed turn · <span class="mono">${phase.observed_turn_id ?? '—'}</span></div>
                 </div>
                 <div class="mb-3 whitespace-pre-wrap break-words text-xs text-[var(--color-fg-secondary)]">${phase.detail}</div>
-                <div class="flex flex-wrap gap-2 mb-3">
+                <div class="flex flex-wrap gap-2">
                   <${ActionButton}
                     variant="warn"
                     size="sm"
@@ -192,40 +186,6 @@ export function OfficialClientSessionPanel() {
                     ariaBusy=${resolving.value}
                     onClick=${() => void resolve({ resolution: 'restart_fresh' })}
                   >새 session으로 재시작<//>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 items-end">
-                  <label class="grid gap-1 text-2xs text-[var(--color-fg-muted)]">
-                    검증된 session ID
-                    <${TextInput}
-                      value=${adoptSessionId.value}
-                      ariaLabel="검증된 official-client session ID"
-                      testId="official-client-session-adopt-session"
-                      disabled=${resolving.value}
-                      onInput=${(event: Event) => { adoptSessionId.value = (event.target as HTMLInputElement).value }}
-                    />
-                  </label>
-                  <label class="grid gap-1 text-2xs text-[var(--color-fg-muted)]">
-                    검증된 turn ID
-                    <${TextInput}
-                      value=${adoptTurnId.value}
-                      ariaLabel="검증된 official-client turn ID"
-                      testId="official-client-session-adopt-turn"
-                      disabled=${resolving.value}
-                      onInput=${(event: Event) => { adoptTurnId.value = (event.target as HTMLInputElement).value }}
-                    />
-                  </label>
-                  <${ActionButton}
-                    variant="ok"
-                    size="sm"
-                    testId="official-client-session-adopt-verified"
-                    disabled=${resolving.value || !canAdopt}
-                    ariaBusy=${resolving.value}
-                    onClick=${() => void resolve({
-                      resolution: 'adopt_verified',
-                      session_id: adoptSessionId.value.trim(),
-                      turn_id: adoptTurnId.value.trim(),
-                    })}
-                  >검증 결과 채택<//>
                 </div>
               </div>
             `

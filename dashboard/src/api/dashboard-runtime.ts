@@ -1142,8 +1142,7 @@ export interface DashboardOfficialClientRecoveryResolutionRecord {
   recovery_id: string
   failure: DashboardOfficialClientRecoveryFailure
   resolution: {
-    kind: 'retry_previous' | 'restart_fresh' | 'adopt_verified'
-    settlement?: DashboardOfficialClientSettlement | null
+    kind: 'retry_previous' | 'restart_fresh'
   }
   resolved_by: string
   resolved_at: number
@@ -1176,7 +1175,6 @@ export interface DashboardOfficialClientSessionResponse {
 export type DashboardOfficialClientRecoveryDecision =
   | { resolution: 'retry_previous' }
   | { resolution: 'restart_fresh' }
-  | { resolution: 'adopt_verified'; session_id: string; turn_id: string }
 
 const OFFICIAL_CLIENT_RECOVERY_FAILURES = new Set<DashboardOfficialClientRecoveryFailure>([
   'transient_spawn_failed',
@@ -1250,15 +1248,11 @@ function decodeOfficialClientResolutionRecord(raw: unknown): DashboardOfficialCl
   const resolved_at = asNumber(raw.resolved_at)
   const kind = asString(raw.resolution.kind)
   if (!recovery_id || !failure || !resolved_by || resolved_at == null) return null
-  if (kind !== 'retry_previous' && kind !== 'restart_fresh' && kind !== 'adopt_verified') return null
-  const settlement = raw.resolution.settlement == null
-    ? null
-    : decodeOfficialClientSettlement(raw.resolution.settlement)
-  if (kind === 'adopt_verified' && !settlement) return null
+  if (kind !== 'retry_previous' && kind !== 'restart_fresh') return null
   return {
     recovery_id,
     failure,
-    resolution: { kind, settlement },
+    resolution: { kind },
     resolved_by,
     resolved_at,
   }

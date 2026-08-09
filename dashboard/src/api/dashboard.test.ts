@@ -4201,26 +4201,23 @@ describe('official-client session API', () => {
     expect(result.session?.phase.observed_session_id).toBe('thread-1')
   })
 
-  it('posts the recovery fence and verified adoption identities', async () => {
-    const settledPayload = {
+  it('posts the exact recovery fence and selected resolution', async () => {
+    const resolvedPayload = {
       ...recoveryPayload,
       session: {
         ...recoveryPayload.session,
-        phase: { kind: 'settled', session_id: 'thread-verified', turn_id: 'turn-verified' },
+        phase: { kind: 'ready' },
         last_recovery_resolution: {
           recovery_id: recoveryPayload.session.phase.recovery_id,
           failure: 'protocol_failed',
-          resolution: {
-            kind: 'adopt_verified',
-            settlement: { session_id: 'thread-verified', turn_id: 'turn-verified' },
-          },
+          resolution: { kind: 'restart_fresh' },
           resolved_by: 'dashboard',
           resolved_at: 1_786_230_010,
         },
       },
     }
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(settledPayload), {
+      new Response(JSON.stringify(resolvedPayload), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -4230,7 +4227,7 @@ describe('official-client session API', () => {
     const result = await resolveOfficialClientSession(
       'sangsu',
       recoveryPayload.session.phase.recovery_id,
-      { resolution: 'adopt_verified', session_id: 'thread-verified', turn_id: 'turn-verified' },
+      { resolution: 'restart_fresh' },
     )
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -4238,11 +4235,9 @@ describe('official-client session API', () => {
     expect(JSON.parse(init.body as string)).toEqual({
       keeper_name: 'sangsu',
       recovery_id: recoveryPayload.session.phase.recovery_id,
-      resolution: 'adopt_verified',
-      session_id: 'thread-verified',
-      turn_id: 'turn-verified',
+      resolution: 'restart_fresh',
     })
-    expect(result.session?.phase.kind).toBe('settled')
+    expect(result.session?.phase.kind).toBe('ready')
     expect(result.session?.last_recovery_resolution?.resolved_by).toBe('dashboard')
   })
 })

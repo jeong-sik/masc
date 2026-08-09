@@ -38,19 +38,17 @@ const recoveryResponse = {
   },
 }
 
-const settledResponse = {
+const resolvedResponse = {
   ...recoveryResponse,
   session: {
     ...recoveryResponse.session,
     phase: {
-      kind: 'settled' as const,
-      session_id: 'thread-verified',
-      turn_id: 'turn-verified',
+      kind: 'ready' as const,
     },
     last_recovery_resolution: {
       recovery_id: recoveryResponse.session.phase.recovery_id,
       failure: 'protocol_failed' as const,
-      resolution: { kind: 'adopt_verified' as const, settlement: { session_id: 'thread-verified', turn_id: 'turn-verified' } },
+      resolution: { kind: 'restart_fresh' as const },
       resolved_by: 'dashboard',
       resolved_at: 1_786_230_010,
     },
@@ -61,7 +59,7 @@ describe('OfficialClientSessionPanel', () => {
   beforeEach(() => {
     keepers.value = [{ name: 'sangsu', status: 'idle', runtime_id: 'codex.codex' }]
     apiMocks.fetchOfficialClientSession.mockReset().mockResolvedValue(recoveryResponse)
-    apiMocks.resolveOfficialClientSession.mockReset().mockResolvedValue(settledResponse)
+    apiMocks.resolveOfficialClientSession.mockReset().mockResolvedValue(resolvedResponse)
   })
 
   afterEach(() => {
@@ -89,33 +87,19 @@ describe('OfficialClientSessionPanel', () => {
     })
   })
 
-  it('requires both verified identities before adoption and shows the durable actor', async () => {
+  it('offers retry without accepting caller-supplied settlement identities', async () => {
     const view = render(html`<${OfficialClientSessionPanel} />`)
 
     await waitFor(() => {
-      expect(view.getByTestId('official-client-session-adopt-verified')).toBeTruthy()
+      expect(view.getByTestId('official-client-session-retry-previous')).toBeTruthy()
     })
-    const adoptButton = view.getByTestId('official-client-session-adopt-verified') as HTMLButtonElement
-    expect(adoptButton.disabled).toBe(true)
-
-    fireEvent.input(view.getByTestId('official-client-session-adopt-session'), {
-      target: { value: 'thread-verified' },
-    })
-    fireEvent.input(view.getByTestId('official-client-session-adopt-turn'), {
-      target: { value: 'turn-verified' },
-    })
-    expect(adoptButton.disabled).toBe(false)
-    fireEvent.click(adoptButton)
+    fireEvent.click(view.getByTestId('official-client-session-retry-previous'))
 
     await waitFor(() => {
       expect(apiMocks.resolveOfficialClientSession).toHaveBeenCalledWith(
         'sangsu',
         recoveryResponse.session.phase.recovery_id,
-        {
-          resolution: 'adopt_verified',
-          session_id: 'thread-verified',
-          turn_id: 'turn-verified',
-        },
+        { resolution: 'retry_previous' },
       )
       expect(view.getByTestId('official-client-session-last-resolution').textContent).toContain('dashboard')
     })

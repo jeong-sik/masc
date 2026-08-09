@@ -60,7 +60,7 @@ let fixture_script ?capture_path lines =
       output_string output
         (Printf.sprintf
            "printf '%%s' \"$request\" | grep -F %s >/dev/null || exit 97\n"
-           (shell_quote (Printf.sprintf {|"version":"%s"|} Version.version)));
+           (shell_quote (Printf.sprintf {|"version":"%s"|} Runtime_build_version.current)));
     Option.iter
       (fun capture_path ->
          output_string
@@ -613,7 +613,7 @@ let test_protocol_uses_spawn_cwd_and_named_permissions () =
        let params = Yojson.Safe.Util.member "params" thread_start in
        check string
          "client version SSOT"
-         Version.version
+         Runtime_build_version.current
          (client_info |> Yojson.Safe.Util.member "version" |> Yojson.Safe.Util.to_string);
        check string
          "protocol cwd"

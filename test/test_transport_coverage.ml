@@ -632,7 +632,7 @@ let test_rest_generate_openapi_document () =
   let open Yojson.Safe.Util in
   let doc = Transport.Rest.generate_openapi_document () in
   check string "openapi version" "3.1.0" (doc |> member "openapi" |> to_string);
-  check string "info.version matches repo version" Version.version
+  check string "info.version matches repo version" Runtime_build_version.current
     (doc |> member "info" |> member "version" |> to_string);
   check string "bearer security scheme type" "http"
     (doc |> member "components" |> member "securitySchemes"

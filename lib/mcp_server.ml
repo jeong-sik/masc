@@ -91,7 +91,7 @@ let server_info =
     [
       ("name", `String "masc");
       ("title", `String "MASC MCP Server");
-      ("version", `String Version.version);
+      ("version", `String Runtime_build_version.current);
       ( "description",
         `String
           "Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources." );

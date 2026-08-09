@@ -319,8 +319,8 @@ let repo_head_commit_unix_ts = probe_commit_unix_ts commit_resolution.repo_head_
 
 let current () =
   let now = Unix.gettimeofday () in
-  { release_version = Version.version
-  ; binary_version = Version.version
+  { release_version = Runtime_build_version.current
+  ; binary_version = Runtime_build_version.current
   ; repo_version
   ; commit = commit_resolution.commit
   ; commit_source = commit_resolution.commit_source

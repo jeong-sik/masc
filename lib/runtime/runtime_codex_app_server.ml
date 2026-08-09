@@ -404,7 +404,7 @@ let probe_protocol io =
            , `Assoc
                [ "name", `String "masc"
                ; "title", `String "MASC"
-               ; "version", `String Version.version
+               ; "version", `String Runtime_build_version.current
                ] )
          ; "capabilities", `Assoc [ "experimentalApi", `Bool true ]
          ]);

@@ -4,9 +4,21 @@ type codex_app_server =
   ; timeout_s : float
   }
 
+type antigravity_cli =
+  { cli_path : string
+  ; model : string
+  ; agent : string option
+  ; effort : Runtime_antigravity.effort option
+  ; execution_mode : Runtime_antigravity.execution_mode
+  ; sandbox : bool
+  ; disable_slash_commands : bool
+  ; timeout_s : float
+  }
+
 type t =
   | Agent_core of Llm_provider.Provider_config.t
   | Codex_app_server of codex_app_server
+  | Antigravity_cli of antigravity_cli
 
 type checkpoint_owner =
   | Masc_oas
@@ -14,20 +26,22 @@ type checkpoint_owner =
 
 let agent_core_provider_config = function
   | Agent_core config -> Some config
-  | Codex_app_server _ -> None
+  | Codex_app_server _ | Antigravity_cli _ -> None
 ;;
 
 let model_id = function
   | Agent_core config -> Some config.Llm_provider.Provider_config.model_id
   | Codex_app_server config -> config.model
+  | Antigravity_cli config -> Some config.model
 ;;
 
 let label = function
   | Agent_core _ -> "agent_core"
   | Codex_app_server _ -> "codex_app_server"
+  | Antigravity_cli _ -> "antigravity_cli"
 ;;
 
 let checkpoint_owner = function
   | Agent_core _ -> Masc_oas
-  | Codex_app_server _ -> Official_client
+  | Codex_app_server _ | Antigravity_cli _ -> Official_client
 ;;

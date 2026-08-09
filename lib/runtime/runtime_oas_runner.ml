@@ -88,6 +88,11 @@ let resolve_runtime_providers ~runtime_id () =
         (Printf.sprintf
            "runtime %S is owned by codex-app-server, not the OAS agent_core"
            rt.Runtime.id)
+    | Runtime_execution.Antigravity_cli _ ->
+      Error
+        (Printf.sprintf
+           "runtime %S is owned by antigravity-cli, not the OAS agent_core"
+           rt.Runtime.id)
   in
   if String.equal runtime_id "" then
     match Runtime.get_default_runtime () with

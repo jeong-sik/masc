@@ -40,6 +40,7 @@ let runpod_provider =
   ; healthcheck_path = None
   ; headers = None
   ; connect_timeout_s = None
+  ; antigravity_cli = None
   }
 
 let qwen_model =

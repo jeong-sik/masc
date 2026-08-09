@@ -71,7 +71,7 @@ graph LR
 | Context | `keeper_context_core.ml`, `keeper_context_runtime.ml`, `keeper_checkpoint_store.ml` | 3 |
 | Memory | `keeper_memory*.ml` (bank, policy, recall) | 4 |
 | Prompt | `keeper_prompt.ml`, `keeper_unified_prompt.ml` | 2 |
-| Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_oas.ml`, `keeper_hooks_oas.ml` | 4 |
+| Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_agent_core.ml`, `keeper_hooks_agent_core.ml` | 4 |
 | Supervision | `keeper_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` | 3 |
 | MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_keeper.ml`, `keeper_schema.ml` | 4 |
 | Alerting / Metrics | `keeper_alerting*.ml`, `keeper_status_runtime*.ml`, `keeper_status_detail.ml` | 6+ |
@@ -188,7 +188,7 @@ stateDiagram-v2
 1. **Observe**: `keeper_world_observation.observe`로 workspace 상태, 멘션, board 이벤트, idle 시간, 경제 압력 등을 수집
 2. **BuildPrompt**: `keeper_unified_prompt.build_prompt`로 keeper identity + observation을 단일 (system_prompt, user_message) 쌍으로 조립
 3. **AgentRun**: `keeper_agent_run.run_turn`이 agent core `Agent.run`에 위임. tools + hooks + context_reducer를 전달하며 memory object는 전달하지 않는다
-4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_oas`가 `agent_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
+4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_agent_core`가 `agent_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
 5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영하고 `observation.idle_seconds`를 `masc_keeper_idle_seconds{keeper_name}` OTel metric-store gauge로 노출
 6. **PostTurnLifecycle**: `keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles`가 compaction, handoff rollover, typed checkpoint metadata를 single-writer로 처리
 7. **Checkpoint / Compact / Handoff**: checkpoint 저장 후 gate에 따라 compaction 또는 handoff rollover를 실행
@@ -347,7 +347,7 @@ Tool call을 `.masc/trajectories/{name}/{trace_id}.jsonl`에 JSONL 기록. 용�
 
 ## 8. Hooks (agent core Integration)
 
-**소스**: `lib/keeper/keeper_hooks_oas.ml`
+**소스**: `lib/keeper/keeper_hooks_agent_core.ml`
 
 agent core Agent.run의 hook lifecycle에 keeper 동작을 주입:
 
@@ -524,7 +524,7 @@ External memory projection은 제거됐다. 남은 경계 이슈는 keeper conte
 | Agent Run | `lib/keeper/keeper_agent_run.ml` |
 | Unified Turn | `lib/keeper/keeper_unified_turn.ml` |
 | Task verification evidence | `lib/workspace/workspace_task_verification.ml` |
-| agent core hook observations | `lib/keeper/keeper_hooks_oas.ml` |
+| Agent Core hook observations | `lib/keeper/keeper_hooks_agent_core.ml` |
 | Eval Harness | `lib/eval_harness.ml` |
 | Trajectory | `lib/trajectory/trajectory.ml` |
 | Supervisor | `lib/keeper/keeper_supervisor.ml` |

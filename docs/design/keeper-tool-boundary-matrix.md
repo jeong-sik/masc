@@ -80,8 +80,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_hooks_agent_core_response_metrics.mli` - hook-observation
 - `lib/keeper_hooks_agent_core_types/keeper_hooks_agent_core_types.ml` - hook-observation
 - `lib/keeper_hooks_agent_core_types/keeper_hooks_agent_core_types.mli` - hook-observation
-- `lib/keeper/keeper_hooks_oas.ml` - hook-observation
-- `lib/keeper/keeper_hooks_oas.mli` - hook-observation
+- `lib/keeper/keeper_hooks_agent_core.ml` - hook-observation
+- `lib/keeper/keeper_hooks_agent_core.mli` - hook-observation
 - `lib/keeper/keeper_tool_activity.ml` - hook-observation
 - `lib/keeper/keeper_tool_activity.mli` - hook-observation
 - `lib/keeper/keeper_sandbox_containment.ml` - sandbox-runtime
@@ -169,5 +169,5 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tools_agent_core_handler_telemetry.mli` - agent-core-tool-bridge
 - `lib/keeper/keeper_tools_agent_core_handler.ml` - agent-core-tool-bridge
 - `lib/keeper/keeper_tools_agent_core_handler.mli` - agent-core-tool-bridge
-- `lib/keeper/keeper_tools_oas.ml` - agent-core-tool-bridge
-- `lib/keeper/keeper_tools_oas.mli` - agent-core-tool-bridge
+- `lib/keeper/keeper_tools_agent_core.ml` - agent-core-tool-bridge
+- `lib/keeper/keeper_tools_agent_core.mli` - agent-core-tool-bridge

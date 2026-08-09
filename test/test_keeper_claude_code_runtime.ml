@@ -172,7 +172,7 @@ let content_of_wire_message raw =
 ;;
 
 let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
-    ?oas_checkpoint ~base_path ~cli_path ~goal () =
+    ?event_capture ?oas_checkpoint ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -195,19 +195,40 @@ let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
                       | [] -> None
                       | _ :: _ -> Some (Agent_sdk.Context.create ())
                     in
-                    Keeper_turn_driver.run_named
-                      ~runtime_id:"claude.claude"
-                      ~keeper_name:"claude-fixture"
-                      ~base_path
-                      ~goal
-                      ~tools
-                      ~initial_messages
-                      ?context
-                      ?event_bus
-                      ?oas_checkpoint
-                      ~sw
-                      ~net:(Eio.Stdenv.net env)
-                      ())))))
+                    let run () =
+                      Keeper_turn_driver.run_named
+                        ~runtime_id:"claude.claude"
+                        ~keeper_name:"claude-fixture"
+                        ~base_path
+                        ~goal
+                        ~tools
+                        ~initial_messages
+                        ?context
+                        ?event_bus
+                        ?oas_checkpoint
+                        ~sw
+                        ~net:(Eio.Stdenv.net env)
+                        ()
+                    in
+                    (match event_bus, event_capture with
+                     | Some bus, Some capture ->
+                       let subscription =
+                         Runtime_event_bus.subscribe
+                           ~capacity:16
+                           ~overflow:Agent_sdk.Event_bus.Drop_oldest
+                           ~purpose:"claude-code-lifecycle-test"
+                           bus
+                       in
+                       Fun.protect
+                         ~finally:(fun () ->
+                           Runtime_event_bus.unsubscribe bus subscription)
+                         (fun () ->
+                            let result = run () in
+                            capture := Runtime_event_bus.drain subscription;
+                            result)
+                     | _, None -> run ()
+                     | None, Some _ ->
+                       invalid_arg "event_capture requires event_bus"))))))
 ;;
 
 let checkpoint_with_messages
@@ -314,17 +335,9 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
   let base_path = temp_workspace () in
   let prompt_marker = Filename.concat base_path "typed-history-prompt.json" in
   let bus = Agent_sdk.Event_bus.create () in
-  let subscription =
-    Runtime_event_bus.subscribe
-      ~capacity:16
-      ~overflow:Agent_sdk.Event_bus.Drop_oldest
-      ~purpose:"claude-code-lifecycle-test"
-      bus
-  in
+  let captured_events = ref [] in
   Fun.protect
-    ~finally:(fun () ->
-      Runtime_event_bus.unsubscribe bus subscription;
-      cleanup_tree base_path)
+    ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        let tool_use : Agent_sdk.Types.message =
          { role = Assistant
@@ -356,6 +369,7 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
               run_keeper_turn
                 ~initial_messages:[ tool_use; tool_result ]
                 ~event_bus:bus
+                ~event_capture:captured_events
                 ~base_path
                 ~cli_path
                 ~goal:"CURRENT_GOAL"
@@ -397,7 +411,7 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
             Yojson.Safe.Util.(tool_history |> member "role" |> to_string)
         | _ -> fail "typed history projection did not preserve the tool cycle");
        let lifecycle_kinds =
-         Runtime_event_bus.drain subscription
+         !captured_events
          |> List.map (fun event ->
            Agent_sdk.Event_bus.payload_kind event.Agent_sdk.Event_bus.payload)
        in

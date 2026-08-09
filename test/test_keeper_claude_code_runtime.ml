@@ -229,7 +229,7 @@ let checkpoint_with_messages
 let test_oas_checkpoint_starts_official_client_turn () =
   let base_path = temp_workspace () in
   let prompt_marker = Filename.concat base_path "checkpoint-prompt.json" in
-  let checkpoint_history =
+  let checkpoint_history : Agent_sdk.Types.message list =
     [ { role = Assistant
       ; content =
           [ ToolUse

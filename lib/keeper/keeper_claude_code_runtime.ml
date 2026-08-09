@@ -118,7 +118,7 @@ let recovery_failure_of_client_error = function
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~enable_thinking
+    ~context ~event_bus
     ~(config : Runtime_execution.claude_code) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -188,7 +188,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~initial_messages
         ~model_input_projection
         ~hooks:(Some hooks)
-        ~enable_thinking
     in
     let tool_surface_sha256 = Session_store.tool_surface_sha256 prepared.tools in
     let* () =
@@ -562,7 +561,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~enable_thinking ~config =
+    ~context ~event_bus ~config =
   Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
     run_without_lifecycle
       ~runtime_id
@@ -578,6 +577,5 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
       ~context_injector
       ~context
       ~event_bus
-      ~enable_thinking
       ~config)
 ;;

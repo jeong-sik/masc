@@ -822,7 +822,6 @@ let run_named
             ~context_injector
             ~context
             ~event_bus
-            ~enable_thinking:inference_policy.attempt_enable_thinking
             ~config
         in
         let claude_result =

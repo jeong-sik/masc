@@ -13,7 +13,8 @@ let parse_or_fail content =
 let agent_core_provider_config (runtime : Runtime.t) =
   match runtime.execution with
   | Runtime_execution.Agent_core provider_config -> provider_config
-  | Runtime_execution.Codex_app_server _ ->
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Antigravity_cli _ ->
     failf "runtime %s is not an agent_core provider" runtime.id
 ;;
 
@@ -3158,13 +3159,14 @@ let test_runtime_assignment_default_rider_resolves_to_default_runtime () =
              "local.good"
              (Runtime.get_default_runtime_id ())))
 
-let codex_app_server_runtime_toml ?credential () =
+let codex_app_server_runtime_toml ?credential ?(options = "") () =
   let credential = Option.value credential ~default:"" in
   Printf.sprintf
     "[providers.codex]\n\
      protocol = \"codex-app-server\"\n\
      command = \"codex\"\n\
      is-non-interactive = true\n\
+     %s\n\
      %s\n\
      [models.codex]\n\
      api-name = \"gpt-5.6-sol\"\n\
@@ -3174,6 +3176,7 @@ let codex_app_server_runtime_toml ?credential () =
      \n\
      [runtime]\n\
      default = \"codex.codex\"\n"
+    options
     credential
 ;;
 
@@ -3189,7 +3192,117 @@ let test_codex_app_server_materializes_as_turn_runtime () =
          fail "codex-app-server was incorrectly materialized as agent_core"
        | Runtime_execution.Codex_app_server config ->
          check string "cli path" "codex" config.cli_path;
-         check (option string) "model" (Some "gpt-5.6-sol") config.model))
+         check (option string) "model" (Some "gpt-5.6-sol") config.model
+       | Runtime_execution.Antigravity_cli _ ->
+         fail "codex-app-server was incorrectly materialized as antigravity-cli"))
+;;
+
+let antigravity_cli_runtime_toml ?credential ?(options = "") () =
+  let credential = Option.value credential ~default:"" in
+  Printf.sprintf
+    "[providers.antigravity]\n\
+     protocol = \"antigravity-cli\"\n\
+     command = \"agy\"\n\
+     is-non-interactive = true\n\
+     %s\n\
+     %s\n\
+     [models.gemini]\n\
+     api-name = \"gemini-3.6-flash-high\"\n\
+     max-context = 128000\n\
+     \n\
+     [antigravity.gemini]\n\
+     \n\
+     [runtime]\n\
+     default = \"antigravity.gemini\"\n"
+    options
+    credential
+;;
+
+let test_antigravity_cli_materializes_typed_process_options () =
+  let options =
+    "agent = \"fixture-agent\"\n\
+     effort = \"high\"\n\
+     execution-mode = \"accept-edits\"\n\
+     sandbox = true\n\
+     disable-slash-commands = false\n\
+     timeout-s = 45.0"
+  in
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml ~options ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Error error -> failf "antigravity-cli runtime should load: %s" error
+       | Ok (runtimes, default, _, _, _, _) ->
+         check int "one runtime" 1 (List.length runtimes);
+         check string "default id" "antigravity.gemini" default.id;
+         (match default.execution with
+          | Runtime_execution.Antigravity_cli config ->
+            check string "cli path" "agy" config.cli_path;
+            check string "model" "gemini-3.6-flash-high" config.model;
+            check (option string) "agent" (Some "fixture-agent") config.agent;
+            check bool
+              "effort"
+              true
+              (config.effort = Some Runtime_antigravity.High);
+            check bool
+              "execution mode"
+              true
+              (config.execution_mode = Runtime_antigravity.Accept_edits);
+            check bool "sandbox" true config.sandbox;
+            check bool "slash commands" false config.disable_slash_commands;
+            check (float 0.0) "timeout" 45.0 config.timeout_s
+          | Runtime_execution.Agent_core _ | Runtime_execution.Codex_app_server _ ->
+            fail "antigravity-cli was materialized through the wrong execution owner"))
+;;
+
+let test_antigravity_cli_defaults_are_explicit () =
+  with_temp_runtime_toml (antigravity_cli_runtime_toml ()) (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error error -> failf "antigravity-cli runtime should load: %s" error
+    | Ok (_, default, _, _, _, _) ->
+      (match default.execution with
+       | Runtime_execution.Antigravity_cli config ->
+         check (option string) "agent" None config.agent;
+         check bool "effort" true (config.effort = None);
+         check bool "plan" true (config.execution_mode = Runtime_antigravity.Plan);
+         check bool "sandbox opt-in" false config.sandbox;
+         check bool "slash expansion disabled" true config.disable_slash_commands;
+         check (float 0.0) "timeout" 300.0 config.timeout_s
+       | Runtime_execution.Agent_core _ | Runtime_execution.Codex_app_server _ ->
+         fail "antigravity-cli was materialized through the wrong execution owner"))
+;;
+
+let test_antigravity_cli_rejects_declared_credentials () =
+  let credential =
+    "[providers.antigravity.credentials]\n\
+     type = \"env\"\n\
+     key = \"GEMINI_API_KEY\""
+  in
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml ~credential ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> fail "antigravity-cli incorrectly admitted declared credentials"
+       | Error error ->
+         check bool "diagnostic names official login ownership" true
+           (String_util.contains_substring
+              error
+              "official Antigravity client owns login state"))
+;;
+
+let test_antigravity_options_are_protocol_scoped () =
+  with_temp_runtime_toml
+    (codex_app_server_runtime_toml
+       ~options:"execution-mode = \"accept-edits\""
+       ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> fail "codex-app-server silently admitted an Antigravity option"
+       | Error error ->
+         check bool "diagnostic names scoped option" true
+           (String_util.contains_substring
+              error
+              "execution-mode is valid only for protocol antigravity-cli"))
 ;;
 
 let test_codex_app_server_rejects_declared_credentials () =
@@ -3219,6 +3332,14 @@ let () =
             test_codex_app_server_materializes_as_turn_runtime;
           test_case "codex app-server rejects declared credentials" `Quick
             test_codex_app_server_rejects_declared_credentials;
+          test_case "antigravity CLI options materialize" `Quick
+            test_antigravity_cli_materializes_typed_process_options;
+          test_case "antigravity CLI defaults are explicit" `Quick
+            test_antigravity_cli_defaults_are_explicit;
+          test_case "antigravity CLI rejects declared credentials" `Quick
+            test_antigravity_cli_rejects_declared_credentials;
+          test_case "antigravity options are protocol-scoped" `Quick
+            test_antigravity_options_are_protocol_scoped;
           test_case "deployment OAS catalog covers live RunPod MTP runtime" `Quick
             test_deployment_oas_model_catalog_covers_live_runpod_mtp;
           test_case

@@ -683,7 +683,8 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
     match rt.Runtime.execution with
     | Runtime_execution.Agent_core provider_config ->
       provider_caps_of_config provider_config
-    | Runtime_execution.Codex_app_server _ ->
+    | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Antigravity_cli _ ->
       Llm_provider.Capabilities.default_capabilities
   in
   apply_runtime_model_input_capabilities

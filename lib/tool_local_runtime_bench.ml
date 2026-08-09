@@ -96,6 +96,12 @@ let validate_requested_model (runtime : Runtime.t) requested_model =
          "runtime %S is owned by codex-app-server; local_runtime_bench only \
           measures OAS agent_core providers"
          runtime.id)
+  | Runtime_execution.Antigravity_cli _ ->
+    Error
+      (Printf.sprintf
+         "runtime %S is owned by antigravity-cli; local_runtime_bench only \
+          measures OAS agent_core providers"
+         runtime.id)
   | Runtime_execution.Agent_core provider_config ->
     (match requested_model with
      | None -> Ok (runtime, provider_config)

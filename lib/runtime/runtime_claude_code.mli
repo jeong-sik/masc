@@ -24,8 +24,15 @@ type session_mode =
   | Start
   | Resume of { session_id : string }
 
+type rate_limit_status =
+  | Allowed
+  | Allowed_warning
+  | Rejected
+
+val rate_limit_status_to_string : rate_limit_status -> string
+
 type rate_limit =
-  { status : string
+  { status : rate_limit_status
   ; rate_limit_type : string option
   ; resets_at : int option
   ; overage_status : string option

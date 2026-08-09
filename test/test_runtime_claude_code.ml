@@ -180,7 +180,7 @@ let test_quota_is_structurally_classified () =
     | Error
         (Runtime_claude_code.Quota_blocked
           { api_error_status = Some 429
-          ; rate_limit = Some { status = "rejected"; _ }
+          ; rate_limit = Some { status = Runtime_claude_code.Rejected; _ }
           }) -> ()
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "typed quota rejection was reported as completion")

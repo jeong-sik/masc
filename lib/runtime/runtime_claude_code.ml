@@ -32,8 +32,19 @@ type session_mode =
   | Start
   | Resume of { session_id : string }
 
+type rate_limit_status =
+  | Allowed
+  | Allowed_warning
+  | Rejected
+
+let rate_limit_status_to_string = function
+  | Allowed -> "allowed"
+  | Allowed_warning -> "allowed_warning"
+  | Rejected -> "rejected"
+;;
+
 type rate_limit =
-  { status : string
+  { status : rate_limit_status
   ; rate_limit_type : string option
   ; resets_at : int option
   ; overage_status : string option
@@ -94,7 +105,7 @@ let error_to_string = function
     let status =
       Option.fold
         ~none:"unknown"
-        ~some:(fun value -> value.status)
+        ~some:(fun value -> rate_limit_status_to_string value.status)
         rate_limit
     in
     let api_status =
@@ -562,10 +573,14 @@ let parse_rate_limit ~expected_session_id fields =
   in
   let* info = required_member stage "rate_limit_info" fields in
   let* info_fields = assoc_at stage info in
-  let* status = required_string stage "status" info_fields in
-  if not (List.mem status [ "allowed"; "allowed_warning"; "rejected" ])
-  then protocol_error stage (Printf.sprintf "unknown status %S" status)
-  else
+  let* status_wire = required_string stage "status" info_fields in
+  let* status =
+    match status_wire with
+    | "allowed" -> Ok Allowed
+    | "allowed_warning" -> Ok Allowed_warning
+    | "rejected" -> Ok Rejected
+    | unknown -> protocol_error stage (Printf.sprintf "unknown status %S" unknown)
+  in
     let* rate_limit_type = optional_string stage "rateLimitType" info_fields in
     let* resets_at = optional_int stage "resetsAt" info_fields in
     let* overage_status = optional_string stage "overageStatus" info_fields in
@@ -640,7 +655,7 @@ let parse_result ~expected_session_id ~rate_limit fields =
       let structurally_quota_blocked =
         Option.equal Int.equal api_error_status (Some 429)
         || Option.exists
-             (fun (limit : rate_limit) -> limit.status = "rejected")
+             (fun (limit : rate_limit) -> limit.status = Rejected)
              rate_limit
       in
       if structurally_quota_blocked

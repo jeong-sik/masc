@@ -717,8 +717,100 @@ let test_owner_serializes_operations_and_settles_restart () =
              (Owner.lookup_operation owner ~operation_id:"kmsg-owner-shutdown")
          in
          (match shutdown.state with
-          | Operation.Failed { kind = Shutdown_interrupted; _ } -> ()
-          | _ -> fail "running cancellation did not persist Shutdown_interrupted")))
+         | Operation.Failed { kind = Shutdown_interrupted; _ } -> ()
+         | _ -> fail "running cancellation did not persist Shutdown_interrupted")))
+;;
+
+let test_installed_runner_drains_fifo_and_starts_idle_submit () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let meta = make_meta "runner-drain" in
+       let owner =
+         owner_ok
+           (Owner.start
+              ~sw
+              ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+              ~base_path
+              ~keeper_name:meta.name
+              ~initial_meta:(Some meta))
+       in
+       let submit operation_id content submitted_at =
+         owner_ok
+           (Owner.submit_operation
+              owner
+              ~operation_id
+              (dashboard_operation_input ~content ~submitted_at ()))
+         |> accepted_operation
+       in
+       let first = submit "kmsg-runner-1" "first" 201.0 in
+       let second = submit "kmsg-runner-2" "second" 202.0 in
+       (match first.state, second.state with
+        | Operation.Queued, Operation.Queued -> ()
+        | _ -> fail "operation started before the runner was installed");
+       let first_started, resolve_first_started = Eio.Promise.create () in
+       let second_started, resolve_second_started = Eio.Promise.create () in
+       let third_started, resolve_third_started = Eio.Promise.create () in
+       let release_first, resolve_release_first = Eio.Promise.create () in
+       let release_second, resolve_release_second = Eio.Promise.create () in
+       let release_third, resolve_release_third = Eio.Promise.create () in
+       let run _turn_sw operation =
+         let started, release =
+           match operation.Operation.operation_id with
+           | "kmsg-runner-1" -> resolve_first_started, release_first
+           | "kmsg-runner-2" -> resolve_second_started, release_second
+           | "kmsg-runner-3" -> resolve_third_started, release_third
+           | operation_id -> fail ("unexpected runner operation: " ^ operation_id)
+         in
+         Eio.Promise.resolve started ();
+         Eio.Promise.await release;
+         Owner.Operation_succeeded
+           { completed_at = Unix.gettimeofday ()
+           ; outcome_ref = "turn-" ^ operation.operation_id
+           }
+       in
+       ignore (owner_ok (Owner.install_operation_runner owner run));
+       Eio.Promise.await first_started;
+       (match
+          (owner_ok (Owner.lookup_operation owner ~operation_id:first.operation_id)).state,
+          (owner_ok (Owner.lookup_operation owner ~operation_id:second.operation_id)).state
+        with
+        | Operation.Running _, Operation.Queued -> ()
+        | _ -> fail "installed runner did not claim only the FIFO head");
+       (match Owner.install_operation_runner owner run with
+        | Error Owner.Operation_runner_already_installed -> ()
+        | Error error -> fail (Owner.error_to_string error)
+        | Ok () -> fail "owner accepted a second operation runner");
+       Eio.Promise.resolve resolve_release_first ();
+       Eio.Promise.await second_started;
+       (match
+          (owner_ok (Owner.lookup_operation owner ~operation_id:first.operation_id)).state,
+          (owner_ok (Owner.lookup_operation owner ~operation_id:second.operation_id)).state
+        with
+        | Operation.Succeeded _, Operation.Running _ -> ()
+        | _ -> fail "first terminal did not start the next FIFO operation");
+       Eio.Promise.resolve resolve_release_second ();
+       let rec await_second_terminal remaining =
+         match
+           (owner_ok (Owner.lookup_operation owner ~operation_id:second.operation_id)).state
+         with
+         | Operation.Succeeded _ -> ()
+         | _ when remaining > 0 ->
+           Eio.Fiber.yield ();
+           await_second_terminal (remaining - 1)
+         | _ -> fail "second automatic operation did not settle"
+       in
+       await_second_terminal 1_000;
+       let third = submit "kmsg-runner-3" "third" 203.0 in
+       (match third.state with
+        | Operation.Running _ -> ()
+        | _ -> fail "idle submit response was not refreshed to Running");
+       Eio.Promise.await third_started;
+       Eio.Promise.resolve resolve_release_third ())
 ;;
 
 let test_root_inventory_loads_and_extends_exactly_once () =
@@ -932,6 +1024,10 @@ let () =
             "operations are serialized and restart-settled"
             `Quick
             test_owner_serializes_operations_and_settles_restart
+        ; test_case
+            "installed runner drains FIFO and starts idle submit"
+            `Quick
+            test_installed_runner_drains_fifo_and_starts_idle_submit
         ; test_case
             "root inventory loads and extends exactly once"
             `Quick

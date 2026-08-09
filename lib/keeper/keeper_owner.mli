@@ -15,6 +15,7 @@ type store =
 type error =
   | Reducer_rejected of Keeper_owner_reducer.error
   | Operation_rejected of Keeper_chat_operation_store.error
+  | Operation_runner_already_installed
   | Store_unavailable of string
   | Owner_closed
 
@@ -48,6 +49,9 @@ type operation_turn_start =
       }
   | Operation_queue_empty
   | Operation_busy of { running_operation_id : string }
+
+type operation_runner =
+  Eio.Switch.t -> Keeper_chat_operation_store.operation -> operation_terminal
 
 type t
 
@@ -118,6 +122,14 @@ val start_next_queued_turn
     admission, and child fork in one actor command. The child returns only
     after transcript and connector terminal effects; the actor alone commits
     the operation terminal state. *)
+
+val install_operation_runner
+  :  t
+  -> operation_runner
+  -> (unit, error) result
+(** Install the one typed execution effect for this Owner. Installation is
+    single-assignment. Once installed, the actor drains durable FIFO work
+    after submit, startup activation, and each terminal settlement. *)
 
 val start_turn
   :  t

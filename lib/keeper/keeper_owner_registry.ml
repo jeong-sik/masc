@@ -16,6 +16,14 @@ type command_error =
   | Command_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Command_rejected of Keeper_owner.error
 
+type runner_install_error =
+  | Operation_runner_already_installed
+  | Operation_runner_inventory_unavailable of lookup_error
+  | Operation_runner_install_failed of
+      { keeper_name : string
+      ; error : Keeper_owner.error
+      }
+
 exception Install_failed of install_error
 
 type pool =
@@ -24,6 +32,7 @@ type pool =
   ; owners : (string, Keeper_owner.t) Hashtbl.t
   ; owners_mu : Eio.Mutex.t
   ; owner_handles : Keeper_owner.t list Atomic.t
+  ; operation_runner : Keeper_owner.operation_runner option Atomic.t
   ; stopping : bool Atomic.t
   }
 
@@ -62,6 +71,17 @@ let command_error_to_string = function
     "Keeper owner command rejected by lifecycle reservation: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
   | Command_rejected error -> Keeper_owner.error_to_string error
+;;
+
+let runner_install_error_to_string = function
+  | Operation_runner_already_installed ->
+    "Keeper operation runner is already installed"
+  | Operation_runner_inventory_unavailable error -> lookup_error_to_string error
+  | Operation_runner_install_failed { keeper_name; error } ->
+    Printf.sprintf
+      "Keeper operation runner installation failed for %s: %s"
+      keeper_name
+      (Keeper_owner.error_to_string error)
 ;;
 
 let () =
@@ -139,6 +159,15 @@ let refresh_owner_handles pool =
   Atomic.set pool.owner_handles owner_handles
 ;;
 
+let activate_owner pool owner =
+  match Atomic.get pool.operation_runner with
+  | None -> Ok owner
+  | Some runner ->
+    (match Keeper_owner.install_operation_runner owner runner with
+     | Ok () -> Ok owner
+     | Error error -> Error (Owner_initialization_failed error))
+;;
+
 let ensure_in_pool pool meta =
   if Atomic.get pool.stopping
   then Error Inventory_stopping
@@ -157,9 +186,12 @@ let ensure_in_pool pool meta =
          with
          | Error error -> Error (Owner_initialization_failed error)
          | Ok owner ->
-           Hashtbl.add pool.owners meta.name owner;
-           refresh_owner_handles pool;
-           Ok owner))
+           (match activate_owner pool owner with
+            | Error _ as error -> error
+            | Ok owner ->
+              Hashtbl.add pool.owners meta.name owner;
+              refresh_owner_handles pool;
+              Ok owner)))
 ;;
 
 let ensure_empty_in_pool pool keeper_name =
@@ -180,9 +212,12 @@ let ensure_empty_in_pool pool keeper_name =
          with
          | Error error -> Error (Owner_initialization_failed error)
          | Ok owner ->
-           Hashtbl.add pool.owners keeper_name owner;
-           refresh_owner_handles pool;
-           Ok owner))
+           (match activate_owner pool owner with
+            | Error _ as error -> error
+            | Ok owner ->
+              Hashtbl.add pool.owners keeper_name owner;
+              refresh_owner_handles pool;
+              Ok owner)))
 ;;
 
 let install_from_store ~sw config =
@@ -196,6 +231,7 @@ let install_from_store ~sw config =
       ; owners = Hashtbl.create (max 16 (List.length metas))
       ; owners_mu = Eio.Mutex.create ()
       ; owner_handles = Atomic.make []
+      ; operation_runner = Atomic.make None
       ; stopping = Atomic.make false
       }
     in
@@ -256,6 +292,26 @@ let get ~base_path ~keeper_name =
       match Hashtbl.find_opt pool.owners keeper_name with
       | Some owner -> Ok owner
       | None -> Error (Owner_not_found keeper_name))
+;;
+
+let install_operation_runner ~base_path runner =
+  match find_pool base_path with
+  | Error error -> Error (Operation_runner_inventory_unavailable error)
+  | Ok pool ->
+    Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+      match Atomic.get pool.operation_runner with
+      | Some _ -> Error Operation_runner_already_installed
+      | None ->
+        Atomic.set pool.operation_runner (Some runner);
+        let rec install = function
+          | [] -> Ok ()
+          | (keeper_name, owner) :: rest ->
+            (match Keeper_owner.install_operation_runner owner runner with
+             | Ok () -> install rest
+             | Error error ->
+               Error (Operation_runner_install_failed { keeper_name; error }))
+        in
+        install (Hashtbl.to_seq pool.owners |> List.of_seq))
 ;;
 
 let apply_meta ?lifecycle_token ~base_path ~keeper_name command =

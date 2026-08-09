@@ -8,6 +8,7 @@ type store =
 type error =
   | Reducer_rejected of Keeper_owner_reducer.error
   | Operation_rejected of Keeper_chat_operation_store.error
+  | Operation_runner_already_installed
   | Store_unavailable of string
   | Owner_closed
 
@@ -44,6 +45,9 @@ type operation_turn_start =
       }
   | Operation_queue_empty
   | Operation_busy of { running_operation_id : string }
+
+type operation_runner =
+  Eio.Switch.t -> Keeper_chat_operation_store.operation -> operation_terminal
 
 type completion =
   { terminal : turn_terminal Eio.Promise.t
@@ -105,6 +109,7 @@ type _ command =
       -> (Keeper_chat_operation_store.operation, error) result command
   | Start_next_queued_turn :
       operation_turn_request -> (operation_turn_start, error) result command
+  | Install_operation_runner : operation_runner -> (unit, error) result command
   | Start_turn : turn_request -> (turn_start, error) result command
   | Child_finished :
       { operation_id : string
@@ -147,6 +152,8 @@ exception Stop_active_child
 let error_to_string = function
   | Reducer_rejected error -> Keeper_owner_reducer.error_to_string error
   | Operation_rejected error -> Keeper_chat_operation_store.error_to_string error
+  | Operation_runner_already_installed ->
+    "keeper owner operation runner is already installed"
   | Store_unavailable detail -> "keeper owner store unavailable: " ^ detail
   | Owner_closed -> "keeper owner is closed"
 ;;
@@ -303,7 +310,12 @@ let notify_child_finished t ~operation_id outcome =
   match request t (Child_finished { operation_id; outcome }) with
   | Ok () -> ()
   | Error Owner_closed -> ()
-  | Error (Reducer_rejected _ | Operation_rejected _ | Store_unavailable _) -> ()
+  | Error
+      ( Reducer_rejected _
+      | Operation_rejected _
+      | Operation_runner_already_installed
+      | Store_unavailable _ ) ->
+    ()
 ;;
 
 let run_child t (request : turn_request) =
@@ -325,7 +337,12 @@ let notify_operation_child_finished t ~operation_id outcome =
   match request t (Operation_child_finished { operation_id; outcome }) with
   | Ok () -> ()
   | Error Owner_closed -> ()
-  | Error (Reducer_rejected _ | Operation_rejected _ | Store_unavailable _) -> ()
+  | Error
+      ( Reducer_rejected _
+      | Operation_rejected _
+      | Operation_runner_already_installed
+      | Store_unavailable _ ) ->
+    ()
 ;;
 
 let operation_failure ~kind detail =
@@ -438,62 +455,191 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
           operation_store
         | Ok () -> respond_operation operation_store resolve operation
       in
-      let rec loop state operation_store =
+      let start_runner_if_idle state operation_store operation_runner =
+        match operation_runner with
+        | None -> state, operation_store
+        | Some run ->
+          let projection = Keeper_owner_reducer.projection state in
+          (match projection.stopping, projection.meta, projection.running_operation_id with
+           | true, _, _ | false, None, _ | false, Some _, Some _ ->
+             state, operation_store
+           | false, Some _, None ->
+             let started_at = Unix.gettimeofday () in
+             let operation_store, started =
+               run_operation_store operation_store (fun store ->
+                 Keeper_chat_operation_store.start_next store ~started_at)
+             in
+             (match started with
+              | Error error ->
+                Log.Keeper.error
+                  "keeper_owner: automatic operation claim failed error=%s"
+                  (error_to_string error);
+                state, operation_store
+              | Ok None -> state, operation_store
+              | Ok (Some operation) ->
+                (match
+                   Keeper_owner_reducer.begin_turn
+                     state
+                     ~operation_id:operation.operation_id
+                 with
+                 | Error error ->
+                   let operation_store, terminal =
+                     commit_operation_terminal
+                       operation_store
+                       ~operation_id:operation.operation_id
+                       (operation_failure
+                          ~kind:Keeper_chat_operation_store.Internal_error
+                          ("Owner reducer rejected a durably claimed operation: "
+                           ^ Keeper_owner_reducer.error_to_string error))
+                   in
+                   (match terminal with
+                    | Ok _ -> ()
+                    | Error terminal_error ->
+                      Log.Keeper.error
+                        "keeper_owner: failed to close rejected claimed operation operation_id=%s error=%s"
+                        operation.operation_id
+                        (error_to_string terminal_error));
+                   state, operation_store
+                 | Ok transition ->
+                   (match apply_transition t store state transition with
+                    | Error (state, error) ->
+                      let operation_store, terminal =
+                        commit_operation_terminal
+                          operation_store
+                          ~operation_id:operation.operation_id
+                          (operation_failure
+                             ~kind:Keeper_chat_operation_store.Internal_error
+                             ("Owner running projection failed after durable claim: "
+                              ^ error_to_string error))
+                      in
+                      (match terminal with
+                       | Ok _ -> ()
+                       | Error terminal_error ->
+                         Log.Keeper.error
+                           "keeper_owner: failed to close unprojected claimed operation operation_id=%s error=%s"
+                           operation.operation_id
+                           (error_to_string terminal_error));
+                      state, operation_store
+                    | Ok state ->
+                      let terminal, resolve = Eio.Promise.create () in
+                      let child_switch, resolve_child_switch = Eio.Promise.create () in
+                      let completion =
+                        { terminal
+                        ; resolve
+                        ; settled = Atomic.make false
+                        ; child_switch
+                        ; resolve_child_switch
+                        }
+                      in
+                      Atomic.set
+                        t.active_completion
+                        (Some (operation.operation_id, completion));
+                      if transition_starts_child transition operation.operation_id
+                      then
+                        Eio.Fiber.fork ~sw:child_sw (fun () ->
+                          run_operation_child
+                            t
+                            { started_at; run; completion }
+                            operation);
+                      state, operation_store))))
+      in
+      let rec loop state operation_store operation_runner =
         match Eio.Stream.take t.mailbox with
         | Command (Exact_projection, resolve) ->
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
-          loop state operation_store
+          loop state operation_store operation_runner
         | Command (Apply_meta command, resolve) ->
           (match Keeper_owner_reducer.apply_meta state command with
            | Error error ->
              Eio.Promise.resolve resolve (Error (Reducer_rejected error));
-             loop state operation_store
+             loop state operation_store operation_runner
            | Ok transition ->
              (match apply_transition t store state transition with
               | Error (state, error) ->
                 Eio.Promise.resolve resolve (Error error);
-                loop state operation_store
+                loop state operation_store operation_runner
               | Ok state ->
                 Eio.Promise.resolve
                   resolve
                   (Ok (Keeper_owner_reducer.projection state).meta);
-                loop state operation_store))
+                loop state operation_store operation_runner))
         | Command (Submit_operation { operation_id; input }, resolve) ->
-          let operation_store =
-            reject_mutation state operation_store resolve (fun store ->
-              Keeper_chat_operation_store.submit store ~operation_id input)
-          in
-          loop state operation_store
+          (match mutation_allowed state with
+           | Error error ->
+             Eio.Promise.resolve resolve (Error error);
+             loop state operation_store operation_runner
+           | Ok () ->
+             let operation_store, submitted =
+               run_operation_store operation_store (fun store ->
+                 Keeper_chat_operation_store.submit store ~operation_id input)
+             in
+             (match submitted with
+              | Error error ->
+                Eio.Promise.resolve resolve (Error error);
+                loop state operation_store operation_runner
+              | Ok submitted ->
+                let state, operation_store =
+                  start_runner_if_idle state operation_store operation_runner
+                in
+                let operation_store, refreshed =
+                  run_operation_store operation_store (fun store ->
+                    Keeper_chat_operation_store.lookup store ~operation_id)
+                in
+                let response =
+                  match refreshed with
+                  | Error error -> Error error
+                  | Ok operation ->
+                    Ok
+                      (match submitted with
+                       | Keeper_chat_operation_store.Accepted _ ->
+                         Keeper_chat_operation_store.Accepted operation
+                       | Keeper_chat_operation_store.Existing _ ->
+                         Keeper_chat_operation_store.Existing operation)
+                in
+                Eio.Promise.resolve resolve response;
+                loop state operation_store operation_runner))
         | Command (Lookup_operation { operation_id }, resolve) ->
           let operation_store =
             respond_operation operation_store resolve (fun store ->
               Keeper_chat_operation_store.lookup store ~operation_id)
           in
-          loop state operation_store
+          loop state operation_store operation_runner
         | Command (List_queued_operations { after_sequence; limit }, resolve) ->
           let operation_store =
             respond_operation operation_store resolve (fun store ->
               Keeper_chat_operation_store.list_queued store ~after_sequence ~limit)
           in
-          loop state operation_store
+          loop state operation_store operation_runner
         | Command (Edit_operation { operation_id; input }, resolve) ->
           let operation_store =
             reject_mutation state operation_store resolve (fun store ->
               Keeper_chat_operation_store.edit store ~operation_id input)
           in
-          loop state operation_store
+          loop state operation_store operation_runner
         | Command (Move_operation_to_end { operation_id }, resolve) ->
           let operation_store =
             reject_mutation state operation_store resolve (fun store ->
               Keeper_chat_operation_store.move_to_end store ~operation_id)
           in
-          loop state operation_store
+          loop state operation_store operation_runner
         | Command (Cancel_operation { operation_id; completed_at }, resolve) ->
           let operation_store =
             reject_mutation state operation_store resolve (fun store ->
               Keeper_chat_operation_store.cancel store ~operation_id ~completed_at)
           in
-          loop state operation_store
+          loop state operation_store operation_runner
+        | Command (Install_operation_runner runner, resolve) ->
+          (match operation_runner with
+           | Some _ ->
+             Eio.Promise.resolve resolve (Error Operation_runner_already_installed);
+             loop state operation_store operation_runner
+           | None ->
+             let operation_runner = Some runner in
+             let state, operation_store =
+               start_runner_if_idle state operation_store operation_runner
+             in
+             Eio.Promise.resolve resolve (Ok ());
+             loop state operation_store operation_runner)
         | Command (Start_next_queued_turn request, resolve) ->
           let projection = Keeper_owner_reducer.projection state in
           (match projection.stopping, projection.meta, projection.running_operation_id with
@@ -501,17 +647,17 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
              Eio.Promise.resolve
                resolve
                (Error (Reducer_rejected Keeper_owner_reducer.Owner_stopping));
-             loop state operation_store
+             loop state operation_store operation_runner
            | false, None, _ ->
              Eio.Promise.resolve
                resolve
                (Error (Reducer_rejected Keeper_owner_reducer.Meta_missing));
-             loop state operation_store
+             loop state operation_store operation_runner
            | false, Some _, Some running_operation_id ->
              Eio.Promise.resolve
                resolve
                (Ok (Operation_busy { running_operation_id }));
-             loop state operation_store
+             loop state operation_store operation_runner
            | false, Some _, None ->
              let operation_store, started =
                run_operation_store operation_store (fun store ->
@@ -522,10 +668,10 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
              (match started with
               | Error error ->
                 Eio.Promise.resolve resolve (Error error);
-                loop state operation_store
+                loop state operation_store operation_runner
               | Ok None ->
                 Eio.Promise.resolve resolve (Ok Operation_queue_empty);
-                loop state operation_store
+                loop state operation_store operation_runner
               | Ok (Some operation) ->
                 (match
                    Keeper_owner_reducer.begin_turn
@@ -543,7 +689,7 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
                            ^ Keeper_owner_reducer.error_to_string error))
                    in
                    Eio.Promise.resolve resolve (Error (Reducer_rejected error));
-                   loop state operation_store
+                   loop state operation_store operation_runner
                  | Ok transition ->
                    (match apply_transition t store state transition with
                     | Error (state, error) ->
@@ -557,7 +703,7 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
                               ^ error_to_string error))
                       in
                       Eio.Promise.resolve resolve (Error error);
-                      loop state operation_store
+                      loop state operation_store operation_runner
                     | Ok state ->
                       Atomic.set
                         t.active_completion
@@ -576,20 +722,20 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
                         (Ok
                            (Operation_started
                               { operation; handle }));
-                      loop state operation_store))))
+                      loop state operation_store operation_runner))))
         | Command (Start_turn request, resolve) ->
           (match Keeper_owner_reducer.begin_turn state ~operation_id:request.operation_id with
            | Error (Turn_already_running running_operation_id) ->
              Eio.Promise.resolve resolve (Ok (Busy { running_operation_id }));
-             loop state operation_store
+             loop state operation_store operation_runner
            | Error error ->
              Eio.Promise.resolve resolve (Error (Reducer_rejected error));
-             loop state operation_store
+             loop state operation_store operation_runner
            | Ok transition ->
              (match apply_transition t store state transition with
               | Error (state, error) ->
                 Eio.Promise.resolve resolve (Error error);
-                loop state operation_store
+                loop state operation_store operation_runner
               | Ok state ->
                 Atomic.set
                   t.active_completion
@@ -597,7 +743,7 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
                 if transition_starts_child transition request.operation_id
                 then Eio.Fiber.fork ~sw:child_sw (fun () -> run_child t request);
                 Eio.Promise.resolve resolve (Ok (Started request.handle));
-                loop state operation_store))
+                loop state operation_store operation_runner))
         | Command (Child_finished { operation_id; outcome }, resolve) ->
           log_child_failure operation_id outcome;
           (match Keeper_owner_reducer.finish_turn state ~operation_id with
@@ -609,7 +755,7 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
                detail;
              settle_active t operation_id (Turn_failed detail);
              Eio.Promise.resolve resolve (Ok ());
-             loop state operation_store
+             loop state operation_store operation_runner
            | Ok transition ->
              (match apply_transition t store state transition with
               | Error (state, error) ->
@@ -618,7 +764,7 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
                   operation_id
                   (error_to_string error);
                 Eio.Promise.resolve resolve (Ok ());
-                loop state operation_store
+                loop state operation_store operation_runner
               | Ok state ->
                 let terminal =
                   match outcome with
@@ -627,37 +773,44 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
                   | Child_cancelled -> Turn_cancelled
                 in
                 settle_active t operation_id terminal;
+                let state, operation_store =
+                  start_runner_if_idle state operation_store operation_runner
+                in
                 Eio.Promise.resolve resolve (Ok ());
-                loop state operation_store))
+                loop state operation_store operation_runner))
         | Command (Operation_child_finished { operation_id; outcome }, resolve) ->
           (match Keeper_owner_reducer.finish_turn state ~operation_id with
            | Error error ->
              let detail = Keeper_owner_reducer.error_to_string error in
              settle_active t operation_id (Turn_failed detail);
              Eio.Promise.resolve resolve (Error (Reducer_rejected error));
-             loop state operation_store
+             loop state operation_store operation_runner
            | Ok transition ->
-             let operation_store, terminal =
-               commit_operation_terminal operation_store ~operation_id outcome
-             in
-             (match terminal with
+             (match commit store transition with
               | Error error ->
                 let detail = error_to_string error in
                 Log.Keeper.error
-                  "keeper_owner: operation terminal commit failed operation_id=%s error=%s"
+                  "keeper_owner: operation meta commit failed operation_id=%s error=%s"
                   operation_id
                   detail;
                 settle_active t operation_id (Turn_failed detail);
                 Eio.Promise.resolve resolve (Error error);
-                loop state operation_store
-              | Ok _operation ->
-                (match commit store transition with
+                loop state operation_store operation_runner
+              | Ok finished_state ->
+                let operation_store, terminal =
+                  commit_operation_terminal operation_store ~operation_id outcome
+                in
+                (match terminal with
                  | Error error ->
                    let detail = error_to_string error in
+                   Log.Keeper.error
+                     "keeper_owner: operation terminal commit failed operation_id=%s error=%s"
+                     operation_id
+                     detail;
                    settle_active t operation_id (Turn_failed detail);
                    Eio.Promise.resolve resolve (Error error);
-                   loop state operation_store
-                 | Ok state ->
+                   loop state operation_store operation_runner
+                 | Ok _operation ->
                    List.iter (publish_effect t) transition.effects;
                    let terminal =
                      match outcome with
@@ -665,14 +818,20 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
                      | Operation_failed { detail; _ } -> Turn_failed detail
                    in
                    settle_active t operation_id terminal;
+                   let finished_state, operation_store =
+                     start_runner_if_idle
+                       finished_state
+                       operation_store
+                       operation_runner
+                   in
                    Eio.Promise.resolve resolve (Ok ());
-                   loop state operation_store)))
+                   loop finished_state operation_store operation_runner)))
         | Command (Begin_stopping, resolve) ->
           let transition = Keeper_owner_reducer.begin_stopping state in
           (match apply_transition t store state transition with
            | Error (state, error) ->
              Eio.Promise.resolve resolve (Error error);
-             loop state operation_store
+             loop state operation_store operation_runner
            | Ok state ->
              let active = Atomic.get t.active_completion in
              Option.iter
@@ -693,9 +852,9 @@ let start_internal ~sw ~store ~operation_store_config ~keeper_name ~initial_meta
                      (fun (operation_id, completion) ->
                         { operation_id; terminal = completion.terminal })
                      active));
-             loop state operation_store)
+             loop state operation_store operation_runner)
       in
-      loop initial_state initial_operation_store)));
+      loop initial_state initial_operation_store None)));
   (match Eio.Promise.await initialized with
    | Ok () -> Ok t
    | Error error -> Error error)
@@ -733,6 +892,8 @@ let move_operation_to_end t ~operation_id =
 let cancel_operation t ~operation_id ~completed_at =
   request t (Cancel_operation { operation_id; completed_at })
 ;;
+
+let install_operation_runner t runner = request t (Install_operation_runner runner)
 
 let start_next_queued_turn t ~started_at ~run =
   let terminal, resolve = Eio.Promise.create () in

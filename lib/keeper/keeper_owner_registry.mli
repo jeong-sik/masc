@@ -21,6 +21,14 @@ type command_error =
   | Command_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Command_rejected of Keeper_owner.error
 
+type runner_install_error =
+  | Operation_runner_already_installed
+  | Operation_runner_inventory_unavailable of lookup_error
+  | Operation_runner_install_failed of
+      { keeper_name : string
+      ; error : Keeper_owner.error
+      }
+
 exception Install_failed of install_error
 
 val install_from_store
@@ -34,6 +42,13 @@ val get
   :  base_path:string
   -> keeper_name:string
   -> (Keeper_owner.t, lookup_error) result
+
+val install_operation_runner
+  :  base_path:string
+  -> Keeper_owner.operation_runner
+  -> (unit, runner_install_error) result
+(** Install one runner across the existing inventory and remember it for every
+    Keeper created later. Installation is process-local and single-assignment. *)
 
 val apply_meta
   :  ?lifecycle_token:Keeper_lifecycle_reservation.token
@@ -61,6 +76,7 @@ val all_projections
 val install_error_to_string : install_error -> string
 val lookup_error_to_string : lookup_error -> string
 val command_error_to_string : command_error -> string
+val runner_install_error_to_string : runner_install_error -> string
 
 module For_testing : sig
   val installed_owner_count : base_path:string -> int

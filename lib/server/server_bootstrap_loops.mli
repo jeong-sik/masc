@@ -9,7 +9,6 @@
 
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
-  ; requests : Keeper_msg_async.recovery_report
   ; fusion_delivery :
       ( Fusion_delivery_projector.recovery_report
       , Fusion_delivery_obligation.error )
@@ -19,7 +18,7 @@ type keeper_persistence_report =
 type keeper_persistence_failure_phase =
   | Resolving_base_path
   | Restoring_shutdown
-  | Recovering_requests
+  | Recovering_persistence
   | Starting_keeper_loops
 
 type keeper_persistence_raised_cause =

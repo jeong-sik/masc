@@ -170,7 +170,6 @@ let filteri_with_fair_yield =
   Server_bootstrap_loops_fiber.filteri_with_fair_yield
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
-  ; requests : Keeper_msg_async.recovery_report
   ; fusion_delivery :
       ( Fusion_delivery_projector.recovery_report
       , Fusion_delivery_obligation.error )
@@ -180,7 +179,7 @@ type keeper_persistence_report =
 type keeper_persistence_failure_phase =
   | Resolving_base_path
   | Restoring_shutdown
-  | Recovering_requests
+  | Recovering_persistence
   | Starting_keeper_loops
 
 type keeper_persistence_raised_cause =
@@ -302,7 +301,7 @@ let observe_preparation_stage ~stage ~started ~examined ~failures =
 let keeper_persistence_failure_phase_to_string = function
   | Resolving_base_path -> "resolving_base_path"
   | Restoring_shutdown -> "restoring_shutdown"
-  | Recovering_requests -> "recovering_requests"
+  | Recovering_persistence -> "recovering_persistence"
   | Starting_keeper_loops -> "starting_keeper_loops"
 ;;
 
@@ -413,7 +412,7 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
   match shutdown_inventory with
   | Error _ as error -> error
   | Ok shutdown ->
-  set_phase Recovering_requests;
+  set_phase Recovering_persistence;
   (* RFC-0240 §2.4. Close tool cycles left open by process death before
      anything reads a checkpoint. Persistence stores the open cycle on purpose
      so recovery knows which calls were dispatched, but nothing closed it, so
@@ -439,42 +438,6 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
       transcript_tail.tool_results_appended
       transcript_tail.unparseable
       transcript_tail.failed;
-  let request_started = preparation_stage_started () in
-  let keeper_msg_recovery =
-    Keeper_msg_async.recover_lost_disk_records ~base_path ()
-  in
-  observe_preparation_stage
-    ~stage:"request"
-    ~started:request_started
-    ~examined:
-      (keeper_msg_recovery.lost
-       + keeper_msg_recovery.finalized
-       + keeper_msg_recovery.cleaned
-       + keeper_msg_recovery.staging_files_inspected
-       + keeper_msg_recovery.unreadable
-       + keeper_msg_recovery.failed)
-    ~failures:
-      (keeper_msg_recovery.unreadable
-       + keeper_msg_recovery.failed
-       + List.length keeper_msg_recovery.store_errors);
-  if
-    keeper_msg_recovery.lost > 0
-    || keeper_msg_recovery.finalized > 0
-    || keeper_msg_recovery.cleaned > 0
-    || keeper_msg_recovery.staging_files_inspected > 0
-    || keeper_msg_recovery.unreadable > 0
-    || keeper_msg_recovery.failed > 0
-  then
-    Log.Keeper.warn
-      "keeper_msg_async: recovery lost=%d finalized=%d cleaned=%d staging_files_inspected=%d staging_files_deleted=%d staging_files_preserved=%d unreadable=%d failed=%d"
-      keeper_msg_recovery.lost
-      keeper_msg_recovery.finalized
-      keeper_msg_recovery.cleaned
-      keeper_msg_recovery.staging_files_inspected
-      keeper_msg_recovery.staging_files_deleted
-      keeper_msg_recovery.staging_files_preserved
-      keeper_msg_recovery.unreadable
-      keeper_msg_recovery.failed;
   let fusion_delivery_recovery =
     Fusion_delivery_projector.recover_startup ~base_path ()
   in
@@ -510,8 +473,7 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
   let prepared =
     { base_path = base_path_identity
     ; report =
-        { shutdown
-        ; requests = keeper_msg_recovery
+      { shutdown
         ; fusion_delivery = fusion_delivery_recovery
         }
     }

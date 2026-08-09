@@ -17,24 +17,18 @@ permissions:
   pull-requests: read
 
 concurrency:
-  # On main pushes each commit gets its own group (keyed by sha) so successive
-  # merges do not abort each other's CI — every commit gets a verification
-  # window. On PRs and non-main pushes, supersede outdated runs as before
-  # (group keyed by ref so synchronize cancels the older run).
+  # CI verifies the current branch state. A newer push contains every older
+  # main commit, so keeping all superseded 30-50 minute builds only multiplies
+  # cold compiles and delays the result for the state that can actually ship.
+  # TLA+ Main Verification remains independently SHA-scoped and preserves the
+  # per-commit formal verification contract.
   group: >-
-    ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{
-      github.event_name == 'push' && github.ref_name == 'main' && github.sha
-      || github.head_ref || github.ref_name || github.run_id
+    ${{ github.workflow }}-${{ github.event_name }}-${{
+      github.event.pull_request.number || github.ref_name || github.run_id
     }}
-  # Code-changing and ready-for-review PR events supersede older CI for the
-  # same PR. Pushes to the same branch also supersede older post-merge CI
-  # EXCEPT for main pushes — main commits are independent state that must each
-  # be verified (background:
-  # #14668 / #14670, 30+ main runs cancelled before TLA could complete on
-  # 2026-05-11). State-only readiness is enforced by PR Automation against the
-  # existing head CI Gate. Ready-for-review is the exception: Draft-only
-  # dependency allowances must be revoked and rechecked before merge.
-  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref_name != 'main') || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
+  # Pushes supersede older CI for the same branch. Code-changing and
+  # ready-for-review PR events likewise replace an outdated run for that PR.
+  cancel-in-progress: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
 
 jobs:
   pr-sync-check:

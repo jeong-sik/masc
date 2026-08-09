@@ -3790,11 +3790,23 @@ let test_audit_cleanup_failure_preserves_recorded_receipt () =
         | Error _ ->
           Alcotest.fail
             "durably recorded append was collapsed into a failed receipt");
+       (match receipt.cleanup_failure with
+        | None -> Alcotest.fail "descriptor cleanup failure was hidden"
+        | Some failure ->
+          Alcotest.(check bool)
+            "cleanup stage is exact"
+            true
+            (failure.stage = Keeper_approval.Audit.Append_cleanup));
+       let open Yojson.Safe.Util in
        let wire = Keeper_approval.Audit.receipt_to_yojson receipt in
        Alcotest.(check bool)
          "wire keeps durable append recorded"
          true
-         (Safe_ops.json_bool ~default:false "recorded" wire))
+         (wire |> member "recorded" |> to_bool);
+       Alcotest.(check string)
+         "cleanup warning stays typed"
+         "append_cleanup"
+         (wire |> member "cleanup_failure" |> member "stage" |> to_string))
 ;;
 
 let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
@@ -3994,8 +4006,8 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
         | [ receipt ] -> check_append_failure Keeper_approval.Audit.Gate_allowed receipt
         | _ -> Alcotest.fail "Always Allow did not retain its exact audit receipt");
        let execution =
-         Keeper_tool_execution.failure "effect failed after authorization"
-         |> Keeper_tool_execution.with_gate_authorization authorization
+         Masc.Keeper_tool_execution.failure "effect failed after authorization"
+         |> Masc.Keeper_tool_execution.with_gate_authorization authorization
        in
        let metadata =
          execution.metadata

@@ -184,6 +184,7 @@ let event_of_string = function
 type write_stage =
   | Store_create
   | Append
+  | Append_cleanup
 
 type write_failure =
   { stage : write_stage
@@ -193,16 +194,29 @@ type write_failure =
 type receipt =
   { event_type : event
   ; write_result : (unit, write_failure) result
+  ; cleanup_failure : write_failure option
   }
 
 let write_stage_to_string = function
   | Store_create -> "store_create"
   | Append -> "append"
+  | Append_cleanup -> "append_cleanup"
 ;;
 
 let receipt_to_yojson receipt =
   let fields =
     [ "event", `String (event_to_string receipt.event_type) ]
+  in
+  let fields =
+    match receipt.cleanup_failure with
+    | None -> fields
+    | Some failure ->
+      ( "cleanup_failure"
+      , `Assoc
+          [ "stage", `String (write_stage_to_string failure.stage)
+          ; "detail", `String failure.detail
+          ] )
+      :: fields
   in
   match receipt.write_result with
   | Ok () -> `Assoc (("recorded", `Bool true) :: fields)
@@ -273,7 +287,7 @@ let store_create_probe = Atomic.make (fun ~base_path:_ -> ())
 
 type append_outcome =
   | Append_recorded
-  | Append_recorded_with_settlement_failure of string
+  | Append_recorded_with_settlement_failure of write_failure
 
 let append_jsonl_durable path json =
   let suffix = Yojson.Safe.to_string json ^ "\n" in
@@ -282,7 +296,9 @@ let append_jsonl_durable path json =
   | Private_file_succeeded_with_cleanup_failure
       { value = (); cleanup_failure } ->
     Append_recorded_with_settlement_failure
-      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+      { stage = Append_cleanup
+      ; detail = sanitized_write_failure_detail cleanup_failure.exception_
+      }
   | Private_file_failed error ->
     raise (Sys_error (Fs_compat.private_jsonl_append_error_to_string error))
   | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
@@ -377,6 +393,7 @@ let record
   | Error detail ->
     { event_type
     ; write_result = Error { stage = Store_create; detail }
+    ; cleanup_failure = None
     }
   | Ok store ->
     let json =
@@ -441,15 +458,19 @@ let record
       | exn -> Error exn
     in
     (match append_result with
-     | Ok Append_recorded -> { event_type; write_result = Ok () }
-     | Ok (Append_recorded_with_settlement_failure detail) ->
+     | Ok Append_recorded ->
+       { event_type; write_result = Ok (); cleanup_failure = None }
+     | Ok (Append_recorded_with_settlement_failure failure) ->
        record_failure
          ~keeper_name
          ~site:Keeper_approval_queue_failure_site.(to_label Audit_append)
          ~id
          ~event_type:(event_to_string event_type)
-         (Sys_error detail);
-       { event_type; write_result = Ok () }
+         (Sys_error failure.detail);
+       { event_type
+       ; write_result = Ok ()
+       ; cleanup_failure = Some failure
+       }
      | Error exn ->
        record_failure
          ~keeper_name
@@ -463,6 +484,7 @@ let record
              { stage = Append
              ; detail = sanitized_write_failure_detail exn
              }
+       ; cleanup_failure = None
        })
 ;;
 
@@ -816,7 +838,8 @@ module For_testing = struct
 
   let set_append_jsonl_cleanup_failure detail =
     Atomic.set append_jsonl (fun _path _json ->
-      Append_recorded_with_settlement_failure detail)
+      Append_recorded_with_settlement_failure
+        { stage = Append_cleanup; detail })
   ;;
 
   let with_audit_io_lock f =

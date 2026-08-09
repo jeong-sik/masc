@@ -35,6 +35,7 @@ val event_of_string : string -> event option
 type write_stage =
   | Store_create
   | Append
+  | Append_cleanup
 
 type write_failure =
   { stage : write_stage
@@ -44,6 +45,7 @@ type write_failure =
 type receipt =
   { event_type : event
   ; write_result : (unit, write_failure) result
+  ; cleanup_failure : write_failure option
   }
 
 val receipt_to_yojson : receipt -> Yojson.Safe.t

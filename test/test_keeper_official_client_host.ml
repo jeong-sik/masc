@@ -12,16 +12,16 @@ let expect_effort label expected result =
   | Error _ -> fail (label ^ ": unexpected configuration error")
 ;;
 
-let test_disabled_without_effort_is_omitted () =
+let test_absent_controls_are_omitted () =
   Host.resolve_reasoning_effort
-    ~enable_thinking:(Some false)
+    ~enable_thinking:None
     ~reasoning_effort:None
-  |> expect_effort "no synthesized none" None
+  |> expect_effort "absent" None
 ;;
 
 let test_explicit_efforts_are_preserved () =
   Host.resolve_reasoning_effort
-    ~enable_thinking:(Some true)
+    ~enable_thinking:None
     ~reasoning_effort:(Some Effort.Medium)
   |> expect_effort "medium" (Some Effort.Medium);
   Host.resolve_reasoning_effort
@@ -29,26 +29,26 @@ let test_explicit_efforts_are_preserved () =
     ~reasoning_effort:(Some Effort.Low)
   |> expect_effort "low" (Some Effort.Low);
   Host.resolve_reasoning_effort
-    ~enable_thinking:(Some false)
+    ~enable_thinking:None
     ~reasoning_effort:(Some Effort.None_)
   |> expect_effort "explicit none" (Some Effort.None_)
 ;;
 
-let test_conflicting_controls_fail_closed () =
+let test_generic_toggle_is_rejected () =
   (match
      Host.resolve_reasoning_effort
        ~enable_thinking:(Some false)
-       ~reasoning_effort:(Some Effort.High)
+       ~reasoning_effort:None
    with
    | Error _ -> ()
-   | Ok _ -> fail "disabled thinking admitted a non-none effort");
+   | Ok _ -> fail "disabled generic toggle was admitted");
   match
     Host.resolve_reasoning_effort
       ~enable_thinking:(Some true)
-      ~reasoning_effort:(Some Effort.None_)
+      ~reasoning_effort:(Some Effort.Medium)
   with
   | Error _ -> ()
-  | Ok _ -> fail "enabled thinking admitted an explicit none effort"
+  | Ok _ -> fail "enabled generic toggle was admitted"
 ;;
 
 let () =
@@ -56,17 +56,17 @@ let () =
     "keeper official-client host"
     [ ( "reasoning effort"
       , [ test_case
-            "disabled without effort is omitted"
+            "absent controls are omitted"
             `Quick
-            test_disabled_without_effort_is_omitted
+            test_absent_controls_are_omitted
         ; test_case
             "explicit efforts are preserved"
             `Quick
             test_explicit_efforts_are_preserved
         ; test_case
-            "conflicting controls fail closed"
+            "generic toggle is rejected"
             `Quick
-            test_conflicting_controls_fail_closed
+            test_generic_toggle_is_rejected
         ] )
     ]
 ;;

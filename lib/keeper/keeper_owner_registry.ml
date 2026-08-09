@@ -13,6 +13,7 @@ type lookup_error =
 
 type command_error =
   | Command_lookup_failed of lookup_error
+  | Command_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Command_rejected of Keeper_owner.error
 
 exception Install_failed of install_error
@@ -57,6 +58,9 @@ let lookup_error_to_string = function
 
 let command_error_to_string = function
   | Command_lookup_failed error -> lookup_error_to_string error
+  | Command_lifecycle_reserved owner ->
+    "Keeper owner command rejected by lifecycle reservation: "
+    ^ Keeper_lifecycle_reservation.snapshot_to_string owner
   | Command_rejected error -> Keeper_owner.error_to_string error
 ;;
 
@@ -232,16 +236,37 @@ let get ~base_path ~keeper_name =
       | None -> Error (Owner_not_found keeper_name))
 ;;
 
-let apply_meta ~base_path ~keeper_name command =
+let apply_meta ?lifecycle_token ~base_path ~keeper_name command =
   match get ~base_path ~keeper_name with
   | Error error -> Error (Command_lookup_failed error)
   | Ok owner ->
-    (match Keeper_owner.apply_meta owner command with
-     | Error error -> Error (Command_rejected error)
+    let result =
+      Keeper_lifecycle_reservation.with_key_lock
+        ~base_path
+        ~keeper_name
+        (fun () ->
+           match
+             Keeper_lifecycle_reservation.authorize
+               ?token:lifecycle_token
+               ~base_path
+               ~keeper_name
+               ()
+           with
+           | Error reservation -> Error (Command_lifecycle_reserved reservation)
+           | Ok () ->
+             (match Keeper_owner.apply_meta owner command with
+              | Error error -> Error (Command_rejected error)
+              | Ok meta -> Ok meta))
+    in
+    (match result with
      | Ok (Some meta) ->
+       (* This derived registry projection owns no state and intentionally runs
+          after the lifecycle lock is released: its update path takes that
+          same lock.  The owner Atomic remains the routine read authority. *)
        Keeper_registry.update_meta_from_persisted ~base_path keeper_name meta;
        Ok (Some meta)
-     | Ok None -> Ok None)
+     | Ok None -> Ok None
+     | Error _ as error -> error)
 ;;
 
 let all_projections ~base_path =

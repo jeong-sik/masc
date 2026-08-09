@@ -116,6 +116,43 @@ max-concurrent = 1
 max-request-body-bytes = 65536
 |}
 
+let runtime_toml_checkpoint_lane =
+  {|
+[runtime]
+default = "checkpoint_lane"
+
+[runtime.lanes.checkpoint_lane]
+strategy = "ordered"
+candidates = [ "codex.codex", "primary.test_model" ]
+
+[providers.codex]
+protocol = "codex-app-server"
+command = "/definitely/missing/masc-codex-app-server"
+is-non-interactive = true
+
+[models.codex]
+api-name = "gpt-fixture"
+max-context = 400000
+
+[codex.codex]
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[primary.test_model]
+is-default = true
+max-concurrent = 1
+max-request-body-bytes = 65536
+|}
+
 let runtime_toml_thinking_lane =
   {|
 [runtime]
@@ -711,6 +748,65 @@ let test_run_named_media_degrade_emits_typed_manifest () =
         "degraded runtime identity"
         "primary.test_model"
         (string_member "degraded_runtime_id" decision))
+
+let test_oas_checkpoint_starts_fresh_official_client_session () =
+  with_runtime_config runtime_toml_checkpoint_lane (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let manifests = ref [] in
+    let context : Runtime_manifest.turn_context =
+      { manifest_keeper_name = "checkpoint-runtime-compat-keeper"
+      ; manifest_agent_name = Some "checkpoint-runtime-compat-agent"
+      ; manifest_trace_id = "checkpoint-runtime-compat-trace"
+      ; manifest_generation = Some 1
+      ; manifest_keeper_turn_id = Some 1
+      }
+    in
+    let checkpoint = checkpoint_with_session_id "oas-session" in
+    match
+      Driver.run_named
+        ~runtime_id:"checkpoint_lane"
+        ~keeper_name:"checkpoint-runtime-compat-keeper"
+        ~base_path:(Filename.get_temp_dir_name ())
+        ~goal:"continue the OAS turn"
+        ~oas_checkpoint:checkpoint
+        ~runtime_manifest_context:context
+        ~runtime_manifest_append:(fun manifest -> manifests := manifest :: !manifests)
+        ~body_timeout_s:0.5
+        ~sw
+        ~net:env#net
+        ()
+    with
+    | Ok _ -> Alcotest.fail "the OAS fixture endpoint unexpectedly completed"
+    | Error
+        (Agent_sdk.Error.Config
+           (Agent_sdk.Error.InvalidConfig { field = "oas_checkpoint"; _ })) ->
+      Alcotest.fail "the official-client runtime must start without OAS resume"
+    | Error _ ->
+      let fresh_session =
+        List.find_opt
+          (fun (manifest : Runtime_manifest.t) ->
+             manifest.event = Runtime_manifest.Runtime_routed
+             && String.equal manifest.status "fresh_session")
+          !manifests
+      in
+      (match fresh_session with
+       | None -> Alcotest.fail "fresh official-client session was not observable"
+       | Some manifest ->
+         let decision =
+           Runtime_manifest.public_projection_of_decision manifest.decision
+         in
+         Alcotest.(check string)
+           "fresh-session routing action"
+           "official_client_fresh_session"
+           (string_member "routing_action" decision);
+         Alcotest.(check string)
+           "fresh-session routing reason"
+           "official_client_owns_session_state"
+           (string_member "routing_reason" decision)))
 
 let test_lane_media_reroute_stays_within_lane () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
@@ -1521,6 +1617,10 @@ let () =
             "run_named media degrade emits typed manifest"
             `Quick
             test_run_named_media_degrade_emits_typed_manifest;
+          Alcotest.test_case
+            "OAS checkpoint starts fresh official-client session"
+            `Quick
+            test_oas_checkpoint_starts_fresh_official_client_session;
           Alcotest.test_case
             "lane media reroute stays within lane"
             `Quick

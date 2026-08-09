@@ -192,6 +192,8 @@ export type {
   DashboardOfficialClientAuditReceipt,
   DashboardOfficialClientRecoveryResponse,
   DashboardOfficialClientRecoveryDecision,
+  DashboardOfficialClientLoginStatus,
+  DashboardOfficialClientProbeResponse,
 } from './dashboard-runtime'
 export {
   fetchRuntimeProviders,
@@ -205,6 +207,7 @@ export {
   patchRuntimeRouting,
   fetchOfficialClientSession,
   resolveOfficialClientSession,
+  probeOfficialClientLogin,
 } from './dashboard-runtime'
 
 export type {

@@ -41,6 +41,7 @@ import {
   fetchRuntimeModelMetrics,
   fetchOfficialClientSession,
   resolveOfficialClientSession,
+  probeOfficialClientLogin,
   patchRuntimeAssignment,
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
@@ -4456,5 +4457,63 @@ describe('official-client session API', () => {
       recoveryPayload.session.phase.recovery_id,
       { resolution: 'restart_fresh' },
     )).rejects.toThrow('유효하지 않은 official-client recovery payload')
+  })
+})
+
+describe('official-client login probe API', () => {
+  const readyPayload = {
+    schema: 'masc.dashboard.official-client-probe.v1',
+    ok: true,
+    runtime_id: 'codex.codex',
+    client_kind: 'codex',
+    configured_model: 'gpt-5.3-codex-spark',
+    measured_at: 1_786_230_100,
+    login: {
+      status: 'ready',
+      authenticated: true,
+      auth_method: 'chatgpt',
+      subscription_type: 'pro',
+      api_provider: null,
+    },
+    client: { user_agent: 'codex_cli_rs/0.147.0' },
+    execution: {
+      status: 'not_measured',
+      reason: 'login_probe_does_not_submit_model_turn',
+    },
+  }
+
+  it('posts the exact runtime id and preserves the login/execution boundary', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(readyPayload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await probeOfficialClientLogin('codex.codex')
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/official-client/probe')
+    expect(JSON.parse(init.body as string)).toEqual({ runtime_id: 'codex.codex' })
+    expect(result.login).toMatchObject({ status: 'ready', authenticated: true })
+    expect(result.execution.status).toBe('not_measured')
+  })
+
+  it('rejects a payload that claims execution was measured', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ...readyPayload,
+        execution: { status: 'ready', reason: 'login_ok' },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(probeOfficialClientLogin('codex.codex')).rejects.toThrow(
+      '유효하지 않은 official-client probe payload',
+    )
   })
 })

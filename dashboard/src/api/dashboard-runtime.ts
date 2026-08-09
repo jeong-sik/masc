@@ -1209,6 +1209,39 @@ export type DashboardOfficialClientRecoveryDecision =
   | { resolution: 'retry_previous' }
   | { resolution: 'restart_fresh' }
 
+export type DashboardOfficialClientLoginStatus =
+  | 'ready'
+  | 'invalid_config'
+  | 'cli_unavailable'
+  | 'login_required'
+  | 'timeout'
+  | 'protocol_error'
+  | 'probe_contract_error'
+
+export interface DashboardOfficialClientProbeResponse {
+  schema: 'masc.dashboard.official-client-probe.v1'
+  ok: true
+  runtime_id: string
+  client_kind: 'codex' | 'claude_code'
+  configured_model: string | null
+  measured_at: number
+  login: {
+    status: DashboardOfficialClientLoginStatus
+    authenticated: boolean
+    auth_method: string | null
+    subscription_type: string | null
+    api_provider: string | null
+    detail: string | null
+  }
+  client: {
+    user_agent: string | null
+  }
+  execution: {
+    status: 'not_measured'
+    reason: 'login_probe_does_not_submit_model_turn'
+  }
+}
+
 const OFFICIAL_CLIENT_RECOVERY_FAILURES = new Set<DashboardOfficialClientRecoveryFailure>([
   'transient_spawn_failed',
   'transport_interrupted',
@@ -1245,6 +1278,16 @@ function decodeOfficialClientNullableString(raw: unknown): string | null | undef
   if (raw === null) return null
   return decodeOfficialClientNonEmptyString(raw) ?? undefined
 }
+
+const OFFICIAL_CLIENT_LOGIN_STATUSES = new Set<DashboardOfficialClientLoginStatus>([
+  'ready',
+  'invalid_config',
+  'cli_unavailable',
+  'login_required',
+  'timeout',
+  'protocol_error',
+  'probe_contract_error',
+])
 
 function decodeOfficialClientSettlement(raw: unknown): DashboardOfficialClientSettlement | null {
   if (!isRecord(raw) || !hasExactKeys(raw, ['session_id', 'turn_id'])) return null
@@ -1498,6 +1541,58 @@ function decodeOfficialClientRecoveryResponse(raw: unknown): DashboardOfficialCl
     : null
 }
 
+function decodeOfficialClientProbeResponse(raw: unknown): DashboardOfficialClientProbeResponse | null {
+  if (!isRecord(raw) || raw.schema !== 'masc.dashboard.official-client-probe.v1' || raw.ok !== true) return null
+  if (!isRecord(raw.login) || !isRecord(raw.client) || !isRecord(raw.execution)) return null
+  const runtime_id = asString(raw.runtime_id)
+  const client_kind = asString(raw.client_kind)
+  if (!Object.hasOwn(raw, 'configured_model')) return null
+  if (raw.configured_model !== null && !asString(raw.configured_model)) return null
+  const configured_model = asNullableString(raw.configured_model)
+  const measured_at = asNumber(raw.measured_at)
+  const status = asString(raw.login.status)
+  const authenticated = asBoolean(raw.login.authenticated)
+  const detail = asNullableString(raw.login.detail)
+  if (!Object.hasOwn(raw.client, 'user_agent')) return null
+  if (raw.client.user_agent !== null && !asString(raw.client.user_agent)) return null
+  const user_agent = asNullableString(raw.client.user_agent)
+  if (!runtime_id || (client_kind !== 'codex' && client_kind !== 'claude_code')) return null
+  if (measured_at == null || measured_at < 0 || authenticated == null) return null
+  if (!status || !OFFICIAL_CLIENT_LOGIN_STATUSES.has(status as DashboardOfficialClientLoginStatus)) return null
+  if ((status === 'ready') !== authenticated) return null
+  if (status !== 'ready' && !detail) return null
+  if (status === 'ready') {
+    if (!asString(raw.login.auth_method) || !asString(raw.login.subscription_type)) return null
+    if (!Object.hasOwn(raw.login, 'api_provider')) return null
+    if (raw.login.api_provider !== null && !asString(raw.login.api_provider)) return null
+  }
+  if (
+    raw.execution.status !== 'not_measured'
+    || raw.execution.reason !== 'login_probe_does_not_submit_model_turn'
+  ) return null
+  return {
+    schema: 'masc.dashboard.official-client-probe.v1',
+    ok: true,
+    runtime_id,
+    client_kind,
+    configured_model,
+    measured_at,
+    login: {
+      status: status as DashboardOfficialClientLoginStatus,
+      authenticated,
+      auth_method: asNullableString(raw.login.auth_method),
+      subscription_type: asNullableString(raw.login.subscription_type),
+      api_provider: asNullableString(raw.login.api_provider),
+      detail,
+    },
+    client: { user_agent },
+    execution: {
+      status: 'not_measured',
+      reason: 'login_probe_does_not_submit_model_turn',
+    },
+  }
+}
+
 function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
   const record = isRecord(raw) ? raw : {}
   return {
@@ -1543,6 +1638,18 @@ export async function resolveOfficialClientSession(
   })
   const decoded = decodeOfficialClientRecoveryResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 official-client recovery payload')
+  return decoded
+}
+
+export async function probeOfficialClientLogin(
+  runtimeId: string,
+): Promise<DashboardOfficialClientProbeResponse> {
+  await ensureDevToken()
+  const raw = await post<unknown>('/api/v1/runtime/official-client/probe', {
+    runtime_id: runtimeId,
+  })
+  const decoded = decodeOfficialClientProbeResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 official-client probe payload')
   return decoded
 }
 

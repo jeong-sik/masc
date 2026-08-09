@@ -7,6 +7,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchDashboardRuntimeProbe: vi.fn(),
   fetchRuntimeProviders: vi.fn(),
   fetchRuntimeModelMetrics: vi.fn(),
+  probeOfficialClientLogin: vi.fn(),
 }))
 
 vi.mock('../api/dashboard', () => apiMocks)
@@ -24,6 +25,7 @@ describe('RuntimeMonitor', () => {
 
   beforeEach(() => {
     vi.resetModules()
+    apiMocks.probeOfficialClientLogin.mockReset()
     apiMocks.fetchRuntimeProviders.mockReset().mockResolvedValue({
       updated_at: '2026-05-13T13:00:00Z',
       summary: {
@@ -337,6 +339,35 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('models · 1')
     expect(container.textContent).toContain('auth · present')
     expect(container.querySelector('article.v2-monitoring-card')).not.toBeNull()
+  })
+
+  it('embeds an explicit subscription probe only for official-client protocols', async () => {
+    const baseline = await apiMocks.fetchRuntimeProviders()
+    apiMocks.fetchRuntimeProviders.mockReset().mockResolvedValue({
+      ...baseline,
+      providers: [{
+        ...baseline.providers[0],
+        provider: 'codex.codex',
+        runtime_id: 'codex.codex',
+        provider_id: 'codex',
+        protocol: 'codex-app-server',
+        runtime_kind: 'cli',
+        model_api_name: 'gpt-5.3-codex-spark',
+        status: 'configured_unverified',
+        available: false,
+      }],
+    })
+    const { RuntimeMonitor } = await import('./runtime-monitor')
+
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.querySelector('[data-testid="official-client-login-probe-codex.codex"]') != null,
+      'official-client login probe',
+    )
+
+    expect(apiMocks.probeOfficialClientLogin).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('gpt-5.3-codex-spark')
+    expect(container.textContent).toContain('configured · unverified')
   })
 
   it('surfaces declared and effective provider/model parameter facts', async () => {

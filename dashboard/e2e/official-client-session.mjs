@@ -11,9 +11,12 @@ if (!fixtureUrl) throw new Error('OFFICIAL_CLIENT_SESSION_FIXTURE_URL is require
 const artifactDir = process.env.OFFICIAL_CLIENT_SESSION_ARTIFACT_DIR ?? '/tmp'
 const recoveryScreenshot = `${artifactDir}/official-client-session-recovery-required.png`
 const resolvedScreenshot = `${artifactDir}/official-client-session-recovery-resolved.png`
+const loginScreenshot = `${artifactDir}/official-client-login-ready.png`
 const recoveryId = '018f3a4a-27f4-7c9a-8fd8-330c2a3845aa'
 let getRequests = 0
 let postedBody = null
+let loginProbeRequests = 0
+let loginProbeBody = null
 
 const recoveryPayload = {
   schema: 'masc.dashboard.official-client-session.v1',
@@ -61,12 +64,38 @@ const resolvedPayload = {
   },
 }
 
+const loginPayload = {
+  schema: 'masc.dashboard.official-client-probe.v1',
+  ok: true,
+  runtime_id: 'codex.codex',
+  client_kind: 'codex',
+  configured_model: 'gpt-5.3-codex-spark',
+  measured_at: 1786230090,
+  login: {
+    status: 'ready',
+    authenticated: true,
+    auth_method: 'chatgpt',
+    subscription_type: 'pro',
+    api_provider: null,
+  },
+  client: { user_agent: 'codex_cli_rs/0.147.0' },
+  execution: {
+    status: 'not_measured',
+    reason: 'login_probe_does_not_submit_model_turn',
+  },
+}
+
 const browser = await chromium.launch({ headless: true })
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
   await page.route('**/api/v1/dashboard/dev-token', route => route.fulfill({
-    json: { token: 'fixture-token', actor: 'dashboard', role: 'worker' },
+    json: { token: 'fixture-token', actor: 'dashboard', role: 'admin' },
   }))
+  await page.route('**/api/v1/runtime/official-client/probe', async route => {
+    loginProbeRequests += 1
+    loginProbeBody = route.request().postDataJSON()
+    await route.fulfill({ json: loginPayload })
+  })
   await page.route('**/api/v1/runtime/sessions/official-client?**', route => {
     getRequests += 1
     return route.fulfill({ json: recoveryPayload })
@@ -83,6 +112,18 @@ try {
   await recovery.getByText('thread-observed', { exact: true }).waitFor()
   await recovery.getByText(recoveryId, { exact: true }).waitFor()
   if (getRequests !== 1) throw new Error(`expected one session GET, got ${getRequests}`)
+  if (loginProbeRequests !== 0) throw new Error('login probe ran before explicit operator action')
+
+  const loginProbe = page.getByTestId('official-client-login-probe-codex.codex')
+  await loginProbe.getByTestId('official-client-login-probe-run-codex.codex').click()
+  await loginProbe.getByTestId('official-client-probe-login').getByText('ready', { exact: true }).waitFor()
+  await loginProbe.getByTestId('official-client-probe-execution').getByText('not_measured', { exact: true }).waitFor()
+  await loginProbe.getByText('pro', { exact: true }).waitFor()
+  if (loginProbeRequests !== 1) throw new Error(`expected one login probe POST, got ${loginProbeRequests}`)
+  if (JSON.stringify(loginProbeBody) !== JSON.stringify({ runtime_id: 'codex.codex' })) {
+    throw new Error(`unexpected login probe body: ${JSON.stringify(loginProbeBody)}`)
+  }
+  await page.screenshot({ path: loginScreenshot, fullPage: true })
 
   await page.screenshot({ path: recoveryScreenshot, fullPage: true })
   await page.getByTestId('official-client-session-restart-fresh').click()
@@ -100,6 +141,7 @@ try {
   await page.screenshot({ path: resolvedScreenshot, fullPage: true })
   process.stdout.write(`official_client_recovery_required_screenshot=${recoveryScreenshot}\n`)
   process.stdout.write(`official_client_recovery_resolved_screenshot=${resolvedScreenshot}\n`)
+  process.stdout.write(`official_client_login_ready_screenshot=${loginScreenshot}\n`)
 } finally {
   await browser.close()
 }

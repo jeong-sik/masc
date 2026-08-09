@@ -4,6 +4,7 @@ import '../styles/global.css'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { OfficialClientSessionPanel } from '../components/official-client-session-panel'
+import { OfficialClientLoginProbe } from '../components/official-client-login-probe'
 import { keepers } from '../store'
 
 keepers.value = [
@@ -25,7 +26,17 @@ function OfficialClientSessionFixture() {
             실제 claim phase와 recovery fence를 확인한 뒤 명시적으로 해소합니다.
           </p>
         </header>
-        <${OfficialClientSessionPanel} />
+        <div class="flex flex-col gap-4">
+          <article class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 p-4">
+            <div class="text-sm font-semibold text-[var(--color-fg-primary)]">codex.codex</div>
+            <div class="text-xs text-[var(--color-fg-muted)]">Codex · gpt-5.3-codex-spark · 128k context</div>
+            <${OfficialClientLoginProbe}
+              runtimeId="codex.codex"
+              configuredModel="gpt-5.3-codex-spark"
+            />
+          </article>
+          <${OfficialClientSessionPanel} />
+        </div>
       </section>
     </main>
   `

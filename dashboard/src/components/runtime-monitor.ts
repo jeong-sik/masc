@@ -35,6 +35,7 @@ import {
   runtimeCatalogSnapshotFacts as runtimeSnapshotFactsText,
 } from '../lib/runtime-provider-summary'
 import { OfficialClientSessionPanel } from './official-client-session-panel'
+import { OfficialClientLoginProbe } from './official-client-login-probe'
 
 /**
  * Filters model metrics by case-insensitive substring match against
@@ -151,6 +152,7 @@ function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot): string
   if (advertised === 'missing_auth' || advertised === 'unsupported' || advertised === 'offline') {
     return 'bad'
   }
+  if (advertised === 'configured_unverified') return 'warn'
   if (advertised === 'vertex_adc') {
     return 'warn'
   }
@@ -164,6 +166,7 @@ function runtimeStatusLabel(provider: DashboardRuntimeProviderSnapshot): string 
   if (advertised === 'missing_auth') return 'missing auth'
   if (advertised === 'unsupported') return 'unsupported'
   if (advertised === 'offline') return 'offline'
+  if (advertised === 'configured_unverified') return 'configured · unverified'
   if (provider.available === true) return 'available'
   if (provider.available === false) return 'unavailable'
   return 'unknown'
@@ -972,6 +975,12 @@ export function RuntimeMonitor() {
                     : null}
                   ${liveProbe?.error
                     ? html`<div class="text-2xs text-[var(--status-bad)]">${liveProbe.error}</div>`
+                    : null}
+                  ${(provider.protocol === 'codex-app-server' || provider.protocol === 'claude-code') && provider.runtime_id
+                    ? html`<${OfficialClientLoginProbe}
+                        runtimeId=${provider.runtime_id}
+                        configuredModel=${provider.model_api_name ?? provider.model_id}
+                      />`
                     : null}
                 </article>
               `})

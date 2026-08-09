@@ -294,127 +294,6 @@ type io =
   ; receive : unit -> (Yojson.Safe.t, error) result
   }
 
-let jsonrpc_response ~id result =
-  `Assoc [ "jsonrpc", `String "2.0"; "id", id; "result", result ]
-;;
-
-let jsonrpc_error ~id ~code message =
-  `Assoc
-    [ "jsonrpc", `String "2.0"
-    ; "id", id
-    ; "error", `Assoc [ "code", `Int code; "message", `String message ]
-    ]
-;;
-
-let jsonrpc_id_to_call_id = function
-  | `String id when String.trim id <> "" -> Ok id
-  | `Int id -> Ok (string_of_int id)
-  | _ -> protocol_error "MCP tools/call" "request id must be a string or integer"
-;;
-
-let mcp_initialize ~id =
-  jsonrpc_response
-    ~id
-    (`Assoc
-       [ "protocolVersion", `String "2024-11-05"
-       ; "capabilities", `Assoc [ "tools", `Assoc [] ]
-       ; ( "serverInfo"
-         , `Assoc
-             [ "name", `String mcp_server_name
-             ; "version", `String "1.0.0"
-             ] )
-       ])
-;;
-
-let mcp_tools_list ~id tools =
-  jsonrpc_response
-    ~id
-    (`Assoc [ "tools", `List (List.map dynamic_tool_spec tools) ])
-;;
-
-let mcp_tool_result ~id (result : dynamic_tool_result) =
-  jsonrpc_response
-    ~id
-    (`Assoc
-       ([ ( "content"
-          , `List
-              [ `Assoc
-                  [ "type", `String "text"
-                  ; "text", `String result.content
-                  ] ] )
-        ]
-        @ if result.success then [] else [ "isError", `Bool true ]))
-;;
-
-let mcp_tools_call ~id ~params ~tools ~tool_call_count =
-  let stage = "MCP tools/call" in
-  let* call_id = jsonrpc_id_to_call_id id in
-  let* fields = assoc_at stage params in
-  let* name = required_string stage "name" fields in
-  let arguments =
-    match List.assoc_opt "arguments" fields with
-    | None -> Ok (`Assoc [])
-    | Some (`Assoc _ as arguments) -> Ok arguments
-    | Some _ -> protocol_error stage "field \"arguments\" must be an object"
-  in
-  let* arguments = arguments in
-  match find_dynamic_tool tools name with
-  | None ->
-    Ok
-      (jsonrpc_error
-         ~id
-         ~code:(-32602)
-         (Printf.sprintf "unknown MASC tool %S" name))
-  | Some tool ->
-    let result =
-      try tool.call ~call_id arguments with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Log.Runtime_agent.warn
-          "Claude Code MCP tool handler raised (tool=%s error=%s)"
-          name
-          (Printexc.to_string exn);
-        { success = false; content = "MASC tool handler raised" }
-    in
-    incr tool_call_count;
-    Ok (mcp_tool_result ~id result)
-;;
-
-type mcp_dispatch =
-  | Mcp_response of Yojson.Safe.t
-  | Mcp_notification
-
-let handle_mcp_message ~tools ~tool_call_count message =
-  let stage = "MCP message" in
-  let* fields = assoc_at stage message in
-  let* jsonrpc = required_string stage "jsonrpc" fields in
-  if jsonrpc <> "2.0"
-  then protocol_error stage (Printf.sprintf "unsupported jsonrpc %S" jsonrpc)
-  else
-    let* method_ = required_string stage "method" fields in
-    let id = Option.value (List.assoc_opt "id" fields) ~default:`Null in
-    let params = Option.value (List.assoc_opt "params" fields) ~default:(`Assoc []) in
-    match method_ with
-    | "initialize" when id <> `Null -> Ok (Mcp_response (mcp_initialize ~id))
-    | "tools/list" when id <> `Null -> Ok (Mcp_response (mcp_tools_list ~id tools))
-    | "tools/call" when id <> `Null ->
-      let* response = mcp_tools_call ~id ~params ~tools ~tool_call_count in
-      Ok (Mcp_response response)
-    | "notifications/initialized" when id = `Null ->
-      Ok Mcp_notification
-    | _ when id = `Null ->
-      protocol_error
-        stage
-        (Printf.sprintf "MCP notification %S is not supported" method_)
-    | _ ->
-      Ok
-        (Mcp_response
-           (jsonrpc_error
-              ~id
-              ~code:(-32601)
-              (Printf.sprintf "MCP method %S is not supported" method_)))
-;;
-
 let send_control_success io ~request_id response =
   io.send
     (`Assoc
@@ -457,10 +336,39 @@ let handle_control_request io ~tools ~tool_call_count fields =
       Error (Unsupported_control_request subtype)
     else
       let* message = required_member stage "message" request_fields in
-      let* dispatch = handle_mcp_message ~tools ~tool_call_count message in
-      (match dispatch with
-       | Mcp_notification -> Ok ()
-       | Mcp_response mcp_response ->
+      let tool_specs () = List.map dynamic_tool_spec tools in
+      let call_tool ~name ~call_id ~arguments =
+        match find_dynamic_tool tools name with
+        | None -> None
+        | Some tool ->
+          let result =
+            try tool.call ~call_id arguments with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+              Log.Runtime_agent.warn
+                "Claude Code MCP tool handler raised (tool=%s error=%s)"
+                name
+                (Printexc.to_string exn);
+              { success = false; content = "MASC tool handler raised" }
+          in
+          Some
+            { Runtime_official_client_mcp.success = result.success
+            ; content = result.content
+            }
+      in
+      let* dispatch =
+        Runtime_official_client_mcp.handle_message
+          ~server_name:mcp_server_name
+          ~tool_specs
+          ~call_tool
+          message
+        |> Result.map_error (fun { Runtime_official_client_mcp.stage; detail } ->
+          Protocol_error { stage; detail })
+      in
+      if dispatch.tool_called then incr tool_call_count;
+      (match dispatch.response with
+       | None -> Ok ()
+       | Some mcp_response ->
          send_control_success
            io
            ~request_id

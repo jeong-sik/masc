@@ -15,4 +15,4 @@ val run :
   context:Agent_core.Context.t option ->
   event_bus:Agent_core.Event_bus.t option ->
   config:Runtime_execution.claude_code ->
-  (Runtime_agent.run_result, Agent_core.Error.sdk_error) result
+  (Runtime_agent.run_result, Agent_core.Error.t) result

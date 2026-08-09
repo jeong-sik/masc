@@ -64,7 +64,7 @@ let retry_after_of_rate_limit = function
     Some (Float.max 0.0 (Float.of_int timestamp -. Time_compat.now ()))
 ;;
 
-let claude_error_to_sdk_error = function
+let claude_error_to_core_error = function
   | Runtime_claude_code.Invalid_config detail ->
     config_error ~field:"claude_code" detail
   | Runtime_claude_code.Subscription_required detail ->
@@ -260,7 +260,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           ~prompt
       with
       | Ok () -> Ok ()
-      | Error error -> Error (claude_error_to_sdk_error error)
+      | Error error -> Error (claude_error_to_core_error error)
     in
     let process_mgr = Eio.Stdenv.process_mgr env in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
@@ -273,7 +273,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           client_config
       with
       | Ok subscription -> Ok subscription
-      | Error error -> Error (claude_error_to_sdk_error error)
+      | Error error -> Error (claude_error_to_core_error error)
     in
     let* claimed_session =
       match
@@ -386,7 +386,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          | Error error ->
            if not !state_persistence_failed
            then recovery_failure := recovery_failure_of_client_error error;
-           Error (claude_error_to_sdk_error error)
+           Error (claude_error_to_core_error error)
          | Ok turn ->
            recovery_failure := Session_store.Protocol_failed;
            let expected_resumed =

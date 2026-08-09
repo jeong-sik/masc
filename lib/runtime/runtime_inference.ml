@@ -49,7 +49,17 @@ let seed_of_thinking_support ?(preserve_thinking = None) (thinking_support : boo
 ;;
 
 let for_runtime ~name =
-  seed_of_thinking_support
-    ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
-    (Runtime.thinking_support_of_runtime_id name)
+  match Runtime.get_runtime_by_id name with
+  | Some runtime ->
+    (match Runtime_execution.checkpoint_owner runtime.Runtime.execution with
+     | Runtime_execution.Official_client ->
+       seed_of_thinking_support None
+     | Runtime_execution.Masc_oas ->
+       seed_of_thinking_support
+         ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
+         (Runtime.thinking_support_of_runtime_id name))
+  | None ->
+    seed_of_thinking_support
+      ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
+      (Runtime.thinking_support_of_runtime_id name)
 ;;

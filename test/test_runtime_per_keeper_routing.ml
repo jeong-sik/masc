@@ -559,8 +559,25 @@ let test_codex_runtime_cannot_enter_oas_runner () =
     | Error detail ->
       Alcotest.(check bool)
         "typed ownership diagnostic"
-        true
-        (string_contains detail "not the OAS agent_core"))
+          true
+          (string_contains detail "not the OAS agent_core"))
+;;
+
+let test_codex_runtime_has_no_oas_thinking_seed () =
+  with_codex_runtime_initialized (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"codex.codex" in
+    Alcotest.(check (option int))
+      "thinking budget"
+      None
+      seed.Runtime_inference.thinking_budget;
+    Alcotest.(check (option bool))
+      "thinking enabled"
+      None
+      seed.Runtime_inference.thinking_enabled;
+    Alcotest.(check (option bool))
+      "preserve thinking"
+      None
+      seed.Runtime_inference.preserve_thinking)
 ;;
 
 let test_runtime_inventory_surfaces_declared_model_capabilities () =
@@ -1973,6 +1990,10 @@ let () =
             "Codex official-client runtime cannot enter OAS runner"
             `Quick
             test_codex_runtime_cannot_enter_oas_runner
+        ; Alcotest.test_case
+            "Codex official-client runtime has no OAS thinking seed"
+            `Quick
+            test_codex_runtime_has_no_oas_thinking_seed
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case

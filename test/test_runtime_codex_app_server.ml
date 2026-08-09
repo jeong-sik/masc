@@ -811,6 +811,134 @@ let test_keeper_protocol_failure_enters_recovery () =
              | Ok _ -> fail "unresolved Codex recovery admitted a duplicate turn")))
 ;;
 
+let test_dashboard_official_client_recovery_projection_and_resolution () =
+  let base_path = temp_workspace "masc-official-client-dashboard-recovery-" in
+  let keeper_name = "codex-fixture" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ "not-json"
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
+            | Error _ -> ()
+            | Ok _ -> fail "malformed official-client response completed the Keeper turn");
+       let recovery =
+         match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+         | Error detail -> fail detail
+         | Ok None -> fail "real Keeper failure left no recovery state"
+         | Ok (Some recovery) -> recovery
+       in
+       let recovery_id =
+         match recovery.phase with
+         | Recovery_required required -> required.recovery_id
+         | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+           fail "dashboard recovery fixture was not recovery-required"
+       in
+       let snapshot =
+         Server_dashboard_official_client_session.snapshot ~base_path ~keeper_name
+         |> Result.get_ok
+       in
+       let open Yojson.Safe.Util in
+       check string
+         "dashboard schema"
+         "masc.dashboard.official-client-session.v1"
+         (snapshot |> member "schema" |> to_string);
+       check string
+         "dashboard client kind"
+         "codex"
+         (snapshot |> member "session" |> member "client_kind" |> to_string);
+       check string
+         "dashboard recovery phase"
+         "recovery_required"
+         (snapshot |> member "session" |> member "phase" |> member "kind" |> to_string);
+       check string
+         "dashboard recovery fence"
+         recovery_id
+         (snapshot
+          |> member "session"
+          |> member "phase"
+          |> member "recovery_id"
+          |> to_string);
+       let body =
+         `Assoc
+           [ "keeper_name", `String keeper_name
+           ; "recovery_id", `String recovery_id
+           ; "resolution", `String "restart_fresh"
+           ]
+         |> Yojson.Safe.to_string
+       in
+       let resolved =
+         Server_dashboard_official_client_session.resolve_body
+           ~base_path
+           ~actor:"dashboard-admin"
+           ~body
+         |> Result.get_ok
+       in
+       check string
+         "dashboard resolved phase"
+         "ready"
+         (resolved |> member "session" |> member "phase" |> member "kind" |> to_string);
+       check string
+         "dashboard resolution actor"
+         "dashboard-admin"
+         (resolved
+          |> member "session"
+          |> member "last_recovery_resolution"
+          |> member "resolved_by"
+          |> to_string);
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok result ->
+              check string
+                "post-resolution Keeper response"
+                "MASC_SUBSCRIPTION_OK"
+                (keeper_response_text result));
+       let settled =
+         match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+         | Error detail -> fail detail
+         | Ok None -> fail "post-resolution Keeper turn lost its durable state"
+         | Ok (Some settled) -> settled
+       in
+       (match settled.phase with
+        | Settled { session_id; turn_id } ->
+          check string "post-resolution session" "thread-1" session_id;
+          check string "post-resolution turn" "turn-1" turn_id
+        | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+          fail "post-resolution Keeper turn did not settle");
+       let duplicate_body =
+         Printf.sprintf
+           {|{"keeper_name":%S,"keeper_name":%S,"recovery_id":%S,"resolution":"restart_fresh"}|}
+           keeper_name
+           keeper_name
+           recovery_id
+       in
+       match
+         Server_dashboard_official_client_session.resolve_body
+           ~base_path
+           ~actor:"dashboard-admin"
+           ~body:duplicate_body
+       with
+       | Error { kind = Bad_request; _ } -> ()
+       | Error _ -> fail "duplicate dashboard request had the wrong error class"
+       | Ok _ -> fail "duplicate dashboard request fields were admitted")
+;;
+
 let test_keeper_resumes_persisted_codex_thread () =
   let base_path = temp_workspace "masc-codex-resume-" in
   Fun.protect
@@ -1459,6 +1587,10 @@ let () =
             "Keeper protocol failure enters recovery"
             `Quick
             test_keeper_protocol_failure_enters_recovery
+        ; test_case
+            "dashboard official-client recovery projection and resolution"
+            `Quick
+            test_dashboard_official_client_recovery_projection_and_resolution
         ; test_case
             "Keeper resumes persisted Codex thread"
             `Quick

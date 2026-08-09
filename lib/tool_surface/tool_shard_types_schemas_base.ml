@@ -10,7 +10,12 @@ let base_tools : Masc_domain.tool_schema list =
     ; description =
         "Get current server time. Returns now_iso (ISO8601) and now_unix (float). Use to \
          timestamp events, check elapsed time, or include current time in reports."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc []
+          ; "additionalProperties", `Bool false
+          ]
     }
   ; (* Context status *)
     { name = "keeper_context_status"
@@ -23,7 +28,12 @@ let base_tools : Masc_domain.tool_schema list =
          passed directly as path or cwd to keeper tools without prefix. Use when checking \
          checkpoint/session continuity or resolving a path without string-interpolating \
          your own keeper name."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc []
+          ; "additionalProperties", `Bool false
+          ]
     }
   ; (* Memory *)
     { name = "keeper_memory_search"
@@ -123,7 +133,12 @@ let base_tools : Masc_domain.tool_schema list =
          the limitation if a connector-wide registry is unavailable. Returns tool names \
          organized by category plus descriptor_surface metadata with executor, \
          schema-shape, and typed usage examples."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc []
+          ; "additionalProperties", `Bool false
+          ]
     }
   ]
 ;;

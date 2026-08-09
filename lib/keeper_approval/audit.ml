@@ -189,19 +189,16 @@ let event_of_string = function
 type decision_kind =
   | Decision_approve
   | Decision_reject
-  | Decision_edit
 
 let decision_kind_to_string = function
   | Decision_approve -> "approve"
   | Decision_reject -> "reject"
-  | Decision_edit -> "edit"
 ;;
 
 let decision_kind_of_string value =
   match String.trim value with
   | "approve" -> Some Decision_approve
   | "reject" -> Some Decision_reject
-  | "edit" -> Some Decision_edit
   | _ -> None
 ;;
 
@@ -213,7 +210,6 @@ let non_empty_reason reason =
 let approval_decision_kind_and_reason = function
   | Decision.Approve -> Decision_approve, None
   | Decision.Reject reason -> Decision_reject, non_empty_reason reason
-  | Decision.Edit _ -> Decision_edit, None
 ;;
 
 let keeper_audit_metric_label = function
@@ -399,7 +395,7 @@ let audit_scan_window ?keeper_name n =
 
 let record_audit_read_failure ?keeper_name ?(metric_site = Keeper_approval_queue_failure_site.Audit_read_recent) ~site exn =
   Keeper_fd_pressure.note_exception ~site exn;
-  Otel_metric_store.inc_counter
+  Otel_metric_store_core.inc_counter
     Keeper_metrics.(to_string ApprovalQueueFailures)
     ~labels:
       [ "keeper",

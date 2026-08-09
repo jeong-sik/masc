@@ -2,10 +2,11 @@
 
 module StringSet = Set_util.StringSet
 
-(* Project every descriptor-owned masc_* backend schema into the substrate so
-   the keeper tool universe knows the tool exists.  This includes the web
-   backends (masc_web_search / masc_web_fetch), which the LLM reaches via their
-   WebSearch / WebFetch public_names.
+(* Keep the internal runtime schemas for descriptor-backed shard tools.  Their
+   public Keeper descriptors may deliberately expose a different shape that is
+   validated before translation (for example, Edit.file_path becomes the
+   runtime tool_edit_file.path).  Only project a descriptor-owned schema when
+   no shard runtime schema exists for that internal name.
 
    Do NOT trim "keeper-only" tools out of this projection to keep them off the
    operator MCP surface.  [raw_all_tool_schemas] feeds both the keeper universe
@@ -13,23 +14,32 @@ module StringSet = Set_util.StringSet
    exclusion is enforced separately and downstream by [Tool_catalog.is_public_mcp]
    / [public_mcp_surface_tools] (contract stated in tool_schemas_misc.mli).
    The Keeper model surface itself comes directly from descriptors. *)
-let descriptor_owned_internal_tool_schemas : Masc_domain.tool_schema list =
+let keeper_runtime_tool_schemas = Tool_shard.all_keeper_tool_schemas
+
+let keeper_runtime_tool_names =
+  keeper_runtime_tool_schemas
+  |> List.fold_left
+       (fun names (schema : Masc_domain.tool_schema) ->
+          StringSet.add schema.name names)
+       StringSet.empty
+
+let descriptor_only_internal_tool_schemas : Masc_domain.tool_schema list =
   Keeper_tool_descriptor.public_descriptors
   |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->
-    if String.starts_with ~prefix:"masc_" descriptor.internal_name
-    then
+    if StringSet.mem descriptor.internal_name keeper_runtime_tool_names
+    then None
+    else
       Some
         { Masc_domain.name = descriptor.internal_name
         ; description = descriptor.description
         ; input_schema = descriptor.input_schema
-        }
-    else None)
+        })
 
 let raw_all_tool_schemas : Masc_domain.tool_schema list =
-  Tool_shard.all_keeper_tool_schemas
+  keeper_runtime_tool_schemas
+  @ descriptor_only_internal_tool_schemas
   @ Tools.raw_schemas
   @ Tool_schemas_misc.schemas
-  @ descriptor_owned_internal_tool_schemas
   @ Board_tool.tools
   @ Keeper_schema.schemas
   @ Tool_local_runtime.schemas

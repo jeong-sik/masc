@@ -1,6 +1,7 @@
 (** Durable, nonblocking HITL requests for Keeper external effects. *)
 
-include Keeper_approval_queue_rules
+open Keeper_approval_queue_rules_types
+open Keeper_approval_queue_rules
 
 type storage_error =
   { path : string
@@ -423,8 +424,6 @@ let approval_decision_to_yojson = function
   | Decision.Approve -> `Assoc [ "kind", `String "approve" ]
   | Decision.Reject reason ->
     `Assoc [ "kind", `String "reject"; "reason", `String reason ]
-  | Decision.Edit input ->
-    `Assoc [ "kind", `String "edit"; "input", input ]
 ;;
 
 let resolution_replay_outcome_to_yojson = function
@@ -960,15 +959,6 @@ let approval_decision_of_yojson json =
        in
        let* reason = required_string ~surface:"gate_pending.decision" "reason" fields in
        Ok (Decision.Reject reason)
-     | "edit" ->
-       let* () =
-         reject_unknown_fields
-           ~surface:"gate_pending.decision"
-           ~allowed:[ "kind"; "input" ]
-           fields
-       in
-       let* input = required_member ~surface:"gate_pending.decision" "input" fields in
-       Ok (Decision.Edit input)
      | other -> Error (Printf.sprintf "gate_pending.decision kind %S is unknown" other))
   | _ -> Error "gate_pending.decision must be a JSON object"
 ;;
@@ -1094,8 +1084,8 @@ let persisted_delivery_of_yojson ~base_path json =
     let* () =
       match decision, grant_consumed with
       | Decision.Approve, (true | false) -> Ok ()
-      | (Decision.Reject _ | Decision.Edit _), false -> Ok ()
-      | (Decision.Reject _ | Decision.Edit _), true ->
+      | Decision.Reject _, false -> Ok ()
+      | Decision.Reject _, true ->
         Error (surface ^ ".grant_consumed is valid only for approve")
     in
     Ok
@@ -1446,7 +1436,7 @@ let attach_replay_results ~delivery_map replay_results =
                  "gate_replay_results outcome %s requires a consumed approve grant"
                  approval_id)
           | Some
-              { decision = (Decision.Reject _ | Decision.Edit _); _ } ->
+              { decision = Decision.Reject _; _ } ->
             Error
               (Printf.sprintf
                  "gate_replay_results outcome %s belongs to a non-approved delivery"
@@ -1570,7 +1560,7 @@ let approved_delivery_unlocked ~base_path ~id =
             if delivery.grant_consumed
             then Ok (Approved_delivery_consumed delivery)
             else Ok (Approved_delivery_unconsumed delivery)
-          | Decision.Reject _ | Decision.Edit _ ->
+          | Decision.Reject _ ->
             Error (Grant_resolution_not_approved id))
      | None ->
        (match SMap.find_opt id (Atomic.get pending) with
@@ -2820,7 +2810,6 @@ let commit_keeper_approval_resolution
 let hitl_resolution_decision_of_approval_decision = function
   | Decision.Approve -> Keeper_event_queue.Hitl_approved
   | Decision.Reject rationale -> Keeper_event_queue.Hitl_rejected rationale
-  | Decision.Edit input -> Keeper_event_queue.Hitl_edited input
 ;;
 
 let deliver_resolution ~base_path (entry : pending_approval) decision =
@@ -3159,16 +3148,15 @@ let approval_decision_equal left right =
   match left, right with
   | Decision.Approve, Decision.Approve -> true
   | Decision.Reject left, Decision.Reject right -> String.equal left right
-  | Decision.Edit left, Decision.Edit right -> Yojson.Safe.equal left right
-  | (Decision.Approve | Decision.Reject _ | Decision.Edit _),
-    (Decision.Approve | Decision.Reject _ | Decision.Edit _) ->
+  | (Decision.Approve | Decision.Reject _),
+    (Decision.Approve | Decision.Reject _) ->
     false
 ;;
 
 let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pending_approval) =
   try
     match
-      upsert_rule
+      Keeper_approval_queue_rules.upsert_rule
         ~base_path
         ~keeper_name:entry.keeper_name
         ~tool_name:entry.tool_name
@@ -3225,10 +3213,10 @@ let remember_rule_for_delivery delivery =
          { path = rule_error.path
          ; reason = rule_error.reason
          })
-  | (Decision.Approve | Decision.Reject _ | Decision.Edit _),
+  | (Decision.Approve | Decision.Reject _),
     false ->
     Ok None
-  | (Decision.Reject _ | Decision.Edit _), true -> Ok None
+  | Decision.Reject _, true -> Ok None
 ;;
 
 let complete_delivery delivery =
@@ -3265,7 +3253,7 @@ let complete_delivery delivery =
                   consumes it. The wake event is only a correlation message and
                   cannot become a second authorization SSOT. *)
                finish ()
-             | Decision.Reject _ | Decision.Edit _ ->
+             | Decision.Reject _ ->
                (match remove_delivery_from_store delivery with
                 | Error storage_error ->
                   Error (Persistence_failed { approval_id = id; storage_error })
@@ -3525,7 +3513,7 @@ let resolve_with_policy
              let remember_rule =
                match decision with
                | Decision.Approve -> remember_rule
-               | Decision.Reject _ | Decision.Edit _ -> false
+               | Decision.Reject _ -> false
              in
              let rule_expires_at =
                if remember_rule then rule_expires_at else None

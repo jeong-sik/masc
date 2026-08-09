@@ -36,7 +36,7 @@ let pending_hitl_approval_counts config =
     |> List.filter_map (fun name ->
          let pending_count =
            List.fold_left
-             (fun count (entry : Keeper_approval_queue.pending_approval) ->
+             (fun count (entry : Keeper_approval_queue_rules_types.pending_approval) ->
                 if String.equal entry.keeper_name name
                 then count + 1
                 else count)

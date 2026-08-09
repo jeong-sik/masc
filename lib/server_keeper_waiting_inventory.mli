@@ -13,7 +13,7 @@ module For_testing : sig
   val dashboard_json_with_pending_reader :
     read_pending:
       (base_path:string ->
-      ( Keeper_approval_queue.pending_approval list
+      ( Keeper_approval_queue_rules_types.pending_approval list
       , Keeper_approval_queue.storage_error )
       result) ->
     Workspace.config ->

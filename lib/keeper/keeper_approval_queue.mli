@@ -4,7 +4,7 @@
     tool/product name. It records an exact request, accepts an explicit
     resolution, and wakes only the originating Keeper lane. *)
 
-include module type of Keeper_approval_queue_rules_types
+open Keeper_approval_queue_rules_types
 
 type storage_error =
   { path : string
@@ -207,103 +207,7 @@ val record_consumed_resolution_replay :
   outcome:resolution_replay_outcome ->
   (replay_recording, grant_error) result
 
-(** {1 Exact Always Allowed rules} *)
-
-val list_rules :
-  base_path:string -> unit -> (approval_rule list, rule_store_error) result
-
-val list_rules_dashboard_json :
-  base_path:string -> unit -> (Yojson.Safe.t, rule_store_error) result
-
-(** Insert or fetch the rule for the exact
-    [(keeper_name, tool_name, canonical complete input)] identity.
-    [expires_at] is an optional absolute Unix expiry; the identity match
-    ignores it, so an existing rule is returned unchanged. *)
-val upsert_rule :
-  base_path:string ->
-  keeper_name:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  ?created_by:string ->
-  ?source_approval_id:string ->
-  ?expires_at:float ->
-  unit ->
-  (approval_rule * bool, rule_store_error) result
-
-val delete_rule :
-  base_path:string -> id:string -> unit -> (approval_rule, rule_store_error) result
-
-(** Find the exact remembered request and report whether it authorizes at
-    [now] (defaults to the wall clock; inject for deterministic evaluation).
-    An expired rule is reported as [Rule_match_expired], never applied, and
-    never deleted. *)
-val find_matching_rule :
-  base_path:string ->
-  keeper_name:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  ?now:float ->
-  unit ->
-  (rule_lookup, rule_store_error) result
-
 val generate_id : unit -> string
-val recent_resolved_history_limit : int
-val recent_resolved_max_limit : int
-val recent_resolved_default_window_minutes : int
-val recent_resolved_min_window_minutes : int
-val recent_resolved_max_window_minutes : int
-
-val read_recent_audit :
-  base_path:string -> ?keeper_name:string -> ?n:int -> unit -> Yojson.Safe.t list
-
-val audit_day_string_of_ts : float -> string
-(** Day key ["YYYY-MM-DD"] for the [YYYY-MM/DD.jsonl] audit layout. Exposed as
-    a pure function so the UTC invariant is testable: the write path
-    ([Jsonl_writer.dated_path]) picks the day file with [Unix.gmtime], so a
-    local-time key would read the wrong file for the hours where the two
-    calendars disagree. *)
-
-type resolved_history =
-  { resolved_rows : Yojson.Safe.t list
-  ; resolved_matched : int
-  ; resolved_limit : int
-  ; resolved_window_minutes : int
-  ; resolved_scan_exhausted : bool
-  }
-(** A page of resolved Gate decisions together with the bounds that produced
-    it. [resolved_rows] is newest first and holds at most [resolved_limit]
-    entries; [resolved_matched] counts every resolved decision the scan saw
-    inside the window, so [resolved_matched > resolved_limit] means the page is
-    a slice rather than the whole window. [resolved_scan_exhausted] reports the
-    second bound: the physical row cap stopped the scan before it reached the
-    window start, so even [resolved_matched] undercounts. Rendering only
-    [resolved_rows] reintroduces the silent truncation this type removes. *)
-
-val list_recent_resolved :
-  base_path:string ->
-  now_ts:float ->
-  ?limit:int ->
-  ?window_minutes:int ->
-  unit ->
-  resolved_history
-(** [list_recent_resolved ~base_path ~now_ts ()] returns resolved Gate decisions
-    from the last [window_minutes] (default
-    {!recent_resolved_default_window_minutes}, clamped to
-    [[recent_resolved_min_window_minutes, recent_resolved_max_window_minutes]]),
-    newest first, capped at [limit] (default
-    {!recent_resolved_history_limit}, clamped to
-    [[0, recent_resolved_max_limit]]).
-
-    [now_ts] is supplied by the caller rather than read here, matching
-    {!Dashboard_gate_metrics.tool_rejection_counts}: the observation boundary
-    captures the clock once for the whole projection, and this function stays
-    deterministic so a test can pin an exact window.
-
-    Rows without a [ts] are excluded: a wall-clock window cannot place an
-    undated decision, and dating it by guesswork would misreport history.
-
-    Storage failures are reported through the approval-queue failure metric and
-    yield an empty page rather than raising. *)
 
 module For_testing : sig
   type strict_snapshot_writer =

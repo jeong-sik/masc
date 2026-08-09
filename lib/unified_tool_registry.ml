@@ -110,11 +110,14 @@ let tag_of_name name : TD.module_tag option =
        | None -> None)
     | _ :: _ :: _ -> invalid_arg ("duplicate tool descriptors for " ^ name)
 
-(** Register a tag + schema only if the name is not already in the tag
-    registry. Existing [Tool_spec] registrations are preserved. *)
-let register_schema_if_missing (schema : Masc_domain.tool_schema) tag =
-  if Option.is_none (TD.lookup_tag schema.name)
-  then TD.register_module_tag ~schemas:[ schema ] ~tag
+(** Register the canonical schema while preserving an existing precise tag. *)
+let register_canonical_schema (schema : Masc_domain.tool_schema) default_tag =
+  let tag =
+    match TD.lookup_tag schema.name with
+    | Some registered_tag -> registered_tag
+    | None -> default_tag
+  in
+  TD.register_module_tag ~schemas:[ schema ] ~tag
 
 (** 1. Register every LLM-visible schema from [Config.raw_all_tool_schemas]
     that does not already have a tag. *)
@@ -124,24 +127,32 @@ let register_visible_raw_schemas () =
        if Tool_catalog.is_visible schema.name
        then
          match tag_of_name schema.name with
-         | Some tag -> register_schema_if_missing schema tag
+         | Some tag -> register_canonical_schema schema tag
          | None ->
            invalid_arg
              ("visible tool schema has no exact dispatch owner: " ^ schema.name))
 
-(** 2. Register each descriptor's internal handler name with the schema owned
-    by that descriptor. Model aliases are canonicalised before dispatch and
-    never receive fabricated placeholder schemas. *)
+(** 2. Register each descriptor's internal handler name with its exact runtime
+    schema.  [Config.raw_all_tool_schemas] owns translated runtime shapes;
+    descriptor schemas remain the model-facing, pre-translation contract. *)
 let register_descriptor_handlers () =
   Keeper_tool_descriptor.all_descriptors ()
   |> List.iter (fun (descriptor : Keeper_tool_descriptor.t) ->
-         let schema : Masc_domain.tool_schema =
-           { name = descriptor.internal_name
-           ; description = descriptor.description
-           ; input_schema = descriptor.input_schema
-           }
+         let schema =
+           match
+             List.find_opt
+               (fun (schema : Masc_domain.tool_schema) ->
+                  String.equal schema.name descriptor.internal_name)
+               Config.raw_all_tool_schemas
+           with
+           | Some schema -> schema
+           | None ->
+             { Masc_domain.name = descriptor.internal_name
+             ; description = descriptor.description
+             ; input_schema = descriptor.input_schema
+             }
          in
-         register_schema_if_missing
+         register_canonical_schema
            schema
            (tag_of_runtime_handler descriptor.runtime_handler))
 

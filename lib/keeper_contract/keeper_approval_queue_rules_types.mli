@@ -121,7 +121,6 @@ module Decision : sig
   type t =
     | Approve
     | Reject of string
-    | Edit of Yojson.Safe.t
 end
 
 type decision = Decision.t

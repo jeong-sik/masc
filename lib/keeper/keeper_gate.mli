@@ -137,8 +137,8 @@ val retry_blocked_auto_judge :
   requested_by:string ->
   expected_input_hash:string ->
   expected_sequence:int ->
-  expected_exact_attempt:Keeper_approval_queue.exact_attempt_state ->
-  expected_disposition:Keeper_approval_queue.summary_attempt_disposition ->
+  expected_exact_attempt:Keeper_approval_queue_rules_types.exact_attempt_state ->
+  expected_disposition:Keeper_approval_queue_rules_types.summary_attempt_disposition ->
   string ->
   (unit, string) result
 (** Explicitly rearm one typed blocked Auto Judge summary. The configured Gate
@@ -183,22 +183,22 @@ module For_testing : sig
     call_id:string ->
     plan_fingerprint:string ->
     request_body_sha256:string ->
-    summary:Keeper_approval_queue.hitl_context_summary ->
+    summary:Keeper_approval_queue_rules_types.hitl_context_summary ->
     ( Keeper_approval_queue.exact_attempt_transition
     , Keeper_approval_queue.exact_attempt_error )
       result
 
   val auto_judge_entry_ready :
-    Keeper_approval_queue.pending_approval -> bool
+    Keeper_approval_queue_rules_types.pending_approval -> bool
 
   val ready_auto_judges_for_owner :
     base_path:string ->
     keeper_name:string ->
-    Keeper_approval_queue.pending_approval list ->
-    Keeper_approval_queue.pending_approval list
+    Keeper_approval_queue_rules_types.pending_approval list ->
+    Keeper_approval_queue_rules_types.pending_approval list
 
-  val claim_auto_judge : Keeper_approval_queue.pending_approval -> bool
-  val release_auto_judge : Keeper_approval_queue.pending_approval -> unit
+  val claim_auto_judge : Keeper_approval_queue_rules_types.pending_approval -> bool
+  val release_auto_judge : Keeper_approval_queue_rules_types.pending_approval -> unit
 
   type owner_drain_outcome =
     { started_id : string option
@@ -217,15 +217,15 @@ module For_testing : sig
 
   type hitl_worker_spawner =
     sw:Eio.Switch.t ->
-    entry:Keeper_approval_queue.pending_approval ->
-    on_summary:(Keeper_approval_queue.hitl_context_summary -> unit) ->
+    entry:Keeper_approval_queue_rules_types.pending_approval ->
+    on_summary:(Keeper_approval_queue_rules_types.hitl_context_summary -> unit) ->
     on_finish:(Hitl_summary_worker.finish_outcome -> unit) ->
     unit ->
     (Hitl_summary_worker.spawn_outcome, string) result
 
   val spawn_auto_judge_entry_with_worker
     :  spawn_worker:hitl_worker_spawner
-    -> Keeper_approval_queue.pending_approval
+    -> Keeper_approval_queue_rules_types.pending_approval
     -> (bool, string) result
   (** Run the production atomic claim, active-owner lifecycle, cleanup, and
       conclusive-only drain with only the worker spawner injected. *)

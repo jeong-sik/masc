@@ -141,7 +141,6 @@ and fusion_terminal =
 and hitl_resolution_decision =
   | Hitl_approved
   | Hitl_rejected of string
-  | Hitl_edited of Yojson.Safe.t
 
 and hitl_resolution = {
   approval_id : string;

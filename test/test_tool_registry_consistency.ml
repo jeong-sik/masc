@@ -99,6 +99,44 @@ let test_schema_inventory_matches_dispatch_validation_registry () =
     Config.raw_all_tool_schemas
 ;;
 
+let schema_property_names schema =
+  match Json_util.assoc_member_opt "properties" schema with
+  | Some (`Assoc properties) -> List.map fst properties
+  | _ -> []
+;;
+
+let test_translated_descriptor_keeps_distinct_runtime_schema () =
+  init ();
+  let edit_descriptor =
+    match Keeper_tool_descriptor.find_public "Edit" with
+    | Some descriptor -> descriptor
+    | None -> Alcotest.fail "Edit descriptor missing"
+  in
+  let runtime_schema =
+    match Tool_dispatch.lookup_schema "tool_edit_file" with
+    | Some schema -> schema
+    | None -> Alcotest.fail "tool_edit_file runtime schema missing"
+  in
+  let public_properties = schema_property_names edit_descriptor.input_schema in
+  let runtime_properties = schema_property_names runtime_schema in
+  Alcotest.(check bool)
+    "Edit public schema owns file_path"
+    true
+    (List.mem "file_path" public_properties);
+  Alcotest.(check bool)
+    "Edit public schema does not expose runtime path"
+    false
+    (List.mem "path" public_properties);
+  Alcotest.(check bool)
+    "tool_edit_file runtime schema owns translated path"
+    true
+    (List.mem "path" runtime_properties);
+  Alcotest.(check bool)
+    "tool_edit_file runtime schema does not reuse public file_path"
+    false
+    (List.mem "file_path" runtime_properties)
+;;
+
 let test_workspace_schemas_route_to_state () =
   init ();
   Tool_schemas_workspace.schemas
@@ -260,6 +298,10 @@ let () =
             "schema inventory matches dispatch validation registry"
             `Quick
             test_schema_inventory_matches_dispatch_validation_registry
+        ; test_case
+            "translated descriptors keep distinct runtime schemas"
+            `Quick
+            test_translated_descriptor_keeps_distinct_runtime_schema
         ] )
     ; ( "workspace_tools"
       , [ test_case "workspace schemas route to Mod_state" `Quick

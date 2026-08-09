@@ -925,10 +925,9 @@ let run_keeper_invocation_turn_admitted_inner
    ([Keeper_unified_turn.run_keeper_cycle]); this gives the chat lane that
    lifecycle instead of adding a second projection beside it.
 
-   Placed on the admitted body, which is the single point all three chat entry
-   paths ([handle_keeper_invocation], [handle_keeper_msg_if_free], and the
-   [on_admitted] arm) funnel through, and which by construction runs while the
-   turn slot is held.
+   Placed on the admitted body, which is the single point both chat entry
+   paths ([handle_keeper_invocation] and the [on_admitted] arm) funnel through,
+   and which by construction runs while the turn slot is held.
 
    [mark_turn_finished] is idempotent and runs on both the normal and the
    exceptional exit. Its own failure must not replace the turn's result or
@@ -1118,34 +1117,3 @@ let handle_keeper_delegate ?event_bus ctx request =
     ~request
     ctx
 ;;
-
-let handle_keeper_msg_if_free
-      ?on_text_delta
-      ?on_event
-      ?event_bus
-      ?continuation_channel
-      ctx
-      direct_message
-  =
-  let event_bus =
-    match event_bus with
-    | Some _ -> event_bus
-    | None -> Event_bus_slots.get_keeper ()
-  in
-  let request =
-    Keeper_invocation_contract.direct_message_request direct_message
-  in
-  let name = Keeper_invocation_contract.target_name request in
-  Keeper_turn_admission.run_chat_if_free
-    ~base_path:ctx.config.base_path
-    ~keeper_name:name
-    (fun () ->
-      run_keeper_invocation_turn_admitted
-        ?on_text_delta
-        ?on_event
-        ?event_bus
-        ?continuation_channel
-        ~surface:Direct_message
-        ~request
-        ~direct_message
-        ctx)

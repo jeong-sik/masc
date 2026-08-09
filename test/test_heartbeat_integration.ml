@@ -170,26 +170,6 @@ let seed_keeper_sandbox_profile ~base_dir name =
     (Filename.concat keepers_dir (name ^ ".toml"))
     "[keeper]\nsandbox_profile = \"local\"\n"
 
-let configure_keeper_chat_persistence ~base_path =
-  let report = Masc.Keeper_chat_queue.configure_persistence ~base_path in
-  match report.load_errors with
-  | [] -> ()
-  | errors ->
-    let describe (keeper_name, (error : Masc.Keeper_chat_queue.snapshot_load_error)) =
-      let owner =
-        match keeper_name with
-        | Some name -> name
-        | None -> "<global>"
-      in
-      Printf.sprintf
-        "%s:%s:%s"
-        owner
-        (Masc.Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind)
-        error.message
-    in
-    Alcotest.failf
-      "keeper chat persistence fixture failed: %s"
-      (String.concat "; " (List.map describe errors))
 let dashboard_purge_cleanup requested_name
     (meta : Keeper_meta_contract.keeper_meta)
     : Shutdown_types.cleanup_intent
@@ -2338,7 +2318,6 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
   let base_dir = temp_dir "shutdown-prepare-join" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
       Memory_lane.For_testing.reset ();
       R.For_testing.clear ();
@@ -2454,7 +2433,6 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
   let base_dir = temp_dir "shutdown-prepare-not-started" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
@@ -2506,7 +2484,6 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
   let base_dir = temp_dir "shutdown-prepare-rollback" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
@@ -2566,7 +2543,6 @@ let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
   let base_dir = temp_dir "shutdown-dormant-cancel-rollback" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
@@ -2691,7 +2667,6 @@ let test_keeper_shutdown_finalizes_idle_operation () =
   Fun.protect
     ~finally:(fun () ->
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
-      Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
       Approval_queue.For_testing.reset_runtime_state ();
       R.For_testing.clear ();

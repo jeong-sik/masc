@@ -31,66 +31,9 @@ module Request_id = struct
   let equal = String.equal
 end
 
-module Receipt_id = struct
-  type t = string
-
-  let prefix = "chatq_"
-  let rng = Random.State.make_self_init ()
-  let rng_mutex = Stdlib.Mutex.create ()
-
-  let generate () =
-    let uuid =
-      Stdlib.Mutex.protect rng_mutex (fun () -> Uuidm.v4_gen rng ())
-    in
-    prefix ^ Uuidm.to_string uuid
-  ;;
-
-  let of_request_id request_id = Request_id.to_string request_id
-
-  let of_string value =
-    let prefix_length = String.length prefix in
-    if
-      String.length value > prefix_length
-      && String.equal (String.sub value 0 prefix_length) prefix
-    then
-      let uuid =
-        String.sub value prefix_length (String.length value - prefix_length)
-      in
-      (match Uuidm.of_string uuid with
-       | Some _ -> Ok value
-       | None -> Error "chat queue receipt id must contain a UUID")
-    else
-      Request_id.of_string value
-      |> Result.map of_request_id
-  ;;
-
-  let to_string value = value
-  let equal = String.equal
-end
-
-module Receipt_ids = struct
-  type t = Receipt_id.t * Receipt_id.t list
-  type error = Empty
-
-  let singleton receipt_id = receipt_id, []
-
-  let of_list = function
-    | [] -> Error Empty
-    | first :: rest -> Ok (first, rest)
-  ;;
-
-  let error_to_string = function
-    | Empty -> "queue delivery identity requires at least one receipt id"
-  ;;
-
-  let to_list (first, rest) = first :: rest
-end
-
 type delivery_key =
   | Operation of Request_id.t
-  | Direct_request of Request_id.t
-  | Async_request of Request_id.t
-  | Queue_receipts of Receipt_ids.t
+  | Fusion_run of Request_id.t
 
 type transcript_slot =
   | Accepted_user
@@ -137,24 +80,10 @@ let delivery_key_to_yojson = function
       [ "kind", `String "operation"
       ; "operation_id", `String (Request_id.to_string operation_id)
       ]
-  | Direct_request request_id ->
+  | Fusion_run request_id ->
     `Assoc
-      [ "kind", `String "direct_request"
+      [ "kind", `String "fusion_run"
       ; "request_id", `String (Request_id.to_string request_id)
-      ]
-  | Async_request request_id ->
-    `Assoc
-      [ "kind", `String "async_request"
-      ; "request_id", `String (Request_id.to_string request_id)
-      ]
-  | Queue_receipts receipt_ids ->
-    `Assoc
-      [ "kind", `String "queue_receipts"
-      ; ( "receipt_ids"
-        , `List
-            (List.map
-               (fun receipt_id -> `String (Receipt_id.to_string receipt_id))
-               (Receipt_ids.to_list receipt_ids)) )
       ]
 ;;
 
@@ -172,55 +101,16 @@ let delivery_key_of_yojson = function
        let* operation_id = string_field "operation_id" fields in
        let* operation_id = Request_id.of_string operation_id in
        Ok (Operation operation_id)
-     | "direct_request" ->
+     | "fusion_run" ->
        let* () =
          validate_fields
-           ~context:"direct request delivery identity"
+           ~context:"Fusion run delivery identity"
            ~expected:[ "kind"; "request_id" ]
            fields
        in
        let* request_id = string_field "request_id" fields in
        let* request_id = Request_id.of_string request_id in
-       Ok (Direct_request request_id)
-     | "async_request" ->
-       let* () =
-         validate_fields
-           ~context:"async request delivery identity"
-           ~expected:[ "kind"; "request_id" ]
-           fields
-       in
-       let* request_id = string_field "request_id" fields in
-       let* request_id = Request_id.of_string request_id in
-       Ok (Async_request request_id)
-     | "queue_receipts" ->
-       let* () =
-         validate_fields
-           ~context:"queue receipt delivery identity"
-           ~expected:[ "kind"; "receipt_ids" ]
-           fields
-       in
-       let* receipt_ids = assoc_field "receipt_ids" fields in
-       let* receipt_ids =
-         match receipt_ids with
-         | `List values ->
-           List.fold_right
-             (fun value result ->
-                let* rest = result in
-                match value with
-                | `String value ->
-                  let* receipt_id = Receipt_id.of_string value in
-                  Ok (receipt_id :: rest)
-                | _ -> Error "queue receipt identity must be a string")
-             values
-             (Ok [])
-         | _ -> Error "delivery identity receipt_ids must be a list"
-       in
-       let* receipt_ids =
-         match Receipt_ids.of_list receipt_ids with
-         | Ok receipt_ids -> Ok receipt_ids
-         | Error error -> Error (Receipt_ids.error_to_string error)
-       in
-       Ok (Queue_receipts receipt_ids)
+       Ok (Fusion_run request_id)
      | _ -> Error (Printf.sprintf "unsupported delivery identity kind %S" kind))
   | _ -> Error "delivery identity must be an object"
 ;;
@@ -228,21 +118,8 @@ let delivery_key_of_yojson = function
 let delivery_key_equal left right =
   match left, right with
   | Operation left, Operation right -> Request_id.equal left right
-  | Direct_request left, Direct_request right -> Request_id.equal left right
-  | Async_request left, Async_request right -> Request_id.equal left right
-  | Queue_receipts left, Queue_receipts right ->
-    let rec equal_lists left right =
-      match left, right with
-      | [], [] -> true
-      | left :: left_rest, right :: right_rest ->
-        Receipt_id.equal left right && equal_lists left_rest right_rest
-      | [], _ :: _ | _ :: _, [] -> false
-    in
-    equal_lists (Receipt_ids.to_list left) (Receipt_ids.to_list right)
-  | Operation _, (Direct_request _ | Async_request _ | Queue_receipts _)
-  | Direct_request _, (Operation _ | Async_request _ | Queue_receipts _)
-  | Async_request _, (Operation _ | Direct_request _ | Queue_receipts _)
-  | Queue_receipts _, (Operation _ | Direct_request _ | Async_request _) -> false
+  | Fusion_run left, Fusion_run right -> Request_id.equal left right
+  | Operation _, Fusion_run _ | Fusion_run _, Operation _ -> false
 ;;
 
 let delivery_key_file_stem key =
@@ -255,9 +132,7 @@ let delivery_key_file_stem key =
   in
   match key with
   | Operation _ -> "operation-" ^ digest
-  | Direct_request _ -> "direct-" ^ digest
-  | Async_request _ -> "async-" ^ digest
-  | Queue_receipts _ -> "queue-" ^ digest
+  | Fusion_run _ -> "fusion-" ^ digest
 ;;
 
 let transcript_slot_to_yojson = function

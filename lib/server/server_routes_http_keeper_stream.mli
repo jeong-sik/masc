@@ -141,7 +141,7 @@ val handle_keeper_chat_stream :
     through the SSE stream rather than the HTTP envelope
     once the headers have flushed. *)
 
-(** {1 Turn execution (shared between HTTP handler and queue consumer)} *)
+(** {1 Owner operation turn execution} *)
 
 type queued_turn_failure_kind =
   | Turn_failed
@@ -157,7 +157,6 @@ type queued_turn_outcome =
       { kind : queued_turn_failure_kind
       ; detail : string
       }
-  | Deferred of { rejection : Keeper_turn_admission.rejection }
 
 type turn_submission =
   | Owner_operation of

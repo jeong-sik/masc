@@ -4,7 +4,6 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 module Lib = Masc
 module Auth = Auth
-module Keeper_chat_queue = Masc.Keeper_chat_queue
 module Workspace = Masc.Workspace
 module Dashboard_http_keeper = Dashboard_http_keeper
 

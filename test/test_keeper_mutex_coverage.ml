@@ -1924,7 +1924,6 @@ let test_keeper_persistence_ready_rejects_second_preparation () =
   let base_b = temp_dir "keeper-persistence-ready-b-" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf base_a;
       rm_rf base_b)
@@ -1975,7 +1974,6 @@ let test_keeper_persistence_canonical_start_token_is_affine () =
   Unix.symlink real_a alias;
   Fun.protect
     ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf parent)
     (fun () ->
@@ -2104,7 +2102,6 @@ let test_keeper_persistence_claim_is_one_shot_for_process () =
   let base_b = temp_dir "keeper-persistence-claim-b-" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf base_a;
       rm_rf base_b)

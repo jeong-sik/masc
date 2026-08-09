@@ -262,9 +262,9 @@ let test_bound_message_queues_exact_slack_ts () =
       check bool "accept completed before handoff" true !accepted_before_delivery;
       (match !observed_delivery with
        | Some
-           { source =
-               Keeper_chat_queue.Slack
-                 { channel_id; user_id; user_name; team_id; thread_ts }
+           { continuation_channel =
+               Keeper_continuation_channel.Slack
+                 { channel_id; user_id; team_id; thread_ts }
            ; surface =
                Surface_ref.Slack
                  { team_id = surface_team_id
@@ -277,7 +277,6 @@ let test_bound_message_queues_exact_slack_ts () =
            } ->
          check string "Slack delivery channel" "C123" channel_id;
          check string "Slack delivery actor" "U123" user_id;
-         check string "Slack delivery actor name" "operator" user_name;
          check (option string) "Slack delivery team" (Some "T123") team_id;
          check (option string) "Slack delivery workspace identity"
            (Some "T123") workspace_id;
@@ -285,8 +284,8 @@ let test_bound_message_queues_exact_slack_ts () =
            (Some "1710000000.123456") thread_ts;
          check string "Slack surface channel" "C123" surface_channel_id;
          check (option string) "Slack surface team" (Some "T123") surface_team_id;
-         check (option string) "Slack source message is top-level" None
-           surface_thread_ts;
+         check (option string) "Slack surface preserves reply thread"
+           (Some "1710000000.123456") surface_thread_ts;
          check (option string) "Slack conversation identity"
            (Some "slack:channel:C123") conversation_id;
          check (option string) "Slack external event identity"

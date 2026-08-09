@@ -383,10 +383,6 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0
           ~last_edited_text:""
     | Text_message_start _ -> continue ()
-    | Queue_request _
-    | Request_terminal _
-    | Queued_turn_deferred _
-    | Chat_queued _
     | Reply_details _
     | Continuation_checkpoint _
     | Agent_core_stream_connected

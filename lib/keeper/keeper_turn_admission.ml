@@ -264,10 +264,6 @@ let run_locked_with_token slot ~lane f =
        raise exn)
 ;;
 
-let run_locked slot ~lane f =
-  run_locked_with_token slot ~lane (fun _token -> f ())
-;;
-
 let waiting_count slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting)
 
 let oldest_waiting_since entries =
@@ -278,14 +274,6 @@ let oldest_waiting_since entries =
        | Some current -> Some (min current since))
     None
     entries
-;;
-
-let rejection_snapshot slot =
-  Stdlib.Mutex.protect slot.state_mu (fun () ->
-    { waiting = slot.waiting
-    ; in_flight = slot.info
-    ; shutdown_operation_id = slot.shutdown_operation_id
-    })
 ;;
 
 (* Preserve the operation that actually rejected admission even if lifecycle
@@ -360,41 +348,6 @@ let run_serialized_with_token ~base_path ~keeper_name f =
 
 let run_serialized ~base_path ~keeper_name f =
   run_serialized_with_token ~base_path ~keeper_name (fun _token -> f ())
-;;
-
-let run_chat_if_free ~base_path ~keeper_name f =
-  let slot = slot_for ~base_path ~keeper_name in
-  match peek_shutdown slot with
-  | Some operation_id ->
-    `Busy (shutdown_rejection_snapshot slot operation_id)
-  | None when waiting_count slot > 0 -> `Busy (rejection_snapshot slot)
-  | None when Eio.Mutex.try_lock slot.turn_mu ->
-    let active_receipts =
-      try Keeper_chat_queue.has_active_receipts ~keeper_name with
-      | exn ->
-        Eio.Mutex.unlock slot.turn_mu;
-        raise exn
-    in
-    (* The outer route's queue peek is only a fast path. Recheck after the
-       turn slot is acquired so a receipt committed or leased between that
-       peek and admission cannot be overtaken. The queue entry lock makes a
-       commit already in progress finish before this read returns; a commit
-       that starts after the read is ordered after this admitted turn. The
-       waiter recheck closes the equivalent increment-before-lock window for
-       [run_serialized]. Queue read errors fail closed and are surfaced by the
-       caller's durable-enqueue path. *)
-    if waiting_count slot > 0
-       || match active_receipts with Ok active -> active | Error _ -> true
-    then (
-      let rejection = rejection_snapshot slot in
-      Eio.Mutex.unlock slot.turn_mu;
-      `Busy rejection)
-    else
-      (match run_locked slot ~lane:Chat f with
-       | `Ran value -> `Ran value
-       | `Shutdown_requested operation_id ->
-         `Busy (shutdown_rejection_snapshot slot operation_id))
-  | None -> `Busy (rejection_snapshot slot)
 ;;
 
 let in_flight ~base_path ~keeper_name =

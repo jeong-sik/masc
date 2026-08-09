@@ -1,4 +1,4 @@
-(** Typed immutable identity shared by direct Keeper chat requests, queued receipts,
+(** Typed immutable identity shared by Keeper operations, Fusion runs,
     durable delivery journals, and transcript idempotency slots. *)
 
 module Request_id : sig
@@ -10,33 +10,9 @@ module Request_id : sig
   val equal : t -> t -> bool
 end
 
-module Receipt_id : sig
-  type t
-
-  val generate : unit -> t
-  val of_request_id : Request_id.t -> t
-  (** Preserve a producer-allocated exact request identity as the queue receipt.
-      No derived hash or second namespace participates in duplicate convergence. *)
-  val of_string : string -> (t, string) result
-  val to_string : t -> string
-  val equal : t -> t -> bool
-end
-
-module Receipt_ids : sig
-  type t
-  type error = Empty
-
-  val singleton : Receipt_id.t -> t
-  val of_list : Receipt_id.t list -> (t, error) result
-  val error_to_string : error -> string
-  val to_list : t -> Receipt_id.t list
-end
-
 type delivery_key =
   | Operation of Request_id.t
-  | Direct_request of Request_id.t
-  | Async_request of Request_id.t
-  | Queue_receipts of Receipt_ids.t
+  | Fusion_run of Request_id.t
 
 type transcript_slot =
   | Accepted_user

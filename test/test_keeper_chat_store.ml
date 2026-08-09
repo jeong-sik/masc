@@ -804,7 +804,7 @@ let test_identified_tool_only_history_is_not_trimmed () =
         | Error detail -> Alcotest.fail detail
       in
       let delivery_key =
-        Keeper_chat_delivery_identity.Direct_request request_id
+        Keeper_chat_delivery_identity.Operation request_id
       in
       (match
          K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
@@ -1897,7 +1897,7 @@ let test_delivery_key_round_trip_to_json_array () =
         | Error detail -> Alcotest.fail detail
       in
       let delivery_key =
-        Keeper_chat_delivery_identity.Direct_request request_id
+        Keeper_chat_delivery_identity.Operation request_id
       in
       (match
          K.append_user_message_once ~base_dir ~keeper_name ~delivery_key

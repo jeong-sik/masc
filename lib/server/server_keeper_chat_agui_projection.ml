@@ -16,12 +16,8 @@ type custom_event_name =
   | Thinking_signature_delta
   | Media_delta
   | Stream_protocol_error
-  | Queue_request
-  | Chat_queued
-  | Queued_turn_deferred
   | Continuation_checkpoint
   | External_effect_completed
-  | Request_terminal
   | Reply_details
 
 let initial =
@@ -52,103 +48,14 @@ let custom_event_name_to_string = function
   | Thinking_signature_delta -> "KEEPER_THINKING_SIGNATURE_DELTA"
   | Media_delta -> "KEEPER_MEDIA_DELTA"
   | Stream_protocol_error -> "KEEPER_STREAM_PROTOCOL_ERROR"
-  | Queue_request -> "KEEPER_QUEUE_REQUEST"
-  | Chat_queued -> "KEEPER_CHAT_QUEUED"
-  | Queued_turn_deferred -> "KEEPER_QUEUED_TURN_DEFERRED"
   | Continuation_checkpoint -> "KEEPER_CONTINUATION_CHECKPOINT"
   | External_effect_completed -> "KEEPER_EXTERNAL_EFFECT_COMPLETED"
-  | Request_terminal -> "KEEPER_REQUEST_TERMINAL"
   | Reply_details -> "KEEPER_REPLY_DETAILS"
 
 let custom ~timestamp ~redact_json state name value =
   Ag_ui.make_event ~timestamp ~thread_id:state.thread_id ~run_id:state.run_id
     ~custom_name:(Some (custom_event_name_to_string name))
     ~custom_value:(Some (redact_json value)) Ag_ui.Custom
-
-let turn_lane_to_json = function
-  | Keeper_chat_events.Autonomous_lane -> `String "autonomous"
-  | Keeper_chat_events.Chat_lane -> `String "chat"
-
-let request_terminal_status_to_string = function
-  | Keeper_chat_events.Deferred -> "deferred"
-  | Keeper_chat_events.Queued -> "queued"
-  | Keeper_chat_events.Done -> "done"
-  | Keeper_chat_events.Error -> "error"
-  | Keeper_chat_events.Cancelled -> "cancelled"
-  | Keeper_chat_events.Rejected -> "rejected"
-  | Keeper_chat_events.Acceptance_uncertain -> "acceptance_uncertain"
-
-let request_terminal_status_ok = function
-  | Keeper_chat_events.Deferred
-  | Keeper_chat_events.Queued
-  | Keeper_chat_events.Done
-  | Keeper_chat_events.Acceptance_uncertain -> true
-  | Keeper_chat_events.Error
-  | Keeper_chat_events.Cancelled
-  | Keeper_chat_events.Rejected -> false
-
-let optional_string_json = function
-  | None -> `Null
-  | Some value -> `String value
-
-let optional_in_flight_fields = function
-  | Some { Keeper_chat_events.lane; started_at } ->
-      [ "in_flight_lane", turn_lane_to_json lane
-      ; "in_flight_started_at", `Float started_at
-      ]
-  | None -> []
-
-let queue_request_to_json (event : Keeper_chat_events.queue_request) =
-  `Assoc
-    [ "request_id", `String event.request_id
-    ; "destination_type", `String "keeper"
-    ; "destination_id", `String event.destination_id
-    ; "channel", `String event.channel
-    ; "actor_id", optional_string_json event.actor_id
-    ; "status", `String "queued"
-    ; "modalities", `List (List.map (fun value -> `String value) event.modalities)
-    ; "transport", `String "sse"
-    ; ( "metadata"
-      , `Assoc
-          (List.map
-             (fun (key, value) -> key, `String value)
-             event.metadata) )
-    ]
-
-let request_terminal_to_json ~redact_text
-    (event : Keeper_chat_events.request_terminal) =
-  `Assoc
-    ([ "keeper_name", `String event.keeper_name
-     ; "status", `String (request_terminal_status_to_string event.status)
-     ; "ok", `Bool (request_terminal_status_ok event.status)
-     ]
-     @ json_opt "request_id"
-         (Option.map (fun value -> `String value) event.request_id)
-     @ json_opt "message"
-         (Option.map (fun value -> `String (redact_text value)) event.message))
-
-let queued_turn_deferred_to_json
-    (event : Keeper_chat_events.queued_turn_deferred) =
-  `Assoc
-    ([ "waiting", `Int event.waiting
-     ; "shutdown_operation_id", optional_string_json event.shutdown_operation_id
-     ]
-     @ optional_in_flight_fields event.in_flight)
-
-let chat_queued_to_json (event : Keeper_chat_events.chat_queued) =
-  `Assoc
-    ([ "keeper_name", `String event.keeper_name
-     ; "status", `String "queued"
-     ; "queue", `String "keeper_chat_queue"
-     ; "pending_count", `Int event.pending_count
-     ; "inflight_count", `Int event.inflight_count
-     ; "recovery_required_count", `Int event.recovery_required_count
-     ; "chat_waiting", `Bool event.chat_waiting
-     ; "receipt_id", `String event.receipt_id
-     ; "queue_revision", `String (Int64.to_string event.queue_revision)
-     ; "shutdown_operation_id", optional_string_json event.shutdown_operation_id
-     ]
-     @ optional_in_flight_fields event.in_flight)
 
 let reply_details_to_json ~redact_text
     (event : Keeper_chat_events.reply_details) =
@@ -260,18 +167,6 @@ let project ~timestamp ~redact_text ~redact_json state event =
   | Agent_core_stream_protocol_error error ->
       state, Some (custom ~timestamp ~redact_json state Stream_protocol_error
                      (stream_protocol_error_to_json error))
-  | Queue_request event ->
-      state, Some (custom ~timestamp ~redact_json state Queue_request
-                     (queue_request_to_json event))
-  | Request_terminal event ->
-      state, Some (custom ~timestamp ~redact_json state Request_terminal
-                     (request_terminal_to_json ~redact_text event))
-  | Queued_turn_deferred event ->
-      state, Some (custom ~timestamp ~redact_json state Queued_turn_deferred
-                     (queued_turn_deferred_to_json event))
-  | Chat_queued event ->
-      state, Some (custom ~timestamp ~redact_json state Chat_queued
-                     (chat_queued_to_json event))
   | Reply_details event ->
       state, Some (custom ~timestamp ~redact_json state Reply_details
                      (reply_details_to_json ~redact_text event))

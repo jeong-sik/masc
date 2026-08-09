@@ -38,58 +38,6 @@ type stream_protocol_error = {
   raw_bytes : int option;
 }
 
-type turn_lane =
-  | Autonomous_lane
-  | Chat_lane
-
-type in_flight =
-  { lane : turn_lane
-  ; started_at : float
-  }
-
-type queue_request =
-  { request_id : string
-  ; destination_id : string
-  ; channel : string
-  ; actor_id : string option
-  ; modalities : string list
-  ; metadata : (string * string) list
-  }
-
-type request_terminal_status =
-  | Deferred
-  | Queued
-  | Done
-  | Error
-  | Cancelled
-  | Rejected
-  | Acceptance_uncertain
-
-type request_terminal =
-  { request_id : string option
-  ; keeper_name : string
-  ; status : request_terminal_status
-  ; message : string option
-  }
-
-type queued_turn_deferred =
-  { waiting : int
-  ; in_flight : in_flight option
-  ; shutdown_operation_id : string option
-  }
-
-type chat_queued =
-  { keeper_name : string
-  ; pending_count : int
-  ; inflight_count : int
-  ; recovery_required_count : int
-  ; chat_waiting : bool
-  ; receipt_id : string
-  ; queue_revision : int64
-  ; shutdown_operation_id : string option
-  ; in_flight : in_flight option
-  }
-
 type reply_details =
   { reply : string
   ; turn_outcome : Keeper_turn_outcome.t
@@ -112,10 +60,6 @@ type keeper_chat_event =
           text message. *)
   | Run_finished of { run_id : string }
   | Event_error of { message : string }
-  | Queue_request of queue_request
-  | Request_terminal of request_terminal
-  | Queued_turn_deferred of queued_turn_deferred
-  | Chat_queued of chat_queued
   | Reply_details of reply_details
   | Continuation_checkpoint of continuation_checkpoint
   | Agent_core_stream_connected

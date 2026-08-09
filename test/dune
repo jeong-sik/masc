@@ -913,9 +913,6 @@
 (tests
  (names
   test_keeper_turn_interrupt
-  test_keeper_chat_consumer_delivery
-  test_keeper_chat_consumer_dispatch
-  test_keeper_consumer_wake_wiring
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage
@@ -1055,9 +1052,6 @@
   test_board_moderation)
  (modules
   test_keeper_turn_interrupt
-  test_keeper_chat_consumer_delivery
-  test_keeper_chat_consumer_dispatch
-  test_keeper_consumer_wake_wiring
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage
@@ -1817,8 +1811,6 @@
 
 (include stanzas/test_keeper_context_observation_projection.inc)
 
-(include stanzas/test_keeper_chat_coalescing.inc)
-
 (include stanzas/test_keeper_turn_admission.inc)
 (include stanzas/test_keeper_owner.inc)
 (include stanzas/test_keeper_chat_operation_http.inc)
@@ -2473,8 +2465,6 @@
 
 (include stanzas/test_fs_compat_publication_reconciliation.inc)
 (include stanzas/test_eio_resource_scope.inc)
-
-(include stanzas/test_keeper_chat_admission_contention.inc)
 
 (include stanzas/test_dashboard_continuity_briefs.inc)
 

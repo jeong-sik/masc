@@ -206,25 +206,6 @@ val run_serialized_with_token
     runs at the same FIFO admission boundary as [run_serialized]; claiming the
     durable operation and reading its latest input must happen inside it. *)
 
-val run_chat_if_free
-  :  base_path:string
-  -> keeper_name:string
-  -> (unit -> 'a)
-  -> [ `Ran of 'a | `Busy of rejection ]
-(** Run [f] holding the chat lane only if the keeper slot can be acquired
-    immediately. Unlike [run_serialized], this never parks the caller behind an
-    in-flight turn. Dashboard direct-stream callers use this to preserve live
-    streaming for idle keepers while atomically routing busy keepers to the
-    durable chat queue. Existing parked chat waiters have priority: when
-    [chat_waiting] is true this returns [`Busy] without attempting the lock.
-    [Busy.shutdown_operation_id] distinguishes lifecycle fencing from
-    ordinary turn contention.
-
-    After acquiring the turn slot it rechecks both parked waiters and active
-    durable receipts. This post-lock check is the direct-admission
-    linearization point: a receipt committed or leased after an outer route
-    peek cannot be overtaken, and queue read errors fail closed as [`Busy]. *)
-
 val in_flight
   :  base_path:string
   -> keeper_name:string

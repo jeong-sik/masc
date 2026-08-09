@@ -165,18 +165,5 @@ val handle_keeper_delegate :
   tool_result
 (** Run a typed delegated invocation through the same serialized Keeper lane. *)
 
-val handle_keeper_msg_if_free :
-  ?on_text_delta:(string -> unit) ->
-  ?on_event:(Agent_core.Types.sse_event -> unit) ->
-  ?event_bus:Agent_core.Event_bus.t ->
-  ?continuation_channel:Keeper_continuation_channel.t ->
-  _ Keeper_types_profile.context ->
-  Keeper_invocation_contract.direct_message ->
-  [ `Ran of tool_result | `Busy of Keeper_turn_admission.rejection ]
-(** Non-blocking chat entrypoint for direct dashboard streaming. It runs the
-    same admitted turn body as [handle_keeper_msg] only when the keeper slot is
-    immediately available; otherwise it returns [`Busy] without parking behind
-    an in-flight turn. *)
-
 (** Stop a running keeper agent. *)
 val handle_keeper_down : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

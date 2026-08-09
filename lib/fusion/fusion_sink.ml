@@ -362,7 +362,7 @@ let wake_keeper_on_fusion_completion
 let delivery_key_of_run_id run_id =
   Keeper_chat_delivery_identity.Request_id.of_string run_id
   |> Result.map (fun request_id ->
-    Keeper_chat_delivery_identity.Async_request request_id)
+    Keeper_chat_delivery_identity.Fusion_run request_id)
   |> Result.map_error (fun detail ->
     Printf.sprintf "invalid Fusion run delivery identity: %s" detail)
 ;;

@@ -18,10 +18,6 @@ let board_attention_quarantine_requeue_tool_name =
   operator_tool_name Operator_name.Operator_board_attention_quarantine_requeue
 ;;
 
-let chat_recovery_tool_name =
-  operator_tool_name Operator_name.Operator_chat_recovery_resolve
-;;
-
 let task_recovery_tool_name =
   operator_tool_name Operator_name.Operator_task_recovery_resolve
 ;;
@@ -134,94 +130,6 @@ let digest_schema ~remote =
               ] );
         ];
   }
-
-let chat_recovery_decision_schema =
-  `Assoc
-    [ ( "oneOf"
-      , `List
-          [ `Assoc
-              [ "type", `String "object"
-              ; "additionalProperties", `Bool false
-              ; ( "properties"
-                , `Assoc
-                    [ ( "kind"
-                      , `Assoc
-                          [ "type", `String "string"
-                          ; "enum", `List [ `String "requeue_unconfirmed" ]
-                          ] )
-                    ] )
-              ; "required", `List [ `String "kind" ]
-              ]
-          ; `Assoc
-              [ "type", `String "object"
-              ; "additionalProperties", `Bool false
-              ; ( "properties"
-                , `Assoc
-                    [ ( "kind"
-                      , `Assoc
-                          [ "type", `String "string"
-                          ; "enum", `List [ `String "cancel_unconfirmed" ]
-                          ] )
-                    ; "detail", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-                    ; ( "outcome_ref"
-                      , `Assoc
-                          [ ( "oneOf"
-                            , `List
-                                [ `Assoc
-                                    [ "type", `String "string"
-                                    ; "minLength", `Int 1
-                                    ]
-                                ; `Assoc [ "type", `String "null" ]
-                                ] )
-                          ] )
-                    ] )
-              ; ( "required"
-                , `List
-                    [ `String "kind"; `String "detail"; `String "outcome_ref" ] )
-              ]
-          ] )
-    ]
-;;
-
-let chat_recovery_schema =
-  { name = chat_recovery_tool_name
-  ; description =
-      "Resolve exactly one crash-ambiguous Keeper chat receipt. The observed receipt_id, canonical revision string, and lease_id must all match; this tool never auto-redelivers."
-  ; input_schema =
-      `Assoc
-        [ "type", `String "object"
-        ; "additionalProperties", `Bool false
-        ; ( "properties"
-          , schema_properties
-              [ ( "schema"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "enum"
-                      , `List
-                          [ `String Keeper_chat_recovery_command.tool_command_schema ] )
-                    ] )
-              ; "keeper_name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; "receipt_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; ( "expected_revision"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; "pattern", `String "^(0|[1-9][0-9]*)$"
-                    ] )
-              ; "lease_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; "decision", chat_recovery_decision_schema
-              ] )
-        ; ( "required"
-          , `List
-              [ `String "schema"
-              ; `String "keeper_name"
-              ; `String "receipt_id"
-              ; `String "expected_revision"
-              ; `String "lease_id"
-              ; `String "decision"
-              ] )
-        ]
-  }
-;;
 
 let board_attention_quarantine_requeue_schema =
   { name = board_attention_quarantine_requeue_tool_name
@@ -364,22 +272,6 @@ let confirm_schema =
         ];
   }
 
-let recovery_mutation_failure_class = function
-  | Keeper_chat_queue.Invalid_input _
-  | Keeper_chat_queue.Receipt_already_terminal _
-  | Keeper_chat_queue.Receipt_not_recovery_required _
-  | Keeper_chat_queue.Receipt_not_pending _
-  | Keeper_chat_queue.Pending_revision_mismatch _
-  | Keeper_chat_queue.Recovery_revision_mismatch _
-  | Keeper_chat_queue.Recovery_lease_mismatch _ ->
-    Tool_result.Workflow_rejection
-  | Keeper_chat_queue.Persistence_not_configured
-  | Keeper_chat_queue.Snapshot_unavailable _
-  | Keeper_chat_queue.Revision_exhausted
-  | Keeper_chat_queue.Persist_failed _ ->
-    Tool_result.Runtime_failure
-;;
-
 let board_attention_quarantine_failure_class = function
   | Keeper_board_attention_quarantine_command.Candidate_state_conflict _
   | Keeper_board_attention_quarantine_command.Partition_state_conflict _ ->
@@ -438,49 +330,6 @@ let board_attention_quarantine_requeue_result
        Tool_result.make_err
          ~tool_name
          ~class_:(board_attention_quarantine_failure_class error)
-         ~start_time
-         ~data
-         (Yojson.Safe.to_string data))
-;;
-
-let chat_recovery_result ~tool_name ~start_time (ctx : _ context) args =
-  match Keeper_chat_recovery_command.parse_tool_command args with
-  | Error error ->
-    let data = Keeper_chat_recovery_command.input_error_to_json error in
-    Tool_result.make_err
-      ~tool_name
-      ~class_:Tool_result.Workflow_rejection
-      ~start_time
-      ~data
-      (Yojson.Safe.to_string data)
-  | Ok command ->
-    let result =
-      Keeper_chat_recovery_command.execute ~now:(Time_compat.now ()) command
-    in
-    let audit =
-      Keeper_chat_recovery_command.audit
-        ctx.config
-        ~actor:ctx.agent_name
-        command
-        ~outcome:
-          (match result with
-           | Ok _ -> Audit_log.Success
-           | Error error ->
-             Audit_log.Failure (Keeper_chat_queue.mutation_error_to_string error))
-      |> Keeper_chat_recovery_command.audit_json
-    in
-    (match result with
-     | Ok report ->
-       Tool_result.make_ok
-         ~tool_name
-         ~start_time
-         ~data:(Keeper_chat_recovery_command.success_json ~audit command report)
-         ()
-     | Error error ->
-       let data = Keeper_chat_recovery_command.mutation_error_json ~audit error in
-       Tool_result.make_err
-         ~tool_name
-         ~class_:(recovery_mutation_failure_class error)
          ~start_time
          ~data
          (Yojson.Safe.to_string data))
@@ -678,8 +527,6 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
            ~start_time:start
            ctx
            args)
-  | tool_name when String.equal tool_name chat_recovery_tool_name ->
-      Some (chat_recovery_result ~tool_name ~start_time:start ctx args)
   | tool_name when String.equal tool_name task_recovery_tool_name ->
       Some (task_recovery_result ~tool_name ~start_time:start ctx args)
   | "masc_operator_confirm" ->
@@ -700,7 +547,6 @@ let schemas : tool_schema list =
     digest_schema ~remote:false;
     action_schema ~remote:false;
     board_attention_quarantine_requeue_schema;
-    chat_recovery_schema;
     task_recovery_schema;
     confirm_schema;
     judgment_write_schema;
@@ -712,7 +558,6 @@ let remote_schemas : tool_schema list =
     digest_schema ~remote:true;
     action_schema ~remote:true;
     board_attention_quarantine_requeue_schema;
-    chat_recovery_schema;
     task_recovery_schema;
     confirm_schema;
   ]
@@ -732,7 +577,6 @@ let tool_spec_read_only =
 (* Tools with explicit catalog metadata that must be preserved. *)
 let operator_profile_only_tools =
   [ board_attention_quarantine_requeue_tool_name
-  ; chat_recovery_tool_name
   ; task_recovery_tool_name
   ]
 ;;

@@ -250,8 +250,14 @@ let test_durable_accept_precedes_delivery_handoff () =
   check bool "accept completed before handoff" true !accepted_before_delivery;
   (match !observed_delivery with
    | Some
-       { source =
-           Keeper_chat_queue.Discord { channel_id; user_id }
+       { continuation_channel =
+           Keeper_continuation_channel.Discord
+             { guild_id = continuation_guild_id
+             ; channel_id
+             ; parent_channel_id = continuation_parent_channel_id
+             ; thread_id = continuation_thread_id
+             ; user_id
+             }
        ; surface =
            Surface_ref.Discord
              { guild_id; channel_id = surface_channel_id; parent_channel_id
@@ -262,6 +268,12 @@ let test_durable_accept_precedes_delivery_handoff () =
        } ->
      check string "Discord delivery channel" "C123" channel_id;
      check string "Discord delivery actor" "U123" user_id;
+     check (option string) "Discord continuation guild"
+       (Some "G123") continuation_guild_id;
+     check (option string) "Discord continuation parent"
+       None continuation_parent_channel_id;
+     check (option string) "Discord continuation thread"
+       None continuation_thread_id;
      check string "Discord surface channel" "C123" surface_channel_id;
      check (option string) "Discord surface guild" (Some "G123") guild_id;
      check (option string) "Discord surface parent" None parent_channel_id;

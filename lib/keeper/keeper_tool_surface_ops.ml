@@ -838,51 +838,6 @@ let complete_keeper_msg_stream_result result =
       (annotate_keeper_json ~runtime_class:"keeper" (Tool_result.data result))
   end
 
-let handle_keeper_msg_stream
-      ?on_text_delta
-      ?on_event
-      ?continuation_channel
-      ?on_admission_rejected
-      ?on_admitted
-      ctx
-      message
-  : tool_result
-  =
-  let run name =
-    match
-      Keeper_invocation_contract.direct_message_with_keeper_name message name
-    with
-    | Error error ->
-      tool_result_error (Keeper_invocation_contract.request_error_to_string error)
-    | Ok message ->
-      (* Stream turns are synchronous today, but still pin the bus visible at the
-         public surface boundary so later refactors cannot reintroduce a nested
-         fallback lookup in the turn body. *)
-      let event_bus = Event_bus_slots.get_keeper () in
-      let result =
-        Turn.handle_keeper_msg
-          ?on_text_delta
-          ?on_event
-          ?event_bus
-          ?continuation_channel
-          ?on_admission_rejected
-          ?on_admitted
-          ctx
-          message
-      in
-      complete_keeper_msg_stream_result result
-  in
-  match resolve_keeper_name ctx message with
-  | Ok name -> run name
-  | Error err ->
-    let raw_name = Keeper_invocation_contract.direct_message_target_name message in
-    (* Preserve typed admission truth after lifecycle teardown removes the
-       metadata row: a shutdown-fenced queued receipt must return to Pending,
-       not become a terminal lookup failure. An open lane still runs the
-       admitted body and surfaces its authoritative metadata error. *)
-    ignore err;
-    run raw_name
-
 let handle_keeper_msg_stream_admitted
       ~admission_token
       ?on_text_delta
@@ -911,46 +866,6 @@ let handle_keeper_msg_stream_admitted
       message
     |> complete_keeper_msg_stream_result
 
-let handle_keeper_msg_stream_if_free
-      ?on_text_delta
-      ?on_event
-      ?continuation_channel
-      ctx
-      message
-  =
-  match resolve_keeper_name ctx message with
-  | Error err ->
-    let raw_name = Keeper_invocation_contract.direct_message_target_name message in
-    (* A connector message already accepted for a live/raw Keeper identity
-       must remain queueable even if metadata resolution is temporarily
-       unavailable. Run the resolution error itself through the same
-       post-lock admission boundary: a held slot, parked waiter, active
-       receipt, or queue read error returns Busy; only an atomically free
-       lane returns the original metadata error. *)
-    Keeper_turn_admission.run_chat_if_free
-      ~base_path:ctx.config.base_path
-      ~keeper_name:raw_name
-      (fun () -> tool_result_error err)
-  | Ok name ->
-    (match Keeper_invocation_contract.direct_message_with_keeper_name message name with
-     | Error error ->
-       `Ran
-         (tool_result_error
-            (Keeper_invocation_contract.request_error_to_string error))
-     | Ok message ->
-       let event_bus = Event_bus_slots.get_keeper () in
-       (match
-          Turn.handle_keeper_msg_if_free
-            ?on_text_delta
-            ?on_event
-            ?event_bus
-            ?continuation_channel
-            ctx
-            message
-        with
-        | `Busy rejection -> `Busy rejection
-        | `Ran result ->
-          `Ran (complete_keeper_msg_stream_result result)))
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in

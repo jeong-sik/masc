@@ -19,13 +19,6 @@ let check name cond =
     Printf.printf "  ✗ %s\n%!" name)
 ;;
 
-let temp_dir prefix =
-  let path = Filename.temp_file prefix "" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
-  path
-;;
-
 let rec remove_tree path =
   if Sys.file_exists path
   then if Sys.is_directory path
@@ -47,52 +40,8 @@ let base_path = "/tmp/masc_test_turn_admission"
 let keeper_name = "admission-keeper"
 let reset () =
   Keeper_turn_admission.For_testing.reset ();
-  Keeper_chat_queue.For_testing.reset ();
   remove_tree base_path;
-  (* [Keeper_fs] never creates a filesystem root, only descendants
-     (durable-directory ownership guard), so enqueue after this wipe fails
-     with [Missing_root] unless the fixture recreates its own root. *)
-  ensure_dir base_path;
-  ignore
-    (Keeper_chat_queue.configure_persistence ~base_path
-      : Keeper_chat_queue.configure_report)
-
-let queued_message : Keeper_chat_queue.queued_message =
-  { content = "typed queue boundary"
-  ; user_blocks = []
-  ; attachments = []
-  ; timestamp = 1.0
-  ; source = Keeper_chat_queue.Dashboard { thread_id = "keeper:admission" }
-  ; user_row_origin = Keeper_chat_store.Needs_append
-  }
-;;
-
-let claim_pending_head () =
-  match Keeper_chat_queue.observe_pending ~keeper_name with
-  | Ok (Some observation) ->
-    (match Keeper_chat_queue.lease_observed observation with
-     | `Leased lease -> lease
-     | `Stale _ -> failwith "pending observation became stale before claim"
-     | `Error error ->
-       failwith (Keeper_chat_queue.mutation_error_to_string error))
-  | Ok None -> failwith "expected an observable pending receipt"
-  | Error error ->
-    failwith (Keeper_chat_queue.mutation_error_to_string error)
-;;
-
-let test_autonomous_admits_when_chat_persistence_is_not_configured () =
-  Keeper_turn_admission.For_testing.reset ();
-  Keeper_chat_queue.For_testing.reset ();
-  Printf.printf
-    "Test 0a: unconfigured Chat persistence does not close autonomous admission\n%!";
-  (match Keeper_chat_queue.enqueue ~keeper_name queued_message with
-   | Error Keeper_chat_queue.Persistence_not_configured ->
-     check "Chat enqueue keeps its typed persistence error" true
-   | Error _ | Ok _ -> check "Chat enqueue keeps its typed persistence error" false);
-  match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> "ran") with
-  | `Ran "ran" -> check "independent autonomous lane remains open" true
-  | `Ran _ | `Busy _ -> check "independent autonomous lane remains open" false
-;;
+  ensure_dir base_path
 
 let test_selected_authority_rejection_has_zero_provider_dispatch () =
   reset ();
@@ -152,36 +101,6 @@ let test_admin_mutation_is_busy_during_admitted_turn () =
     check "admin mutation is deferred before its body" false
 ;;
 
-let test_global_chat_load_error_does_not_close_autonomous_admission () =
-  let error_base_path = temp_dir "masc_test_turn_admission_load_error_" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_turn_admission.For_testing.reset ();
-      Keeper_chat_queue.For_testing.reset ();
-      remove_tree error_base_path)
-    (fun () ->
-      Keeper_turn_admission.For_testing.reset ();
-      Keeper_chat_queue.For_testing.reset ();
-      let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path:error_base_path in
-      ensure_dir (Filename.dirname keepers_dir);
-      Out_channel.with_open_text keepers_dir (fun channel ->
-        output_string channel "not a directory");
-      let report = Keeper_chat_queue.configure_persistence ~base_path:error_base_path in
-      check "registry discovery failure is explicit" (report.load_errors <> []);
-      (match Keeper_chat_queue.enqueue ~keeper_name queued_message with
-       | Error (Keeper_chat_queue.Snapshot_unavailable _) ->
-         check "Chat enqueue retains its typed snapshot error" true
-       | Error _ | Ok _ -> check "Chat enqueue retains its typed snapshot error" false);
-      match
-        Keeper_turn_admission.run_if_free
-          ~base_path:error_base_path
-          ~keeper_name
-          (fun () -> "ran")
-      with
-      | `Ran "ran" -> check "global Chat read error does not block autonomy" true
-      | `Ran _ | `Busy _ -> check "global Chat read error does not block autonomy" false)
-;;
-
 let test_free_slot_admits () =
   reset ();
   Printf.printf "Test 1: free slot admits both lanes\n%!";
@@ -231,95 +150,6 @@ let test_dispatchability_transitions_are_observed () =
        && String.equal rollback_keeper keeper_name
      | _ -> false);
   Keeper_turn_admission.set_slot_transition_observer None
-;;
-
-let test_chat_if_free_never_parks () =
-  reset ();
-  Printf.printf "Test 1b: run_chat_if_free runs only on an immediately free slot\n%!";
-  (match Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () -> "ok") with
-   | `Ran "ok" -> check "run_chat_if_free admits on a free slot" true
-   | `Ran _ | `Busy _ -> check "run_chat_if_free admits on a free slot" false);
-  Eio.Switch.run (fun sw ->
-    let started, set_started = Eio.Promise.create () in
-    let release, set_release = Eio.Promise.create () in
-    Eio.Fiber.fork ~sw (fun () ->
-      ignore
-        (Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () ->
-           Eio.Promise.resolve set_started ();
-           Eio.Promise.await release)));
-    Eio.Promise.await started;
-    (match Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () -> ()) with
-     | `Busy { Keeper_turn_admission.in_flight = Some { lane = Chat; _ }; waiting = 0 } ->
-       check "run_chat_if_free reports busy in-flight chat without parking" true
-     | `Busy _ ->
-       check "run_chat_if_free reports busy in-flight chat without parking" false
-     | `Ran () -> check "run_chat_if_free must not run while slot is held" false);
-    let parked_ran = ref false in
-    Eio.Fiber.fork ~sw (fun () ->
-      ignore
-        (Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () ->
-           parked_ran := true)));
-    check
-      "parked waiter is observable before if-free attempt"
-      (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name);
-    (match Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () -> ()) with
-     | `Busy { Keeper_turn_admission.waiting; _ } ->
-       check "run_chat_if_free yields to an already parked chat" (waiting > 0)
-     | `Ran () -> check "run_chat_if_free must not overtake a parked chat" false);
-    check "parked chat did not run before holder release" (not !parked_ran);
-    Eio.Promise.resolve set_release ())
-;;
-
-let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
-  reset ();
-  Printf.printf
-    "Test 1c: run_chat_if_free rechecks durable receipts after a stale outer peek\n%!";
-  check
-    "outer precheck initially observes no active receipt"
-    (Keeper_chat_queue.has_active_receipts ~keeper_name = Ok false);
-  let message : Keeper_chat_queue.queued_message =
-    { content = "queued first"
-    ; user_blocks = []
-    ; attachments = []
-    ; timestamp = Time_compat.now ()
-    ; source = Keeper_chat_queue.Dashboard { thread_id = "keeper:admission" }
-    ; user_row_origin = Keeper_chat_store.Needs_append
-    }
-  in
-  let receipt = Keeper_chat_queue.enqueue ~keeper_name message in
-  check "receipt commits after the stale outer peek" (Result.is_ok receipt);
-  let direct_ran = ref false in
-  (match
-     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
-       direct_ran := true)
-   with
-   | `Busy { Keeper_turn_admission.waiting = 0; in_flight = None } ->
-     check "pending receipt blocks direct admission" true
-   | `Busy _ | `Ran () -> check "pending receipt blocks direct admission" false);
-  check "pending receipt is not overtaken" (not !direct_ran);
-  let lease = claim_pending_head () in
-  (match
-     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
-       direct_ran := true)
-   with
-   | `Busy _ -> check "inflight receipt blocks direct admission" true
-   | `Ran () -> check "inflight receipt blocks direct admission" false);
-  check "inflight receipt is not overtaken" (not !direct_ran);
-  (match
-     Keeper_chat_queue.finalize ~keeper_name ~lease_id:lease.lease_id
-       ~outcome:
-         (Keeper_chat_queue.Mark_delivered
-            { completed_at = Time_compat.now (); outcome_ref = Some "turn#1" })
-   with
-   | `Finalized _ -> ()
-   | `Unknown_lease | `Error _ -> failwith "expected the lease to finalize");
-  (match
-     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () ->
-       direct_ran := true)
-   with
-   | `Ran () -> check "terminal receipt no longer blocks direct admission" true
-   | `Busy _ -> check "terminal receipt no longer blocks direct admission" false);
-  check "direct turn runs only after receipt terminalizes" !direct_ran
 ;;
 
 let test_autonomous_skips_in_flight_chat () =
@@ -606,43 +436,6 @@ let test_idle_loop_yields_to_parked_chat () =
   check "parked chat admitted after the autonomous turn yielded" !chat_ran
 ;;
 
-let test_pending_receipt_is_not_an_admission_authority () =
-  reset ();
-  Printf.printf
-    "Test 10: a durable pending receipt is not a second admission authority\n%!";
-  (match Keeper_chat_queue.enqueue ~keeper_name queued_message with
-   | Ok _ -> ()
-   | Error error ->
-     check
-       ("enqueue succeeds: " ^ Keeper_chat_queue.mutation_error_to_string error)
-       false);
-  let queued = Keeper_chat_queue.snapshot ~keeper_name in
-  check "queue depth is 1 after enqueue" (List.length queued.pending = 1);
-  check
-    "a pending receipt alone is not a parked chat"
-    (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name));
-  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> 7) with
-   | `Ran 7 -> check "the mutex is the only autonomous admission authority" true
-   | `Ran _ | `Busy _ ->
-     check "a pending receipt must not fence a free turn mutex" false);
-  let lease = claim_pending_head () in
-  (match
-     Keeper_chat_queue.finalize
-       ~keeper_name
-       ~lease_id:lease.lease_id
-       ~outcome:
-         (Keeper_chat_queue.Mark_delivered
-            { completed_at = 3.0; outcome_ref = None })
-   with
-   | `Finalized _ -> ()
-   | `Unknown_lease | `Error _ ->
-     check "cleanup finalize commits the terminal receipt" false);
-  let settled = Keeper_chat_queue.snapshot ~keeper_name in
-  check
-    "queue has no active receipts after finalization"
-    (settled.pending = [] && settled.inflight = [])
-;;
-
 let test_shutdown_reservation_fences_and_rolls_back () =
   reset ();
   Printf.printf "Test 11: shutdown reservation fences every turn lane\n%!";
@@ -674,15 +467,6 @@ let test_shutdown_reservation_fences_and_rolls_back () =
        (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
    | `Rejected { shutdown_operation_id = None; _ } | `Ran () ->
      check "chat lane cannot cross shutdown fence" false);
-  (match
-     Keeper_turn_admission.run_chat_if_free ~base_path ~keeper_name (fun () -> ())
-   with
-   | `Busy { shutdown_operation_id = Some reserved; _ } ->
-     check
-       "if-free chat preserves the typed shutdown owner"
-       (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
-   | `Busy { shutdown_operation_id = None; _ } | `Ran () ->
-     check "if-free chat cannot lose the shutdown owner" false);
   (match
      Keeper_turn_admission.rollback_shutdown
        ~base_path
@@ -778,14 +562,10 @@ let test_unknown_rollback_does_not_create_admission_slot () =
 
 let () =
   Eio_main.run @@ fun _env ->
-  test_autonomous_admits_when_chat_persistence_is_not_configured ();
   test_selected_authority_rejection_has_zero_provider_dispatch ();
   test_admin_mutation_is_busy_during_admitted_turn ();
-  test_global_chat_load_error_does_not_close_autonomous_admission ();
   test_free_slot_admits ();
   test_dispatchability_transitions_are_observed ();
-  test_chat_if_free_never_parks ();
-  test_chat_if_free_rechecks_durable_queue_after_stale_peek ();
   test_autonomous_skips_in_flight_chat ();
   test_chat_turns_serialize ();
   test_distinct_keepers_do_not_block_each_other ();
@@ -794,7 +574,6 @@ let () =
   test_cancelled_waiter_leaves_queue ();
   test_autonomous_yields_to_parked_chat ();
   test_idle_loop_yields_to_parked_chat ();
-  test_pending_receipt_is_not_an_admission_authority ();
   test_shutdown_reservation_fences_and_rolls_back ();
   test_shutdown_reservation_restores_durable_owner ();
   test_unknown_rollback_does_not_create_admission_slot ();

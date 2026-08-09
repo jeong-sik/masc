@@ -175,11 +175,6 @@ let turn_instructions_for_request payload =
 
 let direct_message_of_request payload = payload.direct_message
 
-let modalities_for_request payload =
-  match Keeper_multimodal_input.modalities payload.user_blocks with
-  | [] -> [ "text" ]
-  | labels -> labels
-
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -597,8 +592,7 @@ let execute_keeper_stream_tool_streaming
       ~clock
       ?auth_token:_
       ?on_event
-      ?on_admitted
-      ?admission_token
+      ~admission_token
       state
       ~agent_name
       ~message
@@ -608,7 +602,6 @@ let execute_keeper_stream_tool_streaming
   let workspace_scope = Mcp_server.workspace_scope state in
   let config = workspace_scope.config in
   let start_time = Eio.Time.now clock in
-  let admission_rejection = ref None in
   let body, disposition =
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
@@ -624,25 +617,13 @@ let execute_keeper_stream_tool_streaming
         }
       in
       let dispatched =
-        match admission_token with
-        | None ->
-          Keeper_tool_surface.dispatch_keeper_msg_stream
-            ~on_text_delta
-            ?on_event
-            ~on_admission_rejected:(fun rejection ->
-              admission_rejection := Some rejection)
-            ?on_admitted
-            keeper_ctx
-            ~continuation_channel
-            ~message
-        | Some admission_token ->
-          Keeper_tool_surface.dispatch_keeper_msg_stream_admitted
-            ~admission_token
-            ~on_text_delta
-            ?on_event
-            keeper_ctx
-            ~continuation_channel
-            ~message
+        Keeper_tool_surface.dispatch_keeper_msg_stream_admitted
+          ~admission_token
+          ~on_text_delta
+          ?on_event
+          keeper_ctx
+          ~continuation_channel
+          ~message
       in
       match dispatched with
       | Some result ->
@@ -663,10 +644,7 @@ let execute_keeper_stream_tool_streaming
         ( Printf.sprintf "Internal error: %s" err
         , Tool_result.Failed Tool_result.Runtime_failure )
   in
-  match !admission_rejection with
-  | Some rejection -> `Deferred rejection
-  | None ->
-      let success = keeper_stream_success disposition in
+  let success = keeper_stream_success disposition in
       let end_time = Eio.Time.now clock in
       let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
       let error_detail =
@@ -877,8 +855,6 @@ type keeper_stream_terminal_status =
   | Stream_reconciliation_required
 
 type keeper_request_terminal_status =
-  | Request_deferred
-  | Request_queued
   | Request_stream of keeper_stream_terminal_status
 
 let keeper_stream_terminal_status_to_string = function
@@ -890,14 +866,10 @@ let keeper_stream_terminal_status_to_string = function
 ;;
 
 let keeper_request_terminal_status_to_string = function
-  | Request_deferred -> "deferred"
-  | Request_queued -> "queued"
   | Request_stream status -> keeper_stream_terminal_status_to_string status
 ;;
 
 let keeper_request_terminal_status_is_routine = function
-  | Request_deferred
-  | Request_queued
   | Request_stream (Stream_done | Stream_cancelled | Stream_reconciliation_required) ->
     true
   | Request_stream (Stream_error | Stream_rejected) -> false
@@ -906,7 +878,6 @@ let keeper_request_terminal_status_is_routine = function
 type keeper_stream_worker_event =
   | Stream_event of Agent_core.Types.sse_event
   | Stream_client_disconnected
-  | Stream_queued_turn_deferred of Keeper_turn_admission.rejection
   | Stream_terminal of
       { status : keeper_stream_terminal_status
       ; body : string
@@ -914,7 +885,6 @@ type keeper_stream_worker_event =
       }
 
 and keeper_stream_completion =
-  | Completion_queued_turn_deferred of Keeper_turn_admission.rejection
   | Completion_terminal of
       { status : keeper_stream_terminal_status
       ; body : string
@@ -935,7 +905,6 @@ and queued_turn_outcome =
       { kind : queued_turn_failure_kind
       ; detail : string
       }
-  | Deferred of { rejection : Keeper_turn_admission.rejection }
 
 type turn_submission =
   | Owner_operation of
@@ -949,53 +918,6 @@ type turn_submission =
       ; workspace_id : string option
       ; extra_mentions : Keeper_identity.Keeper_id.t list
       }
-
-let admission_rejection_to_json
-    ({ Keeper_turn_admission.waiting
-     ; in_flight
-     ; shutdown_operation_id
-     } : Keeper_turn_admission.rejection) =
-  let in_flight_fields =
-    match in_flight with
-    | None -> []
-    | Some { Keeper_turn_admission.lane; started_at } ->
-        [ ("in_flight_lane", `String (Keeper_turn_admission.lane_to_string lane))
-        ; ("in_flight_started_at", `Float started_at)
-        ]
-  in
-  `Assoc
-    ([ ("waiting", `Int waiting)
-     ; ( "shutdown_operation_id"
-       , match shutdown_operation_id with
-         | None -> `Null
-         | Some operation_id ->
-           `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
-     ]
-     @ in_flight_fields)
-
-let queued_turn_deferred_event
-    ({ Keeper_turn_admission.waiting
-     ; in_flight
-     ; shutdown_operation_id
-     } : Keeper_turn_admission.rejection) =
-  let in_flight =
-    match in_flight with
-    | None -> None
-    | Some { Keeper_turn_admission.lane; started_at } ->
-        let lane =
-          match lane with
-          | Keeper_turn_admission.Autonomous -> Keeper_chat_events.Autonomous_lane
-          | Keeper_turn_admission.Chat -> Keeper_chat_events.Chat_lane
-        in
-        Some { Keeper_chat_events.lane; started_at }
-  in
-  Keeper_chat_events.Queued_turn_deferred
-    { waiting
-    ; in_flight
-    ; shutdown_operation_id =
-        Option.map Keeper_shutdown_types.Operation_id.to_string
-          shutdown_operation_id
-    }
 
 let queued_turn_failure_kind_to_string = function
   | Turn_failed -> "turn_failed"
@@ -1124,8 +1046,6 @@ let process_single_turn ~user_row_origin ~submission
   in
   let push_worker_event event =
     match event with
-    | Stream_queued_turn_deferred rejection ->
-        stage_completion (Completion_queued_turn_deferred rejection)
     | Stream_terminal { status; body; queued_outcome } ->
         stage_completion
           (Completion_terminal { status; body; queued_outcome })
@@ -1345,10 +1265,9 @@ let process_single_turn ~user_row_origin ~submission
             ~start_time
             detail
         in
-        let on_admitted = None in
         let admission_token =
           match submission with
-          | Owner_operation { admission_token; _ } -> Some admission_token
+          | Owner_operation { admission_token; _ } -> admission_token
         in
         let payload_identity =
           let direct_target =
@@ -1366,18 +1285,16 @@ let process_single_turn ~user_row_origin ~submission
           | Error _ as error -> error
           | Ok () ->
            (try
-            match
+            let result =
               execute_keeper_stream_tool_streaming
                 ~sw:request_sw
                 ~clock
                 ?auth_token
                 state ~agent_name ~message:direct_message ~on_event
                 ~continuation_channel ~on_text_delta:(fun _ -> ())
-                ?admission_token
-                ?on_admitted
-            with
-            | `Ran result -> Ok (`Ran result)
-            | `Deferred rejection -> Ok (`Deferred rejection)
+                ~admission_token
+            in
+            match result with `Ran result -> Ok (`Ran result)
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
@@ -1394,17 +1311,6 @@ let process_single_turn ~user_row_origin ~submission
               Error (Printexc.to_string exn))
         in
         match dispatch_result with
-        | Ok (`Deferred rejection) ->
-            push_worker_event (Stream_queued_turn_deferred rejection);
-            Tool_result.make_ok
-              ~tool_name:"masc_keeper_msg"
-              ~start_time
-              ~data:
-                (`Assoc
-                   [ ("status", `String "deferred")
-                   ; ("admission", admission_rejection_to_json rejection)
-                   ])
-              ()
         | Ok (`Ran (true, body)) ->
           (match canonical_reply_payload_of_body ~redact_text body with
            | Error error ->
@@ -1584,18 +1490,6 @@ let process_single_turn ~user_row_origin ~submission
                         ~tool_name:"masc_keeper_msg"
                         ~start_time
                         detail
-                  | Some (Deferred { rejection }) ->
-                      push_worker_event (Stream_queued_turn_deferred rejection);
-                      Tool_result.make_ok
-                        ~tool_name:"masc_keeper_msg"
-                        ~start_time
-                        ~data:
-                          (`Assoc
-                             [ ("status", `String "deferred")
-                             ; ( "admission"
-                               , admission_rejection_to_json rejection )
-                             ])
-                        ()
                   | Some (Delivered _) | None ->
                       push_worker_event
                         (Stream_terminal
@@ -1670,7 +1564,7 @@ let process_single_turn ~user_row_origin ~submission
            ; queued_outcome = Some (Failed { kind = Turn_failed; detail })
            })
   in
-  let submit_result, request_id =
+  let request_id =
     match submission with
     | Owner_operation { execution_sw; operation_id; _ } ->
       (try
@@ -1687,33 +1581,28 @@ let process_single_turn ~user_row_origin ~submission
                    ; queued_outcome = Some (Failed { kind = Turn_failed; detail })
                    });
               publish_inline_completion ()));
-         ( Ok ()
-         , Some (Keeper_owner.Chat_operation.Operation_id.to_string operation_id) )
+         Some (Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn -> Error (Printexc.to_string exn), None)
-  in
-  let durably_accepted =
-    match submit_result with
-    | Ok () -> true
-    | Error body ->
-      let queued_outcome =
-        match persist_failure_reply body with
-        | Ok () -> Some (Failed { kind = Turn_failed; detail = body })
-        | Error persist_error ->
-          Some
-            (Failed
-               { kind = Transcript_persist_failed
-               ; detail = persist_error
-               })
-      in
-      publish_completion
-        (Completion_terminal
-           { status = Stream_rejected
-           ; body
-           ; queued_outcome
-           });
-      false
+       | exn ->
+         let body = Printexc.to_string exn in
+         let queued_outcome =
+           match persist_failure_reply body with
+           | Ok () -> Some (Failed { kind = Turn_failed; detail = body })
+           | Error persist_error ->
+             Some
+               (Failed
+                  { kind = Transcript_persist_failed
+                  ; detail = persist_error
+                  })
+         in
+         publish_completion
+           (Completion_terminal
+              { status = Stream_rejected
+              ; body
+              ; queued_outcome
+              });
+         None)
   in
   (match client_disconnects, request_id with
    | None, _ | _, None -> ()
@@ -1741,27 +1630,6 @@ let process_single_turn ~user_row_origin ~submission
                  payload.name request_id;
                push_worker_event Stream_client_disconnected
              end));
-  Option.iter
-    (fun request_id ->
-       Log.Keeper.info
-         "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
-         payload.name request_id
-         (if has_connector_context payload then payload.channel else "dashboard");
-       Keeper_chat_events.publish events
-         (Queue_request
-            { request_id
-            ; destination_id = payload.name
-            ; channel =
-                (if has_connector_context payload then payload.channel
-                 else "dashboard")
-            ; actor_id = Some agent_name
-            ; modalities = modalities_for_request payload
-            ; metadata =
-                [ ("projection", "keeper_chat_stream")
-                ; ("protocol", "gate_message_request")
-                ]
-            }))
-    (if durably_accepted then request_id else None);
   let publish_terminal ~status ?(message = "") () =
     let message = redact_text message in
     let status_label = keeper_request_terminal_status_to_string status in
@@ -1834,26 +1702,6 @@ let process_single_turn ~user_row_origin ~submission
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
-    | `Completion (Completion_queued_turn_deferred rejection) ->
-        let message =
-          match rejection.Keeper_turn_admission.shutdown_operation_id with
-          | Some operation_id ->
-              Printf.sprintf
-                "queued receipt remains Pending while shutdown operation %s \
-                 fences keeper admission"
-                (Keeper_shutdown_types.Operation_id.to_string operation_id)
-          | None ->
-              Printf.sprintf
-                "queued receipt remains Pending because keeper admission is \
-                 deferred with %d waiting chat requests"
-                rejection.waiting
-        in
-        publish_terminal ~status:Request_deferred ~message ();
-        Keeper_chat_events.publish events
-          (queued_turn_deferred_event rejection);
-        Keeper_chat_events.publish events Text_message_end;
-        Keeper_chat_events.publish events (Run_finished { run_id });
-        Some (Deferred { rejection })
     | `Completion
         (Completion_terminal
         { status = Stream_cancelled
@@ -2149,10 +1997,6 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                failed ~outcome_ref "Delivery_failed" detail
              | Some (Failed { kind; detail }), _ ->
                failed (queued_turn_failure_kind_to_string kind) detail
-             | Some (Deferred _), _ ->
-               failed
-                 "Admission_invariant"
-                 "Owner operation deferred after holding its admission token"
              | None, _ ->
                failed "Turn_invariant" "Owner operation returned no terminal turn outcome")))
   in

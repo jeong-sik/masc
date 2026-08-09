@@ -587,11 +587,33 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
   let base_path = temp_dir () in
   let keeper_name = "queue-exact-submit" in
   let audit_appends = ref 0 in
+  let sse_frames = ref [] in
+  let subscriber_id = "approval-submit-exact-dedupe" in
+  let pending_sse_count () =
+    List.fold_left
+      (fun count frame ->
+         match Masc.Sse.data_payload_of_frame frame with
+         | Error Masc.Sse.Missing_data_payload -> count
+         | Ok payload ->
+           let open Yojson.Safe.Util in
+           let event = Yojson.Safe.from_string payload in
+           if event |> member "type" |> to_string_option = Some "approval:pending"
+           then count + 1
+           else count)
+      0
+      !sse_frames
+  in
   Fun.protect
     ~finally:(fun () ->
+      Masc.Sse.unsubscribe_external subscriber_id;
       Keeper_approval.Audit.For_testing.reset_store ();
       cleanup_dir base_path)
     (fun () ->
+       Masc.Sse.subscribe_external
+         ~id:subscriber_id
+         ~callback:(fun (event : Masc.Sse.external_event) ->
+           sse_frames := event.Masc.Sse.ext_frame :: !sse_frames)
+         ();
        Keeper_approval.Audit.For_testing.reset_store ();
        Keeper_approval.Audit.For_testing.set_append_jsonl
          (fun _path _json -> incr audit_appends);
@@ -655,6 +677,10 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
          "exact duplicate emits no second pending audit"
          1
          !audit_appends;
+       Alcotest.(check int)
+         "exact duplicate emits no second pending SSE"
+         1
+         (pending_sse_count ());
        let open Yojson.Safe.Util in
        let persisted_entry =
          read_pending_snapshot ~base_path
@@ -679,6 +705,10 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        Alcotest.(check bool) "changed field is a different request" true
          (not (String.equal first changed));
        Alcotest.(check int) "changed request emits its own pending audit" 2 !audit_appends;
+       Alcotest.(check int)
+         "changed request emits its own pending SSE"
+         2
+         (pending_sse_count ());
        Alcotest.(check int) "first request sequence" 1 (pending_entry_exn first).sequence;
        Alcotest.(check int)
          "dedup does not consume sequence"

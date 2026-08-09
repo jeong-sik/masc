@@ -253,46 +253,61 @@ let get ~base_path ~keeper_name =
 ;;
 
 let apply_meta ?lifecycle_token ~base_path ~keeper_name command =
-  match get ~base_path ~keeper_name with
-  | Error error -> Error (Command_lookup_failed error)
-  | Ok owner ->
-    let result =
-      Keeper_lifecycle_reservation.with_key_lock
-        ~base_path
-        ~keeper_name
-        (fun () ->
-           match
-             Keeper_lifecycle_reservation.authorize
-               ?token:lifecycle_token
-               ~base_path
-               ~keeper_name
-               ()
-           with
-           | Error reservation -> Error (Command_lifecycle_reserved reservation)
-           | Ok () ->
-             (match Keeper_owner.apply_meta owner command with
-              | Error error -> Error (Command_rejected error)
-              | Ok meta -> Ok meta))
-    in
-    (match result with
-     | Ok (Some meta) ->
-       (* This derived registry projection owns no state and intentionally runs
-          after the lifecycle lock is released: its update path takes that
-          same lock.  The owner Atomic remains the routine read authority. *)
-       if Option.is_some (Keeper_registry.get ~base_path keeper_name)
-       then Keeper_registry.update_meta_from_persisted ~base_path keeper_name meta;
-       Ok (Some meta)
-     | Ok None -> Ok None
-     | Error _ as error -> error)
+  let result =
+    Keeper_lifecycle_reservation.with_key_lock
+      ~base_path
+      ~keeper_name
+      (fun () ->
+         match get ~base_path ~keeper_name with
+         | Error error -> Error (Command_lookup_failed error)
+         | Ok owner ->
+           (match
+              Keeper_lifecycle_reservation.authorize
+                ?token:lifecycle_token
+                ~base_path
+                ~keeper_name
+                ()
+            with
+            | Error reservation -> Error (Command_lifecycle_reserved reservation)
+            | Ok () ->
+              (match Keeper_owner.apply_meta owner command with
+               | Error error -> Error (Command_rejected error)
+               | Ok meta -> Ok meta)))
+  in
+  (match result with
+   | Ok (Some meta) ->
+     (* This derived registry projection owns no state and intentionally runs
+        after the lifecycle lock is released: its update path takes that
+        same lock.  The owner Atomic remains the routine read authority. *)
+     if Option.is_some (Keeper_registry.get ~base_path keeper_name)
+     then Keeper_registry.update_meta_from_persisted ~base_path keeper_name meta;
+     Ok (Some meta)
+   | Ok None -> Ok None
+   | Error _ as error -> error)
 ;;
 
 let create_meta ~base_path meta =
   match find_pool base_path with
   | Error error -> Error (Command_lookup_failed error)
   | Ok pool ->
-    (match ensure_empty_in_pool pool meta.Keeper_meta_contract.name with
-     | Error error -> Error (Command_lookup_failed error)
-     | Ok _ -> apply_meta ~base_path ~keeper_name:meta.name (Keeper_owner_reducer.Create meta))
+    Keeper_lifecycle_reservation.with_key_lock
+      ~base_path
+      ~keeper_name:meta.Keeper_meta_contract.name
+      (fun () ->
+         match
+           Keeper_lifecycle_reservation.authorize
+             ~base_path
+             ~keeper_name:meta.name
+             ()
+         with
+         | Error reservation -> Error (Command_lifecycle_reserved reservation)
+         | Ok () ->
+           (match ensure_empty_in_pool pool meta.name with
+            | Error error -> Error (Command_lookup_failed error)
+            | Ok owner ->
+              (match Keeper_owner.apply_meta owner (Keeper_owner_reducer.Create meta) with
+               | Error error -> Error (Command_rejected error)
+               | Ok committed -> Ok committed)))
 ;;
 
 let all_projections ~base_path =

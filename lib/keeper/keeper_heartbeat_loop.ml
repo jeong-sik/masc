@@ -251,7 +251,6 @@ let rec compaction_outcomes_of_cycle_outcome = function
   | Cycle.Input_required _
   | Cycle.Cancelled _
   | Cycle.Skipped _
-  | Cycle.Busy _
   | Cycle.Manual_compaction_not_applied _ ->
     []
 ;;
@@ -366,7 +365,6 @@ let run_keepalive_unified_turn
           | Cycle.Input_required _
           | Cycle.Cancelled _
           | Cycle.Skipped _
-          | Cycle.Busy _
           | Cycle.Manual_compaction_failed _
           | Cycle.Manual_compaction_not_applied _
           | Cycle.Manual_compaction_applied _ )
@@ -762,7 +760,6 @@ let run_keepalive_unified_turn
            | Cycle.Input_required _
            | Cycle.Cancelled _
            | Cycle.Skipped _
-           | Cycle.Busy _
            | Cycle.Manual_compaction_applied _
            | Cycle.Manual_compaction_failed _
            | Cycle.Manual_compaction_not_applied _ )
@@ -809,8 +806,7 @@ let run_keepalive_unified_turn
                ( Cycle.Checkpointed _
                | Cycle.Input_required _
                | Cycle.Cancelled _
-               | Cycle.Skipped _
-               | Cycle.Busy _ )
+               | Cycle.Skipped _ )
            | None ->
              ());
       (let compaction_outcomes =

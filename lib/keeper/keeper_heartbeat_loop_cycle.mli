@@ -10,10 +10,6 @@ type cycle_outcome =
       { meta : Keeper_meta_contract.keeper_meta
       ; failure : Keeper_unified_turn.turn_failure
       }
-  | Busy of
-      { meta : Keeper_meta_contract.keeper_meta
-      ; block : Keeper_turn_admission.autonomous_block
-      }
   | Manual_compaction_failed of
       { meta : Keeper_meta_contract.keeper_meta
       ; failure : Keeper_manual_compaction.failure

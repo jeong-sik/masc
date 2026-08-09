@@ -140,25 +140,6 @@ let test_compaction_rejection_tag_is_stable () =
      request_body_sha256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     (Post_turn.compaction_recovery_error_to_string error)
 
-let test_final_admission_busy_requeues_only_pre_dispatch_no_compaction () =
-  let preserves =
-    Masc.Keeper_manual_compaction.For_testing
-    .preserve_no_compaction_after_final_admission_busy
-  in
-  check
-    bool
-    "No_eligible_history remains replayable after final admission Busy"
-    false
-    (preserves Keeper_compaction_outcome.No_eligible_history);
-  check
-    bool
-    "post-dispatch exact terminal remains source-bound after final admission Busy"
-    true
-    (preserves
-       (Keeper_compaction_outcome.Exact_execution_terminal
-          (exact_terminal Keeper_compaction_outcome.Exact_execution_failed)))
-;;
-
 let make_meta
       ?(name = "post-turn-no-auto-compact")
       ?(trace_id = "trace-post-turn-no-auto-compact")
@@ -1049,9 +1030,6 @@ let () =
     "durable compaction", [
       test_case "compaction rejection tag is stable"
         `Quick test_compaction_rejection_tag_is_stable;
-      test_case
-        "final-admission Busy distinguishes pre-dispatch from exact terminal"
-        `Quick test_final_admission_busy_requeues_only_pre_dispatch_no_compaction;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case

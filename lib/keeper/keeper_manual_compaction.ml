@@ -54,7 +54,6 @@ type admitted_operation =
   [ `Applied of success
   | `No_compaction of Keeper_post_turn.no_compaction
   | `Compaction_failed of failure
-  | `Busy of Keeper_turn_admission.autonomous_block
   ]
 
 let checkpoint_ref_to_json (reference : Keeper_checkpoint_ref.t) =
@@ -358,118 +357,50 @@ let observe_manifest ~keeper_name = function
       ()
 ;;
 
-let preserve_no_compaction_after_final_admission_busy = function
-  | Keeper_compaction_outcome.Exact_execution_terminal _ -> true
-  | Keeper_compaction_outcome.Exact_lane_unconfigured
-  | Keeper_compaction_outcome.No_eligible_history
-  | Keeper_compaction_outcome.Invalid_structural_source -> false
-;;
-
-let run_admitted_with
+let run_under_admission_with
       ~append_compaction_manifest
       ~prepare_compaction
-      ~already_admitted
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
   =
-  (* Reject work that is already fenced before spending a provider call. This
-     preflight owns no lifecycle state and releases immediately. A turn can
-     still enter while planning; the final admission and source CAS close that
-     race without stranding [compaction_active]. *)
-  match
-    if already_admitted
-    then `Ran ()
-    else
-      Keeper_turn_admission.run_if_free
-        ~base_path:config.base_path
-        ~keeper_name:meta.name
-        (fun () -> ())
-  with
-  | `Busy block -> `Busy block
-  | `Ran () ->
-    let base_dir, preparation = prepare_with ~prepare_compaction ~config ~meta in
-    let final_admission () =
-      let run () =
-          match run_start_lifecycle ~config ~meta with
-          | Error failure -> Error failure
-          | Ok () ->
-            finish_preparation
-              ~config
-              ~meta
-              preparation
-      in
-      if already_admitted
-      then `Ran (run ())
-      else
-        Keeper_turn_admission.run_if_free
-          ~base_path:config.base_path
-          ~keeper_name:meta.name
-          run
-    in
-    let admitted = final_admission () in
-    (match admitted
-     with
-     | `Busy block ->
-       (match preparation with
-        | Ok prepared ->
-          `No_compaction
-            (Keeper_post_turn.no_compaction_of_prepared prepared)
-        | Error (Keeper_post_turn.No_compaction no_compaction)
-          when preserve_no_compaction_after_final_admission_busy no_compaction.reason ->
-          `No_compaction no_compaction
-        | Error _ -> `Busy block)
-     | `Ran (Error failure) ->
-       (match preparation with
-        | Ok prepared ->
-          `No_compaction
-            (Keeper_post_turn.no_compaction_of_prepared
-               ~cause:
-                 Keeper_compaction_outcome.Lifecycle_transition_failed_after_dispatch
-               prepared)
-        | Error (Keeper_post_turn.No_compaction no_compaction) ->
-          `No_compaction no_compaction
-        | Error _ -> `Compaction_failed failure)
-     | `Ran (Ok (Compacted committed)) ->
-       let manifest =
-         append_compaction_manifest
-           ~config
-           ~base_dir
-           ~meta
-           ~installation:committed.installation
-           ~lifecycle:committed.lifecycle
-           committed.recovery
-       in
-       observe_manifest ~keeper_name:meta.name manifest;
-       `Applied
-         { recovery = committed.recovery
-         ; receipt =
-           { installation = committed.installation
-           ; lifecycle = committed.lifecycle
-           ; manifest
-           ; commit_count = committed.recovery.commit_count
-           }
-         }
-     | `Ran (Ok (No_compaction no_compaction)) -> `No_compaction no_compaction)
-;;
-
-let run_admitted
-    ?before_dispatch_authority
-    ~config
-    ~meta
-    () =
-  run_admitted_with
-    ~append_compaction_manifest:append_manifest
-    ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
-      Keeper_post_turn.prepare_compaction
-        ?before_dispatch_authority
-        ~base_path
+  let base_dir, preparation = prepare_with ~prepare_compaction ~config ~meta in
+  let admitted =
+    match run_start_lifecycle ~config ~meta with
+    | Error failure -> Error failure
+    | Ok () -> finish_preparation ~config ~meta preparation
+  in
+  match admitted with
+  | Error failure ->
+    (match preparation with
+     | Ok prepared ->
+       `No_compaction
+         (Keeper_post_turn.no_compaction_of_prepared
+            ~cause:Keeper_compaction_outcome.Lifecycle_transition_failed_after_dispatch
+            prepared)
+     | Error (Keeper_post_turn.No_compaction no_compaction) ->
+       `No_compaction no_compaction
+     | Error _ -> `Compaction_failed failure)
+  | Ok (Compacted committed) ->
+    let manifest =
+      append_compaction_manifest
+        ~config
         ~base_dir
         ~meta
-        ~trigger
-        ())
-    ~already_admitted:false
-    ~config
-    ~meta
+        ~installation:committed.installation
+        ~lifecycle:committed.lifecycle
+        committed.recovery
+    in
+    observe_manifest ~keeper_name:meta.name manifest;
+    `Applied
+      { recovery = committed.recovery
+      ; receipt =
+          { installation = committed.installation
+          ; lifecycle = committed.lifecycle
+          ; manifest
+          ; commit_count = committed.recovery.commit_count
+          }
+      }
+  | Ok (No_compaction no_compaction) -> `No_compaction no_compaction
 ;;
 
 let run_under_admission
@@ -477,7 +408,7 @@ let run_under_admission
     ~config
     ~meta
     () =
-  run_admitted_with
+  run_under_admission_with
     ~append_compaction_manifest:append_manifest
     ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
       Keeper_post_turn.prepare_compaction
@@ -487,7 +418,6 @@ let run_under_admission
         ~meta
         ~trigger
         ())
-    ~already_admitted:true
     ~config
     ~meta
 ;;
@@ -524,10 +454,6 @@ let failure_to_string = function
 ;;
 
 module For_testing = struct
-  let preserve_no_compaction_after_final_admission_busy =
-    preserve_no_compaction_after_final_admission_busy
-  ;;
-
   let checkpoint_installation_auxiliary_to_json =
     checkpoint_installation_auxiliary_to_json
   ;;

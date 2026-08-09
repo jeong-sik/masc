@@ -270,7 +270,27 @@ let audit_today_path base_dir =
 ;;
 
 let store_create_probe = Atomic.make (fun ~base_path:_ -> ())
-let append_jsonl = Atomic.make Fs_compat.append_jsonl
+let append_jsonl_durable path json =
+  let suffix = Yojson.Safe.to_string json ^ "\n" in
+  match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
+  | Private_file_succeeded () -> ()
+  | Private_file_succeeded_with_cleanup_failure
+      { value = (); cleanup_failure } ->
+    raise
+      (Sys_error
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+  | Private_file_failed error ->
+    raise (Sys_error (Fs_compat.private_jsonl_append_error_to_string error))
+  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    raise
+      (Sys_error
+         (Printf.sprintf
+            "%s; descriptor settlement failed: %s"
+            (Fs_compat.private_jsonl_append_error_to_string error)
+            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
+;;
+
+let append_jsonl = Atomic.make append_jsonl_durable
 
 let get_audit_store ~base_path () =
   let report_failure exn =
@@ -767,7 +787,7 @@ module For_testing = struct
   let reset_store () =
     Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores);
     Atomic.set store_create_probe (fun ~base_path:_ -> ());
-    Atomic.set append_jsonl Fs_compat.append_jsonl
+    Atomic.set append_jsonl append_jsonl_durable
   ;;
 
   let set_store_create_probe probe = Atomic.set store_create_probe probe

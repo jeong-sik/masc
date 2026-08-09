@@ -45,7 +45,12 @@ function response(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
     },
     recent_resolved_state: { state: 'ready' },
     approval_rules: [],
-  } as DashboardGateResponse
+    approval_rules_state: { state: 'ready' },
+    hitl: {
+      gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+      judge_lane: { status: 'available', lane_id: 'keeper_gate_judge', slots: ['keeper_gate_judge'] },
+    },
+  }
 }
 
 async function loadGate() {
@@ -132,6 +137,11 @@ describe('Gate resource (stale-while-revalidate)', () => {
         error: 'Gate 새로고침 실패',
       },
       approval_rules: [],
+      approval_rules_state: {
+        state: 'unavailable',
+        error: 'Gate 새로고침 실패',
+      },
+      hitl: null,
     })
     expect(signals.gateError.value).toContain('Gate 새로고침 실패')
     expect(signals.gateLoading.value).toBe(false)

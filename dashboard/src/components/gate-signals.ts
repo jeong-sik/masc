@@ -23,6 +23,8 @@ export function gateObservationErrorSnapshot(operatorDetail: string): DashboardG
       error: operatorDetail,
     },
     approval_rules: [],
+    approval_rules_state: { state: 'unavailable', error: operatorDetail },
+    hitl: null,
   }
 }
 

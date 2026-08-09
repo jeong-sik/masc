@@ -676,8 +676,8 @@ function ApAside({
                   </div>
                 `
             : null}
-          ${gateMode?.state === 'invalid' || gateMode?.state === 'unavailable' || gateMode?.read_error
-            ? html`<div class="ap-env-warn mono">Gate mode ${gateMode.state ?? 'invalid'}: ${gateMode.read_error ?? '상태 확인 실패'}</div>`
+          ${gateMode?.state === 'invalid' || gateMode?.state === 'unavailable'
+            ? html`<div class="ap-env-warn mono">Gate mode ${gateMode.state}: ${gateMode.read_error}</div>`
             : null}
         </div>
       </section>

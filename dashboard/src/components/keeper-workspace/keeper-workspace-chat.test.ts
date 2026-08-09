@@ -45,7 +45,12 @@ function gateResponse(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
     },
     recent_resolved_state: { state: 'ready' },
     approval_rules: [],
-  } as DashboardGateResponse
+    approval_rules_state: { state: 'ready' },
+    hitl: {
+      gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+      judge_lane: { status: 'available', lane_id: 'keeper_gate_judge', slots: ['keeper_gate_judge'] },
+    },
+  }
 }
 
 async function loadChat() {

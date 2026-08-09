@@ -1,4 +1,4 @@
-type phase =
+type phase = Runtime_official_client_mcp.phase =
   | Awaiting_initialize
   | Awaiting_initialized
   | Ready
@@ -12,17 +12,16 @@ type snapshot =
   }
 
 type mutable_state =
-  { mutable phase : phase
-  ; mutable authenticated_requests : int
+  { mutable authenticated_requests : int
   ; mutable rejected_requests : int
   ; mutable tool_calls : int
-  ; mutable negotiated_protocol_version : string option
   }
 
 type t =
   { endpoint : string
   ; server_name : string
   ; authorization : string
+  ; session : Runtime_official_client_mcp.session
   ; state : mutable_state
   ; state_mutex : Eio.Mutex.t
   ; dispatch_mutex : Eio.Mutex.t
@@ -51,13 +50,15 @@ let fresh_capabilities secure_random =
 ;;
 
 let snapshot t =
-  Eio.Mutex.use_ro t.state_mutex (fun () ->
-    { phase = t.state.phase
-    ; authenticated_requests = t.state.authenticated_requests
-    ; rejected_requests = t.state.rejected_requests
-    ; tool_calls = t.state.tool_calls
-    ; negotiated_protocol_version = t.state.negotiated_protocol_version
-    })
+  Eio.Mutex.use_ro t.dispatch_mutex (fun () ->
+    let session = Runtime_official_client_mcp.snapshot_session t.session in
+    Eio.Mutex.use_ro t.state_mutex (fun () ->
+      { phase = session.phase
+      ; authenticated_requests = t.state.authenticated_requests
+      ; rejected_requests = t.state.rejected_requests
+      ; tool_calls = t.state.tool_calls
+      ; negotiated_protocol_version = session.negotiated_protocol_version
+      }))
 ;;
 
 let endpoint t = t.endpoint
@@ -110,77 +111,23 @@ let protocol_error_response id code message =
     ]
 ;;
 
-let initialize_protocol_version = function
-  | Some (`Assoc fields) ->
-    (match List.assoc_opt "result" fields with
-     | Some (`Assoc result_fields) ->
-       (match List.assoc_opt "protocolVersion" result_fields with
-        | Some (`String value) -> Some value
-        | _ -> None)
-     | _ -> None)
-  | _ -> None
-;;
-
-let phase_error phase method_ =
-  let expected =
-    match phase with
-    | Awaiting_initialize -> "initialize"
-    | Awaiting_initialized -> "notifications/initialized"
-    | Ready -> "tools/list or tools/call"
-  in
-  Printf.sprintf "MCP method %S is not valid before %s" method_ expected
-;;
-
-let phase_admits phase method_ request_id =
-  match method_ with
-  | "server/discover" | "initialize" ->
-    phase = Awaiting_initialize && Option.is_some request_id
-  | "notifications/initialized" ->
-    phase = Awaiting_initialized && Option.is_none request_id
-  | "tools/list" | "tools/call" -> phase = Ready && Option.is_some request_id
-  | _ -> true
-;;
-
-let request_id_json = function
-  | Some id -> id
-  | None -> `Null
-;;
-
-let dispatch t ~tool_specs ~call_tool raw_message =
+let dispatch t ~tool_specs ~call_tool message =
   Eio.Mutex.use_rw ~protect:true t.dispatch_mutex (fun () ->
-    match Runtime_official_client_mcp.decode_message raw_message with
-    | Error error -> Error (`Dispatch error)
-    | Ok message ->
-      let method_ = Runtime_official_client_mcp.message_method message in
-      let request_id = Runtime_official_client_mcp.message_request_id message in
-      let phase = Eio.Mutex.use_ro t.state_mutex (fun () -> t.state.phase) in
-      if not (phase_admits phase method_ request_id)
+    match
+      Runtime_official_client_mcp.handle_message
+        ~session:t.session
+        ~server_name:t.server_name
+        ~tool_specs
+        ~call_tool
+        message
+    with
+    | Error error -> Error error
+    | Ok result ->
+      if result.tool_called
       then
-        Error
-          (`Protocol
-            (request_id_json request_id, phase_error phase method_))
-      else
-        (match
-           Runtime_official_client_mcp.dispatch_message
-             ~server_name:t.server_name
-             ~tool_specs
-             ~call_tool
-             message
-         with
-         | Error error -> Error (`Dispatch error)
-         | Ok result ->
-           Eio.Mutex.use_rw ~protect:true t.state_mutex (fun () ->
-             (match t.state.phase, method_, result.response with
-              | Awaiting_initialize, "initialize", Some _ ->
-                t.state.phase <- Awaiting_initialized;
-                t.state.negotiated_protocol_version <-
-                  initialize_protocol_version result.response
-              | Awaiting_initialized, "notifications/initialized", None ->
-                t.state.phase <- Ready
-              | _ -> ());
-             if result.tool_called
-             then t.state.tool_calls <- t.state.tool_calls + 1);
-           Ok result))
+        Eio.Mutex.use_rw ~protect:true t.state_mutex (fun () ->
+          t.state.tool_calls <- t.state.tool_calls + 1);
+      Ok result)
 ;;
 
 let update_state t f =
@@ -202,16 +149,53 @@ let authorization_matches t request =
   | [] | _ :: _ :: _ -> false
 ;;
 
+let origin_is_admitted request =
+  match Cohttp.Header.get_multi (Cohttp.Request.headers request) "origin" with
+  | [] -> true
+  | _ :: _ -> false
+;;
+
+let accepts_streamable_mcp request =
+  match Cohttp.Header.get_multi (Cohttp.Request.headers request) "accept" with
+  | [] -> false
+  | values ->
+    Mcp_transport_protocol.Http_negotiation.accepts_streamable_mcp
+      (Some (String.concat "," values))
+;;
+
 let content_type_is_json request =
   match Cohttp.Header.get_multi (Cohttp.Request.headers request) "content-type" with
   | [ value ] ->
-    let media_type =
-      match String.index_opt value ';' with
-      | None -> value
-      | Some index -> String.sub value 0 index
-    in
-    String.equal (String.trim media_type |> String.lowercase_ascii) "application/json"
+    Mcp_transport_protocol.Http_negotiation.is_json_content_type (Some value)
   | [] | _ :: _ :: _ -> false
+;;
+
+let protocol_version_header t request =
+  let values =
+    Cohttp.Header.get_multi
+      (Cohttp.Request.headers request)
+      "mcp-protocol-version"
+  in
+  let session = Runtime_official_client_mcp.snapshot_session t.session in
+  match session.phase, session.negotiated_protocol_version, values with
+  | Awaiting_initialize, None, [] -> Ok ()
+  | Awaiting_initialize, None, [ value ] ->
+    Mcp_transport_protocol.validate_protocol_version value
+    |> Result.map (fun _ -> ())
+  | (Awaiting_initialized | Ready), Some expected, [ value ]
+    when String.equal expected value -> Ok ()
+  | (Awaiting_initialized | Ready), Some _, [] ->
+    Error "missing MCP-Protocol-Version header"
+  | (Awaiting_initialized | Ready), Some expected, [ value ] ->
+    Error
+      (Printf.sprintf
+         "MCP-Protocol-Version mismatch: expected %S, got %S"
+         expected
+         value)
+  | _, _, _ :: _ :: _ -> Error "duplicate MCP-Protocol-Version header"
+  | Awaiting_initialize, Some _, _
+  | (Awaiting_initialized | Ready), None, _ ->
+    Error "MCP session has no negotiated protocol version"
 ;;
 
 let content_length request =
@@ -225,58 +209,77 @@ let content_length request =
 ;;
 
 let handle_message t ~tool_specs ~call_tool body =
-  match dispatch t ~tool_specs ~call_tool body with
-  | Error (`Protocol (id, detail)) ->
+  match
+    try Ok (Yojson.Safe.from_string body) with
+    | Yojson.Json_error detail -> Error detail
+    | Stack_overflow -> Error "JSON nesting exceeds parser limits"
+    | Failure detail -> Error detail
+  with
+  | Error detail ->
     reject t;
-    respond_json `Conflict (protocol_error_response id (-32002) detail)
-  | Error (`Dispatch { kind; stage; detail }) ->
-    reject t;
-    let code =
-      match kind with
-      | Runtime_official_client_mcp.Json_parse -> -32700
-      | Runtime_official_client_mcp.Protocol -> -32600
-    in
     respond_json
       `Bad_request
-      (protocol_error_response `Null code (stage ^ ": " ^ detail))
-  | Ok { response = None; _ } -> respond `Accepted ""
-  | Ok { response = Some response; _ } ->
-    let protocol_version = (snapshot t).negotiated_protocol_version in
-    respond_json ?protocol_version `OK response
+      (protocol_error_response `Null (-32700) ("MCP message: " ^ detail))
+  | Ok message ->
+    (match dispatch t ~tool_specs ~call_tool message with
+     | Error { stage; detail } ->
+       reject t;
+       respond_json
+         `Bad_request
+         (protocol_error_response `Null (-32600) (stage ^ ": " ^ detail))
+     | Ok { response = None; _ } -> respond `Accepted ""
+     | Ok { response = Some response; _ } ->
+       let protocol_version = (snapshot t).negotiated_protocol_version in
+       respond_json ?protocol_version `OK response)
 ;;
 
 let handle_post t ~tool_specs ~call_tool request body =
-  if not (content_type_is_json request)
+  if not (accepts_streamable_mcp request)
+  then (
+    reject t;
+    respond
+      `Not_acceptable
+      "Accept must include application/json and text/event-stream")
+  else if not (content_type_is_json request)
   then (
     reject t;
     respond `Unsupported_media_type "Content-Type must be application/json")
   else
-    match content_length request with
+    match protocol_version_header t request with
     | Error detail ->
       reject t;
       respond `Bad_request detail
-    | Ok (Some length) when length > max_body_bytes ->
-      reject t;
-      respond `Payload_too_large "MCP request body exceeds 1048576 bytes"
-    | Ok _ ->
-      (try
-         let body =
-           Eio.Buf_read.(of_flow ~max_size:max_body_bytes body |> take_all)
-         in
-         handle_message t ~tool_specs ~call_tool body
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | Eio.Buf_read.Buffer_limit_exceeded ->
+    | Ok () ->
+      (match content_length request with
+       | Error detail ->
+         reject t;
+         respond `Bad_request detail
+       | Ok (Some length) when length > max_body_bytes ->
          reject t;
          respond `Payload_too_large "MCP request body exceeds 1048576 bytes"
-       | _ ->
-         reject t;
-         respond `Bad_request "failed to read MCP request body")
+       | Ok _ ->
+         (try
+            let body =
+              Eio.Buf_read.(of_flow ~max_size:max_body_bytes body |> take_all)
+            in
+            handle_message t ~tool_specs ~call_tool body
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | Eio.Buf_read.Buffer_limit_exceeded ->
+            reject t;
+            respond `Payload_too_large "MCP request body exceeds 1048576 bytes"
+          | _ ->
+            reject t;
+            respond `Bad_request "failed to read MCP request body"))
 ;;
 
 let request_handler t ~path ~tool_specs ~call_tool _client_addr request body =
   if not (String.equal (Uri.path (Cohttp.Request.uri request)) path)
   then respond `Not_found "Not found"
+  else if not (origin_is_admitted request)
+  then (
+    reject t;
+    respond `Forbidden "Origin is not admitted on the native-client endpoint")
   else if not (authorization_matches t request)
   then (
     reject t;
@@ -289,9 +292,15 @@ let request_handler t ~path ~tool_specs ~call_tool _client_addr request body =
     record_authenticated_request t;
     match Cohttp.Request.meth request with
     | `POST -> handle_post t ~tool_specs ~call_tool request body
-    | `GET -> respond `Method_not_allowed "SSE is not enabled for this endpoint"
-    | `DELETE -> respond `No_content ""
-    | _ -> respond `Method_not_allowed "Method not allowed")
+    | `GET ->
+      reject t;
+      respond `Method_not_allowed "SSE is not enabled for this endpoint"
+    | `DELETE ->
+      reject t;
+      respond `Method_not_allowed "Session deletion is not enabled"
+    | _ ->
+      reject t;
+      respond `Method_not_allowed "Method not allowed")
 ;;
 
 let start ~sw ~net ~secure_random ~server_name ~tool_specs ~call_tool () =
@@ -311,17 +320,16 @@ let start ~sw ~net ~secure_random ~server_name ~tool_specs ~call_tool () =
     | `Unix _ -> assert false
   in
   let state =
-    { phase = Awaiting_initialize
-    ; authenticated_requests = 0
+    { authenticated_requests = 0
     ; rejected_requests = 0
     ; tool_calls = 0
-    ; negotiated_protocol_version = None
     }
   in
   let t =
     { endpoint = Printf.sprintf "http://127.0.0.1:%d%s" port path
     ; server_name
     ; authorization
+    ; session = Runtime_official_client_mcp.create_session ()
     ; state
     ; state_mutex = Eio.Mutex.create ()
     ; dispatch_mutex = Eio.Mutex.create ()

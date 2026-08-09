@@ -18,8 +18,18 @@ type phase =
   | Awaiting_initialized
   | Ready
 
+type session_snapshot =
+  { phase : phase
+  ; negotiated_protocol_version : string option
+  }
+
+type lifecycle =
+  | Needs_initialize
+  | Needs_initialized of string
+  | Session_ready of string
+
 type session =
-  { phase : phase Atomic.t
+  { lifecycle : lifecycle Atomic.t
   }
 
 type message =
@@ -31,7 +41,25 @@ type message =
 let ( let* ) = Result.bind
 let error stage detail = Error { stage; detail }
 
-let create_session () = { phase = Atomic.make Awaiting_initialize }
+let create_session () = { lifecycle = Atomic.make Needs_initialize }
+
+let phase_of_lifecycle = function
+  | Needs_initialize -> Awaiting_initialize
+  | Needs_initialized _ -> Awaiting_initialized
+  | Session_ready _ -> Ready
+;;
+
+let protocol_version_of_lifecycle = function
+  | Needs_initialize -> None
+  | Needs_initialized version | Session_ready version -> Some version
+;;
+
+let snapshot_session session =
+  let lifecycle = Atomic.get session.lifecycle in
+  { phase = phase_of_lifecycle lifecycle
+  ; negotiated_protocol_version = protocol_version_of_lifecycle lifecycle
+  }
+;;
 
 let phase_to_string = function
   | Awaiting_initialize -> "awaiting_initialize"
@@ -40,7 +68,7 @@ let phase_to_string = function
 ;;
 
 let require_phase session ~stage expected =
-  let actual = Atomic.get session.phase in
+  let actual = Atomic.get session.lifecycle |> phase_of_lifecycle in
   if actual = expected
   then Ok ()
   else
@@ -52,17 +80,56 @@ let require_phase session ~stage expected =
          (phase_to_string expected))
 ;;
 
-let transition_phase session ~stage ~expected ~next =
-  if Atomic.compare_and_set session.phase expected next
-  then Ok ()
-  else
-    let actual = Atomic.get session.phase in
+let transition_initialize session ~stage protocol_version =
+  let current = Atomic.get session.lifecycle in
+  match current with
+  | Needs_initialize ->
+    if Atomic.compare_and_set
+         session.lifecycle
+         current
+         (Needs_initialized protocol_version)
+    then Ok ()
+    else
+      let actual = Atomic.get session.lifecycle |> phase_of_lifecycle in
+      error
+        stage
+        (Printf.sprintf
+           "MCP session phase changed to %s; expected %s"
+           (phase_to_string actual)
+           (phase_to_string Awaiting_initialize))
+  | Needs_initialized _ | Session_ready _ ->
     error
       stage
       (Printf.sprintf
-         "MCP session phase changed to %s; expected %s"
-         (phase_to_string actual)
-         (phase_to_string expected))
+         "MCP session phase is %s; expected %s"
+         (phase_to_string (phase_of_lifecycle current))
+         (phase_to_string Awaiting_initialize))
+;;
+
+let transition_initialized session ~stage =
+  let current = Atomic.get session.lifecycle in
+  match current with
+  | Needs_initialized protocol_version ->
+    if Atomic.compare_and_set
+         session.lifecycle
+         current
+         (Session_ready protocol_version)
+    then Ok ()
+    else
+      let actual = Atomic.get session.lifecycle |> phase_of_lifecycle in
+      error
+        stage
+        (Printf.sprintf
+           "MCP session phase changed to %s; expected %s"
+           (phase_to_string actual)
+           (phase_to_string Awaiting_initialized))
+  | Needs_initialize | Session_ready _ ->
+    error
+      stage
+      (Printf.sprintf
+         "MCP session phase is %s; expected %s"
+         (phase_to_string (phase_of_lifecycle current))
+         (phase_to_string Awaiting_initialized))
 ;;
 
 let rec validate_message_value ~stage ~path = function
@@ -165,17 +232,18 @@ let protocol_version params =
 let initialize ~server_name ~id ~params =
   let* protocol_version = protocol_version params in
   Ok
-    (Mcp_transport_protocol.make_response
-       ~id
-       (`Assoc
-          [ "protocolVersion", `String protocol_version
-          ; "capabilities", `Assoc [ "tools", `Assoc [] ]
-          ; ( "serverInfo"
-            , `Assoc
-                [ "name", `String server_name
-                ; "version", `String Runtime_build_version.current
-                ] )
-          ]))
+    ( protocol_version
+    , Mcp_transport_protocol.make_response
+        ~id
+        (`Assoc
+           [ "protocolVersion", `String protocol_version
+           ; "capabilities", `Assoc [ "tools", `Assoc [] ]
+           ; ( "serverInfo"
+             , `Assoc
+                 [ "name", `String server_name
+                 ; "version", `String Runtime_build_version.current
+                 ] )
+           ]) )
 ;;
 
 let tool_result_json ~id (result : tool_result) =
@@ -245,13 +313,11 @@ let dispatch_message ~session ~server_name ~tool_specs ~call_tool message =
     | "initialize", Some request_id ->
       let* () = require_phase session ~stage:"MCP initialize" Awaiting_initialize in
       let id = Mcp_transport_protocol.request_id_to_yojson request_id in
-      let* initialize_response = initialize ~server_name ~id ~params:message.params in
+      let* protocol_version, initialize_response =
+        initialize ~server_name ~id ~params:message.params
+      in
       let* () =
-        transition_phase
-          session
-          ~stage:"MCP initialize"
-          ~expected:Awaiting_initialize
-          ~next:Awaiting_initialized
+        transition_initialize session ~stage:"MCP initialize" protocol_version
       in
       Ok
         { response = Some initialize_response
@@ -275,13 +341,7 @@ let dispatch_message ~session ~server_name ~tool_specs ~call_tool message =
         ~params:message.params
         ~call_tool
     | "notifications/initialized", None ->
-      let* () =
-        transition_phase
-          session
-          ~stage:"MCP notifications/initialized"
-          ~expected:Awaiting_initialized
-          ~next:Ready
-      in
+      let* () = transition_initialized session ~stage:"MCP notifications/initialized" in
       Ok { response = None; tool_called = false }
     | _, None ->
       error

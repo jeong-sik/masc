@@ -5,7 +5,7 @@
     Eio switch. Closing the turn switch closes the listener and all accepted
     connections. *)
 
-type phase =
+type phase = Runtime_official_client_mcp.phase =
   | Awaiting_initialize
   | Awaiting_initialized
   | Ready

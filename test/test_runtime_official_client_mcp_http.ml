@@ -38,20 +38,45 @@ let rec read_headers reader content_length =
     read_headers reader content_length
 ;;
 
-let request ~sw ~net ~endpoint ~authorization body =
+let request
+      ?(method_ = "POST")
+      ?(accept = Some "application/json, text/event-stream")
+      ?origin
+      ?protocol_version
+      ~sw
+      ~net
+      ~endpoint
+      ~authorization
+      body
+  =
   let uri = Uri.of_string endpoint in
   let port = Uri.port uri |> Option.get in
   let path = Uri.path uri in
   let flow =
     Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
   in
+  let optional_header name = function
+    | None -> []
+    | Some value -> [ Printf.sprintf "%s: %s" name value ]
+  in
+  let headers =
+    [ Printf.sprintf "Host: 127.0.0.1:%d" port
+    ; "Authorization: " ^ authorization
+    ; "Content-Type: application/json"
+    ]
+    @ optional_header "Accept" accept
+    @ optional_header "Origin" origin
+    @ optional_header "MCP-Protocol-Version" protocol_version
+    @ [ Printf.sprintf "Content-Length: %d" (String.length body)
+      ; "Connection: close"
+      ]
+  in
   Eio.Flow.copy_string
     (Printf.sprintf
-       "POST %s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nAuthorization: %s\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+       "%s %s HTTP/1.1\r\n%s\r\n\r\n%s"
+       method_
        path
-       port
-       authorization
-       (String.length body)
+       (String.concat "\r\n" headers)
        body)
     flow;
   let reader = Eio.Buf_read.of_flow ~max_size:(2 * 1024 * 1024) flow in
@@ -109,12 +134,13 @@ let test_turn_scoped_capability_and_protocol () =
       ()
   in
   let endpoint, authorization = config_fields bridge in
+  let protocol_version = "2025-11-25" in
   let initialize =
     json_request
       2
       "initialize"
       (`Assoc
-         [ "protocolVersion", `String "2025-11-25"
+         [ "protocolVersion", `String protocol_version
          ; ( "clientInfo"
            , `Assoc
                [ "name", `String "antigravity-client"
@@ -132,6 +158,26 @@ let test_turn_scoped_capability_and_protocol () =
       initialize
   in
   check int "wrong capability" 401 unauthorized.status;
+  let cross_origin =
+    request
+      ~origin:"https://attacker.example"
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      initialize
+  in
+  check int "explicit browser origin" 403 cross_origin.status;
+  let missing_accept =
+    request
+      ~accept:None
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      initialize
+  in
+  check int "streamable Accept is required" 406 missing_accept.status;
   let discover =
     request
       ~sw
@@ -154,7 +200,7 @@ let test_turn_scoped_capability_and_protocol () =
   check int "initialize" 200 initialized.status;
   check string
     "negotiated measured protocol"
-    "2025-11-25"
+    protocol_version
     (Yojson.Safe.from_string initialized.body
      |> member "result"
      |> member "protocolVersion"
@@ -165,7 +211,7 @@ let test_turn_scoped_capability_and_protocol () =
       ; "arguments", `Assoc [ "marker", `String "measured" ]
       ]
   in
-  let premature =
+  let missing_protocol_header =
     request
       ~sw
       ~net:env#net
@@ -173,17 +219,44 @@ let test_turn_scoped_capability_and_protocol () =
       ~authorization
       (json_request 3 "tools/call" call_params)
   in
-  check int "tool call before initialized notification" 409 premature.status;
+  check int "subsequent protocol header is required" 400 missing_protocol_header.status;
+  let mismatched_protocol_header =
+    request
+      ~protocol_version:"2024-11-05"
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      (json_request 3 "tools/call" call_params)
+  in
+  check int "mismatched protocol header" 400 mismatched_protocol_header.status;
+  let premature =
+    request
+      ~protocol_version
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      (json_request 3 "tools/call" call_params)
+  in
+  check int "tool call before initialized notification" 400 premature.status;
   check int "premature call not executed" 0 (List.length !calls);
   let notification =
     {|{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}|}
   in
   let notified =
-    request ~sw ~net:env#net ~endpoint ~authorization notification
+    request
+      ~protocol_version
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      notification
   in
   check int "initialized notification" 202 notified.status;
   let listed =
     request
+      ~protocol_version
       ~sw
       ~net:env#net
       ~endpoint
@@ -203,6 +276,7 @@ let test_turn_scoped_capability_and_protocol () =
      |> Yojson.Safe.Util.to_string);
   let called =
     request
+      ~protocol_version
       ~sw
       ~net:env#net
       ~endpoint
@@ -225,6 +299,7 @@ let test_turn_scoped_capability_and_protocol () =
   in
   let duplicate =
     request
+      ~protocol_version
       ~sw
       ~net:env#net
       ~endpoint
@@ -232,14 +307,25 @@ let test_turn_scoped_capability_and_protocol () =
       duplicate_key
   in
   check int "duplicate JSON key" 400 duplicate.status;
+  let deletion =
+    request
+      ~method_:"DELETE"
+      ~protocol_version
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      ""
+  in
+  check int "unsupported session deletion" 405 deletion.status;
   check int "only admitted call executed" 1 (List.length !calls);
   let snapshot = Runtime_official_client_mcp_http.snapshot bridge in
   check bool
     "ready"
     true
     (snapshot.phase = Runtime_official_client_mcp_http.Ready);
-  check int "authenticated requests" 7 snapshot.authenticated_requests;
-  check int "rejected requests" 3 snapshot.rejected_requests;
+  check int "authenticated requests" 11 snapshot.authenticated_requests;
+  check int "rejected requests" 8 snapshot.rejected_requests;
   check int "measured tool calls" 1 snapshot.tool_calls;
   check
     (option string)

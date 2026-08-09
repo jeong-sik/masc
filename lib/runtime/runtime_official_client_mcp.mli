@@ -20,10 +20,23 @@ type dispatch =
   ; tool_called : bool
   }
 
+type phase =
+  | Awaiting_initialize
+  | Awaiting_initialized
+  | Ready
+
+type session_snapshot =
+  { phase : phase
+  ; negotiated_protocol_version : string option
+  }
+
 type session
 
 val create_session : unit -> session
 (** Fresh closed lifecycle: initialize, initialized notification, then Ready. *)
+
+val snapshot_session : session -> session_snapshot
+(** One immutable observation of lifecycle phase and negotiated protocol. *)
 
 val handle_message :
   session:session ->

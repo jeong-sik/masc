@@ -32,7 +32,11 @@ let quota_result =
 ;;
 
 let mcp_initialize =
-  {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}}}|}
+  {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"claude-code-fixture","version":"1"}}}}}|}
+;;
+
+let mcp_initialized_notification =
+  {|{"type":"control_request","request_id":"mcp-notify-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}}}|}
 ;;
 
 let mcp_list =
@@ -42,6 +46,11 @@ let mcp_list =
 let mcp_call =
   {|{"type":"control_request","request_id":"mcp-call-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"masc_probe","arguments":{"marker":"from-claude"}}}}}|}
 ;;
+
+type fixture_step =
+  | Emit of string
+  | Emit_and_read of string
+  | Emit_after_closing_input of string
 
 let fixture_script ?prompt_marker ?(remove_after_auth = false) lines =
   let path = Filename.temp_file "masc-keeper-claude-code-" ".sh" in
@@ -77,7 +86,14 @@ let fixture_script ?prompt_marker ?(remove_after_auth = false) lines =
         ("printf '%s\\n' \"$user_message\" > " ^ shell_quote marker ^ "\n"))
     prompt_marker;
   List.iter
-    (fun line -> output_string output ("emit " ^ shell_quote line ^ "\n"))
+    (function
+      | Emit line -> output_string output ("emit " ^ shell_quote line ^ "\n")
+      | Emit_and_read line ->
+        output_string output ("emit " ^ shell_quote line ^ "\n");
+        output_string output "IFS= read -r ignored_response\n"
+      | Emit_after_closing_input line ->
+        output_string output "exec 0<&-\n";
+        output_string output ("emit " ^ shell_quote line ^ "\n"))
     lines;
   output_string output "while IFS= read -r ignored; do :; done\n";
   close_out output;
@@ -253,8 +269,8 @@ let test_oas_checkpoint_starts_official_client_turn () =
     (fun () ->
        with_fixture
          ~prompt_marker
-         [ assistant ~turn_id:"turn-checkpoint-1" "MASC_CLAUDE_CHECKPOINT"
-         ; result ~turn_id:"turn-checkpoint-1" "MASC_CLAUDE_CHECKPOINT"
+         [ Emit (assistant ~turn_id:"turn-checkpoint-1" "MASC_CLAUDE_CHECKPOINT")
+         ; Emit (result ~turn_id:"turn-checkpoint-1" "MASC_CLAUDE_CHECKPOINT")
          ]
          (fun cli_path ->
             match
@@ -276,10 +292,22 @@ let test_oas_checkpoint_starts_official_client_turn () =
        let raw =
          Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
        in
+       let projected =
+         content_of_wire_message raw |> Yojson.Safe.from_string
+       in
+       let open Yojson.Safe.Util in
        check string
-         "checkpoint history is not imported"
+         "typed initial-turn schema"
+         "masc.claude-code.initial-turn.v1"
+         (projected |> member "schema" |> to_string);
+       check string
+         "current goal"
          "CHECKPOINT_GOAL"
-         (content_of_wire_message raw))
+         (projected |> member "current_goal" |> to_string);
+       check int
+         "canonical history length"
+         2
+         (projected |> member "history" |> to_list |> List.length))
 ;;
 
 let test_keeper_projects_typed_tool_history_and_lifecycle () =
@@ -320,8 +348,8 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
        in
        with_fixture
          ~prompt_marker
-         [ assistant ~turn_id:"turn-history-1" "MASC_CLAUDE_HISTORY"
-         ; result ~turn_id:"turn-history-1" "MASC_CLAUDE_HISTORY"
+         [ Emit (assistant ~turn_id:"turn-history-1" "MASC_CLAUDE_HISTORY")
+         ; Emit (result ~turn_id:"turn-history-1" "MASC_CLAUDE_HISTORY")
          ]
          (fun cli_path ->
             match
@@ -403,11 +431,12 @@ let test_keeper_projects_masc_tool () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        with_fixture
-         [ mcp_initialize
-         ; mcp_list
-         ; mcp_call
-         ; assistant ~turn_id:"turn-tool-1" "MASC_CLAUDE_TOOL"
-         ; result ~turn_id:"turn-tool-1" "MASC_CLAUDE_TOOL"
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit_and_read mcp_call
+         ; Emit (assistant ~turn_id:"turn-tool-1" "MASC_CLAUDE_TOOL")
+         ; Emit (result ~turn_id:"turn-tool-1" "MASC_CLAUDE_TOOL")
          ]
          (fun cli_path ->
            match
@@ -441,6 +470,55 @@ let load_state base_path =
   | Ok (Some state) -> state
 ;;
 
+let test_post_effect_transport_enters_recovery () =
+  let base_path = temp_workspace () in
+  let call_count = ref 0 in
+  let marker_param : Agent_sdk.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_sdk.Tool.create
+      ~name:"masc_probe"
+      ~description:"Record one deterministic fixture effect"
+      ~parameters:[ marker_param ]
+      (fun _input ->
+        incr call_count;
+        Ok { Agent_sdk.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit_after_closing_input mcp_call
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~tools:[ tool ]
+                ~base_path
+                ~cli_path
+                ~goal:"USE_TOOL_ONCE"
+                ()
+            with
+            | Error
+                (Agent_sdk.Error.Provider
+                  (Llm_provider.Error.ProviderUnavailable _)) -> ()
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok _ -> fail "post-effect response failure completed the Keeper turn");
+       check int "tool effect count" 1 !call_count;
+       let state = load_state base_path in
+       match state.phase with
+       | Recovery_required { failure = Transport_interrupted; _ } -> ()
+       | _ -> fail "post-effect transport failure released the durable claim")
+;;
+
 let test_keeper_settles_and_resumes () =
   let base_path = temp_workspace () in
   let prompt_marker = Filename.concat base_path "resume-prompt.json" in
@@ -448,8 +526,8 @@ let test_keeper_settles_and_resumes () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        with_fixture
-         [ assistant ~turn_id:"turn-1" "MASC_CLAUDE_FIRST"
-         ; result ~turn_id:"turn-1" "MASC_CLAUDE_FIRST"
+         [ Emit (assistant ~turn_id:"turn-1" "MASC_CLAUDE_FIRST")
+         ; Emit (result ~turn_id:"turn-1" "MASC_CLAUDE_FIRST")
          ]
          (fun cli_path ->
            match
@@ -476,8 +554,8 @@ let test_keeper_settles_and_resumes () =
        in
        with_fixture
          ~prompt_marker
-         [ assistant ~turn_id:"turn-2" "MASC_CLAUDE_SECOND"
-         ; result ~turn_id:"turn-2" "MASC_CLAUDE_SECOND"
+         [ Emit (assistant ~turn_id:"turn-2" "MASC_CLAUDE_SECOND")
+         ; Emit (result ~turn_id:"turn-2" "MASC_CLAUDE_SECOND")
          ]
          (fun cli_path ->
            match
@@ -517,7 +595,7 @@ let test_quota_enters_typed_recovery () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture [ rate_limit_rejected; quota_result ] (fun cli_path ->
+       with_fixture [ Emit rate_limit_rejected; Emit quota_result ] (fun cli_path ->
          (match run_keeper_turn ~base_path ~cli_path ~goal:"QUOTA_GOAL" () with
           | Error (Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _)) -> ()
           | Error error -> fail (Agent_sdk.Error.to_string error)
@@ -571,6 +649,10 @@ let () =
             `Quick
             test_keeper_projects_typed_tool_history_and_lifecycle
         ; test_case "projects MASC tool" `Quick test_keeper_projects_masc_tool
+        ; test_case
+            "post-effect transport enters recovery"
+            `Quick
+            test_post_effect_transport_enters_recovery
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
         ; test_case
             "spawn failure releases claim"

@@ -72,6 +72,11 @@ type error =
       }
   | Subscription_required of string
   | Unsupported_control_request of string
+  | Turn_transport_interrupted of
+      { stage : string
+      ; tool_effect_attempted : bool
+      ; detail : string
+      }
   | Turn_failed of string
   | Quota_blocked of
       { api_error_status : int option

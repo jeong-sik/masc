@@ -92,6 +92,12 @@ let claude_error_to_sdk_error = function
     Agent_sdk.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "claude_code"; detail })
+  | Runtime_claude_code.Turn_transport_interrupted _ as error ->
+    Agent_sdk.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "claude_code"
+         ; detail = Runtime_claude_code.error_to_string error
+         })
   | Runtime_claude_code.Protocol_error { stage; detail } ->
     Agent_sdk.Error.Provider
       (Llm_provider.Error.ParseError
@@ -105,6 +111,8 @@ let claude_error_to_sdk_error = function
 let recovery_failure_of_client_error = function
   | Runtime_claude_code.Spawn_failed _ -> Session_store.Transient_spawn_failed
   | Runtime_claude_code.Process_exited _ | Runtime_claude_code.Timeout _ ->
+    Session_store.Transport_interrupted
+  | Runtime_claude_code.Turn_transport_interrupted _ ->
     Session_store.Transport_interrupted
   | Runtime_claude_code.Invalid_config _
   | Runtime_claude_code.Protocol_error _

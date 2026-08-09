@@ -20,6 +20,10 @@ type dispatch =
   ; tool_called : bool
   }
 
+type tool_call_policy =
+  | Reject_tool_calls
+  | Allow_tool_calls
+
 type session
 
 val create_session : unit -> session
@@ -28,6 +32,7 @@ val create_session : unit -> session
 val handle_message :
   session:session ->
   server_name:string ->
+  tool_call_policy:tool_call_policy ->
   tool_specs:(unit -> Yojson.Safe.t list) ->
   call_tool:
     (name:string ->

@@ -98,6 +98,11 @@ sangsu = "codex_subscription.gpt-5.3-codex-spark"
 
 The fallback candidate must already be a valid binding in the same file.
 There is intentionally no `[providers.codex_subscription.credentials]` table.
+An unspecified reasoning effort is omitted from the app-server request so the
+official client can choose a value supported by the selected model. MASC does
+not translate the provider-neutral `enable_thinking = false` toggle into a
+synthetic `reasoning.effort = "none"`; an explicitly supplied effort remains
+explicit and is validated against the toggle before dispatch.
 
 ## Creation and update
 

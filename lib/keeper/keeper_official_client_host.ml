@@ -92,6 +92,29 @@ type prepared_turn =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
+let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
+  match enable_thinking, reasoning_effort with
+  | Some false, None ->
+    (* A provider-neutral boolean is not an official-client effort value.
+       Omitting the field lets the client select a value admitted by the
+       chosen model; synthesizing [None_] sent an unsupported "none" to
+       Codex models whose minimum effort is [Low]. *)
+    Ok None
+  | Some false, Some Llm_provider.Reasoning_effort.None_ ->
+    Ok (Some Llm_provider.Reasoning_effort.None_)
+  | Some false, Some _ ->
+    Error
+      (config_error
+         ~field:"reasoning_effort"
+         "enable_thinking=false conflicts with a non-none reasoning effort")
+  | Some true, Some Llm_provider.Reasoning_effort.None_ ->
+    Error
+      (config_error
+         ~field:"reasoning_effort"
+         "enable_thinking=true conflicts with reasoning effort none")
+  | (Some true | None), reasoning_effort -> Ok reasoning_effort
+;;
+
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     ~initial_messages ~model_input_projection ~hooks ~enable_thinking =
   let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
@@ -181,20 +204,9 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
   let* () = unsupported_parameter "thinking_budget" turn_params.thinking_budget in
   let* () = unsupported_parameter "preserve_thinking" turn_params.preserve_thinking in
   let* reasoning_effort =
-    match turn_params.enable_thinking, turn_params.reasoning_effort with
-    | Some false, Some Llm_provider.Reasoning_effort.None_
-    | Some false, None -> Ok (Some Llm_provider.Reasoning_effort.None_)
-    | Some false, Some _ ->
-      Error
-        (config_error
-           ~field:"reasoning_effort"
-           "enable_thinking=false conflicts with a non-none reasoning effort")
-    | Some true, Some Llm_provider.Reasoning_effort.None_ ->
-      Error
-        (config_error
-           ~field:"reasoning_effort"
-           "enable_thinking=true conflicts with reasoning effort none")
-    | (Some true | None), reasoning_effort -> Ok reasoning_effort
+    resolve_reasoning_effort
+      ~enable_thinking:turn_params.enable_thinking
+      ~reasoning_effort:turn_params.reasoning_effort
   in
   let* tools =
     match turn_params.tool_choice with

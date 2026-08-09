@@ -305,13 +305,11 @@ let get_audit_store ~base_path () =
                Hashtbl.replace audit_stores base_path store;
                store)
         with
-        | Eio.Cancel.Cancelled _ as e -> raise e
         | exn -> Error exn)
     with
     | Ok store -> Ok store
     | Error exn -> report_failure exn
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> report_failure exn
 ;;
 
@@ -415,7 +413,6 @@ let record
           json;
         { event_type; write_result = Ok () }
       with
-      | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         record_failure
           ~keeper_name

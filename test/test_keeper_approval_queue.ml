@@ -3781,7 +3781,10 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
        ignore (install_exn ~base_path);
        let approval_id = submit ~base_path ~keeper_name ~input in
        Keeper_approval.Audit.For_testing.set_append_jsonl
-         (fun _path _json -> failwith "deterministic audit append failure");
+         (fun _path _json ->
+            raise
+              (Eio.Cancel.Cancelled
+                 (Failure "cancelled approval audit append")));
        let resolution =
          match
            AQ.resolve_with_policy

@@ -55,6 +55,9 @@ type decision_kind =
 val decision_kind_to_string : decision_kind -> string
 val decision_kind_of_string : string -> decision_kind option
 
+(** Observation-only write boundary. Store creation, append, and cooperative
+    cancellation failures are contained in the typed receipt; none may erase
+    or invite replay of the authoritative mutation that selected this event. *)
 val record :
   base_path:string ->
   event_type:event ->

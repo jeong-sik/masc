@@ -406,27 +406,27 @@ let record
          @ extra_fields
          )
     in
-    Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
-      try
+    (try
+       Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
         (Atomic.get append_jsonl)
           (audit_today_path (Dated_jsonl.base_dir store))
-          json;
-        { event_type; write_result = Ok () }
-      with
-      | exn ->
-        record_failure
-          ~keeper_name
-          ~site:Keeper_approval_queue_failure_site.(to_label Audit_append)
-          ~id
-          ~event_type:(event_to_string event_type)
-          exn;
-        { event_type
-        ; write_result =
-            Error
-              { stage = Append
-              ; detail = sanitized_write_failure_detail exn
-              }
-        })
+          json);
+       { event_type; write_result = Ok () }
+     with
+     | exn ->
+       record_failure
+         ~keeper_name
+         ~site:Keeper_approval_queue_failure_site.(to_label Audit_append)
+         ~id
+         ~event_type:(event_to_string event_type)
+         exn;
+       { event_type
+       ; write_result =
+           Error
+             { stage = Append
+             ; detail = sanitized_write_failure_detail exn
+             }
+       })
 ;;
 
 let record_rule ~base_path ~event_type (rule : approval_rule) =
@@ -772,4 +772,8 @@ module For_testing = struct
 
   let set_store_create_probe probe = Atomic.set store_create_probe probe
   let set_append_jsonl append = Atomic.set append_jsonl append
+
+  let with_audit_io_lock f =
+    Cross_context_mutex.with_durable_lock audit_io_mutex f
+  ;;
 end

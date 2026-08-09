@@ -119,4 +119,5 @@ module For_testing : sig
   val reset_store : unit -> unit
   val set_store_create_probe : (base_path:string -> unit) -> unit
   val set_append_jsonl : (string -> Yojson.Safe.t -> unit) -> unit
+  val with_audit_io_lock : (unit -> unit) -> unit
 end

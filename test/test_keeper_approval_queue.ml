@@ -3981,6 +3981,61 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
          (metadata |> member "gate" |> member "audit_receipts" |> to_list |> List.length))
 ;;
 
+let test_audit_lock_wait_cancellation_returns_failed_receipt () =
+  let base_path = temp_dir () in
+  let owner_entered = Atomic.make false in
+  let release_owner = Atomic.make false in
+  let holder =
+    Domain.spawn (fun () ->
+      Keeper_approval.Audit.For_testing.with_audit_io_lock (fun () ->
+        Atomic.set owner_entered true;
+        while not (Atomic.get release_owner) do
+          Domain.cpu_relax ()
+        done))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set release_owner true;
+      Domain.join holder;
+      Keeper_approval.Audit.For_testing.reset_store ();
+      cleanup_dir base_path)
+    (fun () ->
+       while not (Atomic.get owner_entered) do
+         Domain.cpu_relax ()
+       done;
+       Eio_main.run @@ fun _environment ->
+       Eio.Switch.run @@ fun sw ->
+       let cancel_context, resolve_cancel_context = Eio.Promise.create () in
+       let result, resolve_result = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let outcome =
+           try
+             Eio.Cancel.sub (fun cancellation ->
+               Eio.Promise.resolve resolve_cancel_context cancellation;
+               `Receipt
+                 (Keeper_approval.Audit.record
+                    ~base_path
+                    ~event_type:Keeper_approval.Audit.Gate_allowed
+                    ~id:"audit-lock-cancellation"
+                    ~keeper_name:"queue-audit-lock-cancellation"
+                    ~tool_name:"external-effect"
+                    ()))
+           with
+           | Eio.Cancel.Cancelled _ -> `Cancellation_escaped
+         in
+         Eio.Promise.resolve resolve_result outcome);
+       let cancellation = Eio.Promise.await cancel_context in
+       Eio.Cancel.cancel cancellation (Failure "cancel audit lock waiter");
+       match Eio.Promise.await result with
+       | `Receipt receipt ->
+         check_failed_audit_receipt
+           ~event_type:Keeper_approval.Audit.Gate_allowed
+           ~stage:Keeper_approval.Audit.Append
+           receipt
+       | `Cancellation_escaped ->
+         Alcotest.fail "audit lock-acquisition cancellation escaped its receipt boundary")
+;;
+
 let test_http_success_exposes_failed_resolution_and_rule_delete_audit () =
   let base_path = temp_dir () in
   let keeper_name = "queue-audit-http-failure" in
@@ -4262,6 +4317,10 @@ let () =
             "cancelled audit observation preserves committed Allow"
             `Quick
             test_cancelled_audit_observation_preserves_committed_allow
+        ; Alcotest.test_case
+            "audit lock wait cancellation returns failed receipt"
+            `Quick
+            test_audit_lock_wait_cancellation_returns_failed_receipt
         ; Alcotest.test_case
             "HTTP success exposes failed resolution and rule audit"
             `Quick

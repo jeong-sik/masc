@@ -18,7 +18,8 @@ val seed_of_thinking_support
     [Some true] actively enables thinking for that model binding. *)
 
 val for_runtime : name:string -> seed
-(** Per-model thinking seed for runtime [name], resolved from the runtime.toml
-    [thinking-support], explicit [preserve-thinking], and OAS typed
-    preserve-thinking capability of the bound model.  See
-    {!seed_of_thinking_support} for the gate semantics. *)
+(** Per-model thinking seed for runtime [name]. [Masc_oas] executions resolve
+    runtime.toml [thinking-support] and explicit [preserve-thinking].
+    [Official_client] executions return an empty seed because their typed
+    effort is owned by the client boundary, not the OAS boolean controls.
+    Unknown runtimes preserve the existing all-absent result. *)

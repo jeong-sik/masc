@@ -541,35 +541,9 @@ let bootstrap_live_keeper_meta ?lifecycle_token ~(ctx : _ context) (m : keeper_m
           }
       }
     in
-    (match lifecycle_token with
-     | Some _ ->
-       (* The revival coordinator already committed the durable candidate.
-          Keep this fresh presence timestamp in the new registry lane; the
-          heartbeat persists it after the transaction releases ownership. *)
-       ()
-     | None ->
-       (match
-          write_meta_with_merge
-            ~merge:Keeper_meta_merge.monotonic_usage_counters
-            ctx.config
-            synced
-        with
-        | Ok () -> ()
-        | Error e ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string WriteMetaFailures)
-            ~labels:[ "keeper", synced.name; "phase", "bootstrap" ]
-            ();
-          Log.Keeper.emit
-            Log.Warn
-            ~category:Log.Heartbeat
-            ~details:
-              (`Assoc
-                 [ "keeper", `String synced.name
-                 ; "error", `String (Keeper_meta_store.write_meta_error_to_string e)
-                 ])
-            (Printf.sprintf "write_meta failed (bootstrap): %s"
-                 (Keeper_meta_store.write_meta_error_to_string e))));
+    (* Bootstrap freshness is process presence, not a durable semantic change.
+       The registry lane receives [synced]; only typed owner commands replace
+       the metadata snapshot. *)
     synced
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

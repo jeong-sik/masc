@@ -435,17 +435,46 @@ let test_retry_notifications_are_bounded () =
        | Ok _ -> fail "retry notifications were unbounded")
 ;;
 
-let test_unknown_notifications_are_bounded () =
-  let unknown = {|{"method":"fixture/unknown","params":{}}|} in
+(* The cap detects a peer speaking an unmodelled protocol, so it counts
+   DISTINCT unrecognised methods. This fixture sends enough different ones to
+   trip it; the sibling test below sends one method many times and must not
+   trip it. *)
+let test_unknown_notification_methods_are_bounded () =
+  let unknown index =
+    Printf.sprintf {|{"method":"fixture/unknown-%d","params":{}}|} index
+  in
   let lines =
     [ init_result; account_chatgpt; thread_result; turn_result ]
-    @ List.init 129 (fun _ -> unknown)
+    @ List.init 33 unknown
   in
   with_fixture lines (fun path ->
     match run_fixture path with
     | Error (Runtime_codex_app_server.Protocol_error _) -> ()
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok _ -> fail "unknown notifications were unbounded")
+    | Ok _ -> fail "distinct unknown notification methods were unbounded")
+;;
+
+(* Live regression (2026-08-09): Codex emits [account/rateLimits/updated]
+   throughout a turn. Counting repeats exhausted the budget on long turns and
+   ended them with a protocol error, which put the official-client session into
+   Recovery_required and rejected every later execution — [sangsu] completed 0
+   of 546 turns in six hours. One unmodelled method is one gap, however often
+   it arrives. *)
+let test_repeated_unknown_notification_method_is_tolerated () =
+  let rate_limits =
+    {|{"method":"account/rateLimits/updated","params":{"primary":{"usedPercent":12}}}|}
+  in
+  let lines =
+    [ init_result; account_chatgpt; thread_result; turn_result ]
+    @ List.init 512 (fun _ -> rate_limits)
+    @ [ item_completed; turn_completed ]
+  in
+  with_fixture lines (fun path ->
+    match run_fixture path with
+    | Ok result ->
+      check string "turn still completes" "MASC_SUBSCRIPTION_OK"
+        (String.trim result.Runtime_codex_app_server.text)
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error))
 ;;
 
 let test_item_output_deltas_are_typed_and_unbounded () =
@@ -1948,9 +1977,13 @@ let () =
             `Quick
             test_retry_notifications_are_bounded
          ; test_case
-             "unknown notifications are bounded"
+             "distinct unknown notification methods are bounded"
              `Quick
-             test_unknown_notifications_are_bounded
+             test_unknown_notification_methods_are_bounded
+         ; test_case
+             "a repeated unknown notification method is tolerated"
+             `Quick
+             test_repeated_unknown_notification_method_is_tolerated
          ; test_case
              "item output deltas are typed and unbounded"
              `Quick

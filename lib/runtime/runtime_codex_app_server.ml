@@ -508,7 +508,24 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params =
 ;;
 
 let max_retry_notifications = 3
-let max_unknown_notifications = 128
+
+(* The cap answers "is the peer speaking a protocol we do not model?", and that
+   is a function of how many DISTINCT methods we fail to recognise, not of how
+   often one of them arrives. JSON-RPC notifications are fire-and-forget, so a
+   method we do not model is not an error on its own.
+
+   Counting repeats made a routine informational notification fatal. Codex
+   emits [account/rateLimits/updated] throughout a turn; on 2026-08-09 that one
+   unmodelled method exhausted a 128-occurrence budget on long turns, ended the
+   turn with a protocol error, and left the official-client session in
+   [Recovery_required] — after which every later execution was rejected with
+   [official_client_session.claim]. Three keepers accumulated 1,375 rejected
+   turns; [sangsu] completed 0 of 546 turns in six hours. Resolving the session
+   did not hold, because the next long turn reproduced it.
+
+   Distinct-method counting keeps the original detection intent: a peer sending
+   many different unrecognised methods still trips the cap. *)
+let max_unknown_notification_methods = 32
 
 let validate_item_delta_notification ~method_ ~thread_id ~turn_id params =
   let* fields = assoc_at method_ params in
@@ -522,7 +539,7 @@ let validate_item_delta_notification ~method_ ~thread_id ~turn_id params =
 ;;
 
 let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
-    ~seen_fallback ~retry_notifications ~unknown_notifications =
+    ~seen_fallback ~retry_notifications ~unknown_methods =
   let* message = io.receive () in
   match message with
   | Response _ | Response_error _ ->
@@ -547,7 +564,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~retry_notifications
-      ~unknown_notifications
+      ~unknown_methods
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
@@ -571,7 +588,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~retry_notifications
-      ~unknown_notifications
+      ~unknown_methods
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
     let* fields = assoc_at stage params in
@@ -597,7 +614,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~seen_final
         ~seen_fallback
         ~retry_notifications
-        ~unknown_notifications
+        ~unknown_methods
   | Notification { method_ = "error"; params } ->
     let stage = "error notification" in
     let* fields = assoc_at stage params in
@@ -613,7 +630,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~seen_final
         ~seen_fallback
         ~retry_notifications:(retry_notifications + 1)
-        ~unknown_notifications
+        ~unknown_methods
     else if will_retry
     then Error (Turn_failed "app-server retry notification limit exceeded")
     else
@@ -623,7 +640,9 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       Error (Turn_failed message)
   | Notification { method_ = "turn/completed"; params } ->
     terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params
-  | Notification _ when unknown_notifications < max_unknown_notifications ->
+  | Notification { method_; _ }
+    when List.mem method_ unknown_methods
+         || List.length unknown_methods < max_unknown_notification_methods ->
     await_turn_terminal
       io
       ~tools
@@ -633,12 +652,16 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~retry_notifications
-      ~unknown_notifications:(unknown_notifications + 1)
+      ~unknown_methods:
+        (if List.mem method_ unknown_methods
+         then unknown_methods
+         else method_ :: unknown_methods)
   | Notification { method_; _ } ->
     protocol_error
       "turn"
       (Printf.sprintf
-         "unknown notification limit exceeded (last method %S)"
+         "unknown notification method limit exceeded (%d distinct, last method %S)"
+         (List.length unknown_methods)
          method_)
 ;;
 
@@ -791,7 +814,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       ~seen_final:None
       ~seen_fallback:None
       ~retry_notifications:0
-      ~unknown_notifications:0
+      ~unknown_methods:[]
   in
   Ok
     { thread_id

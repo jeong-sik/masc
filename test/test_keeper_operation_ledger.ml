@@ -3,6 +3,7 @@ open Alcotest
 module Id = Keeper_operation_id
 module Request = Keeper_operation_request
 module Blob = Keeper_operation_blob_store
+module Mailbox = Keeper_operation_mailbox
 module Store = Keeper_operation_store
 
 let result_exn to_string = function
@@ -308,6 +309,27 @@ let test_cancel_and_pause () =
   check int64 "cancel replay same row" cancelled.queue_seq replay.queue_seq
 ;;
 
+let test_bounded_mailbox () =
+  let mailbox = result_exn Fun.id (Mailbox.create ~capacity:2) in
+  check int "capacity" 2 (Mailbox.capacity mailbox);
+  check bool "open" false (Mailbox.is_closed mailbox);
+  check bool "first added" true (Mailbox.try_add mailbox 1 = Mailbox.Added);
+  check bool "second added" true (Mailbox.try_add mailbox 2 = Mailbox.Added);
+  check int "full depth" 2 (Mailbox.length mailbox);
+  check bool "full is immediate" true (Mailbox.try_add mailbox 3 = Mailbox.Full);
+  Eio_main.run @@ fun _env ->
+  check (option int) "FIFO first" (Some 1) (Mailbox.take mailbox);
+  check (option int) "FIFO second" (Some 2) (Mailbox.take mailbox);
+  Eio.Switch.run @@ fun sw ->
+  let result, resolve = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve (Mailbox.take mailbox));
+  Eio.Fiber.yield ();
+  Mailbox.close mailbox;
+  check (option int) "close wakes empty consumer" None (Eio.Promise.await result);
+  check bool "closed" true (Mailbox.is_closed mailbox);
+  check bool "closed rejects" true (Mailbox.try_add mailbox 4 = Mailbox.Closed)
+;;
+
 let () =
   run
     "keeper operation ledger"
@@ -331,5 +353,7 @@ let () =
             test_ledger_replay_fifo_and_terminal_immutability
         ; test_case "cancel and pause" `Quick test_cancel_and_pause
         ] )
+    ; ( "mailbox"
+      , [ test_case "bounded non-blocking admission" `Quick test_bounded_mailbox ] )
     ]
 ;;

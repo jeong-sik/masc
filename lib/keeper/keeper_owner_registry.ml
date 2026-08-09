@@ -157,6 +157,28 @@ let ensure_in_pool pool meta =
            Ok owner))
 ;;
 
+let ensure_empty_in_pool pool keeper_name =
+  if Atomic.get pool.stopping
+  then Error Inventory_stopping
+  else
+    Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+      match Hashtbl.find_opt pool.owners keeper_name with
+      | Some owner -> Ok owner
+      | None ->
+        (match
+           Keeper_owner.start
+             ~sw:pool.sw
+             ~store:(store_for pool keeper_name)
+             ~keeper_name
+             ~initial_meta:None
+         with
+         | Error error -> Error (Owner_initialization_failed error)
+         | Ok owner ->
+           Hashtbl.add pool.owners keeper_name owner;
+           refresh_owner_handles pool;
+           Ok owner))
+;;
+
 let install_from_store ~sw config =
   let base_path = pool_key config.Workspace.base_path in
   match load_all config with
@@ -220,12 +242,6 @@ let find_pool base_path =
     | Some pool -> Ok pool)
 ;;
 
-let ensure ~base_path meta =
-  match find_pool base_path with
-  | Error _ as error -> error
-  | Ok pool -> ensure_in_pool pool meta
-;;
-
 let get ~base_path ~keeper_name =
   match find_pool base_path with
   | Error _ as error -> error
@@ -263,10 +279,20 @@ let apply_meta ?lifecycle_token ~base_path ~keeper_name command =
        (* This derived registry projection owns no state and intentionally runs
           after the lifecycle lock is released: its update path takes that
           same lock.  The owner Atomic remains the routine read authority. *)
-       Keeper_registry.update_meta_from_persisted ~base_path keeper_name meta;
+       if Option.is_some (Keeper_registry.get ~base_path keeper_name)
+       then Keeper_registry.update_meta_from_persisted ~base_path keeper_name meta;
        Ok (Some meta)
      | Ok None -> Ok None
      | Error _ as error -> error)
+;;
+
+let create_meta ~base_path meta =
+  match find_pool base_path with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok pool ->
+    (match ensure_empty_in_pool pool meta.Keeper_meta_contract.name with
+     | Error error -> Error (Command_lookup_failed error)
+     | Ok _ -> apply_meta ~base_path ~keeper_name:meta.name (Keeper_owner_reducer.Create meta))
 ;;
 
 let all_projections ~base_path =

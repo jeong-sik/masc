@@ -504,18 +504,30 @@ let test_root_inventory_loads_and_extends_exactly_once () =
          | Ok owner -> owner
          | Error error -> fail (Owner_registry.lookup_error_to_string error)
        in
+       let second = make_meta "inventory-second" in
+       (match Owner_registry.create_meta ~base_path second with
+        | Ok (Some committed) -> check string "dynamic owner identity" second.name committed.name
+        | Ok None -> fail "dynamic owner create removed metadata"
+        | Error error -> fail (Owner_registry.command_error_to_string error));
        let ensured =
-         match Owner_registry.ensure ~base_path (make_meta "inventory-second") with
+         match Owner_registry.get ~base_path ~keeper_name:second.name with
          | Ok owner -> owner
          | Error error -> fail (Owner_registry.lookup_error_to_string error)
        in
        let loaded_again =
-         match Owner_registry.ensure ~base_path first with
+         match Owner_registry.get ~base_path ~keeper_name:first.name with
          | Ok owner -> owner
          | Error error -> fail (Owner_registry.lookup_error_to_string error)
        in
-       check bool "ensure preserves the existing actor" true (loaded == loaded_again);
+       check bool "lookup preserves the existing actor" true (loaded == loaded_again);
        check bool "different keeper receives a different actor" false (loaded == ensured);
+       (match Owner_registry.create_meta ~base_path first with
+        | Error
+            (Owner_registry.Command_rejected
+              (Owner.Reducer_rejected Reducer.Meta_already_exists)) ->
+          ()
+        | Error error -> fail ("wrong duplicate create error: " ^ Owner_registry.command_error_to_string error)
+        | Ok _ -> fail "duplicate create replaced existing owner metadata");
        check int
          "dynamic owner extends inventory once"
          2

@@ -146,6 +146,7 @@ let decode_from_oas s =
            (fun sha256 bytes mime preview -> Ok (sha256, bytes, mime, preview))
        with
        | Scanf.Scan_failure msg -> Error msg
+       | End_of_file -> Error "unexpected end of artifact marker"
        | Failure msg -> Error msg
        | Invalid_argument msg -> Error msg)
     with

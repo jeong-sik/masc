@@ -15,7 +15,6 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 import {
-  isRuntimeTomlNonMaterializableProtocol,
   isRuntimeTomlOfficialClientProtocol,
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
@@ -468,15 +467,6 @@ export function RuntimeEnvironmentEditor({
     if (selectedProvider?.transportKind === 'command' && !isRuntimeTomlOfficialClientProtocol(selectedProvider.protocol)) {
       setBindingFormError(
         `"${bindingProviderId}"는 command(CLI) transport라 바인딩을 생성할 수 없습니다 (백엔드가 아직 CLI provider를 라우팅하지 못합니다)`,
-      )
-      return
-    }
-    // Protocol-only non-materialization is limited to Messages_api. Other
-    // protocols, including openai-compatible-cli, are valid when the provider
-    // uses endpoint/HTTP transport.
-    if (selectedProvider && isRuntimeTomlNonMaterializableProtocol(selectedProvider.protocol)) {
-      setBindingFormError(
-        `"${bindingProviderId}"는 ${selectedProvider.protocol} protocol이라 바인딩을 생성할 수 없습니다 (백엔드가 아직 이 provider를 라우팅하지 못합니다)`,
       )
       return
     }

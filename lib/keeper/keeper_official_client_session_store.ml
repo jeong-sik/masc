@@ -67,7 +67,6 @@ type phase =
 type recovery_resolution =
   | Retry_previous
   | Restart_fresh
-  | Adopt_verified of settlement
 
 type recovery_resolution_record =
   { recovery_id : string
@@ -224,7 +223,6 @@ let validate_recovery (recovery : recovery_required) =
 
 let validate_recovery_resolution = function
   | Retry_previous | Restart_fresh -> Ok ()
-  | Adopt_verified settlement -> validate_settlement settlement
 ;;
 
 let validate_recovery_resolution_record (record : recovery_resolution_record) =
@@ -361,22 +359,12 @@ let client_kind_of_string = function
 let recovery_resolution_to_yojson = function
   | Retry_previous -> `Assoc [ "kind", `String "retry_previous" ]
   | Restart_fresh -> `Assoc [ "kind", `String "restart_fresh" ]
-  | Adopt_verified settlement ->
-    `Assoc
-      [ "kind", `String "adopt_verified"
-      ; "settlement", settlement_to_yojson settlement
-      ]
 ;;
 
 let recovery_resolution_of_yojson = function
   | `Assoc [ "kind", `String "retry_previous" ] -> Ok Retry_previous
   | `Assoc [ "kind", `String "restart_fresh" ] -> Ok Restart_fresh
-  | `Assoc fields ->
-    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
-     | [ "kind", `String "adopt_verified"; "settlement", settlement_json ] ->
-       Result.map (fun settlement -> Adopt_verified settlement)
-         (settlement_of_yojson settlement_json)
-     | _ -> Error "official-client recovery resolution fields are not exact")
+  | `Assoc _ -> Error "official-client recovery resolution fields are not exact"
   | _ -> Error "official-client recovery resolution must be a JSON object"
 ;;
 
@@ -984,9 +972,6 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
            | Some settlement -> Settled settlement)
         , completed_turn_count )
     | Restart_fresh -> Ok (Ready, completed_turn_count)
-    | Adopt_verified settlement ->
-      let* () = validate_settlement settlement in
-      Ok (Settled settlement, expected.turn_count)
   in
   let* resolved =
     transition
@@ -1014,7 +999,6 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
     resolved_by
     (match resolution with
      | Retry_previous -> "retry_previous"
-     | Restart_fresh -> "restart_fresh"
-     | Adopt_verified _ -> "adopt_verified");
+     | Restart_fresh -> "restart_fresh");
   Ok resolved
 ;;

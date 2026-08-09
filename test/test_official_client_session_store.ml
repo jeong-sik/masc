@@ -361,7 +361,7 @@ let test_restart_recovery_and_transient_release () =
     | None -> fail "transient release evidence was not persisted")
 ;;
 
-let test_exact_recovery_resolution () =
+let test_exact_recovery_restart () =
   with_workspace "masc-official-client-store-resolution-" (fun base_path ->
     let keeper_name = "resolution" in
     let claimed =
@@ -401,24 +401,23 @@ let test_exact_recovery_resolution () =
      with
      | Error _ -> ()
      | Ok _ -> fail "wrong recovery fence was accepted");
-    let settlement = { session_id = "verified-session"; turn_id = "verified-turn" } in
-    let adopted =
+    let restarted =
       resolve_recovery
         ~base_path
         ~keeper_name
         ~expected:recovery
         ~recovery_id
-        ~resolution:(Adopt_verified settlement)
+        ~resolution:Restart_fresh
         ~resolved_by:"operator"
         ~resolved_at:4.0
       |> Result.get_ok
     in
-    check int "adopt counts verified turn" 1 adopted.turn_count;
-    (match adopted.phase with
-     | Settled observed -> check bool "verified settlement" true (observed = settlement)
-     | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
-       fail "verified terminal identity was not adopted");
-    match adopted.last_recovery_resolution with
+    check int "restart drops incomplete turn" 0 restarted.turn_count;
+    (match restarted.phase with
+     | Ready -> ()
+     | Settled _ | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+       fail "fresh restart did not return the binding to Ready");
+    match restarted.last_recovery_resolution with
     | Some record ->
       check string "durable actor" "operator" record.resolved_by;
       check string "recovery fence" recovery_id record.recovery_id
@@ -508,7 +507,7 @@ let () =
             "restart recovery and transient release"
             `Quick
             test_restart_recovery_and_transient_release
-        ; test_case "exact recovery resolution" `Quick test_exact_recovery_resolution
+        ; test_case "exact recovery restart" `Quick test_exact_recovery_restart
         ; test_case "ambiguous JSON rejected" `Quick test_ambiguous_json_is_rejected
         ; test_case
             "tool surface fingerprint canonical"

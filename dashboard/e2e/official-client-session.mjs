@@ -1,5 +1,10 @@
 import { chromium } from 'playwright'
 
+// Visual interaction fixture only. The production CanAdmin -> store CAS ->
+// refreshed projection contract is exercised against the real HTTP server by
+// test_sse_storm_e2e; this route interception intentionally proves layout and
+// browser request shape, not backend authorization or persistence.
+
 const fixtureUrl = process.env.OFFICIAL_CLIENT_SESSION_FIXTURE_URL
 if (!fixtureUrl) throw new Error('OFFICIAL_CLIENT_SESSION_FIXTURE_URL is required')
 

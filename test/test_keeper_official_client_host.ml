@@ -132,6 +132,45 @@ let test_raw_start_failure_does_not_block_tool () =
     check (option string) "trace failure is not terminal" None !terminal_error)
 ;;
 
+let test_raw_observation_preserves_reserved_exceptions () =
+  let raises_out_of_memory =
+    try
+      ignore
+        (Host.observe_raw_trace
+           ~keeper_name:"keeper-raw-authority"
+           ~stage:Host.Run_start
+           (fun () -> raise Out_of_memory));
+      false
+    with
+    | Out_of_memory -> true
+  in
+  let raises_stack_overflow =
+    try
+      ignore
+        (Host.observe_raw_trace
+           ~keeper_name:"keeper-raw-authority"
+           ~stage:Host.Run_start
+           (fun () -> raise Stack_overflow));
+      false
+    with
+    | Stack_overflow -> true
+  in
+  let raises_sys_break =
+    try
+      ignore
+        (Host.observe_raw_trace
+           ~keeper_name:"keeper-raw-authority"
+           ~stage:Host.Run_start
+           (fun () -> raise Sys.Break));
+      false
+    with
+    | Sys.Break -> true
+  in
+  check bool "Out_of_memory propagates" true raises_out_of_memory;
+  check bool "Stack_overflow propagates" true raises_stack_overflow;
+  check bool "Sys.Break propagates" true raises_sys_break
+;;
+
 let test_raw_finish_failure_does_not_reverse_tool_success () =
   with_active_raw_trace (fun ~path ~active ->
     let executions = ref 0 in
@@ -199,6 +238,10 @@ let () =
             "RAW start failure does not block tool"
             `Quick
             test_raw_start_failure_does_not_block_tool
+        ; test_case
+            "RAW observation preserves reserved exceptions"
+            `Quick
+            test_raw_observation_preserves_reserved_exceptions
         ; test_case
             "RAW finish failure preserves tool success"
             `Quick

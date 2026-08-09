@@ -256,6 +256,7 @@ let observe_raw_trace ~keeper_name ~stage observe =
   match
     try observe () with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | (Out_of_memory | Stack_overflow | Sys.Break) as exn -> raise exn
     | exn -> Error (Agent_sdk.Error.Internal (Printexc.to_string exn))
   with
   | Ok value -> Some value

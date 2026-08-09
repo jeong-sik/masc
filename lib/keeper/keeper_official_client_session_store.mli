@@ -1,0 +1,217 @@
+(** Durable current-owner state between one Keeper and one official subscription
+    client session.
+
+    This is not an OAS checkpoint. The external client owns its transcript;
+    MASC owns the exact claim, observation, recovery, and settlement phase needed
+    to avoid silently duplicating an externally admitted turn. *)
+
+type client_kind =
+  | Codex
+  | Claude_code
+  | Antigravity
+
+type settlement =
+  { session_id : string
+  ; turn_id : string
+  }
+
+type recovery_failure =
+  | Transient_spawn_failed
+  | Transport_interrupted
+  | Protocol_failed
+  | Provider_rejected
+  | Host_hook_failed
+  | State_persistence_failed
+  | Process_restarted
+
+type failure_disposition =
+  | Transient
+  | Ambiguous
+  | Fatal
+
+val failure_disposition : recovery_failure -> failure_disposition
+
+type recovery_required =
+  { recovery_id : string
+  ; previous_settlement : settlement option
+  ; observed_session_id : string option
+  ; observed_turn_id : string option
+  ; owner_epoch : string
+  ; failure : recovery_failure
+  ; detail : string
+  ; required_at : float
+  }
+
+type phase =
+  | Ready
+  | Start of
+      { owner_epoch : string
+      ; previous_settlement : settlement option
+      }
+  | Active of
+      { owner_epoch : string
+      ; session_id : string
+      ; previous_settlement : settlement option
+      }
+  | Turn_inflight of
+      { owner_epoch : string
+      ; session_id : string
+      ; turn_id : string option
+      ; previous_settlement : settlement option
+      }
+  | Recovery_required of recovery_required
+  | Settled of settlement
+
+type recovery_resolution =
+  | Retry_previous
+  | Restart_fresh
+
+type recovery_resolution_record =
+  { recovery_id : string
+  ; failure : recovery_failure
+  ; resolution : recovery_resolution
+  ; resolved_by : string
+  ; resolved_at : float
+  }
+
+type transient_release_record =
+  { failure : recovery_failure
+  ; owner_epoch : string
+  ; released_at : float
+  }
+
+type t =
+  { client_kind : client_kind
+  ; runtime_id : string
+  ; phase : phase
+  ; turn_count : int
+  ; tool_surface_sha256 : string
+  ; last_recovery_resolution : recovery_resolution_record option
+  ; last_transient_release : transient_release_record option
+  ; updated_at : float
+  }
+
+type claim_plan =
+  { previous_settlement : settlement option
+  ; turn_count : int
+  ; required_tool_surface_sha256 : string option
+  }
+
+val process_epoch : unit -> string
+(** One UUID for the current MASC process. A durable incomplete claim owned by
+    another epoch is a restart ambiguity, not an active same-process turn. *)
+
+val path : base_path:string -> keeper_name:string -> (string, string) result
+
+val tool_surface_sha256 : Agent_sdk.Tool.t list -> string
+(** Stable digest of the exact typed dynamic-tool surface. Tool order,
+    parameter order, and JSON object field order do not affect the digest;
+    names, descriptions, parameter semantics, and input schemas do. *)
+
+val load : base_path:string -> keeper_name:string -> (t option, string) result
+(** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an
+    error and never degrades to a new session. *)
+
+val plan_claim :
+  expected:t option ->
+  client_kind:client_kind ->
+  runtime_id:string ->
+  (claim_plan, string) result
+(** Pure claim planning shared by every official-client adapter. The plan is
+    the SSOT for fresh versus resumed execution, the next turn ordinal, and
+    whether the prepared tool surface must match a settled session. *)
+
+val claim :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t option ->
+  client_kind:client_kind ->
+  owner_epoch:string ->
+  runtime_id:string ->
+  tool_surface_sha256:string ->
+  updated_at:float ->
+  (t, string) result
+(** Claim the next exact turn. A terminal binding may start fresh when its
+    declared client kind or runtime id changes. Resuming the same settled
+    client/runtime requires an identical tool surface. Incomplete and recovery
+    phases always reject another claim regardless of configuration changes. *)
+
+val mark_active :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  session_id:string ->
+  updated_at:float ->
+  (t, string) result
+
+val mark_turn_starting :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  session_id:string ->
+  updated_at:float ->
+  (t, string) result
+
+val mark_turn_started :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  session_id:string ->
+  turn_id:string ->
+  updated_at:float ->
+  (t, string) result
+
+val settle :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  session_id:string ->
+  turn_id:string ->
+  updated_at:float ->
+  (t, string) result
+
+val require_recovery :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  failure:recovery_failure ->
+  detail:string ->
+  required_at:float ->
+  (t, string) result
+(** Convert the exact incomplete claim into an explicit operator-visible
+    recovery state. This never retries or clears a possibly executed turn. *)
+
+val release_transient :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  failure:recovery_failure ->
+  released_at:float ->
+  (t, string) result
+(** Release one exact incomplete claim only when [failure] is classified
+    [Transient]. The previous settlement, if any, is restored atomically. *)
+
+val reconcile_process_restart :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  current_owner_epoch:string ->
+  required_at:float ->
+  (t, string) result
+(** Convert an incomplete claim owned by a different process epoch into an
+    explicit ambiguous recovery. Same-epoch claims remain occupied. *)
+
+val resolve_recovery :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  recovery_id:string ->
+  resolution:recovery_resolution ->
+  resolved_by:string ->
+  resolved_at:float ->
+  (t, string) result
+(** Resolve one exact recovery claim with compare-and-swap authority.
+    [Retry_previous] restores the last settled session, [Restart_fresh] makes
+    the next claim start a new session. *)
+(** Every phase change is a process-safe durable compare-and-swap followed by
+    exact read-back. Any incomplete phase blocks a later automatic claim. *)

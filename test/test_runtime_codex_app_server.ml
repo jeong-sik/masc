@@ -23,6 +23,16 @@ let turn_completed =
   {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[{"type":"agentMessage","id":"message-1","text":"MASC_SUBSCRIPTION_OK","phase":"final_answer"}],"status":"completed"}}}|}
 ;;
 
+let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
+
+let resumed_item_completed =
+  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-2","completedAtMs":2,"item":{"type":"agentMessage","id":"message-2","text":"MASC_RESUMED_OK","phase":"final_answer"}}}|}
+;;
+
+let resumed_turn_completed =
+  {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-2","items":[{"type":"agentMessage","id":"message-2","text":"MASC_RESUMED_OK","phase":"final_answer"}],"status":"completed"}}}|}
+;;
+
 let shell_quote value =
   "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
 ;;
@@ -36,35 +46,45 @@ let rec drop count values =
     | _ :: rest -> drop (count - 1) rest
 ;;
 
-let fixture_script lines =
+let fixture_script ?capture_path lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
+  let read_request () =
+    output_string output "IFS= read -r ignored\n";
+    Option.iter
+      (fun capture_path ->
+         output_string
+           output
+           ("printf '%s\\n' \"$ignored\" >> " ^ shell_quote capture_path ^ "\n"))
+      capture_path
+  in
   output_string output "#!/bin/sh\n";
-  output_string output "IFS= read -r ignored\n";
+  read_request ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 0) ^ "\n");
-  output_string output "IFS= read -r ignored\n";
-  output_string output "IFS= read -r ignored\n";
+  read_request ();
+  read_request ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 1) ^ "\n");
-  output_string output "IFS= read -r ignored\n";
+  read_request ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
-  output_string output "IFS= read -r ignored\n";
+  read_request ();
   List.iter
     (fun line -> output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     (drop 3 lines);
+  output_string output "while IFS= read -r ignored; do :; done\n";
   close_out output;
   Unix.chmod path 0o700;
   path
 ;;
 
-let with_fixture lines f =
-  let path = fixture_script lines in
+let with_fixture ?capture_path lines f =
+  let path = fixture_script ?capture_path lines in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
-let run_fixture ?(dynamic_tools = []) ?(history = []) path =
+let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp") path =
   Eio_main.run (fun env ->
     let config =
-      { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+      { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
       ; timeout_s = 2.0
       }
@@ -72,10 +92,28 @@ let run_fixture ?(dynamic_tools = []) ?(history = []) path =
     Runtime_codex_app_server.run_turn
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
+      ~cwd:Eio.Path.(Eio.Stdenv.fs env / cwd)
       ~dynamic_tools
+      ?thread_mode
       ~history
       config
       ~prompt:"Return the fixture marker")
+;;
+
+let test_turn_admission_validation_is_process_free () =
+  let config =
+    { (Runtime_codex_app_server.default_config ()) with cli_path = "" }
+  in
+  Eio_main.run (fun env ->
+    match
+      Runtime_codex_app_server.validate_turn
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+        config
+        ~prompt:"fixture"
+    with
+    | Error (Runtime_codex_app_server.Invalid_config "cli_path must not be empty") -> ()
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok () -> fail "invalid deterministic client config passed admission")
 ;;
 
 let tool_call_request =
@@ -156,7 +194,91 @@ let test_chatgpt_subscription_turn () =
         check string "thread" "thread-1" result.thread_id;
         check string "turn" "turn-1" result.turn_id;
         check string "model" "gpt-fixture" result.model;
-        check string "plan" "pro" result.subscription.plan_type)
+        check string "plan" "pro" result.subscription.plan_type;
+        check bool "new thread" false result.resumed)
+;;
+
+let test_thread_resume_skips_history_injection () =
+  let history =
+    [ { Runtime_codex_app_server.role = User; text = "already in official thread" } ]
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+    (fun path ->
+       match
+         run_fixture
+           ~thread_mode:(Runtime_codex_app_server.Resume { thread_id = "thread-1" })
+           ~history
+           path
+       with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok result ->
+         check bool "resumed" true result.resumed;
+         check string "thread" "thread-1" result.thread_id)
+;;
+
+let test_thread_resume_sends_dynamic_tools () =
+  let capture_path = Filename.temp_file "masc-codex-resume-requests-" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove capture_path)
+    (fun () ->
+       let tool : Runtime_codex_app_server.dynamic_tool =
+         { name = "masc_probe"
+         ; description = "Return a deterministic fixture marker"
+         ; input_schema = `Assoc [ "type", `String "object" ]
+         ; call = (fun ~call_id:_ _ -> { success = true; content = "unused" })
+         }
+       in
+       with_fixture
+         ~capture_path
+         [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+         (fun path ->
+            match
+              run_fixture
+                ~dynamic_tools:[ tool ]
+                ~thread_mode:(Runtime_codex_app_server.Resume { thread_id = "thread-1" })
+                path
+            with
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> ());
+       let requests =
+         In_channel.with_open_bin capture_path (fun input ->
+           In_channel.input_lines input |> List.map Yojson.Safe.from_string)
+       in
+       let resume_request =
+         List.find
+           (fun json -> Yojson.Safe.Util.member "id" json = `Int 3)
+           requests
+       in
+       let dynamic_tools =
+         resume_request
+         |> Yojson.Safe.Util.member "params"
+         |> Yojson.Safe.Util.member "dynamicTools"
+         |> Yojson.Safe.Util.to_list
+       in
+       check int "resume tool count" 1 (List.length dynamic_tools);
+       check string "resume tool name" "masc_probe"
+         (dynamic_tools
+          |> List.hd
+          |> Yojson.Safe.Util.member "name"
+          |> Yojson.Safe.Util.to_string))
+;;
+
+let test_thread_resume_rejects_identity_mismatch () =
+  let wrong_thread =
+    {|{"id":3,"result":{"thread":{"id":"thread-other"},"model":"gpt-fixture"}}|}
+  in
+  with_fixture
+    [ init_result; account_chatgpt; wrong_thread; turn_result; item_completed; turn_completed ]
+    (fun path ->
+       match
+         run_fixture
+           ~thread_mode:(Runtime_codex_app_server.Resume { thread_id = "thread-1" })
+           path
+       with
+       | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "thread/resume admitted a different returned thread id")
 ;;
 
 let test_api_key_account_is_rejected () =
@@ -338,14 +460,170 @@ let cleanup_tree root =
   | _ -> ()
 ;;
 
-let production_keeper_meta ~base_path =
+let test_declared_cwd_reaches_spawn () =
+  let workspace = temp_workspace "masc-codex-cwd-" in
+  let marker = Filename.concat workspace "spawn-cwd.txt" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree workspace)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun fixture ->
+            let wrapper = Filename.temp_file "masc-codex-cwd-wrapper-" ".sh" in
+            Fun.protect
+              ~finally:(fun () -> Sys.remove wrapper)
+              (fun () ->
+                 let output = open_out_bin wrapper in
+                 output_string output "#!/bin/sh\n";
+                 output_string output ("pwd > " ^ shell_quote marker ^ "\n");
+                 output_string output
+                   ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+                 close_out output;
+                 Unix.chmod wrapper 0o700;
+                 (match run_fixture ~cwd:workspace wrapper with
+                  | Error error ->
+                    fail (Runtime_codex_app_server.error_to_string error)
+                  | Ok _ -> ());
+                 let input = open_in_bin marker in
+                 let observed =
+                   Fun.protect
+                     ~finally:(fun () -> close_in input)
+                     (fun () -> input_line input)
+                 in
+                 check string
+                   "spawn cwd"
+                   (Unix.realpath workspace)
+                   (Unix.realpath observed))))
+;;
+
+let test_protocol_uses_spawn_cwd_and_named_permissions () =
+  let workspace = temp_workspace "masc-codex-protocol-cwd-" in
+  let capture_path = Filename.temp_file "masc-codex-protocol-" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_tree workspace;
+      Sys.remove capture_path)
+    (fun () ->
+       with_fixture
+         ~capture_path
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun fixture ->
+            match run_fixture ~cwd:workspace fixture with
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> ());
+       let requests =
+         In_channel.with_open_bin capture_path (fun input ->
+           In_channel.input_lines input |> List.map Yojson.Safe.from_string)
+       in
+       let initialize =
+         List.find
+           (fun json -> Yojson.Safe.Util.member "id" json = `Int 1)
+           requests
+       in
+       let thread_start =
+         List.find
+           (fun json -> Yojson.Safe.Util.member "id" json = `Int 3)
+           requests
+       in
+       let client_info =
+         initialize
+         |> Yojson.Safe.Util.member "params"
+         |> Yojson.Safe.Util.member "clientInfo"
+       in
+       let params = Yojson.Safe.Util.member "params" thread_start in
+       check string
+         "client version SSOT"
+         Version.version
+         (client_info |> Yojson.Safe.Util.member "version" |> Yojson.Safe.Util.to_string);
+       check string
+         "protocol cwd"
+         (Unix.realpath workspace)
+         (params
+          |> Yojson.Safe.Util.member "cwd"
+          |> Yojson.Safe.Util.to_string
+          |> Unix.realpath);
+       check string
+         "named permissions"
+         ":read-only"
+         (params |> Yojson.Safe.Util.member "permissions" |> Yojson.Safe.Util.to_string);
+       check bool
+         "legacy sandbox omitted"
+         true
+         (Yojson.Safe.Util.member "sandbox" params = `Null))
+;;
+
+let test_child_environment_is_allowlisted () =
+  let canary = "MASC_CODEX_SECRET_CANARY" in
+  let previous = Sys.getenv_opt canary in
+  Unix.putenv canary "must-not-reach-child";
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv canary value
+      | None -> Unix.putenv canary "")
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun fixture ->
+            let wrapper = Filename.temp_file "masc-codex-env-wrapper-" ".sh" in
+            Fun.protect
+              ~finally:(fun () -> Sys.remove wrapper)
+              (fun () ->
+                 let output = open_out_bin wrapper in
+                 output_string output "#!/bin/sh\n";
+                 output_string output
+                   "if [ \"${MASC_CODEX_SECRET_CANARY+set}\" = set ]; then exit 71; fi\n";
+                 output_string output "if [ -z \"${HOME:-}\" ]; then exit 72; fi\n";
+                 output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+                 close_out output;
+                 Unix.chmod wrapper 0o700;
+                 match run_fixture wrapper with
+                 | Error error ->
+                   fail (Runtime_codex_app_server.error_to_string error)
+                 | Ok _ -> ())))
+;;
+
+let write_fixture_file path content =
+  let output = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr output)
+    (fun () -> output_string output content)
+;;
+
+let fixture_tool ?(parameters = []) ~name ~description () =
+  Agent_sdk.Tool.create
+    ~name
+    ~description
+    ~parameters
+    (fun _ -> Ok { Agent_sdk.Types.content = "fixture"; _meta = None })
+;;
+
+let production_keeper_meta ~base_path ~trace_id =
   let name = "codex-production-fixture" in
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ "name", `String name
          ; "agent_name", `String (Keeper_identity.keeper_agent_name name)
-         ; "trace_id", `String "codex-production-fixture-trace"
+         ; "trace_id", `String trace_id
          ; "allowed_paths", `List [ `String base_path ]
          ])
   with
@@ -353,17 +631,13 @@ let production_keeper_meta ~base_path =
   | Error detail -> fail ("production Keeper meta fixture failed: " ^ detail)
 ;;
 
-let run_production_keeper_turn ~cli_path ~model =
+let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
     (fun () ->
        with_runtime_config ~model cli_path (fun runtime_path ->
-         let base_path = temp_workspace "masc-codex-production-" in
-         Fun.protect
-           ~finally:(fun () -> cleanup_tree base_path)
-           (fun () ->
-              Eio_main.run (fun env ->
+         Eio_main.run (fun env ->
                 Eio.Switch.run (fun sw ->
                   Fs_compat.set_fs (Eio.Stdenv.fs env);
                   Eio_context.set_env env;
@@ -377,7 +651,7 @@ let run_production_keeper_turn ~cli_path ~model =
                        | Error error -> fail error
                        | Ok () ->
                          let config = Workspace.default_config base_path in
-                         let meta = production_keeper_meta ~base_path in
+                         let meta = production_keeper_meta ~base_path ~trace_id in
                          ignore
                            (Keeper_registry.For_testing.register
                               ~base_path
@@ -414,20 +688,26 @@ let run_production_keeper_turn ~cli_path ~model =
                                     { Keeper_agent_run.system_prompt = base_system_prompt
                                     ; dynamic_context = ""
                                     })
-                                ~user_message:
-                                  "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+                                ~user_message
                                 ~turn_kind:Turn_record.Direct
                                 ~runtime_id:"codex.codex"
                                 ~generation:1
-                                ())))))))
+                                ()))))))
 ;;
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
-    ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.")
-    ~cli_path ~model () =
+    ?base_path
+    ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
+    ~model () =
+  let owns_base_path = Option.is_none base_path in
+  let base_path =
+    Option.value base_path ~default:(temp_workspace "masc-codex-session-")
+  in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
-    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      if owns_base_path then cleanup_tree base_path)
     (fun () ->
        with_runtime_config ~model cli_path (fun runtime_path ->
          Eio_main.run (fun env ->
@@ -450,7 +730,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                     Keeper_turn_driver.run_named
                       ~runtime_id:"codex.codex"
                       ~keeper_name:"codex-fixture"
-                      ~base_path:"/tmp"
+                      ~base_path
                       ~goal
                       ~tools
                       ~initial_messages:[]
@@ -474,6 +754,184 @@ let test_keeper_dispatches_codex_turn_runtime () =
          check bool "measured observation" true (Option.is_some result.runtime_observation))
 ;;
 
+let test_keeper_protocol_failure_enters_recovery () =
+  let base_path = temp_workspace "masc-codex-runtime-recovery-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ "not-json"
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            (match
+               run_keeper_turn
+                 ~base_path
+                 ~cli_path
+                 ~model:"gpt-fixture"
+                 ()
+             with
+             | Error _ -> ()
+             | Ok _ -> fail "malformed official-client response completed the Keeper turn");
+            let recovery =
+              match
+                Keeper_official_client_session_store.load
+                  ~base_path
+                  ~keeper_name:"codex-fixture"
+              with
+              | Error detail -> fail detail
+              | Ok None -> fail "failed Codex turn left no durable recovery state"
+              | Ok (Some state) -> state
+            in
+            (match recovery.phase with
+             | Recovery_required required ->
+               check bool
+                 "runtime failure class"
+                 true
+                 (required.failure = Protocol_failed);
+               check (option string) "no observed session" None required.observed_session_id
+             | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+               fail "failed Codex runtime claim was not converted to recovery-required");
+            (match
+               run_keeper_turn
+                 ~base_path
+                 ~cli_path
+                 ~model:"gpt-fixture"
+                 ()
+             with
+             | Error
+                 (Agent_sdk.Error.Config
+                   (Agent_sdk.Error.InvalidConfig { field; _ })) ->
+               check string "recovery gate field" "official_client_session.claim" field
+             | Error error -> fail (Agent_sdk.Error.to_string error)
+             | Ok _ -> fail "unresolved Codex recovery admitted a duplicate turn")))
+;;
+
+let test_keeper_resumes_persisted_codex_thread () =
+  let base_path = temp_workspace "masc-codex-resume-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~base_path
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok result -> check int "initial turn count" 1 result.turns);
+       let before_turn_ordinal = ref 0 in
+       let after_turn_ordinal = ref 0 in
+       let hooks : Agent_sdk.Hooks.hooks =
+         { Agent_sdk.Hooks.empty with
+           before_turn =
+             Some
+               (function
+                 | BeforeTurn { turn; _ } ->
+                   before_turn_ordinal := turn;
+                   Continue
+                 | _ -> Continue)
+         ; after_turn =
+             Some
+               (function
+                 | AfterTurn { turn; _ } ->
+                   after_turn_ordinal := turn;
+                   Continue
+                 | _ -> Continue)
+         }
+       in
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; resumed_turn_result
+         ; resumed_item_completed
+         ; resumed_turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~base_path
+                ~hooks
+                ~goal:"Return the resumed fixture marker"
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok result ->
+              check string "resumed response" "MASC_RESUMED_OK" (keeper_response_text result);
+              check string "official thread" "thread-1" result.session_id;
+              check int "cumulative turns" 2 result.turns;
+              check int "before-turn ordinal" 2 !before_turn_ordinal;
+              check int "after-turn ordinal" 2 !after_turn_ordinal);
+       match
+         Keeper_official_client_session_store.load
+           ~base_path
+           ~keeper_name:"codex-fixture"
+       with
+       | Error detail -> fail detail
+       | Ok None -> fail "resumed Codex binding disappeared"
+       | Ok (Some binding) -> check int "stored turns" 2 binding.turn_count)
+;;
+
+let test_keeper_rejects_changed_tool_surface_on_resume () =
+  let base_path = temp_workspace "masc-codex-tool-change-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            (match
+               run_keeper_turn
+                 ~base_path
+                 ~cli_path
+                 ~model:"gpt-fixture"
+                 ()
+             with
+             | Error error -> fail (Agent_sdk.Error.to_string error)
+             | Ok _ -> ());
+            let tool = fixture_tool ~name:"new_tool" ~description:"new surface" () in
+            match
+              run_keeper_turn
+                ~base_path
+                ~tools:[ tool ]
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error
+                (Agent_sdk.Error.Config
+                  (Agent_sdk.Error.InvalidConfig { field; _ })) ->
+              check string
+                "fingerprint field"
+                "official_client_session.tool_surface_sha256"
+                field
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok _ -> fail "changed tool surface silently resumed the Codex thread"))
+;;
+
 let assert_production_keeper_result result =
   check string
     "production Keeper response"
@@ -488,18 +946,93 @@ let assert_production_keeper_result result =
 ;;
 
 let test_production_keeper_dispatches_codex_runtime () =
-  with_fixture
-    [ init_result
-    ; account_chatgpt
-    ; thread_result
-    ; turn_result
-    ; item_completed
-    ; turn_completed
-    ]
-    (fun cli_path ->
-       match run_production_keeper_turn ~cli_path ~model:"gpt-fixture" with
-       | Error error -> fail (Agent_sdk.Error.to_string error)
-       | Ok result -> assert_production_keeper_result result)
+  let base_path = temp_workspace "masc-codex-production-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-trace-1"
+                ~user_message:
+                  "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+                ~cli_path
+                ~model:"gpt-fixture"
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok result -> assert_production_keeper_result result))
+;;
+
+let test_production_keeper_resumes_across_trace_rotation () =
+  let base_path = temp_workspace "masc-codex-production-resume-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-trace-1"
+                ~user_message:"Start the production fixture thread."
+                ~cli_path
+                ~model:"gpt-fixture"
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok _ -> ());
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; resumed_turn_result
+         ; resumed_item_completed
+         ; resumed_turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_production_keeper_turn
+                ~base_path
+                ~trace_id:"codex-production-trace-2"
+                ~user_message:"Resume the production fixture thread."
+                ~cli_path
+                ~model:"gpt-fixture"
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok result ->
+              check string
+                "production resumed response"
+                "MASC_RESUMED_OK"
+                result.Keeper_agent_run.response_text);
+       match
+         Keeper_official_client_session_store.load
+           ~base_path
+           ~keeper_name:"codex-production-fixture"
+       with
+       | Error detail -> fail detail
+       | Ok None -> fail "production Codex current-owner state disappeared"
+       | Ok (Some state) ->
+         check int "production cumulative turns" 2 state.turn_count;
+         (match state.phase with
+          | Settled { session_id; _ } ->
+            check string "production thread" "thread-1" session_id
+          | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+            fail "production Codex state did not settle"))
 ;;
 
 let test_keeper_projects_typed_tools_and_hooks () =
@@ -660,13 +1193,14 @@ let test_live_chatgpt_subscription () =
     let result =
       Eio_main.run (fun env ->
         let config =
-          { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+          { (Runtime_codex_app_server.default_config ()) with
             timeout_s = 60.0
           }
         in
         Runtime_codex_app_server.run_turn
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
           config
           ~prompt:"Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.")
     in
@@ -697,13 +1231,14 @@ let test_live_dynamic_tool_subscription () =
     let result =
       Eio_main.run (fun env ->
         let config =
-          { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+          { (Runtime_codex_app_server.default_config ()) with
             timeout_s = 60.0
           }
         in
         Runtime_codex_app_server.run_turn
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
           ~dynamic_tools:[ tool ]
           config
           ~prompt:
@@ -724,13 +1259,14 @@ let test_live_history_injection_subscription () =
     let result =
       Eio_main.run (fun env ->
         let config =
-          { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+          { (Runtime_codex_app_server.default_config ()) with
             timeout_s = 60.0
           }
         in
         Runtime_codex_app_server.run_turn
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
           ~history:
             [ { role = User; text = "The continuity marker is MASC_HISTORY_OK." }
             ; { role = Assistant; text = "I will retain that marker." }
@@ -782,19 +1318,101 @@ let test_live_keeper_dynamic_tool_subscription () =
       check string "live tool Keeper response" "MASC_TOOL_OK" (keeper_response_text result)
 ;;
 
+let test_live_keeper_resumes_official_thread () =
+  if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
+  then Alcotest.skip ()
+  else
+    let base_path = temp_workspace "masc-codex-live-resume-" in
+    Fun.protect
+      ~finally:(fun () -> cleanup_tree base_path)
+      (fun () ->
+         (match
+            run_keeper_turn
+              ~base_path
+              ~goal:
+                "Remember marker MASC_RESUME_MEMORY. Reply exactly MASC_RESUME_FIRST."
+              ~cli_path:"codex"
+              ~model:"gpt-5.6-sol"
+              ()
+          with
+          | Error error -> fail (Agent_sdk.Error.to_string error)
+          | Ok result ->
+            check string
+              "first live response"
+              "MASC_RESUME_FIRST"
+              (keeper_response_text result));
+         match
+           run_keeper_turn
+             ~base_path
+             ~goal:"Reply exactly with the remembered marker."
+             ~cli_path:"codex"
+             ~model:"gpt-5.6-sol"
+             ()
+         with
+         | Error error -> fail (Agent_sdk.Error.to_string error)
+         | Ok result ->
+           check string
+             "resumed live response"
+             "MASC_RESUME_MEMORY"
+             (keeper_response_text result);
+           check int "resumed live turn count" 2 result.turns)
+;;
+
 let test_live_production_keeper_subscription () =
   if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
   then Alcotest.skip ()
   else
-    match run_production_keeper_turn ~cli_path:"codex" ~model:"gpt-5.6-sol" with
-    | Error error -> fail (Agent_sdk.Error.to_string error)
-    | Ok result -> assert_production_keeper_result result
+    let base_path = temp_workspace "masc-codex-live-production-" in
+    Fun.protect
+      ~finally:(fun () -> cleanup_tree base_path)
+      (fun () ->
+         match
+           run_production_keeper_turn
+             ~base_path
+             ~trace_id:"codex-live-production-trace"
+             ~user_message:
+               "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+             ~cli_path:"codex"
+             ~model:"gpt-5.6-sol"
+         with
+         | Error error -> fail (Agent_sdk.Error.to_string error)
+         | Ok result -> assert_production_keeper_result result)
+;;
+
+let test_official_client_host_text_projection_is_hard_cut () =
+  (match
+     Keeper_official_client_host.text_of_blocks
+       ~runtime_label:"fixture"
+       ~field:"messages"
+       [ Agent_sdk.Types.Text "first"; Text "second" ]
+   with
+   | Ok text -> check string "text blocks preserve order" "first\nsecond" text
+   | Error error -> fail (Agent_sdk.Error.to_string error));
+  match
+    Keeper_official_client_host.text_of_blocks
+      ~runtime_label:"fixture"
+      ~field:"messages"
+      [ Agent_sdk.Types.Thinking { content = "private"; signature = None } ]
+  with
+  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; _ })) ->
+    check string "rejected field" "messages" field
+  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Ok _ -> fail "non-text official-client projection was silently admitted"
 ;;
 
 let () =
   run "runtime codex app-server"
     [ ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
+        ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn
+        ; test_case
+            "protocol and spawn share cwd authority"
+            `Quick
+            test_protocol_uses_spawn_cwd_and_named_permissions
+        ; test_case
+            "child environment is allowlisted"
+            `Quick
+            test_child_environment_is_allowlisted
         ; test_case "API key is rejected" `Quick test_api_key_account_is_rejected
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case
@@ -815,16 +1433,48 @@ let () =
             "unknown notifications are bounded"
             `Quick
             test_unknown_notifications_are_bounded
+        ; test_case
+            "turn admission validation is process-free"
+            `Quick
+            test_turn_admission_validation_is_process_free
         ; test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
         ; test_case "history injects before turn" `Quick test_history_is_injected_before_turn
+        ; test_case
+            "thread resume skips history injection"
+            `Quick
+            test_thread_resume_skips_history_injection
+        ; test_case
+            "thread resume sends dynamic tools"
+            `Quick
+            test_thread_resume_sends_dynamic_tools
+        ; test_case
+            "thread resume rejects identity mismatch"
+            `Quick
+            test_thread_resume_rejects_identity_mismatch
         ; test_case
             "Keeper dispatches Codex runtime"
             `Quick
             test_keeper_dispatches_codex_turn_runtime
         ; test_case
+            "Keeper protocol failure enters recovery"
+            `Quick
+            test_keeper_protocol_failure_enters_recovery
+        ; test_case
+            "Keeper resumes persisted Codex thread"
+            `Quick
+            test_keeper_resumes_persisted_codex_thread
+        ; test_case
+            "Keeper rejects changed Codex tool surface"
+            `Quick
+            test_keeper_rejects_changed_tool_surface_on_resume
+        ; test_case
             "production Keeper dispatches Codex runtime"
             `Quick
             test_production_keeper_dispatches_codex_runtime
+        ; test_case
+            "production Keeper resumes across trace rotation"
+            `Quick
+            test_production_keeper_resumes_across_trace_rotation
         ; test_case
             "Keeper projects typed tools and hooks"
             `Quick
@@ -833,6 +1483,10 @@ let () =
             "Keeper rejects unprojected turn parameters"
             `Quick
             test_keeper_rejects_unprojected_turn_parameters
+        ; test_case
+            "shared host text projection is hard-cut"
+            `Quick
+            test_official_client_host_text_projection_is_hard_cut
         ] )
     ; ( "live subscription"
       , [ test_case
@@ -855,6 +1509,10 @@ let () =
             "Keeper typed tool through official Codex app-server"
             `Slow
             test_live_keeper_dynamic_tool_subscription
+        ; test_case
+            "Keeper resumes official Codex thread"
+            `Slow
+            test_live_keeper_resumes_official_thread
         ; test_case
             "production Keeper through official Codex app-server"
             `Slow

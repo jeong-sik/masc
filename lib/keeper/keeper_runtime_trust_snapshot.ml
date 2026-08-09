@@ -695,6 +695,14 @@ let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
   |> sort_timeline_events
   |> fun events -> latest_causal_from_timeline (`List events)
 
+let approval_audit_rows_or_fail = function
+  | Ok rows -> rows
+  | Error error ->
+    failwith
+      ("approval audit unavailable: "
+       ^ Keeper_approval.Audit.read_error_to_string error)
+;;
+
 let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let latest_decision = latest_decision_json ~config ~keeper_name:meta.name in
   let latest_tool_call = latest_tool_call_json ~keeper_name:meta.name in
@@ -703,6 +711,7 @@ let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
     match
       Keeper_approval.Audit.read_recent ~base_path:config.base_path
         ~keeper_name:meta.name ~n:1 ()
+      |> approval_audit_rows_or_fail
     with
     | json :: _ -> Some json
     | [] -> None
@@ -804,6 +813,7 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
   let approval_events =
     Keeper_approval.Audit.read_recent ~base_path ~keeper_name:meta.name
       ~n:8 ()
+    |> approval_audit_rows_or_fail
     |> List.filter_map approval_event_timeline_event
   in
   let transition_events =
@@ -907,6 +917,7 @@ let snapshot_json_inner_with_pending_reader
     match
       Keeper_approval.Audit.read_recent ~base_path:config.base_path
         ~keeper_name:meta.name ~n:1 ()
+      |> approval_audit_rows_or_fail
     with
     | json :: _ -> Some json
     | [] -> None

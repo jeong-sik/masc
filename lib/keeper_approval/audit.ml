@@ -1,5 +1,23 @@
 open Keeper_approval_queue_rules_types
 
+type read_stage =
+  | Read_recent
+  | List_recent_resolved
+
+type read_error =
+  { stage : read_stage
+  ; detail : string
+  }
+
+let read_stage_to_string = function
+  | Read_recent -> "read_recent"
+  | List_recent_resolved -> "list_recent_resolved"
+;;
+
+let read_error_to_string error =
+  Printf.sprintf "%s: %s" (read_stage_to_string error.stage) error.detail
+;;
+
 let record_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
   Keeper_fd_pressure.note_exception ~site:("approval_audit." ^ site) exn;
   Otel_metric_store_core.inc_counter
@@ -24,21 +42,6 @@ let audit_stores_mu = Stdlib.Mutex.create ()
 let audit_io_mutex = Cross_context_mutex.create ()
 let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 
-(* Runtime trust asks for per-keeper latest audit state across the same global
-   audit tail. Cache the raw tail briefly so a keeper snapshot does one shared
-   JSONL read instead of N identical scans. *)
-type recent_audit_cache_entry =
-  { rows : Yojson.Safe.t list
-  ; observed_at : float
-  }
-;;
-
-let recent_audit_cache_mu = Stdlib.Mutex.create ()
-let recent_audit_cache : (string, recent_audit_cache_entry) Hashtbl.t =
-  Hashtbl.create 4
-;;
-
-let recent_audit_cache_ttl_sec = 1.0
 let recent_resolved_history_limit = 20
 let audit_wide_scan_min_rows = 500
 let audit_wide_scan_multiplier = 64
@@ -81,35 +84,29 @@ type resolved_history =
       (* the row cap stopped the scan before it reached the window start *)
   }
 
-let recent_audit_cache_key store limit =
-  Printf.sprintf "%s:%d" (Dated_jsonl.base_dir store) limit
-;;
-
-let invalidate_recent_audit_cache_for_store store =
-  let prefix = Dated_jsonl.base_dir store ^ ":" in
-  Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
-    Hashtbl.filter_map_inplace
-      (fun key entry -> if String.starts_with ~prefix key then None else Some entry)
-      recent_audit_cache)
+let parsed_rows ~stage entries =
+  let rec collect acc = function
+    | [] -> Ok (List.rev acc)
+    | Dated_jsonl.Parsed row :: rest -> collect (row :: acc) rest
+    | Dated_jsonl.Malformed_json { path; line_number; detail } :: _ ->
+      let location =
+        match line_number with
+        | Some line -> Printf.sprintf "%s:%d" path line
+        | None -> path
+      in
+      Error { stage; detail = Printf.sprintf "%s: %s" location detail }
+  in
+  collect [] entries
 ;;
 
 let read_recent_audit_raw store limit =
-  let key = recent_audit_cache_key store limit in
-  let now = Unix.gettimeofday () in
-  let cached =
-    Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
-      match Hashtbl.find_opt recent_audit_cache key with
-      | Some entry when now -. entry.observed_at <= recent_audit_cache_ttl_sec ->
-        Some entry.rows
-      | _ -> None)
-  in
-  match cached with
-  | Some rows -> rows
-  | None ->
-    let rows = Dated_jsonl.read_recent store limit in
-    Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
-      Hashtbl.replace recent_audit_cache key { rows; observed_at = now });
-    rows
+  match Dated_jsonl.read_recent_result store limit with
+  | Error error ->
+    Error
+      { stage = Read_recent
+      ; detail = Dated_jsonl.read_error_to_string error
+      }
+  | Ok entries -> parsed_rows ~stage:Read_recent entries
 ;;
 
 (* The vocabulary of the [event] field in the approval audit log. Every writer
@@ -212,11 +209,6 @@ let approval_decision_kind_and_reason = function
   | Decision.Reject reason -> Decision_reject, non_empty_reason reason
 ;;
 
-let keeper_audit_metric_label = function
-  | Some keeper when String.trim keeper <> "" -> keeper
-  | Some _ | None -> "aggregate"
-;;
-
 let audit_today_path base_dir =
   let open Unix in
   let tm = gmtime (gettimeofday ()) in
@@ -240,7 +232,7 @@ let get_audit_store ~base_path () =
     Log.Keeper.warn
       "approval_queue: audit store creation failed: %s"
       (Printexc.to_string exn);
-    None
+    Error (Printexc.to_string exn)
   in
   try
     match
@@ -248,8 +240,8 @@ let get_audit_store ~base_path () =
         try
           Ok
             (match Hashtbl.find_opt audit_stores base_path with
-             | Some store -> Some store
-             | None ->
+               | Some store -> store
+               | None ->
                let dir =
                  Filename.concat
                    (Common.masc_dir_from_base_path ~base_path)
@@ -257,12 +249,12 @@ let get_audit_store ~base_path () =
                in
                let store = Dated_jsonl.create ~base_dir:dir () in
                Hashtbl.replace audit_stores base_path store;
-               Some store)
+               store)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn -> Error exn)
     with
-    | Ok store -> store
+    | Ok store -> Ok store
     | Error exn -> report_failure exn
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -306,8 +298,8 @@ let record
     | None -> Unix.gettimeofday ()
   in
   match get_audit_store ~base_path () with
-  | None -> ()
-  | Some store ->
+  | Error _ -> ()
+  | Ok store ->
     let json =
       `Assoc
         ([ "ts", `Float timestamp
@@ -332,39 +324,36 @@ let record
            , match authorization_source with
              | Some source -> `String (authorization_source_to_string source)
              | None -> `Null )
+         ; ( "rule_match"
+           , match rule_match with
+             | Some matched -> rule_match_to_yojson matched
+             | None -> `Null )
+         ; "source_approval_id", Json_util.string_opt_to_json source_approval_id
+         ; ( "decision_kind"
+           , match decision_kind with
+             | Some kind -> `String (decision_kind_to_string kind)
+             | None -> `Null )
+         ; "decision_reason", Json_util.string_opt_to_json decision_reason
+         ; ( "summary_status"
+           , match summary_status with
+             | Some status -> summary_status_to_yojson status
+             | None -> `Null )
+         ; ( "exact_attempt"
+           , match exact_attempt with
+             | Some attempt -> exact_attempt_state_to_yojson attempt
+             | None -> `Null )
+         ; ( "summary_attempt_disposition"
+           , match summary_attempt_disposition with
+             | Some disposition ->
+               summary_attempt_disposition_to_yojson disposition
+             | None -> `Null )
          ]
-         @ (match rule_match with
-            | Some matched -> [ "rule_match", rule_match_to_yojson matched ]
-            | None -> [])
-         @ (match source_approval_id with
-            | Some approval_id -> [ "source_approval_id", `String approval_id ]
-            | None -> [])
-         @ (match decision_kind with
-            | Some kind ->
-              [ "decision_kind", `String (decision_kind_to_string kind) ]
-            | None -> [])
-         @ (match decision_reason with
-            | Some reason -> [ "decision_reason", `String reason ]
-            | None -> [])
-         @ (match summary_status with
-            | Some status -> [ "summary_status", summary_status_to_yojson status ]
-            | None -> [])
-         @ (match exact_attempt with
-            | Some attempt ->
-              [ "exact_attempt", exact_attempt_state_to_yojson attempt ]
-            | None -> [])
-         @ (match summary_attempt_disposition with
-            | Some disposition ->
-              [ ( "summary_attempt_disposition"
-                , summary_attempt_disposition_to_yojson disposition ) ]
-            | None -> [])
          @ extra_fields
          )
     in
     Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
       try
-        Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
-        invalidate_recent_audit_cache_for_store store
+        Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> record_failure ~keeper_name ~site:"audit_append" ~id
@@ -393,54 +382,27 @@ let audit_scan_window ?keeper_name n =
 ;;
 
 
-let record_audit_read_failure ?keeper_name ?(metric_site = Keeper_approval_queue_failure_site.Audit_read_recent) ~site exn =
-  Keeper_fd_pressure.note_exception ~site exn;
-  Otel_metric_store_core.inc_counter
-    Keeper_metrics.(to_string ApprovalQueueFailures)
-    ~labels:
-      [ "keeper",
-        keeper_audit_metric_label keeper_name;
-        "site",
-        Keeper_approval_queue_failure_site.to_label metric_site
-      ]
-    ()
-;;
-
-let read_recent ~base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list =
+let read_recent ~base_path ?keeper_name ?(n = 20) ()
+  : (Yojson.Safe.t list, read_error) result
+  =
   if n <= 0
-  then []
+  then Ok []
   else (
     match get_audit_store ~base_path () with
-    | None -> []
-    | Some store ->
-      try
-        let raw = read_recent_audit_raw store (audit_scan_window ?keeper_name n) in
-        let filtered =
-          match keeper_name with
-          | None -> raw
-          | Some name ->
-            raw
-            |> List.filter (fun json ->
-              String.equal name (Safe_ops.json_string ~default:"" "keeper" json))
-        in
-        filtered |> List.rev |> List.filteri (fun idx _ -> idx < n)
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        record_audit_read_failure ?keeper_name ~site:"approval_audit.read_recent" exn;
-        [])
-;;
-
-let json_member_or_null key json =
-  match Json_util.assoc_member_opt key json with
-  | Some value -> value
-  | None -> `Null
-;;
-
-let resolved_approval_decision_kind json =
-  Option.bind
-    (Safe_ops.json_string_opt "decision_kind" json)
-    decision_kind_of_string
+    | Error detail -> Error { stage = Read_recent; detail }
+    | Ok store ->
+      (match read_recent_audit_raw store (audit_scan_window ?keeper_name n) with
+       | Error _ as error -> error
+       | Ok raw ->
+         let filtered =
+           match keeper_name with
+           | None -> raw
+           | Some name ->
+             raw
+             |> List.filter (fun json ->
+               String.equal name (Safe_ops.json_string ~default:"" "keeper" json))
+         in
+         Ok (filtered |> List.rev |> List.filteri (fun idx _ -> idx < n))))
 ;;
 
 let resolved_history_event json =
@@ -449,30 +411,169 @@ let resolved_history_event json =
   | None -> false
 ;;
 
+let resolved_audit_fields =
+  [ "ts"
+  ; "event"
+  ; "id"
+  ; "keeper"
+  ; "tool"
+  ; "decision"
+  ; "turn_id"
+  ; "task_id"
+  ; "goal_id"
+  ; "goal_ids"
+  ; "actor"
+  ; "decision_source"
+  ; "authorization_source"
+  ; "rule_match"
+  ; "source_approval_id"
+  ; "decision_kind"
+  ; "decision_reason"
+  ; "summary_status"
+  ; "exact_attempt"
+  ; "summary_attempt_disposition"
+  ]
+;;
+
+let required_member ~surface key fields =
+  match List.assoc_opt key fields with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s.%s is required" surface key)
+;;
+
+let required_nonblank_string ~surface key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) when String.trim value <> "" -> Ok value
+  | Some (`String _) -> Error (Printf.sprintf "%s.%s must be non-blank" surface key)
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string" surface key)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface key)
+;;
+
+let required_nullable_string ~surface key fields =
+  match List.assoc_opt key fields with
+  | Some `Null -> Ok `Null
+  | Some (`String value) when String.trim value <> "" -> Ok (`String value)
+  | Some (`String _) -> Error (Printf.sprintf "%s.%s must be non-blank" surface key)
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string or null" surface key)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface key)
+;;
+
+let required_nullable_nonnegative_int ~surface key fields =
+  match List.assoc_opt key fields with
+  | Some `Null -> Ok `Null
+  | Some (`Int value) when value >= 0 -> Ok (`Int value)
+  | Some _ ->
+    Error (Printf.sprintf "%s.%s must be a non-negative integer or null" surface key)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface key)
+;;
+
+let required_finite_timestamp ~surface key fields =
+  match List.assoc_opt key fields with
+  | Some (`Float value) when Float.is_finite value && value >= 0.0 -> Ok value
+  | Some (`Int value) when value >= 0 -> Ok (float_of_int value)
+  | Some _ ->
+    Error (Printf.sprintf "%s.%s must be a finite non-negative number" surface key)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface key)
+;;
+
+let required_string_list_json ~surface key fields =
+  match List.assoc_opt key fields with
+  | Some (`List values) ->
+    let rec loop acc = function
+      | [] -> Ok (`List (List.rev acc))
+      | `String value :: rest when String.trim value <> "" ->
+        loop (`String value :: acc) rest
+      | _ -> Error (Printf.sprintf "%s.%s must contain non-blank strings" surface key)
+    in
+    loop [] values
+  | Some _ -> Error (Printf.sprintf "%s.%s must be an array" surface key)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface key)
+;;
+
 let resolved_approval_json_of_audit_event json =
-  let resolved_at = Safe_ops.json_float_opt "ts" json in
-  `Assoc
-    [ "id", `String (Safe_ops.json_string ~default:"" "id" json)
-    ; "event", `String (Safe_ops.json_string ~default:"" "event" json)
-    ; "keeper_name", `String (Safe_ops.json_string ~default:"" "keeper" json)
-    ; "tool_name", `String (Safe_ops.json_string ~default:"" "tool" json)
-    ; "decision", Json_util.string_opt_to_json_trimmed (Safe_ops.json_string_opt "decision" json)
-    ; "decision_kind", Json_util.string_opt_to_json_trimmed
-        (Option.map decision_kind_to_string (resolved_approval_decision_kind json))
-    ; "decision_reason", json_member_or_null "decision_reason" json
-    ; "resolved_at", Json_util.float_opt_to_json resolved_at
-    ; "turn_id", json_member_or_null "turn_id" json
-    ; "task_id", json_member_or_null "task_id" json
-    ; "goal_id", json_member_or_null "goal_id" json
-    ; "goal_ids", json_member_or_null "goal_ids" json
-    ; "actor", json_member_or_null "actor" json
-    ; "decision_source", json_member_or_null "decision_source" json
-    ; "rule_match", json_member_or_null "rule_match" json
-      (* Judge evidence recorded at resolution time (#26126). Events written
-         before that enrichment have no such members and project as [`Null]. *)
-    ; "summary_status", json_member_or_null "summary_status" json
-    ; "exact_attempt", json_member_or_null "exact_attempt" json
-    ]
+  let ( let* ) = Result.bind in
+  let surface = "resolved_approval_audit" in
+  match json with
+  | `Assoc fields ->
+    let* () = Json_util.reject_unknown_fields ~surface ~allowed:resolved_audit_fields fields in
+    let* event = required_nonblank_string ~surface "event" fields in
+    let* () =
+      if String.equal event (event_to_string Resolved)
+      then Ok ()
+      else Error (Printf.sprintf "%s.event must be resolved" surface)
+    in
+    let* id = required_nonblank_string ~surface "id" fields in
+    let* keeper_name = required_nonblank_string ~surface "keeper" fields in
+    let* tool_name = required_nonblank_string ~surface "tool" fields in
+    let* decision = required_nonblank_string ~surface "decision" fields in
+    let* decision_kind_raw = required_nonblank_string ~surface "decision_kind" fields in
+    let* decision_kind =
+      match decision_kind_of_string decision_kind_raw with
+      | Some kind -> Ok kind
+      | None -> Error (Printf.sprintf "%s.decision_kind is invalid" surface)
+    in
+    let* decision_reason = required_nullable_string ~surface "decision_reason" fields in
+    let* () =
+      match decision_kind with
+      | Decision_approve ->
+        (match decision_reason with
+         | `Null -> Ok ()
+         | `String _ ->
+           Error (Printf.sprintf "%s.approve decision cannot carry a reason" surface)
+         | _ -> assert false)
+      | Decision_reject ->
+        (match decision_reason with
+         | `String _ -> Ok ()
+         | `Null -> Error (Printf.sprintf "%s.reject decision requires a reason" surface)
+         | _ -> assert false)
+    in
+    let* resolved_at = required_finite_timestamp ~surface "ts" fields in
+    let* turn_id = required_nullable_nonnegative_int ~surface "turn_id" fields in
+    let* task_id = required_nullable_string ~surface "task_id" fields in
+    let* goal_id = required_nullable_string ~surface "goal_id" fields in
+    let* goal_ids = required_string_list_json ~surface "goal_ids" fields in
+    let* actor = required_nullable_string ~surface "actor" fields in
+    let* decision_source_raw = required_nonblank_string ~surface "decision_source" fields in
+    let* () =
+      match decision_source_of_string decision_source_raw with
+      | Some _ -> Ok ()
+      | None -> Error (Printf.sprintf "%s.decision_source is invalid" surface)
+    in
+    let* authorization_source = required_member ~surface "authorization_source" fields in
+    let* rule_match = required_member ~surface "rule_match" fields in
+    let* source_approval_id = required_member ~surface "source_approval_id" fields in
+    let* summary_status = required_member ~surface "summary_status" fields in
+    let* exact_attempt = required_member ~surface "exact_attempt" fields in
+    let* summary_attempt_disposition =
+      required_member ~surface "summary_attempt_disposition" fields
+    in
+    let* () =
+      match authorization_source, rule_match, source_approval_id, summary_attempt_disposition with
+      | `Null, `Null, `Null, `Null -> Ok ()
+      | _ -> Error (Printf.sprintf "%s contains fields outside the resolved contract" surface)
+    in
+    let* () = summary_status_of_yojson_with_error summary_status |> Result.map ignore in
+    let* () = exact_attempt_state_of_yojson_with_error exact_attempt |> Result.map ignore in
+    Ok
+      (`Assoc
+          [ "id", `String id
+          ; "event", `String event
+          ; "keeper_name", `String keeper_name
+          ; "tool_name", `String tool_name
+          ; "decision", `String decision
+          ; "decision_kind", `String (decision_kind_to_string decision_kind)
+          ; "decision_reason", decision_reason
+          ; "resolved_at", `Float resolved_at
+          ; "turn_id", turn_id
+          ; "task_id", task_id
+          ; "goal_id", goal_id
+          ; "goal_ids", goal_ids
+          ; "actor", actor
+          ; "decision_source", `String decision_source_raw
+          ; "summary_status", summary_status
+          ; "exact_attempt", exact_attempt
+          ])
+  | _ -> Error (Printf.sprintf "%s must be an object" surface)
 ;;
 
 (* Day key for the [YYYY-MM/DD.jsonl] layout. The reasoning this comment used
@@ -493,13 +594,24 @@ let resolved_history_empty ~limit ~window_minutes =
   }
 ;;
 
+let project_resolved_rows rows =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | row :: rest ->
+      (match resolved_approval_json_of_audit_event row with
+       | Ok projected -> loop (projected :: acc) rest
+       | Error detail -> Error { stage = List_recent_resolved; detail })
+  in
+  loop [] rows
+;;
+
 let list_recent_resolved
       ~base_path
       ~now_ts
       ?(limit = recent_resolved_history_limit)
       ?(window_minutes = recent_resolved_default_window_minutes)
       ()
-  : resolved_history
+  : (resolved_history, read_error) result
   =
   let limit = clamp_int limit ~low:0 ~high:recent_resolved_max_limit in
   let window_minutes =
@@ -510,24 +622,25 @@ let list_recent_resolved
   in
   let empty = resolved_history_empty ~limit ~window_minutes in
   if limit <= 0
-  then empty
+  then Ok empty
   else (
     match get_audit_store ~base_path () with
-    | None -> empty
-    | Some store ->
-      (try
-         let window_start =
-           now_ts -. (float_of_int window_minutes *. Masc_time_constants.minute)
-         in
-         let scan_rows = resolved_history_scan_rows limit in
-         (* Chronological, oldest first, tail-bounded to [scan_rows]. *)
-         let scanned =
-           Dated_jsonl.read_range_recent
-             store
-             ~since:(day_string_of_ts window_start)
-             ~until:(day_string_of_ts now_ts)
-             scan_rows
-         in
+    | Error detail -> Error { stage = List_recent_resolved; detail }
+    | Ok store ->
+      let window_start =
+        now_ts -. (float_of_int window_minutes *. Masc_time_constants.minute)
+      in
+      let scan_rows = resolved_history_scan_rows limit in
+      (match Dated_jsonl.read_recent_result store scan_rows with
+       | Error error ->
+         Error
+           { stage = List_recent_resolved
+           ; detail = Dated_jsonl.read_error_to_string error
+           }
+       | Ok entries ->
+         (match parsed_rows ~stage:List_recent_resolved entries with
+          | Error _ as error -> error
+          | Ok scanned ->
          let scanned_count = List.length scanned in
          (* The row cap only hides decisions when it stopped us before we
             reached back to the window start. If the oldest row we read is
@@ -564,31 +677,23 @@ let list_recent_resolved
            |> List.stable_sort (fun (left, _) (right, _) -> Float.compare right left)
            |> List.map snd
          in
-         let rows =
-           matched_rows
-           |> List.filteri (fun idx _ -> idx < limit)
-           |> List.map resolved_approval_json_of_audit_event
+         let selected_rows =
+           matched_rows |> List.filteri (fun idx _ -> idx < limit)
          in
-         { resolved_rows = rows
-         ; resolved_matched = List.length matched_rows
-         ; resolved_limit = limit
-         ; resolved_window_minutes = window_minutes
-         ; resolved_scan_exhausted = scan_exhausted
-         }
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         record_audit_read_failure
-           ~metric_site:Keeper_approval_queue_failure_site.Audit_list_recent_resolved
-           ~site:"approval_audit.list_recent_resolved"
-           exn;
-         empty))
+         (match project_resolved_rows selected_rows with
+          | Error _ as error -> error
+          | Ok rows ->
+            Ok
+              { resolved_rows = rows
+              ; resolved_matched = List.length matched_rows
+              ; resolved_limit = limit
+              ; resolved_window_minutes = window_minutes
+              ; resolved_scan_exhausted = scan_exhausted
+              }))))
 ;;
 
 module For_testing = struct
   let reset_store () =
-    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores);
-    Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
-      Hashtbl.clear recent_audit_cache)
+    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores)
   ;;
 end

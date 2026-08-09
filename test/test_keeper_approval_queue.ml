@@ -34,6 +34,11 @@ let aq_resolve ~base_path ~id ~decision =
 
 let yojson = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
 
+let resolved_history_exn = function
+  | Ok history -> history
+  | Error error -> Alcotest.fail (Keeper_approval.Audit.read_error_to_string error)
+;;
+
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_" "" in
   Unix.unlink dir;
@@ -3632,6 +3637,7 @@ let test_resolved_audit_event_carries_judge_evidence () =
            ~now_ts:(Unix.gettimeofday ())
            ~window_minutes:60
            ()
+         |> resolved_history_exn
        in
        let open Yojson.Safe.Util in
        let row =

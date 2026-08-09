@@ -283,7 +283,8 @@ let resolve_runtime_candidate id =
   match Runtime.get_runtime_by_id id with
   | Some runtime ->
     (match runtime.Runtime.execution with
-     | Runtime_execution.Codex_app_server _ -> Ok runtime
+     | Runtime_execution.Codex_app_server _
+     | Runtime_execution.Claude_code _ -> Ok runtime
      | Runtime_execution.Agent_core provider_config ->
        let* _request_body_cap =
          validate_provider_request_cap
@@ -739,6 +740,15 @@ let run_named
              on_runtime_observation
          | Error _ -> ());
         codex_result, None
+      | Runtime_execution.Claude_code _ ->
+        ( Error
+            (Agent_sdk.Error.Config
+               (Agent_sdk.Error.InvalidConfig
+                  { field = "claude_code"
+                  ; detail =
+                      "claude-code runtime is configured, but this stack layer does not yet contain its Keeper driver"
+                  }))
+        , None )
       | Runtime_execution.Agent_core runtime_provider_config ->
        (match
           match provider_config_transform with

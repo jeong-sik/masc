@@ -90,10 +90,11 @@ let finalize_runtime_breakdown json =
 
 let validate_requested_model (runtime : Runtime.t) requested_model =
   match runtime.execution with
-  | Runtime_execution.Codex_app_server _ ->
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _ ->
     Error
       (Printf.sprintf
-         "runtime %S is owned by codex-app-server; local_runtime_bench only \
+         "runtime %S is owned by an official CLI client; local_runtime_bench only \
           measures OAS agent_core providers"
          runtime.id)
   | Runtime_execution.Agent_core provider_config ->

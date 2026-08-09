@@ -2,6 +2,7 @@
 
     [Agent_core] means MASC/OAS owns the model/tool/checkpoint loop.
     [Codex_app_server] means the official Codex client owns the whole turn;
+    [Claude_code] means the same for the official Claude Code client.
     MASC owns admission, process lifetime, and result projection. *)
 
 type codex_app_server =
@@ -10,9 +11,16 @@ type codex_app_server =
   ; timeout_s : float
   }
 
+type claude_code =
+  { cli_path : string
+  ; model : string option
+  ; timeout_s : float
+  }
+
 type t =
   | Agent_core of Llm_provider.Provider_config.t
   | Codex_app_server of codex_app_server
+  | Claude_code of claude_code
 
 type checkpoint_owner =
   | Masc_oas

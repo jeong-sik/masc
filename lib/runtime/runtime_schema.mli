@@ -12,6 +12,7 @@ type api_format =
   | Chat_completions_api
   | Ollama_api
   | Codex_app_server_runtime
+  | Claude_code_runtime
 [@@deriving show, eq]
 
 type transport =

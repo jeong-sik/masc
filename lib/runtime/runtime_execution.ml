@@ -4,9 +4,16 @@ type codex_app_server =
   ; timeout_s : float
   }
 
+type claude_code =
+  { cli_path : string
+  ; model : string option
+  ; timeout_s : float
+  }
+
 type t =
   | Agent_core of Llm_provider.Provider_config.t
   | Codex_app_server of codex_app_server
+  | Claude_code of claude_code
 
 type checkpoint_owner =
   | Masc_oas
@@ -14,20 +21,22 @@ type checkpoint_owner =
 
 let agent_core_provider_config = function
   | Agent_core config -> Some config
-  | Codex_app_server _ -> None
+  | Codex_app_server _ | Claude_code _ -> None
 ;;
 
 let model_id = function
   | Agent_core config -> Some config.Llm_provider.Provider_config.model_id
   | Codex_app_server config -> config.model
+  | Claude_code config -> config.model
 ;;
 
 let label = function
   | Agent_core _ -> "agent_core"
   | Codex_app_server _ -> "codex_app_server"
+  | Claude_code _ -> "claude_code"
 ;;
 
 let checkpoint_owner = function
   | Agent_core _ -> Masc_oas
-  | Codex_app_server _ -> Official_client
+  | Codex_app_server _ | Claude_code _ -> Official_client
 ;;

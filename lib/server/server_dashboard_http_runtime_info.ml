@@ -774,7 +774,8 @@ let dashboard_runtime_append_probe_path base ~suffix =
 
 let dashboard_runtime_probe_url ~(api_format : Runtime_schema.api_format) base_url =
   match api_format with
-  | Runtime_schema.Codex_app_server_runtime -> None
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Claude_code_runtime -> None
   | Runtime_schema.Ollama_api ->
     let base = dashboard_runtime_trim_trailing_slashes base_url in
     Some
@@ -884,7 +885,8 @@ let dashboard_runtime_model_count_of_body ~(api_format : Runtime_schema.api_form
   try
     let json = Yojson.Safe.from_string body in
     match api_format with
-    | Runtime_schema.Codex_app_server_runtime -> None
+    | Runtime_schema.Codex_app_server_runtime
+    | Runtime_schema.Claude_code_runtime -> None
     | Runtime_schema.Ollama_api -> dashboard_runtime_list_member_len "models" json
     | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
       (match dashboard_runtime_list_member_len "data" json with
@@ -1546,6 +1548,16 @@ let runtime_request_config_json (rt : Runtime.t) =
       ; "timeout_s", `Float config.timeout_s
       ; "verified", `Bool false
       ]
+  | Runtime_execution.Claude_code config ->
+    `Assoc
+      [ "source", `String "official-client-runtime"
+      ; "execution", `String "claude_code"
+      ; "model", Json_util.string_opt_to_json config.model
+      ; "timeout_s", `Float config.timeout_s
+      ; "execution_mode", `String "masc_mcp_only"
+      ; "tool_owner", `String "masc_mcp"
+      ; "verified", `Bool false
+      ]
   | Runtime_execution.Agent_core cfg ->
     `Assoc
     [ "source", `String "oas-provider-config"
@@ -1591,6 +1603,7 @@ let runtime_api_format_wire : Runtime_schema.api_format -> string = function
   | Runtime_schema.Chat_completions_api -> "chat-completions"
   | Runtime_schema.Ollama_api -> "ollama"
   | Runtime_schema.Codex_app_server_runtime -> "codex-app-server"
+  | Runtime_schema.Claude_code_runtime -> "claude-code"
 ;;
 
 let runtime_provider_behavior_capabilities_json
@@ -1700,6 +1713,14 @@ let effective_capabilities_json (rt : Runtime.t) =
       ; "execution", `String "codex_app_server"
       ; "verified", `Bool false
       ]
+  | Runtime_execution.Claude_code _ ->
+    `Assoc
+      [ "source", `String "unverified"
+      ; "execution", `String "claude_code"
+      ; "execution_mode", `String "masc_mcp_only"
+      ; "tool_owner", `String "masc_mcp"
+      ; "verified", `Bool false
+      ]
   | Runtime_execution.Agent_core provider_config ->
    (match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
   | None -> `Null
@@ -1780,6 +1801,13 @@ let runtime_parameter_policy_json (rt : Runtime.t) =
       [ "source", `String "official-client-owned"
       ; "execution", `String "codex_app_server"
       ]
+  | Runtime_execution.Claude_code _ ->
+    `Assoc
+      [ "source", `String "official-client-owned"
+      ; "execution", `String "claude_code"
+      ; "execution_mode", `String "masc_mcp_only"
+      ; "tool_owner", `String "masc_mcp"
+      ]
   | Runtime_execution.Agent_core provider_config ->
     let dialect = RD.for_provider_config provider_config in
     let sampling_candidates = RD.sampling_params_ignored_when_thinking dialect in
@@ -1807,7 +1835,8 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
   let runtime_kind = runtime_kind_of_transport rt.provider.transport in
   let is_official_client_runtime =
     match rt.execution with
-    | Runtime_execution.Codex_app_server _ -> true
+    | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Claude_code _ -> true
     | Runtime_execution.Agent_core _ -> false
   in
   let runtime_status =

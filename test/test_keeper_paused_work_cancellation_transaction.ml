@@ -34,6 +34,9 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
       Keeper_registry.For_testing.clear ();
       remove_tree base_path)
     (fun () ->
+       Eio_main.run @@ fun env ->
+       if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Eio.Switch.run @@ fun sw ->
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "operator"));
        let keeper_name = "paused-cancel-owner" in
@@ -60,6 +63,11 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
          |> require_ok "read persisted Keeper metadata"
          |> require_some "persisted Keeper metadata"
        in
+       (match Keeper_owner_registry.install_from_store ~sw config with
+        | Ok count -> Alcotest.(check int) "installed owner count" 1 count
+        | Error error ->
+          Alcotest.fail
+            (Keeper_owner_registry.install_error_to_string error));
        let source : Queue.stimulus =
          { post_id = "accepted-source"
          ; urgency = Queue.Normal

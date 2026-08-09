@@ -362,7 +362,8 @@ max-concurrent = 1
             && String.equal err.message
                  "unknown protocol \"openai-http\": expected one of \
                   messages-cli, messages-http, openai-compatible-cli, \
-                  openai-compatible-http, ollama-http, codex-app-server")
+                  openai-compatible-http, ollama-http, codex-app-server, \
+                  antigravity-cli")
          errors)
 
 let test_runtime_toml_accepts_messages_caching_capability () =

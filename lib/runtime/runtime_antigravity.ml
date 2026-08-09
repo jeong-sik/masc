@@ -600,6 +600,14 @@ let run_spawned ~mgr ~clock ~cwd config ~conversation_mode ~prompt ~on_conversat
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let process_status = ref None in
+    let abort_with_runtime_error error =
+      (* SIL-OK: the typed protocol error remains authoritative; the finalizer
+         retries termination and awaits the child if this immediate kill races. *)
+      (try Eio.Process.signal proc Sys.sigkill with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | _ -> ());
+      raise (Runtime_error error)
+    in
     Fun.protect
       ~finally:(fun () ->
         match !process_status with
@@ -611,7 +619,7 @@ let run_spawned ~mgr ~clock ~cwd config ~conversation_mode ~prompt ~on_conversat
            while true do
              let line = Eio.Buf_read.line reader in
              match parse_wire_line line with
-             | Error error -> raise (Runtime_error error)
+             | Error error -> abort_with_runtime_error error
              | Ok event ->
                (match
                   apply_event
@@ -621,7 +629,7 @@ let run_spawned ~mgr ~clock ~cwd config ~conversation_mode ~prompt ~on_conversat
                     !state
                     event
                 with
-                | Error error -> raise (Runtime_error error)
+                | Error error -> abort_with_runtime_error error
                 | Ok next -> state := next)
            done
          with
@@ -681,7 +689,7 @@ let run_turn ?(conversation_mode = Start) ~mgr ~clock ~cwd
       ; wall_duration_s
       }
   | _, Some _, Some (Result_error, _, error, _, _) ->
-    let detail = Option.value ~default:"status=ERROR" error in
+    let detail = match error with Some detail -> detail | None -> "status=ERROR" in
     Error (Turn_failed detail)
   | `Exited 0, _, None ->
     Error (Protocol_error { stage = "process completion"; detail = "missing result event" })

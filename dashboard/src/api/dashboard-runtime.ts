@@ -1291,11 +1291,6 @@ const OFFICIAL_CLIENT_LOGIN_STATUSES = new Set<DashboardOfficialClientLoginStatu
   'probe_contract_error',
 ])
 
-function hasExactKeys(raw: Record<string, unknown>, keys: readonly string[]): boolean {
-  const actual = Object.keys(raw)
-  return actual.length === keys.length && keys.every(key => Object.hasOwn(raw, key))
-}
-
 function decodeOfficialClientSettlement(raw: unknown): DashboardOfficialClientSettlement | null {
   if (!isRecord(raw) || !hasExactKeys(raw, ['session_id', 'turn_id'])) return null
   const session_id = decodeOfficialClientNonEmptyString(raw.session_id)

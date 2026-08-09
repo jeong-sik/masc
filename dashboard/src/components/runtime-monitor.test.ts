@@ -2,6 +2,7 @@
 import { h } from 'preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { RuntimeMonitor } from './runtime-monitor'
 
 const apiMocks = vi.hoisted(() => ({
   fetchDashboardRuntimeProbe: vi.fn(),
@@ -24,7 +25,6 @@ describe('RuntimeMonitor', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
-    vi.resetModules()
     apiMocks.probeOfficialClientLogin.mockReset()
     apiMocks.fetchRuntimeProviders.mockReset().mockResolvedValue({
       updated_at: '2026-05-13T13:00:00Z',
@@ -310,8 +310,6 @@ describe('RuntimeMonitor', () => {
   })
 
   it('shows runtime.toml binding identity on provider status cards', async () => {
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
@@ -324,8 +322,6 @@ describe('RuntimeMonitor', () => {
   })
 
   it('separates configured inventory from live provider reachability', async () => {
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
@@ -357,8 +353,6 @@ describe('RuntimeMonitor', () => {
         available: false,
       }],
     })
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.querySelector('[data-testid="official-client-login-probe-codex.codex"]') != null,
@@ -371,8 +365,6 @@ describe('RuntimeMonitor', () => {
   })
 
   it('surfaces declared and effective provider/model parameter facts', async () => {
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
@@ -454,8 +446,6 @@ describe('RuntimeMonitor', () => {
         errors: [],
       },
     })
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
@@ -468,8 +458,6 @@ describe('RuntimeMonitor', () => {
   })
 
   it('renders parameter facts as structured request declared and effective rows', async () => {
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
@@ -558,8 +546,6 @@ describe('RuntimeMonitor', () => {
         },
       ],
     })
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runtime_lane_cache') ?? false,
@@ -624,8 +610,6 @@ describe('RuntimeMonitor', () => {
         },
       ],
     })
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runtime_lane_missing_cache') ?? false,
@@ -656,8 +640,6 @@ describe('RuntimeMonitor', () => {
       status_kind: 'success',
       recorded_at: 1_712_000_000.5,
     }
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.querySelector('[data-testid="oas-latest-telemetry-sample"]') != null,
@@ -674,8 +656,6 @@ describe('RuntimeMonitor', () => {
   })
 
   it('omits the oas telemetry sample line before any push arrives', async () => {
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,

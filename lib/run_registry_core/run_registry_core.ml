@@ -81,6 +81,7 @@ module type Payload = sig
   val completion_of_yojson : Yojson.Safe.t -> (completion, string) result
   val running_noun : string
   val restart_reason : string
+  val completed_retention : [ `All | `Latest of int ]
 end
 
 module Make (Payload : Payload) = struct
@@ -113,7 +114,14 @@ module Make (Payload : Payload) = struct
         }
 
   let ( let* ) = Result.bind
-  let max_completed_retained = 64
+  let max_completed_retained =
+    match Payload.completed_retention with
+    | `Latest count when count > 0 -> count
+    | `Latest count ->
+      invalid_arg
+        (Printf.sprintf "%s completed retention must be positive, got %d" Payload.name count)
+    | `All -> max_int
+  ;;
 
   let is_running entry =
     match entry.status with
@@ -122,13 +130,16 @@ module Make (Payload : Payload) = struct
   ;;
 
   let prune entries =
-    let running, completed = List.partition is_running entries in
-    let recent_completed =
-      completed
-      |> List.sort (fun left right -> Float.compare right.started_at left.started_at)
-      |> List.filteri (fun index _ -> index < max_completed_retained)
-    in
-    running @ recent_completed
+    match Payload.completed_retention with
+    | `All -> entries
+    | `Latest _ ->
+      let running, completed = List.partition is_running entries in
+      let recent_completed =
+        completed
+        |> List.sort (fun left right -> Float.compare right.started_at left.started_at)
+        |> List.filteri (fun index _ -> index < max_completed_retained)
+      in
+      running @ recent_completed
   ;;
 
   let create ?path () =
@@ -191,13 +202,33 @@ module Make (Payload : Payload) = struct
     match t.path with
     | None -> ()
     | Some path ->
-      (try Fs_compat.append_jsonl path (event_to_yojson event) with
-       | exn ->
-         Log.Misc.warn
-           "%s: append failed for %s: %s"
+      let suffix = Yojson.Safe.to_string (event_to_yojson event) ^ "\n" in
+      (match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
+       | Private_file_succeeded () -> ()
+       | Private_file_succeeded_with_cleanup_failure
+           { value = (); cleanup_failure } ->
+         Log.Misc.error
+           "%s: durable append committed for %s but descriptor settlement failed: %s"
            Payload.name
            path
-           (Printexc.to_string exn))
+           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+       | Private_file_failed error ->
+         raise
+           (Sys_error
+              (Printf.sprintf
+                 "%s: durable append failed for %s: %s"
+                 Payload.name
+                 path
+                 (Fs_compat.private_jsonl_append_error_to_string error)))
+       | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+         raise
+           (Sys_error
+              (Printf.sprintf
+                 "%s: durable append failed for %s: %s; descriptor settlement failed: %s"
+                 Payload.name
+                 path
+                 (Fs_compat.private_jsonl_append_error_to_string error)
+                 (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))))
   ;;
 
   let replace_entry_locked t entry =
@@ -217,8 +248,8 @@ module Make (Payload : Payload) = struct
        reaches the path-level append lock. Replay then skips the completion as
        unknown and drops the trailing register as stale Running. *)
     Stdlib.Mutex.protect t.mutation_mutex (fun () ->
-      replace_entry_locked t entry;
-      append_event t (Register { id; started_at; registration }))
+      append_event t (Register { id; started_at; registration });
+      replace_entry_locked t entry)
   ;;
 
   let complete t ~id ~completion =
@@ -237,8 +268,8 @@ module Make (Payload : Payload) = struct
             else entry)
           |> prune
         in
-        Atomic.set t.entries next;
         append_event t (Complete { id; completion });
+        Atomic.set t.entries next;
         `Completed))
   ;;
 
@@ -397,7 +428,8 @@ module Make (Payload : Payload) = struct
       |> drop_replayed_running
       |> prune
     in
-    if reached_end && malformed = [] then compact_replay_log path entries;
+    if reached_end && malformed = [] && Payload.completed_retention <> `All
+    then compact_replay_log path entries;
     { entries = Atomic.make entries
     ; path = Some path
     ; mutation_mutex = Stdlib.Mutex.create ()

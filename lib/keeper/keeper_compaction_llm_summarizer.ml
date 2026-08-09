@@ -894,6 +894,15 @@ let execute_prepared_lane_current
   let registry = Exact_lane_run_registry.global () in
   let run_id = Random_id.prefixed ~prefix:"exact-compaction-" ~bytes:16 in
   let started_at = Time_compat.now () in
+  let prior_summary =
+    match prepared_lane.window.prior_summary with
+    | None -> `Null
+    | Some prior ->
+      `Assoc
+        [ Schema.compaction_plan_field_unit_index, `Int prior.source_index
+        ; "text", `String prior.text
+        ]
+  in
   Exact_lane_run_registry.register_running
     registry
     ~run_id
@@ -906,6 +915,9 @@ let execute_prepared_lane_current
          (`Assoc
          [ "registry_generation", `Intlit (Int64.to_string prepared_lane.registry_generation)
          ; "slot_ids", `List (List.map (fun id -> `String id) prepared_lane.ordered_slot_ids)
+         ; "prior_summary", prior_summary
+         ; ( "window_units"
+           , eligible_units_json (planning_window_sources prepared_lane.window) )
          ; "source_unit_count", `Int (List.length prepared_lane.window.source_units)
          ]));
   let complete outcome output =

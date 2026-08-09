@@ -17,6 +17,7 @@
     "test": "vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1",
     "test:serial": "pnpm test",
     "test:e2e:keeper-lane": "../scripts/harness_dashboard_keeper_lane_timeline_e2e.sh",
+    "test:e2e:internal-agents": "../scripts/harness_dashboard_internal_agents_e2e.sh",
     "test:e2e:queued-stream": "../scripts/harness_dashboard_keeper_queued_stream_e2e.sh",
     "test:watch": "vitest",
     "tokens:build": "tsx design-system/tokens/build.ts",

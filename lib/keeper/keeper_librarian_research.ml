@@ -10,69 +10,12 @@ type raw_trace_sink_outcome =
   | Raw_trace_ready of Agent_sdk.Raw_trace.t
   | Raw_trace_degraded of Agent_sdk.Error.sdk_error
 
-type research_tool =
-  | Search_files
-  | Read_file
-  | Time_now
-  | Context_status
-  | Artifact_read
-  | Memory_search
-  | Library_search
-  | Library_read
-  | Surface_read
-  | Web_search
-  | Web_fetch
-  | Fusion_status
-
-let research_tools =
-  [ Search_files
-  ; Read_file
-  ; Time_now
-  ; Context_status
-  ; Artifact_read
-  ; Memory_search
-  ; Library_search
-  ; Library_read
-  ; Surface_read
-  ; Web_search
-  ; Web_fetch
-  ; Fusion_status
-  ]
-;;
-
-let descriptor_owns_research_tool tool (descriptor : Keeper_tool_descriptor.t) =
-  match tool, descriptor.runtime_handler with
-  | Search_files, Tool_search_files
-  | Read_file, Tool_read_file
-  | Time_now, Tool_time_now
-  | Context_status, Tool_context_status
-  | Artifact_read, Tool_artifact_read
-  | Memory_search, Tool_memory_search
-  | Library_search, Tool_library_search
-  | Library_read, Tool_library_read
-  | Surface_read, Tool_surface_read
-  | Web_search, Tool_web_search
-  | Web_fetch, Tool_web_fetch
-  | Fusion_status, Tool_masc_fusion_status -> true
-  | _ -> false
-;;
-
 let internal_error_of_exception exn =
   Llm_provider.Reserved_exn.reraise_if_reserved exn;
   Agent_sdk.Error.Internal (Printexc.to_string exn)
 ;;
 
-let research_descriptors () =
-  let visible = Keeper_tool_descriptor.model_visible_descriptors () in
-  List.map
-    (fun tool ->
-       match List.filter (descriptor_owns_research_tool tool) visible with
-       | [ descriptor ] -> descriptor
-       | [] -> failwith "Librarian research descriptor is not model-visible"
-       | _ :: _ :: _ ->
-         failwith "Librarian research tool has multiple model-visible descriptors")
-    research_tools
-;;
+let research_descriptors = Keeper_tool_descriptor.model_visible_descriptors
 
 let create_raw_trace_sink
       ~before_create
@@ -87,15 +30,18 @@ let create_raw_trace_sink
   match path_result with
   | Error error -> Raw_trace_degraded error
   | Ok path ->
-    before_create path;
-    (match
-       Agent_sdk.Raw_trace.create
-         ~session_id:(Execution_id.to_string execution_id)
-         ~path
-         ()
+    (try
+       before_create path;
+       match
+         Agent_sdk.Raw_trace.create
+           ~session_id:(Execution_id.to_string execution_id)
+           ~path
+           ()
+       with
+       | Ok sink -> Raw_trace_ready sink
+       | Error error -> Raw_trace_degraded error
      with
-     | Ok sink -> Raw_trace_ready sink
-     | Error error -> Raw_trace_degraded error)
+     | exn -> Raw_trace_degraded (internal_error_of_exception exn))
 ;;
 
 type request =
@@ -146,8 +92,17 @@ type execution_outcome =
       ; turns : int
       ; stop_reason : Runtime_agent.stop_reason
       }
+  | Research_deferred of
+      { session_id : string
+      ; turns : int
+      }
   | Research_failed of Agent_sdk.Error.sdk_error
   | Research_cancelled
+
+let finalizer_may_run = function
+  | Research_deferred _ -> false
+  | Research_completed _ | Research_failed _ | Research_cancelled -> true
+;;
 
 type cleanup_outcome =
   | Cleanup_succeeded
@@ -210,22 +165,30 @@ let tool_error_class_to_yojson = function
 ;;
 
 let registry_tool_call_result_to_yojson = function
-  | Executed (Ok _) ->
+  | Executed (Ok { content; _meta }) ->
     `Assoc
       [ "kind", `String "executed"
       ; "outcome", `String "succeeded"
+      ; "content", `String content
+      ; ( "meta"
+        , match _meta with
+          | Some meta -> meta
+          | None -> `Null )
       ]
-  | Executed (Error { recoverable; error_class; _ }) ->
+  | Executed (Error { message; recoverable; error_class }) ->
     `Assoc
       [ "kind", `String "executed"
       ; "outcome", `String "failed"
+      ; "message", `String message
       ; "recoverable", `Bool recoverable
       ; "error_class", tool_error_class_to_yojson error_class
       ]
-  | Rejected_before_execution _ ->
-    `Assoc [ "kind", `String "rejected_before_execution" ]
-  | Execution_failure_observed _ ->
-    `Assoc [ "kind", `String "execution_failure_observed" ]
+  | Rejected_before_execution detail ->
+    `Assoc
+      [ "kind", `String "rejected_before_execution"; "detail", `String detail ]
+  | Execution_failure_observed detail ->
+    `Assoc
+      [ "kind", `String "execution_failure_observed"; "detail", `String detail ]
   | Terminal_observation_missing ->
     `Assoc [ "kind", `String "terminal_observation_missing" ]
 ;;
@@ -234,6 +197,7 @@ let registry_tool_call_to_yojson call =
   `Assoc
     [ "invocation", invocation_to_yojson call.invocation
     ; "tool_name", `String call.tool_name
+    ; "input", call.input
     ; "started_at", `Float call.started_at
     ; "finished_at", `Float call.finished_at
     ; "duration_ms", `Float call.duration_ms
@@ -311,14 +275,6 @@ let bounded_evidence_to_yojson evidence =
     ]
 ;;
 
-let registry_bounded_evidence_to_yojson evidence =
-  `Assoc
-    [ "original_bytes", `Int evidence.original_bytes
-    ; "retained_bytes", `Int evidence.retained_bytes
-    ; "truncated", `Bool evidence.truncated
-    ]
-;;
-
 let execution_outcome_to_yojson = function
   | Research_completed { evidence; session_id; turns; stop_reason } ->
     `Assoc
@@ -327,6 +283,15 @@ let execution_outcome_to_yojson = function
       ; "session_id", `String session_id
       ; "turns", `Int turns
       ; "stop_reason", runtime_stop_reason_to_yojson stop_reason
+      ]
+  | Research_deferred { session_id; turns } ->
+    `Assoc
+      [ "kind", `String "deferred"
+      ; "session_id", `String session_id
+      ; "turns", `Int turns
+      ; "stop_reason"
+      , runtime_stop_reason_to_yojson
+          (Runtime_agent.Awaiting_external_effect { turns_used = turns })
       ]
   | Research_failed error ->
     `Assoc
@@ -338,31 +303,12 @@ let execution_outcome_to_yojson = function
   | Research_cancelled -> `Assoc [ "kind", `String "cancelled" ]
 ;;
 
-let registry_execution_outcome_to_yojson = function
-  | Research_completed { evidence; session_id; turns; stop_reason } ->
-    `Assoc
-      [ "kind", `String "completed"
-      ; "evidence", registry_bounded_evidence_to_yojson evidence
-      ; "session_id", `String session_id
-      ; "turns", `Int turns
-      ; "stop_reason", runtime_stop_reason_to_yojson stop_reason
-      ]
-  | Research_failed error ->
-    `Assoc
-      [ "kind", `String "failed"
-      ; "category"
-      , `String
-          (Agent_sdk.Error.category_label (Agent_sdk.Error.category error))
-      ; "retryable", `Bool (Agent_sdk.Error.is_retryable error)
-      ]
-  | Research_cancelled -> `Assoc [ "kind", `String "cancelled" ]
-;;
-
 let registry_trace_ref_to_yojson = function
   | None -> `Null
   | Some (trace : Agent_sdk.Raw_trace.run_ref) ->
     `Assoc
       [ "worker_run_id", `String trace.worker_run_id
+      ; "path", `String trace.path
       ; "start_seq", `Int trace.start_seq
       ; "end_seq", `Int trace.end_seq
       ; "agent_name", `String trace.agent_name
@@ -376,6 +322,9 @@ let registry_receipt_to_yojson receipt =
     [ "owner", `String "librarian"
     ; "execution_id", `String (Execution_id.to_string receipt.execution_id)
     ; "runtime_id", `String receipt.runtime_id
+    ; "frozen_system_prompt", `String receipt.frozen_system_prompt
+    ; "frozen_prompt", `String receipt.frozen_prompt
+    ; "frozen_input", receipt.frozen_input
     ; "started_at", `Float receipt.started_at
     ; "finished_at", `Float receipt.finished_at
     ; "duration_ms", `Float receipt.duration_ms
@@ -384,7 +333,7 @@ let registry_receipt_to_yojson receipt =
     , `List (List.map registry_tool_call_to_yojson receipt.tool_calls)
     ; "terminal_effect", terminal_effect_to_yojson receipt.terminal_effect
     ; "cleanup", cleanup_to_yojson receipt.cleanup
-    ; "outcome", registry_execution_outcome_to_yojson receipt.outcome
+    ; "outcome", execution_outcome_to_yojson receipt.outcome
     ; "trace_ref", registry_trace_ref_to_yojson receipt.trace_ref
     ]
 ;;
@@ -399,6 +348,7 @@ let finalizer_evidence_to_yojson receipt =
         ; "turns", `Int turns
         ; "stop_reason", runtime_stop_reason_to_yojson stop_reason
         ]
+    | Research_deferred _ as deferred -> execution_outcome_to_yojson deferred
     | Research_failed error -> execution_outcome_to_yojson (Research_failed error)
     | Research_cancelled -> execution_outcome_to_yojson Research_cancelled
   in
@@ -439,14 +389,14 @@ type recorder =
   { mutex : Eio.Mutex.t
   ; mutable next_ordinal : int
   ; mutable calls : observed_call list
-  ; by_tool_use_id : (string, observed_call) Hashtbl.t
+  ; by_invocation : (Agent_sdk.Tool_contract.Invocation.t, observed_call) Hashtbl.t
   }
 
 let create_recorder () =
   { mutex = Eio.Mutex.create ()
   ; next_ordinal = 0
   ; calls = []
-  ; by_tool_use_id = Hashtbl.create 16
+  ; by_invocation = Hashtbl.create 16
   }
 ;;
 
@@ -460,10 +410,7 @@ let observe_started recorder ~now ~invocation ~tool_name ~input =
       { ordinal; invocation; tool_name; input; started_at = now; terminal = None }
     in
     recorder.calls <- call :: recorder.calls;
-    Hashtbl.replace
-      recorder.by_tool_use_id
-      (Agent_sdk.Tool_contract.Invocation.tool_use_id invocation)
-      call)
+    Hashtbl.replace recorder.by_invocation invocation call)
 ;;
 
 let observe_terminal
@@ -476,9 +423,8 @@ let observe_terminal
       ~result
   =
   with_recorder recorder (fun () ->
-    let tool_use_id = Agent_sdk.Tool_contract.Invocation.tool_use_id invocation in
     let call =
-      match Hashtbl.find_opt recorder.by_tool_use_id tool_use_id with
+      match Hashtbl.find_opt recorder.by_invocation invocation with
       | Some call -> call
       | None ->
         let ordinal = recorder.next_ordinal in
@@ -493,7 +439,7 @@ let observe_terminal
           }
         in
         recorder.calls <- call :: recorder.calls;
-        Hashtbl.replace recorder.by_tool_use_id tool_use_id call;
+        Hashtbl.replace recorder.by_invocation invocation call;
         call
     in
     match call.terminal, result with
@@ -700,6 +646,9 @@ let run ~on_receipt (request : request) =
   in
   let outcome, trace_ref =
     match execution with
+    | `Returned (Ok ({ stop_reason = Runtime_agent.Awaiting_external_effect
+                         { turns_used }; _ } as result)) ->
+      Research_deferred { session_id = result.session_id; turns = turns_used }, result.trace_ref
     | `Returned (Ok result) ->
       let raw_evidence = Agent_sdk.Types.text_of_response result.response in
       let evidence =
@@ -787,6 +736,23 @@ module For_testing = struct
             | Some _ | None -> failwith "missing causal result callback list")
          | _ -> failwith "invalid Librarian causal snapshot")
   ;;
-
   let internal_error_of_exception = internal_error_of_exception
+
+  let freeze_completed_calls calls =
+    let recorder = create_recorder () in
+    List.iteri
+      (fun index (invocation, tool_name, input, result) ->
+         let started_at = Float.of_int index in
+         observe_started recorder ~now:started_at ~invocation ~tool_name ~input;
+         observe_terminal
+           recorder
+           ~now:(started_at +. 0.001)
+           ~invocation
+           ~tool_name
+           ~input
+           ~duration_ms:1.0
+           ~result)
+      calls;
+    freeze_calls recorder
+  ;;
 end

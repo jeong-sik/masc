@@ -1,4 +1,6 @@
-(** Durable observation records for model-driven Keeper exact-output lanes. *)
+(** Admin-only durable execution records for model-driven Keeper exact-output
+    lanes. Input/output values are exact; provider events remain separately
+    identified by RAW trace references. *)
 
 type lane =
   | Librarian
@@ -9,6 +11,10 @@ type lane =
 type outcome =
   | Succeeded
   | Cancelled
+  | Deferred of
+      { code : string
+      ; detail : string
+      }
   | Failed of
       { code : string
       ; detail : string
@@ -87,4 +93,3 @@ type global_install_error = Already_installed
 
 val global : unit -> t
 val install_global : t -> (unit, global_install_error) result
-val max_completed_retained : int

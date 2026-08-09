@@ -80,7 +80,7 @@ function status(row: Row): string {
 function tone(row: Row): StatusBadgeTone {
   const value = status(row)
   if (value === 'succeeded' || value === 'completed' || value === 'approved') return 'ok'
-  if (value === 'running') return 'warn'
+  if (value === 'running' || value === 'deferred') return 'warn'
   if (value === 'rejected') return 'info'
   return 'bad'
 }
@@ -434,12 +434,12 @@ function Details({ row }: { row: Row }) {
         <div class="flex flex-wrap items-center gap-2 text-xs">
           <${EvidenceBadge} kind="typed" />
           <strong>Exact-output registry metadata</strong>
-          <span class="text-[var(--color-fg-muted)]">secret-free 장기 보존 요약 · 실제 값은 operator RAW blob</span>
+          <span class="text-[var(--color-fg-muted)]">Admin-only 실제 typed 값 · provider event는 별도 RAW blob</span>
           <a class="ml-auto text-[var(--color-accent)] hover:underline" href=${keeperHref(row.run.actor)}>Keeper 전체 evidence 열기 →</a>
         </div>
         <div class="grid gap-3 lg:grid-cols-2">
-          <${JsonViewerCard} title="입력 metadata · typed" data=${row.run.input.payload} />
-          <${JsonViewerCard} title="출력 metadata · typed" data=${output} />
+          <${JsonViewerCard} title="실제 입력 · typed" data=${row.run.input.payload} expandAll=${true} />
+          <${JsonViewerCard} title="실제 출력 · typed" data=${output} expandAll=${true} />
         </div>
         ${researchTracePath === undefined
           ? html`<p class="text-xs text-[var(--color-fg-muted)]"><span class="mr-2 inline-flex rounded border border-[var(--color-danger)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-danger)]">TRACE JOIN UNAVAILABLE</span>이 exact-only 실행에는 RAW run ref가 없습니다. 시간이나 subject 문자열로 추정 연결하지 않습니다.</p>`
@@ -452,8 +452,8 @@ function Details({ row }: { row: Row }) {
           : html`<div class="grid gap-2 border-t border-[var(--color-border-default)] pt-3">
               <div class="flex items-center gap-2 text-xs"><${EvidenceBadge} kind="typed" /><strong>Memory before → after</strong><span class="text-[var(--color-fg-muted)]">registry에는 count/revision만, 실제 추가·제거는 아래 journal</span></div>
               <div class="grid gap-3 lg:grid-cols-2">
-                <${JsonViewerCard} title="Before memory · typed preview" data=${memoryEvidence.before} />
-                <${JsonViewerCard} title="After memory + change · typed preview" data=${memoryEvidence.after} />
+                <${JsonViewerCard} title="Before memory · typed" data=${memoryEvidence.before} expandAll=${true} />
+                <${JsonViewerCard} title="After memory + change · typed" data=${memoryEvidence.after} expandAll=${true} />
               </div>
             </div>`}
         ${row.run.lane === 'librarian_exact'
@@ -585,7 +585,7 @@ export function InternalAgentsMonitor() {
 
       <div class="v2-monitoring-card flex flex-wrap gap-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-xs">
         <span class="flex items-center gap-2"><${EvidenceBadge} kind="raw" /> Admin 전용 retained JSONL 실제 행 · 민감값 포함 가능</span>
-        <span class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /> secret-free 장기 보존 metadata</span>
+        <span class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /> schema-typed registry 값 · 권한/retention 계약에 따라 실제값 포함</span>
         <span class="flex items-center gap-2"><${EvidenceBadge} kind="excerpt" /> 원문 전체가 아닌 제한된 출력</span>
       </div>
 

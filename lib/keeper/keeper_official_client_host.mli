@@ -23,6 +23,23 @@ type dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+type raw_trace_stage =
+  | Run_start
+  | Assistant_block
+  | Tool_start
+  | Tool_finish
+  | Run_finish
+
+val observe_raw_trace
+  :  keeper_name:string
+  -> stage:raw_trace_stage
+  -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)
+  -> 'a option
+(** Attempt one secondary RAW-trace observation. A typed trace failure is
+    logged and counted but cannot replace the authoritative provider, tool, or
+    cancellation result. Reserved exceptions from the observation still
+    propagate. *)
+
 val resolve_reasoning_effort :
   enable_thinking:bool option ->
   reasoning_effort:Llm_provider.Reasoning_effort.t option ->
@@ -79,4 +96,5 @@ val dynamic_tools :
   context_injector:Agent_sdk.Hooks.context_injector option ->
   context:Agent_sdk.Context.t option ->
   terminal_error:string option ref ->
+  raw_trace_run:Agent_sdk.Raw_trace.active_run option ->
   (dynamic_tool list, Agent_sdk.Error.sdk_error) result

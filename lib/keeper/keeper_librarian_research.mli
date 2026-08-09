@@ -1,10 +1,8 @@
 (** Tool-capable research phase owned by the Librarian.
 
-    Research receives the closed read/observation-only {!research_tool}
-    authority. Its typed receipt is evidence for the existing tool-free exact
-    Librarian finalizer; it never replaces that finalization authority. This
-    module deliberately has no generic internal-role sum: a later role must
-    prove and own its own production context and failure policy. *)
+    Research receives the canonical complete Keeper model-visible tool bundle.
+    Its typed receipt is evidence for the existing tool-free exact Librarian
+    finalizer; it never replaces that finalization authority. *)
 
 module Execution_id : sig
   type t
@@ -16,23 +14,6 @@ end
 type raw_trace_sink_outcome =
   | Raw_trace_ready of Agent_sdk.Raw_trace.t
   | Raw_trace_degraded of Agent_sdk.Error.sdk_error
-
-type research_tool =
-  | Search_files
-  | Read_file
-  | Time_now
-  | Context_status
-  | Artifact_read
-  | Memory_search
-  | Library_search
-  | Library_read
-  | Surface_read
-  | Web_search
-  | Web_fetch
-  | Fusion_status
-(** Closed, read/observation-only authority granted to the detached Librarian
-    research phase. Operational/mutating tools and ungated provider subcalls
-    are not representable. *)
 
 (** Create a fresh retained-trace candidate for one Librarian research phase.
     The caller registers [Agent_sdk.Raw_trace.file_path] as a durable reachability
@@ -93,8 +74,15 @@ type execution_outcome =
       ; turns : int
       ; stop_reason : Runtime_agent.stop_reason
       }
+  | Research_deferred of
+      { session_id : string
+      ; turns : int
+      }
   | Research_failed of Agent_sdk.Error.sdk_error
   | Research_cancelled
+
+val finalizer_may_run : execution_outcome -> bool
+(** [false] only while an approved external effect has not settled. *)
 
 type cleanup_outcome =
   | Cleanup_succeeded
@@ -123,9 +111,9 @@ val run : on_receipt:(receipt -> unit) -> request -> receipt
     and terminal observation freeze. Cancellation is re-raised only after the
     cancelled receipt has been delivered to this callback. *)
 
-(** Secret-free long-lived registry projection. Frozen prompts/input, tool
-    input/output, evidence text, and trace paths remain only in the retained
-    raw-trace blob behind the operator route. *)
+(** Admin-only durable execution projection. This includes the exact frozen
+    prompts/input, tool input/output, bounded evidence, and trace reference;
+    provider event rows remain separately identifiable in the RAW trace. *)
 val registry_receipt_to_yojson : receipt -> Yojson.Safe.t
 
 (** Bounded evidence projection consumed by the later exact-output phase. *)
@@ -150,4 +138,12 @@ module For_testing : sig
   val internal_error_of_exception : exn -> Agent_sdk.Error.sdk_error
   (** Re-raise reserved runtime exceptions and translate only ordinary failures
       to the research degradation error. *)
+
+  val freeze_completed_calls
+    :  (Agent_sdk.Tool_contract.Invocation.t
+        * string
+        * Yojson.Safe.t
+        * tool_call_result)
+         list
+    -> tool_call list
 end

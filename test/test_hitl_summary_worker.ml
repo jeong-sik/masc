@@ -1853,6 +1853,8 @@ let test_observed_summary_earns_succeeded () =
   (match outcome with
    | Masc.Exact_lane_run_registry.Succeeded -> ()
    | Masc.Exact_lane_run_registry.Cancelled -> Alcotest.fail "expected Succeeded, got Cancelled"
+   | Masc.Exact_lane_run_registry.Deferred { code; _ } ->
+     Alcotest.failf "expected Succeeded, got Deferred %s" code
    | Masc.Exact_lane_run_registry.Failed { code; _ } ->
      Alcotest.failf "expected Succeeded, got Failed %s" code);
   Alcotest.(check bool) "output carries the summary" true (output <> `Null)
@@ -1866,7 +1868,9 @@ let test_missing_summary_earns_failed () =
      Alcotest.(check bool) "detail is not empty" true (String.trim detail <> "")
    | Masc.Exact_lane_run_registry.Succeeded ->
      Alcotest.fail "a run that produced no summary was recorded as Succeeded"
-   | Masc.Exact_lane_run_registry.Cancelled -> Alcotest.fail "expected Failed, got Cancelled");
+   | Masc.Exact_lane_run_registry.Cancelled -> Alcotest.fail "expected Failed, got Cancelled"
+   | Masc.Exact_lane_run_registry.Deferred { code; _ } ->
+     Alcotest.failf "expected Failed, got Deferred %s" code);
   Alcotest.(check bool) "no output is synthesised" true (output = `Null)
 ;;
 

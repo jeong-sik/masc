@@ -1217,6 +1217,11 @@ let spawn_with
         (Exact_lane_run_registry.Exact_input
            (`Assoc
            [ "tool_name", `String entry.tool_name
+           ; "tool_input", entry.input
+           ; ( "request_context"
+             , match entry.request_context with
+               | Some context -> context
+               | None -> `Null )
            ; "turn_id", Json_util.int_opt_to_json entry.turn_id
            ; "task_id", Json_util.string_opt_to_json entry.task_id
            ; "goal_id", Json_util.string_opt_to_json entry.goal_id

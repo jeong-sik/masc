@@ -4,6 +4,7 @@ open Masc
 module Reducer = Keeper_owner_reducer
 module Owner = Keeper_owner
 module Owner_registry = Keeper_owner_registry
+module Operation = Keeper_chat_operation_store
 
 exception Synthetic_child_cancel
 
@@ -146,7 +147,7 @@ let test_actor_concurrent_commands_are_exact () =
   Eio.Switch.run @@ fun sw ->
   let owner =
     owner_ok
-      (Owner.start
+      (Owner.For_testing.start
       ~sw
       ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
       ~keeper_name:"concurrent"
@@ -194,7 +195,7 @@ let test_mailbox_backpressures_without_drop () =
   in
   let owner =
     owner_ok
-      (Owner.start
+      (Owner.For_testing.start
          ~sw
          ~store
          ~keeper_name:"mailbox"
@@ -253,11 +254,19 @@ let test_child_isolation_and_per_keeper_parallelism () =
   let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
   let owner_a =
     owner_ok
-      (Owner.start ~sw ~store ~keeper_name:"a" ~initial_meta:(Some (make_meta "a")))
+      (Owner.For_testing.start
+         ~sw
+         ~store
+         ~keeper_name:"a"
+         ~initial_meta:(Some (make_meta "a")))
   in
   let owner_b =
     owner_ok
-      (Owner.start ~sw ~store ~keeper_name:"b" ~initial_meta:(Some (make_meta "b")))
+      (Owner.For_testing.start
+         ~sw
+         ~store
+         ~keeper_name:"b"
+         ~initial_meta:(Some (make_meta "b")))
   in
   let child_a_started, resolve_child_a_started = Eio.Promise.create () in
   let release_child_a, resolve_release_child_a = Eio.Promise.create () in
@@ -323,7 +332,7 @@ let test_store_failure_is_precommit () =
   Eio.Switch.run @@ fun sw ->
   let owner =
     owner_ok
-      (Owner.start
+      (Owner.For_testing.start
       ~sw
       ~store:
         { replace = (fun _ -> Error "disk unavailable")
@@ -351,7 +360,8 @@ let test_identity_and_running_lifecycle_guards () =
   Eio.Switch.run @@ fun sw ->
   let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
   let empty =
-    owner_ok (Owner.start ~sw ~store ~keeper_name:"empty" ~initial_meta:None)
+    owner_ok
+      (Owner.For_testing.start ~sw ~store ~keeper_name:"empty" ~initial_meta:None)
   in
   (match Owner.start_turn empty ~operation_id:"missing" ~run:(fun _ -> ()) with
    | Error (Owner.Reducer_rejected Reducer.Meta_missing) -> ()
@@ -392,7 +402,7 @@ let test_child_cancellation_releases_slot () =
   Eio.Switch.run @@ fun sw ->
   let owner =
     owner_ok
-      (Owner.start
+      (Owner.For_testing.start
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~keeper_name:"cancel"
@@ -434,7 +444,7 @@ let test_shutdown_releases_full_mailbox_requests () =
     Eio.Switch.run (fun owner_sw ->
       let owner =
         owner_ok
-          (Owner.start
+          (Owner.For_testing.start
              ~sw:owner_sw
              ~store:
                { replace =
@@ -487,7 +497,7 @@ let test_stopping_rejects_new_commands () =
   Eio.Switch.run @@ fun sw ->
   let owner =
     owner_ok
-      (Owner.start
+      (Owner.For_testing.start
       ~sw
       ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
       ~keeper_name:"stopping"
@@ -520,6 +530,120 @@ let rec remove_tree path =
         (Sys.readdir path);
       Unix.rmdir path)
     else Unix.unlink path
+;;
+
+let dashboard_operation_input ?(content = "hello") ?(submitted_at = 100.0) ()
+  : Operation.input
+  =
+  { content
+  ; user_blocks = []
+  ; attachments = []
+  ; submitted_at
+  ; source = Dashboard { thread_id = "owner-thread" }
+  ; user_row_origin = Keeper_chat_store.Needs_append
+  }
+;;
+
+let accepted_operation = function
+  | Operation.Accepted operation -> operation
+  | Existing _ -> fail "fresh owner operation returned Existing"
+;;
+
+let test_owner_serializes_operations_and_settles_restart () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       let meta = make_meta "operation-owner" in
+       let meta_store =
+         { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+       in
+       Eio.Switch.run (fun first_sw ->
+         let owner =
+           owner_ok
+             (Owner.start
+                ~sw:first_sw
+                ~store:meta_store
+                ~base_path
+                ~keeper_name:meta.name
+                ~initial_meta:(Some meta))
+         in
+         let first =
+           owner_ok
+             (Owner.submit_operation
+                owner
+                ~operation_id:"kmsg-owner-1"
+                (dashboard_operation_input ()))
+           |> accepted_operation
+         in
+         let second =
+           owner_ok
+             (Owner.submit_operation
+                owner
+                ~operation_id:"kmsg-owner-2"
+                (dashboard_operation_input ~content:"second" ~submitted_at:101.0 ()))
+           |> accepted_operation
+         in
+         check bool
+           "actor submission allocates FIFO sequence"
+           true
+           (Int64.compare first.sequence second.sequence < 0);
+         let edited =
+           owner_ok
+             (Owner.edit_operation
+                owner
+                ~operation_id:first.operation_id
+                { content = "edited"; user_blocks = []; attachments = [] })
+         in
+         (match edited.input with
+          | Some input -> check string "actor-linearized edit" "edited" input.content
+          | None -> fail "queued actor edit scrubbed input");
+         ignore
+           (owner_ok
+              (Owner.move_operation_to_end owner ~operation_id:first.operation_id));
+         let running =
+           owner_ok (Owner.start_next_operation owner ~started_at:110.0)
+           |> Option.get
+         in
+         check string
+           "actor move determines next FIFO head"
+           second.operation_id
+           running.operation_id);
+       Eio.Switch.run (fun second_sw ->
+         let owner =
+           owner_ok
+             (Owner.start
+                ~sw:second_sw
+                ~store:meta_store
+                ~base_path
+                ~keeper_name:meta.name
+                ~initial_meta:(Some meta))
+         in
+         check int
+           "actor startup settles one historical Running"
+           1
+           (Owner.For_testing.startup_interrupted_count owner);
+         let interrupted =
+           owner_ok (Owner.lookup_operation owner ~operation_id:"kmsg-owner-2")
+         in
+         (match interrupted.state with
+          | Operation.Failed { kind = Interrupted_by_restart; _ } -> ()
+          | _ -> fail "historical Running did not become Interrupted_by_restart");
+         check bool
+           "terminal interrupted row scrubs input"
+           true
+           (Option.is_none interrupted.input);
+         let queued =
+           owner_ok
+             (Owner.list_queued_operations owner ~after_sequence:None ~limit:10)
+         in
+         check int "queued operation survives owner restart" 1 (List.length queued);
+         check string
+           "moved queued operation remains pending"
+           "kmsg-owner-1"
+           (List.hd queued).operation_id))
 ;;
 
 let test_root_inventory_loads_and_extends_exactly_once () =
@@ -729,6 +853,10 @@ let () =
             "stopping rejects new commands"
             `Quick
             test_stopping_rejects_new_commands
+        ; test_case
+            "operations are serialized and restart-settled"
+            `Quick
+            test_owner_serializes_operations_and_settles_restart
         ; test_case
             "root inventory loads and extends exactly once"
             `Quick

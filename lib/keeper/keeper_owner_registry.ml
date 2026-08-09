@@ -151,6 +151,7 @@ let ensure_in_pool pool meta =
           Keeper_owner.start
             ~sw:pool.sw
             ~store:(store_for pool meta.name)
+            ~base_path:pool.config.base_path
             ~keeper_name:meta.name
             ~initial_meta:(Some meta)
          with
@@ -173,6 +174,7 @@ let ensure_empty_in_pool pool keeper_name =
            Keeper_owner.start
              ~sw:pool.sw
              ~store:(store_for pool keeper_name)
+             ~base_path:pool.config.base_path
              ~keeper_name
              ~initial_meta:None
          with

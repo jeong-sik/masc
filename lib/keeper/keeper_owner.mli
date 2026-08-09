@@ -14,6 +14,7 @@ type store =
 
 type error =
   | Reducer_rejected of Keeper_owner_reducer.error
+  | Operation_rejected of Keeper_chat_operation_store.error
   | Store_unavailable of string
   | Owner_closed
 
@@ -33,6 +34,7 @@ type t
 val start
   :  sw:Eio.Switch.t
   -> store:store
+  -> base_path:string
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result
@@ -49,6 +51,61 @@ val apply_meta
   :  t
   -> Keeper_owner_reducer.meta_command
   -> (Keeper_meta_contract.keeper_meta option, error) result
+
+val submit_operation
+  :  t
+  -> operation_id:string
+  -> Keeper_chat_operation_store.input
+  -> (Keeper_chat_operation_store.submit_result, error) result
+
+val lookup_operation
+  :  t
+  -> operation_id:string
+  -> (Keeper_chat_operation_store.operation, error) result
+
+val list_queued_operations
+  :  t
+  -> after_sequence:int64 option
+  -> limit:int
+  -> (Keeper_chat_operation_store.operation list, error) result
+
+val edit_operation
+  :  t
+  -> operation_id:string
+  -> Keeper_chat_operation_store.edit_input
+  -> (Keeper_chat_operation_store.operation, error) result
+
+val move_operation_to_end
+  :  t
+  -> operation_id:string
+  -> (Keeper_chat_operation_store.operation, error) result
+
+val cancel_operation
+  :  t
+  -> operation_id:string
+  -> completed_at:float
+  -> (Keeper_chat_operation_store.operation, error) result
+
+val start_next_operation
+  :  t
+  -> started_at:float
+  -> (Keeper_chat_operation_store.operation option, error) result
+
+val succeed_operation
+  :  t
+  -> operation_id:string
+  -> completed_at:float
+  -> outcome_ref:string
+  -> (Keeper_chat_operation_store.operation, error) result
+
+val fail_operation
+  :  t
+  -> operation_id:string
+  -> completed_at:float
+  -> kind:Keeper_chat_operation_store.failure_kind
+  -> detail:string
+  -> outcome_ref:string option
+  -> (Keeper_chat_operation_store.operation, error) result
 
 val start_turn
   :  t
@@ -69,5 +126,13 @@ val begin_stopping : t -> (unit, error) result
 val error_to_string : error -> string
 
 module For_testing : sig
+  val start
+    :  sw:Eio.Switch.t
+    -> store:store
+    -> keeper_name:string
+    -> initial_meta:Keeper_meta_contract.keeper_meta option
+    -> (t, error) result
+
   val mailbox_depth : t -> int
+  val startup_interrupted_count : t -> int
 end

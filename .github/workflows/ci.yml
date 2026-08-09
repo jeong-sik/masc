@@ -495,26 +495,6 @@ jobs:
             echo "::endgroup::"
           done
 
-      # SSOT and distribution-contract guards that existed but never ran.
-      # test_prompt_asset_sync is the merge-time half of the managed-assets
-      # manifest contract: a mismatch between the manifest and the embedded
-      # prompt set fails the whole boot-time prompt sync, so until now the
-      # first place anyone learned about it was a server that would not
-      # converge its prompt directory. The dirname ratchet had already been
-      # violated in lib/config/playground_paths.ml.
-      - name: Run SSOT and asset contract suites
-        id: ssot_contract_suites
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          ssot_targets="@test/runtest-test_prompt_asset_sync @test/runtest-test_prompt_registry_defaults @test/runtest-test_tool_contract_truth @test/runtest-test_masc_dirname_ssot @test/runtest-test_otel_port_ssot @test/runtest-test_nickname_words_ssot"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${ssot_targets}"
-
       - name: Check doc truth
         if: needs.changes.outputs.doc_truth == 'true'
         run: |
@@ -912,10 +892,9 @@ jobs:
         # reason (#27117), and #26075 found the same shape by tripping over it.
         #
         # Every suite here was executed against origin/main before being added.
-        # Four more guards in this family are red today and are deliberately
+        # Three more guards in this family are red today and are deliberately
         # NOT listed, so this step cannot go green by ignoring them:
-        # test_masc_dirname_ssot, test_keeper_runtime_contract,
-        # test_keeper_identity_drift_counter,
+        # test_keeper_runtime_contract, test_keeper_identity_drift_counter,
         # test_keeper_supervisor_persona_drift_order (#26075 comment).
         run: |
           opam exec -- dune build --root . \
@@ -940,9 +919,12 @@ jobs:
             @test/runtest-test_keeper_turn_fsm_tla_parity \
             @test/runtest-test_keepers_runtime_dir_ssot \
             @test/runtest-test_mcp_h1_h2_admission_parity \
+            @test/runtest-test_masc_dirname_ssot \
             @test/runtest-test_nickname_words_ssot \
             @test/runtest-test_oas_message_constructor_contract \
             @test/runtest-test_otel_port_ssot \
+            @test/runtest-test_prompt_asset_sync \
+            @test/runtest-test_prompt_registry_defaults \
             @test/runtest-test_release_train_guard_script \
             @test/runtest-test_rfc_0086_keeper_namespace_invariant \
             @test/runtest-test_server_base_path_guard \
@@ -1246,23 +1228,6 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_model_inference_metrics"
-
-      # Completion-authority rejection routing and verification-evidence
-      # projection are executable behavior, not implementation shape: the
-      # suite asserts routed identities and stored payloads, never source
-      # text or log wording. It stayed compile-only under @check, so
-      # regression tests added there (#26625, #26657) never ran.
-      - name: Run env-snapshot applied-default suite
-        id: env_snapshot_applied_default_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_env_snapshot_reports_applied_default"
 
       - name: Run channel-gate content-length knob suite
         id: channel_gate_content_length_knob_suite
@@ -1583,7 +1548,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          request_cap_targets="@test/runtest-test_runtime_config_validity @test/runtest-test_keeper_turn_driver_failover @test/runtest-test_keeper_turn_driver_accept @test/runtest-test_keeper_vision_tool @test/runtest-test_runtime_modality_reroute @test/runtest-test_runtime_model_input_tail_window @test/runtest-test_keeper_context_overflow_shrink @test/runtest-test_keeper_provider_call_deadline @test/runtest-test_keeper_runtime_resolved_observability @test/runtest-test_runtime_toml_overrides"
+          request_cap_targets="@test/runtest-test_keeper_turn_driver_failover @test/runtest-test_keeper_turn_driver_accept @test/runtest-test_keeper_vision_tool @test/runtest-test_runtime_modality_reroute @test/runtest-test_runtime_model_input_tail_window @test/runtest-test_keeper_context_overflow_shrink @test/runtest-test_keeper_provider_call_deadline @test/runtest-test_keeper_runtime_resolved_observability @test/runtest-test_runtime_toml_overrides"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${request_cap_targets}"
 
       - name: Run operator control suite
@@ -1632,9 +1597,10 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_wake_turn_context @test/runtest-test_warn_root_causes"
 
-      # Mirror guards and the workspace heartbeat outcome suite landed without
-      # a runtest target, so the ci-test-targets ratchet counted them as
-      # compile-only. Run them.
+      # Workspace heartbeat and transport-vocabulary guards landed without a
+      # runtest target, so the ci-test-targets ratchet counted them as
+      # compile-only. Run them. The assertion-kind mirror already runs in the
+      # invariant and SSOT guard step above.
       - name: Run mirror guard and workspace heartbeat suites
         id: mirror_guard_suites
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -1645,12 +1611,12 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_assertion_kind_mirror @test/runtest-test_workspace_heartbeat_outcome @test/runtest-test_agent_api_query_params @test/runtest-test_h2_mode_vocabulary @test/runtest-test_agent_transport_vocabulary @test/runtest-test_keeper_catchup_digest @test/runtest-test_workspace_root_state_parity"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_workspace_heartbeat_outcome @test/runtest-test_agent_api_query_params @test/runtest-test_h2_mode_vocabulary @test/runtest-test_agent_transport_vocabulary @test/runtest-test_keeper_catchup_digest @test/runtest-test_workspace_root_state_parity"
 
-      # Four more suites landed on main without a runtest target (persona name
-      # via #26962, tool-result demotion via #27013, verification authority
-      # tools via #26994, tool type label). Same ratchet class as above.
-      - name: Run persona, demotion, verification, and tool-label suites
+      # Persona name, tool-result demotion, and tool type label landed on main
+      # without a runtest target. The verification-authority suite already
+      # runs in its dedicated completion-authority step above.
+      - name: Run persona, demotion, and tool-label suites
         id: recent_unwired_suites
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
@@ -1660,7 +1626,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_keeper_name @test/runtest-test_dashboard_briefing @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_telemetry_eio_pbt @test/runtest-test_verification_authority_tools"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_keeper_name @test/runtest-test_dashboard_briefing @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_telemetry_eio_pbt"
 
       # Subprocess capture is bounded head+tail; without a runtest target the
       # assertions that a 9MiB child gets truncated — and that a short one does

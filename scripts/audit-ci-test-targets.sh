@@ -67,6 +67,23 @@ grep -oE '@test/runtest-[a-z_0-9-]+' .github/workflows/ci.yml \
   | sed 's|@test/runtest-||' \
   | sort -u > "$referenced"
 
+duplicate_references="$(
+  grep -oE '@test/runtest-[a-z_0-9-]+' .github/workflows/ci.yml \
+    | sed 's|@test/runtest-||' \
+    | sort \
+    | uniq -d
+)"
+
+if [ -n "$duplicate_references" ]; then
+  echo "[ci-test-targets] FAIL - ci.yml executes the same Dune test target more than once"
+  echo
+  printf '%s\n' "$duplicate_references" | sed 's/^/  - /'
+  echo
+  echo "Keep one authoritative invocation for each target; repeated runtest aliases"
+  echo "spend CI time without adding coverage."
+  exit 2
+fi
+
 missing="$(comm -23 "$referenced" "$declared")"
 
 if [ -n "$missing" ]; then
@@ -88,7 +105,7 @@ fi
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
 # Exact current count. Adding an unwired suite is a regression.
-UNWIRED_BASELINE=701
+UNWIRED_BASELINE=700
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

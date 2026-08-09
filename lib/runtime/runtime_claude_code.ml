@@ -223,10 +223,20 @@ let subscription_only_environment () =
   let blocked =
     [ "ANTHROPIC_API_KEY"
     ; "ANTHROPIC_AUTH_TOKEN"
+    ; "ANTHROPIC_API_URL"
+    ; "ANTHROPIC_BASE_URL"
+    ; "ANTHROPIC_BEDROCK_BASE_URL"
+    ; "ANTHROPIC_VERTEX_BASE_URL"
+    ; "ANTHROPIC_VERTEX_PROJECT_ID"
     ; "CLAUDE_CODE_OAUTH_TOKEN"
+    ; "CLAUDE_CODE_SKIP_BEDROCK_AUTH"
+    ; "CLAUDE_CODE_SKIP_VERTEX_AUTH"
+    ; "CLAUDE_CODE_USE_BEDROCK"
+    ; "CLAUDE_CODE_USE_VERTEX"
     ; "CLAUDECODE"
     ; "CLAUDE_CODE_ENTRYPOINT"
     ; "CLAUDE_AGENT_SDK_VERSION"
+    ; "CLOUD_ML_REGION"
     ]
   in
   Unix.environment ()
@@ -379,6 +389,10 @@ let mcp_tools_call ~id ~params ~tools ~tool_call_count =
     Ok (mcp_tool_result ~id result)
 ;;
 
+type mcp_dispatch =
+  | Mcp_response of Yojson.Safe.t
+  | Mcp_notification
+
 let handle_mcp_message ~tools ~tool_call_count message =
   let stage = "MCP message" in
   let* fields = assoc_at stage message in
@@ -390,18 +404,24 @@ let handle_mcp_message ~tools ~tool_call_count message =
     let id = Option.value (List.assoc_opt "id" fields) ~default:`Null in
     let params = Option.value (List.assoc_opt "params" fields) ~default:(`Assoc []) in
     match method_ with
-    | "initialize" when id <> `Null -> Ok (mcp_initialize ~id)
-    | "tools/list" when id <> `Null -> Ok (mcp_tools_list ~id tools)
+    | "initialize" when id <> `Null -> Ok (Mcp_response (mcp_initialize ~id))
+    | "tools/list" when id <> `Null -> Ok (Mcp_response (mcp_tools_list ~id tools))
     | "tools/call" when id <> `Null ->
-      mcp_tools_call ~id ~params ~tools ~tool_call_count
+      let* response = mcp_tools_call ~id ~params ~tools ~tool_call_count in
+      Ok (Mcp_response response)
     | "notifications/initialized" when id = `Null ->
-      Ok (`Assoc [ "jsonrpc", `String "2.0"; "result", `Assoc [] ])
+      Ok Mcp_notification
+    | _ when id = `Null ->
+      protocol_error
+        stage
+        (Printf.sprintf "MCP notification %S is not supported" method_)
     | _ ->
       Ok
-        (jsonrpc_error
-           ~id
-           ~code:(-32601)
-           (Printf.sprintf "MCP method %S is not supported" method_))
+        (Mcp_response
+           (jsonrpc_error
+              ~id
+              ~code:(-32601)
+              (Printf.sprintf "MCP method %S is not supported" method_)))
 ;;
 
 let send_control_success io ~request_id response =
@@ -446,12 +466,15 @@ let handle_control_request io ~tools ~tool_call_count fields =
       Error (Unsupported_control_request subtype)
     else
       let* message = required_member stage "message" request_fields in
-      let* mcp_response = handle_mcp_message ~tools ~tool_call_count message in
-      send_control_success
-        io
-        ~request_id
-        (`Assoc [ "mcp_response", mcp_response ]);
-      Ok ()
+      let* dispatch = handle_mcp_message ~tools ~tool_call_count message in
+      (match dispatch with
+       | Mcp_notification -> Ok ()
+       | Mcp_response mcp_response ->
+         send_control_success
+           io
+           ~request_id
+           (`Assoc [ "mcp_response", mcp_response ]);
+         Ok ())
   | unsupported ->
     send_control_error
       io

@@ -20,19 +20,32 @@ let result =
 type fixture_step =
   | Emit of string
   | Emit_and_read of string
+  | Emit_and_expect_request_id of string * string
 
 let fixture_script ?(auth_json = auth_subscription) steps =
   let path = Filename.temp_file "masc-claude-code-" ".sh" in
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
   output_string output "set -eu\n";
+  List.iter
+    (fun name ->
+       output_string output
+         (Printf.sprintf "[ \"${%s+x}\" != x ] || exit 90\n" name))
+    [ "ANTHROPIC_API_KEY"
+    ; "ANTHROPIC_AUTH_TOKEN"
+    ; "ANTHROPIC_API_URL"
+    ; "ANTHROPIC_BASE_URL"
+    ; "ANTHROPIC_BEDROCK_BASE_URL"
+    ; "ANTHROPIC_VERTEX_BASE_URL"
+    ; "ANTHROPIC_VERTEX_PROJECT_ID"
+    ; "CLAUDE_CODE_OAUTH_TOKEN"
+    ; "CLAUDE_CODE_SKIP_BEDROCK_AUTH"
+    ; "CLAUDE_CODE_SKIP_VERTEX_AUTH"
+    ; "CLAUDE_CODE_USE_BEDROCK"
+    ; "CLAUDE_CODE_USE_VERTEX"
+    ; "CLOUD_ML_REGION"
+    ];
   output_string output "if [ \"${1-}\" = auth ]; then\n";
-  output_string output
-    "  [ \"${ANTHROPIC_API_KEY+x}\" != x ] || exit 91\n";
-  output_string output
-    "  [ \"${ANTHROPIC_AUTH_TOKEN+x}\" != x ] || exit 92\n";
-  output_string output
-    "  [ \"${CLAUDE_CODE_OAUTH_TOKEN+x}\" != x ] || exit 93\n";
   output_string output
     ("  printf '%s\\n' " ^ shell_quote auth_json ^ "\n");
   output_string output "  exit 0\n";
@@ -59,7 +72,14 @@ let fixture_script ?(auth_json = auth_subscription) steps =
         output_string output ("emit " ^ shell_quote line ^ "\n")
       | Emit_and_read line ->
         output_string output ("emit " ^ shell_quote line ^ "\n");
-        output_string output "IFS= read -r ignored_response\n")
+        output_string output "IFS= read -r ignored_response\n"
+      | Emit_and_expect_request_id (line, request_id) ->
+        output_string output ("emit " ^ shell_quote line ^ "\n");
+        output_string output "IFS= read -r control_response\n";
+        output_string output
+          (Printf.sprintf
+             "printf '%%s' \"$control_response\" | grep -F '\"request_id\":\"%s\"' >/dev/null || exit 96\n"
+             request_id))
     steps;
   output_string output "while IFS= read -r ignored; do :; done\n";
   close_out output;
@@ -101,6 +121,22 @@ let test_validation_is_process_free () =
 ;;
 
 let test_subscription_turn_and_env_scrub () =
+  List.iter
+    (fun name -> Unix.putenv name "hostile-fixture-value")
+    [ "ANTHROPIC_API_KEY"
+    ; "ANTHROPIC_AUTH_TOKEN"
+    ; "ANTHROPIC_API_URL"
+    ; "ANTHROPIC_BASE_URL"
+    ; "ANTHROPIC_BEDROCK_BASE_URL"
+    ; "ANTHROPIC_VERTEX_BASE_URL"
+    ; "ANTHROPIC_VERTEX_PROJECT_ID"
+    ; "CLAUDE_CODE_OAUTH_TOKEN"
+    ; "CLAUDE_CODE_SKIP_BEDROCK_AUTH"
+    ; "CLAUDE_CODE_SKIP_VERTEX_AUTH"
+    ; "CLAUDE_CODE_USE_BEDROCK"
+    ; "CLAUDE_CODE_USE_VERTEX"
+    ; "CLOUD_ML_REGION"
+    ];
   with_fixture [ Emit assistant; Emit result ] (fun path ->
     match run_fixture path with
     | Error error -> fail (Runtime_claude_code.error_to_string error)
@@ -151,6 +187,14 @@ let mcp_list =
   {|{"type":"control_request","request_id":"mcp-list-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}}}|}
 ;;
 
+let mcp_initialized_notification =
+  {|{"type":"control_request","request_id":"mcp-notify-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}}}|}
+;;
+
+let mcp_list_after_notification =
+  {|{"type":"control_request","request_id":"mcp-list-after-notification","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}}}|}
+;;
+
 let mcp_call =
   {|{"type":"control_request","request_id":"mcp-call-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"masc_probe","arguments":{"marker":"from-claude"}}}}}|}
 ;;
@@ -190,6 +234,20 @@ let test_dynamic_tool_callback () =
           "arguments"
           {|{"marker":"from-claude"}|}
           (Yojson.Safe.to_string !observed_input))
+;;
+
+let test_mcp_notification_has_no_response () =
+  with_fixture
+    [ Emit mcp_initialized_notification
+    ; Emit_and_expect_request_id
+        (mcp_list_after_notification, "mcp-list-after-notification")
+    ; Emit assistant
+    ; Emit result
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
 ;;
 
 let test_malformed_json_fails_closed () =
@@ -312,6 +370,10 @@ let () =
         ] )
     ; ( "mcp"
       , [ test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
+        ; test_case
+            "notification has no response"
+            `Quick
+            test_mcp_notification_has_no_response
         ; test_case
             "unsupported control request fails closed"
             `Quick

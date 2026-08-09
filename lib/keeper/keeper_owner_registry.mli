@@ -55,6 +55,13 @@ val run_autonomous_if_idle
   -> ([ `Ran of 'a | `Busy of Keeper_owner.autonomous_block ], command_error) result
 (** Submit one autonomous turn attempt to the Keeper's Owner mailbox. *)
 
+val run_maintenance_if_idle
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit -> 'a)
+  -> ([ `Ran of 'a | `Busy of Keeper_owner.autonomous_block ], command_error) result
+(** Submit one exclusive maintenance attempt to the Keeper's Owner mailbox. *)
+
 val apply_meta
   :  ?lifecycle_token:Keeper_lifecycle_reservation.token
   -> base_path:string

@@ -18,13 +18,16 @@ type operation_projection =
 type turn_lane =
   | Autonomous
   | Chat_operation
+  | Maintenance
 
 type turn_in_flight =
   { lane : turn_lane
   ; started_at : float
   }
 
-type autonomous_block = Turn_busy of turn_in_flight
+type autonomous_block =
+  | Turn_busy of turn_in_flight option
+  | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
 type operation_acceptance =
   { operation : Chat_operation.t
@@ -117,8 +120,11 @@ type _ command =
       ; outcome_ref : string option
       }
       -> (Chat_operation.t, error) result command
-  | Run_autonomous_if_idle :
-      (unit -> 'a) -> ('a autonomous_response, error) result command
+  | Run_if_idle :
+      { lane : turn_lane
+      ; run : unit -> 'a
+      }
+      -> ('a autonomous_response, error) result command
   | Child_finished : child_completion -> (unit, error) result command
   | Begin_stopping : (unit, error) result command
 
@@ -166,14 +172,20 @@ let turn_in_flight t = Atomic.get t.turn_in_flight
 let turn_lane_to_string = function
   | Autonomous -> "autonomous"
   | Chat_operation -> "chat_operation"
+  | Maintenance -> "maintenance"
 ;;
 
 let autonomous_block_to_string = function
-  | Turn_busy { lane; started_at } ->
+  | Turn_busy None -> "reason=turn_busy holder=unpublished"
+  | Turn_busy (Some { lane; started_at }) ->
     Printf.sprintf
       "reason=turn_busy holder_lane=%s holder_started_at=%.17g"
       (turn_lane_to_string lane)
       started_at
+  | Shutdown_requested operation_id ->
+    Printf.sprintf
+      "reason=shutdown_requested operation_id=%s"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
 ;;
 
 let request t command =
@@ -593,18 +605,20 @@ let start
           in
           Eio.Promise.resolve resolve response;
           loop state
-        | Command (Run_autonomous_if_idle run, resolve) ->
+        | Command (Run_if_idle { lane; run }, resolve) ->
           (match reject_if_stopping state (fun () -> Ok ()) with
            | Error error -> Eio.Promise.resolve resolve (Error error)
            | Ok () ->
              (match Atomic.get t.turn_in_flight with
               | Some in_flight ->
-                Eio.Promise.resolve resolve (Ok (Autonomous_busy (Turn_busy in_flight)))
+                Eio.Promise.resolve
+                  resolve
+                  (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
               | None ->
                 t.child_active := true;
                 Atomic.set
                   t.turn_in_flight
-                  (Some { lane = Autonomous; started_at = t.now () });
+                  (Some { lane; started_at = t.now () });
                 Eio.Fiber.fork ~sw (fun () ->
                   let outcome =
                     try
@@ -700,14 +714,17 @@ let fail_running_operation t ~operation_id ~kind ~detail ~outcome_ref =
   request t (Fail_running_operation { operation_id; kind; detail; outcome_ref })
 ;;
 
-let run_autonomous_if_idle t run =
-  match request t (Run_autonomous_if_idle run) with
+let run_if_idle t lane run =
+  match request t (Run_if_idle { lane; run }) with
   | Error _ as error -> error
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)
   | Ok (Autonomous_raised (exn, backtrace)) ->
     Printexc.raise_with_backtrace exn backtrace
 ;;
+
+let run_autonomous_if_idle t run = run_if_idle t Autonomous run
+let run_maintenance_if_idle t run = run_if_idle t Maintenance run
 
 let begin_stopping t = request t Begin_stopping
 

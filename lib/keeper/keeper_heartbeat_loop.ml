@@ -881,11 +881,12 @@ let run_keepalive_unified_turn
       "keeper turn admission busy before stimulus intake: %s"
       (Keeper_turn_admission.autonomous_block_to_string block);
     { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
-  | Ok (`Busy (Keeper_owner.Turn_busy in_flight)) ->
+  | Ok (`Busy (Keeper_owner.Turn_busy (Some in_flight))) ->
     let lane =
       match in_flight.Keeper_owner.lane with
       | Keeper_owner.Autonomous -> Keeper_turn_admission.Autonomous
       | Keeper_owner.Chat_operation -> Keeper_turn_admission.Chat
+      | Keeper_owner.Maintenance -> Keeper_turn_admission.Autonomous
     in
     let block =
       Keeper_turn_admission.Turn_busy
@@ -897,7 +898,14 @@ let run_keepalive_unified_turn
     Log.Keeper.info
       ~keeper_name:meta_after_triage.name
       "keeper owner busy before stimulus intake: %s"
-      (Keeper_owner.autonomous_block_to_string (Keeper_owner.Turn_busy in_flight));
+      (Keeper_owner.autonomous_block_to_string
+         (Keeper_owner.Turn_busy (Some in_flight)));
+    { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
+  | Ok (`Busy (Keeper_owner.Turn_busy None)) ->
+    let block = Keeper_turn_admission.Turn_busy None in
+    { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
+  | Ok (`Busy (Keeper_owner.Shutdown_requested operation_id)) ->
+    let block = Keeper_turn_admission.Shutdown_requested operation_id in
     { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
   | Error error ->
     Log.Keeper.error

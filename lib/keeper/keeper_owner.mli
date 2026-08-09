@@ -24,13 +24,16 @@ type operation_projection =
 type turn_lane =
   | Autonomous
   | Chat_operation
+  | Maintenance
 
 type turn_in_flight =
   { lane : turn_lane
   ; started_at : float
   }
 
-type autonomous_block = Turn_busy of turn_in_flight
+type autonomous_block =
+  | Turn_busy of turn_in_flight option
+  | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
 type operation_acceptance =
   { operation : Chat_operation.t
@@ -99,6 +102,12 @@ val run_autonomous_if_idle
 (** Mailbox-linearized autonomous admission. The callback runs in the Owner's
     child switch, while the actor remains responsive. A queued/running chat or
     another autonomous child returns [`Busy] without consuming turn input. *)
+
+val run_maintenance_if_idle
+  :  t
+  -> (unit -> 'a)
+  -> ([ `Ran of 'a | `Busy of autonomous_block ], error) result
+(** Mailbox-linearized exclusive maintenance attempt. *)
 
 val exact_projection
   :  t

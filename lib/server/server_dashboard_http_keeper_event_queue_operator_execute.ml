@@ -462,24 +462,29 @@ let run_fresh_request ~config ~base_path ~keeper_name request =
   | Some entry ->
     let owner_nonce = entry.meta.runtime.nonce in
     (match
-       Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () ->
-         match Keeper_registry.get ~base_path keeper_name with
-         | None -> Error "keeper registration disappeared"
-         | Some current when current.meta.runtime.nonce <> owner_nonce ->
-           Error "keeper owner nonce changed"
-         | Some _ ->
-           run_admitted_request
-             ~config
-             ~base_path
-             ~keeper_name
-             ~owner_nonce
-             request)
+       Keeper_owner_registry.run_maintenance_if_idle
+         ~base_path
+         ~keeper_name
+         (fun () ->
+            match Keeper_registry.get ~base_path keeper_name with
+            | None -> Error "keeper registration disappeared"
+            | Some current when current.meta.runtime.nonce <> owner_nonce ->
+              Error "keeper owner nonce changed"
+            | Some _ ->
+              run_admitted_request
+                ~config
+                ~base_path
+                ~keeper_name
+                ~owner_nonce
+                request)
      with
-     | `Ran result -> result
-     | `Busy block ->
+     | Ok (`Ran result) -> result
+     | Ok (`Busy block) ->
+       Error ("keeper owner is busy: " ^ Keeper_owner.autonomous_block_to_string block)
+     | Error error ->
        Error
-         ("keeper turn is busy: "
-          ^ Keeper_turn_admission.autonomous_block_to_string block))
+         ("keeper owner unavailable: "
+          ^ Keeper_owner_registry.command_error_to_string error))
 ;;
 
 let run ~config ~keeper_name request =

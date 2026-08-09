@@ -1181,9 +1181,14 @@ let test_owner_linearizes_autonomous_and_chat_children () =
        ("chat operation started beside autonomous child: "
         ^ Chat_operation.state_to_string state));
   (match Owner.run_autonomous_if_idle owner (fun () -> fail "busy child ran") with
-   | Ok (`Busy (Owner.Turn_busy { lane = Owner.Autonomous; _ })) -> ()
+   | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Autonomous; _ }))) -> ()
    | Ok (`Busy _) -> fail "busy result projected the wrong lane"
    | Ok (`Ran _) -> fail "Owner admitted two autonomous children"
+   | Error error -> fail (Owner.error_to_string error));
+  (match Owner.run_maintenance_if_idle owner (fun () -> fail "busy maintenance ran") with
+   | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Autonomous; _ }))) -> ()
+   | Ok (`Busy _) -> fail "maintenance busy result projected the wrong lane"
+   | Ok (`Ran _) -> fail "Owner admitted maintenance beside autonomous"
    | Error error -> fail (Owner.error_to_string error));
   Eio.Promise.resolve resolve_release_autonomous ();
   (match Eio.Stream.take autonomous_result with

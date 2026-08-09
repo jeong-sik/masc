@@ -618,7 +618,11 @@ let run_turn ?(conversation_mode = Start) ~mgr ~clock ~cwd
       }
   | _, Some _, Some (result_status, _, error, _, _)
     when not (String.equal result_status "SUCCESS") ->
-    let detail = Option.value ~default:("status=" ^ result_status) error in
+    let detail =
+      match error with
+      | Some detail -> detail
+      | None -> "status=" ^ result_status
+    in
     Error (Turn_failed detail)
   | `Exited 0, _, None ->
     Error (Protocol_error { stage = "process completion"; detail = "missing result event" })

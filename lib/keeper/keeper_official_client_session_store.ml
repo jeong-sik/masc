@@ -104,6 +104,8 @@ let schema = "masc.keeper.official-client-session.v1"
 let filename = "session.json"
 let state_dirname = "official-client-runtime"
 let lock_filename = "session.lock"
+(* NDT-OK: recovery and process epochs are opaque UUID fences. Randomness is
+   confined to identity generation and never controls a semantic branch. *)
 let recovery_rng = Random.State.make_self_init ()
 let recovery_rng_mutex = Stdlib.Mutex.create ()
 

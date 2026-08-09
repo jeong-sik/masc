@@ -172,7 +172,11 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
              ~field:"enable_thinking"
              "agy has no no-thinking flag; configure Antigravity effort in runtime.toml instead")
     in
-    let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
+    let hooks =
+      match hooks with
+      | Some hooks -> hooks
+      | None -> Agent_sdk.Hooks.empty
+    in
     let owner_epoch = Session.process_epoch () in
     let* stored_session =
       match Session.load ~base_path ~keeper_name with

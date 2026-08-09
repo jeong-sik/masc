@@ -118,7 +118,7 @@ type meta_command =
       ; generation : int
       ; updated_at : string
       }
-  | Delete
+  | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
   | Turn_started_projection of { updated_at : string }
   | Turn_succeeded of
       { usage : usage_delta
@@ -183,6 +183,7 @@ type error =
       ; actual : string
       }
   | Identity_generation_mismatch
+  | Snapshot_changed
 
 let create ~keeper_name meta =
   match meta with
@@ -571,9 +572,13 @@ let apply_turn_runtime_delta
 let apply_existing (state : state) meta command =
   match command with
   | Create _ -> Error Meta_already_exists
-  | Delete ->
-    let state = { state with meta = None } in
-    Ok (publish_transition state (Remove_snapshot meta))
+  | Delete_if_snapshot expected_digest ->
+    let actual_digest = Keeper_meta_json.Snapshot_digest.of_meta meta in
+    if Keeper_meta_json.Snapshot_digest.equal expected_digest actual_digest
+    then
+      let state = { state with meta = None } in
+      Ok (publish_transition state (Remove_snapshot meta))
+    else Error Snapshot_changed
   | Pause { reason; updated_at } ->
     Ok (with_meta state { meta with paused = true; latched_reason = Some reason; updated_at })
   | Resume { updated_at } ->
@@ -764,6 +769,7 @@ let apply_meta (state : state) command =
       Error
         (Keeper_identity_mismatch
            { expected = state.keeper_name; actual = meta.name })
+    | None, Delete_if_snapshot _ -> Ok (publish_transition state No_persistence)
     | None, _ -> Error Meta_missing
     | Some meta, command -> apply_existing state meta command
 ;;
@@ -781,4 +787,5 @@ let error_to_string = function
   | Keeper_identity_mismatch { expected; actual } ->
     Printf.sprintf "Keeper identity mismatch: expected=%s actual=%s" expected actual
   | Identity_generation_mismatch -> "Keeper trace/generation identity changed"
+  | Snapshot_changed -> "Keeper metadata changed after cleanup was prepared"
 ;;

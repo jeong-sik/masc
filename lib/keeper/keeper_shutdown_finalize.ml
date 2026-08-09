@@ -10,6 +10,13 @@ type error =
 let error_to_string = function
   | Store_error error -> Keeper_shutdown_store.error_to_string error
   | Unsupported_phase -> "Keeper shutdown operation is not ready for finalization"
+  | Finalization_blocked
+      ({ phase = Blocked { stage; detail }; _ } as operation) ->
+    Printf.sprintf
+      "Keeper shutdown finalization blocked in operation %s at %s: %s"
+      (Operation_id.to_string operation.operation_id)
+      (failure_stage_to_string stage)
+      detail
   | Finalization_blocked operation ->
     Printf.sprintf
       "Keeper shutdown finalization blocked in operation %s"
@@ -372,7 +379,9 @@ let prepare_cleanup ~config ~entry operation settled_task_ids =
     | Dashboard_keeper_purge _ ->
       (match read_operation_meta ~config operation with
        | Error _ as error -> error
-       | Ok _ -> validate_registry_owner_exact ~config operation)
+       | Ok meta ->
+         validate_registry_owner_exact ~config operation
+         |> Result.map (fun () -> meta))
     | Operator_stop_retain_meta
     | Operator_stop_remove_meta ->
       (match
@@ -386,7 +395,7 @@ let prepare_cleanup ~config ~entry operation settled_task_ids =
        with
        | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
        | Ok None -> Error "Keeper metadata disappeared during shutdown pause"
-       | Ok (Some _retained) -> Ok ())
+       | Ok (Some retained) -> Ok retained)
     | Dead_tombstone_cleanup ->
       (match
          Keeper_owner_registry.apply_meta
@@ -399,11 +408,11 @@ let prepare_cleanup ~config ~entry operation settled_task_ids =
        with
        | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
        | Ok None -> Error "Keeper metadata disappeared during dead-tombstone commit"
-       | Ok (Some _retained) -> Ok ())
+       | Ok (Some retained) -> Ok retained)
   in
   match meta_prepare_result with
   | Error detail -> block ~config operation Meta_update detail
-  | Ok () ->
+  | Ok prepared_meta ->
     (match validate_registry_owner_exact ~config operation with
      | Error detail -> block ~config operation Meta_update detail
      | Ok () ->
@@ -415,7 +424,13 @@ let prepare_cleanup ~config ~entry operation settled_task_ids =
           with
           | Error detail -> block ~config operation Pending_confirm_cleanup detail
           | Ok pending_confirms_removed ->
-            let cleanup = { settled_task_ids; pending_confirms_removed } in
+            let cleanup =
+              { settled_task_ids
+              ; pending_confirms_removed
+              ; meta_snapshot_digest =
+                  Keeper_meta_json.Snapshot_digest.of_meta prepared_meta
+              }
+            in
             let ready =
               { operation with
                 phase = Cleanup_ready cleanup
@@ -461,7 +476,7 @@ let remove_tree path =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let remove_meta_file ~config operation =
+let remove_meta_file ~config operation cleanup =
   match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
   | Retain_operator_pause
   | Retain_dead_tombstone -> Ok ()
@@ -470,7 +485,7 @@ let remove_meta_file ~config operation =
        Keeper_owner_registry.apply_meta
          ~base_path:config.Workspace.base_path
          ~keeper_name:operation.keeper_name
-         Keeper_owner_reducer.Delete
+         (Keeper_owner_reducer.Delete_if_snapshot cleanup.meta_snapshot_digest)
      with
      | Ok None -> Ok ()
      | Ok (Some _) -> Error "Keeper owner delete retained metadata"
@@ -646,7 +661,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
                     error))))
   in
   let finish registry_unregistered =
-    match remove_meta_file ~config operation with
+    match remove_meta_file ~config operation cleanup with
     | Error detail -> block ~config operation Meta_remove detail
     | Ok () ->
       (match remove_session_dir ~config operation with

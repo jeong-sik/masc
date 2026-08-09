@@ -53,11 +53,12 @@ let request t command =
     with
     | `Closed -> Error Owner_closed
     | `Enqueued ->
-      Eio.Fiber.first
-        (fun () -> Eio.Promise.await response)
-        (fun () ->
-           Eio.Promise.await t.closed_p;
-           Error Owner_closed))
+      Eio.Cancel.protect (fun () ->
+        Eio.Fiber.first
+          (fun () -> Eio.Promise.await response)
+          (fun () ->
+             Eio.Promise.await t.closed_p;
+             Error Owner_closed)))
 ;;
 
 let commit store transition =

@@ -74,18 +74,30 @@ let load_all config =
   match Keeper_meta_store.keeper_names_result config with
   | Error detail -> Error (Inventory_load_failed { keeper_name = None; detail })
   | Ok names ->
+    let reject keeper_name detail =
+      Log.Keeper.error
+        "keeper_owner: metadata owner unavailable keeper=%s error=%s"
+        keeper_name
+        detail
+    in
     let rec loop acc = function
       | [] -> Ok (List.rev acc)
       | keeper_name :: rest ->
         (match Keeper_meta_store.read_meta config keeper_name with
          | Error detail ->
-           Error (Inventory_load_failed { keeper_name = Some keeper_name; detail })
+           reject keeper_name detail;
+           loop acc rest
          | Ok None ->
-           Error
-             (Inventory_load_failed
-                { keeper_name = Some keeper_name
-                ; detail = "metadata disappeared during strict owner inventory load"
-                })
+           reject keeper_name "metadata disappeared during owner inventory load";
+           loop acc rest
+         | Ok (Some meta) when not (String.equal keeper_name meta.name) ->
+           reject
+             keeper_name
+             (Printf.sprintf
+                "metadata identity mismatch: path owner=%s payload owner=%s"
+                keeper_name
+                meta.name);
+           loop acc rest
          | Ok (Some meta) -> loop (meta :: acc) rest)
     in
     loop [] names

@@ -293,6 +293,57 @@ let test_mailbox_backpressures_without_drop () =
   check int "mailbox drained" 0 (Owner.For_testing.mailbox_depth owner)
 ;;
 
+let test_enqueued_request_settles_before_cancellation_unwinds () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let replace_entered, resolve_replace_entered = Eio.Promise.create () in
+  let release_replace, resolve_release_replace = Eio.Promise.create () in
+  let cancel_context, resolve_cancel_context = Eio.Promise.create () in
+  let caller_done, resolve_caller_done = Eio.Promise.create () in
+  let caller_unwound = Atomic.make false in
+  let owner =
+    owner_ok
+      (Owner.start
+         ~sw
+         ~store:
+           { replace =
+               (fun _ ->
+                  Eio.Promise.resolve resolve_replace_entered ();
+                  Eio.Promise.await release_replace;
+                  Ok ())
+           ; remove = (fun _ -> Ok ())
+           }
+         ~keeper_name:"cancel-after-enqueue"
+         ~initial_meta:(Some (make_meta "cancel-after-enqueue")))
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    (try
+       Eio.Cancel.sub (fun context ->
+         Eio.Promise.resolve resolve_cancel_context context;
+         ignore
+           (Owner.apply_meta
+              owner
+              (Set_autoboot { enabled = true; updated_at = "committed" })))
+     with
+     | Eio.Cancel.Cancelled _ -> Atomic.set caller_unwound true);
+    Eio.Promise.resolve resolve_caller_done ());
+  let context = Eio.Promise.await cancel_context in
+  Eio.Promise.await replace_entered;
+  Eio.Cancel.cancel context (Failure "cancel after owner enqueue");
+  for _ = 1 to 10 do
+    Eio.Fiber.yield ()
+  done;
+  check bool "caller remains inside committed request" false (Atomic.get caller_unwound);
+  Eio.Promise.resolve resolve_release_replace ();
+  Eio.Promise.await caller_done;
+  check bool "protected request returns after settlement" false (Atomic.get caller_unwound);
+  check
+    bool
+    "enqueued mutation committed before authority scope unwound"
+    true
+    (Option.get (Owner.projection owner).meta).autoboot_enabled
+;;
+
 let test_store_failure_fences_mutations () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -373,10 +424,25 @@ let test_identity_and_delete_guards () =
   in
   (match Owner.apply_meta empty (Create (make_meta "other")) with
    | Error (Owner.Reducer_rejected (Reducer.Keeper_identity_mismatch _)) -> ()
-   | Error error -> fail ("wrong identity error: " ^ Owner.error_to_string error)
-   | Ok _ -> fail "owner accepted metadata for another Keeper");
+  | Error error -> fail ("wrong identity error: " ^ Owner.error_to_string error)
+  | Ok _ -> fail "owner accepted metadata for another Keeper");
   ignore (owner_ok (Owner.apply_meta empty (Create (make_meta "empty"))));
-  ignore (owner_ok (Owner.apply_meta empty Delete));
+  let stale_digest =
+    Keeper_meta_json.Snapshot_digest.of_meta (Option.get (Owner.projection empty).meta)
+  in
+  ignore
+    (owner_ok
+       (Owner.apply_meta
+          empty
+          (Set_autoboot { enabled = true; updated_at = "changed-before-delete" })));
+  (match Owner.apply_meta empty (Delete_if_snapshot stale_digest) with
+   | Error (Owner.Reducer_rejected Reducer.Snapshot_changed) -> ()
+   | Error error -> fail ("wrong stale delete error: " ^ Owner.error_to_string error)
+   | Ok _ -> fail "stale snapshot authority deleted newer metadata");
+  let expected_digest =
+    Keeper_meta_json.Snapshot_digest.of_meta (Option.get (Owner.projection empty).meta)
+  in
+  ignore (owner_ok (Owner.apply_meta empty (Delete_if_snapshot expected_digest)));
   check bool "delete clears metadata" true (Option.is_none (Owner.projection empty).meta)
 ;;
 
@@ -533,6 +599,44 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        (match Owner_registry.all_projections ~base_path with
         | Ok projections -> check int "fleet projection count" 2 (List.length projections)
        | Error error -> fail (Owner_registry.lookup_error_to_string error)))
+;;
+
+let test_root_inventory_isolates_invalid_owner_snapshots () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "owner-isolation-test"));
+       let valid = make_meta "inventory-valid" in
+       Keeper_meta_store.replace_snapshot config valid |> Result.get_ok;
+       let keepers_dir = Workspace.keepers_runtime_dir config in
+       Yojson.Safe.to_file
+         (Filename.concat keepers_dir "inventory-corrupt.json")
+         (`Assoc []);
+       Yojson.Safe.to_file
+         (Filename.concat keepers_dir "inventory-path-name.json")
+         (Keeper_meta_json.meta_to_json (make_meta "inventory-payload-name"));
+       (match Owner_registry.install_from_store ~sw config with
+        | Ok count -> check int "only valid owner starts" 1 count
+        | Error error -> fail (Owner_registry.install_error_to_string error));
+       (match Owner_registry.get ~base_path ~keeper_name:valid.name with
+        | Ok _ -> ()
+        | Error error -> fail (Owner_registry.lookup_error_to_string error));
+       List.iter
+         (fun keeper_name ->
+            match Owner_registry.get ~base_path ~keeper_name with
+            | Error (Owner_registry.Owner_not_found _) -> ()
+            | Error error -> fail (Owner_registry.lookup_error_to_string error)
+            | Ok _ -> fail ("invalid owner started: " ^ keeper_name))
+         [ "inventory-corrupt"; "inventory-path-name"; "inventory-payload-name" ];
+       check int
+         "invalid snapshots do not split owner identity"
+         1
+         (Owner_registry.For_testing.installed_owner_count ~base_path))
 ;;
 
 let test_registry_reads_owner_atomic_projection () =
@@ -712,6 +816,10 @@ let () =
             `Quick
             test_mailbox_backpressures_without_drop
         ; test_case
+            "enqueued request settles before cancellation"
+            `Quick
+            test_enqueued_request_settles_before_cancellation_unwinds
+        ; test_case
             "store failure fences mutations"
             `Quick
             test_store_failure_fences_mutations
@@ -735,6 +843,10 @@ let () =
             "root inventory loads and extends exactly once"
             `Quick
             test_root_inventory_loads_and_extends_exactly_once
+        ; test_case
+            "root inventory isolates invalid owner snapshots"
+            `Quick
+            test_root_inventory_isolates_invalid_owner_snapshots
         ; test_case
             "registry reads owner Atomic projection"
             `Quick

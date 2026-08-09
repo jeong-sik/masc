@@ -2,8 +2,9 @@
 
     Producers communicate through a bounded mailbox.  [apply_meta],
     and [exact_projection] apply backpressure when the mailbox is full;
-    commands are never dropped or coalesced. Routine reads use {!projection}
-    and do not enter the mailbox. *)
+    commands are never dropped or coalesced. Once enqueued, a request settles
+    before caller cancellation can release its surrounding authority scope.
+    Routine reads use {!projection} and do not enter the mailbox. *)
 
 val mailbox_capacity : int
 

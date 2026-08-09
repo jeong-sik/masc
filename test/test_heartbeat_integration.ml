@@ -37,7 +37,9 @@ module Approval_types = Keeper_approval_queue_rules_types
 module Turn_up_args = Masc.Keeper_turn_up_args
 module Turn_up_update = Masc.Keeper_turn_up_update
 module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_meta_json = Masc.Keeper_meta_json
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_owner_registry = Masc.Keeper_owner_registry
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_fs = Masc.Keeper_fs
 module Lifecycle_hooks = Masc.Keeper_lifecycle_hooks
@@ -60,6 +62,19 @@ let write_file path content =
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
+;;
+
+let install_owner_inventory_exn ~sw config =
+  match Keeper_owner_registry.install_from_store ~sw config with
+  | Ok _ -> ()
+  | Error error -> fail (Keeper_owner_registry.install_error_to_string error)
+;;
+
+let create_owner_meta_exn config meta =
+  match Keeper_owner_registry.create_meta ~base_path:config.Workspace.base_path meta with
+  | Ok (Some _) -> ()
+  | Ok None -> fail "owner metadata creation removed its snapshot"
+  | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
 ;;
 
 (* The autonomous keeper_cycle_decision path resolves a runtime id
@@ -146,6 +161,11 @@ let seed_keeper_sandbox_profile ~base_dir name =
     List.fold_left Filename.concat base_dir [ ".masc"; "config"; "keepers" ]
   in
   Fs_compat.mkdir_p keepers_dir;
+  let profile_dir = Filename.concat keepers_dir name in
+  Fs_compat.mkdir_p profile_dir;
+  Fs_compat.save_file
+    (Filename.concat profile_dir "AGENT.md")
+    ("# " ^ name ^ "\n");
   Fs_compat.save_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     "[keeper]\nsandbox_profile = \"local\"\n"
@@ -852,7 +872,11 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         ; phase =
             Shutdown_types.Finalized
               { cleanup =
-                  { settled_task_ids = []; pending_confirms_removed = 0 }
+                  { settled_task_ids = []
+                  ; pending_confirms_removed = 0
+                  ; meta_snapshot_digest =
+                      Keeper_meta_json.Snapshot_digest.of_meta meta
+                  }
               ; meta_removed = false
               ; session_removed = false
               ; registry_unregistered = false
@@ -1071,6 +1095,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "tester")
       in
+      install_owner_inventory_exn ~sw config;
       let backlog_version =
         match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
@@ -1477,9 +1502,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       Masc.Keeper_turn_admission.For_testing.reset ();
       let live_name = "update-blocked-admission" in
       let live_meta = { (make_meta live_name) with paused = true } in
-      (match Keeper_meta_store.replace_snapshot config live_meta with
-       | Ok () -> ()
-       | Error detail -> fail detail);
+      create_owner_meta_exn config live_meta;
       let live_blocked =
         { (operation
              ~name:live_name
@@ -1567,9 +1590,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       let stopped_meta =
         Shutdown_finalize.For_testing.paused_meta (make_meta stopped_name)
       in
-      (match Keeper_meta_store.replace_snapshot config stopped_meta with
-       | Ok () -> ()
-       | Error detail -> fail detail);
+      create_owner_meta_exn config stopped_meta;
       let stopped_parsed =
         { parsed with
           name = stopped_name
@@ -1619,11 +1640,10 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "tester")
       in
+      install_owner_inventory_exn ~sw config;
       let name = "update-turn-in-flight" in
       let meta = make_meta name in
-      (match Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error detail -> fail detail);
+      create_owner_meta_exn config meta;
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
@@ -1735,6 +1755,7 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
          fail (Masc.Server_startup_state.state_ready_error_to_string error));
       let clock = Eio.Stdenv.clock env in
       Eio.Switch.run @@ fun root_sw ->
+      install_owner_inventory_exn ~sw:root_sw config;
       Eio_context.with_test_env
         ~net:(Eio.Stdenv.net env)
         ~clock
@@ -1794,10 +1815,11 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
               fail
                 "the calling Keeper turn waited for the target's long-lived lane"
           in
-          check bool
-            "cross-keeper up succeeds"
-            true
-            (Keeper_types_profile.tool_result_success result);
+          if not (Keeper_types_profile.tool_result_success result)
+          then
+            fail
+              ("cross-keeper up failed: "
+               ^ Yojson.Safe.to_string (Tool_result.data result));
           match R.get ~base_path:config.base_path target_name with
           | None -> fail "target Keeper lane was not registered"
           | Some entry ->
@@ -2598,6 +2620,7 @@ let install_pending_summary ~base_path ~keeper_name ~bind_exact =
 let test_keeper_shutdown_finalizes_idle_operation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "shutdown-finalize" in
   Fun.protect
     ~finally:(fun () ->
@@ -2627,6 +2650,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
       (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
+      install_owner_inventory_exn ~sw:owner_sw config;
       Shutdown_finalize.register_remove_pending_confirms_by_target
         (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
       let operation_id = Shutdown_types.Operation_id.generate () in
@@ -2714,6 +2738,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
     (fun mode ->
        Eio_main.run @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Eio.Switch.run @@ fun owner_sw ->
        let label =
          match mode with
          | `Remove -> "remove"
@@ -2745,6 +2770,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
               | Ok None -> fail "retirement fixture metadata disappeared"
               | Error detail -> fail detail
             in
+            install_owner_inventory_exn ~sw:owner_sw config;
             let entry =
               R.For_testing.register
                 ~base_path:config.base_path
@@ -2793,7 +2819,11 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
               ; join_evidence = None
               ; phase =
                   Shutdown_types.Cleanup_ready
-                    { settled_task_ids = []; pending_confirms_removed = 0 }
+                    { settled_task_ids = []
+                    ; pending_confirms_removed = 0
+                    ; meta_snapshot_digest =
+                        Keeper_meta_json.Snapshot_digest.of_meta meta
+                    }
               ; created_at = Masc_domain.now_iso ()
               ; updated_at = Masc_domain.now_iso ()
               }
@@ -2866,6 +2896,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
 let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "shutdown-dead-tombstone-completion" in
   let completion_bus = Agent_sdk.Event_bus.create () in
   let completion_subscription =
@@ -2900,6 +2931,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
       (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
+      install_owner_inventory_exn ~sw:owner_sw config;
       let entry = R.For_testing.register ~base_path:config.base_path meta.name meta in
       let hook_deliveries = ref 0 in
       Subprocess_registry.register_default_cleanup_hook ();
@@ -3118,6 +3150,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
 let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "dashboard-purge-finalization" in
   let completion_bus = Agent_sdk.Event_bus.create () in
   let completion_subscription =
@@ -3151,6 +3184,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         | Ok None -> fail "dashboard purge metadata disappeared"
         | Error detail -> fail detail
       in
+      install_owner_inventory_exn ~sw:owner_sw config;
       let backlog_version =
         match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
@@ -3230,7 +3264,11 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         ; join_evidence = None
         ; phase =
             Shutdown_types.Cleanup_ready
-              { settled_task_ids = []; pending_confirms_removed = 0 }
+              { settled_task_ids = []
+              ; pending_confirms_removed = 0
+              ; meta_snapshot_digest =
+                  Keeper_meta_json.Snapshot_digest.of_meta meta
+              }
         ; created_at = Masc_domain.now_iso ()
         ; updated_at = Masc_domain.now_iso ()
         }
@@ -3439,6 +3477,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
 let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "shutdown-meta-replay" in
   Fun.protect
     ~finally:(fun () ->
@@ -3454,6 +3493,7 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
       (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
+      install_owner_inventory_exn ~sw:owner_sw config;
       let backlog_version =
         match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
@@ -3461,7 +3501,10 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
       in
       let operation_id = Shutdown_types.Operation_id.generate () in
       let cleanup : Shutdown_types.cleanup_evidence =
-        { settled_task_ids = []; pending_confirms_removed = 0 }
+        { settled_task_ids = []
+        ; pending_confirms_removed = 0
+        ; meta_snapshot_digest = Keeper_meta_json.Snapshot_digest.of_meta meta
+        }
       in
       let operation : Shutdown_types.t =
         { schema_version = Shutdown_types.schema_version
@@ -3497,9 +3540,80 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
       | Ok _ -> fail "meta cleanup replay did not reach Finalized"
       | Error error -> fail (Shutdown_finalize.error_to_string error))
 
+let test_keeper_shutdown_rejects_stale_snapshot_delete () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun owner_sw ->
+  let base_dir = temp_dir "shutdown-stale-meta-delete" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = make_meta "shutdown-stale-meta-delete-keeper" in
+       Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
+       install_owner_inventory_exn ~sw:owner_sw config;
+       let backlog_version =
+         Workspace_backlog.read_backlog_r config |> Result.get_ok |> fun backlog ->
+         backlog.version
+       in
+       let cleanup : Shutdown_types.cleanup_evidence =
+         { settled_task_ids = []
+         ; pending_confirms_removed = 0
+         ; meta_snapshot_digest = Keeper_meta_json.Snapshot_digest.of_meta meta
+         }
+       in
+       let operation : Shutdown_types.t =
+         { schema_version = Shutdown_types.schema_version
+         ; revision = 0
+         ; operation_id = Shutdown_types.Operation_id.generate ()
+         ; keeper_name = meta.name
+         ; lane_ownership = Shutdown_types.Dormant_meta
+         ; trace_id = meta.runtime.trace_id
+         ; generation = meta.runtime.nonce
+         ; actor = "operator"
+         ; cleanup_intent = remove_meta_cleanup
+         ; turn_disposition = Shutdown_types.No_inflight_turn
+         ; expected_backlog_version = backlog_version
+         ; owned_task_ids = []
+         ; join_evidence = None
+         ; phase = Shutdown_types.Cleanup_ready cleanup
+         ; created_at = Masc_domain.now_iso ()
+         ; updated_at = Masc_domain.now_iso ()
+         }
+       in
+       Shutdown_store.persist_new ~config operation |> Result.get_ok;
+       (match
+          Keeper_owner_registry.apply_meta
+            ~base_path:config.base_path
+            ~keeper_name:meta.name
+            (Masc.Keeper_owner_reducer.Set_autoboot
+               { enabled = true; updated_at = "newer-snapshot" })
+        with
+        | Ok (Some _) -> ()
+        | Ok None -> fail "concurrent metadata update removed its snapshot"
+        | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+       (match Shutdown_finalize.run ~config ~entry:None operation with
+        | Error
+            (Shutdown_finalize.Finalization_blocked
+              { phase = Shutdown_types.Blocked { stage = Shutdown_types.Meta_remove; _ }
+              ; _
+              }) -> ()
+        | Error error -> fail (Shutdown_finalize.error_to_string error)
+        | Ok _ -> fail "stale cleanup authority deleted a newer metadata snapshot");
+       match Keeper_meta_store.read_meta config meta.name with
+       | Ok (Some current) ->
+         check bool "newer metadata survives stale cleanup" true current.autoboot_enabled
+       | Ok None -> fail "stale cleanup removed newer metadata"
+       | Error detail -> fail detail)
+
 let test_keeper_shutdown_recovers_committed_task_receipt () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "shutdown-task-receipt" in
   Fun.protect
     ~finally:(fun () ->
@@ -3516,6 +3630,7 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
       (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
+      install_owner_inventory_exn ~sw:owner_sw config;
       Shutdown_finalize.register_remove_pending_confirms_by_target
         (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
       let task_id_wire =
@@ -4077,6 +4192,8 @@ let () =
         test_dashboard_keeper_purge_finalizes_artifacts_and_receipt;
       test_case "shutdown cleanup replays after meta removal" `Quick
         test_keeper_shutdown_cleanup_replays_after_meta_removal;
+      test_case "shutdown rejects stale snapshot delete" `Quick
+        test_keeper_shutdown_rejects_stale_snapshot_delete;
       test_case "shutdown recovers committed task receipt" `Quick
         test_keeper_shutdown_recovers_committed_task_receipt;
       test_case "dead tombstone denied before registration" `Quick

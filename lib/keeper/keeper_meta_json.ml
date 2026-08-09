@@ -90,6 +90,33 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ]
 ;;
 
+module Snapshot_digest = struct
+  type t = string
+
+  let is_lower_hex = function
+    | '0' .. '9'
+    | 'a' .. 'f' -> true
+    | _ -> false
+  ;;
+
+  let of_meta meta =
+    meta
+    |> meta_to_json
+    |> Yojson.Safe.to_string
+    |> Digestif.SHA256.digest_string
+    |> Digestif.SHA256.to_hex
+  ;;
+
+  let of_string value =
+    if String.length value = 64 && String.for_all is_lower_hex value
+    then Ok value
+    else Error "metadata snapshot digest must be exactly 64 lowercase hexadecimal characters"
+  ;;
+
+  let to_string value = value
+  let equal = String.equal
+end
+
 include Keeper_meta_json_parse
 
 let current_write_json meta =

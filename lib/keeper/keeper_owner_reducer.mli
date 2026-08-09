@@ -124,7 +124,7 @@ type meta_command =
       ; generation : int
       ; updated_at : string
       }
-  | Delete
+  | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
   | Turn_started_projection of { updated_at : string }
   | Turn_succeeded of
       { usage : usage_delta
@@ -185,6 +185,7 @@ type error =
       ; actual : string
       }
   | Identity_generation_mismatch
+  | Snapshot_changed
 
 val turn_runtime_delta_of_snapshots
   :  before:Keeper_meta_contract.keeper_meta

@@ -27,8 +27,11 @@ val install_from_store
   :  sw:Eio.Switch.t
   -> Workspace.config
   -> (int, install_error) result
-(** Strictly load every persisted Keeper and start exactly one owner actor for
-    each under [sw].  Returns the installed owner count. *)
+(** Load each valid persisted Keeper independently and start exactly one owner
+    actor for it under [sw]. A malformed, missing, or path-identity-mismatched
+    snapshot is reported and excluded without preventing other owners from
+    starting. Failure to enumerate the inventory still fails installation.
+    Returns the installed owner count. *)
 
 val get
   :  base_path:string

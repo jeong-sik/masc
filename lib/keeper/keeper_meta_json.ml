@@ -15,7 +15,8 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
      dashboards, checkpoint writers, and meta readers do not see a blank or
      downgraded keeper between TOML load and prompt render. *)
   object_of_field_values
-    [ Name, `String m.name
+    [ Schema, `String "masc.keeper_meta.v1"
+    ; Name, `String m.name
     ; Agent_name, `String m.agent_name
     ; Instructions, `String m.instructions
     ; Trace_id, `String (Keeper_id.Trace_id.to_string rt.trace_id)
@@ -86,9 +87,35 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
         | Some uid -> Keeper_id.uid_to_yojson uid
         | None -> `Null )
     ; Oas_env, `Assoc (List.map (fun (k, v) -> k, `String v) m.oas_env)
-    ; Meta_version, `Int m.meta_version
     ]
 ;;
+
+module Snapshot_digest = struct
+  type t = string
+
+  let is_lower_hex = function
+    | '0' .. '9'
+    | 'a' .. 'f' -> true
+    | _ -> false
+  ;;
+
+  let of_meta meta =
+    meta
+    |> meta_to_json
+    |> Yojson.Safe.to_string
+    |> Digestif.SHA256.digest_string
+    |> Digestif.SHA256.to_hex
+  ;;
+
+  let of_string value =
+    if String.length value = 64 && String.for_all is_lower_hex value
+    then Ok value
+    else Error "metadata snapshot digest must be exactly 64 lowercase hexadecimal characters"
+  ;;
+
+  let to_string value = value
+  let equal = String.equal
+end
 
 include Keeper_meta_json_parse
 

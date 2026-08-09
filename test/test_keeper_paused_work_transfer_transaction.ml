@@ -80,18 +80,9 @@ let write_meta config ~keeper_name ~trace_id ~generation ~paused =
          ])
     |> require_ok "parse Keeper metadata fixture"
   in
-  (* write_meta is a CAS: an existing row must be rewritten at its on-disk
-     version, or the store rejects the write as a version conflict. *)
-  let meta_version =
-    match Keeper_meta_store.read_meta config keeper_name with
-    | Ok (Some existing) -> existing.meta_version
-    | Ok None -> 0
-    | Error detail -> Alcotest.fail detail
-  in
   let meta =
     { meta with
       paused
-    ; meta_version
     ; latched_reason =
         (if paused
          then
@@ -104,7 +95,7 @@ let write_meta config ~keeper_name ~trace_id ~generation ~paused =
     ; runtime = { meta.runtime with nonce = generation }
     }
   in
-  Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
+  Keeper_meta_store.replace_snapshot config meta |> require_ok "persist Keeper metadata";
   meta
 ;;
 

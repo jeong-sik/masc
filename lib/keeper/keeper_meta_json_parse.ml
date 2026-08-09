@@ -295,6 +295,7 @@ let parse_oas_env fields =
 ;;
 
 let decode_current_meta fields =
+  let* schema = string_field fields "schema" in
   let* name = string_field fields "name" in
   let* agent_name = string_field fields "agent_name" in
   let* instructions = string_field fields "instructions" in
@@ -347,8 +348,9 @@ let decode_current_meta fields =
   let* current_task_id = parse_current_task_id fields in
   let* keeper_id = parse_keeper_id fields in
   let* oas_env = parse_oas_env fields in
-  let* meta_version = int_field fields "meta_version" in
-  if not (validate_name name)
+  if not (String.equal schema "masc.keeper_meta.v1")
+  then invalidf "unsupported schema: %S" schema
+  else if not (validate_name name)
   then invalidf "name is invalid: %S" name
   (* Generation is the lifecycle fencing counter, so zero is not a valid
      persisted value: it is what an unstamped or reset row looks like. This
@@ -366,10 +368,6 @@ let decode_current_meta fields =
   then invalidf "agent_name does not match canonical keeper identity"
   else if not (validate_name (Keeper_id.Trace_id.to_string trace_id))
   then invalidf "trace_id is invalid: %S" trace_id_raw
-  else if meta_version < 0
-  then invalidf "meta_version must be nonnegative"
-  else if meta_version = max_int
-  then invalidf "meta_version must remain incrementable"
   else
     let usage : usage_metrics =
       { total_turns
@@ -453,7 +451,6 @@ let decode_current_meta fields =
       ; runtime
       ; oas_env
       ; keeper_id
-      ; meta_version
       }
     in
     Ok meta

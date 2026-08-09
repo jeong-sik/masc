@@ -136,7 +136,7 @@ let persist_keeper_meta ?proactive_enabled config keeper_name =
       ; proactive = { enabled }
       }
   in
-  (match Keeper_meta_store.write_meta config meta with
+  (match Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error detail -> fail ("keeper meta write failed: " ^ detail));
   meta

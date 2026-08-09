@@ -22,7 +22,7 @@ let register_wake_target config keeper_name =
   with
   | Error msg -> fail ("keeper meta parse failed: " ^ msg)
   | Ok meta ->
-    (match Keeper_meta_store.write_meta config meta with
+    (match Keeper_meta_store.replace_snapshot config meta with
      | Ok () -> ()
      | Error detail -> fail ("keeper meta write failed: " ^ detail))
 ;;

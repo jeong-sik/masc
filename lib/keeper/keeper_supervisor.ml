@@ -213,16 +213,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
             let reason =
               Keeper_lifecycle_admission.autonomous_denial_to_wire denial
             in
-            (* The persisted meta won the admission decision, so make the
-               registry observe that same authoritative snapshot before
-               publishing the denial.  In particular, a stale [Running]
-               registry entry paired with a persisted dead tombstone must
-               become [Dead], not remain an apparently live lane that can be
-               selected by phase-only consumers. *)
-            Keeper_registry.update_meta
-              ~base_path
-              old_entry.name
-              meta;
             (match denial with
              | Keeper_lifecycle_admission.Autonomous_dead_tombstone ->
                Keeper_registry.mark_dead ~base_path old_entry.name ~at:now

@@ -7,7 +7,6 @@ type request =
 
 type projection_stage =
   | Durable_meta
-  | Registry_meta
   | Registry_transition
 
 type failure =

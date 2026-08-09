@@ -472,7 +472,7 @@ let test_checkpoint_inventory_preserves_partial_load_failures () =
   let config = Workspace.default_config dir in
   let keeper_name = "checkpoint-inventory" in
   let trace_id = "trace-checkpoint-inventory" in
-  Keeper_meta_store.write_meta
+  Keeper_meta_store.replace_snapshot
     config
     (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
   |> Result.map_error (fun detail -> fail ("checkpoint inventory meta write failed: " ^ detail))
@@ -528,7 +528,7 @@ let test_checkpoint_inventory_projects_missing_current () =
   let config = Workspace.default_config dir in
   let keeper_name = "checkpoint-missing" in
   let trace_id = "trace-checkpoint-missing" in
-  Keeper_meta_store.write_meta
+  Keeper_meta_store.replace_snapshot
     config
     (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
   |> Result.map_error (fun detail -> fail ("checkpoint inventory meta write failed: " ^ detail))

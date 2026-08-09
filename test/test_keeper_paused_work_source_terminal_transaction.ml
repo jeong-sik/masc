@@ -90,7 +90,7 @@ let with_source_terminal_lane f =
          ; runtime = { meta.runtime with nonce = 51 }
          }
        in
-       Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
+       Keeper_meta_store.replace_snapshot config meta |> require_ok "persist Keeper metadata";
        let channel =
          Keeper_continuation_channel.dashboard ~thread_id:"thread-terminal-1"
          |> require_ok "construct terminal continuation channel"

@@ -5,6 +5,7 @@ type validation_error = Invalid_current of string
 val validation_error_detail : validation_error -> string
 
 type field =
+  | Schema
   | Name
   | Agent_name
   | Instructions
@@ -56,7 +57,6 @@ type field =
   | Current_task_id
   | Keeper_id
   | Oas_env
-  | Meta_version
 
 val all_fields : field list
 val field_name : field -> string

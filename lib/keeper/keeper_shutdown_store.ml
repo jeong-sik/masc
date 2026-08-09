@@ -249,6 +249,10 @@ let cleanup_evidence_to_json evidence =
   `Assoc
     [ "settled_task_ids", task_ids_to_json evidence.settled_task_ids
     ; "pending_confirms_removed", `Int evidence.pending_confirms_removed
+    ; ( "meta_snapshot_digest"
+      , `String
+          (Keeper_meta_json.Snapshot_digest.to_string
+             evidence.meta_snapshot_digest) )
     ]
 ;;
 
@@ -312,7 +316,6 @@ let cleanup_reason_to_json = function
       [ "kind", `String "dashboard_keeper_purge"
       ; "requested_name", `String context.requested_name
       ; "agent_name", `String context.agent_name
-      ; "meta_version", `Int context.meta_version
       ]
 ;;
 
@@ -538,7 +541,12 @@ let task_ids_field_of_json field json =
 let cleanup_evidence_of_json json =
   let* settled_task_ids = task_ids_field_of_json "settled_task_ids" json in
   let* pending_confirms_removed = int "pending_confirms_removed" json in
-  Ok { settled_task_ids; pending_confirms_removed }
+  let* meta_snapshot_digest_wire = string "meta_snapshot_digest" json in
+  let* meta_snapshot_digest =
+    Keeper_meta_json.Snapshot_digest.of_string meta_snapshot_digest_wire
+    |> Result.map_error (fun detail -> Decode_error detail)
+  in
+  Ok { settled_task_ids; pending_confirms_removed; meta_snapshot_digest }
 ;;
 
 let completion_receipt_of_json json =
@@ -696,8 +704,7 @@ let cleanup_reason_of_json json =
   | "dashboard_keeper_purge" ->
     let* requested_name = string "requested_name" json in
     let* agent_name = string "agent_name" json in
-    let* meta_version = int "meta_version" json in
-    Ok (Dashboard_keeper_purge { requested_name; agent_name; meta_version })
+    Ok (Dashboard_keeper_purge { requested_name; agent_name })
   | value ->
     Error
       (Decode_error (Printf.sprintf "unknown shutdown cleanup reason: %S" value))

@@ -94,33 +94,7 @@ let supervise_keepalive
          ~labels:[ "keeper", meta.name ]
          ();
        Log.Keeper.error "supervisor workspace init failed: %s" (Printexc.to_string exn));
-    let live_meta =
-      try
-        let synced = meta in
-        (match write_meta ctx.config synced with
-         | Ok () -> ()
-         | Error msg ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string WriteMetaFailures)
-             ~labels:[ "keeper", meta.name; "phase", "presence_sync" ]
-             ();
-           Log.Keeper.warn
-             "supervisor presence sync: write_meta failed for %s: %s"
-             meta.name
-             msg);
-        synced
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string PresenceSyncFailures)
-          ~labels:[ "keeper", meta.name ]
-          ();
-        Log.Keeper.error "supervisor presence sync failed: %s" (Printexc.to_string exn);
-        meta
-    in
-    Keeper_registry.update_meta ~base_path meta.name live_meta;
-    match launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg with
+    match launch_supervised_fiber ~proactive_warmup_sec ctx meta reg with
     | Error _ -> ()
     | Ok () ->
       publish_lifecycle

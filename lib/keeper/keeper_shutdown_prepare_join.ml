@@ -11,10 +11,6 @@ type error =
   | Existing_operation of Operation_id.t
   | Meta_snapshot_missing
   | Meta_snapshot_identity_changed
-  | Meta_snapshot_version_changed of
-      { expected : int
-      ; actual : int
-      }
   | Meta_snapshot_read_failed of string
   | Task_discovery_failed of string
   | Prepare_persist_failed of Keeper_shutdown_store.error
@@ -33,11 +29,6 @@ let error_to_string = function
   | Meta_snapshot_missing -> "Keeper shutdown metadata is absent"
   | Meta_snapshot_identity_changed ->
     "Keeper shutdown metadata identity changed before durable prepare"
-  | Meta_snapshot_version_changed { expected; actual } ->
-    Printf.sprintf
-      "Keeper shutdown metadata version changed before durable prepare: expected %d, actual %d"
-      expected
-      actual
   | Meta_snapshot_read_failed detail ->
     Printf.sprintf "Keeper shutdown metadata read failed: %s" detail
   | Task_discovery_failed detail ->
@@ -114,20 +105,6 @@ let rollback_reservation ~config ~keeper_name operation_id =
       (Operation_id.to_string existing)
 ;;
 
-let validate_cleanup_reason reason (meta : Keeper_meta_contract.keeper_meta) =
-  match reason with
-  | Operator_stop_retain_meta
-  | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup -> Ok ()
-  | Dashboard_keeper_purge context ->
-    if Int.equal meta.meta_version context.meta_version
-    then Ok ()
-    else
-      Error
-        (Meta_snapshot_version_changed
-           { expected = context.meta_version; actual = meta.meta_version })
-;;
-
 let read_guarded_meta
     ~config
     ~(observed : Keeper_meta_contract.keeper_meta)
@@ -147,9 +124,8 @@ let read_guarded_meta
                  observed.runtime.nonce) ->
     Error Meta_snapshot_identity_changed
   | Ok (Some latest) ->
-    (match validate_cleanup_reason cleanup_reason latest with
-     | Error _ as error -> error
-     | Ok () -> Ok latest)
+    ignore cleanup_reason;
+    Ok latest
 ;;
 
 let persist_blocked ~config operation stage detail =

@@ -403,55 +403,35 @@ let terminal_reason_of_outcome result = function
          Keeper_turn_disposition.Input_required
      | Runtime_agent.Completed -> Keeper_turn_terminal.success ())
 
-let persist_terminal_turn_meta
-      ~config
-      ~original_meta
-      ~updated_meta
-  =
-  (match
-     Keeper_meta_store.write_meta_with_merge
-       ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-       config
-       updated_meta
-   with
-   | Ok () -> ()
-   | Error msg ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string WriteMetaFailures)
-       ~labels:
-         [ "keeper", updated_meta.name
-         ; ( "phase"
-           , match msg with
-             | Keeper_meta_store.Version_conflict _ -> "keeper_cycle_cas_race"
-             | Keeper_meta_store.Lifecycle_reserved _
-             | Keeper_meta_store.Read_failed _
-             | Keeper_meta_store.Persist_failed _
-             | Keeper_meta_store.Invariant_violation _ -> "keeper_cycle" )
-         ]
-       ();
-     (* #22043: emit inside the [Error] arm so
-        [write_meta_cycle_failures_total] stays a failure counter. It is
-        summed into the dashboard failure panel (Dashboard.ml), and the
-        sibling emit site (Keeper_unified_turn.ml, site=Turn_failure) only
-        fires on the failure path. Previously this inc sat after the match
-        and fired on every successful persist cycle, inflating the series. *)
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string WriteMetaCycleFailures)
-       ~labels:
-         [ "keeper", original_meta.name
-         ; "site", Keeper_write_meta_cycle_failure_site.(to_label Keeper_cycle)
-         ]
-       ();
-     let detail = Keeper_meta_store.write_meta_error_to_string msg in
-     (match msg with
-      | Keeper_meta_store.Version_conflict _ ->
-        Log.Keeper.warn "write_meta lost CAS race after retries (keeper cycle): %s" detail
-      | Keeper_meta_store.Lifecycle_reserved _
-      | Keeper_meta_store.Read_failed _
-      | Keeper_meta_store.Persist_failed _
-      | Keeper_meta_store.Invariant_violation _ ->
-        Log.Keeper.error "write_meta failed after keeper cycle: %s" detail));
-  updated_meta
+exception Owner_meta_commit_failed of string
+
+let persist_terminal_turn_meta ~config ~original_meta ~updated_meta =
+  match
+    Keeper_owner_registry.commit_turn_runtime
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:original_meta.name
+      ~before:original_meta
+      ~after:updated_meta
+  with
+  | Ok (Some committed) -> committed
+  | Ok None ->
+    raise
+      (Owner_meta_commit_failed
+         "Keeper Owner removed metadata during terminal turn commit")
+  | Error error ->
+    let detail = Keeper_owner_registry.command_error_to_string error in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WriteMetaFailures)
+      ~labels:[ "keeper", original_meta.name; "phase", "keeper_cycle" ]
+      ();
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WriteMetaCycleFailures)
+      ~labels:
+        [ "keeper", original_meta.name
+        ; "site", Keeper_write_meta_cycle_failure_site.(to_label Keeper_cycle)
+        ]
+      ();
+    raise (Owner_meta_commit_failed detail)
 ;;
 
 let reset_turn_failures_for_stop_reason ~config ~updated_meta result =

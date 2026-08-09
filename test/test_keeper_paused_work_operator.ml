@@ -107,7 +107,7 @@ let with_source_terminal_lane f =
          ; runtime = { meta.runtime with nonce = 19 }
          }
        in
-       Keeper_meta_store.write_meta config meta |> require_ok "persist source-terminal metadata";
+       Keeper_meta_store.replace_snapshot config meta |> require_ok "persist source-terminal metadata";
        let source, _channel = terminal_source () in
        Persistence.update_result ~base_path ~keeper_name (fun pending ->
          Queue.enqueue pending source)
@@ -340,7 +340,7 @@ let test_inventory_exposes_exact_durable_fences () =
         ; runtime = { meta.runtime with nonce = 17 }
         }
       in
-      Keeper_meta_store.write_meta config meta |> require_ok "persist inventory metadata";
+      Keeper_meta_store.replace_snapshot config meta |> require_ok "persist inventory metadata";
       Persistence.update_result ~base_path ~keeper_name (fun pending ->
         Queue.enqueue pending board_source)
       |> require_ok "persist inventory source";

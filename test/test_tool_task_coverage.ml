@@ -2247,7 +2247,7 @@ let () = test "handle_claim_next_accepts_open_claims" (fun () ->
     | Ok meta -> meta
     | Error e -> failwith ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_meta_store.write_meta ctx.config initial_meta with
+  (match Keeper_meta_store.replace_snapshot ctx.config initial_meta with
   | Ok () -> ()
   | Error e -> failwith ("write_meta failed: " ^ e));
   (* Workspace.update_agent_r setup removed (2026-06-09): the agent-status

@@ -41,9 +41,6 @@ type tool_surface_metrics =
 let owned_active_task_id_for_meta =
   Keeper_current_task_reconcile.owned_active_task_id_for_meta
 
-let merge_current_task_id =
-  Keeper_current_task_reconcile.merge_current_task_id
-
 let sync_current_task_id_from_backlog =
   Keeper_current_task_reconcile.sync_current_task_id_from_backlog
 

@@ -15,6 +15,7 @@ let invalid_currentf format =
 ;;
 
 type field =
+  | Schema
   | Name
   | Agent_name
   | Instructions
@@ -66,10 +67,10 @@ type field =
   | Current_task_id
   | Keeper_id
   | Oas_env
-  | Meta_version
 
 let all_fields =
-  [ Name
+  [ Schema
+  ; Name
   ; Agent_name
   ; Instructions
   ; Trace_id
@@ -120,10 +121,10 @@ let all_fields =
   ; Current_task_id
   ; Keeper_id
   ; Oas_env
-  ; Meta_version
   ]
 
 let field_name = function
+  | Schema -> "schema"
   | Name -> "name"
   | Agent_name -> "agent_name"
   | Instructions -> "instructions"
@@ -175,7 +176,6 @@ let field_name = function
   | Current_task_id -> "current_task_id"
   | Keeper_id -> "keeper_id"
   | Oas_env -> "oas_env"
-  | Meta_version -> "meta_version"
 ;;
 
 let current_field_names = List.map field_name all_fields

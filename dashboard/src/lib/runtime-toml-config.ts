@@ -730,20 +730,17 @@ export const RUNTIME_TOML_PROTOCOLS = [
 export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
 
 // Subset of RUNTIME_TOML_PROTOCOLS the add-provider form is allowed to offer.
-// HTTP protocols create endpoint-backed providers. A typed official-client
-// protocol creates the command-backed runtime its backend adapter owns, while
-// generic command providers remain blocked. `provider_kind_for_http_provider`
-// still returns `None` for `Messages_api`.
-// Messages providers parse and save, but resolve to no provider_kind and
-// `Runtime.materialize_config`'s `List.filter_map` silently drops their bindings
-// from the live runtime list instead of failing the save
-// (lib/runtime/runtime_adapter.ml:183-203, lib/runtime/runtime.ml:239).
-// This is an allow-list of materializable endpoint protocols, so a future 6th
-// protocol defaults to non-creatable until reviewed.
+// HTTP protocols create endpoint-backed providers. Whether a messages-http
+// provider is compatible is owned by the backend provider registry and checked
+// by Runtime.materialize_config at save time; the Dashboard must not duplicate
+// that typed registry decision as a protocol-string heuristic. A typed
+// official-client protocol creates the command-backed runtime its backend
+// adapter owns, while generic command providers remain blocked.
 export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
   'openai-compatible-http',
   'ollama-http',
   'openai-compatible-cli',
+  'messages-http',
   'codex-app-server',
 ] as const
 
@@ -755,15 +752,6 @@ export function isRuntimeTomlCreatableProtocol(protocol: string): protocol is Ru
 
 export function isRuntimeTomlOfficialClientProtocol(protocol: string): boolean {
   return protocol === 'codex-app-server'
-}
-
-const RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS = new Set([
-  'messages-http',
-  'messages-cli',
-])
-
-export function isRuntimeTomlNonMaterializableProtocol(protocol: string): boolean {
-  return RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS.has(protocol)
 }
 
 // runtime.toml ids become TOML table headers ([providers.<id>], [models.<id>],

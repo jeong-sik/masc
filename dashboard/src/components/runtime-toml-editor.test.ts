@@ -870,7 +870,7 @@ describe('RuntimeTomlEditor', () => {
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })
 
-  it('offers only materializable HTTP protocols plus the typed Codex official client', async () => {
+  it('offers backend-validated HTTP protocols plus the typed Codex official client', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
 
@@ -887,9 +887,9 @@ describe('RuntimeTomlEditor', () => {
       'openai-compatible-http',
       'ollama-http',
       'openai-compatible-cli',
+      'messages-http',
       'codex-app-server',
     ])
-    expect(protocolOptions).not.toContain('messages-http')
     expect(protocolOptions).not.toContain('messages-cli')
     // No transport-kind selector left to switch to 'command'.
     expect(container.querySelector('[aria-label="새 provider transport 종류"]')).toBeNull()
@@ -1104,16 +1104,12 @@ command = "provider-runtime --serve"
     expect(sourceAfter).toBe(sourceBefore)
   })
 
-  it('rejects a binding to an existing non-materializable messages-http provider', async () => {
-    // Legacy/hand-edited data: messages-http providers parse and can be rendered
-    // in the structured binding dropdown, but Runtime_adapter currently returns
-    // no Provider_config for Messages_api, so materialize_config would silently
-    // drop a binding pinned to one.
+  it('defers messages-http compatibility to the backend provider registry', async () => {
     const configWithMessagesProvider = {
       ...richConfig,
       source_text: `${richConfig.source_text}
-[providers.messages_api]
-display-name = "Messages API"
+[providers.kimi]
+display-name = "Kimi"
 protocol = "messages-http"
 endpoint = "https://messages.example/v1"
 `,
@@ -1129,19 +1125,16 @@ endpoint = "https://messages.example/v1"
     const sourceBefore = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
 
     fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, {
-      target: { value: 'messages_api' },
+      target: { value: 'kimi' },
     })
     fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, {
       target: { value: 'gpt' },
     })
     fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
 
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-add-binding-error"]')?.textContent).toContain(
-        'messages-http',
-      )
-    })
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-add-binding-error"]')).toBeNull())
     const sourceAfter = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
-    expect(sourceAfter).toBe(sourceBefore)
+    expect(sourceAfter).not.toBe(sourceBefore)
+    expect(sourceAfter).toContain('[kimi.gpt]')
   })
 })

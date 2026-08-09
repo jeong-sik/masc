@@ -143,22 +143,6 @@ let execution_mode_label = function
   | Runtime_antigravity.Accept_edits -> "accept-edits"
 ;;
 
-let runtime_binding_id runtime_id (config : Runtime_execution.antigravity_cli) =
-  let canonical =
-    `Assoc
-      [ "agent", Option.fold ~none:`Null ~some:(fun value -> `String value) config.agent
-      ; "disable_slash_commands", `Bool config.disable_slash_commands
-      ; "effort", `String (effort_label config.effort)
-      ; "execution_mode", `String (execution_mode_label config.execution_mode)
-      ; "model", `String config.model
-      ; "sandbox", `Bool config.sandbox
-      ]
-    |> Yojson.Safe.to_string
-  in
-  let digest = Digestif.SHA256.(digest_string canonical |> to_hex) in
-  runtime_id ^ "#" ^ digest
-;;
-
 let provider_turn_identity ~conversation_id ~num_turns =
   Printf.sprintf "%s:ordinal:%d" conversation_id num_turns
 ;;
@@ -190,7 +174,6 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     in
     let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
     let owner_epoch = Session.process_epoch () in
-    let binding_runtime_id = runtime_binding_id runtime_id config in
     let* stored_session =
       match Session.load ~base_path ~keeper_name with
       | Ok session -> Ok session
@@ -219,7 +202,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
         Session.plan_claim
           ~expected:stored_session
           ~client_kind:Antigravity
-          ~runtime_id:binding_runtime_id
+          ~runtime_id
       with
       | Ok plan -> Ok plan
       | Error detail ->
@@ -289,7 +272,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
           ~expected:stored_session
           ~client_kind:Antigravity
           ~owner_epoch
-          ~runtime_id:binding_runtime_id
+          ~runtime_id
           ~tool_surface_sha256
           ~updated_at:(Time_compat.now ())
       with

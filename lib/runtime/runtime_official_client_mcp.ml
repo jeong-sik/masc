@@ -160,6 +160,8 @@ let tools_call ~id ~params ~call_tool =
     Ok { response = Some (tool_result_json ~id result); tool_called = true }
 ;;
 
+(* TEL-OK: pure fail-closed protocol decoder; the runtime caller owns terminal
+   error telemetry and control-response delivery. *)
 let handle_message ~server_name ~tool_specs ~call_tool raw_message =
   let stage = "MCP message" in
   let* message = parse_message stage raw_message in

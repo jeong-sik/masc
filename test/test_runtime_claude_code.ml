@@ -373,19 +373,9 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
        ; "params", `Assoc []
        ; "fallback", `Bool true
        ]);
-  rejects
+  rejects_raw
     "non-finite nested value"
-    (`Assoc
-       [ "jsonrpc", `String "2.0"
-       ; "id", `Int 6
-       ; "method", `String "tools/call"
-       ; ( "params"
-         , `Assoc
-             [ "name", `String "missing"
-             ; "arguments", `Assoc [ "score", `Float Float.nan ]
-             ] )
-       ])
-  ;
+    {|{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"missing","arguments":{"score":NaN}}}|};
   rejects_raw "malformed JSON" {|{"jsonrpc":"2.0","id":7|}
 ;;
 

@@ -503,26 +503,28 @@ let recover_operation_with_corrupt_owner_fence
     if Keeper_shutdown_types.requires_admission_fence recovered
     then Ok recovered
     else
-      (match corrupt_owner_fence with
-       | None -> Ok recovered
-       | Some fence ->
-         (match
-            Keeper_turn_admission.transition_shutdown
-              ~base_path:config.Workspace.base_path
-              ~keeper_name:fence.keeper_name
-              ~from_operation_id:operation.operation_id
-              ~to_operation_id:(Some fence.operation_id)
-          with
-          | Keeper_turn_admission.Shutdown_transition_applied
-          | Keeper_turn_admission.Shutdown_transition_already_applied ->
-            Ok recovered
-          | Keeper_turn_admission.Shutdown_transition_reserved_by_other existing ->
-            Error
-              (Printf.sprintf
-                 "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
-                 fence.keeper_name
-                 (Operation_id.to_string fence.operation_id)
-                 (Operation_id.to_string existing))))
+      let keeper_name, successor_operation_id =
+        match corrupt_owner_fence with
+        | None -> operation.keeper_name, None
+        | Some fence -> fence.keeper_name, Some fence.operation_id
+      in
+      (match
+         Keeper_turn_admission.transition_shutdown
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+           ~from_operation_id:operation.operation_id
+           ~to_operation_id:successor_operation_id
+       with
+       | Keeper_turn_admission.Shutdown_transition_applied
+       | Keeper_turn_admission.Shutdown_transition_already_applied ->
+         Ok recovered
+       | Keeper_turn_admission.Shutdown_transition_reserved_by_other existing ->
+         Error
+           (Printf.sprintf
+              "shutdown admission restore conflict: keeper=%s recovered=%s existing=%s"
+              keeper_name
+              (Operation_id.to_string operation.operation_id)
+              (Operation_id.to_string existing)))
 ;;
 
 let recover_at_boot ~config =

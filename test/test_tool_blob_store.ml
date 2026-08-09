@@ -1130,7 +1130,7 @@ let () =
             "maintenance malformed reference fails closed"
             `Quick
             test_maintenance_malformed_reference_fails_closed;
-          test_case
+          Alcotest.test_case
             "maintenance ignores prose blob placeholder"
             `Quick
             test_maintenance_ignores_prose_blob_placeholder;

@@ -434,7 +434,6 @@ type keeper_meta =
   ; (* -- Identity & concurrency -- *)
     keeper_id : Keeper_id.Uid.t option
   ; oas_env : (string * string) list
-  ; meta_version : int
   }
 
 let mark_transcript_corruption_reset_required (m : keeper_meta) : keeper_meta =

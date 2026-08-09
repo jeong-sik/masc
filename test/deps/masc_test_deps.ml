@@ -71,6 +71,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         else String.sub candidate 0 64
       in
       let default_value = function
+        | Schema.Schema -> `String "masc.keeper_meta.v1"
         | Schema.Name -> `String name
         | Schema.Agent_name ->
           `String (Masc.Keeper_identity.keeper_agent_name name)
@@ -105,8 +106,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Autonomous_tool_turn_count
         | Schema.Board_reactive_turn_count
         | Schema.Mention_reactive_turn_count
-        | Schema.Noop_turn_count
-        | Schema.Meta_version -> `Int 0
+        | Schema.Noop_turn_count -> `Int 0
         | Schema.Total_cost_usd
         | Schema.Last_turn_ts
         | Schema.Last_compaction_ts

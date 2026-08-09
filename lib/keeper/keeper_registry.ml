@@ -1218,7 +1218,6 @@ module For_testing = struct
   let register = register
   let unregister = unregister
   let clear = clear
-  let reload_meta_from_disk = reload_meta_from_disk
   let record_restart = record_restart
   let set_started_at_for_test = set_started_at_for_test
   let crash_log_of = crash_log_of

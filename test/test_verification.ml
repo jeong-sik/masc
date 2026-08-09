@@ -58,7 +58,7 @@ let ensure_keeper_meta config name =
     Result.bind
       (Masc_test_deps.meta_of_json_fixture
          (`Assoc [ "name", `String name; "always_allow", `Bool true ]))
-      (Masc.Keeper_meta_store.write_meta config)
+      (Masc.Keeper_meta_store.replace_snapshot config)
   with
   | Ok _ -> ()
   | Error detail -> Alcotest.failf "write keeper meta failed: %s" detail
@@ -477,10 +477,9 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
       | Error detail -> Alcotest.fail detail
     in
     (match
-       Masc.Keeper_meta_store.persist_meta
-         config
+       Masc.Keeper_fs.save_json_atomic
          (Masc.Keeper_types_profile.keeper_meta_path config keeper_name)
-         meta
+         (Masc.Keeper_meta_json.meta_to_json meta)
      with
      | Ok () -> ()
      | Error detail -> Alcotest.fail detail);

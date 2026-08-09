@@ -141,6 +141,65 @@ let test_profile_update_preserves_owner_runtime_state () =
   check bool "profile update changes autoboot" true committed.autoboot_enabled
 ;;
 
+let test_turn_delta_preserves_concurrent_compaction_observation () =
+  let before = make_meta "turn-delta-compaction" in
+  let before_usage = before.runtime.usage in
+  let after =
+    { before with
+      runtime =
+        { before.runtime with
+          usage =
+            ({ total_turns = before_usage.total_turns + 1
+            ; total_input_tokens = before_usage.total_input_tokens + 2
+            ; total_output_tokens = before_usage.total_output_tokens + 3
+            ; total_tokens = before_usage.total_tokens + 5
+            ; total_cost_usd = before_usage.total_cost_usd +. 0.25
+            ; last_turn_ts = 42.0
+            ; last_input_tokens = 2
+            ; last_output_tokens = 3
+            ; last_total_tokens = 5
+            ; last_usage_reported_at = Some 42.0
+            ; last_latency_ms = 7
+            } : Keeper_meta_contract.usage_metrics)
+        }
+    ; updated_at = "turn-finished"
+    }
+  in
+  let delta =
+    match Reducer.turn_runtime_delta_of_snapshots ~before ~after with
+    | Ok delta -> delta
+    | Error error -> fail (Reducer.error_to_string error)
+  in
+  let state =
+    match Reducer.create ~keeper_name:before.name (Some before) with
+    | Ok state -> state
+    | Error error -> fail (Reducer.error_to_string error)
+  in
+  let state =
+    reducer_ok
+      (Reducer.apply_meta
+         state
+         (Record_compaction
+            { count_delta = 1
+            ; at = 99.0
+            ; before_tokens = 1_000
+            ; after_tokens = 500
+            ; checked_at = 99.0
+            ; decision = Keeper_meta_contract.Compaction_runtime_decision "committed"
+            ; updated_at = "compacted"
+            }))
+  in
+  let state = reducer_ok (Reducer.apply_meta state (Commit_turn_runtime delta)) in
+  let committed = Option.get (Reducer.projection state).meta in
+  check int "turn delta still commits usage" 1 committed.runtime.usage.total_turns;
+  check int "concurrent compaction count is retained" 1 committed.runtime.compaction_rt.count;
+  check
+    (float 0.0)
+    "stale turn snapshot cannot rewind compaction observation"
+    99.0
+    committed.runtime.compaction_rt.last_ts
+;;
+
 let test_actor_concurrent_commands_are_exact () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -387,7 +446,7 @@ let test_identity_and_running_lifecycle_guards () =
   check bool "delete clears metadata" true (Option.is_none (Owner.projection empty).meta)
 ;;
 
-let test_child_cancellation_releases_slot () =
+let test_child_exception_releases_slot () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let owner =
@@ -408,8 +467,8 @@ let test_child_cancellation_releases_slot () =
     | Busy _ -> fail "cancellation test owner was busy"
   in
   (match Owner.await_turn handle with
-   | Owner.Turn_cancelled -> ()
-   | Turn_succeeded | Turn_failed _ -> fail "child cancellation lost typed terminal");
+   | Owner.Turn_failed _ -> ()
+   | Turn_succeeded | Turn_cancelled -> fail "child exception lost typed terminal");
   await_idle (Eio.Stdenv.clock env) owner 1_000;
   match
     owner_ok
@@ -419,7 +478,7 @@ let test_child_cancellation_releases_slot () =
     (match Owner.await_turn handle with
      | Turn_succeeded -> ()
      | Turn_failed _ | Turn_cancelled -> fail "owner did not recover after cancellation")
-  | Busy _ -> fail "child cancellation leaked the running slot"
+  | Busy _ -> fail "child exception leaked the running slot"
 ;;
 
 let test_shutdown_releases_full_mailbox_requests () =
@@ -533,7 +592,7 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "owner-test"));
        let first = make_meta "inventory-first" in
-       (match Keeper_meta_store.persist_meta config first.name first with
+       (match Keeper_meta_store.replace_snapshot config first with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed owner meta: " ^ detail));
        (match Owner_registry.install_from_store ~sw config with
@@ -574,7 +633,48 @@ let test_root_inventory_loads_and_extends_exactly_once () =
          (Owner_registry.For_testing.installed_owner_count ~base_path);
        (match Owner_registry.all_projections ~base_path with
         | Ok projections -> check int "fleet projection count" 2 (List.length projections)
-        | Error error -> fail (Owner_registry.lookup_error_to_string error)))
+       | Error error -> fail (Owner_registry.lookup_error_to_string error)))
+;;
+
+let test_registry_reads_owner_atomic_projection () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "owner-projection-test"));
+       let initial = make_meta "atomic-projection" in
+       Keeper_meta_store.replace_snapshot config initial |> Result.get_ok;
+       Owner_registry.install_from_store ~sw config |> Result.get_ok |> ignore;
+       let stale_entry =
+         Keeper_registry.For_testing.register ~base_path initial.name initial
+       in
+       (match
+          Owner_registry.apply_meta
+            ~base_path
+            ~keeper_name:initial.name
+            (Add_usage (usage_delta ()))
+        with
+        | Ok (Some _) -> ()
+        | Ok None -> fail "owner usage commit removed metadata"
+        | Error error -> fail (Owner_registry.command_error_to_string error));
+       Keeper_registry.For_testing.unsafe_put_entry
+         ~base_path
+         initial.name
+         stale_entry;
+       match Keeper_registry.get ~base_path initial.name with
+       | Some entry ->
+         check
+           int
+           "registry read overlays owner Atomic projection"
+           1
+           entry.meta.runtime.usage.total_turns
+       | None -> fail "owner-backed registry entry disappeared")
 ;;
 
 let test_lifecycle_reservation_remains_owner_admission_authority () =
@@ -588,7 +688,7 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "owner-reservation-test"));
        let meta = make_meta "inventory-reserved" in
-       (match Keeper_meta_store.persist_meta config meta.name meta with
+       (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed reserved owner meta: " ^ detail));
        (match Owner_registry.install_from_store ~sw config with
@@ -694,10 +794,14 @@ let () =
             "invalid compaction numbers are rejected"
             `Quick
             test_reducer_rejects_invalid_compaction_numbers
-        ; test_case
+          ; test_case
             "profile update preserves runtime state"
             `Quick
             test_profile_update_preserves_owner_runtime_state
+          ; test_case
+              "turn delta preserves concurrent observations"
+              `Quick
+              test_turn_delta_preserves_concurrent_compaction_observation
         ] )
     ; ( "actor"
       , [ test_case
@@ -717,10 +821,10 @@ let () =
             "identity and running lifecycle guards"
             `Quick
             test_identity_and_running_lifecycle_guards
-        ; test_case
-            "child cancellation releases slot"
+          ; test_case
+            "child exception releases slot"
             `Quick
-            test_child_cancellation_releases_slot
+            test_child_exception_releases_slot
         ; test_case
             "shutdown releases full mailbox requests"
             `Quick
@@ -733,6 +837,10 @@ let () =
             "root inventory loads and extends exactly once"
             `Quick
             test_root_inventory_loads_and_extends_exactly_once
+        ; test_case
+            "registry reads owner Atomic projection"
+            `Quick
+            test_registry_reads_owner_atomic_projection
         ; test_case
             "lifecycle reservation gates owner commands"
             `Quick

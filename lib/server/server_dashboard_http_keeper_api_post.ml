@@ -887,11 +887,8 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                 ~detail
                                 ()
                             | Ok () ->
-                           (* Dashboard edits are user-initiated and win for the
-                              fields they touch; update_keeper now persists via
-                              a CAS merge ([heartbeat_fields_from_disk]) so a
-                              concurrent keeper turn's cumulative usage counters
-                              are not rewound by this snapshot-derived write.
+                           (* Dashboard edits commit a closed Owner profile
+                              command, so they cannot overwrite runtime counters.
                               [preserve_prompt_defaults] keeps existing prompt
                               fields when the request omits them. *)
                            let result =

@@ -12,7 +12,7 @@ let target_keys =
   ; "current_task_id"
   ; "keeper_id"
   ; "oas_env"
-  ; "meta_version"
+  ; "schema"
   ]
 
 let test_canonical_includes_runtime_keys () =
@@ -27,6 +27,50 @@ let test_canonical_includes_runtime_keys () =
         (List.mem key canonical))
     target_keys
 
+let valid_json () =
+  let meta =
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ "name", `String "strict-meta"
+         ; "agent_name", `String (Keeper_identity.keeper_agent_name "strict-meta")
+         ; "trace_id", `String "trace-strict-meta"
+         ])
+    |> Result.get_ok
+  in
+  Keeper_meta_json.meta_to_json meta
+;;
+
+let add_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: fields)
+  | _ -> Alcotest.fail "metadata encoder did not return an object"
+;;
+
+let check_rejected label json =
+  match Keeper_meta_json_parse.meta_of_json json with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail (label ^ " was accepted")
+;;
+
+let test_old_version_field_is_rejected () =
+  valid_json ()
+  |> add_field ("meta_" ^ "version") (`Int 7)
+  |> check_rejected "old metadata version field"
+;;
+
+let test_unknown_field_is_rejected () =
+  valid_json ()
+  |> add_field "future_field" (`String "unsupported")
+  |> check_rejected "unknown metadata field"
+;;
+
+let test_wrong_schema_is_rejected () =
+  match valid_json () with
+  | `Assoc fields ->
+    `Assoc (("schema", `String "masc.keeper_meta.v0") :: List.remove_assoc "schema" fields)
+    |> check_rejected "wrong metadata schema"
+  | _ -> Alcotest.fail "metadata encoder did not return an object"
+;;
+
 let () =
   Alcotest.run
     "keeper_meta_current_keyset"
@@ -35,6 +79,18 @@ let () =
             "runtime keys present"
             `Quick
             test_canonical_includes_runtime_keys
+        ; Alcotest.test_case
+            "old metadata version field is rejected"
+            `Quick
+            test_old_version_field_is_rejected
+        ; Alcotest.test_case
+            "unknown field is rejected"
+            `Quick
+            test_unknown_field_is_rejected
+        ; Alcotest.test_case
+            "wrong schema is rejected"
+            `Quick
+            test_wrong_schema_is_rejected
         ] )
     ]
 ;;

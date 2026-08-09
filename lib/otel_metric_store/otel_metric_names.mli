@@ -33,7 +33,7 @@
 (** Objective Keeper turn-attempt observer counters. Labels:
     [keeper].  Re-attempt = same turn id started again before
     the counter advanced; regression = turn id moved strictly
-    backwards (write_meta race symptom — #9733). *)
+    backwards (lost turn-state update symptom — #9733). *)
 
 (** #9943: per-keeper turn latency distribution.  Labels:
     [keeper, bucket].  Bucket vocabulary:
@@ -199,8 +199,6 @@ val metric_tool_keeper_cache_ttl_parse_failures : string
     oracle for sibling sandboxes when keeper identity drifted
     across contract/gate/FS-resolver layers. Label [kind="out_of_roots"]
     records objective allowed-root containment failures. *)
-
-val metric_write_meta_cas_retry_total : string
 
 (** Total board signals that did not produce a wake decision for a
     running keeper ([masc_keeper_board_signal_no_wake_total]).

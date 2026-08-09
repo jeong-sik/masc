@@ -91,10 +91,6 @@ let load_all config =
     loop [] names
 ;;
 
-let remove_error_to_string error =
-  Keeper_meta_store.identity_remove_error_to_string error
-;;
-
 let store_for pool keeper_name : Keeper_owner.store =
   { replace =
       (fun meta ->
@@ -105,18 +101,9 @@ let store_for pool keeper_name : Keeper_owner.store =
                 "owner snapshot identity mismatch: expected=%s actual=%s"
                 keeper_name
                 meta.name)
-         else Keeper_meta_store.persist_meta pool.config keeper_name meta)
+         else Keeper_meta_store.replace_snapshot pool.config meta)
   ; remove =
-      (fun meta ->
-         match
-           Keeper_meta_store.remove_meta_if_identity
-             pool.config
-             ~name:keeper_name
-             ~trace_id:meta.runtime.trace_id
-             ~generation:meta.runtime.nonce
-         with
-         | Ok () -> Ok ()
-         | Error error -> Error (remove_error_to_string error))
+      (fun _meta -> Keeper_meta_store.remove_snapshot pool.config ~name:keeper_name)
   }
 ;;
 
@@ -133,6 +120,18 @@ let refresh_owner_handles pool =
       String.compare (name left) (name right))
   in
   Atomic.set pool.owner_handles owner_handles
+;;
+
+let install_owner_projection pool keeper_name owner =
+  Keeper_owner_projection.install
+    ~base_path:pool.config.Workspace.base_path
+    ~keeper_name
+    owner;
+  Eio.Switch.on_release pool.sw (fun () ->
+    Keeper_owner_projection.remove
+      ~base_path:pool.config.base_path
+      ~keeper_name
+      owner)
 ;;
 
 let ensure_in_pool pool meta =
@@ -153,6 +152,7 @@ let ensure_in_pool pool meta =
          | Error error -> Error (Owner_initialization_failed error)
          | Ok owner ->
            Hashtbl.add pool.owners meta.name owner;
+           install_owner_projection pool meta.name owner;
            refresh_owner_handles pool;
            Ok owner))
 ;;
@@ -175,6 +175,7 @@ let ensure_empty_in_pool pool keeper_name =
          | Error error -> Error (Owner_initialization_failed error)
          | Ok owner ->
            Hashtbl.add pool.owners keeper_name owner;
+           install_owner_projection pool keeper_name owner;
            refresh_owner_handles pool;
            Ok owner))
 ;;
@@ -252,6 +253,26 @@ let get ~base_path ~keeper_name =
       | None -> Error (Owner_not_found keeper_name))
 ;;
 
+let refresh_registry_projection ?lifecycle_token entry meta =
+  let result =
+    match lifecycle_token with
+    | None ->
+      Keeper_registry.update_entry_exact entry (fun current -> { current with meta })
+    | Some token ->
+      Keeper_registry.update_entry_exact_for_lifecycle token entry (fun current ->
+        { current with meta })
+  in
+  match result with
+  | Keeper_registry.Exact_updated
+  | Keeper_registry.Exact_update_missing
+  | Keeper_registry.Exact_update_replaced -> ()
+  | Keeper_registry.Exact_update_invalid error ->
+    Log.Keeper.warn
+      "keeper_owner: committed metadata registry projection rejected keeper=%s error=%s"
+      entry.Keeper_registry.name
+      (Keeper_registry.registry_entry_validation_error_to_string error)
+;;
+
 let apply_meta ?lifecycle_token ~base_path ~keeper_name command =
   let result =
     Keeper_lifecycle_reservation.with_key_lock
@@ -270,20 +291,29 @@ let apply_meta ?lifecycle_token ~base_path ~keeper_name command =
             with
             | Error reservation -> Error (Command_lifecycle_reserved reservation)
             | Ok () ->
+              let observed_entry = Keeper_registry.get ~base_path keeper_name in
               (match Keeper_owner.apply_meta owner command with
                | Error error -> Error (Command_rejected error)
-               | Ok meta -> Ok meta)))
+               | Ok meta -> Ok (meta, observed_entry))))
   in
   (match result with
-   | Ok (Some meta) ->
-     (* This derived registry projection owns no state and intentionally runs
-        after the lifecycle lock is released: its update path takes that
-        same lock.  The owner Atomic remains the routine read authority. *)
-     if Option.is_some (Keeper_registry.get ~base_path keeper_name)
-     then Keeper_registry.update_meta_from_persisted ~base_path keeper_name meta;
+   | Ok (Some meta, observed_entry) ->
+     Option.iter
+       (fun entry -> refresh_registry_projection ?lifecycle_token entry meta)
+       observed_entry;
      Ok (Some meta)
-   | Ok None -> Ok None
+   | Ok (None, _) -> Ok None
    | Error _ as error -> error)
+;;
+
+let commit_turn_runtime ~base_path ~keeper_name ~before ~after =
+  match Keeper_owner_reducer.turn_runtime_delta_of_snapshots ~before ~after with
+  | Error error -> Error (Command_rejected (Keeper_owner.Reducer_rejected error))
+  | Ok delta ->
+    apply_meta
+      ~base_path
+      ~keeper_name
+      (Keeper_owner_reducer.Commit_turn_runtime delta)
 ;;
 
 let create_meta ~base_path meta =

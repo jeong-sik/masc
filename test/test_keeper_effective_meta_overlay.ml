@@ -16,6 +16,17 @@ module Turn_up_config = Masc.Keeper_turn_up_config_persistence
    lives in the main [masc] library. Same pattern as test_keeper_lifecycle_registry_dispatch. *)
 module Keeper_runtime = Masc.Keeper_runtime
 
+let with_owner_inventory config f =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  (match Masc.Keeper_owner_registry.install_from_store ~sw config with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.fail (Masc.Keeper_owner_registry.install_error_to_string error));
+  f ()
+;;
+
 let temp_dir () =
   let path = Filename.temp_file "keeper-effective-meta-" "" in
   Sys.remove path;
@@ -148,7 +159,7 @@ let seed_runtime_meta config name =
   match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> Alcotest.fail err
   | Ok meta -> (
-      match Store.write_meta config meta with
+      match Store.replace_snapshot config meta with
       | Ok () -> meta
   | Error err -> Alcotest.failf "write_meta failed: %s" err)
 
@@ -374,13 +385,14 @@ active_goal_ids = ["goal-masc-improver"]
       active_goal_ids = [ "stale-goal" ];
     }
   in
-  (match Store.write_meta config stale with
+  (match Store.replace_snapshot config stale with
    | Ok () -> ()
    | Error err -> Alcotest.failf "write stale meta failed: %s" err);
   let returned =
-    match Keeper_runtime.ensure_keeper_meta config name with
-    | Ok meta -> meta
-    | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err
+    with_owner_inventory config (fun () ->
+      match Keeper_runtime.ensure_keeper_meta config name with
+      | Ok meta -> meta
+      | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err)
   in
   let disk_json = Yojson.Safe.from_file (Profile.keeper_meta_path config name) in
   let leaked_config_keys =
@@ -436,44 +448,47 @@ sandbox_profile = "local"
     | Error err -> Alcotest.failf "read_meta failed: %s" err
   in
   let stale = { persisted with instructions = "stale instructions" } in
-  (match Store.write_meta config stale with
+  (match Store.replace_snapshot config stale with
    | Ok () -> ()
    | Error err -> Alcotest.failf "write stale meta failed: %s" err);
-  let observed =
-    {
-      stale with
-      runtime =
-        {
-          stale.runtime with
-          usage =
-            {
-              stale.runtime.usage with
-              last_input_tokens = 123;
-              last_output_tokens = 4;
-              last_total_tokens = 127;
-              last_usage_reported_at = Some 1_700_000_000.0;
-            };
-        };
-    }
-  in
   Masc.Keeper_registry.For_testing.clear ();
   Fun.protect
     ~finally:Masc.Keeper_registry.For_testing.clear
     (fun () ->
-      ignore
-        (Masc.Keeper_registry.For_testing.register
-           ~base_path:config.base_path
-           name
-           observed);
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path name stale);
       let reconciled =
-        match Keeper_runtime.ensure_keeper_meta config name with
-        | Ok meta -> meta
-        | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err
+        with_owner_inventory config (fun () ->
+          (match
+             Masc.Keeper_owner_registry.apply_meta
+               ~base_path:config.base_path
+               ~keeper_name:name
+               (Masc.Keeper_owner_reducer.Add_usage
+                  { turns = 0
+                  ; input_tokens = 0
+                  ; output_tokens = 0
+                  ; total_tokens = 0
+                  ; cost_usd = 0.0
+                  ; last_turn_ts = stale.runtime.usage.last_turn_ts
+                  ; last_input_tokens = 123
+                  ; last_output_tokens = 4
+                  ; last_total_tokens = 127
+                  ; last_usage_reported_at = Some 1_700_000_000.0
+                  ; last_latency_ms = stale.runtime.usage.last_latency_ms
+                  })
+           with
+           | Ok (Some _) -> ()
+           | Ok None -> Alcotest.fail "owner usage commit removed metadata"
+           | Error error ->
+             Alcotest.fail
+               (Masc.Keeper_owner_registry.command_error_to_string error));
+          match Keeper_runtime.ensure_keeper_meta config name with
+          | Ok meta -> meta
+          | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err)
       in
-      Masc.Keeper_registry.update_meta_from_persisted
-        ~base_path:config.base_path
-        name
-        reconciled;
+      Alcotest.(check int)
+        "reconcile result preserves live observed input"
+        123
+        reconciled.runtime.usage.last_input_tokens;
       match Masc.Keeper_registry.get ~base_path:config.base_path name with
       | Some entry ->
         Alcotest.(check string)

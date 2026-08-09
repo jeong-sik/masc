@@ -18,6 +18,42 @@ type usage_delta =
   ; last_latency_ms : int
   }
 
+type turn_counter_deltas =
+  { proactive_count : int
+  ; proactive_visible_count : int
+  ; autonomous_action_count : int
+  ; autonomous_turn_count : int
+  ; autonomous_text_turn_count : int
+  ; autonomous_tool_turn_count : int
+  ; board_reactive_turn_count : int
+  ; mention_reactive_turn_count : int
+  ; noop_turn_count : int
+  ; compaction_count : int
+  }
+
+type 'a observed_change =
+  | Unchanged
+  | Changed of 'a
+
+type turn_runtime_delta =
+  { expected_trace_id : Keeper_id.Trace_id.t
+  ; expected_generation : int
+  ; usage : usage_delta
+  ; counters : turn_counter_deltas
+  ; next_keeper_id : Keeper_id.Uid.t option
+  ; next_agent_name : string
+  ; next_trace_id : Keeper_id.Trace_id.t
+  ; next_trace_history : string list
+  ; next_generation : int
+  ; next_last_handoff_ts : float
+  ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
+  ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
+  ; last_autonomous_action_at : string observed_change
+  ; last_blocker : Keeper_meta_contract.blocker_info option observed_change
+  ; message_scope_ack_id : string option observed_change
+  ; updated_at : string
+  }
+
 type identity_handoff =
   { keeper_id : Keeper_id.Uid.t option
   ; agent_name : string
@@ -26,6 +62,10 @@ type identity_handoff =
   ; generation : int
   ; updated_at : string
   }
+
+type shutdown_latch =
+  | Operator_stopped
+  | Dead_tombstone
 
 type compaction_result =
   { count_delta : int
@@ -63,6 +103,15 @@ type meta_command =
       }
   | Resume of { updated_at : string }
   | Reset_latch of { updated_at : string }
+  | Retain_shutdown_latch of
+      { latch : shutdown_latch
+      ; updated_at : string
+      }
+  | Latch_transcript_corruption of
+      { trace_id : Keeper_id.Trace_id.t
+      ; generation : int
+      ; updated_at : string
+      }
   | Set_autoboot of
       { enabled : bool
       ; updated_at : string
@@ -86,6 +135,7 @@ type meta_command =
       ; usage : usage_delta option
       ; updated_at : string
       }
+  | Commit_turn_runtime of turn_runtime_delta
   | Add_usage of usage_delta
   | Set_current_task of
       { task_id : Keeper_id.Task_id.t option
@@ -96,6 +146,12 @@ type meta_command =
       ; updated_at : string
       }
   | Record_compaction of compaction_result
+  | Record_compaction_commit of
+      { trace_id : Keeper_id.Trace_id.t
+      ; generation : int
+      ; commit_count : int
+      ; updated_at : string
+      }
   | Ack_message_scope of
       { message_id : string option
       ; updated_at : string
@@ -139,7 +195,13 @@ type error =
       { expected : string
       ; actual : string
       }
+  | Identity_generation_mismatch
   | Delete_while_running of string
+
+val turn_runtime_delta_of_snapshots
+  :  before:Keeper_meta_contract.keeper_meta
+  -> after:Keeper_meta_contract.keeper_meta
+  -> (turn_runtime_delta, error) result
 
 val create
   :  keeper_name:string

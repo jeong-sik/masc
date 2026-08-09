@@ -50,9 +50,8 @@
    [rate(masc_keeper_turn_reattempts_total[5m]) > 0] and pick
    up repeated-turn pairs without grepping log lines. See also
    [Keeper_metrics.(to_string TurnRegressions)] when the FSM moves to a
-   strictly LOWER turn id (very unusual; indicative of
-   write_meta race losing an in-memory counter increment,
-   #9733). *)
+   strictly LOWER turn id (very unusual; indicative of a lost
+   turn-state update, #9733). *)
 
 (* #9943: per-keeper turn-latency bucket counter.  Each completed
    turn lands in exactly one [latency_bucket] label so a Otel_metric_store
@@ -246,9 +245,6 @@ let metric_tool_keeper_cache_ttl_parse_failures =
 (* Retired RFC-0026 admission-router shadow metric name. Kept only for
    historical Otel_metric_store compatibility; active keeper scheduling uses the
    runtime lane and semaphore path. *)
-
-(* Keeper keepalive (keeper_keepalive.ml). *)
-let metric_write_meta_cas_retry_total = Otel_metric_store_core.declare_counter "masc_write_meta_cas_retry_total"
 
 (* #10474: proactive cycle outcome counters.
    [Keeper_metrics.(to_string NoToolProvider)] fires every time a keeper's

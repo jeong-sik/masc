@@ -15,7 +15,8 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
      dashboards, checkpoint writers, and meta readers do not see a blank or
      downgraded keeper between TOML load and prompt render. *)
   object_of_field_values
-    [ Name, `String m.name
+    [ Schema, `String "masc.keeper_meta.v1"
+    ; Name, `String m.name
     ; Agent_name, `String m.agent_name
     ; Instructions, `String m.instructions
     ; Trace_id, `String (Keeper_id.Trace_id.to_string rt.trace_id)
@@ -86,7 +87,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
         | Some uid -> Keeper_id.uid_to_yojson uid
         | None -> `Null )
     ; Oas_env, `Assoc (List.map (fun (k, v) -> k, `String v) m.oas_env)
-    ; Meta_version, `Int m.meta_version
     ]
 ;;
 

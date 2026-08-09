@@ -36,7 +36,6 @@ type meta_disposition =
 type dashboard_purge_context =
   { requested_name : string
   ; agent_name : string
-  ; meta_version : int
   }
 
 type cleanup_reason =
@@ -414,7 +413,6 @@ let dashboard_purge_context_equal
   =
   String.equal left.requested_name right.requested_name
   && String.equal left.agent_name right.agent_name
-  && Int.equal left.meta_version right.meta_version
 ;;
 
 let cleanup_reason_equal left right =

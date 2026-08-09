@@ -24,6 +24,8 @@ open Otel_spans
 
 type tool_result = Keeper_types_profile.tool_result
 
+exception Direct_owner_meta_commit_failed of string
+
 let handle_keeper_up = Keeper_turn_up.handle_keeper_up
 let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
@@ -795,49 +797,27 @@ let run_keeper_invocation_turn_admitted_inner
               let updated_meta =
                 update_direct_turn_meta lifecycle.updated_meta ~latency_ms result
               in
-              (* #9733: keeper_msg turn-completion is the same race shape
-                 as the unified-turn failure path — heartbeat updates
-                 [last_seen] in parallel and bumps
-                 [meta_version], so a bare [write_meta] loses the CAS
-                 race and silently drops the turn payload (usage tokens,
-                 trace_history, generation).  Use the same merged-CAS
-                 retry as [keeper_unified_turn.ml:1683] so the cycle
-                 payload wins at the cycle-owned fields and heartbeat-
-                 owned fields are taken from disk. *)
-              (match
-                 write_meta_with_merge
-                   ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                   ctx.config updated_meta
-               with
-               | Ok () -> ()
-               | Error msg ->
-                   Otel_metric_store.inc_counter
-                     Keeper_metrics.(to_string WriteMetaFailures)
-                     ~labels:
-                       [ ("keeper", updated_meta.name);
-                         ("phase",
-                          match msg with
-                          | Keeper_meta_store.Version_conflict _ ->
-                            "keeper_msg_turn_cas_race"
-                          | Keeper_meta_store.Lifecycle_reserved _
-                          | Keeper_meta_store.Read_failed _
-                          | Keeper_meta_store.Persist_failed _
-                          | Keeper_meta_store.Invariant_violation _ ->
-                            "keeper_msg_turn")
-                       ]
-                     ();
-                   let detail = Keeper_meta_store.write_meta_error_to_string msg in
-                   match msg with
-                   | Keeper_meta_store.Version_conflict _ ->
-                     Log.Keeper.warn
-                       "write_meta lost CAS race after retries (keeper_msg turn): %s"
-                       detail
-                   | Keeper_meta_store.Lifecycle_reserved _
-                   | Keeper_meta_store.Read_failed _
-                   | Keeper_meta_store.Persist_failed _
-                   | Keeper_meta_store.Invariant_violation _ ->
-                     Log.Keeper.error
-                       "write_meta failed after keeper_msg turn: %s" detail);
+              let updated_meta =
+                match
+                  Keeper_owner_registry.commit_turn_runtime
+                    ~base_path:ctx.config.base_path
+                    ~keeper_name:meta.name
+                    ~before:meta
+                    ~after:updated_meta
+                with
+                | Ok (Some committed) -> committed
+                | Ok None ->
+                  raise
+                    (Direct_owner_meta_commit_failed
+                       "Keeper Owner removed metadata during direct turn commit")
+                | Error error ->
+                  let detail = Keeper_owner_registry.command_error_to_string error in
+                  Otel_metric_store.inc_counter
+                    Keeper_metrics.(to_string WriteMetaFailures)
+                    ~labels:[ "keeper", meta.name; "phase", "keeper_msg_turn" ]
+                    ();
+                  raise (Direct_owner_meta_commit_failed detail)
+              in
               (try
                  Keeper_unified_metrics.append_metrics_snapshot
                    ~config:ctx.config

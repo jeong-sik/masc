@@ -336,7 +336,7 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
             };
         }
       in
-      (match Keeper_meta_store.write_meta config updated_meta with
+      (match Keeper_meta_store.replace_snapshot config updated_meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       Operator_control.invalidate_snapshot_cache ();
@@ -442,7 +442,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
           }
         | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       Dated_jsonl.append
@@ -596,7 +596,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
             };
         }
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       let digest =

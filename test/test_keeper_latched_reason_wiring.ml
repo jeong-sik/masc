@@ -1,16 +1,10 @@
-(** task-1664 (audit Wave F1): pin that the three bool-only pause sites
-    record a typed [Keeper_latched_reason.t] in keeper_meta, that the
-    reason survives serialization and the operator-pause merge, and that
-    the status bridge surfaces it.
+(** Pin that typed owner commands retain pause latches, serialization, and
+    the status bridge without any stale-snapshot merge path.
 
     Sites under test:
-    - gRPC pause directive ([Keeper_keepalive.process_directive Pause]
-      -> [directive_paused_meta]) -> [Operator_paused {grpc_directive}]
-    - keeper_down retain ([Keeper_shutdown_finalize.For_testing.paused_meta],
-      remove_meta=false) -> [Operator_paused {keeper_down}]
-    - durable dead-tombstone final meta
-      ([Keeper_shutdown_finalize.For_testing.dead_tombstone_meta])
-      -> [Dead_tombstone]
+    - gRPC pause directive -> Owner [Pause]
+    - keeper_down retain -> Owner [Retain_shutdown_latch Operator_stopped]
+    - durable dead-tombstone -> Owner [Retain_shutdown_latch Dead_tombstone]
 
     Observability only: these tests assert the {i reason} annotation, not
     any change to the pause/resume decision (which stays carried by
@@ -20,7 +14,9 @@ open Alcotest
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_json = Masc.Keeper_meta_json
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
-module Keeper_meta_merge = Masc.Keeper_meta_merge
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_owner_reducer = Masc.Keeper_owner_reducer
+module Keeper_owner_registry = Masc.Keeper_owner_registry
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_keepalive = Masc.Keeper_keepalive
 module Keeper_directive = Masc.Keeper_directive
@@ -30,13 +26,14 @@ module Keeper_supervisor_types = Masc.Keeper_supervisor_types
 
 let base_json name =
   `Assoc
-    [ "name", `String name
-    ; "agent_name", `String (name ^ "-agent")
+    [ "schema", `String "masc.keeper_meta.v1"
+    ; "name", `String name
+    ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
     ; "trace_id", `String ("trace-" ^ name)
     ]
 
 let make_meta name =
-  match Keeper_meta_json_parse.meta_of_json (base_json name) with
+  match Masc_test_deps.meta_of_json_fixture (base_json name) with
   | Ok meta -> meta
   | Error err -> failf "parse base meta: %s" err
 
@@ -114,13 +111,9 @@ let test_no_latched_reason_serializes_as_null () =
   check (option string) "unset latched_reason round-trips to None" None
     (latched_reason_wire reparsed)
 
-let test_retired_auto_resume_field_is_diagnostic_only () =
-  let before =
-    Masc.Otel_metric_store.metric_total
-      Keeper_metrics.(to_string MetaReadFailures)
-  in
+let test_unknown_field_is_rejected () =
   let json =
-    match base_json "retired-auto-resume-field" with
+    match Keeper_meta_json.meta_to_json (make_meta "retired-auto-resume-field") with
     | `Assoc fields ->
       `Assoc
         (("paused", `Bool true)
@@ -128,20 +121,9 @@ let test_retired_auto_resume_field_is_diagnostic_only () =
          :: fields)
     | _ -> fail "base_json must be an object"
   in
-  let parsed =
-    match Keeper_meta_json_parse.meta_of_json json with
-    | Ok meta -> meta
-    | Error error -> failf "retired field parse failed: %s" error
-  in
-  let after =
-    Masc.Otel_metric_store.metric_total
-      Keeper_metrics.(to_string MetaReadFailures)
-  in
-  check bool "retired field does not activate paused keeper" true parsed.paused;
-  check (option string) "retired field does not invent a latch" None
-    (latched_reason_wire parsed);
-  check (float 0.001) "retired field emits migration-needed diagnostic"
-    (before +. 1.0) after
+  match Keeper_meta_json_parse.meta_of_json json with
+  | Error _ -> ()
+  | Ok _ -> fail "unknown retired metadata field was accepted"
 
 (* ── Status bridge surfacing ────────────────────────────────── *)
 
@@ -177,6 +159,7 @@ let test_grpc_pause_directive_records_reason () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
   let base_path = Masc_test_deps.setup_test_workspace () in
   Fun.protect
     ~finally:(fun () ->
@@ -187,6 +170,11 @@ let test_grpc_pause_directive_records_reason () =
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        let keeper_name = "grpc-directive-keeper" in
        let meta = make_meta keeper_name in
+       Keeper_meta_store.replace_snapshot config meta
+       |> Result.get_ok;
+       Keeper_owner_registry.install_from_store ~sw config
+       |> Result.get_ok
+       |> ignore;
        Keeper_registry.For_testing.clear ();
        ignore (Keeper_registry.For_testing.register ~base_path:config.base_path keeper_name meta);
        Keeper_keepalive.process_directive
@@ -217,10 +205,21 @@ let test_grpc_pause_directive_records_reason () =
 
 (* ── Site 2: keeper_down retain (remove_meta=false) ─────────── *)
 
+let apply_reducer_command meta command =
+  let state =
+    Keeper_owner_reducer.create ~keeper_name:meta.Keeper_meta_contract.name (Some meta)
+    |> Result.get_ok
+  in
+  let transition = Keeper_owner_reducer.apply_meta state command |> Result.get_ok in
+  (Keeper_owner_reducer.projection transition.state).meta |> Option.get
+;;
+
 let test_keeper_down_retain_records_reason () =
   let retained =
-    Masc.Keeper_shutdown_finalize.For_testing.paused_meta
+    apply_reducer_command
       (make_meta "downretain-owner")
+      (Keeper_owner_reducer.Retain_shutdown_latch
+         { latch = Keeper_owner_reducer.Operator_stopped; updated_at = "retained" })
   in
   check bool "keeper_down retain pauses keeper" true retained.paused;
   check
@@ -251,7 +250,10 @@ let test_dead_tombstone_final_meta_records_reason () =
     }
   in
   let finalized =
-    Masc.Keeper_shutdown_finalize.For_testing.dead_tombstone_meta input
+    apply_reducer_command
+      input
+      (Keeper_owner_reducer.Retain_shutdown_latch
+         { latch = Keeper_owner_reducer.Dead_tombstone; updated_at = "dead" })
   in
   check bool "dead final meta remains paused" true finalized.paused;
   check
@@ -262,63 +264,6 @@ let test_dead_tombstone_final_meta_records_reason () =
   check bool "dead final meta clears stale blocker" true
     (Option.is_none finalized.runtime.last_blocker)
 
-let test_heartbeat_merge_preserves_typed_latched_pause () =
-  let caller =
-    { (make_meta "typed-operator-pause-merge-caller") with
-      paused = false
-    ; latched_reason = None
-    }
-  in
-  let operator_latch =
-    Some
-      (Keeper_latched_reason.Operator_paused
-         { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
-  in
-  let latest_operator_pause =
-    { caller with paused = true; latched_reason = operator_latch }
-  in
-  let preserved =
-    Keeper_meta_merge.heartbeat_fields_from_disk
-      ~latest:latest_operator_pause
-      ~caller
-  in
-  check bool "typed operator pause remains paused" true preserved.paused;
-  check
-    (option string)
-    "typed operator pause preserves reason"
-    (Some wire_keeper_down)
-    (latched_reason_wire preserved);
-  let latest_dead_tombstone =
-    { latest_operator_pause with
-      latched_reason = Some Keeper_latched_reason.Dead_tombstone
-    }
-  in
-  let dead_preserved =
-    Keeper_meta_merge.heartbeat_fields_from_disk
-      ~latest:latest_dead_tombstone
-      ~caller
-  in
-  check bool "typed dead tombstone remains paused" true dead_preserved.paused;
-  check
-    (option string)
-    "typed dead tombstone preserves terminal reason"
-    (Some wire_dead_tombstone)
-    (latched_reason_wire dead_preserved);
-  let latest_unlabeled_pause =
-    { latest_operator_pause with latched_reason = None }
-  in
-  let unclassified_preserved =
-    Keeper_meta_merge.heartbeat_fields_from_disk
-      ~latest:latest_unlabeled_pause
-      ~caller
-  in
-  check bool "unclassified pause remains durable" true unclassified_preserved.paused;
-  check
-    (option string)
-    "unclassified pause remains explicitly unlabeled"
-    None
-    (latched_reason_wire unclassified_preserved)
-
 let () =
   run
     "keeper_latched_reason_wiring"
@@ -327,8 +272,8 @@ let () =
             test_latched_reason_survives_serialization
         ; test_case "unset reason serializes as null and round-trips to None" `Quick
             test_no_latched_reason_serializes_as_null
-        ; test_case "retired auto-resume field is diagnostic only" `Quick
-            test_retired_auto_resume_field_is_diagnostic_only
+        ; test_case "unknown retired field is rejected" `Quick
+            test_unknown_field_is_rejected
         ] )
     ; ( "status bridge"
       , [ test_case "attention fields surface the typed pause reason wire" `Quick
@@ -341,7 +286,5 @@ let () =
             test_keeper_down_retain_records_reason
         ; test_case "dead final meta records terminal tombstone reason" `Quick
             test_dead_tombstone_final_meta_records_reason
-        ; test_case "heartbeat merge preserves typed latch, not pause shape" `Quick
-            test_heartbeat_merge_preserves_typed_latched_pause
         ] )
     ]

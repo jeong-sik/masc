@@ -178,7 +178,6 @@ let dashboard_purge_cleanup requested_name
       Shutdown_types.Dashboard_keeper_purge
         { requested_name
         ; agent_name = meta.agent_name
-        ; meta_version = meta.meta_version
         }
   ; remove_session = true
   }
@@ -1478,7 +1477,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       Masc.Keeper_turn_admission.For_testing.reset ();
       let live_name = "update-blocked-admission" in
       let live_meta = { (make_meta live_name) with paused = true } in
-      (match Keeper_meta_store.write_meta config live_meta with
+      (match Keeper_meta_store.replace_snapshot config live_meta with
        | Ok () -> ()
        | Error detail -> fail detail);
       let live_blocked =
@@ -1568,7 +1567,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       let stopped_meta =
         Shutdown_finalize.For_testing.paused_meta (make_meta stopped_name)
       in
-      (match Keeper_meta_store.write_meta config stopped_meta with
+      (match Keeper_meta_store.replace_snapshot config stopped_meta with
        | Ok () -> ()
        | Error detail -> fail detail);
       let stopped_parsed =
@@ -1622,7 +1621,7 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
       in
       let name = "update-turn-in-flight" in
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
       let profile_defaults =
@@ -2143,7 +2142,7 @@ let test_dashboard_purge_resolution_is_fail_closed () =
        | Ok (Some _) -> fail "plain agent was classified as a Keeper"
        | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
       let persisted = make_meta "dashboard-purge-persisted" in
-      (match Keeper_meta_store.write_meta config persisted with
+      (match Keeper_meta_store.replace_snapshot config persisted with
        | Ok () -> ()
        | Error detail -> fail detail);
       let persisted =
@@ -2159,10 +2158,16 @@ let test_dashboard_purge_resolution_is_fail_closed () =
         | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
       in
       check string "resolved exact Keeper name" persisted.name target.keeper_name;
+      check bool
+        "resolved exact metadata trace"
+        true
+        (Keeper_id.Trace_id.equal
+           persisted.runtime.trace_id
+           target.meta.runtime.trace_id);
       check int
-        "resolved exact metadata version"
-        persisted.meta_version
-        target.meta.meta_version;
+        "resolved exact metadata generation"
+        persisted.runtime.nonce
+        target.meta.runtime.nonce;
       let backlog_version =
         match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
@@ -2257,7 +2262,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
       in
       let name = "shutdown-idle-lane" in
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
       let entry = R.For_testing.register ~base_path:config.base_path name meta in
@@ -2372,7 +2377,7 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
       in
       let name = "shutdown-not-started-lane" in
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
       let entry = R.For_testing.register ~base_path:config.base_path name meta in
@@ -2424,7 +2429,7 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
       in
       let name = "shutdown-prepare-rollback-lane" in
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
       let entry = R.For_testing.register ~base_path:config.base_path name meta in
@@ -2484,7 +2489,7 @@ let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
       in
       let name = "shutdown-dormant-cancel-rollback" in
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
       let intake_started, intake_started_u = Eio.Promise.create () in
@@ -2619,7 +2624,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
           ~keeper_name:meta.name
           ~bind_exact:false
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
       Shutdown_finalize.register_remove_pending_confirms_by_target
@@ -2731,7 +2736,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
               | Error detail -> fail detail
             in
             let meta = make_meta ("shutdown-summary-" ^ label) in
-            (match Keeper_meta_store.write_meta config meta with
+            (match Keeper_meta_store.replace_snapshot config meta with
              | Ok () -> ()
              | Error detail -> fail detail);
             let meta =
@@ -2892,7 +2897,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
         | Error detail -> fail detail
       in
       let meta = make_meta "shutdown-dead-tombstone-keeper" in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
       let entry = R.For_testing.register ~base_path:config.base_path meta.name meta in
@@ -3137,7 +3142,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
       let initial = make_meta "dashboard-purge-finalize" in
-      (match Keeper_meta_store.write_meta config initial with
+      (match Keeper_meta_store.replace_snapshot config initial with
        | Ok () -> ()
        | Error detail -> fail detail);
       let meta =
@@ -3390,7 +3395,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         false
         (Sys.file_exists runtime_dir);
       let retired_identity = make_meta meta.name in
-      (match Keeper_meta_store.write_meta config retired_identity with
+      (match Keeper_meta_store.replace_snapshot config retired_identity with
        | Ok () -> ()
        | Error detail -> fail detail);
       (match
@@ -3411,7 +3416,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         |> Keeper_meta_contract.map_runtime (fun runtime ->
           { runtime with nonce = runtime.nonce + 1 })
       in
-      (match Keeper_meta_store.write_meta config replacement with
+      (match Keeper_meta_store.replace_snapshot config replacement with
        | Ok () -> ()
        | Error detail -> fail detail);
       (match
@@ -3446,7 +3451,7 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
       let meta = make_meta "shutdown-meta-replay-keeper" in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
       let backlog_version =
@@ -3482,14 +3487,10 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
        | Ok () -> ()
        | Error error -> fail (Shutdown_store.error_to_string error));
       (match
-         Keeper_meta_store.remove_meta_if_identity
-           config
-           ~name:meta.name
-           ~trace_id:meta.runtime.trace_id
-           ~generation:meta.runtime.nonce
+         Keeper_meta_store.remove_snapshot config ~name:meta.name
        with
        | Ok () -> ()
-       | Error error -> fail (Keeper_meta_store.identity_remove_error_to_string error));
+       | Error error -> fail error);
       match Shutdown_finalize.run ~config ~entry:None operation with
       | Ok { phase = Shutdown_types.Finalized evidence; _ } ->
         check bool "meta cleanup remains complete on replay" true evidence.meta_removed
@@ -3512,7 +3513,7 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
       let meta = make_meta "shutdown-task-receipt-keeper" in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
       Shutdown_finalize.register_remove_pending_confirms_by_target

@@ -5,7 +5,6 @@ type request =
 
 type projection_stage =
   | Durable_meta
-  | Registry_meta
   | Registry_transition
 
 type failure =
@@ -61,7 +60,6 @@ let ( let* ) = Result.bind
 
 let projection_stage_to_string = function
   | Durable_meta -> "durable_meta"
-  | Registry_meta -> "registry_meta"
   | Registry_transition -> "registry_transition"
 ;;
 
@@ -210,23 +208,7 @@ let registered_owner_opt config receipt =
   | Some entry -> Ok (Some entry)
 ;;
 
-let update_registry_meta token entry committed =
-  match
-    Keeper_registry.update_entry_exact_for_lifecycle token entry (fun current ->
-      { current with meta = committed })
-  with
-  | Keeper_registry.Exact_updated -> Ok ()
-  | Keeper_registry.Exact_update_missing -> Error "registered lane disappeared"
-  | Keeper_registry.Exact_update_replaced -> Error "registered lane was replaced"
-  | Keeper_registry.Exact_update_invalid error ->
-    Error (Keeper_registry.registry_entry_validation_error_to_string error)
-;;
-
-let project_registry token entry committed =
-  let* () =
-    update_registry_meta token entry committed
-    |> Result.map_error (fun detail -> Projection_failed { stage = Registry_meta; detail })
-  in
+let project_registry token (entry : Keeper_registry.registry_entry) =
   let* phase =
     match entry.phase with
     | Keeper_state_machine.Paused ->
@@ -293,7 +275,7 @@ let project_receipt token config (receipt : Keeper_paused_work_disposition_recei
   in
   match entry with
   | None -> Error Registry_owner_missing
-  | Some entry -> project_registry token entry committed
+  | Some entry -> project_registry token entry
 ;;
 
 let create_receipt config ~keeper_name request =

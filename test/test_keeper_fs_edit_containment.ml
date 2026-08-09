@@ -142,7 +142,6 @@ let test_docker_write_defers_explicit_root () =
   setup
   @@ fun ~config ~meta ~playground:_ ~publication_recovery ->
   let meta = { meta with allowed_paths = [ config.base_path ] } in
-  Keeper_registry.update_meta ~base_path:config.base_path meta.name meta;
   let path = Filename.concat config.base_path "root-write.txt" in
   let raw =
     handle_file_write

@@ -61,80 +61,16 @@ let with_keeper_entry_by_identity ~identity ~on_missing f =
   | None -> on_missing ()
 ;;
 
-let persist_directive_meta_update
-      (entry : Keeper_registry.registry_entry)
-      ~(updated_meta : keeper_meta)
-  : (unit, string) result
-  =
-  let keeper_filename =
-    Keeper_runtime_root_entry.keeper_basename
+let apply_owner_meta (entry : Keeper_registry.registry_entry) command =
+  match
+    Keeper_owner_registry.apply_meta
+      ~base_path:entry.base_path
       ~keeper_name:entry.name
-      Keeper_runtime_root_entry.Metadata
-  in
-  let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path:entry.base_path in
-  let default_path =
-    Filename.concat (Filename.concat masc_root Common.keepers_runtime_dirname) keeper_filename
-  in
-  let persisted_path =
-    if Fs_compat.file_exists default_path
-    then default_path
-    else (
-      let clusters_dir = Filename.concat masc_root "clusters" in
-      let cluster_paths =
-        match Safe_ops.list_dir_safe clusters_dir with
-        | Ok names ->
-          names
-          |> List.map (fun cluster_name ->
-            Filename.concat
-              (Filename.concat (Filename.concat clusters_dir cluster_name) Common.keepers_runtime_dirname)
-              keeper_filename)
-          |> List.filter Fs_compat.file_exists
-        | Error _ -> []
-      in
-      match cluster_paths with
-      | [] -> default_path
-      | [ path ] -> path
-      | paths ->
-        let by_mtime_desc a b =
-          let a_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime a) in
-          let b_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime b) in
-          Float.compare b_mtime a_mtime
-        in
-        (match List.sort by_mtime_desc paths with
-         | latest_path :: _ -> latest_path
-         | [] -> default_path))
-  in
-  match Keeper_fs.save_json_atomic persisted_path (Keeper_meta_json.meta_to_json updated_meta) with
-  | Ok () ->
-    Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta;
-    Ok ()
-  | Error msg ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string WriteMetaFailures)
-      ~labels:[ "keeper", entry.name; "site", "directive_persist" ]
-      ();
-    Log.Keeper.emit
-      Log.Warn
-      ~category:Log.Heartbeat
-      ~details:(`Assoc [ "keeper", `String entry.name; "error", `String msg ])
-      (Printf.sprintf "directive meta persist failed for %s: %s" entry.name msg);
-    Error msg
-;;
-
-let directive_paused_meta (meta : keeper_meta) paused =
-  if paused
-  then
-    { meta with
-      paused = true
-    ; latched_reason =
-        Some
-          (Keeper_latched_reason.Operator_paused
-             { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
-    ; runtime = { meta.runtime with last_blocker = None }
-    ; updated_at = now_iso ()
-    }
-  else
-    { (Keeper_meta_contract.mark_resumed meta) with updated_at = now_iso () }
+      command
+  with
+  | Ok (Some meta) -> Ok meta
+  | Ok None -> Error "Keeper metadata disappeared during directive commit"
+  | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
 ;;
 
 let transcript_corruption_reset_required (meta : keeper_meta) =
@@ -287,14 +223,26 @@ let set_keeper_paused_state ~agent_name paused =
             ~labels:
               [ "keeper", entry.name; "site", "resume_reset_required" ]
             ();
-          Log.Keeper.error
+         Log.Keeper.error
             "directive resume denied for %s: transcript corruption requires \
              checkpoint reset"
             entry.name)
        else (
          let previous_failure_reason = entry.last_failure_reason in
-         let updated_meta = directive_paused_meta entry.meta paused in
-         match persist_directive_meta_update entry ~updated_meta with
+         let command =
+           if paused
+           then
+             Keeper_owner_reducer.Pause
+               { reason =
+                   Keeper_latched_reason.Operator_paused
+                     { operator_actor =
+                         Keeper_latched_reason.operator_actor_grpc_directive
+                     }
+               ; updated_at = now_iso ()
+               }
+           else Keeper_owner_reducer.Resume { updated_at = now_iso () }
+         in
+         match apply_owner_meta entry command with
          | Error err ->
            Keeper_registry.set_failure_reason
              ~base_path:entry.base_path
@@ -310,7 +258,7 @@ let set_keeper_paused_state ~agent_name paused =
              (if paused then "pause" else "resume")
              entry.name
              err
-         | Ok () ->
+         | Ok _committed_meta ->
            Keeper_registry.dispatch_event_unit
              ~base_path:entry.base_path
              entry.name
@@ -350,10 +298,12 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
       log_directive_agent_not_in_registry ~agent_name ~action:"claim")
     (fun entry ->
        let task_id_string = Keeper_id.Task_id.to_string task_id in
-       let updated_meta =
-         { entry.meta with current_task_id = Some task_id; updated_at = now_iso () }
-       in
-       match persist_directive_meta_update entry ~updated_meta with
+       match
+         apply_owner_meta
+           entry
+           (Keeper_owner_reducer.Set_current_task
+              { task_id = Some task_id; updated_at = now_iso () })
+       with
        | Error err ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string DirectiveFailures)
@@ -364,13 +314,13 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
            entry.name
            task_id_string
            err
-       | Ok () ->
+       | Ok committed_meta ->
          (* SubmitTask post-action
             guard pins that the directive successfully attached the
             [task_id] to the keeper's meta. The [@@fsm_guard] PPX
             routes the assertion through [wrap_unit ~stage:"guard"]
             automatically. *)
-         post_submit_task ~meta:updated_meta ~task_id;
+         post_submit_task ~meta:committed_meta ~task_id;
          wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
@@ -1015,14 +965,12 @@ let start_keepalive
         let wakeup = reg.fiber_wakeup in
         let live_meta = bootstrap_live_keeper_meta ?lifecycle_token ~ctx m in
         let live_meta_installed =
-          (match lifecycle_token with
-           | None ->
-             Keeper_registry.update_entry_exact reg (fun current ->
-               { current with meta = live_meta })
-           | Some token ->
-             Keeper_registry.update_entry_exact_for_lifecycle token reg (fun current ->
-               { current with meta = live_meta }))
-          |> Keeper_registry.exact_update_succeeded reg ~site:"start_keepalive.live_meta"
+          match Keeper_registry.get ~base_path:ctx.config.base_path reg.name with
+          | Some current ->
+            Keeper_lane.Id.equal
+              (Keeper_lane.id current.lane)
+              (Keeper_lane.id reg.lane)
+          | None -> false
         in
         if not live_meta_installed
         then (

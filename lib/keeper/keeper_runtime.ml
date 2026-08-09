@@ -649,16 +649,7 @@ let start_supervisor_sweep ctx =
                        entry.name
                        (ensure_keeper_meta_with_cause ctx.config entry.name)
                    with
-                   | Ok updated_meta ->
-                       (* Propagate the updated meta back into the registry so
-                          subsequent turns observe the new runtime_id (and
-                          any other reconciled fields) immediately.  Without
-                          this the file is updated but the in-memory
-                          [registry_entry.meta] stays stale until restart. *)
-                       Keeper_registry.update_meta_from_persisted
-                         ~base_path
-                         entry.name
-                         updated_meta
+                   | Ok _ -> ()
                    | Error e ->
                        Log.Keeper.warn
                          "TOML reconcile failed for %s: %s"

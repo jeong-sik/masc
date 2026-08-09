@@ -57,7 +57,7 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
          ; runtime = { meta.runtime with nonce = generation }
          }
        in
-       Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
+       Keeper_meta_store.replace_snapshot config meta |> require_ok "persist Keeper metadata";
        let persisted =
          Keeper_meta_store.read_meta config keeper_name
          |> require_ok "read persisted Keeper metadata"

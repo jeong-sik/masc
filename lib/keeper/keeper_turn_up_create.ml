@@ -236,7 +236,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
 	        };
       keeper_id = Some (Keeper_id.Uid.generate ());
       oas_env = p.profile_defaults.oas_env;
-      meta_version = 0;
       } in
       let system_prompt =
         Keeper_run_context.build_base_system_prompt
@@ -331,7 +330,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       | Error e ->
         Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
-        Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
+        Log.Keeper.error
+          "create_keeper failed: owner metadata commit error for name=%s: %s"
+          p.name
+          e;
         Progress.stop_tracking task_id;
         tool_result_error e
       | Ok () ->

@@ -39,7 +39,7 @@ let ensure_producer config name =
     Result.bind
       (Masc_test_deps.meta_of_json_fixture
          (`Assoc [ "name", `String name; "always_allow", `Bool true ]))
-      (Keeper_meta_store.write_meta config)
+      (Keeper_meta_store.replace_snapshot config)
   with
   | Ok _ -> ()
   | Error err -> Alcotest.failf "write keeper meta failed: %s" err

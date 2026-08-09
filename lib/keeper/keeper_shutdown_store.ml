@@ -312,7 +312,6 @@ let cleanup_reason_to_json = function
       [ "kind", `String "dashboard_keeper_purge"
       ; "requested_name", `String context.requested_name
       ; "agent_name", `String context.agent_name
-      ; "meta_version", `Int context.meta_version
       ]
 ;;
 
@@ -696,8 +695,7 @@ let cleanup_reason_of_json json =
   | "dashboard_keeper_purge" ->
     let* requested_name = string "requested_name" json in
     let* agent_name = string "agent_name" json in
-    let* meta_version = int "meta_version" json in
-    Ok (Dashboard_keeper_purge { requested_name; agent_name; meta_version })
+    Ok (Dashboard_keeper_purge { requested_name; agent_name })
   | value ->
     Error
       (Decode_error (Printf.sprintf "unknown shutdown cleanup reason: %S" value))

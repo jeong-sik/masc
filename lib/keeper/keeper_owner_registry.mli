@@ -45,6 +45,15 @@ val apply_meta
     from the committed owner projection.  The existing lifecycle reservation
     remains the admission authority through the owner commit. *)
 
+val commit_turn_runtime
+  :  base_path:string
+  -> keeper_name:string
+  -> before:Keeper_meta_contract.keeper_meta
+  -> after:Keeper_meta_contract.keeper_meta
+  -> (Keeper_meta_contract.keeper_meta option, command_error) result
+(** Derive and commit only the closed turn delta. Cumulative fields are added
+    to the actor's current snapshot; callers cannot overwrite the record. *)
+
 val create_meta
   :  base_path:string
   -> Keeper_meta_contract.keeper_meta

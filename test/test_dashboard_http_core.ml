@@ -680,11 +680,11 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
       Masc.Keeper_registry.For_testing.unregister ~base_path transfer_keeper;
       Masc.Keeper_registry.For_testing.unregister ~base_path target_keeper)
     (fun () ->
-       Masc.Keeper_meta_store.write_meta config cancel_meta
+       Masc.Keeper_meta_store.replace_snapshot config cancel_meta
        |> require_ok "persist cancellation source keeper metadata";
-       Masc.Keeper_meta_store.write_meta config transfer_meta
+       Masc.Keeper_meta_store.replace_snapshot config transfer_meta
        |> require_ok "persist transfer source keeper metadata";
-       Masc.Keeper_meta_store.write_meta config target_meta
+       Masc.Keeper_meta_store.replace_snapshot config target_meta
        |> require_ok "persist target keeper metadata";
        ignore
          (Masc.Keeper_registry.For_testing.register
@@ -1643,7 +1643,7 @@ let test_execution_trust_uses_narrow_keeper_projection () =
       }
     | Error error -> failf "meta fixture: %s" error
   in
-  (match Masc.Keeper_meta_store.write_meta config meta with
+  (match Masc.Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error error -> failf "write meta: %s" error);
   let json = Dashboard_http_keeper.execution_trust_dashboard_json config in
@@ -2990,7 +2990,7 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
         keeper_name;
       cleanup_dir dir)
     (fun () ->
-       (match Masc.Keeper_meta_store.write_meta config meta with
+       (match Masc.Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error error -> fail ("write meta: " ^ error));
        ignore
@@ -3176,7 +3176,7 @@ let prepare_config_sync_keeper config name =
       ; instructions = name ^ " config-sync fixture instructions"
       }
   in
-  match Masc.Keeper_meta_store.write_meta config meta with
+  match Masc.Keeper_meta_store.replace_snapshot config meta with
   | Ok () -> ()
   | Error error -> fail ("write meta: " ^ error)
 
@@ -3437,7 +3437,7 @@ let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
             | Ok meta -> meta
             | Error error -> fail ("meta fixture: " ^ error)
           in
-          (match Masc.Keeper_meta_store.write_meta config meta with
+          (match Masc.Keeper_meta_store.replace_snapshot config meta with
            | Ok () -> ()
            | Error error -> fail ("write meta: " ^ error));
           ignore

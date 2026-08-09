@@ -12,6 +12,42 @@ type usage_delta =
   ; last_latency_ms : int
   }
 
+type turn_counter_deltas =
+  { proactive_count : int
+  ; proactive_visible_count : int
+  ; autonomous_action_count : int
+  ; autonomous_turn_count : int
+  ; autonomous_text_turn_count : int
+  ; autonomous_tool_turn_count : int
+  ; board_reactive_turn_count : int
+  ; mention_reactive_turn_count : int
+  ; noop_turn_count : int
+  ; compaction_count : int
+  }
+
+type 'a observed_change =
+  | Unchanged
+  | Changed of 'a
+
+type turn_runtime_delta =
+  { expected_trace_id : Keeper_id.Trace_id.t
+  ; expected_generation : int
+  ; usage : usage_delta
+  ; counters : turn_counter_deltas
+  ; next_keeper_id : Keeper_id.Uid.t option
+  ; next_agent_name : string
+  ; next_trace_id : Keeper_id.Trace_id.t
+  ; next_trace_history : string list
+  ; next_generation : int
+  ; next_last_handoff_ts : float
+  ; compaction_observation : Keeper_meta_contract.compaction_runtime observed_change
+  ; proactive_observation : Keeper_meta_contract.proactive_runtime observed_change
+  ; last_autonomous_action_at : string observed_change
+  ; last_blocker : Keeper_meta_contract.blocker_info option observed_change
+  ; message_scope_ack_id : string option observed_change
+  ; updated_at : string
+  }
+
 type identity_handoff =
   { keeper_id : Keeper_id.Uid.t option
   ; agent_name : string
@@ -20,6 +56,10 @@ type identity_handoff =
   ; generation : int
   ; updated_at : string
   }
+
+type shutdown_latch =
+  | Operator_stopped
+  | Dead_tombstone
 
 type compaction_result =
   { count_delta : int
@@ -57,6 +97,15 @@ type meta_command =
       }
   | Resume of { updated_at : string }
   | Reset_latch of { updated_at : string }
+  | Retain_shutdown_latch of
+      { latch : shutdown_latch
+      ; updated_at : string
+      }
+  | Latch_transcript_corruption of
+      { trace_id : Keeper_id.Trace_id.t
+      ; generation : int
+      ; updated_at : string
+      }
   | Set_autoboot of
       { enabled : bool
       ; updated_at : string
@@ -80,6 +129,7 @@ type meta_command =
       ; usage : usage_delta option
       ; updated_at : string
       }
+  | Commit_turn_runtime of turn_runtime_delta
   | Add_usage of usage_delta
   | Set_current_task of
       { task_id : Keeper_id.Task_id.t option
@@ -90,6 +140,12 @@ type meta_command =
       ; updated_at : string
       }
   | Record_compaction of compaction_result
+  | Record_compaction_commit of
+      { trace_id : Keeper_id.Trace_id.t
+      ; generation : int
+      ; commit_count : int
+      ; updated_at : string
+      }
   | Ack_message_scope of
       { message_id : string option
       ; updated_at : string
@@ -138,6 +194,7 @@ type error =
       { expected : string
       ; actual : string
       }
+  | Identity_generation_mismatch
   | Delete_while_running of string
 
 let create ~keeper_name meta =
@@ -206,6 +263,164 @@ let checked_add field current delta =
 
 let ( let* ) result f = Result.bind result f
 
+let nonnegative_difference field before after =
+  if after < before
+  then Error (Invalid_delta (field ^ " regressed"))
+  else Ok (after - before)
+;;
+
+let observed_change before after =
+  if before = after then Unchanged else Changed after
+;;
+
+let turn_runtime_delta_of_snapshots
+      ~(before : Keeper_meta_contract.keeper_meta)
+      ~(after : Keeper_meta_contract.keeper_meta)
+  =
+  if not (String.equal before.name after.name)
+  then
+    Error
+      (Keeper_identity_mismatch
+         { expected = before.name; actual = after.name })
+  else
+    let before_rt = before.runtime in
+    let after_rt = after.runtime in
+    let before_usage = before_rt.usage in
+    let after_usage = after_rt.usage in
+    let* turns =
+      nonnegative_difference "total_turns" before_usage.total_turns after_usage.total_turns
+    in
+    let* input_tokens =
+      nonnegative_difference
+        "total_input_tokens"
+        before_usage.total_input_tokens
+        after_usage.total_input_tokens
+    in
+    let* output_tokens =
+      nonnegative_difference
+        "total_output_tokens"
+        before_usage.total_output_tokens
+        after_usage.total_output_tokens
+    in
+    let* total_tokens =
+      nonnegative_difference
+        "total_tokens"
+        before_usage.total_tokens
+        after_usage.total_tokens
+    in
+    let cost_usd = after_usage.total_cost_usd -. before_usage.total_cost_usd in
+    let* proactive_count =
+      nonnegative_difference
+        "proactive_count_total"
+        before_rt.proactive_rt.count_total
+        after_rt.proactive_rt.count_total
+    in
+    let* proactive_visible_count =
+      nonnegative_difference
+        "proactive_visible_count_total"
+        before_rt.proactive_rt.visible_count_total
+        after_rt.proactive_rt.visible_count_total
+    in
+    let* autonomous_action_count =
+      nonnegative_difference
+        "autonomous_action_count"
+        before_rt.autonomous_action_count
+        after_rt.autonomous_action_count
+    in
+    let* autonomous_turn_count =
+      nonnegative_difference
+        "autonomous_turn_count"
+        before_rt.autonomous_turn_count
+        after_rt.autonomous_turn_count
+    in
+    let* autonomous_text_turn_count =
+      nonnegative_difference
+        "autonomous_text_turn_count"
+        before_rt.autonomous_text_turn_count
+        after_rt.autonomous_text_turn_count
+    in
+    let* autonomous_tool_turn_count =
+      nonnegative_difference
+        "autonomous_tool_turn_count"
+        before_rt.autonomous_tool_turn_count
+        after_rt.autonomous_tool_turn_count
+    in
+    let* board_reactive_turn_count =
+      nonnegative_difference
+        "board_reactive_turn_count"
+        before_rt.board_reactive_turn_count
+        after_rt.board_reactive_turn_count
+    in
+    let* mention_reactive_turn_count =
+      nonnegative_difference
+        "mention_reactive_turn_count"
+        before_rt.mention_reactive_turn_count
+        after_rt.mention_reactive_turn_count
+    in
+    let* noop_turn_count =
+      nonnegative_difference
+        "noop_turn_count"
+        before_rt.noop_turn_count
+        after_rt.noop_turn_count
+    in
+    let* compaction_count =
+      nonnegative_difference
+        "compaction_count"
+        before_rt.compaction_rt.count
+        after_rt.compaction_rt.count
+    in
+    let usage =
+      { turns
+      ; input_tokens
+      ; output_tokens
+      ; total_tokens
+      ; cost_usd
+      ; last_turn_ts = after_usage.last_turn_ts
+      ; last_input_tokens = after_usage.last_input_tokens
+      ; last_output_tokens = after_usage.last_output_tokens
+      ; last_total_tokens = after_usage.last_total_tokens
+      ; last_usage_reported_at = after_usage.last_usage_reported_at
+      ; last_latency_ms = after_usage.last_latency_ms
+      }
+    in
+    let* () = validate_delta usage in
+    Ok
+      { expected_trace_id = before_rt.trace_id
+      ; expected_generation = before_rt.nonce
+      ; usage
+      ; counters =
+          { proactive_count
+          ; proactive_visible_count
+          ; autonomous_action_count
+          ; autonomous_turn_count
+          ; autonomous_text_turn_count
+          ; autonomous_tool_turn_count
+          ; board_reactive_turn_count
+          ; mention_reactive_turn_count
+          ; noop_turn_count
+          ; compaction_count
+          }
+      ; next_keeper_id = after.keeper_id
+      ; next_agent_name = after.agent_name
+      ; next_trace_id = after_rt.trace_id
+      ; next_trace_history = after_rt.trace_history
+      ; next_generation = after_rt.nonce
+      ; next_last_handoff_ts = after_rt.last_handoff_ts
+      ; compaction_observation =
+          observed_change before_rt.compaction_rt after_rt.compaction_rt
+      ; proactive_observation =
+          observed_change before_rt.proactive_rt after_rt.proactive_rt
+      ; last_autonomous_action_at =
+          observed_change
+            before_rt.last_autonomous_action_at
+            after_rt.last_autonomous_action_at
+      ; last_blocker = observed_change before_rt.last_blocker after_rt.last_blocker
+      ; message_scope_ack_id =
+          observed_change before_rt.message_scope_ack_id after_rt.message_scope_ack_id
+      ; updated_at = after.updated_at
+      }
+;;
+
 let add_usage meta delta =
   match validate_delta delta with
   | Error _ as error -> error
@@ -246,6 +461,128 @@ let update_usage meta usage =
   | Some delta -> add_usage meta delta
 ;;
 
+let apply_observed_change current = function
+  | Unchanged -> current
+  | Changed value -> value
+;;
+
+let apply_turn_runtime_delta
+      (meta : Keeper_meta_contract.keeper_meta)
+      (delta : turn_runtime_delta)
+  =
+  if
+    not (Keeper_id.Trace_id.equal meta.runtime.trace_id delta.expected_trace_id)
+    || not (Int.equal meta.runtime.nonce delta.expected_generation)
+  then Error Identity_generation_mismatch
+  else
+    let* meta = add_usage meta delta.usage in
+    let runtime = meta.runtime in
+    let counters = delta.counters in
+    let* proactive_count_total =
+      checked_add
+        "proactive_count_total"
+        runtime.proactive_rt.count_total
+        counters.proactive_count
+    in
+    let* proactive_visible_count_total =
+      checked_add
+        "proactive_visible_count_total"
+        runtime.proactive_rt.visible_count_total
+        counters.proactive_visible_count
+    in
+    let* autonomous_action_count =
+      checked_add
+        "autonomous_action_count"
+        runtime.autonomous_action_count
+        counters.autonomous_action_count
+    in
+    let* autonomous_turn_count =
+      checked_add
+        "autonomous_turn_count"
+        runtime.autonomous_turn_count
+        counters.autonomous_turn_count
+    in
+    let* autonomous_text_turn_count =
+      checked_add
+        "autonomous_text_turn_count"
+        runtime.autonomous_text_turn_count
+        counters.autonomous_text_turn_count
+    in
+    let* autonomous_tool_turn_count =
+      checked_add
+        "autonomous_tool_turn_count"
+        runtime.autonomous_tool_turn_count
+        counters.autonomous_tool_turn_count
+    in
+    let* board_reactive_turn_count =
+      checked_add
+        "board_reactive_turn_count"
+        runtime.board_reactive_turn_count
+        counters.board_reactive_turn_count
+    in
+    let* mention_reactive_turn_count =
+      checked_add
+        "mention_reactive_turn_count"
+        runtime.mention_reactive_turn_count
+        counters.mention_reactive_turn_count
+    in
+    let* noop_turn_count =
+      checked_add "noop_turn_count" runtime.noop_turn_count counters.noop_turn_count
+    in
+    let* compaction_count =
+      checked_add
+        "compaction_count"
+        runtime.compaction_rt.count
+        counters.compaction_count
+    in
+    let proactive_observation =
+      apply_observed_change runtime.proactive_rt delta.proactive_observation
+    in
+    let proactive_rt =
+      { proactive_observation with
+        count_total = proactive_count_total
+      ; visible_count_total = proactive_visible_count_total
+      }
+    in
+    let compaction_observation =
+      apply_observed_change runtime.compaction_rt delta.compaction_observation
+    in
+    let compaction_rt =
+      { compaction_observation with count = compaction_count }
+    in
+    let runtime =
+      { runtime with
+        trace_id = delta.next_trace_id
+      ; trace_history = delta.next_trace_history
+      ; nonce = delta.next_generation
+      ; last_handoff_ts = delta.next_last_handoff_ts
+      ; compaction_rt
+      ; proactive_rt
+      ; last_autonomous_action_at =
+          apply_observed_change
+            runtime.last_autonomous_action_at
+            delta.last_autonomous_action_at
+      ; autonomous_action_count
+      ; autonomous_turn_count
+      ; autonomous_text_turn_count
+      ; autonomous_tool_turn_count
+      ; board_reactive_turn_count
+      ; mention_reactive_turn_count
+      ; noop_turn_count
+      ; last_blocker = apply_observed_change runtime.last_blocker delta.last_blocker
+      ; message_scope_ack_id =
+          apply_observed_change runtime.message_scope_ack_id delta.message_scope_ack_id
+      }
+    in
+    Ok
+      { meta with
+        keeper_id = delta.next_keeper_id
+      ; agent_name = delta.next_agent_name
+      ; runtime
+      ; updated_at = delta.updated_at
+      }
+;;
+
 let apply_existing (state : state) meta command =
   match command with
   | Create _ -> Error Meta_already_exists
@@ -266,6 +603,51 @@ let apply_existing (state : state) meta command =
       (with_meta
          state
          { meta with paused = false; latched_reason = None; runtime; updated_at })
+  | Retain_shutdown_latch { latch; updated_at } ->
+    let latched_reason, runtime =
+      match latch with
+      | Operator_stopped ->
+        ( Keeper_latched_reason.Operator_paused
+            { operator_actor = Keeper_latched_reason.operator_actor_keeper_down }
+        , meta.runtime )
+      | Dead_tombstone ->
+        Keeper_latched_reason.Dead_tombstone,
+        { meta.runtime with last_blocker = None }
+    in
+    Ok
+      (with_meta
+         state
+         { meta with
+           current_task_id = None
+         ; paused = true
+         ; latched_reason = Some latched_reason
+         ; updated_at
+         ; runtime
+         })
+  | Latch_transcript_corruption { trace_id; generation; updated_at } ->
+    if
+      not (Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id)
+      || not (Int.equal meta.runtime.nonce generation)
+    then Error Identity_generation_mismatch
+    else
+    (match
+       Keeper_lifecycle_admission.state
+         ~paused:meta.paused
+         ~latched_reason:meta.latched_reason
+     with
+     | Keeper_lifecycle_admission.Dead_tombstone ->
+       Ok (publish_transition state No_persistence [])
+     | Keeper_lifecycle_admission.Active
+     | Keeper_lifecycle_admission.Paused _ ->
+       Ok
+         (with_meta
+            state
+            { meta with
+              paused = true
+            ; latched_reason =
+                Some Keeper_latched_reason.Transcript_corruption_reset_required
+            ; updated_at
+            }))
   | Set_autoboot { enabled; updated_at } ->
     Ok (with_meta state { meta with autoboot_enabled = enabled; updated_at })
   | Update_profile update ->
@@ -329,6 +711,10 @@ let apply_existing (state : state) meta command =
      | Ok meta ->
        let runtime = { meta.runtime with last_blocker = Some blocker } in
        Ok (with_meta state { meta with runtime; updated_at }))
+  | Commit_turn_runtime delta ->
+    (match apply_turn_runtime_delta meta delta with
+     | Error _ as error -> error
+     | Ok meta -> Ok (with_meta state meta))
   | Add_usage delta ->
     (match add_usage meta delta with
      | Error _ as error -> error
@@ -365,6 +751,21 @@ let apply_existing (state : state) meta command =
          in
          let meta = Keeper_meta_contract.map_compaction_rt (fun _ -> compaction_rt) meta in
          Ok (with_meta state { meta with updated_at = result.updated_at }))
+  | Record_compaction_commit { trace_id; generation; commit_count; updated_at } ->
+    if
+      not (Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id)
+      || not (Int.equal meta.runtime.nonce generation)
+    then Error Identity_generation_mismatch
+    else if commit_count < 0
+    then Error (Invalid_delta "compaction commit count is negative")
+    else
+      let compaction_rt =
+        { meta.runtime.compaction_rt with
+          count = max meta.runtime.compaction_rt.count commit_count
+        }
+      in
+      let meta = Keeper_meta_contract.map_compaction_rt (fun _ -> compaction_rt) meta in
+      Ok (with_meta state { meta with updated_at })
   | Ack_message_scope { message_id; updated_at } ->
     let runtime = { meta.runtime with message_scope_ack_id = message_id } in
     Ok (with_meta state { meta with runtime; updated_at })
@@ -428,6 +829,7 @@ let error_to_string = function
   | Invalid_delta detail -> "invalid additive delta: " ^ detail
   | Keeper_identity_mismatch { expected; actual } ->
     Printf.sprintf "Keeper identity mismatch: expected=%s actual=%s" expected actual
+  | Identity_generation_mismatch -> "Keeper trace/generation identity changed"
   | Delete_while_running operation_id ->
     Printf.sprintf "cannot delete Keeper while turn %s is running" operation_id
 ;;

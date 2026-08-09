@@ -300,7 +300,6 @@ type keeper_meta = {
   (* Identity & concurrency *)
   keeper_id : Keeper_id.Uid.t option;
   oas_env : (string * string) list;
-  meta_version : int;
 }
 
 (** Stamp the current Keeper state as structurally corrupted and requiring

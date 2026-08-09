@@ -34,7 +34,10 @@ type error =
 
 type t =
   { db : Sqlite3.db
+  ; blobs : Keeper_operation_blob_store.t
+  ; lock : Stdlib.Mutex.t
   ; mutable closed : bool
+  ; mutable write_blocked : string option
   }
 
 let ( let* ) = Result.bind
@@ -75,6 +78,11 @@ let error_to_string = function
       (state_to_string state)
   | Store_error detail -> "Keeper operation store failure: " ^ detail
   | Integrity_error detail -> "Keeper operation store integrity failure: " ^ detail
+;;
+
+let blob_error stage error =
+  Integrity_error
+    (stage ^ ": " ^ Keeper_operation_blob_store.error_to_string error)
 ;;
 
 let sqlite_error db operation rc =
@@ -169,7 +177,7 @@ let database_user_version = 1L
 let database_file = "operations.sqlite3"
 
 let operations_table_sql =
-  "CREATE TABLE operations (queue_seq INTEGER PRIMARY KEY, operation_id TEXT UNIQUE NOT NULL CHECK (length(operation_id) = 69 AND substr(operation_id, 1, 5) = 'kop1:' AND substr(operation_id, 6) NOT GLOB '*[^0-9a-f]*'), kind TEXT NOT NULL CHECK (kind IN ('message', 'stimulus', 'autonomous')), source_ref TEXT NOT NULL CHECK (length(source_ref) > 0), submitter_ref TEXT NOT NULL CHECK (length(submitter_ref) > 0), state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'settled', 'cancelled', 'interrupted')), request_digest TEXT NOT NULL CHECK (length(request_digest) = 64 AND request_digest NOT GLOB '*[^0-9a-f]*'), input_ref TEXT NOT NULL CHECK (length(input_ref) = 71 AND substr(input_ref, 1, 7) = 'sha256:' AND substr(input_ref, 8) NOT GLOB '*[^0-9a-f]*'), base_state_ref TEXT, outcome_ref TEXT, next_state_ref TEXT, created_at REAL NOT NULL CHECK (created_at >= 0), started_at REAL, finished_at REAL, CHECK (base_state_ref IS NULL OR (length(base_state_ref) = 71 AND substr(base_state_ref, 1, 7) = 'sha256:' AND substr(base_state_ref, 8) NOT GLOB '*[^0-9a-f]*')), CHECK (outcome_ref IS NULL OR (length(outcome_ref) = 71 AND substr(outcome_ref, 1, 7) = 'sha256:' AND substr(outcome_ref, 8) NOT GLOB '*[^0-9a-f]*')), CHECK (next_state_ref IS NULL OR (length(next_state_ref) = 71 AND substr(next_state_ref, 1, 7) = 'sha256:' AND substr(next_state_ref, 8) NOT GLOB '*[^0-9a-f]*')), CHECK ((state = 'queued' AND started_at IS NULL AND finished_at IS NULL AND base_state_ref IS NULL AND outcome_ref IS NULL AND next_state_ref IS NULL) OR (state = 'running' AND started_at IS NOT NULL AND finished_at IS NULL AND outcome_ref IS NULL AND next_state_ref IS NULL) OR (state = 'settled' AND started_at IS NOT NULL AND finished_at IS NOT NULL AND outcome_ref IS NOT NULL) OR (state = 'cancelled' AND started_at IS NULL AND finished_at IS NOT NULL AND base_state_ref IS NULL AND outcome_ref IS NULL AND next_state_ref IS NULL) OR (state = 'interrupted' AND started_at IS NOT NULL AND finished_at IS NOT NULL AND outcome_ref IS NOT NULL AND next_state_ref IS NULL))) STRICT"
+  "CREATE TABLE operations (queue_seq INTEGER PRIMARY KEY, operation_id TEXT UNIQUE NOT NULL CHECK (length(operation_id) = 69 AND substr(operation_id, 1, 5) = 'kop1:' AND substr(operation_id, 6) NOT GLOB '*[^0-9a-f]*'), kind TEXT NOT NULL CHECK (kind IN ('message', 'stimulus', 'autonomous')), source_ref TEXT NOT NULL CHECK (length(source_ref) > 0), submitter_ref TEXT NOT NULL CHECK (length(submitter_ref) > 0), state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'settled', 'cancelled', 'interrupted')), request_digest TEXT NOT NULL CHECK (length(request_digest) = 64 AND request_digest NOT GLOB '*[^0-9a-f]*'), input_ref TEXT NOT NULL CHECK (length(input_ref) = 71 AND substr(input_ref, 1, 7) = 'sha256:' AND substr(input_ref, 8) NOT GLOB '*[^0-9a-f]*'), base_state_ref TEXT, outcome_ref TEXT, next_state_ref TEXT, created_at REAL NOT NULL CHECK (created_at >= 0), started_at REAL, finished_at REAL, CHECK (base_state_ref IS NULL OR (length(base_state_ref) = 71 AND substr(base_state_ref, 1, 7) = 'sha256:' AND substr(base_state_ref, 8) NOT GLOB '*[^0-9a-f]*')), CHECK (outcome_ref IS NULL OR (length(outcome_ref) = 71 AND substr(outcome_ref, 1, 7) = 'sha256:' AND substr(outcome_ref, 8) NOT GLOB '*[^0-9a-f]*')), CHECK (next_state_ref IS NULL OR (length(next_state_ref) = 71 AND substr(next_state_ref, 1, 7) = 'sha256:' AND substr(next_state_ref, 8) NOT GLOB '*[^0-9a-f]*')), CHECK ((state = 'queued' AND started_at IS NULL AND finished_at IS NULL AND base_state_ref IS NULL AND outcome_ref IS NULL AND next_state_ref IS NULL) OR (state = 'running' AND started_at IS NOT NULL AND finished_at IS NULL AND outcome_ref IS NULL AND next_state_ref IS NULL) OR (state = 'settled' AND started_at IS NOT NULL AND finished_at IS NOT NULL AND outcome_ref IS NOT NULL) OR (state = 'cancelled' AND started_at IS NULL AND finished_at IS NOT NULL AND base_state_ref IS NULL AND outcome_ref IS NOT NULL AND next_state_ref IS NULL) OR (state = 'interrupted' AND started_at IS NOT NULL AND finished_at IS NOT NULL AND outcome_ref IS NOT NULL AND next_state_ref IS NULL))) STRICT"
 ;;
 
 let deliveries_table_sql =
@@ -327,6 +335,7 @@ let initialize_database db path =
   in
   match body with
   | Error error ->
+    (* See the returned schema error; rollback is cleanup and cannot replace it. *)
     ignore (exec db ~operation:"rollback schema transaction" "ROLLBACK");
     Error error
   | Ok () ->
@@ -367,7 +376,139 @@ let read_schema_objects db =
        loop [])
 ;;
 
-let validate_database db =
+let canonical_of_persisted_bytes field bytes =
+  match Keeper_operation_request.Canonical_json.of_string bytes with
+  | Ok value
+    when String.equal
+           bytes
+           (Keeper_operation_request.Canonical_json.to_bytes value) -> Ok value
+  | Ok _ -> Error (Integrity_error (field ^ " is not canonical JSON"))
+  | Error error ->
+    Error
+      (Integrity_error
+         (field
+          ^ ": "
+          ^ Keeper_operation_request.Canonical_json.error_to_string error))
+;;
+
+let required_blob stage fetch reference =
+  match fetch reference with
+  | Error error -> Error (blob_error stage error)
+  | Ok None -> Error (Integrity_error (stage ^ " does not resolve to a blob"))
+  | Ok (Some payload) -> Ok payload
+;;
+
+let validate_optional_blob stage decode fetch value =
+  if String.equal value ""
+  then Ok ()
+  else
+    let* reference =
+      decode value
+      |> Result.map_error (fun detail -> Integrity_error (stage ^ ": " ^ detail))
+    in
+    let* _ = required_blob stage fetch reference in
+    Ok ()
+;;
+
+let validate_operation_row blobs stmt =
+  let* operation_id =
+    Keeper_operation_id.Operation_id.of_string (Sqlite3.column_text stmt 0)
+    |> Result.map_error (fun detail -> Integrity_error ("operation_id: " ^ detail))
+  in
+  let* kind = kind_of_string (Sqlite3.column_text stmt 1) in
+  let* source_json =
+    canonical_of_persisted_bytes "source_ref" (Sqlite3.column_text stmt 2)
+  in
+  let* source_ref =
+    Keeper_operation_request.Source_ref.of_canonical_json source_json
+    |> Result.map_error (fun detail -> Integrity_error detail)
+  in
+  let* submitter_json =
+    canonical_of_persisted_bytes "submitter_ref" (Sqlite3.column_text stmt 3)
+  in
+  let* submitter_ref =
+    Keeper_operation_request.Submitter_ref.of_canonical_json submitter_json
+    |> Result.map_error (fun detail -> Integrity_error detail)
+  in
+  let* () =
+    Keeper_operation_request.validate_persisted_identity
+      ~kind
+      ~source_ref
+      ~submitter_ref
+    |> Result.map_error (fun detail -> Integrity_error detail)
+  in
+  let request_digest = Sqlite3.column_text stmt 4 in
+  let* input_ref =
+    Keeper_operation_blob_store.Input_ref.of_string (Sqlite3.column_text stmt 5)
+    |> Result.map_error (fun detail -> Integrity_error ("input_ref: " ^ detail))
+  in
+  let* input =
+    required_blob
+      "input_ref"
+      (Keeper_operation_blob_store.fetch_input blobs)
+      input_ref
+  in
+  let* request =
+    Keeper_operation_request.make
+      ~operation_id
+      ~kind
+      ~source_ref
+      ~submitter_ref
+      ~input
+    |> Result.map_error (fun detail -> Integrity_error detail)
+  in
+  let* () =
+    if
+      String.equal
+        request_digest
+        (Keeper_operation_request.request_digest request)
+    then Ok ()
+    else Error (Integrity_error "request_digest does not match persisted request")
+  in
+  let optional_text index =
+    if Sqlite3.column_is_null stmt index then "" else Sqlite3.column_text stmt index
+  in
+  let* () =
+    validate_optional_blob
+      "base_state_ref"
+      Keeper_operation_blob_store.State_ref.of_string
+      (Keeper_operation_blob_store.fetch_state blobs)
+      (optional_text 6)
+  in
+  let* () =
+    validate_optional_blob
+      "outcome_ref"
+      Keeper_operation_blob_store.Outcome_ref.of_string
+      (Keeper_operation_blob_store.fetch_outcome blobs)
+      (optional_text 7)
+  in
+  validate_optional_blob
+    "next_state_ref"
+    Keeper_operation_blob_store.State_ref.of_string
+    (Keeper_operation_blob_store.fetch_state blobs)
+    (optional_text 8)
+;;
+
+let validate_operation_rows db blobs =
+  with_statement
+    db
+    ~operation:"validate operation rows"
+    "SELECT operation_id, kind, source_ref, submitter_ref, request_digest, input_ref, base_state_ref, outcome_ref, next_state_ref FROM operations ORDER BY queue_seq"
+    (fun stmt ->
+       let rec loop () =
+         let rc = Sqlite3.step stmt in
+         if rc = Sqlite3.Rc.DONE
+         then Ok ()
+         else if rc = Sqlite3.Rc.ROW
+         then (
+           let* () = validate_operation_row blobs stmt in
+           loop ())
+         else Error (Store_error (sqlite_error db "validate operation rows" rc))
+       in
+       loop ())
+;;
+
+let validate_database db blobs =
   let* application_id =
     single_int64 db ~operation:"read application id" "PRAGMA application_id"
   in
@@ -401,9 +542,9 @@ let validate_database db =
         let* integrity =
         single_text db ~operation:"run integrity check" "PRAGMA integrity_check"
         in
-        if String.equal integrity "ok"
-        then Ok ()
-        else Error (Integrity_error ("SQLite integrity_check: " ^ integrity))
+        if not (String.equal integrity "ok")
+        then Error (Integrity_error ("SQLite integrity_check: " ^ integrity))
+        else validate_operation_rows db blobs
 ;;
 
 let inspect_database_path path =
@@ -431,38 +572,54 @@ let close_db db =
 
 let open_or_create ~base_path ~keeper_runtime_dir =
   let path = Filename.concat keeper_runtime_dir database_file in
+  let inspect_runtime_dir () =
+    Fs_compat.inspect_owned_directory_chain
+      ~ownership_root:base_path
+      keeper_runtime_dir
+    |> Result.map_error (fun rejection ->
+      Integrity_error
+        (Fs_compat.owned_directory_chain_rejection_to_string rejection))
+  in
   try
-    Fs_compat.mkdir_p keeper_runtime_dir;
-    let* ownership =
-      Fs_compat.inspect_owned_directory_chain
-        ~ownership_root:base_path
-        keeper_runtime_dir
-      |> Result.map_error (fun rejection ->
-        Integrity_error
-          (Fs_compat.owned_directory_chain_rejection_to_string rejection))
-    in
+    let* ownership = inspect_runtime_dir () in
     let* () =
       match ownership with
       | Fs_compat.Owned_directory _ -> Ok ()
       | Fs_compat.Owned_directory_missing ->
-        Error (Store_error "Keeper runtime directory was not created")
+        Fs_compat.mkdir_p keeper_runtime_dir;
+        (match inspect_runtime_dir () with
+         | Ok (Fs_compat.Owned_directory _) -> Ok ()
+         | Ok Fs_compat.Owned_directory_missing ->
+           Error (Store_error "Keeper runtime directory was not created")
+         | Error _ as error -> error)
     in
     let* existed = inspect_database_path path in
+    let blobs =
+      Keeper_operation_blob_store.create ~base_path ~keeper_runtime_dir
+    in
     let db = Sqlite3.db_open ~mutex:`FULL path in
     let opened =
       if existed
       then
-        let* () = validate_database db in
+        let* () = validate_database db blobs in
         let* () = configure_connection db in
-        validate_database db
+        validate_database db blobs
       else
         let* () = configure_connection db in
         let* () = initialize_database db path in
-        validate_database db
+        validate_database db blobs
     in
     (match opened with
-     | Ok () -> Ok { db; closed = false }
+     | Ok () ->
+       Ok
+         { db
+         ; blobs
+         ; lock = Stdlib.Mutex.create ()
+         ; closed = false
+         ; write_blocked = None
+         }
      | Error error ->
+       (* See the returned validation error; close is cleanup for the rejected handle. *)
        ignore (close_db db);
        Error error)
   with
@@ -478,12 +635,30 @@ let ensure_open t =
   if t.closed then Error (Store_error "operation store is closed") else Ok ()
 ;;
 
+let ensure_writable t =
+  let* () = ensure_open t in
+  match t.write_blocked with
+  | None -> Ok ()
+  | Some detail ->
+    Error
+      (Store_error
+         ("operation store writes are blocked after uncertain durable state: "
+          ^ detail))
+;;
+
+let block_writes t error =
+  t.write_blocked <- Some (error_to_string error)
+;;
+
+let with_store_lock t f = Stdlib.Mutex.protect t.lock f
+
 let close t =
-  if t.closed
-  then Ok ()
-  else (
-    t.closed <- true;
-    close_db t.db)
+  with_store_lock t (fun () ->
+    if t.closed
+    then Ok ()
+    else (
+      t.closed <- true;
+      close_db t.db))
 ;;
 
 let nullable_text stmt index =
@@ -495,17 +670,7 @@ let nullable_float stmt index =
 ;;
 
 let parse_canonical field bytes =
-  match Keeper_operation_request.Canonical_json.of_string bytes with
-  | Ok value
-    when String.equal bytes (Keeper_operation_request.Canonical_json.to_bytes value) ->
-    Ok value
-  | Ok _ -> Error (Integrity_error (field ^ " is not canonical JSON"))
-  | Error error ->
-    Error
-      (Integrity_error
-         (field
-          ^ ": "
-          ^ Keeper_operation_request.Canonical_json.error_to_string error))
+  canonical_of_persisted_bytes field bytes
 ;;
 
 let parse_ref field decode = function
@@ -524,6 +689,21 @@ let operation_of_row stmt =
   let* kind = kind_of_string (Sqlite3.column_text stmt 2) in
   let* source_ref = parse_canonical "source_ref" (Sqlite3.column_text stmt 3) in
   let* submitter_ref = parse_canonical "submitter_ref" (Sqlite3.column_text stmt 4) in
+  let* typed_source =
+    Keeper_operation_request.Source_ref.of_canonical_json source_ref
+    |> Result.map_error (fun detail -> Integrity_error detail)
+  in
+  let* typed_submitter =
+    Keeper_operation_request.Submitter_ref.of_canonical_json submitter_ref
+    |> Result.map_error (fun detail -> Integrity_error detail)
+  in
+  let* () =
+    Keeper_operation_request.validate_persisted_identity
+      ~kind
+      ~source_ref:typed_source
+      ~submitter_ref:typed_submitter
+    |> Result.map_error (fun detail -> Integrity_error detail)
+  in
   let* state = state_of_string (Sqlite3.column_text stmt 5) in
   let* input_ref =
     Keeper_operation_blob_store.Input_ref.of_string (Sqlite3.column_text stmt 7)
@@ -569,7 +749,7 @@ let select_columns =
   "queue_seq, operation_id, kind, source_ref, submitter_ref, state, request_digest, input_ref, base_state_ref, outcome_ref, next_state_ref, created_at, started_at, finished_at"
 ;;
 
-let find t operation_id =
+let find_unlocked t operation_id =
   let* () = ensure_open t in
   with_statement
     t.db
@@ -597,6 +777,10 @@ let find t operation_id =
        else Error (Store_error (sqlite_error t.db "find operation" rc)))
 ;;
 
+let find t operation_id =
+  with_store_lock t (fun () -> find_unlocked t operation_id)
+;;
+
 let begin_immediate t = exec t.db ~operation:"begin operation transaction" "BEGIN IMMEDIATE"
 let rollback t = exec t.db ~operation:"rollback operation transaction" "ROLLBACK"
 let commit t = exec t.db ~operation:"commit operation transaction" "COMMIT"
@@ -605,10 +789,26 @@ type admission =
   | Accepted of operation
   | Replayed of operation
 
-let exact_request_row request input_ref row =
-  String.equal row.request_digest (Keeper_operation_request.request_digest request)
-  && Keeper_operation_blob_store.Input_ref.equal row.input_ref input_ref
-  && row.kind = Keeper_operation_request.kind request
+let canonical_equal left right =
+  String.equal
+    (Keeper_operation_request.Canonical_json.to_bytes left)
+    (Keeper_operation_request.Canonical_json.to_bytes right)
+;;
+
+let exact_request_row t request row =
+  if
+    not
+      (String.equal
+         row.request_digest
+         (Keeper_operation_request.request_digest request))
+    || row.kind <> Keeper_operation_request.kind request
+  then Ok false
+  else
+    match Keeper_operation_blob_store.fetch_input t.blobs row.input_ref with
+    | Error error -> Error (blob_error "input_ref" error)
+    | Ok None -> Error (Integrity_error "input_ref does not resolve to a blob")
+    | Ok (Some input) ->
+      Ok (canonical_equal input (Keeper_operation_request.input request))
 ;;
 
 let insert_queued t ~now ~request ~input_ref =
@@ -652,38 +852,63 @@ let insert_queued t ~now ~request ~input_ref =
        bind_all 1 values)
 ;;
 
-let admit t ~now ~request ~input_ref =
-  let* () = ensure_open t in
+let admit_unlocked t ~now ~request =
+  let* () = ensure_writable t in
   let* () = validate_time "created_at" now in
   let operation_id = Keeper_operation_request.operation_id request in
-  let* () = begin_immediate t in
-  match find t operation_id with
-  | Error error ->
-    ignore (rollback t);
-    Error error
+  match find_unlocked t operation_id with
+  | Error _ as error -> error
   | Ok (Some existing) ->
-    ignore (rollback t);
-    if exact_request_row request input_ref existing
-    then Ok (Replayed existing)
-    else Error (Identity_conflict operation_id)
+    let* exact = exact_request_row t request existing in
+    if exact then Ok (Replayed existing) else Error (Identity_conflict operation_id)
   | Ok None ->
-    (match insert_queued t ~now ~request ~input_ref with
+    let* input_ref =
+      Keeper_operation_blob_store.put_input
+        t.blobs
+        (Keeper_operation_request.input request)
+      |> Result.map_error (blob_error "publish input blob")
+    in
+    let* () = begin_immediate t in
+    (match find_unlocked t operation_id with
      | Error error ->
+       (* See the returned read error; rollback only abandons this admission attempt. *)
        ignore (rollback t);
        Error error
-     | Ok () ->
-       (match commit t with
-        | Error commit_error ->
+     | Ok (Some existing) ->
+       (* See exact replay handling below; rollback closes the unused transaction. *)
+       ignore (rollback t);
+       let* exact = exact_request_row t request existing in
+       if exact then Ok (Replayed existing) else Error (Identity_conflict operation_id)
+     | Ok None ->
+       (match insert_queued t ~now ~request ~input_ref with
+        | Error error ->
+          (* See the returned insert error; rollback only abandons this admission attempt. *)
           ignore (rollback t);
-          (match find t operation_id with
-           | Ok (Some row) when exact_request_row request input_ref row ->
-             Ok (Accepted row)
-           | Ok _ | Error _ -> Error commit_error)
+          Error error
         | Ok () ->
-          (match find t operation_id with
-           | Ok (Some row) -> Ok (Accepted row)
-           | Ok None -> Error (Integrity_error "accepted operation disappeared")
-           | Error _ as error -> error)))
+          (match commit t with
+           | Error commit_error ->
+             (* See exact read-back below; commit outcome, not rollback status, is authoritative. *)
+             ignore (rollback t);
+             (match find_unlocked t operation_id with
+              | Ok (Some row) ->
+                (match exact_request_row t request row with
+                 | Ok true -> Ok (Accepted row)
+                 | Ok false | Error _ ->
+                   block_writes t commit_error;
+                   Error commit_error)
+              | Ok None | Error _ ->
+                block_writes t commit_error;
+                Error commit_error)
+           | Ok () ->
+             (match find_unlocked t operation_id with
+              | Ok (Some row) -> Ok (Accepted row)
+              | Ok None -> Error (Integrity_error "accepted operation disappeared")
+              | Error _ as error -> error))))
+;;
+
+let admit t ~now ~request =
+  with_store_lock t (fun () -> admit_unlocked t ~now ~request)
 ;;
 
 let running_count t =
@@ -719,9 +944,33 @@ let first_queued_id t =
        else Error (Store_error (sqlite_error t.db "select queued operation" rc)))
 ;;
 
-let start_next t ~now ~base_state_ref =
-  let* () = ensure_open t in
+let publish_optional_state t ~stage = function
+  | None -> Ok None
+  | Some state ->
+    Keeper_operation_blob_store.put_state t.blobs state
+    |> Result.map Option.some
+    |> Result.map_error (blob_error stage)
+;;
+
+let same_optional_state_ref left right =
+  match left, right with
+  | None, None -> true
+  | Some left, Some right -> Keeper_operation_blob_store.State_ref.equal left right
+  | None, Some _ | Some _, None -> false
+;;
+
+let exact_running_row ~now ~base_state_ref row =
+  row.state = Running
+  && Option.exists (Float.equal now) row.started_at
+  && same_optional_state_ref base_state_ref row.base_state_ref
+;;
+
+let start_next_unlocked t ~now ~base_state =
+  let* () = ensure_writable t in
   let* () = validate_time "started_at" now in
+  let* base_state_ref =
+    publish_optional_state t ~stage:"publish base state blob" base_state
+  in
   let* () = begin_immediate t in
   let body =
     let* running = running_count t in
@@ -764,14 +1013,32 @@ let start_next t ~now ~base_state_ref =
   in
   match body with
   | Error error ->
+    (* See the returned transition error; rollback only abandons this start attempt. *)
     ignore (rollback t);
     Error error
   | Ok None ->
-    let* () = commit t in
-    Ok None
+    (match commit t with
+     | Ok () -> Ok None
+     | Error error ->
+       (* See the returned commit error; no operation row was selected to read back. *)
+       ignore (rollback t);
+       Error error)
   | Ok (Some operation_id) ->
-    let* () = commit t in
-    find t operation_id
+    (match commit t with
+     | Ok () -> find_unlocked t operation_id
+     | Error commit_error ->
+       (* See exact Running read-back below; durable row state is authoritative. *)
+       ignore (rollback t);
+       (match find_unlocked t operation_id with
+        | Ok (Some row) when exact_running_row ~now ~base_state_ref row ->
+          Ok (Some row)
+        | Ok _ | Error _ ->
+          block_writes t commit_error;
+          Error commit_error))
+;;
+
+let start_next t ~now ~base_state =
+  with_store_lock t (fun () -> start_next_unlocked t ~now ~base_state)
 ;;
 
 let update_terminal t ~operation_id ~from_state ~to_state ~now ~outcome_ref ~next_state_ref =
@@ -838,14 +1105,41 @@ let update_terminal t ~operation_id ~from_state ~to_state ~now ~outcome_ref ~nex
        else Error (Integrity_error "terminal operation compare-and-update failed"))
 ;;
 
-let cancel_queued t ~now operation_id =
-  let* () = ensure_open t in
+let cancellation_evidence operation_id =
+  Keeper_operation_request.Canonical_json.of_yojson
+    (`Assoc
+       [ "kind", `String "cancelled"
+       ; ( "operation_id"
+         , `String
+             (Keeper_operation_id.Operation_id.to_string operation_id) )
+       ])
+  |> Result.map_error (fun error ->
+    Integrity_error
+      (Keeper_operation_request.Canonical_json.error_to_string error))
+;;
+
+let exact_terminal_row ~target_state ~now ~outcome_ref ~next_state_ref row =
+  row.state = target_state
+  && Option.exists
+       (Keeper_operation_blob_store.Outcome_ref.equal outcome_ref)
+       row.outcome_ref
+  && same_optional_state_ref next_state_ref row.next_state_ref
+  && Option.exists (Float.equal now) row.finished_at
+;;
+
+let cancel_queued_unlocked t ~now operation_id =
+  let* () = ensure_writable t in
   let* () = validate_time "finished_at" now in
-  let* existing = find t operation_id in
+  let* existing = find_unlocked t operation_id in
   match existing with
   | None -> Error (Invalid_input "operation does not exist")
   | Some ({ state = Cancelled; _ } as operation) -> Ok operation
   | Some { state = Queued; _ } ->
+    let* evidence = cancellation_evidence operation_id in
+    let* outcome_ref =
+      Keeper_operation_blob_store.put_outcome t.blobs evidence
+      |> Result.map_error (blob_error "publish cancellation evidence")
+    in
     let* () = begin_immediate t in
     (match
        update_terminal
@@ -854,49 +1148,89 @@ let cancel_queued t ~now operation_id =
          ~from_state:Queued
          ~to_state:Cancelled
          ~now
-         ~outcome_ref:None
+         ~outcome_ref:(Some outcome_ref)
          ~next_state_ref:None
      with
      | Error error ->
+       (* See the returned transition error; rollback only abandons this cancellation. *)
        ignore (rollback t);
        Error error
      | Ok () ->
-       let* () = commit t in
-       (match find t operation_id with
-        | Ok (Some operation) -> Ok operation
-        | Ok None -> Error (Integrity_error "cancelled operation disappeared")
-        | Error _ as error -> error))
+       (match commit t with
+        | Ok () ->
+          (match find_unlocked t operation_id with
+           | Ok (Some operation) -> Ok operation
+           | Ok None -> Error (Integrity_error "cancelled operation disappeared")
+           | Error _ as error -> error)
+        | Error commit_error ->
+          (* See exact Cancelled read-back below; durable row state is authoritative. *)
+          ignore (rollback t);
+          (match find_unlocked t operation_id with
+           | Ok (Some row)
+             when exact_terminal_row
+                    ~target_state:Cancelled
+                    ~now
+                    ~outcome_ref
+                    ~next_state_ref:None
+                    row -> Ok row
+           | Ok _ | Error _ ->
+             block_writes t commit_error;
+             Error commit_error)))
   | Some ({ state = (Running | Settled | Interrupted); _ } as operation) ->
     Error (State_conflict { operation_id; state = operation.state })
 ;;
 
-let finish_running t ~now ~operation_id ~target_state ~outcome_ref ~next_state_ref =
-  let* () = ensure_open t in
+let cancel_queued t ~now operation_id =
+  with_store_lock t (fun () -> cancel_queued_unlocked t ~now operation_id)
+;;
+
+let stored_terminal_payload_matches t ~outcome ~next_state operation =
+  match operation.outcome_ref with
+  | None -> Error (Integrity_error "terminal operation has no outcome_ref")
+  | Some outcome_ref ->
+    let* stored_outcome =
+      match Keeper_operation_blob_store.fetch_outcome t.blobs outcome_ref with
+      | Error error -> Error (blob_error "outcome_ref" error)
+      | Ok None -> Error (Integrity_error "outcome_ref does not resolve to a blob")
+      | Ok (Some payload) -> Ok payload
+    in
+    if not (canonical_equal stored_outcome outcome)
+    then Ok false
+    else
+      match next_state, operation.next_state_ref with
+      | None, None -> Ok true
+      | Some expected, Some state_ref ->
+        (match Keeper_operation_blob_store.fetch_state t.blobs state_ref with
+         | Error error -> Error (blob_error "next_state_ref" error)
+         | Ok None ->
+           Error (Integrity_error "next_state_ref does not resolve to a blob")
+         | Ok (Some actual) -> Ok (canonical_equal expected actual))
+      | None, Some _ | Some _, None -> Ok false
+;;
+
+let finish_running_unlocked t ~now ~operation_id ~target_state ~outcome ~next_state =
+  let* () = ensure_writable t in
   let* () = validate_time "finished_at" now in
-  let* existing = find t operation_id in
+  let* existing = find_unlocked t operation_id in
   match existing with
   | None -> Error (Invalid_input "operation does not exist")
   | Some operation ->
     if operation.state = target_state
-    then
-      let same_outcome =
-        Option.exists
-          (Keeper_operation_blob_store.Outcome_ref.equal outcome_ref)
-          operation.outcome_ref
+    then (
+      let* exact =
+        stored_terminal_payload_matches t ~outcome ~next_state operation
       in
-      let same_next =
-        match next_state_ref, operation.next_state_ref with
-        | None, None -> true
-        | Some left, Some right ->
-          Keeper_operation_blob_store.State_ref.equal left right
-        | None, Some _ | Some _, None -> false
-      in
-      if same_outcome && same_next
-      then Ok operation
-      else Error (State_conflict { operation_id; state = operation.state })
+      if exact then Ok operation else Error (State_conflict { operation_id; state = operation.state }))
     else
       match operation.state with
       | Running ->
+        let* outcome_ref =
+          Keeper_operation_blob_store.put_outcome t.blobs outcome
+          |> Result.map_error (blob_error "publish terminal outcome")
+        in
+        let* next_state_ref =
+          publish_optional_state t ~stage:"publish next state blob" next_state
+        in
         let* () = begin_immediate t in
         (match
            update_terminal
@@ -909,40 +1243,58 @@ let finish_running t ~now ~operation_id ~target_state ~outcome_ref ~next_state_r
              ~next_state_ref
          with
          | Error error ->
+           (* See the returned transition error; rollback only abandons this settlement. *)
            ignore (rollback t);
            Error error
          | Ok () ->
-           let* () = commit t in
-           (match find t operation_id with
-            | Ok (Some terminal) -> Ok terminal
-            | Ok None -> Error (Integrity_error "terminal operation disappeared")
-            | Error _ as error -> error))
+           (match commit t with
+            | Ok () ->
+              (match find_unlocked t operation_id with
+               | Ok (Some terminal) -> Ok terminal
+               | Ok None -> Error (Integrity_error "terminal operation disappeared")
+               | Error _ as error -> error)
+            | Error commit_error ->
+              (* See exact terminal read-back below; durable row state is authoritative. *)
+              ignore (rollback t);
+              (match find_unlocked t operation_id with
+               | Ok (Some row)
+                 when exact_terminal_row
+                        ~target_state
+                        ~now
+                        ~outcome_ref
+                        ~next_state_ref
+                        row -> Ok row
+               | Ok _ | Error _ ->
+                 block_writes t commit_error;
+                 Error commit_error)))
       | Queued | Settled | Cancelled | Interrupted ->
         Error (State_conflict { operation_id; state = operation.state })
 ;;
 
-let interrupt_running t ~now ~operation_id ~evidence_ref =
-  finish_running
-    t
-    ~now
-    ~operation_id
-    ~target_state:Interrupted
-    ~outcome_ref:evidence_ref
-    ~next_state_ref:None
+let interrupt_running t ~now ~operation_id ~evidence =
+  with_store_lock t (fun () ->
+    finish_running_unlocked
+      t
+      ~now
+      ~operation_id
+      ~target_state:Interrupted
+      ~outcome:evidence
+      ~next_state:None)
 ;;
 
-let settle t ~now ~operation_id ~outcome_ref ~next_state_ref =
-  finish_running
-    t
-    ~now
-    ~operation_id
-    ~target_state:Settled
-    ~outcome_ref
-    ~next_state_ref
+let settle t ~now ~operation_id ~outcome ~next_state =
+  with_store_lock t (fun () ->
+    finish_running_unlocked
+      t
+      ~now
+      ~operation_id
+      ~target_state:Settled
+      ~outcome
+      ~next_state)
 ;;
 
-let set_paused t value =
-  let* () = ensure_open t in
+let set_paused_unlocked t value =
+  let* () = ensure_writable t in
   let* () =
     with_statement
       t.db
@@ -964,7 +1316,11 @@ let set_paused t value =
   else Error (Integrity_error "keeper_control contains an invalid row count")
 ;;
 
-let paused t =
+let set_paused t value =
+  with_store_lock t (fun () -> set_paused_unlocked t value)
+;;
+
+let paused_unlocked t =
   let* () = ensure_open t in
   let* value =
     single_int64
@@ -979,7 +1335,13 @@ let paused t =
   else Error (Integrity_error "keeper_control.paused is outside its domain")
 ;;
 
-let count_operations t =
+let paused t = with_store_lock t (fun () -> paused_unlocked t)
+
+let count_operations_unlocked t =
   let* () = ensure_open t in
   single_int64 t.db ~operation:"count operations" "SELECT COUNT(*) FROM operations"
+;;
+
+let count_operations t =
+  with_store_lock t (fun () -> count_operations_unlocked t)
 ;;

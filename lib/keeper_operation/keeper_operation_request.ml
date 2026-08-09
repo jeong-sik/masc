@@ -116,6 +116,40 @@ let valid_identity ~field value =
   else Ok value
 ;;
 
+let assoc_fields ~surface canonical =
+  match Canonical_json.to_yojson canonical with
+  | `Assoc fields -> Ok fields
+  | _ -> Error (surface ^ " must be an object")
+;;
+
+let reject_unknown_fields ~surface ~allowed fields =
+  match List.find_opt (fun (field, _) -> not (List.mem field allowed)) fields with
+  | None -> Ok ()
+  | Some (field, _) ->
+    Error (Printf.sprintf "%s contains unsupported field %s" surface field)
+;;
+
+let required_string ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`String value) -> valid_identity ~field:(surface ^ "." ^ field) value
+  | Some _ -> Error (surface ^ "." ^ field ^ " must be a string")
+  | None -> Error (surface ^ "." ^ field ^ " is required")
+;;
+
+let required_nonnegative_int ~surface field fields =
+  match List.assoc_opt field fields with
+  | Some (`Int value) when value >= 0 -> Ok value
+  | Some (`Int _) -> Error (surface ^ "." ^ field ^ " must be non-negative")
+  | Some _ -> Error (surface ^ "." ^ field ^ " must be an integer")
+  | None -> Error (surface ^ "." ^ field ^ " is required")
+;;
+
+let required_operation_id ~surface field fields =
+  let* value = required_string ~surface field fields in
+  Keeper_operation_id.Operation_id.of_string value
+  |> Result.map_error (fun detail -> surface ^ "." ^ field ^ ": " ^ detail)
+;;
+
 module Source_ref = struct
   type t =
     | Operator_message of { request_id : string }
@@ -217,6 +251,88 @@ module Source_ref = struct
     let* json = json in
     Canonical_json.of_yojson json |> map_error Canonical_json.error_to_string
   ;;
+
+  let of_canonical_json canonical =
+    let surface = "keeper_operation.source_ref" in
+    let* fields = assoc_fields ~surface canonical in
+    let* kind = required_string ~surface "kind" fields in
+    match kind with
+    | "operator_message" ->
+      let* () =
+        reject_unknown_fields ~surface ~allowed:[ "kind"; "request_id" ] fields
+      in
+      let* request_id = required_string ~surface "request_id" fields in
+      Ok (Operator_message { request_id })
+    | "discord_message" ->
+      let* () =
+        reject_unknown_fields
+          ~surface
+          ~allowed:[ "kind"; "guild_id"; "channel_id"; "message_id" ]
+          fields
+      in
+      let* guild_id = required_string ~surface "guild_id" fields in
+      let* channel_id = required_string ~surface "channel_id" fields in
+      let* message_id = required_string ~surface "message_id" fields in
+      Ok (Discord_message { guild_id; channel_id; message_id })
+    | "slack_message" ->
+      let* () =
+        reject_unknown_fields
+          ~surface
+          ~allowed:[ "kind"; "team_id"; "channel_id"; "message_ts" ]
+          fields
+      in
+      let* team_id = required_string ~surface "team_id" fields in
+      let* channel_id = required_string ~surface "channel_id" fields in
+      let* message_ts = required_string ~surface "message_ts" fields in
+      Ok (Slack_message { team_id; channel_id; message_ts })
+    | "keeper_message" ->
+      let* () =
+        reject_unknown_fields
+          ~surface
+          ~allowed:
+            [ "kind"
+            ; "keeper_name"
+            ; "causing_operation_id"
+            ; "tool_call_id"
+            ; "ordinal"
+            ]
+          fields
+      in
+      let* keeper_name = required_string ~surface "keeper_name" fields in
+      let* causing_operation_id =
+        required_operation_id ~surface "causing_operation_id" fields
+      in
+      let* tool_call_id = required_string ~surface "tool_call_id" fields in
+      let* ordinal = required_nonnegative_int ~surface "ordinal" fields in
+      Ok
+        (Keeper_message
+           { keeper_name; causing_operation_id; tool_call_id; ordinal })
+    | "event" ->
+      let* () =
+        reject_unknown_fields ~surface ~allowed:[ "kind"; "event_id" ] fields
+      in
+      let* event_id = required_string ~surface "event_id" fields in
+      Ok (Event { event_id })
+    | "continuation" ->
+      let* () =
+        reject_unknown_fields
+          ~surface
+          ~allowed:[ "kind"; "causal_parent_operation_id"; "delta_ref" ]
+          fields
+      in
+      let* causal_parent_operation_id =
+        required_operation_id ~surface "causal_parent_operation_id" fields
+      in
+      let* delta_ref = required_string ~surface "delta_ref" fields in
+      Ok (Continuation { causal_parent_operation_id; delta_ref })
+    | "autonomous_candidate" ->
+      let* () =
+        reject_unknown_fields ~surface ~allowed:[ "kind"; "candidate_id" ] fields
+      in
+      let* candidate_id = required_string ~surface "candidate_id" fields in
+      Ok (Autonomous_candidate { candidate_id })
+    | other -> Error (Printf.sprintf "%s.kind %S is unknown" surface other)
+  ;;
 end
 
 module Submitter_ref = struct
@@ -260,6 +376,40 @@ module Submitter_ref = struct
     let* json = json in
     Canonical_json.of_yojson json |> map_error Canonical_json.error_to_string
   ;;
+
+  let of_canonical_json canonical =
+    let surface = "keeper_operation.submitter_ref" in
+    let* fields = assoc_fields ~surface canonical in
+    let* kind = required_string ~surface "kind" fields in
+    match kind with
+    | "operator" ->
+      let* () =
+        reject_unknown_fields ~surface ~allowed:[ "kind"; "principal_id" ] fields
+      in
+      let* principal_id = required_string ~surface "principal_id" fields in
+      Ok (Operator { principal_id })
+    | "connector" ->
+      let* () =
+        reject_unknown_fields
+          ~surface
+          ~allowed:[ "kind"; "authenticated_identity" ]
+          fields
+      in
+      let* authenticated_identity =
+        required_string ~surface "authenticated_identity" fields
+      in
+      Ok (Connector { authenticated_identity })
+    | "keeper" ->
+      let* () =
+        reject_unknown_fields ~surface ~allowed:[ "kind"; "keeper_name" ] fields
+      in
+      let* keeper_name = required_string ~surface "keeper_name" fields in
+      Ok (Keeper { keeper_name })
+    | "system" ->
+      let* () = reject_unknown_fields ~surface ~allowed:[ "kind" ] fields in
+      Ok System
+    | other -> Error (Printf.sprintf "%s.kind %S is unknown" surface other)
+  ;;
 end
 
 type t =
@@ -284,11 +434,38 @@ let source_matches_kind kind source =
     false
 ;;
 
-let make ~operation_id ~kind ~source_ref ~submitter_ref ~input =
-  let open Result in
+let validate_persisted_identity ~kind ~source_ref ~submitter_ref =
   if not (source_matches_kind kind source_ref)
   then Error "operation kind does not match its typed source"
   else
+    let mismatch () =
+      Error "operation source and authenticated submitter do not match"
+    in
+    match source_ref with
+    | Source_ref.Operator_message _ ->
+      (match submitter_ref with
+       | Submitter_ref.Operator _ -> Ok ()
+       | Connector _ | Keeper _ | System -> mismatch ())
+    | Discord_message _ | Slack_message _ ->
+      (match submitter_ref with
+       | Submitter_ref.Connector _ -> Ok ()
+       | Operator _ | Keeper _ | System -> mismatch ())
+    | Keeper_message { keeper_name = source_keeper; _ } ->
+      (match submitter_ref with
+       | Submitter_ref.Keeper { keeper_name = submitter_keeper }
+         when String.equal source_keeper submitter_keeper -> Ok ()
+       | Keeper _ | Operator _ | Connector _ | System -> mismatch ())
+    | Event _ | Continuation _ | Autonomous_candidate _ ->
+      (match submitter_ref with
+       | Submitter_ref.System -> Ok ()
+       | Operator _ | Connector _ | Keeper _ -> mismatch ())
+;;
+
+let make ~operation_id ~kind ~source_ref ~submitter_ref ~input =
+  let open Result in
+  match validate_persisted_identity ~kind ~source_ref ~submitter_ref with
+  | Error _ as error -> error
+  | Ok () ->
     let* source_json = Source_ref.to_canonical_json source_ref in
     let* submitter_json = Submitter_ref.to_canonical_json submitter_ref in
     let envelope =

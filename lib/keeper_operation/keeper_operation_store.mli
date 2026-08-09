@@ -51,7 +51,6 @@ val admit
   :  t
   -> now:float
   -> request:Keeper_operation_request.t
-  -> input_ref:Keeper_operation_blob_store.Input_ref.t
   -> (admission, error) result
 
 val find
@@ -62,7 +61,7 @@ val find
 val start_next
   :  t
   -> now:float
-  -> base_state_ref:Keeper_operation_blob_store.State_ref.t option
+  -> base_state:Keeper_operation_request.Canonical_json.t option
   -> (operation option, error) result
 
 val cancel_queued
@@ -75,15 +74,15 @@ val interrupt_running
   :  t
   -> now:float
   -> operation_id:Keeper_operation_id.Operation_id.t
-  -> evidence_ref:Keeper_operation_blob_store.Outcome_ref.t
+  -> evidence:Keeper_operation_request.Canonical_json.t
   -> (operation, error) result
 
 val settle
   :  t
   -> now:float
   -> operation_id:Keeper_operation_id.Operation_id.t
-  -> outcome_ref:Keeper_operation_blob_store.Outcome_ref.t
-  -> next_state_ref:Keeper_operation_blob_store.State_ref.t option
+  -> outcome:Keeper_operation_request.Canonical_json.t
+  -> next_state:Keeper_operation_request.Canonical_json.t option
   -> (operation, error) result
 
 val set_paused : t -> bool -> (unit, error) result

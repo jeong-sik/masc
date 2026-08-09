@@ -112,16 +112,25 @@ let read_exact t path =
 
 let ensure_shard t path =
   let shard = Filename.dirname path in
+  let inspect () =
+    Fs_compat.inspect_owned_directory_chain ~ownership_root:t.base_path shard
+  in
+  let rejection error =
+    Error
+      (Filesystem_error
+         (Fs_compat.owned_directory_chain_rejection_to_string error))
+  in
   try
-    Fs_compat.mkdir_p shard;
-    match Fs_compat.inspect_owned_directory_chain ~ownership_root:t.base_path shard with
+    match inspect () with
+    | Error error -> rejection error
     | Ok (Fs_compat.Owned_directory _) -> Ok ()
     | Ok Fs_compat.Owned_directory_missing ->
-      Error (Filesystem_error ("blob shard was not created: " ^ shard))
-    | Error rejection ->
-      Error
-        (Filesystem_error
-           (Fs_compat.owned_directory_chain_rejection_to_string rejection))
+      Fs_compat.mkdir_p shard;
+      (match inspect () with
+       | Error error -> rejection error
+       | Ok (Fs_compat.Owned_directory _) -> Ok ()
+       | Ok Fs_compat.Owned_directory_missing ->
+         Error (Filesystem_error ("blob shard was not created: " ^ shard)))
   with
   | Sys_error detail -> Error (Filesystem_error detail)
   | Unix.Unix_error (code, operation, argument) ->

@@ -47,6 +47,7 @@ module Source_ref : sig
     | Autonomous_candidate of { candidate_id : string }
 
   val to_canonical_json : t -> (Canonical_json.t, string) result
+  val of_canonical_json : Canonical_json.t -> (t, string) result
 end
 
 module Submitter_ref : sig
@@ -57,7 +58,14 @@ module Submitter_ref : sig
     | System
 
   val to_canonical_json : t -> (Canonical_json.t, string) result
+  val of_canonical_json : Canonical_json.t -> (t, string) result
 end
+
+val validate_persisted_identity
+  :  kind:kind
+  -> source_ref:Source_ref.t
+  -> submitter_ref:Submitter_ref.t
+  -> (unit, string) result
 
 type t
 

@@ -1,10 +1,5 @@
-type error_kind =
-  | Json_parse
-  | Protocol
-
 type error =
-  { kind : error_kind
-  ; stage : string
+  { stage : string
   ; detail : string
   }
 
@@ -20,13 +15,12 @@ type dispatch =
 
 type message =
   { method_name : string
-  ; request_id : Yojson.Safe.t option
+  ; request_id : Mcp_transport_protocol.request_id option
   ; params : Yojson.Safe.t
   }
 
 let ( let* ) = Result.bind
-let error stage detail = Error { kind = Protocol; stage; detail }
-let json_parse_error stage detail = Error { kind = Json_parse; stage; detail }
+let error stage detail = Error { stage; detail }
 
 let rec validate_message_value ~stage ~path = function
   | `Assoc fields ->
@@ -68,13 +62,6 @@ let reject_unknown_fields ~stage ~allowed fields =
   | Some (name, _) -> error stage (Printf.sprintf "unknown field %S" name)
 ;;
 
-let parse_message stage raw_message =
-  try Ok (Yojson.Safe.from_string raw_message) with
-  | Yojson.Json_error detail -> json_parse_error stage ("invalid JSON: " ^ detail)
-  | Stack_overflow -> json_parse_error stage "JSON nesting exceeds parser limits"
-  | Failure detail -> json_parse_error stage ("invalid JSON: " ^ detail)
-;;
-
 let assoc_at stage = function
   | `Assoc fields -> Ok fields
   | _ -> error stage "expected an object"
@@ -87,30 +74,29 @@ let required_string stage name fields =
   | None -> error stage (Printf.sprintf "missing field %S" name)
 ;;
 
-let response ~id result =
-  `Assoc [ "jsonrpc", `String "2.0"; "id", id; "result", result ]
-;;
-
-let error_response ~id ~code message =
-  `Assoc
-    [ "jsonrpc", `String "2.0"
-    ; "id", id
-    ; "error", `Assoc [ "code", `Int code; "message", `String message ]
-    ]
-;;
-
 let request_id stage = function
-  | `String id when String.trim id <> "" -> Ok (`String id, id)
-  | `Int id -> Ok (`Int id, string_of_int id)
-  | _ -> error stage "request id must be a non-empty string or integer"
+  | id ->
+    (match Mcp_transport_protocol.request_id_of_yojson id with
+     | Error request_id_error ->
+       error
+         stage
+         (Mcp_transport_protocol.request_id_error_to_string request_id_error)
+     | Ok request_id ->
+       let json = Mcp_transport_protocol.request_id_to_yojson request_id in
+       let* call_id =
+         match json with
+         | `String value | `Intlit value -> Ok value
+         | _ -> error stage "typed request id projected to an invalid JSON value"
+       in
+       Ok (request_id, json, call_id))
 ;;
 
 let request_id_opt stage fields =
   match List.assoc_opt "id" fields with
   | None -> Ok None
   | Some id ->
-    let* id, _call_id = request_id stage id in
-    Ok (Some id)
+    let* request_id, _json, _call_id = request_id stage id in
+    Ok (Some request_id)
 ;;
 
 let params_object stage fields =
@@ -121,21 +107,22 @@ let params_object stage fields =
 ;;
 
 let protocol_version params =
-  let supported = [ "2025-11-25"; "2025-06-18"; "2025-03-26"; "2024-11-05" ] in
-  match params with
-  | `Assoc fields ->
-    (match List.assoc_opt "protocolVersion" fields with
-     | Some (`String requested) when List.mem requested supported -> Ok requested
-     | Some (`String _) -> Ok "2025-11-25"
-     | None -> Ok "2024-11-05"
-     | Some _ -> error "MCP initialize" "field \"protocolVersion\" must be a string")
-  | _ -> error "MCP initialize" "params must be an object"
+  let stage = "MCP initialize" in
+  let* () =
+    Mcp_transport_protocol.validate_initialize_params (Some params)
+    |> Result.map_error (fun detail -> { stage; detail })
+  in
+  match Mcp_transport_protocol.get_field "protocolVersion" params with
+  | Some (`String requested) ->
+    Mcp_transport_protocol.validate_protocol_version requested
+    |> Result.map_error (fun detail -> { stage; detail })
+  | None | Some _ -> error stage "invalid protocolVersion"
 ;;
 
 let initialize ~server_name ~id ~params =
   let* protocol_version = protocol_version params in
   Ok
-    (response
+    (Mcp_transport_protocol.make_response
        ~id
        (`Assoc
           [ "protocolVersion", `String protocol_version
@@ -143,13 +130,13 @@ let initialize ~server_name ~id ~params =
           ; ( "serverInfo"
             , `Assoc
                 [ "name", `String server_name
-                ; "version", `String "1.0.0"
+                ; "version", `String Version.version
                 ] )
           ]))
 ;;
 
 let tool_result_json ~id (result : tool_result) =
-  response
+  Mcp_transport_protocol.make_response
     ~id
     (`Assoc
        ([ ( "content"
@@ -164,7 +151,7 @@ let tool_result_json ~id (result : tool_result) =
 
 let tools_call ~id ~params ~call_tool =
   let stage = "MCP tools/call" in
-  let* id, call_id = request_id stage id in
+  let* _request_id, id, call_id = request_id stage id in
   let* fields = assoc_at stage params in
   let* name = required_string stage "name" fields in
   let* arguments =
@@ -178,9 +165,9 @@ let tools_call ~id ~params ~call_tool =
     Ok
       { response =
           Some
-            (error_response
+            (Mcp_transport_protocol.make_error
                ~id
-               ~code:(-32602)
+               (-32602)
                (Printf.sprintf "unknown official-client tool %S" name))
       ; tool_called = false
       }
@@ -188,14 +175,10 @@ let tools_call ~id ~params ~call_tool =
     Ok { response = Some (tool_result_json ~id result); tool_called = true }
 ;;
 
-let message_method message = message.method_name
-let message_request_id message = message.request_id
-
 (* TEL-OK: pure fail-closed protocol decoder; the runtime caller owns terminal
    error telemetry and control-response delivery. *)
-let decode_message raw_message =
+let decode_message message =
   let stage = "MCP message" in
-  let* message = parse_message stage raw_message in
   let* () = validate_message_value ~stage ~path:"$" message in
   let* fields = assoc_at stage message in
   let* () =
@@ -216,38 +199,48 @@ let decode_message raw_message =
 
 let dispatch_message ~server_name ~tool_specs ~call_tool message =
   match message.method_name, message.request_id with
-    | "initialize", Some id ->
+    | "initialize", Some request_id ->
+      let id = Mcp_transport_protocol.request_id_to_yojson request_id in
       let* initialize_response = initialize ~server_name ~id ~params:message.params in
       Ok
         { response = Some initialize_response
         ; tool_called = false
         }
-    | "tools/list", Some id ->
+    | "tools/list", Some request_id ->
+      let id = Mcp_transport_protocol.request_id_to_yojson request_id in
       Ok
         { response =
-            Some (response ~id (`Assoc [ "tools", `List (tool_specs ()) ]))
+            Some
+              (Mcp_transport_protocol.make_response
+                 ~id
+                 (`Assoc [ "tools", `List (tool_specs ()) ]))
         ; tool_called = false
         }
-    | "tools/call", Some id -> tools_call ~id ~params:message.params ~call_tool
+    | "tools/call", Some request_id ->
+      tools_call
+        ~id:(Mcp_transport_protocol.request_id_to_yojson request_id)
+        ~params:message.params
+        ~call_tool
     | "notifications/initialized", None ->
       Ok { response = None; tool_called = false }
     | _, None ->
       error
         "MCP message"
         (Printf.sprintf "MCP notification %S is not supported" message.method_name)
-    | _, Some id ->
+    | _, Some request_id ->
+      let id = Mcp_transport_protocol.request_id_to_yojson request_id in
       Ok
         { response =
             Some
-              (error_response
+              (Mcp_transport_protocol.make_error
                  ~id
-                 ~code:(-32601)
+                 (-32601)
                  (Printf.sprintf "MCP method %S is not supported" message.method_name))
         ; tool_called = false
         }
 ;;
 
-let handle_message ~server_name ~tool_specs ~call_tool raw_message =
-  let* message = decode_message raw_message in
+let handle_message ~server_name ~tool_specs ~call_tool message_json =
+  let* message = decode_message message_json in
   dispatch_message ~server_name ~tool_specs ~call_tool message
 ;;

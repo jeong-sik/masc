@@ -187,7 +187,7 @@ let test_quota_is_structurally_classified () =
 ;;
 
 let mcp_initialize =
-  {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}}}|}
+  {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"claude-code-fixture","version":"1"}}}}}|}
 ;;
 
 let mcp_list =
@@ -272,19 +272,11 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
     else failf "unexpected tool dispatch reached the callback: %s" name
   in
   let dispatch json =
-    let message =
-      Runtime_official_client_mcp.decode_message (Yojson.Safe.to_string json)
-      |> Result.get_ok
-    in
-    check string
-      "decoded method"
-      (json |> Yojson.Safe.Util.member "method" |> Yojson.Safe.Util.to_string)
-      (Runtime_official_client_mcp.message_method message);
-    Runtime_official_client_mcp.dispatch_message
+    Runtime_official_client_mcp.handle_message
       ~server_name:"masc"
       ~tool_specs
       ~call_tool
-      message
+      json
     |> Result.get_ok
   in
   let list =
@@ -297,17 +289,6 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
          ])
   in
   check bool "list has response" true (Option.is_some list.response);
-  let decoded_list =
-    Runtime_official_client_mcp.decode_message
-      {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}|}
-    |> Result.get_ok
-  in
-  check
-    (option string)
-    "decoded request id"
-    (Some "1")
-    (Runtime_official_client_mcp.message_request_id decoded_list
-     |> Option.map Yojson.Safe.to_string);
   check bool "list did not call a tool" false list.tool_called;
   let notification =
     dispatch
@@ -343,24 +324,30 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
        ~server_name:"masc"
        ~tool_specs
        ~call_tool
-       {|{"jsonrpc":"2.0","id":true,"method":"tools/list"}|}
+       (`Assoc
+          [ "jsonrpc", `String "2.0"
+          ; "id", `Bool true
+          ; "method", `String "tools/list"
+          ])
    with
    | Error { stage = "MCP message"; _ } -> ()
    | Error _ -> fail "invalid request id had the wrong error stage"
    | Ok _ -> fail "boolean JSON-RPC request id was admitted");
-  let rejects_raw label raw_message =
+  let rejects label message =
     match
       Runtime_official_client_mcp.handle_message
         ~server_name:"masc"
         ~tool_specs
         ~call_tool
-        raw_message
+        message
     with
     | Error { stage = "MCP message"; _ } -> ()
     | Error _ -> failf "%s had the wrong error stage" label
     | Ok _ -> failf "%s was admitted" label
   in
-  let rejects label json = rejects_raw label (Yojson.Safe.to_string json) in
+  let rejects_raw label raw_message =
+    rejects label (Yojson.Safe.from_string raw_message)
+  in
   rejects
     "explicit null notification id"
     (`Assoc
@@ -394,15 +381,28 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
        ]);
   rejects_raw
     "non-finite nested value"
-    {|{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"missing","arguments":{"score":NaN}}}|};
-  rejects_raw "malformed JSON" {|{"jsonrpc":"2.0","id":7|}
+    {|{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"missing","arguments":{"score":NaN}}}|}
 ;;
 
 let test_shared_mcp_protocol_is_negotiated () =
   let tool_specs () = [] in
   let call_tool ~name:_ ~call_id:_ ~arguments:_ = None in
-  let initialize =
-    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}|}
+  let initialize protocol_version =
+    `Assoc
+      [ "jsonrpc", `String "2.0"
+      ; "id", `Int 1
+      ; "method", `String "initialize"
+      ; ( "params"
+        , `Assoc
+            [ "protocolVersion", `String protocol_version
+            ; "capabilities", `Assoc []
+            ; ( "clientInfo"
+              , `Assoc
+                  [ "name", `String "official-client-test"
+                  ; "version", `String "1"
+                  ] )
+            ] )
+      ]
   in
   let open Yojson.Safe.Util in
   match
@@ -410,7 +410,7 @@ let test_shared_mcp_protocol_is_negotiated () =
       ~server_name:"masc"
       ~tool_specs
       ~call_tool
-      initialize
+      (initialize "2025-11-25")
   with
   | Error error -> fail (error.stage ^ ": " ^ error.detail)
   | Ok dispatch ->
@@ -421,7 +421,40 @@ let test_shared_mcp_protocol_is_negotiated () =
        |> Option.get
        |> member "result"
        |> member "protocolVersion"
-       |> to_string)
+       |> to_string);
+    (match
+       Runtime_official_client_mcp.handle_message
+         ~server_name:"masc"
+         ~tool_specs
+         ~call_tool
+         (initialize "2099-01-01")
+     with
+     | Error { stage = "MCP initialize"; _ } -> ()
+     | Error _ -> fail "unsupported protocol version had the wrong stage"
+     | Ok _ -> fail "unsupported protocol version was silently normalized");
+    (match
+       Runtime_official_client_mcp.handle_message
+         ~server_name:"masc"
+         ~tool_specs
+         ~call_tool
+         (`Assoc
+            [ "jsonrpc", `String "2.0"
+            ; "id", `Int 2
+            ; "method", `String "initialize"
+            ; ( "params"
+              , `Assoc
+                  [ "capabilities", `Assoc []
+                  ; ( "clientInfo"
+                    , `Assoc
+                        [ "name", `String "official-client-test"
+                        ; "version", `String "1"
+                        ] )
+                  ] )
+            ])
+     with
+     | Error { stage = "MCP initialize"; _ } -> ()
+     | Error _ -> fail "missing protocol version had the wrong stage"
+     | Ok _ -> fail "missing protocol version inherited a hidden default")
 ;;
 
 let test_malformed_json_fails_closed () =

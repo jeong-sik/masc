@@ -372,8 +372,8 @@ let handle_control_request io ~tools ~tool_call_count fields =
           ~server_name:mcp_server_name
           ~tool_specs
           ~call_tool
-          (Yojson.Safe.to_string message)
-        |> Result.map_error (fun { Runtime_official_client_mcp.stage; detail; _ } ->
+          message
+        |> Result.map_error (fun { Runtime_official_client_mcp.stage; detail } ->
           Protocol_error { stage; detail })
       in
       if dispatch.tool_called then incr tool_call_count;

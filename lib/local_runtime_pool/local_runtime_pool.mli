@@ -13,7 +13,7 @@
     [assignment]) had zero production callers as of
     2026-05-05 and was removed surgically per audit response;
     if leasing semantics are needed in the future, the design
-    should land at the OAS runtime layer per RFC-0026 (the
+    should land at the AGENT_CORE runtime layer per RFC-0026 (the
     same architectural rollback as [admission_queue]).
     The read-only accessors below remain in active use by
     [tool_local_runtime_status] / [tool_local_runtime_verify]
@@ -119,7 +119,7 @@ val runtime_id_of_base_url : string -> string
 val parse_errors : unit -> string list
 (** Returns the [pool_state.parse_errors] list.  Populated
     when [load_runtimes_from_env] could not interpret an
-    entry of [LLM_ENDPOINTS] — the SDK's
+    entry of [LLM_ENDPOINTS] — Agent Core's
     [Llm_provider.Discovery.llm_endpoints_env_var], not a
     MASC-prefixed name; surfaced to the operator dashboard. *)
 

@@ -147,13 +147,13 @@ let test_agent_event_source () =
     Alcotest.(check string) "tagged as agent_event" "agent_event" source
   | _ -> Alcotest.fail "expected Assoc"
 
-let test_oas_event_source_and_scope_filter () =
+let test_agent_core_event_source_and_scope_filter () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_oas_event" in
-  let oas_events_dir = Filename.concat dir ".masc/oas-events" in
-  Fs_compat.mkdir_p oas_events_dir;
-  write_jsonl oas_events_dir [
+  let dir = tmpdir "telem_agent_core_event" in
+  let agent_core_events_dir = Filename.concat dir ".masc/agent-core-events" in
+  Fs_compat.mkdir_p agent_core_events_dir;
+  write_jsonl agent_core_events_dir [
     `Assoc
       [
         ("ts_unix", `Float 1000.0);
@@ -175,17 +175,17 @@ let test_oas_event_source_and_scope_filter () =
   ];
   let entries =
     Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
-      ~sources:[Telemetry_unified.Oas_event]
+      ~sources:[Telemetry_unified.Agent_core_event]
       ~session_id:"sess-2" ~worker_run_id:"run-2" ()
   in
-  Alcotest.(check int) "one filtered oas event" 1 (List.length entries);
+  Alcotest.(check int) "one filtered agent_core event" 1 (List.length entries);
   match List.hd entries with
   | `Assoc fields ->
     let source = match List.assoc_opt "source" fields with
       | Some (`String s) -> s | _ -> "" in
     let event_type = match List.assoc_opt "event_type" fields with
       | Some (`String s) -> s | _ -> "" in
-    Alcotest.(check string) "tagged as oas_event" "oas_event" source;
+    Alcotest.(check string) "tagged as agent_core_event" "agent_core_event" source;
     Alcotest.(check string) "event type preserved" "turn_completed" event_type
   | _ -> Alcotest.fail "expected Assoc"
 
@@ -1209,7 +1209,7 @@ let test_summary_ignores_recovered_coverage_gap () =
   Telemetry_coverage_gap.record
     ~masc_root:root
     ~source:"tool_call_io"
-    ~producer:"keeper_hooks_oas"
+    ~producer:"keeper_hooks_agent_core"
     ~durable_store:(Filename.concat root "tool_calls")
     ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
     ~stale_reason:"tool_call_io_append_failed"
@@ -1267,7 +1267,7 @@ let test_replay_retention_lists_selected_sources () =
   let root = masc_root dir in
   let json =
     Telemetry_unified.replay_retention_json ~base_path:dir ~masc_root:root
-      ~sources:[ Telemetry_unified.Oas_event; Telemetry_unified.Tool_metric ]
+      ~sources:[ Telemetry_unified.Agent_core_event; Telemetry_unified.Tool_metric ]
   in
   match json with
   | `Assoc fields ->
@@ -1284,7 +1284,7 @@ let test_replay_retention_lists_selected_sources () =
       | _ -> Alcotest.fail "expected selected_sources"
     in
     Alcotest.(check (list string)) "selected sources"
-      [ "oas_event"; "tool_metric" ]
+      [ "agent_core_event"; "tool_metric" ]
       selected_sources;
     let durable_stores =
       match List.assoc_opt "durable_stores" fields with
@@ -1292,18 +1292,18 @@ let test_replay_retention_lists_selected_sources () =
       | _ -> Alcotest.fail "expected durable_stores"
     in
     Alcotest.(check int) "durable store count" 2 (List.length durable_stores);
-    let oas_store =
+    let agent_core_store =
       List.find
         (fun value ->
-          String.equal "oas_event" (json_string_field "source" value))
+          String.equal "agent_core_event" (json_string_field "source" value))
         durable_stores
     in
-    Alcotest.(check string) "oas durable store"
-      (Filename.concat root "oas-events")
-      (json_string_field "durable_store" oas_store);
-    Alcotest.(check string) "oas dashboard surface"
+    Alcotest.(check string) "agent_core durable store"
+      (Filename.concat root "agent-core-events")
+      (json_string_field "durable_store" agent_core_store);
+    Alcotest.(check string) "agent_core dashboard surface"
       "/api/v1/dashboard/telemetry"
-      (json_string_field "dashboard_surface" oas_store)
+      (json_string_field "dashboard_surface" agent_core_store)
   | _ -> Alcotest.fail "expected Assoc"
 
 (* ── Cluster-aware path ─────────────────────────── *)
@@ -1424,8 +1424,8 @@ let () =
         [
           Alcotest.test_case "empty base" `Quick test_empty_returns_empty;
           Alcotest.test_case "agent events" `Quick test_agent_event_source;
-          Alcotest.test_case "oas events + scope filter" `Quick
-            test_oas_event_source_and_scope_filter;
+          Alcotest.test_case "agent_core events + scope filter" `Quick
+            test_agent_core_event_source_and_scope_filter;
           Alcotest.test_case "agent tool_called scope promotion" `Quick
             test_keeper_tool_called_scope_promoted_for_filters;
           Alcotest.test_case "dedupe shadow agent tool_called" `Quick

@@ -5,7 +5,7 @@
 
     Pattern: test_integration.ml (OpenAI-compatible mock) *)
 
-open Agent_sdk
+open Agent_core
 open Types
 
 (* ── Mock HTTP Server ────────────────────────────────── *)
@@ -173,7 +173,7 @@ let test_before_turn_nudge_injected_into_request () =
          ; hooks =
              { Hooks.empty with
                before_turn =
-                 Some (fun _event -> Hooks.Nudge "OAS_BEFORE_TURN_NUDGE_MARKER")
+                 Some (fun _event -> Hooks.Nudge "AGENT_CORE_BEFORE_TURN_NUDGE_MARKER")
              }
          }
        in
@@ -199,7 +199,7 @@ let test_before_turn_nudge_injected_into_request () =
        Alcotest.(check bool)
          "nudge marker reached the LLM request body"
          true
-         (contains body "OAS_BEFORE_TURN_NUDGE_MARKER"))
+         (contains body "AGENT_CORE_BEFORE_TURN_NUDGE_MARKER"))
 ;;
 
 (* ── pre_tool_use tests ──────────────────────────────── *)

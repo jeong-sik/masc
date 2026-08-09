@@ -424,12 +424,12 @@ let dashboard_perf_compute (config : Workspace.config) : Yojson.Safe.t =
               , Option.fold
                   ~none:`Null
                   ~some:dashboard_perf_row_json
-                  (row_by_name rows "oas_runtime_status") )
+                  (row_by_name rows "agent_core_runtime_status") )
             ; ( "runtime_single"
               , Option.fold
                   ~none:`Null
                   ~some:dashboard_perf_row_json
-                  (row_by_name rows "oas_runtime_single") )
+                  (row_by_name rows "agent_core_runtime_single") )
             ] )
       ; "benchmarks", `List (List.map dashboard_perf_row_json rows)
       ; ( "comparison"

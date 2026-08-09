@@ -64,16 +64,16 @@ let () =
   List.iter
     (fun stage ->
       Otel_metric_store.register_counter
-        ~name:Otel_metric_store.metric_oas_sse_relay_retries
-        ~help:Otel_metric_store.metric_oas_sse_relay_retries
+        ~name:Otel_metric_store.metric_agent_core_sse_relay_retries
+        ~help:Otel_metric_store.metric_agent_core_sse_relay_retries
         ~labels:[ "stage", stage ]
         ())
     relay_retry_stages;
   List.iter
     (fun stage ->
       Otel_metric_store.register_counter
-        ~name:Otel_metric_store.metric_oas_sse_relay_drops
-        ~help:Otel_metric_store.metric_oas_sse_relay_drops
+        ~name:Otel_metric_store.metric_agent_core_sse_relay_drops
+        ~help:Otel_metric_store.metric_agent_core_sse_relay_drops
         ~labels:[ "stage", stage ]
         ())
     relay_drop_stages
@@ -134,14 +134,14 @@ let observe_external_subscriber_fanout_duration seconds =
 ;;
 
 (* P2 silent-failure fix (transport scan):
-   The OAS relay drop-marker is the operator-visible signal that an
-   OAS event was dropped after exhausting retries.  If the drop marker
+   The AGENT_CORE relay drop-marker is the operator-visible signal that an
+   AGENT_CORE event was dropped after exhausting retries.  If the drop marker
    broadcast itself fails, operators get no
    indication a drop happened.  Distinct from inc_broadcast_failure
    so the recovery-path failure rate is isolated from normal broadcast
    failures. *)
 let inc_relay_drop_marker_failure () =
-  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_drop_marker_failures ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drop_marker_failures ()
 ;;
 
 let set_sse_queue_snapshot ~avg_depth ~max_depth ~hot_sessions =
@@ -499,32 +499,32 @@ let transport_health_json () =
   let sse_queue_avg = v Otel_metric_store.metric_sse_queue_depth_avg () in
   let sse_queue_max = int_of_float (v Otel_metric_store.metric_sse_queue_depth_max ()) in
   let relay_queue_depth =
-    int_of_float (v Otel_metric_store.metric_oas_sse_relay_queue_depth ())
+    int_of_float (v Otel_metric_store.metric_agent_core_sse_relay_queue_depth ())
   in
   let relay_retry_append =
     int_of_float
-      (v Otel_metric_store.metric_oas_sse_relay_retries ~labels:[ "stage", "append" ] ())
+      (v Otel_metric_store.metric_agent_core_sse_relay_retries ~labels:[ "stage", "append" ] ())
   in
   let relay_retry_broadcast =
     int_of_float
-      (v Otel_metric_store.metric_oas_sse_relay_retries ~labels:[ "stage", "broadcast" ] ())
+      (v Otel_metric_store.metric_agent_core_sse_relay_retries ~labels:[ "stage", "broadcast" ] ())
   in
   let relay_retry_total =
-    int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_oas_sse_relay_retries)
+    int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_agent_core_sse_relay_retries)
   in
   let relay_drop_queue =
-    int_of_float (v Otel_metric_store.metric_oas_sse_relay_drops ~labels:[ "stage", "queue" ] ())
+    int_of_float (v Otel_metric_store.metric_agent_core_sse_relay_drops ~labels:[ "stage", "queue" ] ())
   in
   let relay_drop_append =
     int_of_float
-      (v Otel_metric_store.metric_oas_sse_relay_drops ~labels:[ "stage", "append" ] ())
+      (v Otel_metric_store.metric_agent_core_sse_relay_drops ~labels:[ "stage", "append" ] ())
   in
   let relay_drop_broadcast =
     int_of_float
-      (v Otel_metric_store.metric_oas_sse_relay_drops ~labels:[ "stage", "broadcast" ] ())
+      (v Otel_metric_store.metric_agent_core_sse_relay_drops ~labels:[ "stage", "broadcast" ] ())
   in
   let relay_drop_total =
-    int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_oas_sse_relay_drops)
+    int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_agent_core_sse_relay_drops)
   in
   let broadcast_sum = v Otel_metric_store.metric_sse_broadcast_duration () in
   let broadcast_count = v Otel_metric_store.metric_sse_broadcast_duration_count () in

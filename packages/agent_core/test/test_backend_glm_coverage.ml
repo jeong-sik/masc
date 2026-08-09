@@ -74,11 +74,11 @@ let test_classification_matrix () =
   check_classification "quota" "1308" K.Glm_quota_exceeded false;
   check_classification "server" "1234" K.Glm_server_error true;
   check_classification "invalid" "1210" K.Glm_invalid_request false;
-  check_classification "context overflow (oas#2947)" "1261" K.Glm_context_overflow false;
+  check_classification "context overflow (agent-core boundary)" "1261" K.Glm_context_overflow false;
   check_classification "unknown" "9999" K.Glm_invalid_request false
 ;;
 
-(* oas#2947: the streaming path classifies a non-200 rejection by the
+(* agent-core boundary: the streaming path classifies a non-200 rejection by the
    envelope's documented code field. 1261 must parse to the overflow class;
    prose alone (no code) must not. *)
 let test_check_glm_error_1261_envelope () =
@@ -276,7 +276,7 @@ let () =
     [ ( "classification"
       , [ test_case "error classification matrix" `Quick test_classification_matrix
         ; test_case
-            "1261 envelope parses to context overflow (oas#2947)"
+            "1261 envelope parses to context overflow (agent-core boundary)"
             `Quick
             test_check_glm_error_1261_envelope
         ; test_case "http status mapping" `Quick test_http_status_mapping

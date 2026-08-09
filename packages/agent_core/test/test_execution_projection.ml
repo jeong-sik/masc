@@ -1,6 +1,6 @@
-open Agent_sdk
+open Agent_core
 open Alcotest
-module Internal = Agent_sdk__
+module Internal = Agent_core__
 module Runtime = Internal.Execution_runtime
 module Codec = Internal.Execution_codec_executor
 module Writer = Internal.Execution_lane_writer
@@ -142,8 +142,8 @@ let test_live_and_restart_projection () =
   in
   let codec = Codec.of_runtime internal_runtime in
   let fs = Eio.Stdenv.fs env in
-  let dir = make_dir fs "oas-projection-live-" in
-  let other_dir = make_dir fs "oas-projection-other-" in
+  let dir = make_dir fs "agent_core-projection-live-" in
+  let other_dir = make_dir fs "agent_core-projection-other-" in
   Fun.protect
     ~finally:(fun () ->
       Eio.Path.rmtree ~missing_ok:true dir;
@@ -374,7 +374,7 @@ let test_cursor_codec_is_closed_and_versioned () =
     |> Result.map_error Error.to_string
     |> value
   in
-  let dir = make_dir (Eio.Stdenv.fs env) "oas-projection-cursor-" in
+  let dir = make_dir (Eio.Stdenv.fs env) "agent_core-projection-cursor-" in
   Fun.protect
     ~finally:(fun () -> Eio.Path.rmtree ~missing_ok:true dir)
     (fun () ->

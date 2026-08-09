@@ -1,6 +1,6 @@
 (** Keeper_turn_driver — MASC named-runtime and model-label execution entry points.
 
-    Public API for running OAS agents through MASC-managed named runtime
+    Public API for running AGENT_CORE agents through MASC-managed named runtime
     profiles ([run_named])
     or explicit model label ([run_model_by_label]), with optional MASC
     tool bridging variants.
@@ -12,7 +12,7 @@ open Result.Syntax
 (* Sub-module includes (God file decomposition).
    Each sub-module is self-contained; the facade re-exports everything
    so existing callers do not need qualification. *)
-include Runtime_oas_runner
+include Runtime_agent_core_runner
 include Keeper_internal_error
 include Keeper_turn_driver_helpers
 
@@ -51,7 +51,7 @@ let media_degrade_manifest_decision ~(runtime_id : string)
       ])
 
 type provider_run_result =
-  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+  (Runtime_agent.run_result, Agent_core.Error.t) result
 
 type provider_attempt_outcomes =
   { provider_result : provider_run_result
@@ -67,7 +67,7 @@ type deferred_runtime_lane =
   ; failed_runtime_id : string
   ; next_runtime_id : string
   ; later_runtime_ids : string list
-  ; failure : Agent_sdk.Error.sdk_error
+  ; failure : Agent_core.Error.t
   }
 
 let deferred_runtime_ids hint =
@@ -99,7 +99,7 @@ let project_provider_attempt_result ~replay_prefix_projection provider_result =
               }
           | Error error ->
             Error
-              (Agent_sdk.Error.Internal
+              (Agent_core.Error.Internal
                  (Keeper_replay_prefix.restore_error_to_string error))))
   in
   { provider_result; turn_result }
@@ -114,7 +114,7 @@ let runtime_failed_decision ~idx ~runtime_id error =
       ("idx", `Int idx);
       ("runtime_id", `String runtime_id);
       ( "error_kind"
-      , `String Agent_sdk.Error.(category error |> category_label) );
+      , `String Agent_core.Error.(category error |> category_label) );
     ]
 
 let lane_should_retry
@@ -131,14 +131,14 @@ let lane_should_retry
   then
     (* A typed ContextOverflow is a per-candidate capacity bound, not a request
        defect: a later lane candidate with a larger context window can still
-       serve the same turn. [sdk_error_to_http_error] folds it into a generic
+       serve the same turn. [core_error_to_http_error] folds it into a generic
        HTTP 400 which [Runtime_attempt_fsm.should_try_next] treats as terminal,
        so the typed error must be read before that mapping. Overflow on the
        last candidate still returns the typed error, keeping the typed
        overflow observation (blocker label, failure route) intact. *)
     true
   else
-    match Keeper_turn_driver_try_runtime.sdk_error_to_http_error error with
+    match Keeper_turn_driver_try_runtime.core_error_to_http_error error with
     | Some http_err -> Runtime_attempt_fsm.should_try_next http_err
     | None -> false
 
@@ -171,7 +171,7 @@ let attempt_runtime_candidates
        | Some overflow_error -> Error overflow_error
        | None ->
          Error
-           (Agent_sdk.Error.Internal
+           (Agent_core.Error.Internal
               (Printf.sprintf
                  "runtime lane %S exhausted all candidates"
                  runtime_id)))
@@ -261,14 +261,14 @@ let attempt_runtime_candidates
   loop ~observed_overflow:None 0 candidates
 
 let runtime_candidate_missing_error id =
-  Agent_sdk.Error.Internal
+  Agent_core.Error.Internal
     (Printf.sprintf
        "keeper_turn_driver: lane candidate %S disappeared from runtimes"
        id)
 
 let runtime_candidate_missing_request_cap_error error =
-  Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig
+  Agent_core.Error.Config
+    (Agent_core.Error.InvalidConfig
        { field = "max-request-body-bytes"
        ; detail = Runtime.request_body_cap_error_to_string error
        })
@@ -380,7 +380,7 @@ let run_named
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?temperature
-    ?(accept = fun (_ : Agent_sdk.Types.api_response) -> true)
+    ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
     ?hooks
     ?raw_trace
     ?on_event
@@ -396,7 +396,7 @@ let run_named
     ?context
     ?enable_thinking
     ?cooperative_yield_probe
-    ?oas_checkpoint
+    ?agent_core_checkpoint
     ?trace_link
     ?event_bus
     ?on_runtime_observation
@@ -410,9 +410,9 @@ let run_named
     ?sw
     ?net
     ()
-  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Runtime_agent.run_result, Agent_core.Error.t) result =
   match require_eio ?sw ?net () with
-  | Error e -> Error (eio_context_error_to_sdk_error e)
+  | Error e -> Error (eio_context_error_to_core_error e)
   | Ok (sw, net) ->
 	  (* Lane-aware dispatch: resolve a runtime id or ordered failover lane, then
 	     attempt candidates sequentially with manifest evidence per attempt. *)
@@ -477,7 +477,7 @@ let run_named
   if lane_candidate_ids = []
   then
     Error
-      (Agent_sdk.Error.Internal
+      (Agent_core.Error.Internal
          (Printf.sprintf
             "requested runtime or lane %S not found among configured runtimes"
             runtime_id))
@@ -491,13 +491,13 @@ let run_named
       []
   in
   let checkpoint_messages =
-    match oas_checkpoint with
+    match agent_core_checkpoint with
     | None -> []
-    | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
+    | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
   in
   (* [initial_messages] is the caller's canonical pre-turn history and is the
      exact prefix checked later by replay persistence.  A resumed checkpoint is
-     only the OAS dispatch carrier; media degradation may project its messages
+     only the AGENT_CORE dispatch carrier; media degradation may project its messages
      without changing this canonical history. *)
   let canonical_replay_prefix = initial_messages in
   let first_candidate_id, remaining_candidate_ids =
@@ -581,7 +581,7 @@ let run_named
      row + injected model-input notice — RFC-0126/0145). The stripped checkpoint
      is the dispatch view only; the persisted checkpoint is unchanged, so a
      later vision-capable runtime still sees the original media. *)
-  let goal_blocks, initial_messages, oas_checkpoint, replay_prefix_projection =
+  let goal_blocks, initial_messages, agent_core_checkpoint, replay_prefix_projection =
     match reroute_decision with
     | Runtime_agent.No_capable_runtime _ ->
       let caps = Runtime_agent.input_capabilities_of_runtime first_runtime in
@@ -592,9 +592,9 @@ let run_named
         Runtime_agent.strip_unsupported_modality_messages caps initial_messages
       in
       let stripped_checkpoint, checkpoint_dropped =
-        match oas_checkpoint with
+        match agent_core_checkpoint with
         | None -> None, []
-        | Some (checkpoint : Agent_sdk.Checkpoint.t) ->
+        | Some (checkpoint : Agent_core.Checkpoint.t) ->
           let messages, dropped =
             Runtime_agent.strip_unsupported_modality_messages
               caps
@@ -611,7 +611,7 @@ let run_named
        | None ->
          (* Nothing strippable (e.g. only ToolResult-nested media): keep the
             inputs unchanged so the loud capability floor still applies. *)
-         goal_blocks, initial_messages, oas_checkpoint, Keeper_replay_prefix.unchanged
+         goal_blocks, initial_messages, agent_core_checkpoint, Keeper_replay_prefix.unchanged
        | Some note ->
          Log.Keeper.warn
            "%s: RFC-0265 media degrade on %s — dropped %s, continuing text-only"
@@ -623,11 +623,11 @@ let run_named
            ~decision:(media_degrade_manifest_decision ~runtime_id:first_runtime_id dropped)
            Keeper_runtime_manifest.Runtime_routed;
          let goal_with_note =
-           stripped_goal @ [ Agent_sdk.Types.text_block note ]
+           stripped_goal @ [ Agent_core.Types.text_block note ]
          in
          let dispatch_prefix =
            match stripped_checkpoint with
-           | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
+           | Some (checkpoint : Agent_core.Checkpoint.t) -> checkpoint.messages
            | None -> stripped_initial
          in
          ( Some goal_with_note
@@ -637,7 +637,7 @@ let run_named
              ~canonical_prefix:canonical_replay_prefix
              ~dispatch_prefix ))
     | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ ->
-      goal_blocks, initial_messages, oas_checkpoint, Keeper_replay_prefix.unchanged
+      goal_blocks, initial_messages, agent_core_checkpoint, Keeper_replay_prefix.unchanged
   in
   let transport_resolved =
     match transport with
@@ -657,13 +657,13 @@ let run_named
       if not allowed
       then
         Log.Keeper.info
-          "%s: runtime lane retry deferred after typed OAS checkpoint stage \
+          "%s: runtime lane retry deferred after typed AGENT_CORE checkpoint stage \
            (runtime_id=%s attempt=%d error_kind=%s); the next keeper cycle \
            remains eligible"
           keeper_name
           attempt_runtime_id
           attempt
-          Agent_sdk.Error.(category error |> category_label);
+          Agent_core.Error.(category error |> category_label);
       allowed)
     ~runtime_id:
       (match deferred_runtime_lane with
@@ -707,11 +707,11 @@ let run_named
             ~config
         in
         let codex_result =
-          match provider_config_transform, oas_checkpoint with
+          match provider_config_transform, agent_core_checkpoint with
           | Some _, _ ->
             Error
-              (Agent_sdk.Error.Config
-                 (Agent_sdk.Error.InvalidConfig
+              (Agent_core.Error.Config
+                 (Agent_core.Error.InvalidConfig
                     { field = "provider_config_transform"
                     ; detail =
                         "provider config transforms cannot target a \
@@ -720,14 +720,14 @@ let run_named
           | None, checkpoint ->
             (* The official-client session store is the start-or-resume
                authority ([Keeper_codex_runtime] reads the durable
-               [previous_settlement]); the OAS checkpoint payload is never
+               [previous_settlement]); the AGENT_CORE checkpoint payload is never
                replayed on this lane, but the representable canonical history
                is preserved instead of being erased with it (masc#27812). *)
             (match checkpoint with
              | Some _ ->
                Log.Keeper.info
                  "%s: official-client runtime %s resolves start-or-resume from \
-                  its durable session store; the OAS checkpoint payload is not \
+                  its durable session store; the AGENT_CORE checkpoint payload is not \
                   replayed"
                  keeper_name attempt_runtime_id;
                emit_runtime_manifest
@@ -800,8 +800,8 @@ let run_named
       | Runtime_execution.Antigravity_cli _ ->
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         ( Error
-            (Agent_sdk.Error.Config
-               (Agent_sdk.Error.InvalidConfig
+            (Agent_core.Error.Config
+               (Agent_core.Error.InvalidConfig
                   { field = "runtime_execution"
                   ; detail =
                       "antigravity-cli is configured but Keeper dispatch is not admitted"
@@ -826,11 +826,11 @@ let run_named
             ~config
         in
         let claude_result =
-          match provider_config_transform, oas_checkpoint with
+          match provider_config_transform, agent_core_checkpoint with
           | Some _, _ ->
             Error
-              (Agent_sdk.Error.Config
-                 (Agent_sdk.Error.InvalidConfig
+              (Agent_core.Error.Config
+                 (Agent_core.Error.InvalidConfig
                     { field = "provider_config_transform"
                     ; detail =
                         "provider config transforms cannot target a claude-code runtime"
@@ -838,12 +838,12 @@ let run_named
           | None, Some _ ->
             (* The durable official-client session store owns start-or-resume
                (Keeper_claude_code_runtime reads [previous_settlement]), so a
-               present OAS checkpoint only means its payload is not replayed —
-               it does not make the turn a fresh session. Same vocabulary as
-               the codex-app-server arm (#27938, masc#27812). *)
+               present Agent Core checkpoint only means its payload is not
+               replayed — it does not make the turn a fresh session. Same
+               vocabulary as the codex-app-server arm (#27938, masc#27812). *)
             Log.Keeper.info
               "%s: official-client runtime %s resolves start-or-resume from \
-               its durable session store; the OAS checkpoint payload is not \
+               its durable session store; the Agent Core checkpoint payload is not \
                replayed"
               keeper_name
               attempt_runtime_id;
@@ -899,7 +899,7 @@ let run_named
           (* Cached provider health is observation only. Every eligible runtime
              reaches the real provider boundary; only the resulting typed error
              may drive fallback. *)
-          let name = Printf.sprintf "oas-%s" attempt_runtime_id in
+          let name = Printf.sprintf "agent_core-%s" attempt_runtime_id in
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
@@ -940,7 +940,7 @@ let run_named
             ; enable_thinking = inference_policy.attempt_enable_thinking
             ; preserve_thinking = inference_policy.attempt_preserve_thinking
             ; cooperative_yield_probe
-            ; oas_checkpoint
+            ; agent_core_checkpoint
             ; trace_link
             ; sw
             ; net

@@ -132,8 +132,8 @@ val slot_scheduler_observed
 (** [agent_completed] carries a variable-shape result tail beyond
     the three base fields ([agent_name], [task_id], [elapsed_s]).
     The tail comes from a runtime-local helper that closes over
-    [Agent_sdk] variant types.  To keep [Sse_event] free of
-    [Agent_sdk] dependencies, the caller projects the tail into a
+    [Agent_core] variant types.  To keep [Sse_event] free of
+    [Agent_core] dependencies, the caller projects the tail into a
     [(string * Yojson.Safe.t) list] and passes it via
     [~result_fields].  The list is appended to the atd-emitted base
     record in declaration order, preserving byte equality with the

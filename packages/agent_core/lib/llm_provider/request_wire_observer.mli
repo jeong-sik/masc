@@ -1,9 +1,9 @@
 (** Caller-owned pre-dispatch serialization evidence for one provider request.
 
-    OAS invokes the observer after provider-specific serialization and every
+    AGENT_CORE invokes the observer after provider-specific serialization and every
     stream-field injection have completed and after the exact serialized-body
     admission check. This is pre-dispatch serialization evidence: it proves
-    which bytes OAS prepared at that boundary, but does not claim that a
+    which bytes AGENT_CORE prepared at that boundary, but does not claim that a
     transport started or completed dispatch. The observation contains only
     structural identity, byte length, and a SHA-256 digest; the request body,
     prompts, tool arguments, headers, and credentials are never exposed.

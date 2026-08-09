@@ -16,7 +16,7 @@
 
     @stability Internal *)
 
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module Runtime_binding = Agent_core.Provider_runtime_binding
 module Provider_binding = Runtime_provider_binding
 
 (* --- Inlined from the deleted [Runtime_config_provider_binding] --- *)
@@ -169,8 +169,8 @@ let api_key_of_credential ?registry_entry (credential : Runtime_schema.credentia
 
 (* --- Provider kind resolution --- *)
 
-(* CLI subprocess provider kinds were removed in the agent_sdk pin bump
-   (oas service-name migration). No provider kind is a subprocess CLI, so a
+(* CLI subprocess provider kinds were removed in the agent_core pin bump
+   (agent_core service-name migration). No provider kind is a subprocess CLI, so a
    CLI-transport provider can never resolve to a provider kind. The reason is
    surfaced as [Error] (not [None]) so a binding dropped for this cause explains
    itself at load instead of vanishing silently (Unknown->silent-drop
@@ -181,7 +181,7 @@ let provider_kind_of_cli_provider (provider : Runtime_schema.provider)
     (Printf.sprintf
        "provider %S uses protocol %s over a CLI transport, which the runtime \
         adapter no longer materializes (CLI subprocess provider kinds were \
-        removed in the agent_sdk pin bump)"
+        removed in the agent_core pin bump)"
        provider.id
        provider.protocol)
 ;;
@@ -235,7 +235,7 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
      | None ->
        Error
          (Printf.sprintf
-            "provider %S uses protocol %s, but no OAS provider registry entry exists; \
+            "provider %S uses protocol %s, but no AGENT_CORE provider registry entry exists; \
              messages-http requires registry kind SSOT"
             provider.id
             provider.protocol))
@@ -266,7 +266,7 @@ let supports_tool_choice_override_of_model_spec (spec : Runtime_schema.model_spe
   | None -> None
 ;;
 
-let oas_thinking_control_format = function
+let agent_core_thinking_control_format = function
   | Runtime_schema.No_thinking_control ->
     Llm_provider.Capabilities.No_thinking_control
   | Runtime_schema.Thinking_object -> Llm_provider.Capabilities.Thinking_object
@@ -284,9 +284,9 @@ let oas_thinking_control_format = function
 ;;
 
 (** A runtime [api-name] is an opaque deployment string, not automatically an
-    OAS catalog model. When OAS has no exact provider/model row, project the
+    AGENT_CORE catalog model. When AGENT_CORE has no exact provider/model row, project the
     complete typed runtime declaration into the Provider_config override that
-    OAS exposes for concrete endpoint contracts. Catalogued models keep the OAS
+    AGENT_CORE exposes for concrete endpoint contracts. Catalogued models keep the AGENT_CORE
     row unchanged; an absent runtime capability block remains absent and is
     rejected later by the normal startup gate. *)
 let model_capabilities_override_of_model_spec
@@ -316,7 +316,7 @@ let model_capabilities_override_of_model_spec
          ; supports_extended_thinking = caps.supports_extended_thinking
          ; supports_reasoning_budget = caps.supports_reasoning_budget
          ; thinking_control_format =
-             oas_thinking_control_format caps.thinking_control_format
+             agent_core_thinking_control_format caps.thinking_control_format
          ; supports_response_format_json = caps.supports_response_format_json
          ; supports_structured_output = caps.supports_structured_output
          ; supports_multimodal_inputs = caps.supports_multimodal_inputs
@@ -366,7 +366,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?max_concurrent_
            List.filter (fun (key, _) -> not (is_auth_header_key key)) headers
        in
        (* TOML-declared custom headers override generated non-auth headers by
-          key. Auth is carried only by [api_key] and is merged by OAS at HTTP
+          key. Auth is carried only by [api_key] and is merged by AGENT_CORE at HTTP
           request time, so [Provider_config.headers] does not duplicate secrets. *)
        let custom_keys = List.map (fun (key, _) -> normalize_header_key key) custom_headers in
        let headers =
@@ -384,7 +384,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?max_concurrent_
                ([provider_name = "<id>"]) resolve per declared provider instead of
                collapsing every OpenAI-compatible endpoint into the "openai_compat"
                label (which no catalog row carries — the 2026-07-15 boot-gate
-               wipeout). OAS's own binding layer passes it the same way
+               wipeout). AGENT_CORE's own binding layer passes it the same way
                (provider_runtime_binding.ml [runtime_binding_provider_config]). *)
             ~provider_id:provider.id
             ~model_id:spec.api_name

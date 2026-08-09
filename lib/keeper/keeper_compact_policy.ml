@@ -133,7 +133,7 @@ let record_pre_compact
     (try
        Sse.broadcast
          (`Assoc
-             [ "type", `String "oas:masc:harness:pre_compact"
+             [ "type", `String "agent_core:masc:harness:pre_compact"
              ; ( "payload"
                , `Assoc
                    [ "timestamp", `Float event.timestamp
@@ -155,7 +155,7 @@ let record_pre_compact
 ;;
 
 type requested_compaction =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
   ; exact_execution_evidence :
       Keeper_compaction_llm_summarizer.exact_execution_evidence
   ; summarized_message_count : int
@@ -186,23 +186,23 @@ let tool_block_counts messages =
   let rec count_blocks (uses, results) blocks =
     List.fold_left
       (fun (uses, results) -> function
-         | Agent_sdk.Types.ToolUse _ -> uses + 1, results
-         | Agent_sdk.Types.ToolResult { content_blocks; _ } ->
+         | Agent_core.Types.ToolUse _ -> uses + 1, results
+         | Agent_core.Types.ToolResult { content_blocks; _ } ->
            let counts = uses, results + 1 in
            Option.fold ~none:counts ~some:(count_blocks counts) content_blocks
-         | Agent_sdk.Types.Text _
-         | Agent_sdk.Types.Thinking _
-         | Agent_sdk.Types.ReasoningDetails _
-         | Agent_sdk.Types.RedactedThinking _
-         | Agent_sdk.Types.Image _
-         | Agent_sdk.Types.Document _
-         | Agent_sdk.Types.Audio _ ->
+         | Agent_core.Types.Text _
+         | Agent_core.Types.Thinking _
+         | Agent_core.Types.ReasoningDetails _
+         | Agent_core.Types.RedactedThinking _
+         | Agent_core.Types.Image _
+         | Agent_core.Types.Document _
+         | Agent_core.Types.Audio _ ->
            uses, results)
       (uses, results)
       blocks
   in
   List.fold_left
-    (fun counts (message : Agent_sdk.Types.message) ->
+    (fun counts (message : Agent_core.Types.message) ->
        count_blocks counts message.content)
     (0, 0)
     messages
@@ -387,7 +387,7 @@ let compact_for_request_typed_with
       { (checkpoint_of_context ctx) with messages = requested.messages }
     in
     let compacted_ctx =
-      sync_oas_context { checkpoint }
+      sync_agent_core_context { checkpoint }
     in
     let after_bytes = serialized_bytes compacted_ctx in
     let reject reason =
@@ -490,7 +490,7 @@ let compact_for_request_typed_with
         in
         reject (Invalid_structural_evidence (error, terminal))
       | Ok evidence ->
-        let compacted_ctx = sync_oas_context compacted_ctx in
+        let compacted_ctx = sync_agent_core_context compacted_ctx in
         Log.Harness.emit
           Log.Info
           ~details:

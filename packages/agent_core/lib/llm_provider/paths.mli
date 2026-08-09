@@ -1,8 +1,8 @@
-(** Path SSOT for the OAS SDK.
+(** Path SSOT for the Agent Core.
 
     Centralises the remaining cwd probe so library code does not call
     [Sys.getcwd] directly. Runtime/session/catalog roots must be supplied
-    explicitly or through their documented [OAS_*] variables. *)
+    explicitly or through their documented [AGENT_CORE_*] variables. *)
 
 (** Current working directory at the time of the call.
 

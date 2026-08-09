@@ -1,10 +1,10 @@
 open Result.Syntax
 
 let config_error ~field detail =
-  Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })
+  Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })
 ;;
 
-let internal_error detail = Agent_sdk.Error.Internal detail
+let internal_error detail = Agent_core.Error.Internal detail
 
 module Host = Keeper_official_client_host
 module Session_store = Keeper_official_client_session_store
@@ -14,9 +14,9 @@ let runtime_label = "Claude Code"
 let project_messages messages =
   let rec loop system history = function
     | [] -> Ok (List.rev system, List.rev history)
-    | (message : Agent_sdk.Types.message) :: rest ->
+    | (message : Agent_core.Types.message) :: rest ->
       (match message.role with
-       | Agent_sdk.Types.System ->
+       | Agent_core.Types.System ->
          let* text =
            Host.text_of_blocks
              ~runtime_label
@@ -24,7 +24,7 @@ let project_messages messages =
              message.content
          in
          loop (text :: system) history rest
-       | Agent_sdk.Types.User | Agent_sdk.Types.Assistant | Agent_sdk.Types.Tool ->
+       | Agent_core.Types.User | Agent_core.Types.Assistant | Agent_core.Types.Tool ->
          loop
            system
            (Keeper_context_core.message_to_json message :: history)
@@ -64,46 +64,46 @@ let retry_after_of_rate_limit = function
     Some (Float.max 0.0 (Float.of_int timestamp -. Time_compat.now ()))
 ;;
 
-let claude_error_to_sdk_error = function
+let claude_error_to_core_error = function
   | Runtime_claude_code.Invalid_config detail ->
     config_error ~field:"claude_code" detail
   | Runtime_claude_code.Subscription_required detail ->
-    Agent_sdk.Error.Provider
+    Agent_core.Error.Provider
       (Llm_provider.Error.AuthError { provider = "claude_code"; detail })
   | Runtime_claude_code.Quota_blocked ({ rate_limit; _ } as blocked) ->
-    Agent_sdk.Error.Provider
+    Agent_core.Error.Provider
       (Llm_provider.Error.HardQuota
          { provider = "claude_code"
          ; retry_after = retry_after_of_rate_limit rate_limit
          ; detail = Runtime_claude_code.error_to_string (Quota_blocked blocked)
          })
   | Runtime_claude_code.Turn_failed detail ->
-    Agent_sdk.Error.Provider
+    Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
          { provider = "claude_code"; error_type = Some "turn_failed"; detail })
   | Runtime_claude_code.Timeout seconds ->
-    Agent_sdk.Error.Api
-      (Agent_sdk.Retry.Timeout
+    Agent_core.Error.Api
+      (Agent_core.Retry.Timeout
          { message = Printf.sprintf "Claude Code turn timed out after %.3fs" seconds
          ; phase = None
          })
   | Runtime_claude_code.Spawn_failed detail
   | Runtime_claude_code.Process_exited detail ->
-    Agent_sdk.Error.Provider
+    Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "claude_code"; detail })
   | Runtime_claude_code.Turn_transport_interrupted _ as error ->
-    Agent_sdk.Error.Provider
+    Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "claude_code"
          ; detail = Runtime_claude_code.error_to_string error
          })
   | Runtime_claude_code.Protocol_error { stage; detail } ->
-    Agent_sdk.Error.Provider
+    Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
          { detail = Printf.sprintf "%s: %s" stage detail })
   | Runtime_claude_code.Unsupported_control_request subtype ->
-    Agent_sdk.Error.Provider
+    Agent_core.Error.Provider
       (Llm_provider.Error.UnknownVariant
          { type_name = "claude_code.control_request"; value = subtype })
 ;;
@@ -143,7 +143,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     let hooks =
       match hooks with
       | Some hooks -> hooks
-      | None -> Agent_sdk.Hooks.empty
+      | None -> Agent_core.Hooks.empty
     in
     let owner_epoch = Session_store.process_epoch () in
     let* stored_session =
@@ -260,7 +260,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           ~prompt
       with
       | Ok () -> Ok ()
-      | Error error -> Error (claude_error_to_sdk_error error)
+      | Error error -> Error (claude_error_to_core_error error)
     in
     let process_mgr = Eio.Stdenv.process_mgr env in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
@@ -273,7 +273,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           client_config
       with
       | Ok subscription -> Ok subscription
-      | Error error -> Error (claude_error_to_sdk_error error)
+      | Error error -> Error (claude_error_to_core_error error)
     in
     let* claimed_session =
       match
@@ -386,7 +386,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          | Error error ->
            if not !state_persistence_failed
            then recovery_failure := recovery_failure_of_client_error error;
-           Error (claude_error_to_sdk_error error)
+           Error (claude_error_to_core_error error)
          | Ok turn ->
            recovery_failure := Session_store.Protocol_failed;
            let expected_resumed =
@@ -412,14 +412,14 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)
            in
            let response =
-             { Agent_sdk.Types.id = turn.turn_id
+             { Agent_core.Types.id = turn.turn_id
              ; model = turn.model
              ; stop_reason = EndTurn
              ; content = [ Text turn.text ]
              ; usage = None
              ; telemetry =
                  Some
-                   { Agent_sdk.Types.default_inference_telemetry with
+                   { Agent_core.Types.default_inference_telemetry with
                      request_latency_ms = Some latency_ms
                    ; canonical_model_id = Some turn.model
                    }
@@ -431,7 +431,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                ~turn_count
                ~hook_name:"after_turn"
                hooks.after_turn
-               (Agent_sdk.Hooks.AfterTurn { turn = turn_count; response })
+               (Agent_core.Hooks.AfterTurn { turn = turn_count; response })
            in
            let* () =
              match after_turn with
@@ -456,7 +456,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                ~turn_count
                ~hook_name:"on_stop"
                hooks.on_stop
-               (Agent_sdk.Hooks.OnStop { reason = response.stop_reason; response })
+               (Agent_core.Hooks.OnStop { reason = response.stop_reason; response })
            in
            let* () =
              match on_stop with
@@ -527,7 +527,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                ~selected_model_raw:(Some turn.model)
                ~capture
                ~attempt_details_source:"claude_code"
-               ~oas_internal_runtime_allowed:false
+               ~agent_core_internal_runtime_allowed:false
                ()
            in
            Ok
@@ -557,7 +557,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     (match turn_result with
      | Ok _ -> turn_result
      | Error original_error ->
-       let original_detail = Agent_sdk.Error.to_string original_error in
+       let original_detail = Agent_core.Error.to_string original_error in
        (match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
         | Ok () -> turn_result
         | Error recovery_detail ->

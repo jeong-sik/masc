@@ -1,17 +1,17 @@
-# OAS Event Catalog
+# AGENT_CORE Event Catalog
 
-Single source of truth for every event surface exposed by OAS. This
+Single source of truth for every event surface exposed by AGENT_CORE. This
 document covers *what* events exist, *where* they are emitted, *how* they
 relate, and the contracts downstream consumers can rely on.
 
-**Scope**: `agent_sdk` library (`lib/`).
+**Scope**: `agent_core` library (`lib/`).
 **Status**: Stable catalog; entries marked *Evolving* may change with
 deprecation notice.
 **Last updated**: v0.216.0.
 
 > **Note (v0.217.x)**: Surfaces 4 and 6 below reference the former
 > `Runtime_server_*` protocol cluster and `Runtime_sync.window` replay
-> surface. Those modules have been removed from `agent_sdk`; only
+> surface. Those modules have been removed from `agent_core`; only
 > `Runtime_store` (durable event/snapshot store) and `Runtime.event`
 > remain as the live runtime surface. The entries are retained as
 > historical contract references; rows marked *removed* no longer
@@ -21,7 +21,7 @@ deprecation notice.
 
 ## 1. Six event surfaces at a glance
 
-OAS carries six independent event surfaces. They are listed here in order
+AGENT_CORE carries six independent event surfaces. They are listed here in order
 of external relevance.
 
 | # | Surface | Module | Transport | Audience |
@@ -29,7 +29,7 @@ of external relevance.
 | 1 | **Event_bus** | `Event_bus` | In-process pub/sub | Library consumers (subscribers) |
 | 2 | **Hooks** | `Hooks` | Synchronous callback | Library consumers (interception/audit) |
 | 3 | **Durable journal** | `Durable_event` | In-memory append-only + JSONL | Crash recovery + event-sourced replay |
-| 4 | **Runtime protocol** | `Runtime` + `Runtime_server_*` | stdout JSON-RPC-ish protocol | `oas_runtime` subprocess consumers |
+| 4 | **Runtime protocol** | `Runtime` + `Runtime_server_*` | stdout JSON-RPC-ish protocol | `agent_core_runtime` subprocess consumers |
 | 5 | **LLM wire stream** | `Types.sse_event` | Provider-specific SSE → normalized | Internal (streaming accumulation) |
 | 6 | **Runtime resume replay** | `Runtime_sync.window` | JSON replay window | External resume/A2A adapters |
 
@@ -100,19 +100,19 @@ identifier.** The following prefixes are reserved:
 
 | Prefix | Owner | Purpose |
 |--------|-------|---------|
-| `runtime.*` | OAS | Events from `Runtime` session protocol (§5) |
-| `durable.*` | OAS | Events from `Durable_event` journal (§4) |
-| `provider.*` | OAS | Provider-specific escape hatch — e.g. `provider.anthropic.cache_hit`, `provider.openai.reasoning_tokens`, `provider.gemini.safety_rating` |
-| `oas.*` | OAS | Reserved for future OAS use |
+| `runtime.*` | AGENT_CORE | Events from `Runtime` session protocol (§5) |
+| `durable.*` | AGENT_CORE | Events from `Durable_event` journal (§4) |
+| `provider.*` | AGENT_CORE | Provider-specific escape hatch — e.g. `provider.anthropic.cache_hit`, `provider.openai.reasoning_tokens`, `provider.gemini.safety_rating` |
+| `agent_core.*` | AGENT_CORE | Reserved for future AGENT_CORE use |
 | `<downstream>.*` | Downstream | Any other prefix; pick one and stick to it |
 
-**Downstream publishers SHOULD NOT use OAS's `Event_bus` as a general-
+**Downstream publishers SHOULD NOT use AGENT_CORE's `Event_bus` as a general-
 purpose telemetry channel for their own domain events.** Create your own
 typed event surface for downstream product events.
 
-External product/domain events can correlate with OAS via `correlation_id`,
+External product/domain events can correlate with AGENT_CORE via `correlation_id`,
 `run_id`, `caused_by`, raw-trace refs, and OTel trace/span IDs without becoming
-OAS-native taxonomy.
+AGENT_CORE-native taxonomy.
 
 ### 2.4 Filters, subscriptions, and draining
 
@@ -195,7 +195,7 @@ See `lib/base/hooks.mli` for the full decision contract.
 Event-sourced record of everything needed to reconstruct agent state on
 crash recovery. Events are immutable; append-only.
 
-`Durable_event` remains the only production durable-journal authority. OAS has
+`Durable_event` remains the only production durable-journal authority. AGENT_CORE has
 no second public execution journal and external consumers must not dual-write
 an alternative occurrence history. Any internal execution-topology work is
 outside this public catalog until a production single-writer hard cut is
@@ -261,7 +261,7 @@ tool calls from Event_bus should filter on one or the other.
 
 **Header**: `lib/runtime.ml`. Stability: Evolving.
 
-Session-level runtime for `oas_runtime` subprocess usage. Runtime emits
+Session-level runtime for `agent_core_runtime` subprocess usage. Runtime emits
 on **two channels simultaneously**:
 
 1. **Primary**: JSON-RPC-ish protocol message `Event_message { session_id; event }` written to stdout.
@@ -373,7 +373,7 @@ around that) become observable.
 **Header**: `lib/runtime_sync.mli`; event truth:
 `lib/runtime.mli`. Stability: Evolving.
 
-Current OAS core does not expose a `lib/protocol/a2a_server.ml` HTTP task
+Current AGENT_CORE core does not expose a `lib/protocol/a2a_server.ml` HTTP task
 stream. External A2A or resume-capable adapters should bridge protocol
 messages onto Runtime commands and consume `Runtime_sync.window` for replay.
 
@@ -395,8 +395,8 @@ messages onto Runtime commands and consume `Runtime_sync.window` for replay.
 
 ## 8. Multi-vendor compatibility matrix
 
-Every OAS-supported LLM vendor produces the **same native Event_bus
-payload variants** when running via OAS. Provider-specific signals go
+Every AGENT_CORE-supported LLM vendor produces the **same native Event_bus
+payload variants** when running via AGENT_CORE. Provider-specific signals go
 through `Custom("provider.<name>.<event>", ...)`.
 
 | Provider | Native: Agent/Turn/Tool | Native: Handoff | Native: Context* | Provider-specific Custom |
@@ -426,7 +426,7 @@ provider. Missing credentials / endpoints skip gracefully.
    - An audit/interception point? → `Hooks` callback.
    - A replay-relevant record? → `Durable_event` variant.
    - Provider-specific? → `Custom("provider.<name>.<event>", json)`.
-   - Downstream domain event? → downstream's own Event_bus, not OAS's.
+   - Downstream domain event? → downstream's own Event_bus, not AGENT_CORE's.
 
 2. **Provider-agnostic check** (native variants only, per I6):
    - Confirm the semantic exists in Anthropic + OpenAI + Gemini.
@@ -469,7 +469,7 @@ provider. Missing credentials / endpoints skip gracefully.
 
 ## 11. Industry comparison
 
-| Concept | OAS | OpenAI Agents SDK | Claude Agent SDK | LangGraph |
+| Concept | AGENT_CORE | OpenAI Agents SDK | Claude Agent SDK | LangGraph |
 |---------|-----|-------------------|------------------|-----------|
 | Primary surface | `Event_bus` + `Hooks` | `RawResponsesStreamEvent` / `RunItemStreamEvent` / `AgentUpdatedStreamEvent` | Hooks (18 events) | `astream_events` |
 | Event shape | Tagged OCaml sum (pattern match) | Flat `type` string + JSON | Hook callback arguments | Flat `event` string + data/metadata |

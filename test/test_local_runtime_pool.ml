@@ -36,7 +36,7 @@ let install_pool runtimes =
 
 let test_parse_runtime_env () =
   Local_runtime_pool.reset ();
-  (* OAS 0.112.0 auto-appends Ollama endpoint (http://127.0.0.1:11434) to
+  (* AGENT_CORE 0.112.0 auto-appends Ollama endpoint (http://127.0.0.1:11434) to
      LLM_ENDPOINTS.  ollama_endpoint is a module-level constant so env changes
      at test time have no effect.  Include it in the LLM_ENDPOINTS list to
      keep the count predictable via deduplication. *)

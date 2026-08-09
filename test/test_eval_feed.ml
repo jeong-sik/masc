@@ -168,7 +168,7 @@ let test_list_agents_nonexistent_dir () =
 
 let test_list_agents_with_dirs () =
   let base = tmpdir "eval_agents" in
-  let eval_root = Filename.concat (Filename.concat base ".oas") "eval" in
+  let eval_root = Filename.concat (Filename.concat base ".agent_core") "eval" in
   mkdir_p (Filename.concat eval_root "keeper-b");
   mkdir_p (Filename.concat eval_root "keeper-a");
   write_file (Filename.concat eval_root "readme.txt") "ignore me";
@@ -191,7 +191,7 @@ let test_read_latest_with_files () =
   let base = tmpdir "eval_files" in
   let eval_dir =
     Filename.concat
-      (Filename.concat (Filename.concat base ".oas") "eval")
+      (Filename.concat (Filename.concat base ".agent_core") "eval")
       "keeper-a"
   in
   mkdir_p eval_dir;
@@ -246,7 +246,7 @@ let test_read_latest_with_limit () =
   let base = tmpdir "eval_limit" in
   let eval_dir =
     Filename.concat
-      (Filename.concat (Filename.concat base ".oas") "eval")
+      (Filename.concat (Filename.concat base ".agent_core") "eval")
       "keeper-b"
   in
   mkdir_p eval_dir;

@@ -1,4 +1,4 @@
-module T = Agent_sdk.Types
+module T = Agent_core.Types
 module Id_set = Set.Make (String)
 
 type closed_unit =

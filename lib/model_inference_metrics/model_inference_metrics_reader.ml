@@ -316,7 +316,7 @@ let coverage_stage_of_entry (entry : raw_entry) : string option =
     then Some "unknown"
     else (
       match entry.usage_reported, entry.telemetry_reported with
-      | Some false, _ | _, Some false -> Some "oas"
+      | Some false, _ | _, Some false -> Some "agent_core"
       | _ ->
         (match coverage_reason_of_entry entry with
          | Some _ -> Some "unknown"

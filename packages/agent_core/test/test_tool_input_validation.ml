@@ -1,6 +1,6 @@
 (** Unit tests for Tool_input_validation — deterministic schema checking. *)
 
-open Agent_sdk
+open Agent_core
 open Alcotest
 
 let actual_to_string = function

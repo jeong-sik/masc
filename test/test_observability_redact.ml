@@ -173,19 +173,19 @@ let test_normal_tool_output_returns_some () =
 
 (* Regression: the former generic 20+ alnum pattern used to eat the 64-hex
    sha256 in a blob marker and produce "[masc:blob [REDACTED] bytes=... preview=..."
-   which [Tool_output.decode_from_oas] cannot parse back. That pattern is now
+   which [Tool_output.decode_from_agent_core] cannot parse back. That pattern is now
    removed; decoding still scopes redaction to the preview body so the marker
    structure is preserved either way. *)
 let test_blob_marker_preserves_structure () =
   let sha = String.make 64 'a' in
   let marker =
-    Tool_output.encode_for_oas
+    Tool_output.encode_for_agent_core
       (Tool_output.Stored
          (artifact_ref_exn ~sha256:sha ~bytes:10523 ~preview:"hello"
             ~mime:"text/plain"))
   in
   let redacted = Observability_redact.redact_preview marker in
-  match Tool_output.decode_from_oas redacted with
+  match Tool_output.decode_from_agent_core redacted with
   | Tool_output.Decoded { sha256; bytes; mime; _ } ->
       Alcotest.(check string) "sha256 preserved" sha sha256;
       Alcotest.(check int) "bytes preserved" 10523 bytes;
@@ -199,7 +199,7 @@ let test_blob_marker_redacts_preview_body () =
   let sha = String.make 64 'b' in
   let preview = {|{"api_key": "sk-proj-abc123xyz456def789ghi012jkl345"}|} in
   let marker =
-    Tool_output.encode_for_oas
+    Tool_output.encode_for_agent_core
       (Tool_output.Stored
          (artifact_ref_exn ~sha256:sha ~bytes:999 ~preview
             ~mime:"application/json"))
@@ -219,7 +219,7 @@ let test_blob_marker_redacts_preview_body () =
 let test_preview_json_strings_preserves_embedded_marker () =
   let sha = String.make 64 'c' in
   let marker =
-    Tool_output.encode_for_oas
+    Tool_output.encode_for_agent_core
       (Tool_output.Stored
          (artifact_ref_exn ~sha256:sha ~bytes:500 ~preview:"hi"
             ~mime:"text/plain"))
@@ -230,7 +230,7 @@ let test_preview_json_strings_preserves_embedded_marker () =
   | `Assoc fields ->
       (match List.assoc_opt "content" fields with
        | Some (`String s) ->
-           (match Tool_output.decode_from_oas s with
+           (match Tool_output.decode_from_agent_core s with
             | Tool_output.Decoded { sha256; bytes; mime; _ } ->
                 Alcotest.(check string) "sha256 preserved in leaf" sha sha256;
                 Alcotest.(check int) "bytes preserved in leaf" 500 bytes;

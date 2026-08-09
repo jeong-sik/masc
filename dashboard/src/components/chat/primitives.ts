@@ -93,17 +93,17 @@ function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'o
 }
 
 function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
-  // The stream content-block index (oasBlockIndex) is provenance detail, not
+  // The stream content-block index (agentCoreBlockIndex) is provenance detail, not
   // an identity: it stays in the hover title and in the
-  // data-chat-trace-oas-block-index attribute, while the visible label keeps
-  // the stable channel name. An "OAS #3" badge told the operator nothing
+  // data-chat-trace-agent-core-block-index attribute, while the visible label keeps
+  // the stable channel name. An "Agent Core #3" badge told the operator nothing
   // about where the step came from (bug #11).
   if (step.kind === 'think') {
     return {
       label: 'thinking_delta',
-      title: step.oasBlockIndex === undefined
+      title: step.agentCoreBlockIndex === undefined
         ? 'source: KEEPER_THINKING_DELTA'
-        : `source: KEEPER_THINKING_DELTA, content block ${step.oasBlockIndex}`,
+        : `source: KEEPER_THINKING_DELTA, content block ${step.agentCoreBlockIndex}`,
       tone: 'stream',
     }
   }
@@ -117,9 +117,9 @@ function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
   if (step.kind === 'progress') {
     return {
       label: 'intermediate_text',
-      title: step.oasBlockIndex === undefined
+      title: step.agentCoreBlockIndex === undefined
         ? 'source: TEXT_MESSAGE_CONTENT followed by TOOL_CALL_START'
-        : `source: TEXT_MESSAGE_CONTENT block ${step.oasBlockIndex}, followed by TOOL_CALL_START`,
+        : `source: TEXT_MESSAGE_CONTENT block ${step.agentCoreBlockIndex}, followed by TOOL_CALL_START`,
       tone: 'stream',
     }
   }
@@ -127,9 +127,9 @@ function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
   if (callId) {
     return {
       label: 'tool_call_id',
-      title: step.oasBlockIndex === undefined
+      title: step.agentCoreBlockIndex === undefined
         ? `source: TOOL_CALL_*, tool_call_id=${callId}`
-        : `source: TOOL_CALL_*, tool_call_id=${callId}, content block ${step.oasBlockIndex}`,
+        : `source: TOOL_CALL_*, tool_call_id=${callId}, content block ${step.agentCoreBlockIndex}`,
       tone: 'tool',
     }
   }
@@ -1739,7 +1739,7 @@ function ChatTraceStep({
         data-chat-turn-order-index=${orderIndex ?? undefined}
         data-chat-turn-order-kind="trace"
         data-chat-trace-provenance=${sourceBadge.label}
-        data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+        data-chat-trace-agent-core-block-index=${step.agentCoreBlockIndex ?? undefined}
         data-chat-trace-ts=${step.ts ?? undefined}
       >
         <span class="chat-block-tnode"></span>
@@ -1815,7 +1815,7 @@ function ChatTraceStep({
         data-chat-turn-order-index=${orderIndex ?? undefined}
         data-chat-turn-order-kind="trace"
         data-chat-trace-provenance=${sourceBadge.label}
-        data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+        data-chat-trace-agent-core-block-index=${step.agentCoreBlockIndex ?? undefined}
         data-chat-trace-ts=${step.ts ?? undefined}
       >
         <span class="chat-block-tnode"></span>
@@ -1852,7 +1852,7 @@ function ChatTraceStep({
       data-chat-turn-order-kind="tool"
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-tool-call-id=${step.toolCallId?.trim() || undefined}
-      data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+      data-chat-trace-agent-core-block-index=${step.agentCoreBlockIndex ?? undefined}
       data-chat-trace-link-state=${step.toolCallId?.trim() ? 'trace-only' : 'unlinked'}
       data-chat-trace-output-state=${step.status ?? 'pending'}
       data-chat-trace-ts=${step.ts ?? undefined}
@@ -3436,7 +3436,7 @@ function ToolTraceStep({
       data-chat-turn-order-kind=${orderKind}
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-tool-call-id=${callId ?? undefined}
-      data-chat-trace-oas-block-index=${traceStep?.oasBlockIndex ?? undefined}
+      data-chat-trace-agent-core-block-index=${traceStep?.agentCoreBlockIndex ?? undefined}
       data-chat-trace-entry-id=${entry?.id ?? undefined}
       data-chat-trace-link-state=${structuralSummary ? 'structural' : unlinkedTraceTool ? 'unlinked' : entry ? 'joined' : 'trace-only'}
       data-chat-trace-output-state=${status}

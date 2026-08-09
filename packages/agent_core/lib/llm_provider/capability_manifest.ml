@@ -59,7 +59,7 @@ type entry =
         thinking_object_adaptive / thinking_object_only / chat_template_kwargs /
         chat_template_token / reasoning_effort / enable_thinking). Parsed + applied in
         {!Capabilities.apply_manifest_entry}. Without this field a manifest
-        entry silently dropped the model's thinking knob (RFC-OAS-023).
+        entry silently dropped the model's thinking knob (Agent Core contract).
 
         Joined from the JSON [thinking_control_format] and [thinking_control_token]
         members at parse time: [chat_template_token] carries its token (for
@@ -90,7 +90,7 @@ type entry =
 type t = entry list
 
 (* Local result-syntax bindings so this file can use [let*] / [let+]
-   without depending on [agent_sdk.base] (which would create a circular
+   without depending on [agent_core.base] (which would create a circular
    library dependency). *)
 module Result_syntax = struct
   let ( let* ) = Result.bind
@@ -387,7 +387,7 @@ let parse_entry json =
   in
   (* Validate [base] against the closed preset vocab at parse time (mirrors the
      other canonical fields below) so an unknown label fails closed instead of
-     silently resolving to [default_capabilities] downstream (RFC-OAS-034). *)
+     silently resolving to [default_capabilities] downstream (Agent Core contract). *)
   let* base_label_raw =
     canonical_choice "base" ~allowed:Capability_vocab.base_label_values json
   in
@@ -740,7 +740,7 @@ let%test "of_json: unknown root fields return error" =
 
 let%test "of_json: unknown base preset returns error, not silent default" =
   (* A [base] value outside the closed preset vocab must fail closed at parse
-     rather than resolve to [default_capabilities] downstream (RFC-OAS-034). *)
+     rather than resolve to [default_capabilities] downstream (Agent Core contract). *)
   let json =
     Yojson.Safe.from_string
       {|{"schema_version":1,"models":[{"id_prefix":"m","base":"not_a_preset"}]}|}

@@ -16,13 +16,13 @@ type keeper_profile_defaults = {
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
-  (* Per-keeper OAS CLI transport env vars (OAS 0.159+).
-     Parsed from [[keeper.oas_env]] table.  Keys MUST match
-     ^OAS_[A-Z]+_.+ — any other entries are dropped with
+  (* Per-keeper AGENT_CORE CLI transport env vars (AGENT_CORE 0.159+).
+     Parsed from [[keeper.agent_core_env]] table.  Keys MUST match
+     ^AGENT_CORE_[A-Z]+_.+ — any other entries are dropped with
      a warning to avoid ambient env injection via keeper TOML.
-     Applied via Unix.putenv right before each turn so OAS transport
+     Applied via Unix.putenv right before each turn so AGENT_CORE transport
      build_args picks them up.  Empty list = no overrides. *)
-  oas_env : (string * string) list;
+  agent_core_env : (string * string) list;
 }
 
 let empty_keeper_profile_defaults =
@@ -43,6 +43,6 @@ let empty_keeper_profile_defaults =
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;
     always_allow = None;
-    oas_env = [];
+    agent_core_env = [];
   }
 ;;

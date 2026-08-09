@@ -15,7 +15,7 @@
 (* Prefix the provider subsystem [ctx] onto the message so diagnostics stay
    attributable once merged into the shared runtime log. *)
 let format_line ~ctx message =
-  Printf.sprintf "[oas:%s] %s" ctx message
+  Printf.sprintf "[agent_core:%s] %s" ctx message
   |> Llm_provider.Secret_redactor.redact_string
 ;;
 

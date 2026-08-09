@@ -1,4 +1,4 @@
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 module String_set = Set.Make (String)
 module String_map = Map.Make (String)
 

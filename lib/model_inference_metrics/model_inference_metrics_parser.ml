@@ -60,17 +60,17 @@ let success_inference_identity fields telemetry_fields =
   match
     json_string_field_opt "trace_id" fields,
     json_int_field_opt "turn_id" fields,
-    json_int_field_opt "oas_turn_ordinal" telemetry_fields
+    json_int_field_opt "agent_core_turn_ordinal" telemetry_fields
   with
-  | Some trace_id, Some keeper_turn_id, Some oas_turn_ordinal
+  | Some trace_id, Some keeper_turn_id, Some agent_core_turn_ordinal
     when (not (String.equal (String.trim trace_id) ""))
          && keeper_turn_id > 0
-         && oas_turn_ordinal >= 0 ->
+         && agent_core_turn_ordinal >= 0 ->
     Ok
       (Some
          { Cost_ledger.trace_id = trace_id
          ; keeper_turn_id
-         ; oas_turn_ordinal
+         ; agent_core_turn_ordinal
          })
   | _ -> Error Missing_success_inference_identity
 ;;
@@ -190,7 +190,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
          else (
            (* Success turns: full telemetry parsing. Model attribution is
               structural: prefer the explicit selected/model fields, then use
-              the current runtime route when OAS did not surface a concrete
+              the current runtime route when AGENT_CORE did not surface a concrete
               model. *)
            let model_result : (string, parse_error) result =
              match first_json_string_field_opt "selected_model" model_attribution_field_sets with

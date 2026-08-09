@@ -49,7 +49,7 @@ describe('queued Keeper chat server push', () => {
 
 describe('normalizeSSEDispatchType', () => {
   it('routes Event_bus audit events to the audit handler', () => {
-    expect(normalizeSSEDispatchType('oas:masc:audit_event')).toBe('audit_event')
+    expect(normalizeSSEDispatchType('agent_core:masc:audit_event')).toBe('audit_event')
   })
 
   it('keeps board slash events on their explicit cases', () => {
@@ -61,7 +61,7 @@ describe('normalizeSSEDispatchType', () => {
   })
 })
 
-describe('server-push OAS typed-payload handlers', () => {
+describe('server-push Agent Core typed-payload handlers', () => {
   beforeEach(() => {
     journal.value = []
   })
@@ -75,9 +75,9 @@ describe('server-push OAS typed-payload handlers', () => {
     return journal.value[0]
   }
 
-  it('creates a journal entry from a typed oas:agent_started payload', () => {
+  it('creates a journal entry from a typed agent_core:agent_started payload', () => {
     emitEvent({
-      type: 'oas:agent_started',
+      type: 'agent_core:agent_started',
       event_type: 'agent_started',
       ts_unix: 1_000,
       correlation_id: 'c1',
@@ -92,9 +92,9 @@ describe('server-push OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.agent).toBe('alpha')
   })
 
-  it('creates a journal entry from a typed oas:agent_completed payload', () => {
+  it('creates a journal entry from a typed agent_core:agent_completed payload', () => {
     emitEvent({
-      type: 'oas:agent_completed',
+      type: 'agent_core:agent_completed',
       event_type: 'agent_completed',
       ts_unix: 1_000,
       correlation_id: 'c1',
@@ -110,7 +110,7 @@ describe('server-push OAS typed-payload handlers', () => {
 
   it('records a cooperative yield without calling it completion', () => {
     emitEvent({
-      type: 'oas:agent_yielded',
+      type: 'agent_core:agent_yielded',
       event_type: 'agent_yielded',
       ts_unix: 1_000,
       correlation_id: 'c1',
@@ -126,7 +126,7 @@ describe('server-push OAS typed-payload handlers', () => {
 
   it('records a typed input request without calling it failure', () => {
     emitEvent({
-      type: 'oas:agent_input_required',
+      type: 'agent_core:agent_input_required',
       event_type: 'agent_input_required',
       ts_unix: 1_000,
       correlation_id: 'c1',
@@ -150,9 +150,9 @@ describe('server-push OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Agent input required · request-1')
   })
 
-  it('creates a journal entry from a typed oas:agent_failed payload with all error fields', () => {
+  it('creates a journal entry from a typed agent_core:agent_failed payload with all error fields', () => {
     emitEvent({
-      type: 'oas:agent_failed',
+      type: 'agent_core:agent_failed',
       event_type: 'agent_failed',
       ts_unix: 1_000,
       correlation_id: 'c1',
@@ -175,11 +175,11 @@ describe('server-push OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Agent run failed · t1 · 3.0s · boom')
   })
 
-  it('drops a malformed oas:agent_started payload and logs a warning', () => {
+  it('drops a malformed agent_core:agent_started payload and logs a warning', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const beforeCount = journal.value.length
     emitEvent({
-      type: 'oas:agent_started',
+      type: 'agent_core:agent_started',
       event_type: 'agent_started',
       ts_unix: 1_000,
       correlation_id: 'c1',
@@ -195,9 +195,9 @@ describe('server-push OAS typed-payload handlers', () => {
     warnSpy.mockRestore()
   })
 
-  it('creates a journal entry from a typed oas:tool_called payload', () => {
+  it('creates a journal entry from a typed agent_core:tool_called payload', () => {
     emitEvent({
-      type: 'oas:tool_called',
+      type: 'agent_core:tool_called',
       event_type: 'tool_called',
       ts_unix: 1_000,
       correlation_id: 'c1',
@@ -212,9 +212,9 @@ describe('server-push OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.agent).toBe('alpha')
   })
 
-  it('creates a journal entry from a typed oas:turn_completed payload', () => {
+  it('creates a journal entry from a typed agent_core:turn_completed payload', () => {
     emitEvent({
-      type: 'oas:turn_completed',
+      type: 'agent_core:turn_completed',
       event_type: 'turn_completed',
       ts_unix: 1_000,
       correlation_id: 'c1',
@@ -228,9 +228,9 @@ describe('server-push OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Turn completed · T5')
   })
 
-  it('creates a journal entry from a typed oas:handoff_requested payload', () => {
+  it('creates a journal entry from a typed agent_core:handoff_requested payload', () => {
     emitEvent({
-      type: 'oas:handoff_requested',
+      type: 'agent_core:handoff_requested',
       event_type: 'handoff_requested',
       ts_unix: 1_000,
       correlation_id: 'c1',
@@ -244,9 +244,9 @@ describe('server-push OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Handoff requested · alpha→beta · load')
   })
 
-  it('creates a journal entry and compaction record from a typed oas:context_compacted payload', () => {
+  it('creates a journal entry and compaction record from a typed agent_core:context_compacted payload', () => {
     emitEvent({
-      type: 'oas:context_compacted',
+      type: 'agent_core:context_compacted',
       event_type: 'context_compacted',
       ts_unix: 1_000,
       correlation_id: 'c1',
@@ -260,9 +260,9 @@ describe('server-push OAS typed-payload handlers', () => {
         before_tokens: 1000,
         after_tokens: 800,
         phase: 'summarize',
-        runtime: 'oas-runtime',
+        runtime: 'agent-core-runtime',
       },
     })
-    expect(lastJournalEntry()?.text).toBe('OAS compact · 1000→800 · summarize')
+    expect(lastJournalEntry()?.text).toBe('Agent Core compact · 1000→800 · summarize')
   })
 })

@@ -1,7 +1,7 @@
 (** Durable current-owner state between one Keeper and one official subscription
     client session.
 
-    This is not an OAS checkpoint. The external client owns its transcript;
+    This is not an AGENT_CORE checkpoint. The external client owns its transcript;
     MASC owns the exact claim, observation, recovery, and settlement phase needed
     to avoid silently duplicating an externally admitted turn. *)
 
@@ -118,7 +118,7 @@ val process_epoch : unit -> string
 
 val path : base_path:string -> keeper_name:string -> (string, string) result
 
-val tool_surface_sha256 : Agent_sdk.Tool.t list -> string
+val tool_surface_sha256 : Agent_core.Tool.t list -> string
 (** Stable digest of the exact typed dynamic-tool surface. Tool order,
     parameter order, and JSON object field order do not affect the digest;
     names, descriptions, parameter semantics, and input schemas do. *)

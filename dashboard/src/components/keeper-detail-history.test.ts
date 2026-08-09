@@ -34,8 +34,8 @@ function makeRow(overrides: Partial<KeeperCheckpointSummary> = {}): KeeperCheckp
 
 describe("filterCheckpointHistory", () => {
   const rows = [
-    makeRow({ snapshot_id: "abc-123", source_kind: "oas_current", latest_preview: "hello world" }),
-    makeRow({ snapshot_id: "def-456", source_kind: "oas_history", latest_preview: "foo bar" }),
+    makeRow({ snapshot_id: "abc-123", source_kind: "agent_core_current", latest_preview: "hello world" }),
+    makeRow({ snapshot_id: "def-456", source_kind: "agent_core_history", latest_preview: "foo bar" }),
     makeRow({ snapshot_id: "ghi-789", source_kind: "manual", latest_preview: "baz qux" }),
   ]
 
@@ -49,7 +49,7 @@ describe("filterCheckpointHistory", () => {
   })
 
   it("filters by source_kind", () => {
-    expect(filterCheckpointHistory(rows, "oas_history")).toHaveLength(1)
+    expect(filterCheckpointHistory(rows, "agent_core_history")).toHaveLength(1)
   })
 
   it("filters by latest_preview", () => {
@@ -107,7 +107,7 @@ describe("KeeperCheckpointPanel diagnostics", () => {
       history: [],
       history_errors: [{
         snapshot_id: "history-broken.json",
-        source_kind: "oas_history",
+        source_kind: "agent_core_history",
         is_current: false,
         path: "/tmp/trace-test/history-broken.json",
         file_stat: { size_bytes: 19 },
@@ -156,7 +156,7 @@ describe("KeeperCheckpointPanel diagnostics", () => {
       session_dir: "/tmp/trace-test",
       current: {
         snapshot_id: "trace-test.json",
-        source_kind: "oas_current",
+        source_kind: "agent_core_current",
         is_current: true,
         status: "available",
         path: "/tmp/trace-test/trace-test.json",

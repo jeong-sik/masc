@@ -109,7 +109,7 @@ let accumulate_event (acc : stream_acc) = function
           arguments; the empty case {}{} it "fixed" was the same model bug, not a
           provider re-emit (Gemini re-emits via InputJsonSnapshot, not Delta).
           Concatenating instead surfaces multi-object arguments as a typed
-          [malformed_tool_use_arguments] at finalize -- RFC-OAS-029 S8: reject on
+          [malformed_tool_use_arguments] at finalize -- Agent Core contract S8: reject on
           read, never silently coerce or drop. *)
        Buffer.add_string buf s
      | Types.ReasoningDetailsDelta { reasoning_content; details } ->
@@ -196,7 +196,7 @@ let accumulate_event (acc : stream_acc) = function
    is converted to this variant exactly once (parse, don't validate) and the
    finalizer below matches it exhaustively, so adding a kind breaks this compile
    site rather than slipping through the prior [_ -> None] catch-all that
-   silently dropped any unrecognized block (RFC-OAS-029 S6.1). An unmodeled wire
+   silently dropped any unrecognized block (Agent Core contract S6.1). An unmodeled wire
    kind becomes [Unknown_block] — handled explicitly as an unsupported stream
    surface (S8.3), never silently or as assistant-visible text. *)
 type block_kind =
@@ -328,7 +328,7 @@ let finalize_stream_acc (acc : stream_acc) =
            non-empty buffer that fails to parse is a malformed tool call —
            fail closed with a typed [Stream_parse_failed] rather than coercing
            to [`Assoc []], which would silently dispatch the tool with empty
-           arguments (RFC-OAS-029 S8: no silent permissive default). Mirrors
+           arguments (Agent Core contract S8: no silent permissive default). Mirrors
            the [Unknown_block] fail-closed arm and the typed-absence policy of
            the sibling [Tool_result_block] branch (which carries [json = None]
            rather than fabricating an object). *)
@@ -415,7 +415,7 @@ let finalize_stream_acc (acc : stream_acc) =
         media_block "audio" (fun ~media_type ~data ~source_type ->
           Types.Audio { media_type; data; source_type })
       | Some (Unknown_block kind) ->
-        (* RFC-OAS-029 S6.1/S8.3: an unmodeled content-block kind is handled
+        (* Agent Core contract S6.1/S8.3: an unmodeled content-block kind is handled
            explicitly and fail-closed. Unknown wire semantics are not safely
            equivalent to assistant-visible text, and surfacing [text] here can
            leak future server/tool/control blocks into conversation history. Keep
@@ -909,8 +909,8 @@ let%test "finalize_stream_acc fails closed on InputJsonDelta multi-object args (
   (* The live malformed_tool_use_arguments raw="{}{}" case: a model emitted one
      tool call whose arguments were two concatenated JSON objects. #2344 coerced
      this to a single "{}" via the content-based re-emit guard, and the same guard
-     silently dropped the FIRST object for distinct {a}{b} args. OAS now fails
-     closed with a typed malformed_tool_use_arguments (RFC-OAS-029 S8) -- the model
+     silently dropped the FIRST object for distinct {a}{b} args. AGENT_CORE now fails
+     closed with a typed malformed_tool_use_arguments (Agent Core contract S8) -- the model
      bug is surfaced to operators, never silently coerced to empty args nor
      dropped. *)
   let acc = create_stream_acc () in
@@ -944,7 +944,7 @@ let%test "finalize_stream_acc fails closed on InputJsonDelta multi-object args (
 let%test "finalize_stream_acc fails closed on live multi-object tool args" =
   (* Exact reproduction of the reported tool-argument failure:
      deepseek-v4-flash (Ollama Cloud, OpenAI-compatible) opened a reasoning
-     block (OAS block index 0) then emitted ONE list_tasks call whose arguments
+     block (AGENT_CORE block index 0) then emitted ONE list_tasks call whose arguments
      string was two concatenated
      objects -- {"include_done":false} then {"exclude_automation":true,"limit":5}
      (together a single valid arg set the model wrongly split). The tool block is
@@ -1155,7 +1155,7 @@ let%test "finalize_stream_acc empty produces empty content" =
 ;;
 
 let%test "finalize_stream_acc fails closed for unknown block kind with text" =
-  (* RFC-OAS-029 S6.1/S8.3: unmodeled content-block kinds are not silently
+  (* Agent Core contract S6.1/S8.3: unmodeled content-block kinds are not silently
      dropped and are not coerced into assistant-visible Text. Revert this fix to
      the old branch -> [Ok { content = [Types.Text "data"]; _ }] (red). *)
   let acc = create_stream_acc () in
@@ -1307,7 +1307,7 @@ let%test "finalize_stream_acc fails closed for media payload without metadata" =
 let%test "finalize_stream_acc fails closed on malformed tool_use arguments" =
   (* Non-truncated turn: a non-empty argument buffer that fails to parse is a
      malformed tool call and surfaces a typed [Stream_parse_failed] rather than
-     silently coercing to empty arguments (RFC-OAS-029 S8: no silent permissive
+     silently coercing to empty arguments (Agent Core contract S8: no silent permissive
      default). Truncation is handled by the MaxTokens guard, below. *)
   let acc = create_stream_acc () in
   Hashtbl.replace acc.block_types 0 "tool_use";

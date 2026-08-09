@@ -55,7 +55,7 @@ let test_prefix_cache_zero_no_increment () =
   let before_read = counter_value
     ~labels:provider_cache_labels
     "masc_llm_provider_cache_read_tokens_total" in
-  (* Simulate the guard in keeper_hooks_oas.ml: only inc if > 0 *)
+  (* Simulate the guard in keeper_hooks_agent_core.ml: only inc if > 0 *)
   let cc = 0 in
   let cr = 0 in
   if cc > 0 then

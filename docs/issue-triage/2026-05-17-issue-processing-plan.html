@@ -269,7 +269,7 @@
       </div>
       <div class="tile">
         <strong>12</strong>
-        <span>oas open issues for cross-repo routing</span>
+        <span>agent core open issues for cross-repo routing</span>
       </div>
     </div>
     <p class="muted">Snapshot checked at <code>2026-05-17T04:08:33Z</code> with <code>gh search issues</code>, <code>gh issue list</code>, and <code>gh pr list</code>.</p>
@@ -281,7 +281,7 @@
       <div class="panel">
         <p><strong>Default posture:</strong> evidence-first. No <code>target:now</code>, <code>live-defect</code>, or main-health issue should be closed unless it has fixed-on-main evidence, a linked PR/check result, or a documented superseding parent issue.</p>
         <p><strong>Primary output:</strong> this HTML report plus the Mermaid flow below. The next execution pass can use it to comment, relabel, close duplicates, or preserve blockers without re-litigating the triage policy.</p>
-        <p><strong>Boundary:</strong> OAS-owned items remain cross-repo evidence dependencies. MASC should not mark them done from a MASC-only patch.</p>
+        <p><strong>Boundary:</strong> agent core-owned items remain cross-repo evidence dependencies. MASC should not mark them done from a MASC-only patch.</p>
       </div>
     </section>
 
@@ -382,8 +382,8 @@
           <p><code>contract</code>, <code>root-cause</code>, meta epics, and architecture debt. Split meta from leaf work before closing.</p>
         </div>
         <div class="panel">
-          <h3><span class="p3">P3</span> Cross-repo OAS</h3>
-          <p><code>cross-repo/oas</code> and OAS boundary issues. Require upstream OAS issue, PR, or pin evidence.</p>
+          <h3><span class="p3">P3</span> Cross-repo agent core</h3>
+          <p><code>cross-repo/agent core</code> and agent core boundary issues. Require upstream agent core issue, PR, or pin evidence.</p>
         </div>
         <div class="panel">
           <h3><span class="p4">P4</span> Feature, performance, research</h3>
@@ -423,7 +423,7 @@
           <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc/issues/13276">#13276</a></td><td>Track Docker multi-keeper credential and rootless isolation validation</td><td><span class="badge">target:now</span><span class="badge">docker</span><span class="badge">runtime</span></td><td>Need Docker-visible credential and isolation validation evidence.</td></tr>
           <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc/issues/13274">#13274</a></td><td>Track workflow-level tool failure severity for approval and egress blockers</td><td><span class="badge">target:now</span><span class="badge">telemetry</span><span class="badge">contract</span></td><td>Require severity mapping and tool-failure telemetry proof.</td></tr>
           <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc/issues/13265">#13265</a></td><td>GOAL LOOP full 206-finding audit corpus is not replayable from repo</td><td><span class="badge">target:now</span><span class="badge">context</span><span class="badge">runtime</span></td><td>Verify corpus replay path from repo or record non-replayable blockers.</td></tr>
-          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc/issues/11079">#11079</a></td><td>[logic/OAS] compute_judgments timeout - governance_judge runtime timeout cluster</td><td><span class="badge">target:now</span><span class="badge">runtime</span></td><td>Preserve as P0 until OAS timeout evidence and MASC impact are separated.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc/issues/11079">#11079</a></td><td>[logic/agent core] compute_judgments timeout - governance_judge runtime timeout cluster</td><td><span class="badge">target:now</span><span class="badge">runtime</span></td><td>Preserve as P0 until agent core timeout evidence and MASC impact are separated.</td></tr>
           <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc/issues/11040">#11040</a></td><td>[hygiene/leak] git worktree count 539 - stale worktrees and no cleanup hook</td><td><span class="badge">target:now</span><span class="badge">runtime</span></td><td>Re-measure current worktree count before closing as operationally fixed.</td></tr>
           <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc/issues/10349">#10349</a></td><td>Keeper identity drift across contract/gate/FS resolver layers</td><td><span class="badge">target:now</span><span class="badge">runtime</span></td><td>Verify identity drift path against current credential and sandbox code.</td></tr>
 
@@ -444,9 +444,9 @@
           <tr><td class="p2">P2</td><td><a href="https://github.com/jeong-sik/masc/issues/9521">#9521</a></td><td>[Meta] string matching root prevention: type-safe enum enforcement</td><td><span class="badge">root-cause</span><span class="badge">root-cause:STR</span><span class="badge">contract</span></td><td>Keep as root-cause parent until open typed-classifier PRs land.</td></tr>
           <tr><td class="p2">P2</td><td><a href="https://github.com/jeong-sik/masc/issues/9520">#9520</a></td><td>[Meta] telemetry root prevention: 100% instrumentation enforcement</td><td><span class="badge">root-cause</span><span class="badge">root-cause:TEL</span><span class="badge">telemetry</span></td><td>Keep as telemetry parent; require metric coverage evidence per child.</td></tr>
 
-          <tr><td class="p3">P3</td><td><a href="https://github.com/jeong-sik/masc/issues/15028">#15028</a></td><td>Track OAS-owned provider/model boundary migration</td><td><span class="badge">cross-repo/oas</span><span class="badge">target:next</span></td><td>Require OAS PR/pin evidence before MASC closure.</td></tr>
-          <tr><td class="p3">P3</td><td><a href="https://github.com/jeong-sik/masc/issues/11929">#11929</a></td><td>[OAS] I-H5 OAS internal cancellation guard</td><td><span class="badge">cross-repo/oas</span><span class="badge">target:next</span></td><td>Mirror to OAS issue state and keep MASC as downstream tracker.</td></tr>
-          <tr><td class="p3">P3</td><td><a href="https://github.com/jeong-sik/masc/issues/11923">#11923</a></td><td>[Meta] MASC x OAS root improvement roadmap</td><td><span class="badge">cross-repo/oas</span><span class="badge">type:epic</span><span class="badge">context</span></td><td>Keep as roadmap parent; avoid using it as a leaf closure target.</td></tr>
+          <tr><td class="p3">P3</td><td><a href="https://github.com/jeong-sik/masc/issues/15028">#15028</a></td><td>Track agent core-owned provider/model boundary migration</td><td><span class="badge">cross-repo/agent core</span><span class="badge">target:next</span></td><td>Require agent core PR/pin evidence before MASC closure.</td></tr>
+          <tr><td class="p3">P3</td><td><a href="https://github.com/jeong-sik/masc/issues/11929">#11929</a></td><td>[agent core] I-H5 agent core internal cancellation guard</td><td><span class="badge">cross-repo/agent core</span><span class="badge">target:next</span></td><td>Mirror to agent core issue state and keep MASC as downstream tracker.</td></tr>
+          <tr><td class="p3">P3</td><td><a href="https://github.com/jeong-sik/masc/issues/11923">#11923</a></td><td>[Meta] MASC x agent core root improvement roadmap</td><td><span class="badge">cross-repo/agent core</span><span class="badge">type:epic</span><span class="badge">context</span></td><td>Keep as roadmap parent; avoid using it as a leaf closure target.</td></tr>
 
           <tr><td class="p4">P4</td><td><a href="https://github.com/jeong-sik/masc/issues/15298">#15298</a></td><td>Retire metrics backend godfile below size cap</td><td><span class="badge">performance</span><span class="badge">type:architecture</span></td><td>Needs acceptance threshold and file-size target before implementation.</td></tr>
           <tr><td class="p4">P4</td><td><a href="https://github.com/jeong-sik/masc/issues/15114">#15114</a></td><td>lazy_task: parallelize independent startup tasks</td><td><span class="badge">performance</span><span class="badge">target:next</span></td><td>Require baseline and regression bound before changing concurrency.</td></tr>
@@ -470,13 +470,13 @@ flowchart TD
   D -- yes --> P1[P1 Main health and CI]
   D -- no --> E{contract/root-cause/meta architecture?}
   E -- yes --> P2[P2 Contract/root-cause architecture]
-  E -- no --> F{cross-repo/oas?}
-  F -- yes --> P3[P3 Cross-repo OAS]
+  E -- no --> F{cross-repo/agent core?}
+  F -- yes --> P3[P3 Cross-repo agent core]
   F -- no --> P4[P4 Feature/perf/research]
   P0 --> G{Fixed on main with proof?}
   P1 --> G
   P2 --> H{Duplicate or superseded by parent?}
-  P3 --> I{Upstream OAS evidence exists?}
+  P3 --> I{Upstream agent core evidence exists?}
   P4 --> J{Acceptance criteria exists?}
   G -- yes --> K[Comment evidence and close completed]
   G -- no --> L[Keep open with next proof step]
@@ -496,7 +496,7 @@ flowchart TD
 gh issue list --repo jeong-sik/masc --state open --limit 200 --json number,title,labels,updatedAt
 gh pr list --repo jeong-sik/masc --state open --limit 100 --json number,title,headRefName,labels,isDraft,updatedAt
 gh search issues --repo jeong-sik/masc --state open --label target:later --json number --limit 50 | jq 'length'
-gh issue list --repo jeong-sik/oas --state open --limit 100 --json number,title,labels,updatedAt</code></div>
+gh issue list --repo jeong-sik/agent core --state open --limit 100 --json number,title,labels,updatedAt</code></div>
     </section>
 
     <section>
@@ -506,7 +506,7 @@ gh issue list --repo jeong-sik/oas --state open --limit 100 --json number,title,
           <li>Patch <a href="https://github.com/jeong-sik/masc/issues/15731">#15731</a> planning labels first because it is a live P0 with <code>triage-required</code>.</li>
           <li>For P0/P1, map each issue to an open PR or a focused verification command. Close nothing without E2 proof.</li>
           <li>For P2, comment parent/child links before closing duplicates or superseded architecture trackers.</li>
-          <li>For P3, verify corresponding OAS issue/PR/pin state and leave a blocked evidence comment where upstream is missing.</li>
+          <li>For P3, verify corresponding agent core issue/PR/pin state and leave a blocked evidence comment where upstream is missing.</li>
           <li>For P4, add missing acceptance criteria or archive as not planned with explicit rationale.</li>
         </ol>
       </div>

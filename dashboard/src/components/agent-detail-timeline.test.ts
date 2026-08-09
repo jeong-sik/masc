@@ -53,7 +53,7 @@ describe('ToolCallEventRow source badge', () => {
         success: true,
         source: 'keeper_in_turn',
         keeper_turn_id: 7,
-        oas_turn: 2,
+        agent_core_turn: 2,
       }),
     )
     const badge = host.querySelector('[data-tool-source="keeper_in_turn"]')

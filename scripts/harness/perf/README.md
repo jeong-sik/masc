@@ -166,8 +166,8 @@ that prompt into its ephemeral base path from the explicit root.
 **The boot recipe (verified — keepers issue real turns; FSM reaches `awaiting_provider -> streaming`):**
 
 1. **runtime.toml must borrow a catalog-valid model id.** `Runtime.init_default_strict`
-   (`server_runtime_bootstrap.ml`) rejects any model whose `api-name` is absent from the OAS catalog
-   (the OAS embedded catalog). Set `api-name = "deepseek-v4-flash"` (a catalog `id_prefix`) while pointing
+   (`server_runtime_bootstrap.ml`) rejects any model whose `api-name` is absent from the AGENT_CORE catalog
+   (the AGENT_CORE embedded catalog). Set `api-name = "deepseek-v4-flash"` (a catalog `id_prefix`) while pointing
    the provider `endpoint` at the local mock.
 2. **The keeper TOML must opt into autoboot.** Declarative keepers are excluded by design unless the
    `[keeper]` section sets `autoboot_enabled = true` (`keeper_runtime.ml:154`) **and**

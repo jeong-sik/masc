@@ -2,7 +2,7 @@
    producer-owned in Turn_record and is used only to address/dedupe this
    projection; durable semantic continuity comes from the Keeper checkpoint.
    The exact raw trace supplies the final response and a content-free activity
-   projection for that recorded OAS run. *)
+   projection for that recorded AGENT_CORE run. *)
 
 type turn =
   { turn_id : string
@@ -13,7 +13,7 @@ type turn =
 
 let default_limit = Keeper_raw_trace_retention.history_limit
 
-let sdk_run_ref (run_ref : Turn_record.raw_trace_run_ref) : Agent_sdk.Raw_trace.run_ref =
+let agent_core_run_ref (run_ref : Turn_record.raw_trace_run_ref) : Agent_core.Raw_trace.run_ref =
   { worker_run_id = run_ref.worker_run_id
   ; path = run_ref.path
   ; start_seq = run_ref.start_seq
@@ -47,11 +47,11 @@ type raw_trace_identity_mismatch =
 
 let check_raw_trace_identity
       (run_ref : Turn_record.raw_trace_run_ref)
-      (records : Agent_sdk.Raw_trace.record list)
+      (records : Agent_core.Raw_trace.record list)
   =
   let rec loop = function
     | [] -> Ok ()
-    | (record : Agent_sdk.Raw_trace.record) :: rest ->
+    | (record : Agent_core.Raw_trace.record) :: rest ->
       if not (String.equal record.agent_name run_ref.agent_name)
       then Error Runtime_agent_name_mismatch
       else (
@@ -63,7 +63,7 @@ let check_raw_trace_identity
 ;;
 
 let trace_step_of_trajectory = function
-  | Agent_sdk.Trajectory.Think { ts; _ } ->
+  | Agent_core.Trajectory.Think { ts; _ } ->
     (* RFC-0358 §2 admits the step and its timestamp, not the reasoning. The
        flag carries that fact; the label a reader shows for it belongs to the
        reader, not to this projection. *)
@@ -72,9 +72,9 @@ let trace_step_of_trajectory = function
          { text = ""
          ; content_withheld = true
          ; ts = Some (Masc_domain.iso8601_of_unix_seconds ts)
-         ; oas_block_index = None
+         ; agent_core_block_index = None
          })
-  | Agent_sdk.Trajectory.Act { tool_call; _ } ->
+  | Agent_core.Trajectory.Act { tool_call; _ } ->
     let status =
       match tool_call.finished_at, tool_call.is_error with
       | None, _ -> Some Keeper_chat_blocks.Trace_tool_pending
@@ -103,9 +103,9 @@ let trace_step_of_trajectory = function
          ; ts =
              Some
                (Masc_domain.iso8601_of_unix_seconds tool_call.started_at)
-         ; oas_block_index = None
+         ; agent_core_block_index = None
          })
-  | Agent_sdk.Trajectory.Observe _ | Agent_sdk.Trajectory.Respond _ -> None
+  | Agent_core.Trajectory.Observe _ | Agent_core.Trajectory.Respond _ -> None
 ;;
 
 let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
@@ -134,23 +134,23 @@ let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
           run_ref.path;
         None
       | Current_regular_file ->
-        (match Agent_sdk.Raw_trace_query.read_run (sdk_run_ref run_ref) with
+        (match Agent_core.Raw_trace_query.read_run (agent_core_run_ref run_ref) with
          | Error err ->
            Log.Keeper.warn ~keeper_name
              "autonomous turn source: cannot read exact run %s: %s"
              run_ref.worker_run_id
-             (Agent_sdk.Error.to_string err);
+             (Agent_core.Error.to_string err);
            None
          | Ok [] ->
            Log.Keeper.warn ~keeper_name
              "autonomous turn source: exact run %s has no records"
              run_ref.worker_run_id;
            None
-         | Ok ((first : Agent_sdk.Raw_trace.record) :: _ as records) ->
+         | Ok ((first : Agent_core.Raw_trace.record) :: _ as records) ->
            (match check_raw_trace_identity run_ref records with
             | Error Runtime_agent_name_mismatch ->
               Log.Keeper.warn ~keeper_name
-                "autonomous turn source: exact run %s has a mismatched OAS runtime identity"
+                "autonomous turn source: exact run %s has a mismatched AGENT_CORE runtime identity"
                 run_ref.worker_run_id;
               None
             | Error Session_id_mismatch ->
@@ -162,13 +162,13 @@ let turn_of_record ~config ~keeper_name (record : Turn_record.t) =
               let final_text =
                 records
                 |> List.rev
-                |> List.find_opt (fun (row : Agent_sdk.Raw_trace.record) ->
-                  row.record_type = Agent_sdk.Raw_trace.Run_finished)
-                |> Option.map (fun (row : Agent_sdk.Raw_trace.record) -> row.final_text)
+                |> List.find_opt (fun (row : Agent_core.Raw_trace.record) ->
+                  row.record_type = Agent_core.Raw_trace.Run_finished)
+                |> Option.map (fun (row : Agent_core.Raw_trace.record) -> row.final_text)
                 |> Option.join
               in
               let trace =
-                Agent_sdk.Trajectory.of_raw_trace_records records
+                Agent_core.Trajectory.of_raw_trace_records records
                 |> fun trajectory -> trajectory.steps
                 |> List.filter_map trace_step_of_trajectory
               in

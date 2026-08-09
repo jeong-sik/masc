@@ -146,7 +146,7 @@ describe('KeeperToolTelemetry render', () => {
       coverage_gaps: [
         {
           source: 'trajectory_tool_call',
-          producer: 'keeper_hooks_oas.post_tool_use',
+          producer: 'keeper_hooks_agentCore.post_tool_use',
           durable_store: '.masc/keepers/analyst/trajectories',
           dashboard_surface: '/api/v1/keepers/:name/tool-stats',
           stale_reason: 'trajectory_append_failed',
@@ -167,7 +167,7 @@ describe('KeeperToolTelemetry render', () => {
 
     expect(container.textContent).toContain('Tool trajectory write failed · 1 recorded gap')
     expect(container.textContent).toContain('reason trajectory_append_failed')
-    expect(container.textContent).toContain('producer keeper_hooks_oas.post_tool_use')
+    expect(container.textContent).toContain('producer keeper_hooks_agentCore.post_tool_use')
     expect(container.textContent).toContain('store .masc/keepers/analyst/trajectories')
     expect(container.textContent).toContain('surface /api/v1/keepers/:name/tool-stats')
     expect(container.textContent).toContain('trace trace-tool-stats-gap')

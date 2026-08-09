@@ -298,10 +298,10 @@ module Rest = struct
     with
     | Some schema -> Some schema
     | None ->
-      Sdk_tool_contract.sdk_bindings
-      |> List.find_opt (fun (binding : Sdk_tool_contract.sdk_tool_binding) ->
+      Agent_core_tool_contract.agent_core_bindings
+      |> List.find_opt (fun (binding : Agent_core_tool_contract.agent_core_tool_binding) ->
              String.equal binding.canonical_operation name)
-      |> Option.map (fun (binding : Sdk_tool_contract.sdk_tool_binding) ->
+      |> Option.map (fun (binding : Agent_core_tool_contract.agent_core_tool_binding) ->
              { Masc_domain.name
              ; description = binding.description
              ; input_schema = binding.input_schema
@@ -373,11 +373,11 @@ module Rest = struct
     |> Option.value ~default:[ "masc" ]
 
   let parameters_from_schema (schema : Yojson.Safe.t) =
-    let required = Sdk_tool_contract.required_names schema in
-    Sdk_tool_contract.property_map schema
+    let required = Agent_core_tool_contract.required_names schema in
+    Agent_core_tool_contract.property_map schema
     |> List.map (fun (name, property_schema) ->
            let description =
-             Sdk_tool_contract.string_member "description" property_schema
+             Agent_core_tool_contract.string_member "description" property_schema
              |> Option.value
                   ~default:(Printf.sprintf "%s parameter" name)
            in
@@ -393,8 +393,8 @@ module Rest = struct
   let operation_catalog_entry name (schema : Masc_domain.tool_schema) =
     let entry = help_entry name in
     let aliases =
-      Sdk_tool_contract.sdk_aliases_for_operation name
-      |> List.map Sdk_tool_contract.sdk_alias_json
+      Agent_core_tool_contract.agent_core_aliases_for_operation name
+      |> List.map Agent_core_tool_contract.agent_core_alias_json
     in
     let rest_bindings =
       actual_rest_bindings_for_operation name
@@ -414,7 +414,7 @@ module Rest = struct
         ("inputSchema", schema.input_schema);
         ("tags", list_json (tags_for_operation name));
         ("x-mcp-tool", `Assoc (Tool_catalog.metadata_to_fields name));
-        ("x-agent-sdk", `Assoc [ ("aliases", `List aliases) ]);
+        ("x-agent-core", `Assoc [ ("aliases", `List aliases) ]);
         ("x-rest-bindings", `List rest_bindings);
       ]
 
@@ -534,7 +534,7 @@ module Rest = struct
       Yojson.Safe.t =
     let mcp_auth_mode = auth_mode_of_mcp_path () in
     let operation_entries =
-      Sdk_tool_contract.core_remote_operation_names
+      Agent_core_tool_contract.core_remote_operation_names
       |> List.filter_map (fun name ->
              match find_schema name with
              | Some schema -> Some (name, schema)
@@ -545,9 +545,9 @@ module Rest = struct
         (fun (name, schema) -> operation_catalog_entry name schema)
         operation_entries
     in
-    let sdk_tools =
-      List.map Sdk_tool_contract.sdk_alias_json
-        Sdk_tool_contract.sdk_bindings
+    let agent_core_tools =
+      List.map Agent_core_tool_contract.agent_core_alias_json
+        Agent_core_tool_contract.agent_core_bindings
     in
     let components_schemas =
       operation_entries
@@ -610,7 +610,7 @@ module Rest = struct
           ("x-auth-description", `String (auth_mode_description mcp_auth_mode));
           ("security", openapi_bearer_security);
           ("x-mcp-operations", `List operation_catalog);
-          ("x-agent-sdk-tools", `List sdk_tools);
+          ("x-agent-core-tools", `List agent_core_tools);
         ]);
     let path_entries =
       Hashtbl.to_seq path_table
@@ -632,7 +632,7 @@ module Rest = struct
               ("version", `String Runtime_build_version.current);
               ( "description",
                 `String
-                  "Internal OAS export for MASC MCP agent control. Use x-mcp-operations for canonical MCP operation metadata and x-agent-sdk-tools for the current SDK-facing projections." );
+                  "Internal AGENT_CORE export for MASC MCP agent control. Use x-mcp-operations for canonical MCP operation metadata and x-agent-core-tools for the current agent-core projections." );
             ] );
         ( "servers",
           `List

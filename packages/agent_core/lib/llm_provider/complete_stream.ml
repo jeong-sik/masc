@@ -340,7 +340,7 @@ let complete_stream_http
         | None -> start_latency_counter ?clock ()
       in
       let ttfrc_ref = ref None in
-      (* RFC-OAS-020 — TTFT (Time To First Token) capture.
+      (* Agent Core contract — TTFT (Time To First Token) capture.
          [first_token_at_ref] fires on the first chunk that carries a
          non-empty generated delta (text / reasoning / tool-call arg).
          [first_event_at_ref] fires on the very first SSE
@@ -377,7 +377,7 @@ let complete_stream_http
       in
       let ollama_usage = ref None in
       let ollama_timings = ref None in
-      (* RFC-OAS-019 — stream-lifetime accumulators for the
+      (* Agent Core contract — stream-lifetime accumulators for the
          [Streaming_summary] variant that fires once at finalize.
          Hoisted out of [body_logic] so exception paths (timeout,
          transport error, SSE wire error) can publish too.
@@ -453,7 +453,7 @@ let complete_stream_http
             | Some (p50, p95, pmax) -> Some p50, Some p95, Some pmax
             | None -> None, None, None
           in
-          (* RFC-OAS-020: compute TTFT from first-token capture
+          (* Agent Core contract: compute TTFT from first-token capture
              (was first-chunk = ttfrc). [prefill_ms] is the gap
              between any first event and the first token; [None]
              when they coincide (OpenAI-compat: no separable
@@ -504,9 +504,9 @@ let complete_stream_http
           ~body:body_with_stream
           ~f:(fun reader ->
             emit_stream_event on_event Types.Connected;
-            (* OAS exposes one redacted provider observation to a caller-owned
+            (* AGENT_CORE exposes one redacted provider observation to a caller-owned
                nonblocking offer. Queueing, persistence, capacity, and retries
-               remain outside the provider SDK boundary. *)
+               remain outside the provider boundary. *)
             let observe_wire_chunk chunk =
               match observe_wire_chunk with
               | None -> ()
@@ -518,7 +518,7 @@ let complete_stream_http
               let streaming_reasoning =
                 (Reasoning_dialect.for_provider_config config).streaming
               in
-              (* RFC-OAS-019: first_chunk_seen / chunk_counter / last_chunk_t
+              (* Agent Core contract: first_chunk_seen / chunk_counter / last_chunk_t
                  hoisted out of body_logic so publish_summary on
                  exception paths sees consistent state. *)
               let get_state () =
@@ -530,7 +530,7 @@ let complete_stream_http
                   s
               in
               let dispatch (events, tel_opt) =
-                (* RFC-OAS-020: capture first-event + first-token
+                (* Agent Core contract: capture first-event + first-token
                    wall-clock offsets. [first_event_at_ref] fires on
                    ANY first event (prelude or token);
                    [first_token_at_ref] fires on generated token events,
@@ -552,7 +552,7 @@ let complete_stream_http
                   (fun evt ->
                      emit_stream_event on_event evt;
                      Complete_stream_acc.accumulate_event acc evt;
-                     (* RFC-OAS-019: classify each delta for the
+                     (* Agent Core contract: classify each delta for the
                         [Streaming_summary] kind_breakdown that fires at
                         finalize. Wire errors set terminal_state; per-chunk
                         emission of [Streaming_chunk_n] is no longer
@@ -629,7 +629,7 @@ let complete_stream_http
                     (match elapsed_ms, !last_chunk_t with
                      | Some elapsed_ms, Some last_chunk_t ->
                        let inter_chunk_ms = elapsed_ms -. last_chunk_t in
-                       (* RFC-OAS-019: per-chunk [Streaming_chunk_n] publish
+                       (* Agent Core contract: per-chunk [Streaming_chunk_n] publish
                           removed. Inter-chunk gaps are accumulated for the
                           percentile reservoir in [Streaming_summary]. Metrics
                           sinks still receive the raw sample so aggregate backends
@@ -790,7 +790,7 @@ let complete_stream_http
                   let phase =
                     Http_client.timeout_phase_of_stream_idle_state !stream_idle_state
                   in
-                  (* RFC-OAS-037: name the knob that actually armed this
+                  (* Agent Core contract: name the knob that actually armed this
                      deadline. Before the TTFT split every phase was governed
                      by stream_idle_timeout_s; now a first-event timeout can
                      come from first_event_timeout_s or body_timeout_s, and
@@ -857,7 +857,7 @@ let complete_stream_http
                          ~wire_format:active_wire_format
                          serr)
                 in
-                (* RFC-OAS-019: emit one [Streaming_summary] at stream
+                (* Agent Core contract: emit one [Streaming_summary] at stream
                    finalize on the normal path. [terminal_state] defaults to
                    [Terminal_done]; dispatch and finalize errors upgrade it
                    before publication. *)
@@ -868,7 +868,7 @@ let complete_stream_http
           ()
       with
       | Error _ as e ->
-        (* RFC-OAS-019: transport-level error before body_logic ran (or
+        (* Agent Core contract: transport-level error before body_logic ran (or
            before its publish). Idempotent via summary_published. *)
         publish_summary ~terminal:(Telemetry_event.Terminal_error "transport_error") ();
         e
@@ -917,7 +917,7 @@ let complete_stream_http
         publish_summary ~terminal:(Telemetry_event.Terminal_error "timeout_error") ();
         Error err
       | Ok (Error err) ->
-        (* oas#2947: a glm request rejection arrives as a non-200 whose body is
+        (* agent-core boundary: a glm request rejection arrives as a non-200 whose body is
            glm's structured error envelope. Promote a code-1261 context
            overflow to the typed [ProviderFailure Context_overflow] here, while
            the provider identity is still known — downstream classification

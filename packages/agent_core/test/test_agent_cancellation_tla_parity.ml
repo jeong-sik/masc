@@ -10,7 +10,7 @@
    Reference: specs/AgentCancellation.tla
 *)
 
-open Agent_sdk
+open Agent_core
 
 let all_phases =
   [ Runtime.Bootstrapping

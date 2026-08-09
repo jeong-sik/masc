@@ -56,7 +56,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
       'base-system',
       'unified-world',
       'turn-soft-context',
-      'oas-hook',
+      'agent-core-hook',
     ])
     // The world message carries no prompt asset: keeper.turn_intent was its
     // only one and #26823 removed it. Its two rows are computed observations.

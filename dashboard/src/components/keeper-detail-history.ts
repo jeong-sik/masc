@@ -42,12 +42,12 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * Pure filter for OAS snapshot history rows.
+ * Pure filter for Agent Core snapshot history rows.
  *
  * Case-insensitive substring match on `snapshot_id`, `source_kind`, and
  * `latest_preview` so operators can locate a snapshot by partial id, by the
  * preview text that described the turn, or by its source kind
- * (`oas_current` / `oas_history`).
+ * (`agent_core_current` / `agent_core_history`).
  *
  * Empty/whitespace query returns the input reference unchanged (no new
  * array allocation, preserves referential equality for memoisation).
@@ -219,7 +219,7 @@ export function KeeperCheckpointPanel({
         return
       }
       const confirmed = await requestConfirm({
-        title: 'OAS snapshot 삭제',
+        title: 'Agent Core snapshot 삭제',
         message: `${selectedIds.length}개 snapshot history를 삭제합니다.\n현재 active checkpoint는 건드리지 않습니다.`,
         tone: 'danger',
         confirmText: '삭제',
@@ -327,7 +327,7 @@ export function KeeperCheckpointPanel({
     <div class="flex flex-col gap-3 v2-monitoring-panel">
       <div class="flex items-center justify-between gap-3 v2-monitoring-toolbar">
         <div class="text-2xs text-[var(--color-fg-muted)]">
-          current OAS checkpoint와 OAS snapshot history만 노출합니다.
+          current Agent Core checkpoint와 Agent Core snapshot history만 노출합니다.
         </div>
         <div class="flex items-center gap-2">
           <${ActionButton}
@@ -413,7 +413,7 @@ export function KeeperCheckpointPanel({
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-panel">
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-3 py-2 v2-monitoring-toolbar">
           <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
-            OAS Snapshot History
+            Agent Core Snapshot History
             ${inventory && inventory.history.length > 0 && historyQuery.trim() !== ''
               ? html`<span class="ml-2 text-3xs font-normal normal-case tracking-normal text-[var(--color-fg-disabled)]">${filterCheckpointHistory(inventory.history, historyQuery).length}/${inventory.history.length}</span>`
               : null}
@@ -423,12 +423,12 @@ export function KeeperCheckpointPanel({
             class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
             value=${historyQuery}
             placeholder="snapshot id / preview / 요약 필터"
-            ariaLabel="OAS snapshot history 필터"
+            ariaLabel="Agent Core snapshot history 필터"
             onInput=${(e: Event) => { setHistoryQuery((e.target as HTMLInputElement).value) }}
           />
         </div>
         ${!inventory || inventory.history.length === 0
-          ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)] v2-monitoring-row">저장된 OAS history snapshot이 아직 없습니다.</div>`
+          ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)] v2-monitoring-row">저장된 Agent Core history snapshot이 아직 없습니다.</div>`
           : (() => {
               const visibleHistory = filterCheckpointHistory(inventory.history, historyQuery)
               const isFiltering = historyQuery.trim() !== ''

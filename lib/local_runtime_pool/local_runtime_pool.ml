@@ -124,7 +124,7 @@ let runtime_of_discovery_status (status : Discovery_cache.endpoint_info) =
     failure_streak = if status.healthy then 0 else 1;
     cooldown_until = unavailable;
     last_error =
-      if status.healthy then None else Some "oas discovery marked endpoint unhealthy";
+      if status.healthy then None else Some "agent_core discovery marked endpoint unhealthy";
     total_started = 0;
     total_success = 0;
     total_failure = 0;
@@ -316,7 +316,7 @@ let record_measured_ceiling value =
 
 (* [acquire] / [release] / [model_label_of_assignment] removed 2026-05-05 —
    zero production callers; see [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
-   §7.1. If leasing semantics return, design at the OAS runtime layer per RFC-0026. *)
+   §7.1. If leasing semantics return, design at the AGENT_CORE runtime layer per RFC-0026. *)
 
 let snapshot_to_yojson (snapshot : runtime_snapshot) =
   `Assoc

@@ -4,7 +4,7 @@
 
 open Types
 
-type agent_runner = string -> (api_response, Error.sdk_error) result
+type agent_runner = string -> (api_response, Error.t) result
 
 type child_output =
   { text : string
@@ -146,7 +146,7 @@ let prompt_of_input = function
 
 let make_handler config : Tool.tool_handler =
   fun (input : Yojson.Safe.t) ->
-  (* RFC-OAS-029 S4.3: the untyped handler delegates to the typed parser
+  (* Agent Core contract S4.3: the untyped handler delegates to the typed parser
      [prompt_of_input] (the SSOT) and propagates its [Error] instead of
      silently serializing malformed input as the prompt. *)
   match prompt_of_input input with

@@ -7,7 +7,7 @@ let emit_tool_exec
       ~typed_outcome
       ~provider
       ~keeper_turn_id
-      ~oas_turn
+      ~agent_core_turn
       ~task_id
       ()
   =
@@ -32,7 +32,7 @@ let emit_tool_exec
                ; "provider", `String provider
                ; "keeper_name", `String meta.name
                ; "keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id
-               ; "oas_turn", `Int oas_turn
+               ; "agent_core_turn", `Int agent_core_turn
                ; "task_id", Json_util.string_opt_to_json task_id
                ; "source", `String "keeper_in_turn"
                ])

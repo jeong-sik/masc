@@ -24,7 +24,7 @@ let test_load_default_catalog () =
   | Ok catalog ->
     check
       bool
-      "embedded default is exactly the OAS models.toml catalog"
+      "embedded default is exactly the AGENT_CORE models.toml catalog"
       true
       (Model_catalog.model_entries expected = Model_catalog.model_entries catalog
        && Model_catalog.provider_entries expected = Model_catalog.provider_entries catalog

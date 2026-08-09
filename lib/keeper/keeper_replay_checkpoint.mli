@@ -23,21 +23,21 @@ val emit_wire_capture_response_suppressed_metrics :
   keeper_name:string -> wire_capture_response_suppression_reason list -> unit
 
 val checkpoint_for_replay_persistence :
-  history_messages:Agent_sdk.Types.message list ->
+  history_messages:Agent_core.Types.message list ->
   session_id:string ->
   response_text:string ->
   ?stop_reason:Runtime_agent.stop_reason ->
-  Agent_sdk.Checkpoint.t ->
-  (Agent_sdk.Checkpoint.t * replay_suffix_prune_reason option, string) result
+  Agent_core.Checkpoint.t ->
+  (Agent_core.Checkpoint.t * replay_suffix_prune_reason option, string) result
 
 val select_finalization_checkpoint :
-  last_persisted_checkpoint:Agent_sdk.Checkpoint.t option ->
-  Agent_sdk.Checkpoint.t ->
-  Agent_sdk.Checkpoint.t * bool
+  last_persisted_checkpoint:Agent_core.Checkpoint.t option ->
+  Agent_core.Checkpoint.t ->
+  Agent_core.Checkpoint.t * bool
 
 val finalization_checkpoint_already_persisted :
   source_already_persisted:bool ->
-  source:Agent_sdk.Checkpoint.t ->
-  patched:Agent_sdk.Checkpoint.t ->
+  source:Agent_core.Checkpoint.t ->
+  patched:Agent_core.Checkpoint.t ->
   replay_suffix_pruned:replay_suffix_prune_reason option ->
   bool

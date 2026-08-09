@@ -8,7 +8,7 @@
 
     @stability Internal *)
 
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module Runtime_binding = Agent_core.Provider_runtime_binding
 
 val normalize_provider_id : string -> string
 (** Trim, lowercase, and replace [-] with [_] in a provider identifier so

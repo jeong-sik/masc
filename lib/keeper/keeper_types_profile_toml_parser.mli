@@ -70,7 +70,7 @@ type keeper_profile_defaults =
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
-  oas_env : (string * string) list;
+  agent_core_env : (string * string) list;
 }
 val empty_keeper_profile_defaults : keeper_profile_defaults
 val dedupe_keep_order : 'a list -> 'a list
@@ -80,9 +80,9 @@ val lower_string_list_opt : string list -> string list option
 val first_some : 'a option -> 'a option -> 'a option
 val string_of_toml_value_for_env :
   Keeper_toml_loader.toml_value -> string option
-val oas_env_key_prefix : string
-val oas_env_key_is_allowed : string -> bool
-val extract_oas_env_from_doc :
+val agent_core_env_key_prefix : string
+val agent_core_env_key_is_allowed : string -> bool
+val extract_agent_core_env_from_doc :
   Keeper_toml_loader.toml_doc -> (string * string) list
 val profile_defaults_of_toml :
   Keeper_toml_loader.toml_doc ->

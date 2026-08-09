@@ -24,11 +24,11 @@ Scope:
 | Owner | Responsibility | Must not own |
 | --- | --- | --- |
 | `execution-dispatch` | Keeper-side command, board, status, task, keeper, memory, and receipt execution dispatch. | Tool name policy, sandbox runtime mechanics, GitHub transport details. |
-| `hook-observation` | OAS hook event parsing, metrics, and observational adapters. | OAS tool handler execution or keeper runtime dispatch. |
-| `oas-tool-bridge` | Keeper tool bridge for OAS bundle, handler, telemetry, and deterministic errors. | Generic tool policy or non-OAS hook observation. |
+| `hook-observation` | agent core hook event parsing, metrics, and observational adapters. | agent core tool handler execution or keeper runtime dispatch. |
+| `agent-core-tool-bridge` | Keeper tool bridge for agent core bundle, handler, telemetry, and deterministic errors. | Generic tool policy or non-agent core hook observation. |
 | `sandbox-runtime` | Sandbox containment, Docker runtime, read/session runners, executor, and shell IR target plumbing. | Tool naming policy or GitHub runtime. |
 | `shell-surface` | Shell command parsing, typed Execute input, shell ops, path, runtime paths, and timeout semantics. | Sandbox runtime or keeper tool registry/policy. |
-| `tool-surface-policy` | Keeper tool aliasing, boundary, disclosure, diversity, emission, registry, policy, resolution, and tool-specific policy records. | OAS bridge implementation, shell parsing, sandbox execution. |
+| `tool-surface-policy` | Keeper tool aliasing, boundary, disclosure, diversity, emission, registry, policy, resolution, and tool-specific policy records. | agent core bridge implementation, shell parsing, sandbox execution. |
 
 ## Coverage Manifest
 
@@ -72,16 +72,16 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_execution.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_join.ml` - execution-dispatch
 - `lib/keeper/keeper_execution_join.mli` - execution-dispatch
-- `lib/keeper/keeper_hooks_oas_cost_events.ml` - hook-observation
-- `lib/keeper/keeper_hooks_oas_cost_events.mli` - hook-observation
-- `lib/keeper/keeper_hooks_oas_introspection.ml` - hook-observation
-- `lib/keeper/keeper_hooks_oas_introspection.mli` - hook-observation
-- `lib/keeper/keeper_hooks_oas_response_metrics.ml` - hook-observation
-- `lib/keeper/keeper_hooks_oas_response_metrics.mli` - hook-observation
-- `lib/keeper_hooks_oas_types/keeper_hooks_oas_types.ml` - hook-observation
-- `lib/keeper_hooks_oas_types/keeper_hooks_oas_types.mli` - hook-observation
-- `lib/keeper/keeper_hooks_oas.ml` - hook-observation
-- `lib/keeper/keeper_hooks_oas.mli` - hook-observation
+- `lib/keeper/keeper_hooks_agent_core_cost_events.ml` - hook-observation
+- `lib/keeper/keeper_hooks_agent_core_cost_events.mli` - hook-observation
+- `lib/keeper/keeper_hooks_agent_core_introspection.ml` - hook-observation
+- `lib/keeper/keeper_hooks_agent_core_introspection.mli` - hook-observation
+- `lib/keeper/keeper_hooks_agent_core_response_metrics.ml` - hook-observation
+- `lib/keeper/keeper_hooks_agent_core_response_metrics.mli` - hook-observation
+- `lib/keeper_hooks_agent_core_types/keeper_hooks_agent_core_types.ml` - hook-observation
+- `lib/keeper_hooks_agent_core_types/keeper_hooks_agent_core_types.mli` - hook-observation
+- `lib/keeper/keeper_hooks_agent_core.ml` - hook-observation
+- `lib/keeper/keeper_hooks_agent_core.mli` - hook-observation
 - `lib/keeper/keeper_tool_activity.ml` - hook-observation
 - `lib/keeper/keeper_tool_activity.mli` - hook-observation
 - `lib/keeper/keeper_sandbox_containment.ml` - sandbox-runtime
@@ -161,13 +161,13 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_surface.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface_ops.ml` - tool-surface-policy
-- `lib/keeper/keeper_tools_oas_bundle.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_bundle.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_handler_exec.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_handler_exec.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_handler_telemetry.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_handler_telemetry.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_handler.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas_handler.mli` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas.ml` - oas-tool-bridge
-- `lib/keeper/keeper_tools_oas.mli` - oas-tool-bridge
+- `lib/keeper/keeper_tools_agent_core_bundle.ml` - agent-core-tool-bridge
+- `lib/keeper/keeper_tools_agent_core_bundle.mli` - agent-core-tool-bridge
+- `lib/keeper/keeper_tools_agent_core_handler_exec.ml` - agent-core-tool-bridge
+- `lib/keeper/keeper_tools_agent_core_handler_exec.mli` - agent-core-tool-bridge
+- `lib/keeper/keeper_tools_agent_core_handler_telemetry.ml` - agent-core-tool-bridge
+- `lib/keeper/keeper_tools_agent_core_handler_telemetry.mli` - agent-core-tool-bridge
+- `lib/keeper/keeper_tools_agent_core_handler.ml` - agent-core-tool-bridge
+- `lib/keeper/keeper_tools_agent_core_handler.mli` - agent-core-tool-bridge
+- `lib/keeper/keeper_tools_agent_core.ml` - agent-core-tool-bridge
+- `lib/keeper/keeper_tools_agent_core.mli` - agent-core-tool-bridge

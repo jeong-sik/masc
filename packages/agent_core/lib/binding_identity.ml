@@ -1,4 +1,4 @@
-(** Opaque identity of one resolved OAS provider binding. *)
+(** Opaque identity of one resolved AGENT_CORE provider binding. *)
 
 module PC = Llm_provider.Provider_config
 module PK = Llm_provider.Provider_kind

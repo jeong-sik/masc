@@ -116,7 +116,7 @@ code_refs:
 - Tool Monitor default view는 full telemetry/full quality panels를 나란히 터뜨리지 않고 tool success, failures, attention tools, failure categories, and lane links만 먼저 보여준다.
 - Evidence Timeline default view는 Activity Graph card panels를 자동으로 붙이지 않는다. Activity Graph는 `#monitoring?section=observatory&view=activity`, Live는 `#monitoring?section=observatory&view=live`에서만 열린다.
 - Transport/Feature/Diagnostics 상세는 Monitor daily default가 아니라 diagnostics/admin 성격이다. Monitor에는 degraded badge나 diagnostic link만 노출한다.
-- Runtime & Runtime default view는 OAS/runtime signal을 먼저 보여주고 `transport-health`, `diagnostics`, `feature-health`를 hidden diagnostics link 묶음으로 노출한다.
+- Runtime & Runtime default view는 agent core/runtime signal을 먼저 보여주고 `transport-health`, `diagnostics`, `feature-health`를 hidden diagnostics link 묶음으로 노출한다.
 
 ## Canonical Read Models
 - `GET /api/v1/dashboard/shell`
@@ -128,8 +128,8 @@ code_refs:
   - observatory investigation graph
 - `GET /api/v1/dashboard/telemetry/summary`, `GET /api/v1/dashboard/telemetry?source=tool_call_io`
   - Tool Monitor evidence-log lens and source freshness metadata
-- `GET /api/v1/dashboard/oas/telemetry/recent`, `GET /api/v1/dashboard/oas/telemetry/summary`
-  - in-process OAS runtime-lane sample cache; payloads expose `dashboard_surface`, `source`, and `retention.durable_replay_surface` so operators can distinguish cache state from durable `oas_event` replay
+- `GET /api/v1/dashboard/agent core/telemetry/recent`, `GET /api/v1/dashboard/agent core/telemetry/summary`
+  - in-process agent core runtime-lane sample cache; payloads expose `dashboard_surface`, `source`, and `retention.durable_replay_surface` so operators can distinguish cache state from durable `agent_core_event` replay
 - `GET /api/v1/dashboard/memory-subsystems`
   - cognition memory sub-view read model
 - `GET /api/v1/attribution/summary`
@@ -196,7 +196,7 @@ code_refs:
 
 ## SSE Expectations
 - SSE는 freshness transport다. canonical hydration source는 REST projection이다.
-- dashboard observer session은 live `oas:*` tail과 durable replay를 함께 본다.
+- dashboard observer session은 live `agent_core:*` tail과 durable replay를 함께 본다.
 - 현재 v1 shell이 직접 반응하는 최소 이벤트 클래스:
   - `broadcast`
   - `task_*`

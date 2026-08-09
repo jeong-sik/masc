@@ -26,7 +26,7 @@ type runtime_observation = {
   fallback_events : runtime_fallback_event list;
   attempt_details_available : bool;
   attempt_details_source : string;
-  oas_internal_runtime_allowed : bool;
+  agent_core_internal_runtime_allowed : bool;
   streaming_ttfrc_ms : float option;
   streaming_inter_chunk_count : int;
   streaming_inter_chunk_avg_ms : float option;
@@ -50,7 +50,7 @@ and runtime_fallback_event = {
 
 module StringMap = Set_util.StringMap
 
-(* RFC-0132 PR-2: runtime observation OAS/dashboard surface = external boundary; redact via SSOT. *)
+(* RFC-0132 PR-2: runtime observation AGENT_CORE/dashboard surface = external boundary; redact via SSOT. *)
 let public_runtime_model_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
@@ -128,12 +128,12 @@ let find_runtime_eviction_candidate counters =
 (* ================================================================ *)
 
 (** Map provider_kind to a runtime-label prefix. Delegates to the
-    current OAS registry helper so endpoint-distinct providers track
-    the pinned agent_sdk behavior. The function does not enumerate
+    current AGENT_CORE registry helper so endpoint-distinct providers track
+    the pinned agent_core behavior. The function does not enumerate
     specific providers; the registry resolves them. *)
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  match Agent_sdk.Provider_runtime_binding.binding_for_provider_config cfg with
-  | Some binding -> binding.Agent_sdk.Provider_runtime_binding.id
+  match Agent_core.Provider_runtime_binding.binding_for_provider_config cfg with
+  | Some binding -> binding.Agent_core.Provider_runtime_binding.id
   | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
 
 let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
@@ -153,7 +153,7 @@ let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     ?(fallback_events = [])
     ?(attempt_details_available = false)
     ?(attempt_details_source = "opaque_named_runtime")
-    ?(oas_internal_runtime_allowed = false)
+    ?(agent_core_internal_runtime_allowed = false)
     ?(streaming_ttfrc_ms = None)
     ?(streaming_inter_chunk_count = 0)
     ?(streaming_inter_chunk_avg_ms = None)
@@ -194,7 +194,7 @@ let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     fallback_events;
     attempt_details_available;
     attempt_details_source;
-    oas_internal_runtime_allowed;
+    agent_core_internal_runtime_allowed;
     streaming_ttfrc_ms;
     streaming_inter_chunk_count;
     streaming_inter_chunk_avg_ms;
@@ -229,7 +229,7 @@ type runtime_metrics_capture = {
    [public_runtime] placeholder by #15040. Sibling parity restored.
 
    The redacted variants for external boundaries (keeper metrics consumed
-   by dashboard/OAS) live in lib/keeper/keeper_unified_metrics.ml as
+   by dashboard/AGENT_CORE) live in lib/keeper/keeper_unified_metrics.ml as
    [redacted_runtime_attempt_to_json] etc. and intentionally omit
    model_id/model_label entirely. Those are not touched here. *)
 let runtime_attempt_to_json (attempt : runtime_attempt) : Yojson.Safe.t =
@@ -406,8 +406,8 @@ let runtime_metrics_for_candidates ~candidate_count:(_ : int) () =
 let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
     ~(candidate_count : int)
     ~(selected_model_raw : string option) ~(capture : runtime_metrics_capture)
-    ?(attempt_details_source = "oas_metrics_callbacks")
-    ?(oas_internal_runtime_allowed = false)
+    ?(attempt_details_source = "agent_core_metrics_callbacks")
+    ?(agent_core_internal_runtime_allowed = false)
     () =
   let ttfrc, chunk_count, chunk_avg =
     streaming_metrics_of_capture capture.streaming
@@ -418,7 +418,7 @@ let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
     ~fallback_events:(List.rev capture.fallback_events_rev)
     ~attempt_details_available:true
     ~attempt_details_source
-    ~oas_internal_runtime_allowed
+    ~agent_core_internal_runtime_allowed
     ~streaming_ttfrc_ms:ttfrc
     ~streaming_inter_chunk_count:chunk_count
     ~streaming_inter_chunk_avg_ms:chunk_avg
@@ -453,7 +453,7 @@ let runtime_observation_to_json (obs : runtime_observation) : Yojson.Safe.t =
           (List.map runtime_fallback_event_to_json obs.fallback_events) );
       ("attempt_details_available", `Bool obs.attempt_details_available);
       ("attempt_details_source", `String obs.attempt_details_source);
-      ("oas_internal_runtime_allowed", `Bool obs.oas_internal_runtime_allowed);
+      ("agent_core_internal_runtime_allowed", `Bool obs.agent_core_internal_runtime_allowed);
       ("streaming_ttfrc_ms", Json_util.float_opt_to_json obs.streaming_ttfrc_ms);
       ("streaming_inter_chunk_count", `Int obs.streaming_inter_chunk_count);
       ("streaming_inter_chunk_avg_ms", Json_util.float_opt_to_json obs.streaming_inter_chunk_avg_ms);

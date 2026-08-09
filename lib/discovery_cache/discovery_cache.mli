@@ -1,4 +1,4 @@
-(** Discovery_cache — TTL-cached wrapper over the OAS provider
+(** Discovery_cache — TTL-cached wrapper over the AGENT_CORE provider
     discovery probe.
 
     All HTTP probing logic lives in [Llm_provider.Discovery]; this

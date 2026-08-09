@@ -412,10 +412,10 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'heartbeat_failures',
   'turn_failures',
   'exception',
-  'sdk_context_window_exceeded',
-  'sdk_unrecognized_stop_reason',
-  'sdk_guardrail_violation',
-  'sdk_tripwire_violation',
+  'agent_core_context_window_exceeded',
+  'agent_core_unrecognized_stop_reason',
+  'agent_core_guardrail_violation',
+  'agent_core_tripwire_violation',
 ] as const
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
@@ -634,7 +634,7 @@ export type KeeperConversationSource =
   | 'world_state_prompt'
   | 'internal_assistant'
   // A keeper turn that ran without anyone addressing the keeper. Its ordinary
-  // User/Assistant/Tool exchange is durable in the OAS checkpoint; these
+  // User/Assistant/Tool exchange is durable in the Agent Core checkpoint; these
   // dashboard-only rows avoid duplicating that conversation in the chat store
   // and are projected by Keeper_autonomous_turn_source. Visible by default but
   // folded into one collapsed group, because a keeper may wake once a minute.
@@ -831,10 +831,10 @@ export type ChatTraceThinkStep = {
   text: string
   contentWithheld?: boolean
   ts?: string
-  oasBlockIndex?: number
+  agentCoreBlockIndex?: number
 }
 export type ChatTraceReasonStep = { kind: 'reason'; text: string; detail?: string; ts?: string }
-export type ChatTraceProgressStep = { kind: 'progress'; text: string; ts?: string; oasBlockIndex?: number }
+export type ChatTraceProgressStep = { kind: 'progress'; text: string; ts?: string; agentCoreBlockIndex?: number }
 export type ChatTraceToolStep = {
   kind: 'tool'
   name: string
@@ -844,7 +844,7 @@ export type ChatTraceToolStep = {
   args?: string
   result?: string
   ts?: string
-  oasBlockIndex?: number
+  agentCoreBlockIndex?: number
 }
 export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceProgressStep | ChatTraceToolStep
 export type ChatTraceBlock = { t: 'trace'; trace: ChatTraceStep[] }
@@ -1322,7 +1322,7 @@ export interface KeeperOutcomes {
     consecutive_fail_current: number
   }
   validation: {
-    oas_verdicts: {
+    agent_core_verdicts: {
       pass: number
       fail: number
       unknown: number

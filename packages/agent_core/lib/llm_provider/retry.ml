@@ -136,7 +136,7 @@ let is_retryable = function
     keeps the existing provider-unavailability handling.
 
     [Empty_unattributed] is the third case, previously folded into the second:
-    the provider ended an empty turn with a stop_reason token this SDK does not
+    the provider ended an empty turn with a stop_reason token agent core does not
     model. Retrying or rotating replays the same prompt, so attributing it to
     transient provider unavailability turns an unmodeled provider contract into
     an invisible retry loop — an overflow signalled with an unmodeled token
@@ -186,7 +186,7 @@ let verdict_of_empty_completion ~(stop_reason : Types.stop_reason) ~message =
 
     Only the typed [ContextOverflow] value is produced here. Each caller keeps
     its own wrapping of the result — [Provider_failure_attribution]'s
-    [Error.Api], and the SDK boundary in [Error] that flattens via
+    [Error.Api], and agent core boundary in [Error] that flattens via
     [error_message] into [InvalidRequest].
 
     This is the overflow-only projection of {!verdict_of_empty_completion}: it
@@ -717,7 +717,7 @@ let%test "classify_error 429 transient preserves retry_after" =
   | Timeout _ -> false
 ;;
 
-(* oas 429 typed completion (2026-07): incident context — ollama.com
+(* agent_core 429 typed completion (2026-07): incident context — ollama.com
    returned HTTP 429 with a flat-string body (no [error.retry_after]
    field) while carrying a standard [Retry-After] response header. The
    classifier must fall back to the header when the body has nothing, and

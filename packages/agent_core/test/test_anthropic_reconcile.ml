@@ -1,8 +1,8 @@
 (** End-to-end regression guard for the EndTurn + tool-block reconcile fix
-    (oas#2728).
+    (agent-core boundary).
 
     Migrated here from [lib/llm_provider/backend_tool_call_harness.ml] when that
-    Internal-declared zero-consumer module was deleted (oas#2690). The pure
+    Internal-declared zero-consumer module was deleted (agent-core boundary). The pure
     [Stop_reason_wire.reconcile] / [of_finish] unit tests in
     [lib/llm_provider/stop_reason_wire.ml] pin the typed function contract; this
     test exercises the full integration path

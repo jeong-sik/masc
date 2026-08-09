@@ -4,7 +4,7 @@
     accumulate_event, finalize_stream_acc) and map_http_error which
     are not exercised by the existing test_streaming.ml. *)
 
-open Agent_sdk
+open Agent_core
 module Retry = Llm_provider.Retry
 open Types
 
@@ -15,7 +15,7 @@ module Streaming = struct
   include Llm_provider.Streaming
   include Llm_provider.Complete_stream_acc
 
-  let map_http_error = Provider_failure_attribution.sdk_error_of_http_error
+  let map_http_error = Provider_failure_attribution.core_error_of_http_error
 end
 
 (* ── Helpers ────────────────────────────────────────────────────── *)
@@ -683,8 +683,8 @@ let test_map_http_error_http_error () =
     Llm_provider.Http_client.HttpError
       { code = 429; body = "rate limited"; retry_after_header = None }
   in
-  let sdk_err = Streaming.map_http_error http_err in
-  match sdk_err with
+  let core_err = Streaming.map_http_error http_err in
+  match core_err with
   | Error.Api _ -> ()
   | _ -> Alcotest.fail "expected Error.Api"
 ;;
@@ -694,8 +694,8 @@ let test_map_http_error_network_error () =
     Llm_provider.Http_client.NetworkError
       { message = "connection refused"; kind = Unknown }
   in
-  let sdk_err = Streaming.map_http_error http_err in
-  match sdk_err with
+  let core_err = Streaming.map_http_error http_err in
+  match core_err with
   | Error.Api (Retry.NetworkError { message; _ }) ->
     check_string "message" "connection refused" message
   | _ -> Alcotest.fail "expected Error.Api NetworkError"
@@ -709,8 +709,8 @@ let test_map_http_error_server_error () =
       ; retry_after_header = None
       }
   in
-  let sdk_err = Streaming.map_http_error http_err in
-  match sdk_err with
+  let core_err = Streaming.map_http_error http_err in
+  match core_err with
   | Error.Api (Retry.ServerError { status; _ }) -> check_int "status" 500 status
   | _ -> Alcotest.fail "expected Error.Api ServerError"
 ;;
@@ -720,8 +720,8 @@ let test_map_http_error_auth_error () =
     Llm_provider.Http_client.HttpError
       { code = 401; body = "unauthorized"; retry_after_header = None }
   in
-  let sdk_err = Streaming.map_http_error http_err in
-  match sdk_err with
+  let core_err = Streaming.map_http_error http_err in
+  match core_err with
   | Error.Api (Retry.AuthError _) -> ()
   | _ -> Alcotest.fail "expected Error.Api AuthError"
 ;;
@@ -730,8 +730,8 @@ let test_map_http_error_accept_rejected_not_network () =
   let http_err =
     Llm_provider.Http_client.AcceptRejected { reason = "missing transport" }
   in
-  let sdk_err = Streaming.map_http_error http_err in
-  match sdk_err with
+  let core_err = Streaming.map_http_error http_err in
+  match core_err with
   | Error.Api (Retry.InvalidRequest { message; _ }) ->
     check_string "message" "missing transport" message
   | _ -> Alcotest.fail "expected Error.Api InvalidRequest"
@@ -744,8 +744,8 @@ let test_map_http_error_provider_parse_not_network () =
       ; message = "SSE parse failed: bad json"
       }
   in
-  let sdk_err = Streaming.map_http_error http_err in
-  match sdk_err with
+  let core_err = Streaming.map_http_error http_err in
+  match core_err with
   | Error.Provider (Llm_provider.Error.ParseError _) -> ()
   | _ -> Alcotest.fail "expected Error.Provider ParseError"
 ;;

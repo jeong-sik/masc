@@ -124,9 +124,9 @@ const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
   heartbeat:  { icon: 'H', color: 'text-[var(--color-fg-muted)]', label: '하트비트' },
   lifecycle:  { icon: 'L', color: 'text-[var(--color-status-warn)]', label: '생명주기' },
   thinking:   { icon: '\u{1F4AD}', color: TRACE_TONE.infoText, label: '내부 사고' },
-  oas_tool:   { icon: 'O', color: 'text-[var(--amber-bright)]', label: 'OAS 도구' },
-  oas_turn:   { icon: 'R', color: 'text-[var(--rose-light)]', label: 'OAS 턴' },
-  oas_context: { icon: 'C', color: TRACE_TONE.infoText, label: 'OAS 압축' },
+  agent_core_tool:   { icon: 'O', color: 'text-[var(--amber-bright)]', label: 'Agent Core 도구' },
+  agent_core_turn:   { icon: 'R', color: 'text-[var(--rose-light)]', label: 'Agent Core 턴' },
+  agent_core_context: { icon: 'C', color: TRACE_TONE.infoText, label: 'Agent Core 압축' },
 }
 
 // Use shared tool category from tool-call-shared (SSOT)
@@ -342,9 +342,9 @@ function hasTraceRouteContext(context: MutableTraceRouteContext): boolean {
 
 function traceRouteSurface(event: UnifiedTraceEvent): string {
   if (event.kind === 'tool_call') return 'Tool'
-  if (event.kind === 'oas_tool') return 'Tool'
-  if (event.kind === 'oas_turn') return 'Turn'
-  if (event.kind === 'oas_context') return 'Context'
+  if (event.kind === 'agent_core_tool') return 'Tool'
+  if (event.kind === 'agent_core_turn') return 'Turn'
+  if (event.kind === 'agent_core_context') return 'Context'
   return KIND_STYLES[event.kind]?.label ?? event.kind
 }
 
@@ -590,11 +590,11 @@ function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
   `
 }
 
-function OasDetail({ event }: { event: UnifiedTraceEvent }) {
+function AgentCoreDetail({ event }: { event: UnifiedTraceEvent }) {
   const d = event.detail
 
   // ── Tool call ──
-  if (event.kind === 'oas_tool') {
+  if (event.kind === 'agent_core_tool') {
     const phase = typeof d.phase === 'string' ? d.phase : ''
     const toolName = typeof d.tool_name === 'string' ? d.tool_name : 'unknown'
     const phaseLabel = phase === 'called' ? '호출' : phase === 'completed' ? '완료' : phase
@@ -614,7 +614,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
   }
 
   // ── Turn ──
-  if (event.kind === 'oas_turn') {
+  if (event.kind === 'agent_core_turn') {
     const phase = typeof d.phase === 'string' ? d.phase : ''
     const turn = d.turn
     const phaseLabel = phase === 'started' ? '시작' : phase === 'completed' ? '완료' : phase
@@ -628,8 +628,8 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     `
   }
 
-  // ── OAS context compaction ──
-  if (event.kind === 'oas_context') {
+  // ── Agent Core context compaction ──
+  if (event.kind === 'agent_core_context') {
     const before = typeof d.before_tokens === 'number' ? d.before_tokens : null
     const after = typeof d.after_tokens === 'number' ? d.after_tokens : null
     const saved = before != null && after != null ? before - after : null
@@ -791,9 +791,9 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     || (event.kind === 'broadcast' && typeof event.detail.content === 'string' && event.detail.content.length > BROADCAST_PREVIEW_MAX)
     || event.kind === 'task'
     || event.kind === 'thinking'
-    || event.kind === 'oas_tool'
-    || event.kind === 'oas_turn'
-    || event.kind === 'oas_context'
+    || event.kind === 'agent_core_tool'
+    || event.kind === 'agent_core_turn'
+    || event.kind === 'agent_core_context'
     || (event.kind === 'lifecycle' && event.detail.durable_kind)
     || contextLinks.length > 0
 
@@ -811,7 +811,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
             ? html`<span class="text-xs font-mono font-medium ${style.color}">${event.toolName}</span>`
             : html`<span class="text-3xs font-medium uppercase tracking-wider ${kindStyle.color}">${kindStyle.label}</span>`}
           <${TraceBadge} tone="neutral" wide>
-            ${event.sourceLane === 'oas' ? 'OAS' : 'MASC'}
+            ${event.sourceLane === 'agentCore' ? 'Agent Core' : 'MASC'}
           </${TraceBadge}>
           ${event.turn != null ? html`
             <span class="text-3xs text-[var(--color-fg-disabled)]">
@@ -867,9 +867,9 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
         ${event.kind === 'broadcast' ? html`<${BroadcastDetail} event=${event} />` : null}
         ${event.kind === 'task' ? html`<${TaskDetail} event=${event} />` : null}
         ${event.kind === 'thinking' ? html`<${ThinkingDetail} event=${event} />` : null}
-        ${event.kind === 'oas_tool' || event.kind === 'oas_turn' || event.kind === 'oas_context'
+        ${event.kind === 'agent_core_tool' || event.kind === 'agent_core_turn' || event.kind === 'agent_core_context'
           || (event.kind === 'lifecycle' && event.detail.durable_kind)
-          ? html`<${OasDetail} event=${event} />`
+          ? html`<${AgentCoreDetail} event=${event} />`
           : null}
       </div>
     </details>

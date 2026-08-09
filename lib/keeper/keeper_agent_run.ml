@@ -1,4 +1,4 @@
-(** Keeper_agent_run — Run a single keeper turn via OAS Agent.run().
+(** Keeper_agent_run — Run a single keeper turn via Agent_core.Agent.run().
 
     This module is intentionally a compatibility facade: public types and
     entrypoints stay here while prompt metrics, result/error helpers, and
@@ -45,7 +45,7 @@ let normalize_response_text_for_finalization
   | Ok response_text -> Ok response_text
   | Error _ ->
     (* Finalization exposes the typed accept-rejected response itself. Tool
-       execution history stays in the OAS checkpoint; it is not projected into
+       execution history stays in the AGENT_CORE checkpoint; it is not projected into
        a read/mutating behavioral classification. *)
     Error
       (Keeper_turn_driver_try_provider.accept_rejected_error
@@ -53,7 +53,7 @@ let normalize_response_text_for_finalization
          ~response:run_result.response)
 ;;
 
-(* OAS raw-trace sink for keeper turns: parsed Run_started / Assistant_block /
+(* AGENT_CORE raw-trace sink for keeper turns: parsed Run_started / Assistant_block /
    Tool_execution / Run_finished records written to a fresh per-turn JSONL
    under [Keeper_types_support.keeper_raw_trace_dir]. Passing the sink into
    [Keeper_turn_driver.run_named] is what populates
@@ -61,19 +61,19 @@ let normalize_response_text_for_finalization
 
    Failure isolation: the trace store is observability state and must never
    gate keeper liveness. A fresh file per turn keeps [Raw_trace.create]
-   (OAS [create -> scan_next_seq -> read_all]) from parsing any previous
+   (AGENT_CORE [create -> scan_next_seq -> read_all]) from parsing any previous
    turn's data, so a corrupt or oversized historical trace cannot wedge
    dispatch — and if sink creation still fails, the turn dispatches
    untraced with the typed [Sink_degraded] record emitted as a warn log
    plus the [Keeper_metrics.RawTraceSinkDegraded] counter. *)
 type raw_trace_sink_outcome =
-  | Sink_ready of Agent_sdk.Raw_trace.t
-  | Sink_degraded of Agent_sdk.Error.sdk_error
+  | Sink_ready of Agent_core.Raw_trace.t
+  | Sink_degraded of Agent_core.Error.t
 
 type request_evidence =
   { wire_observation : Turn_record.request_wire_observation
   ; prompt_blocks : Turn_record.prompt_block list
-  ; input_messages : Agent_sdk.Types.message list option
+  ; input_messages : Agent_core.Types.message list option
   }
 
 (* What the queue held when the turn decided to yield. The decision itself is
@@ -184,13 +184,13 @@ let keeper_raw_trace_sink
     try Ok (Keeper_types_support.keeper_raw_trace_turn_path config meta.name)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Agent_sdk.Error.Internal (Printexc.to_string exn))
+    | exn -> Error (Agent_core.Error.Internal (Printexc.to_string exn))
   in
   match path_result with
   | Error err -> Sink_degraded err
   | Ok path ->
     (match
-       Agent_sdk.Raw_trace.create
+       Agent_core.Raw_trace.create
          ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
          ~path
          ()
@@ -206,7 +206,7 @@ let keeper_raw_trace_sink
 let raw_trace_for_dispatch
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
-  : Agent_sdk.Raw_trace.t option
+  : Agent_core.Raw_trace.t option
   =
   match keeper_raw_trace_sink ~config ~meta with
   | Sink_ready sink -> Some sink
@@ -217,14 +217,14 @@ let raw_trace_for_dispatch
       ();
     Log.Keeper.warn ~keeper_name:meta.name
       "raw-trace sink degraded; dispatching turn untraced: %s"
-      (Agent_sdk.Error.to_string err);
+      (Agent_core.Error.to_string err);
     None
 ;;
 
 let prune_raw_traces_after_turn_record
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
-      (raw_trace : Agent_sdk.Raw_trace.t option)
+      (raw_trace : Agent_core.Raw_trace.t option)
   =
   match raw_trace with
   | None -> ()
@@ -274,7 +274,7 @@ let provider_transcript_admission messages =
         Keeper_internal_error.Unresolved_tool_results, tool_use_ids
     in
     Error
-      (Keeper_internal_error.sdk_error_of_masc_internal_error
+      (Keeper_internal_error.core_error_of_masc_internal_error
          (Keeper_internal_error.Incomplete_tool_transcript
             { reason
             ; detail =
@@ -290,13 +290,13 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
   | Ok () -> dispatch ()
 ;;
 
-(* [run_ref.agent_name] is the OAS runtime identity, not the Keeper identity.
+(* [run_ref.agent_name] is the AGENT_CORE runtime identity, not the Keeper identity.
    The writer binds the reference to this turn's session; the autonomous-turn
-   reader validates the recorded OAS identity and session against every raw
+   reader validates the recorded AGENT_CORE identity and session against every raw
    trace row before projecting the run. *)
 let turn_record_raw_trace_run_ref
       ~expected_session_id
-      (run_ref : Agent_sdk.Raw_trace.run_ref)
+      (run_ref : Agent_core.Raw_trace.run_ref)
   : (Turn_record.raw_trace_run_ref, string) result
   =
   match run_ref.session_id with
@@ -335,7 +335,7 @@ module For_testing = struct
   let turn_record_raw_trace_run_ref = turn_record_raw_trace_run_ref
 end
 
-(** Run a single keeper turn via OAS Agent.run().
+(** Run a single keeper turn via Agent_core.Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
     prompt, then calls [build_turn_prompt] with the base prompt and message
@@ -343,7 +343,7 @@ end
     policy guards, and turn-specific instructions on top.
 
     After the callback returns the final system prompt, appends the user
-    message, builds OAS tools + hooks, and delegates to
+    message, builds AGENT_CORE tools + hooks, and delegates to
     [Keeper_turn_driver.run_named] which internally calls Agent.run().
 
     @param config Workspace configuration
@@ -371,7 +371,7 @@ let run_turn
       ~(base_dir : string)
       ~(max_context : int)
       ~(build_turn_prompt :
-         base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
+         base_system_prompt:string -> messages:Agent_core.Types.message list -> turn_prompt)
       ~(user_message : string)
       ~(turn_kind : Turn_record.turn_kind)
       ?user_blocks
@@ -401,7 +401,7 @@ let run_turn
       ?autonomous_yield_requested
       ?on_checkpoint_stage
       ()
-  : (run_result, Agent_sdk.Error.sdk_error) result
+  : (run_result, Agent_core.Error.t) result
   =
   (* Section 1: Setup — sanitize input, build context, compose prompt. *)
   let deferred_runtime_lane_ref = ref None in
@@ -520,7 +520,7 @@ let run_turn
   let shared_context = ctx.shared_context in
   let session = ctx.session in
   let base_system_prompt = ctx.base_system_prompt in
-  let resume_oas_checkpoint = ctx.resume_oas_checkpoint in
+  let resume_agent_core_checkpoint = ctx.resume_agent_core_checkpoint in
   let start_turn_count = ctx.start_turn_count in
   let receipt_started_at = ctx.receipt_started_at in
   let config_root = ctx.config_root in
@@ -538,7 +538,7 @@ let run_turn
       ~keeper_turn_id:manifest_keeper_turn_id
   in
   let checkpoint_path =
-    Keeper_checkpoint_store.oas_checkpoint_path ~session_dir:session.session_dir
+    Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir:session.session_dir
       ~session_id:trace_id
   in
   let append_manifest =
@@ -588,11 +588,11 @@ let run_turn
   let memory_context = prompt_ctx.Keeper_run_prompt.memory_context in
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
-  let resume_oas_checkpoint =
+  let resume_agent_core_checkpoint =
     Option.map
-      (fun (checkpoint : Agent_sdk.Checkpoint.t) ->
+      (fun (checkpoint : Agent_core.Checkpoint.t) ->
         { checkpoint with messages = history_messages })
-      resume_oas_checkpoint
+      resume_agent_core_checkpoint
   in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
   (* 7. Set up agent — delegated to Keeper_run_tools *)
@@ -646,7 +646,7 @@ let run_turn
       match hitl_resolution with
       | None -> ctx_work
       | Some _ ->
-        let user_message = Agent_sdk.Types.user_msg user_message in
+        let user_message = Agent_core.Types.user_msg user_message in
         Keeper_context_runtime.append ctx_work user_message
     in
     let prompt_metrics =
@@ -697,9 +697,9 @@ let run_turn
     let tools = s.Keeper_run_tools.tools in
     let hooks = s.Keeper_run_tools.hooks in
     let acc = s.Keeper_run_tools.acc in
-    let agent_ref : Agent_sdk.Agent.t option ref = ref None in
-    let final_oas_turn_ordinal_ref =
-      s.Keeper_run_tools.final_oas_turn_ordinal_ref
+    let agent_ref : Agent_core.Agent.t option ref = ref None in
+    let final_agent_core_turn_ordinal_ref =
+      s.Keeper_run_tools.final_agent_core_turn_ordinal_ref
     in
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
     let receipt_model_used_ref = s.Keeper_run_tools.receipt_model_used_ref in
@@ -764,13 +764,13 @@ let run_turn
     in
     (* Tool/path confinement stays owned by MASC dispatch. Each filesystem and
        shell operation resolves its concrete target through
-       [Keeper_alerting_path] and [Keeper_sandbox_containment]; OAS receives no
+       [Keeper_alerting_path] and [Keeper_sandbox_containment]; AGENT_CORE receives no
        ambient path capability. *)
     (
-       (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
+       (* AGENT_CORE [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
           only when the operator explicitly configures it. The deadline resets
           after each successful line, so this is gap detection, not a total run
-          cap. [None] is carried unchanged: neither MASC nor OAS may infer a
+          cap. [None] is carried unchanged: neither MASC nor AGENT_CORE may infer a
           provider/model default. *)
        let stream_idle_timeout_s =
          Keeper_runtime_resolved.stream_idle_timeout_sec ()
@@ -790,9 +790,9 @@ let run_turn
        let turn_result =
          let cooperative_yield_probe =
            Some
-             (fun (_ : Agent_sdk.Agent.Advanced.tool_boundary) ->
+             (fun (_ : Agent_core.Agent.Advanced.tool_boundary) ->
                 try
-                  (* OAS invokes this probe after tool results and the
+                  (* AGENT_CORE invokes this probe after tool results and the
                      checkpoint have persisted. A descriptor-typed terminal
                      effect therefore either completes the turn or fails it;
                      neither state can re-enter the provider loop. *)
@@ -830,26 +830,26 @@ let run_turn
                          | Ok None -> repeated_tool_call_decision ()
                          | Error detail ->
                            Error
-                             (Agent_sdk.Error.Internal
+                             (Agent_core.Error.Internal
                                 ("keeper cooperative-yield snapshot failed: "
                                  ^ detail)))))
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->
                   Error
-                    (Agent_sdk.Error.Internal
+                    (Agent_core.Error.Internal
                        (Printf.sprintf
                           "keeper cooperative-yield probe failed: %s"
                           (Printexc.to_string exn))))
          in
          let checkpoint_sidecar =
-                ctx_work.checkpoint.Agent_sdk.Checkpoint.working_context
+                ctx_work.checkpoint.Agent_core.Checkpoint.working_context
          in
          let last_persisted_checkpoint_ref = ref None in
-         let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
+         let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
                 Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
-                (* OAS's per-turn pipeline builds checkpoints with an empty
-                   session_id (the OAS agent carries no session field), so the
+                (* AGENT_CORE's per-turn pipeline builds checkpoints with an empty
+                   session_id (the AGENT_CORE agent carries no session field), so the
                    sink must stamp the keeper's own session identity before
                    persisting. [meta.runtime.trace_id] is a validated,
                    non-empty [Trace_id.t]; without this restamp the checkpoint
@@ -865,7 +865,7 @@ let run_turn
                   }
                 in
                 match
-                  Keeper_checkpoint_store.save_oas_classified
+                  Keeper_checkpoint_store.save_agent_core_classified
                     ~session_dir:session.session_dir
                     checkpoint
                 with
@@ -924,7 +924,7 @@ let run_turn
                       ~context:shared_context
                       ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
-                      ?oas_checkpoint:resume_oas_checkpoint
+                      ?agent_core_checkpoint:resume_agent_core_checkpoint
                       ?event_bus
                       ?trace_link
                       ~on_runtime_observation:
@@ -966,7 +966,7 @@ let run_turn
                 (* RFC-MASC-004: AfterTurn hooks flush incrementally during
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
-                 let text = Agent_sdk.Types.text_of_content result.response.content in
+                 let text = Agent_core.Types.text_of_content result.response.content in
                  (* RFC-0132 PR-2: receipt model surface = external boundary; redact via SSOT. *)
                  let model =
                    Boundary_redaction.to_string
@@ -977,7 +977,7 @@ let run_turn
                  receipt_stop_reason_ref := Some result.stop_reason;
                  receipt_runtime_observation_ref := result.runtime_observation;
                  (* Thinking is now persisted per-turn inside the after_turn
-                    hook (Keeper_hooks_oas), untruncated, for EVERY turn. The
+                    hook (Keeper_hooks_agent_core), untruncated, for EVERY turn. The
                     old post-run single-shot capture here saved only the final
                     turn's reasoning and would double-write the terminal turn
                     now, so it was removed. *)
@@ -1041,29 +1041,29 @@ let run_turn
                       | Ok response_text ->
                         let turn_outcome =
                           match s.terminal_effect_state () with
-                          | Keeper_tools_oas.Terminal_effect_completed ->
+                          | Keeper_tools_agent_core.Terminal_effect_completed ->
                             Ok Keeper_turn_outcome.External_effect_completed
-                          | Keeper_tools_oas.Terminal_effect_failed failure ->
+                          | Keeper_tools_agent_core.Terminal_effect_failed failure ->
                             Error
-                              (Agent_sdk.Error.Internal
+                              (Agent_core.Error.Internal
                                  ("successful Keeper run retained a failed terminal effect: "
                                   ^ failure.diagnostic))
-                          | Keeper_tools_oas.Terminal_effect_open
-                          | Keeper_tools_oas.Deferred_tool_result
-                          | Keeper_tools_oas.External_effect_deferred ->
+                          | Keeper_tools_agent_core.Terminal_effect_open
+                          | Keeper_tools_agent_core.Deferred_tool_result
+                          | Keeper_tools_agent_core.External_effect_deferred ->
                             Ok
                               (Keeper_turn_outcome.of_result_surface
                                  ~response_text
                                  result.stop_reason)
                         in
-                        (match turn_outcome, !final_oas_turn_ordinal_ref with
+                        (match turn_outcome, !final_agent_core_turn_ordinal_ref with
                          | Error e, _ -> Error e
                          | Ok _, None ->
                            Error
-                             (Agent_sdk.Error.Internal
+                             (Agent_core.Error.Internal
                                 "successful Agent.run returned without an \
                                  AfterTurn ordinal")
-                         | Ok turn_outcome, Some final_oas_turn_ordinal ->
+                         | Ok turn_outcome, Some final_agent_core_turn_ordinal ->
                            Keeper_agent_run_finalize_response.finalize
                              ~config ~meta ~publication_recovery
                              ~ctx_snapshot:ctx_work
@@ -1075,7 +1075,7 @@ let run_turn
                              ~result
                              ~last_persisted_checkpoint:
                                !last_persisted_checkpoint_ref
-                             ~final_oas_turn_ordinal
+                             ~final_agent_core_turn_ordinal
                              ~checkpoint_persistence_error
                              ~post_turn_t0 ~runtime_id_string
                              ~history_messages
@@ -1099,7 +1099,7 @@ let run_turn
                                    ~masc_root:(Workspace.masc_root_dir config)
                                    ~keeper_name:meta.name
                                    ~turn_id:manifest_keeper_turn_id
-                                   ~sdk_turn:result.turns
+                                   ~agent_core_turn:result.turns
                                    ~trace_id:meta.runtime.trace_id
                                    ~response_text
                                    ())
@@ -1155,7 +1155,7 @@ let run_turn
        (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the
           receipt above. execution_ids come from the trajectory
           accumulator (every entry of this run carries the id minted at
-          the dispatch boundary); sampling reads the last SDK turn's
+          the dispatch boundary); sampling reads the last agent-core turn's
           effective values from the turn context cell. *)
        (let tctx =
           Keeper_tool_call_log_context.get_turn_context_record
@@ -1194,8 +1194,8 @@ let run_turn
         in
         let request_latency_ms : int option =
           (* RFC-0233 §9 — wall-clock duration of the provider call in
-             milliseconds, sourced from OAS
-             [inference_telemetry.request_latency_ms]. The OAS transport
+             milliseconds, sourced from AGENT_CORE
+             [inference_telemetry.request_latency_ms]. The AGENT_CORE transport
              layer ([complete_common.patch_telemetry] non-streaming,
              [complete_stream] streaming) synthesizes it whenever a response
              is produced. Both [inference_telemetry] and the field itself are
@@ -1212,7 +1212,7 @@ let run_turn
         in
         let ttfrc_ms : float option =
           (* RFC-0233 §10 — time-to-first-response-chunk (wall-clock, ms),
-             sourced from OAS [inference_telemetry.ttfrc_ms]. The streaming
+             sourced from AGENT_CORE [inference_telemetry.ttfrc_ms]. The streaming
              transport ([complete_stream]) fills it for every provider on the
              first SSE chunk, so it is populated across the streaming keeper
              fleet; non-streaming turns and the error path leave it [None].

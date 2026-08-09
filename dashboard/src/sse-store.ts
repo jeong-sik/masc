@@ -6,8 +6,8 @@
 // async imports, signal-only updates).
 
 import {
-  pauseQueuedOasRuntimeIngress,
-  resumeQueuedOasRuntimeIngress,
+  pauseQueuedAgentCoreRuntimeIngress,
+  resumeQueuedAgentCoreRuntimeIngress,
   normalizeSSEDispatchType,
 } from './sse'
 import {
@@ -54,8 +54,8 @@ import { isRecord } from './lib/type-guards'
 import { normalizeKeeperApprovalAuditReceipt } from './lib/keeper-approval-audit'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
-import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
-import { hydrateOasTelemetrySample } from './oas-telemetry-store'
+import { parseAgentCorePayloadOrNull } from './schemas/sse-event-payload'
+import { hydrateAgentCoreTelemetrySample } from './agent-core-telemetry-store'
 import {
   SSE_APPROVAL_AUDIT_EVENT,
   SSE_APPROVAL_PENDING_EVENT,
@@ -311,7 +311,7 @@ function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
 // catches edits whose per-call event was coalesced). All already reach the
 // dashboard live; the IDE just never listened. keeper_tool_call already exists
 // in the fixed event-type allowlist (schemas/sse.ts) and is broadcast by
-// lib/keeper_tools_oas_handler_telemetry.ml.
+// lib/keeper_tools_agent_core_handler_telemetry.ml.
 const IDE_WORKSPACE_REFRESH_EVENTS = new Set([
   'keeper_tool_call',
   'keeper_tool_skipped',
@@ -443,7 +443,7 @@ function handleKeeperLifecycle(event: { type: string; name?: string }): void {
     scheduleRefresh('operator', () => _refreshOperatorFn?.(), SSE_KEEPER_OPERATOR_DEBOUNCE_MS)
   }
 
-  // keeper_turn_complete is an SDK-hook event that can precede the durable
+  // keeper_turn_complete is an agent-core hook event that can precede the durable
   // TurnRecord commit, so it refreshes status only. Transcript freshness is
   // driven by the post-commit keeper_chat_appended invalidation.
   if (normalizeMascEventType(event.type) === 'keeper_turn_complete') {
@@ -494,19 +494,19 @@ function handleReconnect(): void {
   // If the server is still warming up after restart, the first fetch may fail.
   // Schedule a single retry after 3s to cover the warm-up window.
   invalidateDashboardCache()
-  pauseQueuedOasRuntimeIngress()
+  pauseQueuedAgentCoreRuntimeIngress()
   void hydrateAfterReconnect()
     .finally(() => {
-      resumeQueuedOasRuntimeIngress()
+      resumeQueuedAgentCoreRuntimeIngress()
     })
 }
 
 async function hydrateAfterReconnect(): Promise<void> {
   try {
-    const { replayOasRuntimeTelemetry } = await import('./oas-runtime-store')
-    await replayOasRuntimeTelemetry()
+    const { replayAgentCoreRuntimeTelemetry } = await import('./agent-core-runtime-store')
+    await replayAgentCoreRuntimeTelemetry()
   } catch (err) {
-    console.warn('[server-push] reconnect OAS replay failed', err instanceof Error ? err.message : err)
+    console.warn('[server-push] reconnect Agent Core replay failed', err instanceof Error ? err.message : err)
   }
   requestNamespaceTruthNow()
   // Recover approval-queue state that may have changed while disconnected: the
@@ -614,7 +614,7 @@ function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
 }
 
 export function routeServerPushEvent(event: SSEEvent): void {
-  if (event.type === 'oas:context_compacted') {
+  if (event.type === 'agent_core:context_compacted') {
     const keeperName = event.agent_name?.trim() ?? ''
     if (keeperName) {
       for (const refresh of _refreshKeeperCompactionFns) {
@@ -820,8 +820,8 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
-  if (event.type === 'oas:agent_failed') {
-    const parsed = parseOasPayloadOrNull(event.type, event.payload)
+  if (event.type === 'agent_core:agent_failed') {
+    const parsed = parseAgentCorePayloadOrNull(event.type, event.payload)
     if (!parsed || parsed.kind !== 'agent_failed') return false
     const { payload: p } = parsed
     void import('./components/common/error-notification')
@@ -846,9 +846,9 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
 
   // The payload is the sample itself (schema-validated at the boundary), so
   // the read model hydrates from the push directly — zero HTTP fetch. The
-  // runtime monitor renders latestOasTelemetrySample; nothing to refresh.
-  if (event.type === 'oas_telemetry_sample') {
-    hydrateOasTelemetrySample(event)
+  // runtime monitor renders latestAgentCoreTelemetrySample; nothing to refresh.
+  if (event.type === 'agent_core_telemetry_sample') {
+    hydrateAgentCoreTelemetrySample(event)
     return true
   }
 

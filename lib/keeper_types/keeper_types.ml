@@ -38,7 +38,7 @@ type keeper_continuity =
 
 (** Per-tool usage entry for keeper tool tracking.
     Defined here so Keeper_registry can embed it without depending
-    on Keeper_tools_oas (avoids module init order issues). *)
+    on Keeper_tools_agent_core (avoids module init order issues). *)
 type tool_call_entry =
   { count : int
   ; successes : int
@@ -52,7 +52,7 @@ type tool_call_entry =
 (* ================================================================ *)
 
 type working_context =
-  { checkpoint : Agent_sdk.Checkpoint.t }
+  { checkpoint : Agent_core.Checkpoint.t }
 
 type session_context =
   { session_id : string

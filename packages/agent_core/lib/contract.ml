@@ -1,6 +1,6 @@
 (** Explicit runtime contract helpers.
 
-    The SDK already had prompt and context primitives needed to shape an agent
+    Agent Core already had prompt and context primitives needed to shape an agent
     run. This module packages those primitives into a first-class contract so callers can
     declare runtime awareness, trigger context, and skill bundles in one place. *)
 
@@ -23,7 +23,7 @@ type t =
   ; skills : Skill.t list
   }
 
-let context_key = "agent_sdk.contract"
+let context_key = "agent_core.contract"
 
 let empty =
   { runtime_awareness = None; trigger = None; instruction_layers = []; skills = [] }

@@ -49,7 +49,7 @@ val log_level_of_failure_class : tool_failure_class -> Log.level
 
 (** {1 Tool call outcome (wire-level)} *)
 
-(** Lightweight observation of an MCP/OAS wire response.  This external
+(** Lightweight observation of an MCP/AGENT_CORE wire response.  This external
     projection cannot represent {!Deferred}; it is not an internal execution
     outcome authority. *)
 type tool_call_outcome = Ok | Error | Unknown
@@ -175,7 +175,7 @@ val make_ok
   -> unit
   -> result
 
-(** Typed deferred constructor.  [metadata] is forwarded opaquely at the OAS
+(** Typed deferred constructor.  [metadata] is forwarded opaquely at the AGENT_CORE
     boundary; the constructor itself is the only semantic authority. *)
 val make_deferred
   :  tool_name:string

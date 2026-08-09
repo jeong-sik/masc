@@ -57,8 +57,8 @@ sub-lanes accept any general text Runtime in a frozen declared order. Different
 lanes may use different first slots for load distribution. Runtime order is
 never inferred from price, tier, provider name, or error prose.
 
-Native JSON mode and JSON Schema are optional OAS wire optimizations, not MASC
-admission requirements. Without them, OAS uses the ordinary text path and the
+Native JSON mode and JSON Schema are optional agent core wire optimizations, not MASC
+admission requirements. Without them, agent core uses the ordinary text path and the
 domain validator decides whether the result is accepted. Only intrinsically
 different work such as image, audio, embedding, or another non-text modality
 may require a special Runtime capability.
@@ -91,8 +91,8 @@ Partial source evidence does not satisfy this definition.
 |---|---|---|
 | MASC domain | the question, domain schema, semantic validator, and use of the accepted value | provider names, model quirks, wire dialects, or candidate ranking |
 | Runtime slot | opaque identity plus the declared execution specification | hidden policy inferred from pricing, tier, or past preference |
-| OAS | provider/model resolution, capability facts, vendor wire encoding, strict output parsing, typed transport errors, and frozen-order failover | MASC domain meaning, Task state, Keeper lifecycle, or domain persistence |
-| Dashboard/API | read-only projections of the same MASC domain state and OAS evidence | a second status calculation or mutable execution truth |
+| agent core | provider/model resolution, capability facts, vendor wire encoding, strict output parsing, typed transport errors, and frozen-order failover | MASC domain meaning, Task state, Keeper lifecycle, or domain persistence |
+| Dashboard/API | read-only projections of the same MASC domain state and agent core evidence | a second status calculation or mutable execution truth |
 
 For an ordinary LLM judgment, MASC sends input and consumes either an accepted
 domain value or a typed exhausted result. It does not select a provider-specific
@@ -331,7 +331,7 @@ MVP failover does not ask another LLM what an already typed runtime failure mean
 The required path is:
 
 ```text
-typed OAS failure
+typed agent core failure
   -> next declared Runtime slot
   -> visible exhausted reason if none remain
   -> Keeper remains alive

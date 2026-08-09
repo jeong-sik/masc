@@ -24,11 +24,11 @@ type api_strategy = Pipeline.api_strategy =
       }
 
 type detailed_error = Provider_failure_attribution.detailed_error =
-  { error : Error.sdk_error
+  { error : Error.t
   ; provider_failure : Provider_failure_attribution.t option
   }
 
-let detailed_error_of_sdk_error = Provider_failure_attribution.of_sdk_error
+let detailed_error_of_core_error = Provider_failure_attribution.of_core_error
 
 type execution_runtime = Agent_execution_runner.runtime
 type execution_store = Agent_execution_runner.store
@@ -220,14 +220,14 @@ let run_with_execution_scope ~sw ?execution_store agent run =
     (match start_scope () with
      | Error error ->
        Error
-         (detailed_error_of_sdk_error
+         (detailed_error_of_core_error
             (Error.Internal
                ("durable child scope: " ^ Execution_agent_scope.error_to_string error)))
      | Ok execution_scope ->
        Agent_execution_runner.with_scope execution_scope (fun () -> run ~sw))
   | Some _, Some _ ->
     Error
-      (detailed_error_of_sdk_error
+      (detailed_error_of_core_error
          (Error.Internal "execution store and child scope factory are mutually exclusive"))
 ;;
 
@@ -250,12 +250,12 @@ let run_loop_detailed
   let* user_blocks =
     if resuming
     then
-      resume_user_input agent user_blocks |> Result.map_error detailed_error_of_sdk_error
+      resume_user_input agent user_blocks |> Result.map_error detailed_error_of_core_error
     else Ok (append_user_input agent user_blocks)
   in
   let trace_prompt = trace_prompt_of_blocks user_blocks in
   with_raw_trace_run_result
-    ~of_sdk_error:detailed_error_of_sdk_error
+    ~of_core_error:detailed_error_of_core_error
     ~error_to_string:(fun detailed -> Error.to_string detailed.error)
     agent
     trace_prompt
@@ -365,10 +365,10 @@ let run_blocks_detailed ~sw ?clock ?on_yield ?on_resume ?execution_store agent u
   =
   with_run_lifecycle_events agent (fun () ->
     match validate_user_input_blocks user_blocks with
-    | Error error -> Error (detailed_error_of_sdk_error error)
+    | Error error -> Error (detailed_error_of_core_error error)
     | Ok () ->
       (match Agent_lifecycle_events.validate_run_callbacks ~on_yield ~on_resume with
-       | Error error -> Error (detailed_error_of_sdk_error error)
+       | Error error -> Error (detailed_error_of_core_error error)
        | Ok () ->
          with_periodic_callbacks ~sw ?clock agent (fun ~sw ->
            run_loop_detailed
@@ -415,10 +415,10 @@ let run_stream_blocks_detailed
   =
   with_run_lifecycle_events agent (fun () ->
     match validate_user_input_blocks user_blocks with
-    | Error error -> Error (detailed_error_of_sdk_error error)
+    | Error error -> Error (detailed_error_of_core_error error)
     | Ok () ->
       (match Agent_lifecycle_events.validate_run_callbacks ~on_yield ~on_resume with
-       | Error error -> Error (detailed_error_of_sdk_error error)
+       | Error error -> Error (detailed_error_of_core_error error)
        | Ok () ->
          let on_telemetry =
            Option.map
@@ -627,10 +627,10 @@ let run_with_handoffs_blocks_detailed
       user_blocks
   =
   match validate_user_input_blocks user_blocks with
-  | Error error -> Error (detailed_error_of_sdk_error error)
+  | Error error -> Error (detailed_error_of_core_error error)
   | Ok () ->
     (match validate_handoff_targets agent targets with
-     | Error error -> Error (detailed_error_of_sdk_error error)
+     | Error error -> Error (detailed_error_of_core_error error)
      | Ok () ->
        let handoff_tools =
          List.map
@@ -848,12 +848,12 @@ module Advanced = struct
       if resuming
       then
         resume_user_input agent user_blocks
-        |> Result.map_error detailed_error_of_sdk_error
+        |> Result.map_error detailed_error_of_core_error
       else Ok (append_user_input agent user_blocks)
     in
     let trace_prompt = trace_prompt_of_blocks user_blocks in
     with_raw_trace_run_classified_result
-      ~of_sdk_error:detailed_error_of_sdk_error
+      ~of_core_error:detailed_error_of_core_error
       ~error_to_string:(fun detailed -> Error.to_string detailed.error)
       ~classify_success:classify_trace_success
       agent
@@ -893,10 +893,10 @@ module Advanced = struct
           Agent_lifecycle_events.Completed receipt.response)
     @@ fun () ->
       match validate_user_input_blocks user_blocks with
-      | Error error -> Error (detailed_error_of_sdk_error error)
+      | Error error -> Error (detailed_error_of_core_error error)
       | Ok () ->
         (match Agent_lifecycle_events.validate_run_callbacks ~on_yield ~on_resume with
-         | Error error -> Error (detailed_error_of_sdk_error error)
+         | Error error -> Error (detailed_error_of_core_error error)
          | Ok () ->
            with_periodic_callbacks ~sw ?clock agent (fun ~sw ->
              run_loop_detailed

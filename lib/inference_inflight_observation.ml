@@ -1,8 +1,8 @@
 (** MASC-visible observation of inference calls.
 
-    Provider capacity, retry, and throttling belong to OAS.  This module never
+    Provider capacity, retry, and throttling belong to AGENT_CORE.  This module never
     admits, rejects, ranks, queues, or delays a Keeper.  It only exposes the
-    number of MASC calls currently crossing the OAS boundary. *)
+    number of MASC calls currently crossing the AGENT_CORE boundary. *)
 
 type t =
   { mutable active : int
@@ -56,7 +56,7 @@ let active () = Eio.Mutex.use_ro global.mutex (fun () -> global.active)
 
 let snapshot_json () =
   `Assoc
-    [ "boundary_owner", `String "oas_runtime"
+    [ "boundary_owner", `String "agent_core_runtime"
     ; "active", `Int (active ())
     ]
 ;;

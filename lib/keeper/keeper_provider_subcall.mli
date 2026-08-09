@@ -10,9 +10,9 @@ type complete_fn =
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
+  messages:Agent_core.Types.message list ->
   unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+  (Agent_core.Types.api_response, Llm_provider.Http_client.http_error) result
 
 val complete
   :  ?override:complete_fn
@@ -20,9 +20,9 @@ val complete
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> config:Llm_provider.Provider_config.t
-  -> messages:Agent_sdk.Types.message list
+  -> messages:Agent_core.Types.message list
   -> unit
-  -> (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+  -> (Agent_core.Types.api_response, Llm_provider.Http_client.http_error) result
 (** Production calls apply only
-    {!Keeper_runtime_resolved.body_timeout_override_sec} at the OAS Provider
+    {!Keeper_runtime_resolved.body_timeout_override_sec} at the AGENT_CORE Provider
     boundary. No feature-local wall-clock timeout is installed. *)

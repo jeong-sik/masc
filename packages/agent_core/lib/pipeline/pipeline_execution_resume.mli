@@ -20,22 +20,22 @@ val dispatch
        (turn:int
         -> response:Types.api_response
         -> Types.content_block Nonempty.t
-        -> ('a, Error.sdk_error) result)
+        -> ('a, Error.t) result)
   -> tools_settled_before_checkpoint:
        (response:Types.api_response
         -> turn:int
         -> invocations:Execution_agent_scope.invocation_authority list
         -> tool_results:Types.content_block list
         -> Types.content_block Nonempty.t
-        -> ('a, Error.sdk_error) result)
+        -> ('a, Error.t) result)
   -> tools_settled:
        (response:Types.api_response
         -> turn:int
         -> invocations:Execution_agent_scope.invocation_authority list
         -> tool_results:Types.content_block list
         -> Types.content_block Nonempty.t
-        -> ('a, Error.sdk_error) result)
+        -> ('a, Error.t) result)
   -> all_pre_tool_use_blocked:'a
   -> terminal:(Types.api_response -> 'a)
-  -> fresh:(unit -> ('a, Error.sdk_error) result)
-  -> ('a, Error.sdk_error) result
+  -> fresh:(unit -> ('a, Error.t) result)
+  -> ('a, Error.t) result

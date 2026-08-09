@@ -311,7 +311,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
                   class="!py-0.5 inline-flex items-center"
                   disabled=${directiveLoading.value}
                   onClick=${() => handleDirective('wakeup')}
-                  title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 runtime/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
+                  title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 runtime/agentCore/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
                 >깨우기<//>`
               : null}`}
         ${isPaused && keeper.keepalive_running

@@ -123,7 +123,7 @@ r7_count="$({ rg -U -c --no-heading "$r7_pattern" bin lib test 2>/dev/null || tr
   | awk -F: '{sum += $2} END {print sum+0}')"
 if [ "$r7_count" -gt 0 ]; then
   echo "ERROR[R7-metric-label-keeper-name]: $r7_count occurrences (baseline 0)." >&2
-  echo "  Replace with: \"keeper\" — the canonical metric label key (cf. Keeper_hooks_oas_types.label_keeper)." >&2
+  echo "  Replace with: \"keeper\" — the canonical metric label key (cf. Keeper_hooks_agent_core_types.label_keeper)." >&2
   echo "  Offending sites:" >&2
   rg -U -l "$r7_pattern" bin lib test 2>/dev/null | sed 's/^/    /' >&2
   fail=1

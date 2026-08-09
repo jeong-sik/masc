@@ -176,7 +176,7 @@ val run_keepalive_unified_turn :
   stop:bool Atomic.t ->
   proactive_warmup_elapsed:bool ->
   reactive_wake:bool ->
-  shared_context:Agent_sdk.Context.t ->
+  shared_context:Agent_core.Context.t ->
   deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
   on_deferred_runtime_consumed:(unit -> unit) ->
   record_deferred_runtime_lane:

@@ -7,7 +7,7 @@
     typecheck. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 let event_kind (event : Event_bus.event) = Event_bus.payload_kind event.payload
 

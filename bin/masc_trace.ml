@@ -193,9 +193,9 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
                else count)
              0
       in
-      let max_oas_turn_count =
+      let max_agent_core_turn_count =
         json_rows
-        |> List.filter_map (fun json -> int_field json "oas_turn_count")
+        |> List.filter_map (fun json -> int_field json "agent_core_turn_count")
         |> List.fold_left
              (fun acc value ->
                match acc with
@@ -226,11 +226,11 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
       in
       Printf.printf
         "=== turn identity === keeper=%s keeper_turn_id=%d manifest_rows=%d \
-         max_oas_turn_count=%s provider_attempts=%d/%d provider_lanes=%d \
+         max_agent_core_turn_count=%s provider_attempts=%d/%d provider_lanes=%d \
          checkpoints_saved=%d receipts_appended=%d turn_finished=%d \
          event_bus=%d correlation_id=%s compaction=%d/%d\n"
         keeper turn_id (List.length matches)
-        (match max_oas_turn_count with
+        (match max_agent_core_turn_count with
          | None -> "-"
          | Some value -> string_of_int value)
         (count_event "provider_attempt_started")

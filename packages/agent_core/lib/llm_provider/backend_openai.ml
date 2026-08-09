@@ -2,7 +2,7 @@
     and request building.
 
     Pure functions operating on {!Llm_provider.Types}.
-    {!build_request} uses {!Provider_config.t} (no agent_sdk coupling).
+    {!build_request} uses {!Provider_config.t} (no agent_core coupling).
 
     @since 0.92.0 decomposed into Backend_openai_serialize,
     Backend_openai_parse *)
@@ -174,7 +174,7 @@ let%test "glm drops tools when tool_choice none" =
   (not (List.mem_assoc "tool_choice" assoc)) && not (List.mem_assoc "tools" assoc)
 ;;
 
-(* === Capability-gated sampling param tests (oas#827) === *)
+(* === Capability-gated sampling param tests (agent-core boundary) === *)
 
 let%test "glm drops min_p when model does not support it" =
   (* Glm's glm_capabilities inherits supports_min_p = false from
@@ -713,7 +713,7 @@ let%test "parse_openai_response_result end_turn finish_reason" =
   | Error _ -> false
 ;;
 
-let%test "parse_openai_response_result null content fails closed (oas#2483)" =
+let%test "parse_openai_response_result null content fails closed (agent-core boundary)" =
   let json_str =
     Yojson.Safe.to_string
       (`Assoc
@@ -736,7 +736,7 @@ let%test "parse_openai_response_result null content fails closed (oas#2483)" =
   | Error (Backend_openai_parse.Provider_error _) | Ok _ -> false
 ;;
 
-let%test "parse_openai_response_result blank content with tool_calls stays Ok (oas#2483)" =
+let%test "parse_openai_response_result blank content with tool_calls stays Ok (agent-core boundary)" =
   let json_str =
     Yojson.Safe.to_string
       (`Assoc

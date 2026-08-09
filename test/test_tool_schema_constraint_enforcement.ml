@@ -2,8 +2,8 @@
 
     masc declares minimum/maximum/exclusiveMinimum/exclusiveMaximum/
     minLength/maxLength/minItems/maxItems across its tool schemas, but
-    [Tool_bridge.params_of_json_schema] projects a schema onto the OAS
-    [tool_param] record (name/type/required), dropping every bound. The SDK
+    [Tool_bridge.params_of_json_schema] projects a schema onto the AGENT_CORE
+    [tool_param] record (name/type/required), dropping every bound. Agent Core
     validation hook therefore never saw them, and a caller learned about an
     out-of-range value only if the handler happened to re-check it — which
     is how [keeper_artifact_read] answered [max_bytes=565244] with a message

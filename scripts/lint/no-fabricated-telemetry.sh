@@ -27,7 +27,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ALLOWLIST="${ROOT}/scripts/lint/no-fabricated-telemetry.allowlist"
 
-ROOTS=("${ROOT}/dashboard/src" "${ROOT}/oas-public")
+ROOTS=("${ROOT}/dashboard/src" "${ROOT}/agent_core-public")
 
 ALLOW_TMP="$(mktemp -t no-fab-tele.XXXXXX)"
 trap 'rm -f "${ALLOW_TMP}"' EXIT

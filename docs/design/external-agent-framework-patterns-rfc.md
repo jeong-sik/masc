@@ -17,7 +17,7 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc`에 바로 
 설계 우선순위와 landing point를 고정한다.
 
 이 문서의 핵심 질문은 "어느 프레임워크로 갈아탈 것인가"가 아니라
-"현재 `MASC -> OAS` spine 위에서 어떤 추상화를 제품 수준으로 끌어올릴 것인가"다.
+"현재 `MASC -> agent core` spine 위에서 어떤 추상화를 제품 수준으로 끌어올릴 것인가"다.
 
 ## Scope
 
@@ -41,7 +41,7 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc`에 바로 
 
 ## Decision Summary
 
-1. `masc`는 workspace coordination과 Keeper runtime을 소유하고, single-agent runtime은 계속 OAS에 둔다.
+1. `masc`는 workspace coordination과 Keeper runtime을 소유하고, single-agent runtime은 계속 agent core에 둔다.
 2. 외부 비교에서 가장 먼저 가져올 패턴은 LangGraph류의 `checkpoint truth + replay discipline`이다.
 3. 두 번째는 Provider-D Agents SDK가 보여주는 `typed workflow surface + guardrail/eval-friendly tracing`이다.
 4. 세 번째는 Morph 글이 강조한 `framework보다 infra primitive가 중요하다`는 관점이다.
@@ -61,7 +61,7 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc`에 바로 
 ## What to Keep
 
 - `MASC`는 언제/왜/누가 실행되는지를 결정하고,
-  `OAS`는 단일 agent runtime을 담당하는 현재 boundary를 유지한다.
+  `agent core`는 단일 agent runtime을 담당하는 현재 boundary를 유지한다.
 - repo-local, single-machine, trusted-network workspace collaboration이라는 front-door promise를 유지한다.
 - keeper playground containment를 sandbox SSOT로 유지한다.
 
@@ -82,8 +82,8 @@ What to change:
 
 Primary landing:
 
-- `docs/spec/13-oas-integration.md`
-- `docs/OAS-MASC-BOUNDARY.md`
+- `docs/spec/13-agent-core-integration.md`
+- `docs/agent core-MASC-BOUNDARY.md`
 - `docs/KEEPER-STATE-OWNERSHIP.md`
 
 Implementation anchors:
@@ -235,7 +235,7 @@ Reason:
 ## Internal References
 
 - `README.md`
-- `docs/OAS-MASC-BOUNDARY.md`
+- `docs/agent core-MASC-BOUNDARY.md`
 - `docs/PRODUCT-REVIEW.md`
 - `docs/KEEPER-CONTINUITY-VALIDATION.md`
 - `docs/BENCHMARK-RUNBOOK.md`

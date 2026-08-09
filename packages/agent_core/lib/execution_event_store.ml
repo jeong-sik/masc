@@ -237,7 +237,7 @@ let initializing_name = "events.v1.wal.initializing"
 let authority_name = "events.v1.commit"
 let authority_initializing_name = "events.v1.commit.initializing"
 let lock_name = ".writer.lock"
-let frame_magic = "OASE"
+let frame_magic = "MACE"
 let frame_version = 1
 
 (* Version 2 hard-cuts recursive work to exact tool attempts; WAL framing is unchanged. *)

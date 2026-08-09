@@ -33,7 +33,7 @@ val hitl_context_summary_schema : Yojson.Safe.t
 val without_response_format
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** Clear the OAS structured-output response format: the request states its output
+(** Clear the AGENT_CORE structured-output response format: the request states its output
     contract in its prompt and validates the parse downstream, so it asks the
     provider for no wire format at all. Use for call sites whose prompt spells
     out the object shape and whose parser is total — a malformed reply must
@@ -43,7 +43,7 @@ val without_response_format
 val anti_rationalization_reviewer_provider_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** Provider config for the task anti-rationalization reviewer: clears the OAS
+(** Provider config for the task anti-rationalization reviewer: clears the AGENT_CORE
     structured-output response format. The verdict channel is the
     [report_review_verdict] tool call (exactly-once, total parser in
     [Task.Anti_rationalization]); a wire response format constrained only the

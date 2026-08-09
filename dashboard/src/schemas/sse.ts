@@ -5,7 +5,7 @@
 // boot, so keep validation direct and limited to the boundary guarantees the
 // handlers rely on.
 
-import { OAS_EVENT_PREFIX } from '../config/constants'
+import { AGENT_CORE_EVENT_PREFIX } from '../config/constants'
 import type {
   Attribution,
   AttributionOutcome,
@@ -65,7 +65,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_chat_turn_event',
   'keeper_waiting_inventory_changed',
   'keeper_compaction_snapshots_changed',
-  'oas_telemetry_sample',
+  'agent_core_telemetry_sample',
   'ide_cursor_changed',
   'keeper_tool_call',
   'masc/keeper_tool_call',
@@ -642,7 +642,7 @@ function isIgnorableMcpNotification(value: unknown): boolean {
 
 function isSSEEventType(value: unknown): value is SSEEventType {
   return typeof value === 'string' && (
-    FIXED_SSE_EVENT_TYPES.has(value) || value.startsWith(OAS_EVENT_PREFIX)
+    FIXED_SSE_EVENT_TYPES.has(value) || value.startsWith(AGENT_CORE_EVENT_PREFIX)
   )
 }
 
@@ -661,7 +661,7 @@ function schema<T>(
 
 export const SSEEventTypeSchema = schema<SSEEventType>((value) => {
   if (isSSEEventType(value)) return ok(value)
-  return fail(undefined, 'Expected a known SSE event type or an oas:* event type')
+  return fail(undefined, 'Expected a known SSE event type or an agent_core:* event type')
 })
 
 export type { SSEEventType }
@@ -756,7 +756,7 @@ function malformedKeeperTurnProjection(
 export const SSEMessageSchema = schema<SSEMessage>((value) => {
   if (!isRecord(value)) return fail(undefined, 'Expected SSE message object')
   if (!isSSEEventType(value.type)) {
-    return fail('type', 'Expected known SSE event type or oas:* event type')
+    return fail('type', 'Expected known SSE event type or agent_core:* event type')
   }
 
   for (const key of STRING_FIELDS) {
@@ -781,7 +781,7 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
   if (
     value.payload != null
     && !isRecord(value.payload)
-    && !value.type.startsWith(OAS_EVENT_PREFIX)
+    && !value.type.startsWith(AGENT_CORE_EVENT_PREFIX)
   ) {
     return fail('payload', 'Expected payload object')
   }
@@ -828,7 +828,7 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     }
   }
 
-  if (value.type === 'oas_telemetry_sample') {
+  if (value.type === 'agent_core_telemetry_sample') {
     if (typeof value.provider_id !== 'string' || value.provider_id.trim() === '') {
       return fail('provider_id', 'Expected non-empty provider_id')
     }

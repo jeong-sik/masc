@@ -100,7 +100,7 @@ let parse_sync_response ~http_codec ~provider_kind body =
      | Backend_glm.Provider_response ->
        (match error.error_class with
         | Backend_glm.Glm_context_overflow ->
-          (* oas#2947: keep the provider-reported overflow typed instead of
+          (* agent-core boundary: keep the provider-reported overflow typed instead of
              flattening it into an HTTP 400 body string — consumers reach
              their compaction/shrink path only on a typed overflow. glm's
              envelope does not carry the token limit. *)

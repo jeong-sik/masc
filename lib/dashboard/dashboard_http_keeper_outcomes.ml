@@ -7,7 +7,7 @@
       compaction / handoff outcomes classified by [selected_event].
     - [registry_entry] crash_log / restart_count / turn_consecutive_failures
       -> resilience counters.
-    - [Dashboard_harness_health.read_recent_verdicts] -> OAS verdict pass/fail
+    - [Dashboard_harness_health.read_recent_verdicts] -> AGENT_CORE verdict pass/fail
       scoped to this keeper by [agent_name].
 
     Conservation law (spec {!KeeperOutcomesConservation.tla}):
@@ -120,7 +120,7 @@ let compute_outcomes_rollup
       ( "validation",
         `Assoc
           [
-            ( "oas_verdicts",
+            ( "agent_core_verdicts",
               `Assoc
                 [
                   ("pass", `Int !pass_v);

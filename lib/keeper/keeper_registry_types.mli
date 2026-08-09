@@ -232,7 +232,7 @@ val stage_to_witness : decision_stage -> packed_decision_stage
 
 (** Decision stages valid as ADVANCE targets within a turn.  Excludes
     [Decision_undecided] (the initial state set only by [mark_turn_started]
-    / [mark_sdk_turn_started]).  The 2 spec-forbidden [<active>_to_undecided]
+    / [mark_agent_core_turn_started]).  The 2 spec-forbidden [<active>_to_undecided]
     transitions are unrepresentable through this type, replacing the prior
     runtime [invalid_arg] inside [set_turn_decision_stage]. *)
 type decision_stage_active =
@@ -431,10 +431,10 @@ type registry_entry = {
           history files. [None] until the first [Context_measured] event
           has been dispatched. *)
   last_event_bus_correlation : string option;
-      (** Most recent OAS Event_bus [correlation_id] extracted after a
+      (** Most recent AGENT_CORE Event_bus [correlation_id] extracted after a
           keeper turn via [Event_bus.drain]. [None] until the first
           successful drain. Stable per session (= [meta.runtime.trace_id]
-          as passed to OAS). *)
+          as passed to AGENT_CORE). *)
   pending_turn_measurement : turn_measurement option;
       (** Fresh measurement captured by [Context_measured] and reserved
           for the next [mark_turn_measurement] call. Hidden from idle
@@ -480,7 +480,7 @@ and turn_observation = {
   last_progress_at : float;
       (** Unix timestamp of the most recent in-turn progress signal.
           Initialized to [started_at] and updated by registry transitions,
-          SDK streaming events, and completed tool calls. *)
+          Agent Core streaming events, and completed tool calls. *)
   last_progress_kind : string option;
       (** Low-cardinality label for the progress signal that most recently
           refreshed [last_progress_at]. *)

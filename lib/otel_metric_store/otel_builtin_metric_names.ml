@@ -48,8 +48,8 @@ let metric_telemetry_observe_failures = Otel_metric_store_core.declare_counter "
    most 19 (3 + 8 + 8). *)
 let metric_workspace_telemetry_drop = Otel_metric_store_core.declare_counter "masc_workspace_telemetry_drop_total"
 
-(* Per-caller observation of genuine inner OAS timeout exceptions. *)
-include Otel_oas_metric_names
+(* Per-caller observation of genuine inner AGENT_CORE timeout exceptions. *)
+include Otel_agent_core_metric_names
 
 
 include Otel_runtime_metric_names
@@ -81,7 +81,7 @@ include Otel_policy_metric_names
    [Keeper_supervisor.sweep_and_recover] will respawn the fiber. Without
    the strike→crash promotion these failures repeated silently for
    hours (4h+ zombie keepers observed 2026-04-26). *)
-let metric_oas_bus_capacity = "masc_oas_bus_capacity"
+let metric_agent_core_bus_capacity = "masc_agent_core_bus_capacity"
 
 let metric_process_timeout = Otel_metric_store_core.declare_counter "masc_process_timeout_total"
 let metric_build_identity_probe_failures = Otel_metric_store_core.declare_counter "masc_build_identity_probe_failures_total"
@@ -100,11 +100,11 @@ include Otel_identity_metric_names
    (a single-character typo creates a new invisible metric). *)
 
 (* Centralized metric constants for inline string replacement.
-   keeper_hooks_oas.ml, keeper_guards.ml, keeper_execution_receipt.ml,
+   keeper_hooks_agent_core.ml, keeper_guards.ml, keeper_execution_receipt.ml,
    keeper_tool_execute_runtime.ml, keeper_sandbox_docker.ml,
    keeper_heartbeat_snapshot.ml,
    keeper_unified_metrics.ml. *)
-(* OAS after-turn response metadata was accepted but omitted its response model
+(* AGENT_CORE after-turn response metadata was accepted but omitted its response model
    field. This is provider response-shape telemetry, not keeper policy
    telemetry. *)
 let metric_after_turn_response_model_empty = Otel_metric_store_core.declare_counter "masc_after_turn_response_model_empty_total"

@@ -5,7 +5,7 @@
 
     All responses are canned JSON. No real LLM calls. *)
 
-open Agent_sdk
+open Agent_core
 open Alcotest
 
 let card_interfaces =

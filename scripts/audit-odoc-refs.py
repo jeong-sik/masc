@@ -46,7 +46,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # not checkable here and is not evidence of drift.
 EXTERNAL_MODULE_PREFIXES = frozenset(
     {
-        "Agent_sdk",
+        "Agent_core",
         "Alcotest",
         "Array",
         "Astring",

@@ -66,7 +66,7 @@ type endpoint_status =
   ; failures : probe_failure list
   }
 
-let local_llm_url_env_var = "OAS_LOCAL_LLM_URL"
+let local_llm_url_env_var = "AGENT_CORE_LOCAL_LLM_URL"
 let llm_endpoints_env_var = "LLM_ENDPOINTS"
 let ollama_host_env_var = "OLLAMA_HOST"
 let default_ollama_endpoint = "http://127.0.0.1:11434"

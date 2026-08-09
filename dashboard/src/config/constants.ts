@@ -7,11 +7,11 @@ export const DEFAULT_MASC_HOST = 'localhost'
 export const DEFAULT_MASC_PORT = 8935
 export const DEFAULT_MASC_ORIGIN = `http://${DEFAULT_MASC_HOST}:${DEFAULT_MASC_PORT}`
 
-// --- OAS event namespace ---
-// SSE event types emitted by the OAS keeper runtime are namespaced with this
-// prefix (e.g. "oas:context_compacted"). Single source so the prefix string and
+// --- Agent Core event namespace ---
+// SSE event types emitted by the Agent Core keeper runtime are namespaced with this
+// prefix (e.g. "agent_core:context_compacted"). Single source so the prefix string and
 // its strip length stay in sync across the parser and ingress guards.
-export const OAS_EVENT_PREFIX = 'oas:'
+export const AGENT_CORE_EVENT_PREFIX = 'agent_core:'
 
 // --- HTTP timeouts (milliseconds) ---
 // Backend dashboard timeout is 30s; frontend must wait slightly longer.
@@ -81,15 +81,15 @@ export const KEEPER_DIGEST_MIN_ACTIVITY = 1
 
 // --- Buffer & cache sizes (Vite env overridable) ---
 // Defaults balance memory/render cost against available history. Users who
-// want deeper replay (e.g. OAS telemetry) can raise the ceiling at build
+// want deeper replay (e.g. Agent Core telemetry) can raise the ceiling at build
 // time without editing this file:
-//   VITE_OAS_TELEMETRY_REPLAY_LIMIT=2000 pnpm --filter masc-dashboard build
+//   VITE_AGENT_CORE_TELEMETRY_REPLAY_LIMIT=2000 pnpm --filter masc-dashboard build
 import { envInt, envString } from './env'
 
 export const MAX_JOURNAL_ENTRIES = envInt('VITE_MAX_JOURNAL_ENTRIES', 200)
-export const OAS_AGENT_EVENT_BUFFER = envInt('VITE_OAS_AGENT_EVENT_BUFFER', 50)
-export const OAS_TELEMETRY_REPLAY_LIMIT = envInt('VITE_OAS_TELEMETRY_REPLAY_LIMIT', 500)
-export const OAS_OPENTELEMETRY_UI_URL = envString('VITE_OAS_OPENTELEMETRY_UI_URL', null)
+export const AGENT_CORE_AGENT_EVENT_BUFFER = envInt('VITE_AGENT_CORE_AGENT_EVENT_BUFFER', 50)
+export const AGENT_CORE_TELEMETRY_REPLAY_LIMIT = envInt('VITE_AGENT_CORE_TELEMETRY_REPLAY_LIMIT', 500)
+export const AGENT_CORE_OPENTELEMETRY_UI_URL = envString('VITE_AGENT_CORE_OPENTELEMETRY_UI_URL', null)
 // Overview telemetry renders a fixed 28-bar sparkline; this bounds raw samples
 // per 5-minute bucket before the summary model takes over for totals/freshness.
 export const OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET = envInt(

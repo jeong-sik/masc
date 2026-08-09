@@ -37,11 +37,11 @@ let with_temp_tree f =
 let test_lists_existing_sibling_dirs () =
   with_temp_tree (fun root ->
     mkdir_p (Filename.concat root "repos/masc");
-    mkdir_p (Filename.concat root "repos/oas");
+    mkdir_p (Filename.concat root "repos/agent_core");
     let hint = Exec_policy.existing_sibling_dirs_hint ~workdir:root "repos/masc-mcp" in
     Alcotest.(check (option string))
       "stale repos/masc-mcp surfaces the real repos/ entries (sorted, no rename table)"
-      (Some "(existing directories under repos/: masc, oas)")
+      (Some "(existing directories under repos/: masc, agent_core)")
       hint)
 ;;
 

@@ -56,7 +56,7 @@ module Behavioral : sig
     }
 
   (** Extract observation from an agent after a run. *)
-  val observe : Agent.t -> (Types.api_response, Error.sdk_error) result -> observation
+  val observe : Agent.t -> (Types.api_response, Error.t) result -> observation
 
   (** Evaluate an observation against an expectation. *)
   val evaluate : observation -> expectation -> verdict
@@ -82,7 +82,7 @@ module Adversarial : sig
     | ErrorContains of string
 
   type observation =
-    { result : (Types.api_response, Error.sdk_error) result
+    { result : (Types.api_response, Error.t) result
     ; tools_executed : string list
     ; error_message : string option
     }

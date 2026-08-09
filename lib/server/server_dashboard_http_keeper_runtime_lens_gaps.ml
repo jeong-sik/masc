@@ -174,7 +174,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
          | Some row when row.Keeper_runtime_manifest.links.checkpoint_path = None ->
            { code = "checkpoint_missing"
            ; severity = "warn"
-           ; lane = "oas_agent"
+           ; lane = "agent_core_agent"
            ; detail = Some "terminal event has no checkpoint_path link"
            }
            :: gaps
@@ -240,7 +240,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
             && scan.event_bus_correlation_ids = []
             && scan.event_bus_run_ids = []
          then
-           { code = "provider_oas_link_missing"
+           { code = "provider_agent_core_link_missing"
            ; severity = "warn"
            ; lane = "provider"
            ; detail =

@@ -985,7 +985,7 @@ let set_last_error_entry ~base_path ~name err =
   Error_tracking.set_last_error_entry ~base_path ~name err ~update_entry:update_entry_unit
 ;;
 
-(* record_error (MASC/OAS Error-Warn Reduction Goal §P6 dedup logic) moved to Keeper_registry_error_recording. No alias here — it would create a cycle via [Keeper_registry.set_last_error_entry], so ca... *)
+(* record_error (MASC/AGENT_CORE Error-Warn Reduction Goal §P6 dedup logic) moved to Keeper_registry_error_recording. No alias here — it would create a cycle via [Keeper_registry.set_last_error_entry], so ca... *)
 
 let clear_error ~base_path name =
   Error_tracking.clear_error ~base_path name ~update_entry:update_entry_unit
@@ -1084,9 +1084,9 @@ let record_turn_tool_inflight ~base_path name ~count =
   ()
 ;;
 
-(* Reset the SDK-turn FSM fields while retaining Keeper-turn identity,
+(* Reset agent core-turn FSM fields while retaining Keeper-turn identity,
    timing, model, and measurement state. *)
-let mark_sdk_turn_started ~base_path name =
+let mark_agent_core_turn_started ~base_path name =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
@@ -1099,7 +1099,7 @@ let mark_sdk_turn_started ~base_path name =
         then e, false
         else (
           let new_obs =
-            { (stamp_turn_progress ~now ~event_kind:"sdk_turn_started" obs) with
+            { (stamp_turn_progress ~now ~event_kind:"agent_core_turn_started" obs) with
               turn_phase = Packed Turn_prompting
             ; decision_stage = Packed Decision_undecided
             }

@@ -42,7 +42,7 @@ type outcome =
   | Completed of Types.api_response
   | Yielded of { turn : int }
   | Input_required of Error.input_required
-  | Failed of Error.sdk_error
+  | Failed of Error.t
 
 let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~outcome ~elapsed =
   match event_bus, started with

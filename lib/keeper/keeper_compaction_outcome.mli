@@ -33,7 +33,7 @@ type no_compaction_reason =
           checkpoint source, not a stochastic provider failure. *)
   | Exact_execution_terminal of exact_execution_terminal
       (** Typed outcome of one completed exact-output execution. The retained
-          OAS slot/call identity is evidence only; it creates no second claim,
+          AGENT_CORE slot/call identity is evidence only; it creates no second claim,
           durable replay barrier, or commit authority. *)
 
 type no_compaction =

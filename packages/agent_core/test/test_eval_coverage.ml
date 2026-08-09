@@ -15,7 +15,7 @@
       show_run_metrics, metric_of_yojson error path, run_metrics_of_yojson
       error path, find_metric_value *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ──────────────────────────────────────────── *)
 

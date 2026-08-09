@@ -11,7 +11,7 @@ module EC = Masc.Keeper_error_classify
 module KUF = Masc.Keeper_unified_turn_failure
 
 let invalid_request message =
-  Agent_sdk.Error.Api
+  Agent_core.Error.Api
     (Llm_provider.Retry.InvalidRequest
        { message; reason = Llm_provider.Retry.Unknown_invalid_request })
 ;;
@@ -27,7 +27,7 @@ let test_is_invalid_request_error_only_for_api_invalid_request () =
     "provider-side InvalidRequest does not match"
     false
     (EC.is_invalid_request_error
-       (Agent_sdk.Error.Provider
+       (Agent_core.Error.Provider
           (Llm_provider.Error.InvalidRequest
              { provider = "provider"; reason = "Invalid request: bad body" })));
   check
@@ -35,14 +35,14 @@ let test_is_invalid_request_error_only_for_api_invalid_request () =
     "ContextOverflow does not match"
     false
     (EC.is_invalid_request_error
-       (Agent_sdk.Error.Api
+       (Agent_core.Error.Api
           (ContextOverflow { message = "exceeded"; limit = None })));
   check
     bool
     "rendered internal text does not match"
     false
     (EC.is_invalid_request_error
-       (Agent_sdk.Error.Internal "Bad Request: arbitrary provider text"))
+       (Agent_core.Error.Internal "Bad Request: arbitrary provider text"))
 ;;
 
 let test_invalid_request_is_auto_recoverable () =
@@ -66,7 +66,7 @@ let test_transport_400_bridges_to_typed_api_invalid_request () =
       bool
       "transport-classified 400 reaches the typed API predicate"
       true
-      (EC.is_invalid_request_error (Agent_sdk.Error.Api classified))
+      (EC.is_invalid_request_error (Agent_core.Error.Api classified))
   | _ ->
     fail "HTTP 400 transport classification did not produce InvalidRequest"
 ;;

@@ -1,6 +1,6 @@
 (** Deterministic offline checkpoint purge (RFC-0351 S1).
 
-    Reduces a persisted OAS checkpoint with three closed rules, none of which
+    Reduces a persisted AGENT_CORE checkpoint with three closed rules, none of which
     involves an LLM:
 
     - R1 duplicate collapse: byte-identical text-only messages repeated at
@@ -34,7 +34,7 @@
     history has to be prevented at the write boundary that admitted it
     (#25443). [session_id], [turn_count], and every other checkpoint field
     outside [messages] pass through unchanged, so
-    [Keeper_checkpoint_store.save_oas_classified] accepts the result as an
+    [Keeper_checkpoint_store.save_agent_core_classified] accepts the result as an
     equal-watermark re-save.
 
     Applying the purge twice with the same config returns the first result
@@ -77,13 +77,13 @@ type purge_error =
 
 val purge_messages
   :  config:config
-  -> Agent_sdk.Types.message list
-  -> (Agent_sdk.Types.message list * report, purge_error) result
+  -> Agent_core.Types.message list
+  -> (Agent_core.Types.message list * report, purge_error) result
 (** Pure message-list transform behind {!purge}. Exposed for tests. *)
 
 val purge
   :  config:config
-  -> Agent_sdk.Checkpoint.t
-  -> (Agent_sdk.Checkpoint.t * report, purge_error) result
+  -> Agent_core.Checkpoint.t
+  -> (Agent_core.Checkpoint.t * report, purge_error) result
 (** Apply {!purge_messages} to [ckpt.messages], leaving every other field
     unchanged. *)

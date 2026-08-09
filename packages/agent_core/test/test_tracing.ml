@@ -1,7 +1,7 @@
 (** Tests for tracing.ml -- TRACER module type and built-in implementations *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 let test_null_tracer_no_op () =
   let open Tracing.Null_tracer in

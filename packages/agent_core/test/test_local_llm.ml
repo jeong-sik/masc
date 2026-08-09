@@ -4,7 +4,7 @@
     Run: LLAMA_LIVE_TEST=1 dune exec ./test/test_local_llm.exe
 *)
 
-open Agent_sdk
+open Agent_core
 open Types
 
 let base_url = "http://127.0.0.1:8085"

@@ -58,4 +58,4 @@ val resume_from : Checkpoint.t -> t
 val to_json : t -> Yojson.Safe.t
 
 (** Deserialize session from JSON. *)
-val of_json : Yojson.Safe.t -> (t, Error.sdk_error) result
+val of_json : Yojson.Safe.t -> (t, Error.t) result

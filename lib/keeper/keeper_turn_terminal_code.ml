@@ -13,7 +13,7 @@ type t =
   | Turn_overflow_failure
   | Operator_interrupt
   | Exception_unhandled of string
-  | Sdk_error of string
+  | Agent_core_error of string
 
 let to_wire = function
   | Healthy -> "healthy"
@@ -25,7 +25,7 @@ let to_wire = function
   | Turn_overflow_failure -> "turn_overflow_failure"
   | Operator_interrupt -> "operator_interrupt"
   | Exception_unhandled _ -> "exception"
-  | Sdk_error wire -> wire
+  | Agent_core_error wire -> wire
 ;;
 
 let of_wire_exact = function
@@ -39,4 +39,4 @@ let of_wire_exact = function
   | _ -> None
 ;;
 
-let of_sdk_error_wire wire = Sdk_error wire
+let of_core_error_wire wire = Agent_core_error wire

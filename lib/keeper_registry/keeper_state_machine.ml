@@ -188,7 +188,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
     [ Mark_dead_tombstone
     ; lifecycle "dead" (event_to_string event)
     ; Trigger_immediate_cleanup
-    ; Cancel_pending_oas
+    ; Cancel_pending_agent_core
     ]
   | Stopped ->
     [ Cleanup_and_unregister

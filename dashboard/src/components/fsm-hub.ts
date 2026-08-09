@@ -201,10 +201,10 @@ function runtimeTraceTurnLabel(trace: KeeperRuntimeTraceResponse): string {
   const keeperTurn = trace.turn_identity.requested_keeper_turn_id
     ?? trace.turn_identity.manifest_keeper_turn_ids.at(-1)
     ?? null
-  const oasTurn = trace.turn_identity.max_oas_turn_count
+  const agentCoreTurn = trace.turn_identity.max_agent_core_turn_count
   const keeperLabel = keeperTurn == null ? '—' : `#${keeperTurn}`
-  const oasLabel = oasTurn == null ? '—' : String(oasTurn)
-  return `turn ${keeperLabel} / oas ${oasLabel}`
+  const agentCoreLabel = agentCoreTurn == null ? '—' : String(agentCoreTurn)
+  return `turn ${keeperLabel} / agentCore ${agentCoreLabel}`
 }
 
 function runtimeTraceTitle(trace: KeeperRuntimeTraceResponse): string {

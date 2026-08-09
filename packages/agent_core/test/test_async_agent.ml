@@ -2,7 +2,7 @@
 
     Uses a mock HTTP server (cohttp-eio) to simulate LLM responses.
     No real LLM calls. *)
-open Agent_sdk
+open Agent_core
 
 open Alcotest
 

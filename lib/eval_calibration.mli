@@ -111,11 +111,11 @@ val record_verdict :
   task_id:string ->
   req:Task.Anti_rationalization.review_request ->
   result:Task.Anti_rationalization.review_result ->
-  ?on_harness_verdict:(Agent_sdk.Harness.verdict -> unit) ->
+  ?on_harness_verdict:(Agent_core.Harness.verdict -> unit) ->
   unit ->
   unit
 (** Append a verdict record to the JSONL store.
-    If [~on_harness_verdict] is provided, converts the record to an OAS
+    If [~on_harness_verdict] is provided, converts the record to an AGENT_CORE
     [Harness.verdict] and invokes the callback after persistence.
     This enables wiring to [Eval.add_verdict] or SSE event publishers. *)
 
@@ -142,10 +142,10 @@ val format_few_shot_block : calibration_example list -> string
 (** Format examples into a text block for prompt injection.
     Returns [""] for an empty list. *)
 
-(** {1 OAS Integration} *)
+(** {1 AGENT_CORE Integration} *)
 
-val to_harness_verdict : verdict_record -> Agent_sdk.Harness.verdict
-(** Convert a MASC verdict record to an OAS [Harness.verdict].
+val to_harness_verdict : verdict_record -> Agent_core.Harness.verdict
+(** Convert a MASC verdict record to an AGENT_CORE [Harness.verdict].
     [Approve] maps to [passed=true, score=1.0];
     [Reject _] maps to [passed=false, score=0.0] with gate detail. *)
 

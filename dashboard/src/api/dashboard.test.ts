@@ -327,7 +327,7 @@ describe('keeper tool telemetry fetchers', () => {
             ts: 1_777_100_000,
             ts_iso: '2026-05-14T00:00:00Z',
             source: 'trajectory_tool_call',
-            producer: 'keeper_hooks_oas.post_tool_use',
+            producer: 'keeper_hooks_agentCore.post_tool_use',
             durable_store: '.masc/keepers/keeper-alpha/trajectories',
             dashboard_surface: '/api/v1/keepers/:name/tool-stats',
             stale_reason: 'trajectory_append_failed',
@@ -350,7 +350,7 @@ describe('keeper tool telemetry fetchers', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/tool-stats')
     expect(result.coverage_gap_count).toBe(1)
     expect(result.coverage_gaps?.[0]).toMatchObject({
-      producer: 'keeper_hooks_oas.post_tool_use',
+      producer: 'keeper_hooks_agentCore.post_tool_use',
       durable_store: '.masc/keepers/keeper-alpha/trajectories',
       dashboard_surface: '/api/v1/keepers/:name/tool-stats',
       stale_reason: 'trajectory_append_failed',
@@ -400,7 +400,7 @@ describe('keeper tool telemetry fetchers', () => {
     })
   })
 
-  it('decodes objective success, goals, and exact OAS occurrence', async () => {
+  it('decodes objective success, goals, and exact Agent Core occurrence', async () => {
     const fetchMock = vi.fn(() => Promise.resolve(
       new Response(JSON.stringify({
         keeper: 'keeper-alpha',
@@ -577,8 +577,8 @@ describe('keeper tool telemetry fetchers', () => {
             keeper_turn_id: 12,
             source: 'runtime_manifest',
             trigger: 'proactive(85%)',
-            runtime_id: 'oas-seoul-1',
-            display_runtime: 'oas-seoul-1',
+            runtime_id: 'agent-core-seoul-1',
+            display_runtime: 'agent-core-seoul-1',
             before_tokens: 210000,
             after_tokens: 120000,
             saved_tokens: 90000,
@@ -635,8 +635,8 @@ describe('keeper tool telemetry fetchers', () => {
             keeper_turn_id: 14,
             source: 'runtime_manifest',
             trigger: 'proactive(90%)',
-            runtime_id: 'oas-seoul-1',
-            display_runtime: 'oas-seoul-1',
+            runtime_id: 'agent-core-seoul-1',
+            display_runtime: 'agent-core-seoul-1',
             before_tokens: 180000,
             after_tokens: 90000,
             saved_tokens: 90000,
@@ -667,8 +667,8 @@ describe('keeper tool telemetry fetchers', () => {
             keeper_turn_id: 15,
             source: 'runtime_manifest',
             trigger: 'provider_overflow',
-            runtime_id: 'oas-seoul-1',
-            display_runtime: 'oas-seoul-1',
+            runtime_id: 'agent-core-seoul-1',
+            display_runtime: 'agent-core-seoul-1',
             before_tokens: null,
             after_tokens: null,
             saved_tokens: null,
@@ -700,7 +700,7 @@ describe('keeper tool telemetry fetchers', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/compaction-snapshots?limit=2')
     expect(result.items[0]?.before_tokens).toBe(210000)
     expect(result.items[0]?.saved_tokens).toBe(90000)
-    expect(result.items[0]?.display_runtime).toBe('oas-seoul-1')
+    expect(result.items[0]?.display_runtime).toBe('agent-core-seoul-1')
     expect(result.items[0]?.reinjection_observation.state).toBe('reinserted')
     expect(result.read_error_count).toBe(1)
     expect(result.read_errors).toEqual([
@@ -2825,7 +2825,7 @@ describe('fetchKeeperConfig', () => {
         slots: {
           pre_tool_use: {
             active: 'true',
-            source: 'keeper_hooks_oas',
+            source: 'keeper_hooks_agentCore',
             features: 'tool_start_timing',
           },
         },
@@ -3051,10 +3051,10 @@ describe('fetchKeeperConfig', () => {
       ['provider_runtime_error', '런타임 호출 오류'],
       ['fiber_unresolved', 'Fiber 미해결'],
       ['stale_turn_timeout', '오래된 턴 만료'],
-      ['sdk_context_window_exceeded', 'SDK 컨텍스트 윈도 초과'],
-      ['sdk_unrecognized_stop_reason', 'SDK 미식별 정지 사유'],
-      ['sdk_guardrail_violation', 'SDK 가드레일 위반'],
-      ['sdk_tripwire_violation', 'SDK Tripwire 위반'],
+      ['agent_core_context_window_exceeded', 'Agent Core 컨텍스트 윈도 초과'],
+      ['agent_core_unrecognized_stop_reason', 'Agent Core 미식별 정지 사유'],
+      ['agent_core_guardrail_violation', 'Agent Core 가드레일 위반'],
+      ['agent_core_tripwire_violation', 'Agent Core Tripwire 위반'],
     ] as const
 
     for (const [blockerClass, label] of cases) {
@@ -3410,7 +3410,7 @@ describe('fetchRuntimeProviders', () => {
               always_ignored_sampling_params: ['temperature'],
             },
             request_config: {
-              source: 'oas-provider-config',
+              source: 'agent-core-provider-config',
               provider_kind: 'openai_compat',
               request_path: '/chat/completions',
               request_path_targets_responses_api: false,
@@ -3450,7 +3450,7 @@ describe('fetchRuntimeProviders', () => {
               connect_timeout_s: 120,
             },
             effective_capabilities: {
-              source: 'oas-provider-config-model',
+              source: 'agent-core-provider-config-model',
               max_context_tokens: 131072,
               max_output_tokens: 65536,
               supports_tools: true,
@@ -3599,7 +3599,7 @@ describe('fetchRuntimeProviders', () => {
           status: 'degraded',
           degraded: true,
           operator_action_required: true,
-          terminal_reason: 'missing_oas_catalog_models',
+          terminal_reason: 'missing_agent_core_catalog_models',
           message: 'runtime catalog degraded boot',
           config_path: '/tmp/masc-test/runtime.toml',
           configured_default_runtime_id: 'runpod_mtp.qwen',
@@ -3627,7 +3627,7 @@ describe('fetchRuntimeProviders', () => {
           dropped_lanes: [
             { lane_id: 'mimo-only', runtime_ids: ['mimo.mimo-v2.5-pro'] },
           ],
-          next_action: 'Add deployment rows to oas-models-overlay.toml (or upstream OAS).',
+          next_action: 'Add deployment rows to agent-core-models-overlay.toml (or upstream Agent Core).',
         },
         config_path: '/tmp/masc-test/runtime.toml',
       }), {
@@ -3716,7 +3716,7 @@ describe('fetchRuntimeProviders', () => {
     expect(result.assignment_status?.assigned_runtimes).toEqual(['openai.gpt'])
     expect(result.assignment_status?.assignments[0]?.keeper).toBe('budgettest')
     expect(result.startup_degradation?.status).toBe('degraded')
-    expect(result.startup_degradation?.terminal_reason).toBe('missing_oas_catalog_models')
+    expect(result.startup_degradation?.terminal_reason).toBe('missing_agent_core_catalog_models')
     expect(result.startup_degradation?.effective_default_runtime_id).toBe('runpod_mtp.qwen')
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
@@ -3777,7 +3777,7 @@ describe('fetchRuntimeModelMetrics', () => {
           usage_missing_count: 1,
           telemetry_missing_count: 1,
           coverage_status: 'none',
-          primary_coverage_stage: 'oas',
+          primary_coverage_stage: 'agentCore',
           primary_coverage_reason: 'missing_usage_and_inference',
           coverage_reason_counts: [
             { reason: 'missing_usage_and_inference', count: 1 },
@@ -3801,7 +3801,7 @@ describe('fetchRuntimeModelMetrics', () => {
               usage_reported: false,
               telemetry_reported: false,
               coverage_reason: 'missing_usage_and_inference',
-              coverage_stage: 'oas',
+              coverage_stage: 'agentCore',
             },
           ],
           buckets: [
@@ -3839,7 +3839,7 @@ describe('fetchRuntimeModelMetrics', () => {
     expect(metric.usage_missing_count).toBe(1)
     expect(metric.telemetry_missing_count).toBe(1)
     expect(metric.coverage_status).toBe('none')
-    expect(metric.primary_coverage_stage).toBe('oas')
+    expect(metric.primary_coverage_stage).toBe('agentCore')
     expect(metric.primary_coverage_reason).toBe('missing_usage_and_inference')
     expect(metric.coverage_reason_counts).toEqual([
       { reason: 'missing_usage_and_inference', count: 1 },
@@ -3856,7 +3856,7 @@ describe('fetchRuntimeModelMetrics', () => {
     expect(metric.recent_entries?.[0]?.usage_reported).toBe(false)
     expect(metric.recent_entries?.[0]?.telemetry_reported).toBe(false)
     expect(metric.recent_entries?.[0]?.coverage_reason).toBe('missing_usage_and_inference')
-    expect(metric.recent_entries?.[0]?.coverage_stage).toBe('oas')
+    expect(metric.recent_entries?.[0]?.coverage_stage).toBe('agentCore')
     expect(metric.buckets?.[0]?.p95_latency_ms).toBeNull()
     expect(metric.buckets?.[0]?.cache_hit_ratio).toBeNull()
   })

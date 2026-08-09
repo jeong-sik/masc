@@ -10,18 +10,18 @@ code_refs:
 
 **Status**: Internal-runtime scope implemented in local worktrees; benchmark/program work remains partially unimplemented
 **Date**: 2026-04-03
-**Scope**: `masc` + `oas` + local benchmark harness
-**One sentence**: tool calling 품질을 `first-pass selection`에서 `bounded convergence under validation pressure`로 재정의하고, public MCP와 internal OAS 자율 경로의 경계를 유지한 채 self-healing helper와 공통 benchmark contract를 도입한다.
+**Scope**: `masc` + `agent core` + local benchmark harness
+**One sentence**: tool calling 품질을 `first-pass selection`에서 `bounded convergence under validation pressure`로 재정의하고, public MCP와 internal agent core 자율 경로의 경계를 유지한 채 self-healing helper와 공통 benchmark contract를 도입한다.
 
 ## Related Documents
 
 - `../BENCHMARK-RUNBOOK.md`
 - Local code references:
-  - `/Users/dancer/me/workspace/yousleepwhen/oas/lib/structured.ml`
-  - `/Users/dancer/me/workspace/yousleepwhen/oas/lib/agent/agent_tools.ml`
-  - `/Users/dancer/me/workspace/yousleepwhen/oas/lib/tool_input_validation.ml`
-  - `/Users/dancer/me/workspace/yousleepwhen/oas/test/test_agent_pipeline.ml`
-  - `/Users/dancer/me/workspace/yousleepwhen/oas/test/test_structured.ml`
+  - `/Users/dancer/me/workspace/yousleepwhen/agent core/lib/structured.ml`
+  - `/Users/dancer/me/workspace/yousleepwhen/agent core/lib/agent/agent_tools.ml`
+  - `/Users/dancer/me/workspace/yousleepwhen/agent core/lib/tool_input_validation.ml`
+  - `/Users/dancer/me/workspace/yousleepwhen/agent core/test/test_agent_pipeline.ml`
+  - `/Users/dancer/me/workspace/yousleepwhen/agent core/test/test_structured.ml`
 - Experiment evidence:
   - `/Users/dancer/me/.worktrees/exp-gemma4-tool-bench/docs/gemma4-tool-benchmark-20260403.md`
   - `/Users/dancer/me/.worktrees/exp-gemma4-tool-bench/docs/strict-v2-quality-summary-20260403.md`
@@ -31,11 +31,11 @@ code_refs:
 
 Runtime scope has moved since the original draft.
 
-- `oas` now has a generic internal helper `Tool_retry_policy` and uses it in both the generic agent tool loop and `Structured.extract_with_retry`.
-- `masc` now opts in to that helper only on internal OAS-backed autonomous paths:
+- `agent core` now has a generic internal helper `Tool_retry_policy` and uses it in both the generic agent tool loop and `Structured.extract_with_retry`.
+- `masc` now opts in to that helper only on internal agent core-backed autonomous paths:
   - keeper turn path
   - proactive keeper generation path
-  - OAS worker builder path
+  - agent core worker builder path
   - local worker resume path
 - `masc` public MCP path remains one-shot and deterministic. No model-facing retry loop was added there.
 - Benchmark runner abstraction, MLX harness lane, and the broader program phases below are still proposal-level unless explicitly marked otherwise.
@@ -52,7 +52,7 @@ Runtime scope has moved since the original draft.
 그 결과:
 
 - benchmark가 raw selection, BM25 selection, oracle self-heal upper-bound로 흩어져 있다
-- `samchon`식 recovery가 OAS 안에 부분적으로 존재하지만 generic helper로 표면화돼 있지 않다
+- `samchon`식 recovery가 agent core 안에 부분적으로 존재하지만 generic helper로 표면화돼 있지 않다
 - `masc` public MCP path에 retry를 넣어야 하는지에 대한 경계가 문서화돼 있지 않다
 - MLX 실험은 필요하지만 현재 harness가 `Provider-D-compatible endpoint` 전제라 바로 붙일 수 없다
 - 최신 모델 추가가 ad hoc하게 일어나고, artifact schema와 acceptance gate가 고정돼 있지 않다
@@ -65,7 +65,7 @@ Runtime scope has moved since the original draft.
 
 - public MCP wire protocol을 변경하지 않는다
 - public MCP one-shot call에 model-facing auto-retry를 추가하지 않는다
-- OAS에 deprecated MLX provider surface를 되살리지 않는다
+- agent core에 deprecated MLX provider surface를 되살리지 않는다
 - Provider-A식 hidden-state probe, steering, interpretability 실험을 1차 범위에 넣지 않는다
 - reward-hacking bench를 safety verdict engine으로 과장하지 않는다
 - benchmark artifact를 곧바로 production policy truth로 승격하지 않는다
@@ -96,14 +96,14 @@ Runtime scope has moved since the original draft.
 - `masc` public MCP path:
   - deterministic validation 있음
   - model-facing retry loop 없음
-- `masc` internal keeper/OAS path:
+- `masc` internal keeper/agent core path:
   - validation 있음
   - bounded same-run correction 가능
-  - OAS `Tool_retry_policy.default_internal`로 opt-in
-- `oas` generic tool loop:
+  - agent core `Tool_retry_policy.default_internal`로 opt-in
+- `agent core` generic tool loop:
   - invalid input / recoverable tool error를 typed retry decision으로 평가
   - policy-enabled agent에서 same-run next turn correction 가능
-- `oas` structured path:
+- `agent core` structured path:
   - `Structured.extract_with_retry`가 같은 helper core를 사용해 explicit bounded retry를 제공
 
 이 상태는 여전히 uneven하지만, reusable helper와 adoption boundary 자체는 이제 코드로 존재한다.
@@ -114,7 +114,7 @@ Runtime scope has moved since the original draft.
 
 - current runners: endpoint POST `/v1/chat/completions`
 - current score artifacts: JSON output files under `data/tool-calling-benchmark/results-*`
-- MLX는 local runtime 후보이지만 OAS provider surface에서는 이미 deprecated다
+- MLX는 local runtime 후보이지만 agent core provider surface에서는 이미 deprecated다
 
 따라서 MLX를 넣으려면 `provider resurrection`이 아니라 `benchmark runner abstraction`이 필요하다.
 
@@ -219,7 +219,7 @@ backend 종류는 두 개만 허용한다.
 
 MLX는 benchmark harness 내부 runtime으로만 도입한다.
 
-- OAS provider surface에는 추가하지 않는다
+- agent core provider surface에는 추가하지 않는다
 - deprecated `local_mlx`를 revive하지 않는다
 - local Python runner가 `mlx-lm`을 직접 호출한다
 
@@ -252,9 +252,9 @@ control-only retained model:
 
 ## 7. Self-Healing Runtime Proposal
 
-### 7.1 OAS helper
+### 7.1 agent core helper
 
-OAS에 generic internal helper `tool_retry_policy`를 추가한다.
+agent core에 generic internal helper `tool_retry_policy`를 추가한다.
 
 Implementation status:
 
@@ -279,12 +279,12 @@ adoption target:
 
 `masc`에서는 다음 경계만 허용한다.
 
-- internal OAS-backed autonomous path: retry policy 사용 가능
+- internal agent core-backed autonomous path: retry policy 사용 가능
 - public MCP path: retry policy 금지, current deterministic validation 유지
 
 Implementation status:
 
-- internal keeper / worker OAS-backed paths: adopted
+- internal keeper / worker agent core-backed paths: adopted
 - public MCP path: unchanged
 
 이 boundary는 red line이다.
@@ -336,7 +336,7 @@ Public wire changes:
 
 Internal interface additions:
 
-- OAS `tool_retry_policy`
+- agent core `tool_retry_policy`
 - benchmark `backend runner` abstraction
 - benchmark `benchmark_result_v2`
 - benchmark `model_catalog.json`
@@ -381,7 +381,7 @@ and `Gemma 4 E4B`에서:
 ### 10.3 Boundary gate
 
 - public MCP path golden tests unchanged
-- internal OAS path only retry activation proven
+- internal agent core path only retry activation proven
 - no new MCP wire field
 
 ### 10.4 Pressure bench gate
@@ -396,7 +396,7 @@ Phase-1에서 점수 threshold는 두지 않는다.
 
 ## 11. Test Plan
 
-OAS:
+agent core:
 
 - validation error retry success
 - recoverable tool error retry success
@@ -406,7 +406,7 @@ OAS:
 MASC:
 
 - public MCP path still returns one-shot validation failure
-- internal OAS worker path can consume retry policy
+- internal agent core worker path can consume retry policy
 - tool prefilter benchmark-derived table remains deterministic
 
 Harness:
@@ -442,7 +442,7 @@ Status: pending
 
 Phase 3:
 
-- OAS `tool_retry_policy`
+- agent core `tool_retry_policy`
 - internal-path-only integration in `masc`
 
 Status: completed in local worktrees on 2026-04-04
@@ -473,8 +473,8 @@ Status: pending
 이 RFC의 핵심은 다음이다.
 
 - benchmark truth를 `first-pass + bounded recovery + pressure behavior`의 세 축으로 고정한다
-- OAS의 existing retry shape를 generic helper로 끌어올린다
+- agent core의 existing retry shape를 generic helper로 끌어올린다
 - 그 helper는 internal autonomous path에만 연결한다
-- MLX는 OAS provider가 아니라 harness backend로 도입한다
+- MLX는 agent core provider가 아니라 harness backend로 도입한다
 
 이 네 줄이 지켜지면 model expansion과 runtime improvement를 같은 계약 아래에서 비교할 수 있다.

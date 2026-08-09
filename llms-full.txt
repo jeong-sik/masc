@@ -6,7 +6,7 @@ Current runtime and tool guidance lives in `docs/KEEPER-USER-MANUAL.md` and the 
 
 ## Goal
 
-Use workspace collaboration as the default front door. Keepers run on the OAS-backed runtime and actively use Goal, Task, Board, Schedule, repository, and sandbox capabilities to advance work.
+Use workspace collaboration as the default front door. Keepers run on the agent core-backed runtime and actively use Goal, Task, Board, Schedule, repository, and sandbox capabilities to advance work.
 
 ## Primary entities
 
@@ -41,7 +41,7 @@ Use this when long-running autonomous execution is needed:
 ## Important constraints
 
 - `claim` does not set `current_task`; call `masc_plan_set_task`.
-- Keepers use the OAS-backed runtime. Use operator observations or interventions only when they help the current work proceed.
+- Keepers use the agent core-backed runtime. Use operator observations or interventions only when they help the current work proceed.
 
 ## Secondary surfaces
 

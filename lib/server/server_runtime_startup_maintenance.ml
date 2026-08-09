@@ -111,7 +111,7 @@ let prune_keeper_scoped_flat_stores ~days ~masc_root =
    tool_calls/transition-audit while the periodic pass lacked
    resilience_audit. data/tool-metrics stays startup-only (it lives under
    base_path, not the masc root), so it remains at the caller.
-   oas-events joined 2026-07-31: 434 MB accumulated with no retention.
+   agent-core-events joined 2026-07-31: 434 MB accumulated with no retention.
    costs and audit-approvals joined 2026-08-05: both write the same
    [YYYY-MM/DD.jsonl] shape through [Dated_jsonl.create]
    ([cost_ledger.ml:250], [keeper_approval_queue.ml:1732]) yet were on no
@@ -125,7 +125,7 @@ let top_level_dated_stores =
   ; "voice_sessions"
   ; "tool_calls"
   ; Keeper_transition_audit.store_dirname
-  ; "oas-events"
+  ; "agent-core-events"
   ; "costs"
   ; "audit-approvals"
   ]

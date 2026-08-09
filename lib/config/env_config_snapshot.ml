@@ -370,9 +370,9 @@ let model_routing_entries =
       "Sticky lane failover preference TTL (seconds, 1 hour); 0 disables";
   ]
 
-let oas_sse_entries =
+let agent_core_sse_entries =
   [
-    entry ~default:"2.0" "MASC_OAS_SSE_DRAIN_INTERVAL_SEC"
+    entry ~default:"2.0" "MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC"
       "SSE drain interval (seconds, floor 0.1)";
   ]
 
@@ -510,7 +510,7 @@ let category_specs =
       @ sse_entries @ telemetry_entries
       @ tool_entries );
     "rate_limiting", rate_limiting_entries;
-    "inference", model_routing_entries @ oas_sse_entries @ local_runtime_entries;
+    "inference", model_routing_entries @ agent_core_sse_entries @ local_runtime_entries;
     ( "keeper"
     , keeper_entries
       @ keeper_keepalive_entries @ keeper_metrics_entries

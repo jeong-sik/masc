@@ -3,7 +3,7 @@
     See the [.mli] for the contract.  Implementation notes:
 
     - State is a small [Hashtbl] guarded by [Stdlib.Mutex], matching the
-      {!Dashboard_oas_bridge} convention in this library (record/read may be
+      {!Dashboard_agent_core_bridge} convention in this library (record/read may be
       called from outside Eio fibers, so [Eio.Mutex] is not required).
     - Expiry is lazy: [prefer_order] compares the entry age against
       {!ttl_s} at call time and drops stale entries on read. *)

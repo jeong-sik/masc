@@ -46,9 +46,9 @@ let run_llm_reviewer_fn
      report_tool_schema:Types_core.tool_schema ->
      lookup:lookup_surface ->
      on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
-     unit -> (verdict option, Agent_sdk.Error.sdk_error) result) Atomic.t
+     unit -> (verdict option, Agent_core.Error.t) result) Atomic.t
   = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
-      Error (Agent_sdk.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
+      Error (Agent_core.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
 
 (** Issue #8436: schema enum used to be hand-rolled as a 2-element
     string list. Payload-bearing [Reject _] prevents the simple
@@ -425,7 +425,7 @@ let review
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
            Error
-             (Agent_sdk.Error.Internal
+             (Agent_core.Error.Internal
                 (Printf.sprintf
                    "task completion evaluator raised unexpectedly: %s"
                    (Printexc.to_string exn)))
@@ -465,7 +465,7 @@ let review
             ; fallback_reason = Some detail
             }
         | Error error ->
-          let detail = Agent_sdk.Error.to_string error in
+          let detail = Agent_core.Error.to_string error in
           (Atomic.get outcome_observer_fn)
             ~outcome:"unavailable"
             ~runtime:evaluator_runtime;

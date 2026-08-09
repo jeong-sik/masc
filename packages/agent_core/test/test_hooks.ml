@@ -1,7 +1,7 @@
 (** Tests for hooks.ml — lifecycle events and hook decisions *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 let default_schedule
       ?(planned_index = 0)
@@ -240,7 +240,7 @@ let input_request =
 let tool_approval_prompt = { Hooks.question = "authorize this command?" }
 
 let test_validate_legal_pre_tool_use () =
-  (* RFC-OAS-039: only the typed approval decision is legal after the model
+  (* Agent Core contract: only the typed approval decision is legal after the model
      chose the exact tool occurrence. Generic user input is never authority. *)
   let decisions =
     [ Hooks.Continue
@@ -368,7 +368,7 @@ let test_validate_illegal_block_at_on_stop () =
   check bool "Block at on_stop is Error" true (Result.is_error err)
 ;;
 
-(* [test_validate_illegal_elicit_at_pre_tool_use] was deleted by RFC-OAS-039.
+(* [test_validate_illegal_elicit_at_pre_tool_use] was deleted by Agent Core contract.
    It pinned exactly the closure that RFC removes. Its coverage is not lost:
    [test_elicit_input_illegal_where_it_cannot_settle_input] asserts the same
    rejection for all seven stages where [ElicitInput] is still illegal, which

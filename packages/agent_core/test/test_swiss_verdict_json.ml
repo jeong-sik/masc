@@ -1,6 +1,6 @@
-(** Tests for Swiss Verdict JSON serialization (RFC-OAS-002 Phase 2). *)
+(** Tests for Swiss Verdict JSON serialization (Agent Core contract Phase 2). *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ──────────────────────────────────────────────────── *)
 

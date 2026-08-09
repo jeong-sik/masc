@@ -50,13 +50,13 @@ let emit_wire_capture_response_suppressed_metrics ~keeper_name reasons =
     reasons
 ;;
 
-let is_trailing_blank_assistant (message : Agent_sdk.Types.message) =
+let is_trailing_blank_assistant (message : Agent_core.Types.message) =
   match message.role, message.content with
-  | Agent_sdk.Types.Assistant, [] -> true
-  | Agent_sdk.Types.Assistant, blocks ->
+  | Agent_core.Types.Assistant, [] -> true
+  | Agent_core.Types.Assistant, blocks ->
     List.for_all
       (function
-        | Agent_sdk.Types.Text text -> String.trim text = ""
+        | Agent_core.Types.Text text -> String.trim text = ""
         | _ -> false)
       blocks
   | _, _ -> false
@@ -71,15 +71,15 @@ let drop_trailing_blank_assistants messages =
 ;;
 
 let canonical_success_replay_checkpoint
-      ~(history_messages : Agent_sdk.Types.message list)
+      ~(history_messages : Agent_core.Types.message list)
       ~(session_id : string)
       ~(response_text : string)
-      (checkpoint : Agent_sdk.Checkpoint.t)
+      (checkpoint : Agent_core.Checkpoint.t)
   =
   match
     Keeper_replay_prefix.split
       ~prefix:history_messages
-      checkpoint.Agent_sdk.Checkpoint.messages
+      checkpoint.Agent_core.Checkpoint.messages
   with
   | Ok current_suffix ->
        (* A blank visible response is not authority to erase typed replay. The
@@ -101,7 +101,7 @@ let canonical_success_replay_checkpoint
          if String.trim response_text = ""
          then
            { checkpoint with
-             Agent_sdk.Checkpoint.session_id
+             Agent_core.Checkpoint.session_id
            ; messages = history_messages @ current_suffix
            ; working_context = None
            }
@@ -115,20 +115,20 @@ let canonical_success_replay_checkpoint
            let messages =
              if
                List.exists
-                 (fun (msg : Agent_sdk.Types.message) ->
-                    msg.role = Agent_sdk.Types.Assistant)
+                 (fun (msg : Agent_core.Types.message) ->
+                    msg.role = Agent_core.Types.Assistant)
                  current_suffix
              then base_messages
              else
                base_messages
                @
-               [ Agent_sdk.Types.make_message
-                   ~role:Agent_sdk.Types.Assistant
-                   [ Agent_sdk.Types.Text response_text ]
+               [ Agent_core.Types.make_message
+                   ~role:Agent_core.Types.Assistant
+                   [ Agent_core.Types.Text response_text ]
                ]
            in
            Keeper_context_core.patch_checkpoint_last_assistant
-             { checkpoint with Agent_sdk.Checkpoint.messages }
+             { checkpoint with Agent_core.Checkpoint.messages }
              ~session_id
              ~response_text
        in
@@ -140,19 +140,19 @@ let canonical_success_replay_checkpoint
 ;;
 
 let observation_replay_checkpoint
-      ~(history_messages : Agent_sdk.Types.message list)
+      ~(history_messages : Agent_core.Types.message list)
       ~(session_id : string)
-      (checkpoint : Agent_sdk.Checkpoint.t)
+      (checkpoint : Agent_core.Checkpoint.t)
   =
   match
     Keeper_replay_prefix.split
       ~prefix:history_messages
-      checkpoint.Agent_sdk.Checkpoint.messages
+      checkpoint.Agent_core.Checkpoint.messages
   with
   | Ok _ ->
     Ok
       ( { checkpoint with
-          Agent_sdk.Checkpoint.session_id
+          Agent_core.Checkpoint.session_id
         }
       , None )
   | Error _ ->
@@ -161,11 +161,11 @@ let observation_replay_checkpoint
 ;;
 
 let checkpoint_for_replay_persistence
-      ~(history_messages : Agent_sdk.Types.message list)
+      ~(history_messages : Agent_core.Types.message list)
       ~(session_id : string)
       ~(response_text : string)
       ?(stop_reason = Runtime_agent.Completed)
-      (checkpoint : Agent_sdk.Checkpoint.t)
+      (checkpoint : Agent_core.Checkpoint.t)
   =
   match stop_reason with
   | Runtime_agent.InputRequired _ ->
@@ -175,12 +175,12 @@ let checkpoint_for_replay_persistence
     (match
        Keeper_replay_prefix.split
          ~prefix:history_messages
-         checkpoint.Agent_sdk.Checkpoint.messages
+         checkpoint.Agent_core.Checkpoint.messages
      with
      | Ok (_ :: _) ->
        Ok
          ( { checkpoint with
-             Agent_sdk.Checkpoint.session_id
+             Agent_core.Checkpoint.session_id
            }
          , None )
      | Ok [] ->
@@ -206,7 +206,7 @@ let checkpoint_for_replay_persistence
       checkpoint
 ;;
 
-(* OAS constructs the mutation-boundary checkpoint and then installs the same
+(* AGENT_CORE constructs the mutation-boundary checkpoint and then installs the same
    immutable message values on the agent state. The list spines are rebuilt, so
    list physical equality is too strict; comparing each message record by
    identity proves the state boundary without hashing or scanning large text and
@@ -221,8 +221,8 @@ let rec messages_share_values_by_identity left right =
 ;;
 
 let select_finalization_checkpoint
-    ~(last_persisted_checkpoint : Agent_sdk.Checkpoint.t option)
-    (result_checkpoint : Agent_sdk.Checkpoint.t) =
+    ~(last_persisted_checkpoint : Agent_core.Checkpoint.t option)
+    (result_checkpoint : Agent_core.Checkpoint.t) =
   match last_persisted_checkpoint with
   | Some persisted
     when Int.equal persisted.turn_count result_checkpoint.turn_count
@@ -235,8 +235,8 @@ let select_finalization_checkpoint
 
 let finalization_checkpoint_already_persisted
     ~source_already_persisted
-    ~(source : Agent_sdk.Checkpoint.t)
-    ~(patched : Agent_sdk.Checkpoint.t)
+    ~(source : Agent_core.Checkpoint.t)
+    ~(patched : Agent_core.Checkpoint.t)
     ~replay_suffix_pruned =
   source_already_persisted
   && Option.is_none replay_suffix_pruned

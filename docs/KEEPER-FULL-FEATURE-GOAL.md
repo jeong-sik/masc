@@ -2,7 +2,7 @@
 
 > Status: Proposed implementation contract
 > Scope: MASC Keeper execution, Gate, compaction, asynchronous operations, and
-> the OAS composition boundary
+> the agent core composition boundary
 
 This document states the target behavior and ownership rules. It does not claim
 that an open PR, green unit test, or private foundation is already live. Current
@@ -17,7 +17,7 @@ documents and must be refreshed from their authoritative sources.
 > prohibitions; retain only objectively provable typed execution invariants;
 > route external effects through exact Always Allowed, configured LLM Auto
 > Judge, or nonblocking HITL; compose each MASC operation with one or more
-> finite OAS Agent runs; make Tool, Model, LLM Agent, Keeper, Fusion, and the
+> finite agent core Agent runs; make Tool, Model, LLM Agent, Keeper, Fusion, and the
 > product shorthand `Any`, `Any[]`, and `AsyncAny[]` compose through typed
 > invocation adapters whose asynchronous progress survives restart; preserve
 > active identities through MASC-owned LLM compaction and reinjection; and
@@ -29,7 +29,7 @@ documents and must be refreshed from their authoritative sources.
 The Goal is complete only when current evidence proves all of these gates:
 
 1. forbidden active-source concepts are absent;
-2. OAS owns only generic finite Agent execution and provider/runtime behavior;
+2. agent core owns only generic finite Agent execution and provider/runtime behavior;
 3. MASC owns long-lived Keeper product orchestration;
 4. Gate modes are exact, non-hierarchical, nonblocking, and observable;
 5. each Keeper drains an independent durable queue;
@@ -47,7 +47,7 @@ The Goal is complete only when current evidence proves all of these gates:
 ## 3. Two Nested Authorities
 
 ```text
-MASC durable operation                    OAS finite Agent.run
+MASC durable operation                    agent core finite Agent.run
 ────────────────────────────────────      ───────────────────────────────
 Keeper / Task / Goal / Board owner        Agent turn and provider attempt
 Gate / HITL / schedule decision           Tool invocation and tool attempt
@@ -60,23 +60,23 @@ Dashboard product projection              Exact finite-run event projection
 The dependency remains one-way:
 
 ```text
-MASC  ──depends on──>  OAS
-OAS   ──must not know──> Keeper / Board / Task / Goal / Gate / HITL
+MASC  ──depends on──>  agent core
+agent core   ──must not know──> Keeper / Board / Task / Goal / Gate / HITL
                          Fusion / Connector / Scheduler / MASC
 ```
 
-### 3.1 OAS ownership
+### 3.1 agent core ownership
 
-OAS owns reusable provider/model catalogs, multimodal protocol values,
+agent core owns reusable provider/model catalogs, multimodal protocol values,
 streaming, reasoning/tool feedback, finite Agent-run topology, exact ToolUse and
 ToolResult structure, invocation-local identity, run-local effect receipts,
 provider-native context capacity, typed provider failure, and generic typed
-hooks around one finite tool invocation. OAS also owns the generic typed
+hooks around one finite tool invocation. agent core also owns the generic typed
 asynchronous accept/reconcile/cancel/observe protocol and its optional
 journal-backed reference runtime. It does not own a MASC long-lived operation
 namespace, worker/wake policy, or Keeper lifecycle.
 
-For one finite run, OAS may privately own:
+For one finite run, agent core may privately own:
 
 - `Agent_run -> Agent_turn -> Provider_attempt`;
 - structured output blocks and tool invocations;
@@ -87,7 +87,7 @@ For one finite run, OAS may privately own:
 - receipt-after-effect evidence;
 - typed `Effect_outcome_unknown` and reconciliation fencing.
 
-This is not a Keeper lane. A finite OAS execution scope must close at run
+This is not a Keeper lane. A finite agent core execution scope must close at run
 completion and must never become one infinite Keeper-lifetime WAL.
 
 ### 3.2 MASC ownership
@@ -96,26 +96,26 @@ MASC owns Keeper lifecycle, owner-lane scheduling, durable product operations,
 Gate/HITL, Task/Goal/Board/Connector/Fusion state, Scheduler occurrence
 semantics, Memory, compaction policy and execution, reinjection, and dashboard
 projections. MASC also owns the adapters that expose Keeper, Fusion, Connector,
-Scheduler, or another MASC operation through the generic OAS tool boundary.
-OAS may provide a generic Agent adapter; it must not gain MASC-specific node
+Scheduler, or another MASC operation through the generic agent core tool boundary.
+agent core may provide a generic Agent adapter; it must not gain MASC-specific node
 kinds or dispatch rules.
 
-A MASC operation may reference an OAS run and its nodes:
+A MASC operation may reference an agent core run and its nodes:
 
 ```text
-MASC operation_id -> OAS run_ref -> OAS node_id / receipt cursor
+MASC operation_id -> agent core run_ref -> agent core node_id / receipt cursor
 ```
 
-MASC decides when a Keeper may start, wait, do other work, or wake. OAS reports
+MASC decides when a Keeper may start, wait, do other work, or wake. agent core reports
 the exact finite run outcome; it does not decide product continuation.
 
-“MASC is a read-only OAS execution projection” means only that MASC must not
-invent or rewrite OAS run history. It does not make MASC read-only for its own
+“MASC is a read-only agent core execution projection” means only that MASC must not
+invent or rewrite agent core run history. It does not make MASC read-only for its own
 operation journal, Gate decisions, checkpoints, or Keeper lane.
 
 ### 3.3 No duplicate SSOT
 
-The finite OAS run has one simple law:
+The finite agent core run has one simple law:
 
 ```text
 Execution Journal = sole execution writer and recovery SSOT
@@ -138,10 +138,10 @@ Projection failure cannot relabel, roll back, or hide a Journal commit.
 
 Across the product boundary:
 
-- OAS writes finite Agent-run execution history;
+- agent core writes finite Agent-run execution history;
 - MASC writes long-lived product operation and Keeper-lane history.
 
-An OAS addition is valid only when a generic OAS consumer can use it without
+An agent core addition is valid only when a generic agent core consumer can use it without
 learning MASC product concepts.
 
 ### 3.4 Lossless recursive execution and canonical feedback
@@ -171,9 +171,9 @@ is parented by the exact Tool attempt that created it, never directly by the
 logical Tool invocation; otherwise retries would merge distinct child history.
 
 `PreTool` is committed before the handler effect and contains the canonical
-input plus the typed OAS hook outcome. A MASC adapter records its product Gate
+input plus the typed agent core hook outcome. A MASC adapter records its product Gate
 and admission decision in the referenced MASC operation, not by adding
-MASC-specific fields to the OAS node. A rejected invocation has no Tool attempt
+MASC-specific fields to the agent core node. A rejected invocation has no Tool attempt
 and commits a typed rejection. An executed invocation commits its exact
 canonical ToolResult or typed failure before any post hook. `PostToolUse` then
 observes every committed terminal result; declared failure additionally runs
@@ -184,7 +184,7 @@ settle.
 For an asynchronous MASC adapter, the ToolResult closes the finite submission
 invocation with an acceptance receipt; it does not claim that the long-lived
 child operation has completed. Child progress and terminal wake are MASC
-operation events and do not fire a second OAS post-hook lifecycle.
+operation events and do not fire a second agent core post-hook lifecycle.
 
 The next provider request is constructed only from committed canonical protocol
 values:
@@ -325,7 +325,7 @@ dispatch, persist the exact receipt before projecting success.
 - Blind resume is forbidden.
 - Parent and child operations retain exact join and cancellation edges.
 
-OAS owns the run-local attempt/receipt; MASC owns the product intent,
+agent core owns the run-local attempt/receipt; MASC owns the product intent,
 continuation, and decision about what to do with the reported outcome.
 
 ## 8. Asynchronous Any-as-a-Tool
@@ -334,7 +334,7 @@ Tool, Model, LLM Agent, Keeper, Fusion, and heterogeneous collections use the
 same parent/child operation law.
 
 `Any`, `Any[]`, and `AsyncAny[]` are product shorthand, not untyped JSON types
-or public OAS coordinator concepts:
+or public agent core coordinator concepts:
 
 - `Any` is one existentially packed typed invocation with its adapter witness;
 - programmatic `Any[]` is an immutable collection with explicit serial or
@@ -357,13 +357,13 @@ Tool. Recursive composition uses the same tree: the composite has one outer
 Neither the execution writer nor the dashboard duplicates the child events as
 flat outer events.
 
-- OAS owns generic Tool, Model-call, finite-Agent adapter mechanics, and the
+- agent core owns generic Tool, Model-call, finite-Agent adapter mechanics, and the
   typed asynchronous acceptance/reconciliation/cancellation/observation
   façade.
 - MASC owns Keeper, Fusion, and other product adapters, the injected
   long-lived operation backend namespace, worker and wake policy, continuation,
   authorization, and application switch.
-- An adapter cannot make OAS import or encode Keeper, Fusion, Board, Goal,
+- An adapter cannot make agent core import or encode Keeper, Fusion, Board, Goal,
   Scheduler, Connector, or MASC variants.
 - A parent submits immutable child requests and stores exact child references.
 - Children may run concurrently or on their own Keeper lanes.
@@ -395,8 +395,8 @@ budget-derived Stop/Pause gate.
 
 ## 9. MASC-Owned LLM Compaction
 
-OAS has no reducer, automatic truncation, compaction policy, or overflow retry.
-OAS returns typed capacity/overflow facts. MASC queues compaction in the owner
+agent core has no reducer, automatic truncation, compaction policy, or overflow retry.
+agent core returns typed capacity/overflow facts. MASC queues compaction in the owner
 lane and invokes a configured model.
 
 - Compaction is a durable operation and releases the owner claim while waiting.
@@ -417,7 +417,7 @@ provider-native token counting when available; otherwise preserve typed
 `Unknown` rather than guessing from characters.
 
 A fit claim is bound to one exact pending source and the same immutable request
-artifact that OAS later dispatches after applying its hooks and model-input
+artifact that agent core later dispatches after applying its hooks and model-input
 projection. MASC must not reconstruct that provider request. A manual
 compaction with no pending source may record semantic reduction, but it cannot
 claim that an unknown future turn fits. Source-bound manual and overflow work
@@ -470,8 +470,8 @@ typed provider/model catalogs. Fallback follows explicit candidate order and
 declared capability, never names, URLs, or vendor strings.
 
 MASC owns the application-lifetime switch and the single host CPU-allocation
-policy. It creates and shares one opaque OAS execution runtime with an explicit
-allocation; OAS encapsulates its internal pool and exposes no raw pool or
+policy. It creates and shares one opaque agent core execution runtime with an explicit
+allocation; agent core encapsulates its internal pool and exposes no raw pool or
 allocation heuristic. Journal codec, recovery scan, and projection work cannot
 create a pool per lane/event or silently fall back onto the Keeper or server
 scheduling domain. Resource exhaustion is a typed lane-local result, not a
@@ -479,7 +479,7 @@ fleet stop or a reason to discard committed progress.
 
 Dashboard chat preserves causal interleaving of thinking, output, ToolUse,
 progress, ToolResult, multimodal blocks, child operations, compaction, and
-reinjection. It shows product operation identity and referenced OAS run/node
+reinjection. It shows product operation identity and referenced agent core run/node
 identity without merging their writers.
 
 The dashboard recursively projects the committed tree. It may fold nodes for
@@ -505,7 +505,7 @@ precede EventBus, SSE, log, metric, and dashboard projections.
 | async collection | atomic admission returns ordered handles; every terminal child event reaches its owner |
 | interrupted run | cancellation preserves committed partial nodes and explicit terminal state |
 | server isolation | journal work cannot stall the Keeper or server scheduling domain |
-| restart recovery | durable operation and finite OAS run references reconcile |
+| restart recovery | durable operation and finite agent core run references reconcile |
 | active compaction | ToolUse/progress/unresolved effect anchors remain exact |
 | oversized compaction | fallback/waves avoid arbitrary truncation |
 | reinjection | exact receipt proves which compacted block entered which turn |
@@ -530,9 +530,9 @@ audits may remain only when clearly marked as history.
 
 Keep each PR single-contract and independently reviewable:
 
-1. finish the OAS finite-run single-writer hard cut without public complexity;
-2. release OAS and pin MASC exactly;
-3. compose MASC operation identity with OAS run/node/receipt identity;
+1. finish the agent core finite-run single-writer hard cut without public complexity;
+2. release agent core and pin MASC exactly;
+3. compose MASC operation identity with agent core run/node/receipt identity;
 4. make per-owner progress and continuation durable;
 5. implement owner-only wake, fencing, and restart reconciliation;
 6. make compaction a durable lane operation with source CAS;

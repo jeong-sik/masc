@@ -1,6 +1,6 @@
 (** Provider-level error types.
 
-    Independent of the OAS [Error.sdk_error] hierarchy.
+    Independent of the AGENT_CORE [Error.t] hierarchy.
 
     @stability Internal
     @since 0.93.1 *)
@@ -28,7 +28,7 @@ type provider_error =
       }
   (** A provider-owned error envelope arrived in an otherwise accepted
       response.  Its subtype is diagnostic evidence only; retry policy is
-      owned by the caller above OAS. *)
+      owned by the caller above AGENT_CORE. *)
   | UnknownVariant of
       { type_name : string
       ; value : string

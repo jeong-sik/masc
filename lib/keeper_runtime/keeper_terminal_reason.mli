@@ -7,10 +7,10 @@
 
     - [Keeper_turn_terminal_code] (RFC-0042 PR-1/PR-2.5) is the
       {e producer-side} bridge from [Keeper_registry.failure_reason] /
-      [Agent_sdk.Error.sdk_error]. Its [of_wire] returns [None] for the
-      SDK-error codes ([api_error_*], agent observation wires, [internal_error]) because
-      they are all collapsed into its [Sdk_error of string] blob — the
-      sub-sum RFC-0042 §5.2 explicitly defers. Matching on [Sdk_error s]
+      [Agent_core.Error.t]. Its [of_wire] returns [None] for the
+      agent-core error codes ([api_error_*], agent observation wires, [internal_error]) because
+      they are all collapsed into its [Agent_core_error of string] blob — the
+      sub-sum RFC-0042 §5.2 explicitly defers. Matching on [Agent_core_error s]
       would force the substring re-parse back into the open, so it cannot
       be the consumer's parse target.
     - [Keeper_turn_disposition] is the operator-facing layer;
@@ -55,7 +55,7 @@ type t =
           typed provider/infrastructure retry observation, not an opaque
           internal failure.  Payload preserves the original bytes. *)
   | Config_or_auth of string
-  (** Canonical configuration/authentication wires emitted by the typed SDK
+  (** Canonical configuration/authentication wires emitted by the typed agent core
           error encoder. Arbitrary strings containing ["config"] or ["auth"]
           are not classified here. Payload is the original string. *)
   | Provider_runtime_failure of string
@@ -100,7 +100,7 @@ val to_wire : t -> string
     [Provider_runtime_failure] family: a plain (non-structural)
     [Api.Timeout], [Api.NetworkError], and provider-level timeout markers
     such as ["provider_error_timeout:http_operation"]. These mirror the
-    [Agent_sdk.Error] variants
+    [Agent_core.Error] variants
     [Keeper_error_classify.is_transient_network_error] reports as transient.
     The encoder [Keeper_agent_error.api_error_terminal_reason_code]
     references these so producer and consumer cannot drift.

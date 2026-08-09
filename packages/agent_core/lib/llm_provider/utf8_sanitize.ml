@@ -11,7 +11,7 @@
     delegates to the Stdlib decoder.
 
     Control characters (0x00-0x1F except LF/CR/TAB, plus DEL 0x7F) break LLM
-    prompt formatting. Replacing them at the SDK level prevents consumers from
+    prompt formatting. Replacing them at agent core level prevents consumers from
     needing their own sanitize pass.
 
     @since 0.138.0 — control character sanitization added

@@ -1,12 +1,12 @@
 (** Prompt metrics for keeper Agent.run turns. *)
 
-module Canonical_tool = Agent_sdk.Canonical_tool
+module Canonical_tool = Agent_core.Canonical_tool
 
 (** Structured prompt result from [build_turn_prompt] callback.
     [system_prompt] contains hard constraints (identity, policy guards,
     tool guidance, direct-reply mode) that must stay in the system prompt.
     [dynamic_context] contains soft context (continuity, skill route,
-    worktree changes, turn instructions) injected via OAS
+    worktree changes, turn instructions) injected via AGENT_CORE
     [extra_system_context] at request assembly. *)
 type turn_prompt =
   { system_prompt : string
@@ -47,8 +47,8 @@ let rec split_at count rev_prefix values =
 
 let provider_content_messages
       ~prompt_context_present
-      ~(projection_input : Agent_sdk.Types.message list)
-      ~(projected_messages : Agent_sdk.Types.message list)
+      ~(projection_input : Agent_core.Types.message list)
+      ~(projected_messages : Agent_core.Types.message list)
   =
   let projection_input_count = List.length projection_input in
   match split_at projection_input_count [] projected_messages with
@@ -59,19 +59,19 @@ let provider_content_messages
         if Bool.equal seen prompt_context_present
         then Some (List.rev rev_retained)
         else None
-      | (message : Agent_sdk.Types.message) :: rest ->
+      | (message : Agent_core.Types.message) :: rest ->
         (match
-         Agent_sdk.Types.Extra_system_context_provenance.classify
+         Agent_core.Types.Extra_system_context_provenance.classify
              message.metadata
          with
-         | Agent_sdk.Types.Extra_system_context_provenance.Absent ->
+         | Agent_core.Types.Extra_system_context_provenance.Absent ->
            remove_prompt_context seen (message :: rev_retained) rest
-         | Agent_sdk.Types.Extra_system_context_provenance.Present
+         | Agent_core.Types.Extra_system_context_provenance.Present
            when prompt_context_present && not seen ->
            remove_prompt_context true rev_retained rest
-         | Agent_sdk.Types.Extra_system_context_provenance.Present
-         | Agent_sdk.Types.Extra_system_context_provenance.Invalid
-         | Agent_sdk.Types.Extra_system_context_provenance.Duplicate -> None)
+         | Agent_core.Types.Extra_system_context_provenance.Present
+         | Agent_core.Types.Extra_system_context_provenance.Invalid
+         | Agent_core.Types.Extra_system_context_provenance.Duplicate -> None)
     in
     Option.map
        (fun retained_input -> retained_input @ projection_suffix)
@@ -180,8 +180,8 @@ let add_segment_metric
     }
 
 let metric_of_block
-    ~role:(_ : Agent_sdk.Types.role)
-    (block : Agent_sdk.Types.content_block) : prompt_segment_metrics =
+    ~role:(_ : Agent_core.Types.role)
+    (block : Agent_core.Types.content_block) : prompt_segment_metrics =
   let bytes =
     match Canonical_tool.tool_result_of_block block with
     | Some result ->
@@ -202,31 +202,31 @@ let metric_of_block
             + String.length (Yojson.Safe.to_string call.Canonical_tool.input)
         | None -> (
           match block with
-          | Agent_sdk.Types.Text text ->
+          | Agent_core.Types.Text text ->
               String.length (Inference_utils.sanitize_text_utf8 text)
-          | Agent_sdk.Types.Thinking { content; _ } ->
+          | Agent_core.Types.Thinking { content; _ } ->
               String.length (Inference_utils.sanitize_text_utf8 content)
-          | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
-              Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+          | Agent_core.Types.ReasoningDetails { reasoning_content; details } ->
+              Agent_core.Types.reasoning_details_text ~reasoning_content ~details
               |> Inference_utils.sanitize_text_utf8
               |> String.length
-          | Agent_sdk.Types.RedactedThinking text ->
+          | Agent_core.Types.RedactedThinking text ->
               String.length (Inference_utils.sanitize_text_utf8 text)
-          | Agent_sdk.Types.Image { data; _ }
-          | Agent_sdk.Types.Document { data; _ }
-          | Agent_sdk.Types.Audio { data; _ } -> String.length data
-          | Agent_sdk.Types.ToolResult _ ->
+          | Agent_core.Types.Image { data; _ }
+          | Agent_core.Types.Document { data; _ }
+          | Agent_core.Types.Audio { data; _ } -> String.length data
+          | Agent_core.Types.ToolResult _ ->
               invalid_arg
-                "keeper_agent_prompt_metrics: OAS canonical tool-result projection unavailable"
-          | Agent_sdk.Types.ToolUse _ ->
+                "keeper_agent_prompt_metrics: AGENT_CORE canonical tool-result projection unavailable"
+          | Agent_core.Types.ToolUse _ ->
               invalid_arg
-                "keeper_agent_prompt_metrics: OAS canonical tool-call projection unavailable"))
+                "keeper_agent_prompt_metrics: AGENT_CORE canonical tool-call projection unavailable"))
   in
   { bytes; fingerprint = None }
 
 let input_component_of_block
-    ~(role : Agent_sdk.Types.role)
-    (block : Agent_sdk.Types.content_block) : Turn_record.input_component_id =
+    ~(role : Agent_core.Types.role)
+    (block : Agent_core.Types.content_block) : Turn_record.input_component_id =
   if Option.is_some (Canonical_tool.tool_call_of_block block)
   then Turn_record.Message_tool_use
   else
@@ -234,27 +234,27 @@ let input_component_of_block
     | Some _ -> Turn_record.Message_tool_result
     | None ->
       (match block with
-  | Agent_sdk.Types.ToolResult _ -> Turn_record.Message_tool_result
-  | Agent_sdk.Types.ToolUse _ ->
+  | Agent_core.Types.ToolResult _ -> Turn_record.Message_tool_result
+  | Agent_core.Types.ToolUse _ ->
       invalid_arg
-        "keeper_agent_prompt_metrics: OAS canonical tool-call projection unavailable"
-  | Agent_sdk.Types.Text _ -> (
+        "keeper_agent_prompt_metrics: AGENT_CORE canonical tool-call projection unavailable"
+  | Agent_core.Types.Text _ -> (
       match role with
-      | Agent_sdk.Types.User -> Turn_record.Message_user
-      | Agent_sdk.Types.System -> Turn_record.Message_system
-      | Agent_sdk.Types.Assistant -> Turn_record.Message_assistant_text
-      | Agent_sdk.Types.Tool -> Turn_record.Message_tool_result)
-  | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.ReasoningDetails _ ->
+      | Agent_core.Types.User -> Turn_record.Message_user
+      | Agent_core.Types.System -> Turn_record.Message_system
+      | Agent_core.Types.Assistant -> Turn_record.Message_assistant_text
+      | Agent_core.Types.Tool -> Turn_record.Message_tool_result)
+  | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ ->
       Turn_record.Message_thinking
-  | Agent_sdk.Types.RedactedThinking _ -> Turn_record.Message_redacted_thinking
-  | Agent_sdk.Types.Image _ -> Turn_record.Message_image
-  | Agent_sdk.Types.Document _ -> Turn_record.Message_document
-  | Agent_sdk.Types.Audio _ -> Turn_record.Message_audio)
+  | Agent_core.Types.RedactedThinking _ -> Turn_record.Message_redacted_thinking
+  | Agent_core.Types.Image _ -> Turn_record.Message_image
+  | Agent_core.Types.Document _ -> Turn_record.Message_document
+  | Agent_core.Types.Audio _ -> Turn_record.Message_audio)
 
 let build_ctx_composition_metrics
     ~(prompt_blocks : Turn_record.prompt_block list)
-    ~(tools : Agent_sdk.Tool.t list)
-    ~(input_messages : Agent_sdk.Types.message list)
+    ~(tools : Agent_core.Tool.t list)
+    ~(input_messages : Agent_core.Types.message list)
     ~(actual_input_tokens : int option) : ctx_composition_metrics =
   let totals :
       (Turn_record.input_component_id, prompt_segment_metrics) Hashtbl.t =
@@ -273,7 +273,7 @@ let build_ctx_composition_metrics
       (fun total tool ->
         total
         + String.length
-            (Yojson.Safe.to_string (Agent_sdk.Tool.schema_to_json tool)))
+            (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)))
       0 tools
   in
   if tool_schema_bytes > 0
@@ -282,7 +282,7 @@ let build_ctx_composition_metrics
       ~bucket:Turn_record.Tool_schemas
       { bytes = tool_schema_bytes; fingerprint = None };
   List.iter
-    (fun (message : Agent_sdk.Types.message) ->
+    (fun (message : Agent_core.Types.message) ->
       List.iter
         (fun block ->
           let bucket = input_component_of_block ~role:message.role block in

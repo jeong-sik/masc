@@ -24,7 +24,7 @@ MASC owns the product semantics:
 - operator dashboard projections
 - TODO claim policy and CAS authority
 
-OAS stays a generic agent runtime. It can expose runtime events, raw traces,
+agent core stays a generic agent runtime. It can expose runtime events, raw traces,
 proof records, and OTel spans, but it must not learn MASC-specific CRDT doc
 ids, keeper slots, board semantics, or branch-visualization policy.
 

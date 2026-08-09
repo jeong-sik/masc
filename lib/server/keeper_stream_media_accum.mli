@@ -1,12 +1,12 @@
 (** Keeper_stream_media_accum — RFC-0301 item 6.
 
     Accumulates model-generated media streamed during a keeper turn so the turn's
-    persist path can record it as reload-visible chat blocks. Fed the same raw OAS
+    persist path can record it as reload-visible chat blocks. Fed the same raw AGENT_CORE
     stream events, it mirrors the bridge's media validity rules for durable reload
     persistence. It collects media
     payload per block index, rejects media deltas for tool/invalid blocks, preserves
     the first media metadata for an active block, and finalizes at either
-    [ContentBlockStop] or [MessageStop]. {!Keeper_chat_oas_stream_bridge} surfaces
+    [ContentBlockStop] or [MessageStop]. {!Keeper_chat_agent_core_stream_bridge} surfaces
     the same media live over SSE; this captures it for durable chat persistence so
     a dashboard reload still shows the generated image/audio instead of only text. *)
 
@@ -14,8 +14,8 @@ type t
 
 val create : unit -> t
 
-val on_event : t -> Agent_sdk.Types.sse_event -> unit
-(** Feed one raw OAS stream event. Media deltas accumulate per block index;
+val on_event : t -> Agent_core.Types.sse_event -> unit
+(** Feed one raw AGENT_CORE stream event. Media deltas accumulate per block index;
     [ContentBlockStop] finalizes one index and [MessageStop] finalizes all still
     open media. Non-media events are ignored except tool starts, which mark their
     index invalid for media persistence. *)

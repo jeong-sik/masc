@@ -351,7 +351,7 @@ export function deriveKeeperToolCallDossier(
 }
 
 // Tool output may be (a) a raw string, (b) a JSON blob we logged as a string,
-// (c) a [masc:blob ...] marker produced by Tool_output.encode_for_oas
+// (c) a [masc:blob ...] marker produced by Tool_output.encode_for_agentCore
 // when the bytes exceeded the inline threshold (legacy encoding, kept for
 // jsonl entries written before the normalization change), or (d) a
 // normalized blob descriptor object {_blob: {...}} written by the current

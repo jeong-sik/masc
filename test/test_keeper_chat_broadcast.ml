@@ -103,7 +103,7 @@ let test_projection_covers_thinking_and_tool_args () =
   in
   let _, thinking =
     project state
-      (E.Oas_thinking_delta { index = 0; delta = "inspect" })
+      (E.Agent_core_thinking_delta { index = 0; delta = "inspect" })
   in
   let thinking = Ag_ui.event_to_json (projected_exn (state, thinking)) in
   Alcotest.(check (option string)) "thinking custom event"

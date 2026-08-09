@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Breaking (agent execution ownership)**: MASC now owns its execution engine
+  as the embedded `masc.agent_core` library. Runtime modules, configuration,
+  environment keys, telemetry, dashboard events, persistence fields, and
+  public OCaml types use the Agent Core contract directly. No alternate module,
+  wire name, environment key, storage decoder, or compatibility facade remains.
 - **Breaking (startup/task storage contract)**: startup health and readiness
   now expose only lifecycle, lazy-task, readiness, error, and path/config
   diagnostics. Task operations bind directly to the supplied Workspace
@@ -10,7 +15,7 @@
 - **Breaking (cost ledger storage/schema)**: the Keeper producer, `masc-cost`,
   and inference metrics now share one current row codec and the date-split
   `.masc/costs/YYYY-MM/DD.jsonl` store. Automatic rows carry the runtime-owned
-  `(trace_id, keeper_turn_id, oas_turn_ordinal)` identity, so decision/cost
+  `(trace_id, keeper_turn_id, agent_core_turn_ordinal)` identity, so decision/cost
   observations merge only on exact identity; nearby timestamps and equal token
   counts no longer act as a deduplication rule. Windowed readers open only the
   requested day range, and malformed rows, schema violations, or duplicate
@@ -114,27 +119,30 @@
   - Keeper prompts now have one authoring source: `<keeper>/AGENT.md`. Keeper TOML stores the Keeper handle and operational settings without copying the prompt.
 
 ### Changed
-- Bumped the OAS Agent SDK pin to v0.231.4
-  (`2add6bf4a0c7a70dab3b60f82c62643a5bd8a9d6`). Compaction can now project
-  exact credential-free request-body bytes through the same provider serializer
-  and output requirement used by OAS admission, without duplicating serializer
-  or provider/model limit logic in MASC.
-- Bumped the OAS Agent SDK pin to v0.231.3
-  (`e01940b14d501900b8cbfa2fbb1e0484ada5a42d`). The GLM streaming backend now
-  consumes the catalog-resolved typed reasoning dialect instead of hardcoding
-  `reasoning_content`; MASC's deployment overlay declares the exact
-  `delta:reasoning_content` capability for both GLM-5-Turbo provider bindings.
+- Agent Core compaction projects exact credential-free request-body bytes
+  through the provider serializer and output requirement used by admission,
+  without duplicating serializer or provider/model limit logic in MASC.
+- The Agent Core GLM streaming backend consumes the catalog-resolved typed
+  reasoning dialect instead of hardcoding `reasoning_content`; MASC's
+  deployment overlay declares the exact `delta:reasoning_content` capability
+  for both GLM-5-Turbo provider bindings.
 - Provider materialization and registry/model-string resolution now share
   `Runtime_provider_binding.default_headers_for_kind` as the sole owner of
   non-credential provider header defaults. The duplicate Runtime adapter
   table and unused `headers_with_auth` public surface were removed; auth
-  tokens remain carried only through OAS `api_key`.
+  tokens remain carried only through Agent Core `api_key`.
 - Workspace broadcast delivery now returns the canonical content, mention, and
   message type produced by its single terminal-task invariant check. MCP
   session/SSE/notification/audit consumers reuse that exact result instead of
   pre-running the invariant through a bypass flag.
-- Bumped the OAS Agent SDK pin to `ca7a02b7` (oas#2766). Supports non-standard stop_reason provider dialects (e.g. `context_length_exceeded`, `max_context_length`) and preserves empty completion stop_reason in GLM parser to prevent orphan retries on context overflow.
-- Bumped the OAS Agent SDK pin to `c1eaa88b` (oas#2764). Allows empty delta `id` and `name` strings as `Ok None` in the SSE stream parser to prevent stream failure crashes on GLM-5-Turbo and OpenAI-compatible backends emitting empty initial delta fragments.
+- Agent Core accepts provider-specific stop-reason dialects such as
+  `context_length_exceeded` and `max_context_length`, and preserves empty GLM
+  completion stop reasons so context overflow cannot become an orphan retry.
+- Agent Core accepts empty initial SSE delta `id` and `name` strings as
+  `Ok None`, preventing stream failures on GLM-5-Turbo and compatible backends.
+- Malformed artifact markers that end before all required fields now return the
+  typed `Invalid_marker` result instead of escaping as `End_of_file` during
+  tool-blob maintenance.
 
 
 ## [0.21.2] - 2026-07-20

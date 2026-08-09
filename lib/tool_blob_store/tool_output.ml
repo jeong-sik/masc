@@ -126,7 +126,7 @@ let marker_prefix = "[masc:blob sha256="
 
 let is_marker s = String.starts_with ~prefix:marker_prefix s
 
-let encode_for_oas = function
+let encode_for_agent_core = function
   | Inline s -> s
   | Stored { sha256; bytes; preview; mime } ->
     Printf.sprintf "[masc:blob sha256=%s bytes=%d mime=%s preview=%S]"
@@ -137,7 +137,7 @@ type decode_result =
   | Invalid_marker of { detail : string }
   | Decoded of artifact_ref
 
-let decode_from_oas s =
+let decode_from_agent_core s =
   if not (is_marker s) then Not_marker
   else
     match
@@ -198,7 +198,7 @@ let artifact_refs_in_text text =
            }
        | Some stop ->
          let marker = String.sub text start (stop - start + 1) in
-         (match decode_from_oas marker with
+         (match decode_from_agent_core marker with
           | Decoded reference ->
             collect (stop + 1) (reference :: references)
           | Invalid_marker { detail } -> Error { offset = start; detail }

@@ -234,7 +234,7 @@ let project
              (* Continuity across a source change is a declared decision, not an
                 incidental hash comparison: the target dialect's typed
                 [rotation_policy] says which differences a stored artifact may
-                survive (RFC-OAS-029 S3.1). *)
+                survive (Agent Core contract S3.1). *)
              | Types.Reasoning_source.Present source
                when not
                       (Types.Reasoning_source.rotation_admits

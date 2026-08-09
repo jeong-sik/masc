@@ -37,8 +37,8 @@ let turn_label (row : manifest_row) =
   | Some value -> string_of_int value
   | None -> "unknown"
 
-let oas_turn_label (row : manifest_row) =
-  match row.Keeper_runtime_manifest.oas_turn_count with
+let agent_core_turn_label (row : manifest_row) =
+  match row.Keeper_runtime_manifest.agent_core_turn_count with
   | Some value -> string_of_int value
   | None -> "0"
 
@@ -48,10 +48,10 @@ let fallback_edge_id (row : manifest_row) idx =
     idx
 
 let fallback_tool_batch_id (row : manifest_row) =
-  Printf.sprintf "%s:keeper-%s:tool-batch-oas-%s"
+  Printf.sprintf "%s:keeper-%s:tool-batch-agent_core-%s"
     row.Keeper_runtime_manifest.trace_id
     (turn_label row)
-    (oas_turn_label row)
+    (agent_core_turn_label row)
 
 let fallback_provider_attempt_id (row : manifest_row) attempt_index =
   Printf.sprintf "%s:keeper-%s:provider-attempt-%d"
@@ -65,7 +65,7 @@ let fallback_checkpoint_id (row : manifest_row) =
     [
       Json_util.get_string decision "session_id"
       |> Option.map (fun session_id ->
-        Printf.sprintf "checkpoint:%s:oas-%s" session_id (oas_turn_label row));
+        Printf.sprintf "checkpoint:%s:agent_core-%s" session_id (agent_core_turn_label row));
       basename_opt row.Keeper_runtime_manifest.links.checkpoint_path
       |> Option.map (fun base -> "checkpoint:" ^ base);
       Json_util.get_string decision "checkpoint_path"
@@ -227,7 +227,7 @@ let clock_edge_json ~idx ~provider_attempt_index (row : manifest_row) =
           (first_string_opt [ clock_string row "finished_at"; event_finished_at row ]) );
       ("trace_id", `String row.Keeper_runtime_manifest.trace_id);
       ("keeper_turn_id", Json_util.int_opt_to_json row.Keeper_runtime_manifest.keeper_turn_id);
-      ("oas_turn_count", Json_util.int_opt_to_json row.Keeper_runtime_manifest.oas_turn_count);
+      ("agent_core_turn_count", Json_util.int_opt_to_json row.Keeper_runtime_manifest.agent_core_turn_count);
       ("provider_attempt_id", Json_util.string_opt_to_json provider_attempt_id);
       ("tool_batch_id", Json_util.string_opt_to_json tool_batch_id);
       ("checkpoint_id", Json_util.string_opt_to_json checkpoint_id);

@@ -3,7 +3,7 @@
     Verifies that the default Eio-backed context survives parallel access from
     multiple fibers without deadlock or crash. *)
 
-open Agent_sdk
+open Agent_core
 
 let test_concurrent_context_access () =
   Eio_main.run

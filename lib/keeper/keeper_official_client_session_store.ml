@@ -160,22 +160,22 @@ let rec canonical_json = function
 ;;
 
 let tool_surface_sha256 tools =
-  let tool_json (tool : Agent_sdk.Tool.t) =
+  let tool_json (tool : Agent_core.Tool.t) =
     let parameters =
       List.sort
-        (fun (left : Agent_sdk.Types.tool_param) right ->
+        (fun (left : Agent_core.Types.tool_param) right ->
            String.compare left.name right.name)
         tool.schema.parameters
     in
     `Assoc
       [ "description", `String tool.schema.description
-      ; "input_schema", Agent_sdk.Types.params_to_input_schema parameters
+      ; "input_schema", Agent_core.Types.params_to_input_schema parameters
       ; "name", `String tool.schema.name
       ]
     |> canonical_json
   in
   tools
-  |> List.sort (fun (left : Agent_sdk.Tool.t) right ->
+  |> List.sort (fun (left : Agent_core.Tool.t) right ->
     String.compare left.schema.name right.schema.name)
   |> List.map tool_json
   |> fun tools -> Yojson.Safe.to_string (`List tools)

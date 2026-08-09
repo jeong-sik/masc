@@ -67,14 +67,14 @@ export function appendLiveToolCall(
   })
 }
 
-/** Append a live OAS runtime event from SSE into the trace feed. */
-export function appendLiveOasEvent(
+/** Append a live Agent Core runtime event from SSE into the trace feed. */
+export function appendLiveAgentCoreEvent(
   agentName: string,
   event: Omit<UnifiedTraceEvent, 'sourceLane' | 'agentName'>,
 ): void {
   appendLiveTraceEvent(agentName, {
     ...event,
-    sourceLane: 'oas',
+    sourceLane: 'agentCore',
     agentName,
   })
 }

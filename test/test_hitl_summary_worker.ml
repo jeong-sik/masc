@@ -1,6 +1,6 @@
 open Alcotest
 
-module EO = Agent_sdk.Exact_output
+module EO = Agent_core.Exact_output
 module F = Compaction_exact_output_fixture
 module Gate = Masc.Keeper_gate
 module Q = Masc.Keeper_approval_queue
@@ -511,7 +511,7 @@ let test_flow_order_completion_and_replay () =
        check int "replay made no second POST" 1 (F.post_count first))
 ;;
 
-let test_predispatch_failure_advances_only_to_oas_successor () =
+let test_predispatch_failure_advances_only_to_agent_core_successor () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "hitl-flow-failover" @@ fun base_path ->
   Fun.protect
@@ -543,7 +543,7 @@ let test_predispatch_failure_advances_only_to_oas_successor () =
          ~on_summary:(fun _ -> ())
          prepared
        |> require_executed;
-       check int "OAS-selected successor posted once" 1 (F.post_count successor);
+       check int "AGENT_CORE-selected successor posted once" 1 (F.post_count successor);
        (match (Worker.For_testing.flow_evidence prepared).advances with
         | [ advance ] ->
           check string
@@ -562,7 +562,7 @@ let test_predispatch_failure_advances_only_to_oas_successor () =
                (cause = EO.Completion_failed)
            | EO.Flow_advance_candidate_rejected _ ->
              fail "transport failure was recorded as a candidate rejection")
-        | _ -> fail "exactly one typed OAS advance should be retained");
+        | _ -> fail "exactly one typed AGENT_CORE advance should be retained");
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
@@ -1905,9 +1905,9 @@ let () =
             `Quick
             test_flow_order_completion_and_replay
         ; test_case
-            "pre-dispatch failure advances to OAS successor"
+            "pre-dispatch failure advances to AGENT_CORE successor"
             `Quick
-            test_predispatch_failure_advances_only_to_oas_successor
+            test_predispatch_failure_advances_only_to_agent_core_successor
         ; test_case
             "JSON-syntax candidate admits without structured capability"
             `Quick

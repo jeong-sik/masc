@@ -1,15 +1,15 @@
 open Result.Syntax
 
 let config_error ~field detail =
-  Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })
+  Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })
 ;;
 
-let internal_error detail = Agent_sdk.Error.Internal detail
+let internal_error detail = Agent_core.Error.Internal detail
 
 let text_of_blocks ~runtime_label ~field blocks =
   let rec loop texts = function
     | [] -> Ok (String.concat "\n" (List.rev texts))
-    | Agent_sdk.Types.Text text :: rest -> loop (text :: texts) rest
+    | Agent_core.Types.Text text :: rest -> loop (text :: texts) rest
     | _ :: _ ->
       Error
         (config_error
@@ -20,7 +20,7 @@ let text_of_blocks ~runtime_label ~field blocks =
 ;;
 
 type history_projection =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
   ; dropped_tool_messages : int
   ; dropped_messages : int
   ; dropped_blocks : int
@@ -34,14 +34,14 @@ type history_projection =
 let project_official_history messages =
   let project
       (kept, dropped_tool, dropped_msgs, dropped_blocks)
-      (message : Agent_sdk.Types.message) =
+      (message : Agent_core.Types.message) =
     match message.role with
     | Tool -> kept, dropped_tool + 1, dropped_msgs, dropped_blocks
     | System | User | Assistant ->
       let text_blocks, other_blocks =
         List.partition
           (function
-            | Agent_sdk.Types.Text _ -> true
+            | Agent_core.Types.Text _ -> true
             | _ -> false)
           message.content
       in
@@ -70,7 +70,7 @@ let history_projection_lossless projection =
   && projection.dropped_blocks = 0
 ;;
 
-let user_message text : Agent_sdk.Types.message =
+let user_message text : Agent_core.Types.message =
   { role = User
   ; content = [ Text text ]
   ; name = None
@@ -79,7 +79,7 @@ let user_message text : Agent_sdk.Types.message =
   }
 ;;
 
-let system_message text : Agent_sdk.Types.message =
+let system_message text : Agent_core.Types.message =
   { role = System
   ; content = [ Text text ]
   ; name = None
@@ -91,14 +91,14 @@ let system_message text : Agent_sdk.Types.message =
 let last_tool_results messages =
   messages
   |> List.rev
-  |> List.find_map (fun (message : Agent_sdk.Types.message) ->
+  |> List.find_map (fun (message : Agent_core.Types.message) ->
     match message.role with
     | Tool ->
       Some
         (List.filter_map
            (function
-             | Agent_sdk.Types.ToolResult { content; outcome; _ } ->
-               Some (Agent_sdk.Types.tool_result_of_outcome ~content outcome)
+             | Agent_core.Types.ToolResult { content; outcome; _ } ->
+               Some (Agent_core.Types.tool_result_of_outcome ~content outcome)
              | _ -> None)
            message.content)
     | System | User | Assistant -> None)
@@ -111,7 +111,7 @@ let hook_error ~runtime_label ~hook_name ~stage detail =
        "%s runtime %s hook failed at %s: %s"
        runtime_label
        hook_name
-       (Agent_sdk.Hooks.hook_stage_to_string stage)
+       (Agent_core.Hooks.hook_stage_to_string stage)
        detail)
 ;;
 
@@ -122,13 +122,13 @@ let illegal_hook_decision ~runtime_label ~hook_name decision =
        "%s runtime %s hook returned unsupported decision %s"
        runtime_label
        hook_name
-       (Agent_sdk.Hooks.decision_kind_to_string
-          (Agent_sdk.Hooks.classify_decision decision)))
+       (Agent_core.Hooks.decision_kind_to_string
+          (Agent_core.Hooks.classify_decision decision)))
 ;;
 
 let invoke_turn_hook ~keeper_name ~turn_count ~hook_name hook event =
-  Agent_sdk.Agent_tools.invoke_hook
-    ~tracer:Agent_sdk.Tracing.null
+  Agent_core.Agent_tools.invoke_hook
+    ~tracer:Agent_core.Tracing.null
     ~agent_name:keeper_name
     ~turn_count
     ~hook_name
@@ -137,22 +137,22 @@ let invoke_turn_hook ~keeper_name ~turn_count ~hook_name hook event =
 ;;
 
 let lifecycle_outcome = function
-  | Error error -> Agent_sdk.Agent_lifecycle_events.Failed error
+  | Error error -> Agent_core.Agent_lifecycle_events.Failed error
   | Ok ({ response; stop_reason; _ } : Runtime_agent.run_result) ->
     (match stop_reason with
      | Runtime_agent.Completed ->
-       Agent_sdk.Agent_lifecycle_events.Completed response
+       Agent_core.Agent_lifecycle_events.Completed response
      | Runtime_agent.InputRequired { request; _ } ->
-       Agent_sdk.Agent_lifecycle_events.Input_required request
+       Agent_core.Agent_lifecycle_events.Input_required request
      | Runtime_agent.Yielded_to_chat_waiting { turns_used }
      | Runtime_agent.Yielded_to_durable_stimulus { turns_used }
      | Runtime_agent.Awaiting_external_effect { turns_used }
      | Runtime_agent.Yielded_after_repeated_tool_call { turns_used; _ } ->
-       Agent_sdk.Agent_lifecycle_events.Yielded { turn = turns_used })
+       Agent_core.Agent_lifecycle_events.Yielded { turn = turns_used })
 ;;
 
 let with_run_lifecycle_events ~event_bus ~keeper_name run =
-  Agent_sdk.Agent_lifecycle_events.with_run_lifecycle_events
+  Agent_core.Agent_lifecycle_events.with_run_lifecycle_events
     ~event_bus
     ~agent_name:keeper_name
     ~raw_trace:None
@@ -162,9 +162,9 @@ let with_run_lifecycle_events ~event_bus ~keeper_name run =
 ;;
 
 type prepared_turn =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
   ; system_prompt : string
-  ; tools : Agent_sdk.Tool.t list
+  ; tools : Agent_core.Tool.t list
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
@@ -180,14 +180,14 @@ let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
 
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     ~initial_messages ~model_input_projection ~hooks =
-  let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
+  let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
   let before_turn =
     invoke_turn_hook
       ~keeper_name
       ~turn_count
       ~hook_name:"before_turn"
       hooks.before_turn
-      (Agent_sdk.Hooks.BeforeTurn { turn = turn_count; messages = initial_messages })
+      (Agent_core.Hooks.BeforeTurn { turn = turn_count; messages = initial_messages })
   in
   let* messages =
     match before_turn with
@@ -198,19 +198,19 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     | decision ->
       Error (illegal_hook_decision ~runtime_label ~hook_name:"before_turn" decision)
   in
-  let current_params = Agent_sdk.Hooks.default_turn_params in
+  let current_params = Agent_core.Hooks.default_turn_params in
   let before_turn_params =
     invoke_turn_hook
       ~keeper_name
       ~turn_count
       ~hook_name:"before_turn_params"
       hooks.before_turn_params
-      (Agent_sdk.Hooks.BeforeTurnParams
+      (Agent_core.Hooks.BeforeTurnParams
          { turn = turn_count
          ; messages
          ; last_tool_results = last_tool_results messages
          ; current_params
-         ; reasoning = Agent_sdk.Hooks.empty_reasoning_summary
+         ; reasoning = Agent_core.Hooks.empty_reasoning_summary
          })
   in
   let* turn_params =
@@ -281,7 +281,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
               "%s official-client tools do not support forced tool choice %s"
               runtime_label
               (Yojson.Safe.to_string
-                 (Agent_sdk.Types.tool_choice_to_json choice))))
+                 (Agent_core.Types.tool_choice_to_json choice))))
   in
   Ok { messages; system_prompt; tools; reasoning_effort }
 ;;
@@ -299,12 +299,12 @@ type dynamic_tool =
   }
 
 let tool_hook_error_to_string = function
-  | Agent_sdk.Agent_tools.Hook_execution_failed
+  | Agent_core.Agent_tools.Hook_execution_failed
       { hook_name; stage; tool_name; detail; _ } ->
     Printf.sprintf
       "%s hook failed at %s for tool %s: %s"
       hook_name
-      (Agent_sdk.Hooks.hook_stage_to_string stage)
+      (Agent_core.Hooks.hook_stage_to_string stage)
       tool_name
       detail
 ;;
@@ -333,7 +333,7 @@ let observe_raw_trace ~keeper_name ~stage observe =
     try observe () with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | (Out_of_memory | Stack_overflow | Sys.Break) as exn -> raise exn
-    | exn -> Error (Agent_sdk.Error.Internal (Printexc.to_string exn))
+    | exn -> Error (Agent_core.Error.Internal (Printexc.to_string exn))
   with
   | Ok value -> Some value
   | Error error ->
@@ -346,7 +346,7 @@ let observe_raw_trace ~keeper_name ~stage observe =
       ~keeper_name
       "official-client RAW trace observation failed at %s; authoritative execution continues: %s"
       stage
-      (Agent_sdk.Error.to_string error);
+      (Agent_core.Error.to_string error);
     None
 ;;
 
@@ -356,7 +356,7 @@ let record_raw_tool_started ~keeper_name ~raw_trace_run ~invocation ~tool_name ~
   | Some active ->
     Option.is_some
       (observe_raw_trace ~keeper_name ~stage:Tool_start (fun () ->
-         Agent_sdk.Raw_trace.record_tool_execution_started
+         Agent_core.Raw_trace.record_tool_execution_started
            active
            ~invocation
            ~tool_name
@@ -376,7 +376,7 @@ let finish_dynamic_tool_raw
   | true, Some active ->
     ignore
       (observe_raw_trace ~keeper_name ~stage:Tool_finish (fun () ->
-         Agent_sdk.Raw_trace.record_tool_execution_finished
+         Agent_core.Raw_trace.record_tool_execution_finished
            active
            ~invocation
            ~tool_name
@@ -391,13 +391,13 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
   match context_injector with
   | None -> ()
   | Some inject ->
-    let output = Agent_sdk.Types.tool_result_of_outcome ~content outcome in
+    let output = Agent_core.Types.tool_result_of_outcome ~content outcome in
     (try
        match inject ~tool_name ~input ~output with
        | None -> ()
-       | Some (injection : Agent_sdk.Hooks.injection) ->
+       | Some (injection : Agent_core.Hooks.injection) ->
          List.iter
-           (fun (key, value) -> Agent_sdk.Context.set context key value)
+           (fun (key, value) -> Agent_core.Context.set context key value)
            injection.context_updates;
          if injection.extra_messages <> []
          then
@@ -415,28 +415,28 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
           ^ Printexc.to_string exn))
 ;;
 
-let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
-    ~(hooks : Agent_sdk.Hooks.hooks) ~event_bus ~context_injector ~terminal_error
+let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context ~tools
+    ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector ~terminal_error
     ~raw_trace_run ~next_dynamic_invocation_index
-    (tool : Agent_sdk.Tool.t) =
+    (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
-  ; input_schema = Agent_sdk.Types.params_to_input_schema tool.schema.parameters
+  ; input_schema = Agent_core.Types.params_to_input_schema tool.schema.parameters
   ; call =
       (fun ~call_id input ->
-        let schedule : Agent_sdk.Tool_contract.schedule =
+        let schedule : Agent_core.Tool_contract.schedule =
           { planned_index = Atomic.fetch_and_add next_dynamic_invocation_index 1
           ; batch_index = 0
           ; batch_size = 1
-          ; execution_mode = Agent_sdk.Tool.execution_mode tool
+          ; execution_mode = Agent_core.Tool.execution_mode tool
           }
         in
         let invocation =
-          Agent_sdk.Tool_contract.Invocation.create
+          Agent_core.Tool_contract.Invocation.create
             ~tool_use_id:call_id
             ~turn:turn_count
             ~schedule
-            ~completion:(Agent_sdk.Tool.completion tool)
+            ~completion:(Agent_core.Tool.completion tool)
         in
         let raw_trace_started =
           record_raw_tool_started
@@ -461,7 +461,7 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
               ~turn_count
               ~hook_name:"pre_tool_use"
               hooks.pre_tool_use
-              (Agent_sdk.Hooks.PreToolUse
+              (Agent_core.Hooks.PreToolUse
                  { invocation
                  ; tool_name = tool.schema.name
                  ; input
@@ -474,7 +474,7 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
             let detail =
               Printf.sprintf
                 "pre_tool_use hook failed at %s: %s"
-                (Agent_sdk.Hooks.hook_stage_to_string stage)
+                (Agent_core.Hooks.hook_stage_to_string stage)
                 detail
             in
             { success = false; content = detail }
@@ -483,8 +483,8 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
               Printf.sprintf
                 "%s dynamic tool cannot settle hook decision %s without a host approval callback"
                 runtime_label
-                (Agent_sdk.Hooks.decision_kind_to_string
-                   (Agent_sdk.Hooks.classify_decision decision))
+                (Agent_core.Hooks.decision_kind_to_string
+                   (Agent_core.Hooks.classify_decision decision))
             in
             record_terminal_error terminal_error detail;
             { success = false; content = detail }
@@ -493,19 +493,19 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
               Printf.sprintf
                 "%s dynamic tool received illegal pre_tool_use decision %s"
                 runtime_label
-                (Agent_sdk.Hooks.decision_kind_to_string
-                   (Agent_sdk.Hooks.classify_decision decision))
+                (Agent_core.Hooks.decision_kind_to_string
+                   (Agent_core.Hooks.classify_decision decision))
             in
             record_terminal_error terminal_error detail;
             { success = false; content = detail }
           | Continue ->
             (match
-               Agent_sdk.Agent_tools.find_and_execute_tool
+               Agent_core.Agent_tools.find_and_execute_tool
                  ~context
                  ~tools
                  ~hooks
                  ~event_bus
-                 ~tracer:Agent_sdk.Tracing.null
+                 ~tracer:Agent_core.Tracing.null
                  ~agent_name:keeper_name
                  ~invocation
                  tool.schema.name
@@ -522,19 +522,19 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
                  ~content:result.content
                  ~outcome:result.outcome;
                { success =
-                   not (Agent_sdk.Types.tool_result_outcome_is_error result.outcome)
+                   not (Agent_core.Types.tool_result_outcome_is_error result.outcome)
                ; content = result.content
                }
              | Error error ->
                let detail = tool_hook_error_to_string error in
                (match error with
-                | Agent_sdk.Agent_tools.Hook_execution_failed
+                | Agent_core.Agent_tools.Hook_execution_failed
                     { stage = (Post_tool_use | Post_tool_use_failure); _ } ->
                   record_terminal_error terminal_error detail;
                   { success = true
                   ; content = "Tool completed, but its post-execution hook failed; do not retry"
                   }
-                | Agent_sdk.Agent_tools.Hook_execution_failed _ ->
+                | Agent_core.Agent_tools.Hook_execution_failed _ ->
                   { success = false; content = detail }))
         in
         match execute () with
@@ -564,7 +564,7 @@ let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_b
     let next_dynamic_invocation_index = Atomic.make 0 in
     Ok
       (List.map
-         (dynamic_tool_of_oas
+         (dynamic_tool_of_agent_core
             ~runtime_label
             ~keeper_name
             ~turn_count

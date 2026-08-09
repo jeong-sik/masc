@@ -109,7 +109,7 @@ let is_rate_limit_exempt path =
     [Httpun.Reqd.respond_with_string] calls in the main request handler
     against the "invalid state, currently handling error" [Failure] that
     httpun raises when the reqd has already entered its error-handling path
-    (e.g. client disconnect during a long OAS turn — 2026-05-05 cycle9
+    (e.g. client disconnect during a long AGENT_CORE turn — 2026-05-05 cycle9
     FATAL race, also see [Http_server_eio.safe_respond_with_string]).
     [Eio.Cancel.Cancelled] is always re-raised. *)
 let safe_reqd_respond reqd response body =
@@ -118,7 +118,7 @@ let safe_reqd_respond reqd response body =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Failure msg ->
       Log.Server.warn
-        "[http] reqd respond skipped (invalid state; 2026-05-05 OAS cancel race): %s"
+        "[http] reqd respond skipped (invalid state; 2026-05-05 AGENT_CORE cancel race): %s"
         msg
   | exn ->
       Log.Server.warn "[http] reqd respond unexpected exception: %s"

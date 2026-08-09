@@ -199,12 +199,12 @@ let append_decision_record
         ( "trace_ref",
           match result with
           | Some { trace_ref = Some trace_ref; _ } ->
-              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
+              Agent_core.Raw_trace.run_ref_to_yojson trace_ref
           | _ -> `Null );
         ( "run_validation",
           match result with
           | Some { run_validation = Some validation; _ } ->
-              Agent_sdk.Raw_trace.run_validation_to_yojson validation
+              Agent_core.Raw_trace.run_validation_to_yojson validation
           | _ -> `Null );
         ( "telemetry",
           match result with
@@ -319,7 +319,7 @@ let append_decision_record
                 ("resolved_model_id", `Null);
                 ("outcome", `String "success");
                 ("turn_count", `Int r.turn_count);
-                ("oas_turn_ordinal", `Int r.final_oas_turn_ordinal);
+                ("agent_core_turn_ordinal", `Int r.final_agent_core_turn_ordinal);
                 ("stop_reason", `String stop_reason_str);
                 ("usage_reported", `Bool r.usage_reported);
                 ("telemetry_reported", `Bool telemetry_reported);

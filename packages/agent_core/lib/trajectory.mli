@@ -1,6 +1,6 @@
 (** Trajectory — structured agent execution trace.
 
-    Bridges OAS {!Raw_trace} records into a higher-level execution model
+    Bridges AGENT_CORE {!Raw_trace} records into a higher-level execution model
     inspired by Deep Agents Harbor evaluation framework.
 
     @stability Evolving

@@ -1,6 +1,6 @@
 (** Typed cooperative tool-boundary execution tests. *)
 
-open Agent_sdk
+open Agent_core
 
 let mock_provider =
   Llm_provider.Provider_config.make
@@ -156,7 +156,7 @@ let last_record path =
 ;;
 
 let with_temp_trace f =
-  let path = Filename.temp_file "oas-agent-advanced" ".jsonl" in
+  let path = Filename.temp_file "agent_core-agent-advanced" ".jsonl" in
   Fun.protect
     ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
     (fun () -> f path)

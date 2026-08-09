@@ -4,7 +4,7 @@ open Masc
 
 let keeper_name = "keeper-autonomous-source"
 let agent_name = "keeper-autonomous-agent"
-let runtime_agent_name = "oas-test-runtime"
+let runtime_agent_name = "agent_core-test-runtime"
 let trace_id = "trace-test-0000"
 
 let temp_dir () =
@@ -40,22 +40,22 @@ let ensure_trace_dir config =
 
 let raw_record ~worker_run_id ~seq ~ts ~record_type fields =
   `Assoc
-    (("trace_version", `Int Agent_sdk.Raw_trace.trace_version)
+    (("trace_version", `Int Agent_core.Raw_trace.trace_version)
      :: ("worker_run_id", `String worker_run_id)
      :: ("seq", `Int seq)
      :: ("ts", `Float ts)
      :: ("agent_name", `String runtime_agent_name)
      :: ("session_id", `String trace_id)
-     :: ("record_type", `String (Agent_sdk.Raw_trace.record_type_to_string record_type))
+     :: ("record_type", `String (Agent_core.Raw_trace.record_type_to_string record_type))
      :: fields)
 ;;
 
 let run_lines ~worker_run_id ~start_seq ~base_ts ~prompt ~final_text =
   [ raw_record ~worker_run_id ~seq:start_seq ~ts:base_ts
-      ~record_type:Agent_sdk.Raw_trace.Run_started
+      ~record_type:Agent_core.Raw_trace.Run_started
       [ "prompt", `String prompt; "model", `String "test-model" ]
   ; raw_record ~worker_run_id ~seq:(start_seq + 1) ~ts:(base_ts +. 1.)
-      ~record_type:Agent_sdk.Raw_trace.Assistant_block
+      ~record_type:Agent_core.Raw_trace.Assistant_block
       [ "block_index", `Int 0
       ; "block_kind", `String "thinking"
       ; ( "assistant_block"
@@ -65,7 +65,7 @@ let run_lines ~worker_run_id ~start_seq ~base_ts ~prompt ~final_text =
             ] )
       ]
   ; raw_record ~worker_run_id ~seq:(start_seq + 2) ~ts:(base_ts +. 2.)
-      ~record_type:Agent_sdk.Raw_trace.Tool_execution_started
+      ~record_type:Agent_core.Raw_trace.Tool_execution_started
       [ "tool_name", `String "Read"
       ; "tool_input", `Assoc [ "path", `String "secret.ml" ]
       ; "tool_use_id", `String ("tool-" ^ worker_run_id)
@@ -76,7 +76,7 @@ let run_lines ~worker_run_id ~start_seq ~base_ts ~prompt ~final_text =
       ; "tool_execution_mode", `String "serial"
       ]
   ; raw_record ~worker_run_id ~seq:(start_seq + 3) ~ts:(base_ts +. 3.)
-      ~record_type:Agent_sdk.Raw_trace.Tool_execution_finished
+      ~record_type:Agent_core.Raw_trace.Tool_execution_finished
       [ "tool_name", `String "Read"
       ; "tool_result", `String {|{"files":["target.ml"]}|}
       ; "tool_error", `Bool false
@@ -87,7 +87,7 @@ let run_lines ~worker_run_id ~start_seq ~base_ts ~prompt ~final_text =
       ; "tool_batch_size", `Int 1
       ]
   ; raw_record ~worker_run_id ~seq:(start_seq + 4) ~ts:(base_ts +. 4.)
-      ~record_type:Agent_sdk.Raw_trace.Run_finished
+      ~record_type:Agent_core.Raw_trace.Run_finished
       [ "final_text", `String final_text; "stop_reason", `String "end_turn" ]
   ]
 ;;
@@ -246,7 +246,7 @@ let test_mismatched_raw_trace_runtime_identity_is_skipped () =
     run_lines ~worker_run_id:"run-mismatch" ~start_seq:1 ~base_ts:4500.
       ~prompt:"ignored" ~final_text:"must not be attributed"
     |> replace_raw_field_at ~index:3 ~field:"agent_name"
-         ~value:(`String "oas-other-runtime")
+         ~value:(`String "agent_core-other-runtime")
   in
   write_lines path records;
   write_turn_record config ~absolute_turn:44 ~generation:9
@@ -354,9 +354,9 @@ let test_direct_turn_does_not_duplicate_chat_invalidation () =
   Alcotest.(check int) "direct chat path owns its invalidation" 0 !invalidations
 ;;
 
-(* The OAS runtime identity is opaque here. The reader validates it against
+(* The AGENT_CORE runtime identity is opaque here. The reader validates it against
    the selected raw rows without comparing it to the Keeper identity. *)
-let sdk_run_ref ~agent_name ~session_id : Agent_sdk.Raw_trace.run_ref =
+let agent_core_run_ref ~agent_name ~session_id : Agent_core.Raw_trace.run_ref =
   { worker_run_id = "wr-exact-run"
   ; path = "/keepers/" ^ keeper_name ^ "/raw-traces/turn-exact.jsonl"
   ; start_seq = 1
@@ -367,11 +367,11 @@ let sdk_run_ref ~agent_name ~session_id : Agent_sdk.Raw_trace.run_ref =
 ;;
 
 let test_runtime_identity_is_recorded_not_compared () =
-  let runtime_agent_name = "oas-ollama_cloud.deepseek-v4-flash" in
+  let runtime_agent_name = "agent_core-ollama_cloud.deepseek-v4-flash" in
   match
     Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
       ~expected_session_id:trace_id
-      (sdk_run_ref ~agent_name:runtime_agent_name ~session_id:(Some trace_id))
+      (agent_core_run_ref ~agent_name:runtime_agent_name ~session_id:(Some trace_id))
   with
   | Error detail -> Alcotest.failf "runtime identity was compared, not recorded: %s" detail
   | Ok (recorded : Turn_record.raw_trace_run_ref) ->
@@ -385,7 +385,7 @@ let test_keeper_agent_identity_is_also_accepted () =
   match
     Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
       ~expected_session_id:trace_id
-      (sdk_run_ref ~agent_name ~session_id:(Some trace_id))
+      (agent_core_run_ref ~agent_name ~session_id:(Some trace_id))
   with
   | Error detail -> Alcotest.failf "expected the reference to be recorded: %s" detail
   | Ok (recorded : Turn_record.raw_trace_run_ref) ->
@@ -396,7 +396,7 @@ let test_session_identity_mismatch_is_rejected () =
   match
     Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
       ~expected_session_id:trace_id
-      (sdk_run_ref ~agent_name ~session_id:(Some "trace-other-9999"))
+      (agent_core_run_ref ~agent_name ~session_id:(Some "trace-other-9999"))
   with
   | Ok _ -> Alcotest.fail "a foreign session identity was recorded"
   | Error _ -> ()
@@ -406,7 +406,7 @@ let test_absent_session_identity_is_rejected () =
   match
     Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
       ~expected_session_id:trace_id
-      (sdk_run_ref ~agent_name ~session_id:None)
+      (agent_core_run_ref ~agent_name ~session_id:None)
   with
   | Ok _ -> Alcotest.fail "a reference without session identity was recorded"
   | Error _ -> ()
@@ -433,7 +433,7 @@ let () =
             test_direct_turn_does_not_duplicate_chat_invalidation
         ] )
     ; ( "exact_run_reference"
-      , [ Alcotest.test_case "records the OAS runtime identity" `Quick
+      , [ Alcotest.test_case "records the AGENT_CORE runtime identity" `Quick
             test_runtime_identity_is_recorded_not_compared
         ; Alcotest.test_case "records a keeper-shaped identity" `Quick
             test_keeper_agent_identity_is_also_accepted

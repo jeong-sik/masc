@@ -9,7 +9,7 @@
     3. [temperature = 0.0] (greedy) is a valid value → [Some 0.0]; temperature
        is NOT a positive-only field.
     4. Absent [temperature] → [None]; the caller keeps its fallback
-       ([MASC_KEEPER_UNIFIED_TEMP] / the OAS agent_default profile).
+       ([MASC_KEEPER_UNIFIED_TEMP] / the AGENT_CORE agent_default profile).
     5. An out-of-range value (outside [0.0, 2.0]) fails the parse (fail-closed):
        an invalid temperature is rejected at load rather than sent to the
        provider, which would reject it at request time.

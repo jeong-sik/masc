@@ -34,12 +34,12 @@ export type ToolCallEntry = {
   lane?: string
   // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
   execution_id?: string
-  // RFC-0233 PR-2: provider call id (oas-event join key). Equals the chat tool
+  // RFC-0233 PR-2: provider call id (agent-core-event join key). Equals the chat tool
   // row's tool_call_id for the same execution, so the chat ToolCallBubble can
   // join this entry's output onto the transcript. Absent when the call carried
   // no provider id (synthesised tc-<position> rows) or on pre-PR-2 logs.
   tool_use_id?: string
-  // OAS model-tool occurrence slot. Together with turn it scopes provider ids
+  // Agent Core model-tool occurrence slot. Together with turn it scopes provider ids
   // that may be blank or repeated.
   planned_index?: number
   // Goal id(s) this call was attributed to (conditional on the row carrying

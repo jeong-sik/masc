@@ -13,7 +13,7 @@ let default_getenv = Sys.getenv_opt
 (* [get ?getenv name] is the canonical env-read primitive. The optional
    [getenv] argument (default [Sys.getenv_opt]) is a dependency-injection
    seam so callers and tests can resolve the environment without touching
-   the process env (RFC-OAS-024 §6 cut 5). The pure core never calls this
+   the process env (Agent Core contract §6 cut 5). The pure core never calls this
    directly — it receives resolved config values as arguments. *)
 let get ?(getenv = default_getenv) name = trim_non_empty_opt (getenv name)
 
@@ -23,13 +23,13 @@ let split_on_char_trim sep s =
 
 [@@@coverage off]
 
-(* RFC-OAS-024 §6 cut 5: the ?getenv seam lets tests/callers resolve the
+(* Agent Core contract §6 cut 5: the ?getenv seam lets tests/callers resolve the
    environment deterministically without mutating process-global state. *)
-let%test "get honors injected getenv (RFC-OAS-024 seam)" =
+let%test "get honors injected getenv (Agent Core contract seam)" =
   let never _ = None in
   let always_yes _ = Some "yes" in
-  get ~getenv:never "OAS_UNSET_VAR_ZZZ" = None
-  && get ~getenv:always_yes "OAS_ANY_VAR_ZZZ" = Some "yes"
+  get ~getenv:never "AGENT_CORE_UNSET_VAR_ZZZ" = None
+  && get ~getenv:always_yes "AGENT_CORE_ANY_VAR_ZZZ" = Some "yes"
 ;;
 
 let%test "split_on_char_trim drops empty fragments" =

@@ -4,7 +4,7 @@
     agent must stop that loop when the run exits normally or by cancellation so
     long-lived caller switches do not retain active callback loops. *)
 
-open Agent_sdk
+open Agent_core
 
 let response : Types.api_response =
   { id = "periodic-cleanup-response"
@@ -231,7 +231,7 @@ let test_on_run_complete_cancelled_propagates () =
 let test_on_run_complete_cancelled_finishes_raw_trace () =
   Eio_main.run
   @@ fun env ->
-  with_temp_dir "oas-agent-complete-cancel-raw-trace"
+  with_temp_dir "agent_core-agent-complete-cancel-raw-trace"
   @@ fun session_root ->
   Eio.Switch.run
   @@ fun sw ->
@@ -277,7 +277,7 @@ let test_exception_preserved_when_raw_trace_finalization_fails () =
        @@ fun get_records ->
        Eio_main.run
        @@ fun env ->
-       with_temp_dir "oas-agent-exception-raw-trace-finalize"
+       with_temp_dir "agent_core-agent-exception-raw-trace-finalize"
        @@ fun session_root ->
        Eio.Switch.run
        @@ fun sw ->

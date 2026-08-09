@@ -6,7 +6,7 @@
     - mcp_tool_of_json: JSON tool definition parsing
     - merge_env: environment variable merging *)
 
-open Agent_sdk
+open Agent_core
 module Sdk_types = Mcp_protocol.Mcp_types
 
 let make_tool_result ?is_error ?structured_content content =
@@ -151,7 +151,7 @@ let test_merge_env_empty_extras () =
 ;;
 
 let test_merge_env_adds_new () =
-  let key = "OAS_TEST_MERGE_ENV_UNIQUE_KEY_12345" in
+  let key = "AGENT_CORE_TEST_MERGE_ENV_UNIQUE_KEY_12345" in
   let env = Mcp.merge_env [ key, "test_value" ] in
   let found =
     Array.to_list env |> List.exists (fun entry -> entry = key ^ "=test_value")

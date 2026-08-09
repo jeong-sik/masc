@@ -235,7 +235,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
 	          last_runtime_attempt = None;
 	        };
       keeper_id = Some (Keeper_id.Uid.generate ());
-      oas_env = p.profile_defaults.oas_env;
+      agent_core_env = p.profile_defaults.agent_core_env;
       } in
       let system_prompt =
         Keeper_run_context.build_base_system_prompt
@@ -249,7 +249,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
       let init_save_result =
         try
-          Keeper_context_runtime.save_oas_checkpoint
+          Keeper_context_runtime.save_agent_core_checkpoint
             ~multimodal_policy:meta.multimodal_policy
             ~keeper_name:meta.name
             ~session
@@ -260,7 +260,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
-            log_keeper_exn ~label:"save_oas_checkpoint (init) exception" exn;
+            log_keeper_exn ~label:"save_agent_core_checkpoint (init) exception" exn;
             Error (`Unexpected_exception (Printexc.to_string exn))
       in
       match init_save_result with
@@ -354,7 +354,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("instructions", `String meta.instructions);
           ("proactive_enabled", `Bool meta.proactive.enabled);
           ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
-          ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
+          ("agent_core_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.agent_core_env));
         ] in
         tool_result_ok_data json
          | ( Keepalive_already_registered _

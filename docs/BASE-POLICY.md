@@ -182,7 +182,7 @@ let schemas : Types.tool_schema list = []
 
 **After**:
 ```ocaml
-(** Tool_compact — OAS-backed compaction pipeline. … *)
+(** Tool_compact — agent core-backed compaction pipeline. … *)
 let schemas : Types.tool_schema list = []
 ```
 
@@ -201,7 +201,7 @@ only empty stubs using primitive Stdlib types.  The Dune check target
 | Horizon | Mid |
 | Owner lane | Keepers on `task-130` claim work items from this policy |
 
-Active purge tasks `task-117`–`task-125` and OAS Base policy task
+Active purge tasks `task-117`–`task-125` and agent core Base policy task
 `task-128` should be evaluated against this contract before any further
 `open Base` removal or addition.  The contract is the decision point:
 

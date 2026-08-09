@@ -1,6 +1,6 @@
 # OCaml 북극성 지표 (North Star Guideline)
 
-> masc + OAS 코드베이스의 OCaml 품질 기준.
+> masc + agent core 코드베이스의 OCaml 품질 기준.
 > 측정 가능하고, ROI가 높고, 학문적으로 올바른 개선 항목.
 > 생성일: 2026-04-21 · §1 스냅샷 갱신: 2026-05-12
 
@@ -13,12 +13,12 @@
 > `.ml` 파일로 커졌고 `.mli` 커버리지는 같은 기간에 53% → 97% 로 올랐다.
 > "(2026-04, 재측정 필요)" 표시된 행은 2026-04-21 측정값 그대로다.
 
-| 축 | masc | OAS | 평가 |
+| 축 | masc | agent core | 평가 |
 |----|----------|-----|------|
 | `.mli` 커버리지 | 1005/1033 (97%, 2026-05-12) | 216/218 (99%) | Tier 1-A 사실상 완료 |
 | `Obj.magic` (실사용) | 0건 (2026-05-12; 당시 유일한 히트였던 CDAL 평가기 내 금지패턴 문자열 리터럴은 모듈 제거로 소멸) | 0건 | 깨끗함 |
 | `Stdlib.Mutex` 생성 | `Stdlib.Mutex.create` 39 호출 / `module Mutex = Stdlib.Mutex` 105 파일 (2026-05-12) — 다수는 의도된 컨벤션 (짧은 critical section, Eio 의존 회피 주석 명시) | 2군데 | 무분별 신규 추가만 경계 |
-| `Eio.Mutex` 사용 | `Eio.Mutex.create` 113 호출 / `Eio.Mutex` 등장 142 파일 (2026-05-12) | 19군데 (호출/등장 횟수) | 과잉 여부 재평가 필요 — masc 열은 `Stdlib.Mutex` 행과 같은 단위 (호출 수 / 파일 수), OAS 열은 등장 횟수 |
+| `Eio.Mutex` 사용 | `Eio.Mutex.create` 113 호출 / `Eio.Mutex` 등장 142 파일 (2026-05-12) | 19군데 (호출/등장 횟수) | 과잉 여부 재평가 필요 — masc 열은 `Stdlib.Mutex` 행과 같은 단위 (호출 수 / 파일 수), agent core 열은 등장 횟수 |
 | 와일드카드 `_` (Top 파일) | (2026-04, 재측정 필요) keeper_status_detail: 35, verification: 28 | runtime_server: 25 | RFC-0071 §3.4 (warning 4 활성화) 이 진행 중 — §2-B/§3 참조 |
 | GADT | (2026-04) 2군데+ | 5군데 | 미활용 |
 | Effect Handlers | 0건 (2026-05-12; `Effect.perform`/`Effect.Deep`/`Effect.Shallow` 0건 — Eio 내부 사용 제외) | 0건 | **공백** |
@@ -110,7 +110,7 @@
 **실행**: 작은 pilot에서 시작 — 로깅 effect 하나만 도입 후 관찰.
 
 #### E. GADT 확대 적용
-**현재**: masc 2건 (`typed_state.ml`), OAS 5건.
+**현재**: masc 2건 (`typed_state.ml`), agent core 5건.
 
 **적용 후보**:
 1. **툴 스키마**: `string * string` 튜플 대신 타입 수준에서 입력/출력 타입 강제
@@ -191,27 +191,27 @@ let work_kind_of_turn_mode = function
 
 **(2026-04 당시) 현재**:
 ```ocaml
-let post_commit_failure_kind_of_error (err : Oas.Error.sdk_error) =
+let post_commit_failure_kind_of_error (err : Agent_core.Error.t) =
   match err with
-  | Oas.Error.Api (Timeout _) -> Keeper_registry.Post_commit_timeout
+  | Agent_core.Error.Api (Timeout _) -> Keeper_registry.Post_commit_timeout
   | _ -> Keeper_registry.Post_commit_failure
 ```
 
-**분석**: `Oas.Error.sdk_error`의 변형은 Api/Agent/Internal/Config/MaxTurnsExceeded/TokenBudgetExceeded/ExitConditionMet/UnrecognizedStopReason.
+**분석**: `Agent_core.Error.t`의 변형은 Api/Agent/Internal/Config/MaxTurnsExceeded/TokenBudgetExceeded/ExitConditionMet/UnrecognizedStopReason.
 Timeout vs 나머지 구분이 실제로 유의미하므로, 이 wildcard는 **합리적**으로 판단.
 다만 명시적 분류로 변경하면 문서화 가치 증가:
 
 ```ocaml
 let post_commit_failure_kind_of_error = function
-  | Oas.Error.Api (Timeout _) -> Post_commit_timeout
-  | Oas.Error.Api _ | Oas.Error.Agent _ | Oas.Error.Internal _
-  | Oas.Error.Config _ | Oas.Error.InvalidConfig _
-  | Oas.Error.MaxTurnsExceeded | Oas.Error.TokenBudgetExceeded
-  | Oas.Error.ExitConditionMet | Oas.Error.UnrecognizedStopReason ->
+  | Agent_core.Error.Api (Timeout _) -> Post_commit_timeout
+  | Agent_core.Error.Api _ | Agent_core.Error.Agent _ | Agent_core.Error.Internal _
+  | Agent_core.Error.Config _ | Agent_core.Error.InvalidConfig _
+  | Agent_core.Error.MaxTurnsExceeded | Agent_core.Error.TokenBudgetExceeded
+  | Agent_core.Error.ExitConditionMet | Agent_core.Error.UnrecognizedStopReason ->
       Post_commit_failure
 ```
 
-**ROI**: 낮음. OAS가 변형을 추가할 때만 이점. 문서화 목적이면 OK, 아니면 현행 유지.
+**ROI**: 낮음. agent core가 변형을 추가할 때만 이점. 문서화 목적이면 OK, 아니면 현행 유지.
 
 ### 3C. server_dashboard_http_runtime_info.ml — Mutex 전환
 
@@ -337,7 +337,7 @@ JSON 구조가 `Assoc`이 아니면 무시하는 것이 올바른 동작. **합�
 **핵심**: OCaml 5.x 멀티도메인 메모리 모델은 "Local DRF" (Data-Race-Free locally).
 data race가 없으면 sequential consistency 보장. data race가 있어도 효과가 공간적/시간적으로 제한됨.
 
-**실천 (masc + OAS에 직접 적용)**:
+**실천 (masc + agent core에 직접 적용)**:
 1. **`Atomic` 사용 규칙**: cross-domain 공유 변수는 반드시 `Atomic.t`로 감싸거나 `Stdlib.Mutex`로 보호.
    현재 코드의 `Atomic.make`/`Atomic.get`/`Atomic.set` 패턴은 올바름.
 2. **`Eio.Mutex`는 same-domain용**: cross-domain 공유에는 `Stdlib.Mutex` 필요 (feedback memory 참조).

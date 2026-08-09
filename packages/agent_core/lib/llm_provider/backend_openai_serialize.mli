@@ -10,7 +10,7 @@
     with the chat-template thinking token prepended when the resolved [caps]
     declare a [Chat_template_token] and thinking is requested, else the prompt
     unchanged. SSOT for both the Ollama-native and OpenAI-compat request builders
-    so the same catalog row cannot be handled asymmetrically (oas#2483: the
+    so the same catalog row cannot be handled asymmetrically (agent-core boundary: the
     OpenAI-compat wire used to drop the token silently, producing blank-content
     200s / empty-turn storms). *)
 val system_prompt_with_thinking_token

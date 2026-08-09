@@ -1,7 +1,7 @@
 (** Tests for the Harness module — behavioral, adversarial, performance,
     regression, swiss cheese, and composability verification. *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Behavioral harness tests ────────────────────────────────── *)
 

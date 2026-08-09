@@ -4,7 +4,7 @@
     these constants instead of inlining magic strings/numbers.
 
     {!local_llm_default_url} follows the same env override chain that
-    OAS discovery uses before falling back to the current local runtime
+    AGENT_CORE discovery uses before falling back to the current local runtime
     URL.
 
     @since 2.241.0 *)
@@ -47,8 +47,8 @@ val is_ollama_url : string -> bool
 val openai_chat_completions_path : string
 
 (** [/chat/completions] — version-free path for [Provider_config.t] where
-    [base_url] already includes the version segment.  Matches the OAS
-    SDK's internal default in [api_openai.ml]. *)
+    [base_url] already includes the version segment.  Matches the AGENT_CORE
+    Agent Core's internal default in [api_openai.ml]. *)
 val chat_completions_path : string
 
 (** [/v1/models]. *)
@@ -66,7 +66,7 @@ val is_cli_transport_url : string -> bool
 (** {1 Local LLM URL} *)
 
 (** Override order:
-    [OAS_LOCAL_LLM_URL] -> {!ollama_default_url}. *)
+    [AGENT_CORE_LOCAL_LLM_URL] -> {!ollama_default_url}. *)
 val local_llm_default_url : string
 
 (** {1 MASC HTTP server} *)

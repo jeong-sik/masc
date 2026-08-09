@@ -244,7 +244,7 @@ let%test "known terminal reasons map identically on both paths" =
   && same "model_context_window_exceeded"
 ;;
 
-(* oas#2621 wire-root regression guard: the overflow finish-reason token must
+(* agent-core boundary wire-root regression guard: the overflow finish-reason token must
    decode to [ContextWindowExceeded] on BOTH the parse-time ([of_finish]) and
    streaming ([provisional_of_string]) paths, and the guard must ignore
    [has_tool_blocks] (an overflow turn is terminal regardless of any block set).

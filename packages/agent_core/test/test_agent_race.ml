@@ -3,7 +3,7 @@
     Verifies that concurrent access to Agent.t mutable state and lifecycle
     fields via the Eio.Mutex is safe under parallel Eio fibers. *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ──────────────────────────────────────────────── *)
 

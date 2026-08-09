@@ -2827,7 +2827,7 @@ let test_complete_stream_unknown_latency_stays_unknown () =
   | Exit -> ()
 ;;
 
-(* RFC-OAS-026: drive the [Some t] transport dispatch arm. The high-level
+(* Agent Core contract: drive the [Some t] transport dispatch arm. The high-level
    [stream_idle_timeout_s] must reach [read_sse] via the request-borne carrier field on
    [Llm_transport.completion_request]; pre-F1 the dispatch dropped it and a
    first-token stall hung until an external watchdog. The sibling idle-timeout
@@ -3660,7 +3660,7 @@ let () =
             `Quick
             test_complete_stream_unknown_latency_stays_unknown
         ; test_case
-            "transport arm idle timeout (RFC-OAS-026)"
+            "transport arm idle timeout (Agent Core contract)"
             `Quick
             test_complete_stream_transport_arm_idle_timeout
         ; test_case

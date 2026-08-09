@@ -57,7 +57,7 @@ type options =
         [stdout_idle_timeout_s] knob via the transport's own config.
         @since 0.176.0 *)
   ; first_event_timeout_s : float option
-    (** RFC-OAS-037: dedicated bound for the time-to-first-event
+    (** Agent Core contract: dedicated bound for the time-to-first-event
         (TTFT / prefill) wait, distinct from [stream_idle_timeout_s].
         While the stream is still awaiting its first event this bounds
         the wait; [stream_idle_timeout_s] arms only AFTER the first event
@@ -193,9 +193,9 @@ val set_state : t -> Types.agent_state -> unit
 val update_state : t -> (Types.agent_state -> Types.agent_state) -> unit
 val description : t -> string option
 
-(** {1 SDK version} *)
+(** {1 Agent-core version} *)
 
-val sdk_version : string
+val agent_core_version : string
 
 (** {1 Construction} *)
 

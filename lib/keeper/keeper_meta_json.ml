@@ -86,7 +86,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match m.keeper_id with
         | Some uid -> Keeper_id.uid_to_yojson uid
         | None -> `Null )
-    ; Oas_env, `Assoc (List.map (fun (k, v) -> k, `String v) m.oas_env)
+    ; Agent_core_env, `Assoc (List.map (fun (k, v) -> k, `String v) m.agent_core_env)
     ]
 ;;
 

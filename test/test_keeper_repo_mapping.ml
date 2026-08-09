@@ -102,7 +102,7 @@ let test_wildcard_scope_is_parsed_at_boundary () =
 
 let test_save_creates_directory_and_replaces_same_keeper () =
   with_temp_base_path (fun base_path ->
-    save_mapping base_path "executor" [ "masc"; "oas" ];
+    save_mapping base_path "executor" [ "masc"; "agent_core" ];
     save_mapping base_path "reviewer" [ "docs" ];
     save_mapping base_path "executor" [ "masc" ];
     let mappings = Keeper_repo_mapping.load_all ~base_path |> Result.get_ok in

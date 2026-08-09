@@ -13,11 +13,11 @@ val run :
   meta:Keeper_meta_contract.keeper_meta ->
   generation:int ->
   turn:int ->
-  oas_turn_count:int ->
+  agent_core_turn_count:int ->
   actual_tools:string list ->
-  librarian_messages:Agent_sdk.Types.message list ->
+  librarian_messages:Agent_core.Types.message list ->
   post_turn_t0:float ->
-  inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
+  inference_telemetry:Agent_core.Types.inference_telemetry option ->
   unit ->
   unit
 (** Run the full post-turn memory series.
@@ -26,7 +26,7 @@ val run :
     immediately before this function is called; it is used to compute
     the [post_turn_ms] metric written to the decision log.
 
-    [inference_telemetry] is [result.response.telemetry] from the OAS
+    [inference_telemetry] is [result.response.telemetry] from the AGENT_CORE
     result; it is optional because some providers do not emit telemetry.
 
     The post-turn entrypoint owns Librarian admission and its execution fence.

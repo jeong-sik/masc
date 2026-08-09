@@ -67,7 +67,7 @@ end
     [Httpun.Reqd.respond_with_string] to silently discard the
     [Failure "...invalid state..."] that httpun raises when the
     request descriptor has already transitioned into its error-
-    handling path (e.g. client disconnected during a long OAS
+    handling path (e.g. client disconnected during a long AGENT_CORE
     turn and httpun's own error_handler fired first — the
     2026-05-05 cycle9 FATAL race).
 
@@ -99,7 +99,7 @@ let safe_respond_with_string reqd response body =
           Log.Http.debug
             "[http-eio] respond_with_string skipped (reqd already in \
              error-handling state; classifier match — \
-             2026-05-05 OAS cancellation race): %s" msg
+             2026-05-05 AGENT_CORE cancellation race): %s" msg
       | None ->
           Log.Http.warn
             "[http-eio] respond_with_string unexpected exception: %s"

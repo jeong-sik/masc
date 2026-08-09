@@ -1,7 +1,7 @@
 (** Unit tests for the shared exact-output flow error rendering. *)
 
 module Detail = Masc.Keeper_exact_flow_detail
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 
 let test_execution_cause_detail () =
   Alcotest.(check string)
@@ -93,7 +93,7 @@ let test_raw_response_excerpt_cuts_on_utf8_boundary () =
 (* The eleven distinct execution causes reach the advance line through
    [execution_cause_detail]. The execution-failed branch of
    the execution-failed branch cannot be built here — [flow_attempt_snapshot] is a
-   private SDK type with no constructor — so what is pinned is that every
+   private agent-core type with no constructor — so what is pinned is that every
    cause the renderer can receive still renders apart from every other. A
    single shared label is what made the eleven indistinguishable in the log,
    and this fails if any two collapse onto the same string. *)

@@ -20,7 +20,7 @@ type AssemblyLane =
   | 'system_prompt'
   | 'user_message'
   | 'extra_system_context'
-  | 'oas_hook'
+  | 'agent_core_hook'
   | 'manifest'
 
 type WarningSeverity = 'critical' | 'warn' | 'info'
@@ -158,10 +158,10 @@ const STAGES: AssemblyStageSpec[] = [
     promptKeys: [],
   },
   {
-    id: 'oas-hook',
+    id: 'agent-core-hook',
     order: 5,
     title: 'Final context',
-    lane: 'oas_hook',
+    lane: 'agent_core_hook',
     role: 'model_input',
     messageSlot: 'final',
     summary: 'Memory and tool hints added at the end.',
@@ -288,7 +288,7 @@ function stageAccentClass(stage: KeeperPromptAssemblyStage): string {
       return 'border-l-[var(--ok)] bg-[rgba(107,158,107,0.12)] text-[#486f48]'
     case 'extra_system_context':
       return 'border-l-[var(--warn)] bg-[rgba(201,162,74,0.14)] text-[#806331]'
-    case 'oas_hook':
+    case 'agent_core_hook':
       return 'border-l-[#ba5b65] bg-[rgba(196,106,90,0.13)] text-[#87444b]'
     case 'manifest':
       return 'border-l-[var(--color-border-strong)] bg-[rgba(44,40,34,0.08)] text-[#6a5c4a]'
@@ -307,7 +307,7 @@ function stageDotClass(stage: KeeperPromptAssemblyStage): string {
       return 'bg-[var(--ok)]'
     case 'extra_system_context':
       return 'bg-[var(--warn)]'
-    case 'oas_hook':
+    case 'agent_core_hook':
       return 'bg-[#ba5b65]'
     case 'manifest':
       return 'bg-[var(--color-border-strong)]'

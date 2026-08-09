@@ -1,7 +1,7 @@
 (** Keeper_unified_prompt — Build a single unified prompt from keeper identity
     and world observation.
 
-    Sections removed in #6814: Available Tools (OAS tool schema handles),
+    Sections removed in #6814: Available Tools (AGENT_CORE tool schema handles),
     Recent Tool Activity, Last Cycle Outcome, Tool Diversity Signal,
     Peer Keepers, Your Recent Board Posts,
     Behavioral Self-Assessment, Actionable Routes, Signal Interpretation.

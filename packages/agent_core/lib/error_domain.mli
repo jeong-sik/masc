@@ -96,7 +96,7 @@ type mcp_error =
 
 (** {1 Union type} *)
 
-type sdk_error_poly =
+type core_error_poly =
   [ provider_error
   | tool_error
   | agent_error
@@ -116,20 +116,20 @@ type sdk_error_poly =
     compensates. *)
 
 type error_ctx =
-  { error : sdk_error_poly
+  { error : core_error_poly
   ; stage : string option (** pipeline stage where error occurred *)
   ; backtrace : string option (** Printexc.get_backtrace snapshot *)
   }
 
 (** Wrap an error with pipeline stage context. *)
-val with_stage : string -> sdk_error_poly -> error_ctx
+val with_stage : string -> core_error_poly -> error_ctx
 
 (** {1 Conversion} *)
 
-val of_sdk_error : Error.sdk_error -> sdk_error_poly
-val to_sdk_error : sdk_error_poly -> Error.sdk_error
-val to_string : [< sdk_error_poly ] -> string
-val is_retryable : [< sdk_error_poly ] -> bool
+val of_core_error : Error.t -> core_error_poly
+val to_core_error : core_error_poly -> Error.t
+val to_string : [< core_error_poly ] -> string
+val is_retryable : [< core_error_poly ] -> bool
 
 (** Context-aware to_string: includes stage if present. *)
 val ctx_to_string : error_ctx -> string

@@ -1,4 +1,4 @@
-open Agent_sdk
+open Agent_core
 open Types
 
 let unwrap = function
@@ -10,7 +10,7 @@ let with_temp_dir f =
   let root =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "oas-raw-trace-%d-%06x" (Unix.getpid ()) (Random.int 0xFFFFFF))
+      (Printf.sprintf "agent_core-raw-trace-%d-%06x" (Unix.getpid ()) (Random.int 0xFFFFFF))
   in
   Unix.mkdir root 0o755;
   Fun.protect

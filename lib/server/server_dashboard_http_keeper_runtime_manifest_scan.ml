@@ -19,7 +19,7 @@ type runtime_manifest_scan =
   ; mutable total_rows : int
   ; mutable has_terminal : bool
   ; mutable terminal_keeper_turn_ids : int list
-  ; mutable max_oas_turn_count : int option
+  ; mutable max_agent_core_turn_count : int option
   ; mutable keeper_turn_ids : int list
   ; mutable event_bus_count : int
   ; mutable event_bus_correlation_ids : string list
@@ -72,7 +72,7 @@ let make_runtime_manifest_scan ~path ~limit ~scan_line_limit ~scan_scope =
   ; total_rows = 0
   ; has_terminal = false
   ; terminal_keeper_turn_ids = []
-  ; max_oas_turn_count = None
+  ; max_agent_core_turn_count = None
   ; keeper_turn_ids = []
   ; event_bus_count = 0
   ; event_bus_correlation_ids = []
@@ -251,8 +251,8 @@ let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
   (match row.Keeper_runtime_manifest.keeper_turn_id with
    | Some value -> scan.keeper_turn_ids <- value :: scan.keeper_turn_ids
    | None -> ());
-  (match row.Keeper_runtime_manifest.oas_turn_count with
-   | Some value -> scan.max_oas_turn_count <- max_int_opt scan.max_oas_turn_count value
+  (match row.Keeper_runtime_manifest.agent_core_turn_count with
+   | Some value -> scan.max_agent_core_turn_count <- max_int_opt scan.max_agent_core_turn_count value
    | None -> ());
   (match row.Keeper_runtime_manifest.event with
    | Keeper_runtime_manifest.Turn_finished ->

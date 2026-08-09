@@ -401,7 +401,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
     Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
   in
   let env =
-    merge_env_overrides ~remove:[ "OAS_MODEL_CATALOG" ]
+    merge_env_overrides ~remove:[ "AGENT_CORE_MODEL_CATALOG" ]
       [
         ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");

@@ -6,7 +6,7 @@
     Telemetry_bus delivery is verified without a capacity policy. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 open Llm_provider
 
 (* ── Helpers ──────────────────────────────────────────────────────── *)

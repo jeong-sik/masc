@@ -34,10 +34,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 [[ -x "$BINARY" ]] || { echo "release-evidence: binary not executable: $BINARY" >&2; exit 1; }
-[[ -f config/oas-models-overlay.toml ]] || { echo "release-evidence: config/oas-models-overlay.toml missing" >&2; exit 1; }
+[[ -f config/agent-core-models-overlay.toml ]] || { echo "release-evidence: config/agent-core-models-overlay.toml missing" >&2; exit 1; }
 
 readonly SMOKE_FIXTURE_DIR="$repo_root/scripts/fixtures/release-evidence"
-for smoke_fixture in runtime.toml oas-models-overlay.toml; do
+for smoke_fixture in runtime.toml agent-core-models-overlay.toml; do
   [[ -f "$SMOKE_FIXTURE_DIR/$smoke_fixture" ]] || {
     echo "release-evidence: smoke fixture missing: scripts/fixtures/release-evidence/$smoke_fixture" >&2
     exit 1
@@ -239,8 +239,8 @@ copy_install_smoke() {
   # Server_runtime_bootstrap.mandatory_exact_output_lane_ids by
   # test_runtime_config_validity, which runs in every PR.
   cp "$SMOKE_FIXTURE_DIR/runtime.toml" "$base_path/.masc/config/runtime.toml"
-  cp "$SMOKE_FIXTURE_DIR/oas-models-overlay.toml" \
-    "$base_path/.masc/config/oas-models-overlay.toml"
+  cp "$SMOKE_FIXTURE_DIR/agent-core-models-overlay.toml" \
+    "$base_path/.masc/config/agent-core-models-overlay.toml"
 }
 
 capture_installed_version() {

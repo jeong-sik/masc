@@ -12,4 +12,4 @@
 # grandfathered.
 
 # Documentation example in interface comment (legitimate)
-lib/keeper/keeper_hooks_oas.mli:22
+lib/keeper/keeper_hooks_agent_core.mli:22

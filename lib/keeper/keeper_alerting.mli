@@ -17,9 +17,9 @@ open Keeper_memory
 
 (** Merge two API usage records by summing all fields. *)
 val merge_usage :
-  Agent_sdk.Types.api_usage ->
-  Agent_sdk.Types.api_usage ->
-  Agent_sdk.Types.api_usage
+  Agent_core.Types.api_usage ->
+  Agent_core.Types.api_usage ->
+  Agent_core.Types.api_usage
 
 (** {1 Included: Keeper_alerting_path} *)
 

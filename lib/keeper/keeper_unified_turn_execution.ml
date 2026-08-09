@@ -28,7 +28,7 @@ type declared_lane_failure =
   | Declared_runtime_lane_exhausted
 
 (* Only the context-window axis classifies as [Provider_context_overflow]:
-   the blocker below publishes the [Sdk_context_window_exceeded] class,
+   the blocker below publishes the [Agent_core_context_window_exceeded] class,
    which would be wrong for a declared-byte refusal. *)
 let declared_lane_failure_of_error err =
   match capacity_refusal_of_error err with
@@ -52,7 +52,7 @@ let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch =
   match before_dispatch_authority () with
   | Error reason ->
     Error
-      (Agent_sdk.Error.Internal
+      (Agent_core.Error.Internal
          ("keeper provider dispatch authority rejected: " ^ reason))
   | Ok () -> dispatch ()
 ;;
@@ -64,7 +64,7 @@ type ctx =
   { attempt : int
   ; base_dir : string
   ; build_turn_prompt :
-      base_system_prompt:string -> messages:Agent_sdk.Types.message list ->
+      base_system_prompt:string -> messages:Agent_core.Types.message list ->
       Keeper_agent_run.turn_prompt
   ; channel : Keeper_world_observation.keeper_cycle_channel
   ; continuation_delivery_channel : Keeper_continuation_channel.t option
@@ -73,12 +73,12 @@ type ctx =
          unrelated conversations. [None] fails closed to no external delivery. *)
   ; hitl_resolution : Keeper_event_queue.hitl_resolution option
       (* Typed decision for the originating Keeper's exact external-effect
-         Gate. It is never converted to a generic OAS approval. *)
+         Gate. It is never converted to a generic AGENT_CORE approval. *)
   ; cleanup : unit -> unit
   ; config : Workspace.config
   ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_runtime_budget.turn_event_bus_summary
-  ; event_bus : Agent_sdk.Event_bus.t option
-  ; event_bus_integrity_error_snapshot : unit -> Agent_sdk.Error.sdk_error option
+  ; event_bus : Agent_core.Event_bus.t option
+  ; event_bus_integrity_error_snapshot : unit -> Agent_core.Error.t option
   ; tool_completed_count_snapshot : unit -> int
   ; generation : int
   ; keeper_turn_id : int
@@ -88,7 +88,7 @@ type ctx =
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
   ; publication_recovery :
       Keeper_publication_recovery_availability.turn_context
-  ; shared_context : Agent_sdk.Context.t option
+  ; shared_context : Agent_core.Context.t option
   ; trajectory_acc : Trajectory.accumulator
   ; turn_id : int
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
@@ -107,7 +107,7 @@ let run (ctx : ctx)
       ~(record_streaming_cancelled_observation : config:Workspace.config -> run_meta:keeper_meta -> run_generation:int -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
       ~(runtime_id_of_meta : keeper_meta -> string)
       ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
-  : (Keeper_agent_run.run_result, Agent_sdk.Error.sdk_error) result * turn_state
+  : (Keeper_agent_run.run_result, Agent_core.Error.t) result * turn_state
 =
   let { config
       ; meta
@@ -137,10 +137,10 @@ let run (ctx : ctx)
     ctx
   in
   (match Eio_context.get_clock () with
-   | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
+   | Error msg -> Error (Agent_core.Error.Internal msg), turn_state
    | Ok clock ->
-   (* Same-run retry authority comes from OAS's typed checkpoint boundary.
-      OAS invokes the sink only after mutating the agent state at a declared
+   (* Same-run retry authority comes from AGENT_CORE's typed checkpoint boundary.
+      AGENT_CORE invokes the sink only after mutating the agent state at a declared
       checkpoint stage, and MASC marks the stage before delegating persistence.
       Therefore a sink failure also closes replay authority: the attempt may
       already contain effects even when the durable write failed. A lossy
@@ -250,7 +250,7 @@ let run (ctx : ctx)
                       ([Keeper_unified_turn.run_keeper_cycle] → here, only ever
                       reached via [Keeper_turn_admission.run_if_free]); the chat
                       lane runs [run_keeper_msg_turn_admitted] on a separate
-                      path. Thus the probe is lane-gated and runs only at OAS's
+                      path. Thus the probe is lane-gated and runs only at AGENT_CORE's
                       post-tool boundary. Its signals come from the exact chat
                       receipt and durable-event queues their consumers drain. *)
                  ~autonomous_yield_requested
@@ -289,8 +289,8 @@ let run (ctx : ctx)
           "[input_required] keeper=%s agent paused: request_id=%s \
            question=%s"
           meta.name
-          ir.Agent_sdk.Error.request_id
-          (let q = ir.Agent_sdk.Error.question in
+          ir.Agent_core.Error.request_id
+          (let q = ir.Agent_core.Error.question in
            if String.length q > 80
            then String.sub q 0 80 ^ "…"
            else q);
@@ -350,7 +350,7 @@ let run (ctx : ctx)
           ~keeper_name:meta.name
           "%s: same-run runtime retry deferred after durable run progress \
            (checkpoint_observed=%b); \
-           current OAS contract cannot continue without admitting the input again"
+           current AGENT_CORE contract cannot continue without admitting the input again"
           meta.name
           checkpoint_observed;
       match !deferred_runtime_lane_ref with
@@ -383,8 +383,8 @@ let run (ctx : ctx)
           ~reason:"frozen_runtime_suffix_exhausted"
           ~next_runtime:None
           ~attempt
-          ~error_kind:(Some Agent_sdk.Error.(category err |> category_label))
-          ~error_message:(Some (Agent_sdk.Error.to_string err));
+          ~error_kind:(Some Agent_core.Error.(category err |> category_label))
+          ~error_message:(Some (Agent_core.Error.to_string err));
         mark_terminal_error err;
         Error err, turn_state
       | None ->
@@ -397,8 +397,8 @@ let run (ctx : ctx)
             ~reason:"provider_context_overflow"
             ~next_runtime:None
             ~attempt
-            ~error_kind:(Some Agent_sdk.Error.(category err |> category_label))
-            ~error_message:(Some (Agent_sdk.Error.to_string err));
+            ~error_kind:(Some Agent_core.Error.(category err |> category_label))
+            ~error_message:(Some (Agent_core.Error.to_string err));
           let current_turn_event_bus =
             drain_turn_event_bus ~site:"context_overflow_capture" ()
           in
@@ -415,16 +415,16 @@ let run (ctx : ctx)
                         ^ ": "
                         ^ overflow_evidence_detail
                         ^ ": "
-                        ^ Agent_sdk.Error.to_string err)
-                     Sdk_context_window_exceeded)
+                        ^ Agent_core.Error.to_string err)
+                     Agent_core_context_window_exceeded)
             }
           in
           Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string OasExecutionErrors)
+            Keeper_metrics.(to_string Agent_coreExecutionErrors)
             ~labels:
               [ "keeper", meta.name
               ; "phase",
-                Keeper_oas_execution_error_phase.(
+                Keeper_agent_core_execution_error_phase.(
                   to_label Provider_context_overflow)
               ]
             ();
@@ -432,7 +432,7 @@ let run (ctx : ctx)
             "%s: provider returned typed context overflow after runtime \
              rotation: %s"
             meta.name
-            (short_preview (Agent_sdk.Error.to_string err));
+            (short_preview (Agent_core.Error.to_string err));
           (* Automatic overflow-compaction recovery was removed (#26546)
              after producing no committed compaction. This attempt returns
              its typed provider error and marks it terminal; no recovery is
@@ -447,13 +447,13 @@ let run (ctx : ctx)
             ~reason:"declared_runtime_lane_exhausted"
             ~next_runtime:None
             ~attempt
-            ~error_kind:(Some Agent_sdk.Error.(category err |> category_label))
-            ~error_message:(Some (Agent_sdk.Error.to_string err));
+            ~error_kind:(Some Agent_core.Error.(category err |> category_label))
+            ~error_message:(Some (Agent_core.Error.to_string err));
           mark_terminal_error err;
           Error err, turn_state)
   in
   (* Do not wrap the full keeper turn in a cumulative wall-clock timeout.
-     Long voice/OAS turns can keep making stream or tool progress beyond the
+     Long voice/AGENT_CORE turns can keep making stream or tool progress beyond the
      legacy 600s cap. Runaway detection is owned by stream idle, provider
      attempt liveness, tool-level timeouts, max-turn limits, and the optional
      supervisor stale-turn watchdog. Retry admission must not reintroduce the

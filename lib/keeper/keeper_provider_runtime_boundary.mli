@@ -1,4 +1,4 @@
-(** Typed provider/runtime observations for SDK errors crossing from OAS into
+(** Typed provider/runtime observations for agent-core errors crossing from AGENT_CORE into
     MASC.
 
     This module deliberately does not classify keeper tool invocation or task
@@ -31,8 +31,8 @@ type timeout_phase =
 
 val timeout_phase_to_label : timeout_phase -> string
 type timeout_source =
-  | Oas_api
-  | Oas_provider
+  | Agent_core_api
+  | Agent_core_provider
 
 type provider_timeout =
   { phase : timeout_phase option
@@ -43,16 +43,16 @@ type t =
   | Provider_timeout of provider_timeout
   | Not_provider_runtime_failure
 
-val classify_sdk_error : Agent_sdk.Error.sdk_error -> t
+val classify_core_error : Agent_core.Error.t -> t
 
 val classify_provider_runtime_error_record
   :  code:string
   -> detail:string
   -> t
 (** Classify a persisted [Provider_runtime_error] catch-all record.  This is
-    narrower than parsing arbitrary messages: it only recognizes the OAS
+    narrower than parsing arbitrary messages: it only recognizes the AGENT_CORE
     provider timeout wire markers such as
     ["provider_error_timeout:http_operation"]. [detail] remains in the
     signature for existing callers, but is not trusted for classification. *)
 
-val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
+val is_provider_timeout_error : Agent_core.Error.t -> bool

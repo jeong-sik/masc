@@ -604,7 +604,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       {
         name: 'runtime-keeper',
         status: 'active',
-        runtime_id: 'oas-keeper_unified',
+        runtime_id: 'agent-core-keeper_unified',
         selected_runtime_canonical: 'primary',
         primary_model: 'openai:gpt-5.4',
         active_model: 'gpt-5.4',
@@ -643,7 +643,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     expect(keeper).toMatchObject({
-      runtime_id: 'oas-keeper_unified',
+      runtime_id: 'agent-core-keeper_unified',
       runtime_canonical: 'primary',
       selected_runtime_canonical: 'primary',
       active_model_label: null,

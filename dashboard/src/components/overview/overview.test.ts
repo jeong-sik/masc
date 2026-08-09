@@ -678,10 +678,10 @@ describe('computeOverviewStats', () => {
 describe('keeperRuntimeLabel', () => {
   it('uses the shared runtime display priority', () => {
     expect(keeperRuntimeLabel(makeKeeper({
-      runtime_canonical: 'oas.primary',
-      selected_runtime_canonical: 'oas.secondary',
+      runtime_canonical: 'agentCore.primary',
+      selected_runtime_canonical: 'agentCore.secondary',
       runtime_id: 'legacy.runtime',
-    }))).toBe('oas.primary')
+    }))).toBe('agentCore.primary')
   })
 
   it('does not expose raw keeper model fields as runtime labels', () => {
@@ -700,12 +700,12 @@ describe('keeperRuntimeLabel', () => {
 describe('buildOverviewTelemetrySnapshot', () => {
   const nowMs = Date.parse('2026-04-18T10:00:00Z')
   const entry = (minutesAgo: number): TelemetryEntry => ({
-    source: 'oas_event',
+    source: 'agent_core_event',
     ts_unix: (nowMs - minutesAgo * 60 * 1000) / 1000,
   })
   const sources: TelemetrySourceSummary[] = [
     {
-      source: 'oas_event',
+      source: 'agent_core_event',
       entry_count: 10,
       latest_age_s: 8,
       health: 'ok',

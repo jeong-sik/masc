@@ -1,4 +1,4 @@
-open Agent_sdk
+open Agent_core
 
 let invocation tool_use_id =
   let schedule : Tool_contract.schedule =
@@ -1156,7 +1156,7 @@ let () =
                    Alcotest.fail
                      (Printf.sprintf
                         "checkpoint decode failed: %s"
-                        (Agent_sdk.Error.to_string err))
+                        (Agent_core.Error.to_string err))
                in
                let agent = Agent.resume ~net ~checkpoint:decoded () in
                let resumed_context = Agent.context agent in

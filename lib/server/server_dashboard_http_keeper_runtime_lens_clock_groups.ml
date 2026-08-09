@@ -224,7 +224,7 @@ let runtime_lens_clock_group_gaps scan =
   |> (fun gaps ->
        match
          clock_group_open_gap ~code:"clock_checkpoint_group_open" ~severity:"warn"
-           ~lane:"oas_agent" ~label:"checkpoint" (groups_of_type "checkpoint")
+           ~lane:"agent_core_agent" ~label:"checkpoint" (groups_of_type "checkpoint")
        with
        | Some gap -> gap :: gaps
        | None -> gaps)
@@ -322,7 +322,7 @@ let runtime_lens_clock_gaps scan =
   |> (fun gaps ->
        if checkpoint_saved_count > 0 && scan.context_injected_count = 0 then
          add ~code:"clock_checkpoint_without_context" ~severity:"warn"
-           ~lane:"oas_agent"
+           ~lane:"agent_core_agent"
            ~detail:
              "checkpoint_saved exists without a context_injected clock edge"
            gaps

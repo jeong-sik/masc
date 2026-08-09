@@ -79,9 +79,9 @@ entry states why the site cannot route through the canonical surface. Summary:
   `~ctx:context` uses a runtime-computed component string; no static module
   preserves the per-call value.
 - **Runtime-computed component** (`lib/runtime_log_sink.ml`) — `Log.emit`
-  with `~module_name:("oas:" ^ record.module_name)`; the component is built per
+  with `~module_name:("agent_core:" ^ record.module_name)`; the component is built per
   record at runtime, so no static module preserves it. (A *static* literal
-  component such as `"oas:event"` is migrate-able — a module's `name` string may
+  component such as `"agent_core:event"` is migrate-able — a module's `name` string may
   contain a colon even though the OCaml identifier cannot; that site became the
   `Oas_event` module.)
 
@@ -105,7 +105,7 @@ Non-canonical sites in `lib/` + `bin/`, before → after:
 | top-level `Log.{info,warn,error,debug}` (`~ctx` + no-ctx) | 63 | 61 | 2 (dynamic `~ctx:context`) | 0 |
 | `Logs.*` library | 11 | 11 | 0 | 0 |
 | `Log.legacy_stderr` / `legacy_traceln` (call sites) | 27 | 0 | 27 (embedded `[LEVEL]` prefix) | 0 |
-| bare `Log.emit` / `emit_event` (non-comment) | 8 | 7 | 1 (`"oas:" ^ …` runtime component) | 0 |
+| bare `Log.emit` / `emit_event` (non-comment) | 8 | 7 | 1 (`"agent_core:" ^ …` runtime component) | 0 |
 | raw `Printf.eprintf` / `prerr_*` | 47 | 3 | 44 (log.ml, fs_compat, CLI tools, boot/FATAL) | 0 |
 
 The migration added per-module loggers for the components that previously only

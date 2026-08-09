@@ -36,12 +36,12 @@ type try_provider_ctx =
   ; name : string
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
     goal : string
-  ; goal_blocks : Agent_sdk.Types.content_block list option
+  ; goal_blocks : Agent_core.Types.content_block list option
   ; session_id : string option
   ; system_prompt : string
-  ; tools : Agent_sdk.Tool.t list
-  ; initial_messages : Agent_sdk.Types.message list
-  ; model_input_projection : Agent_sdk.Agent.model_input_projection option
+  ; tools : Agent_core.Tool.t list
+  ; initial_messages : Agent_core.Types.message list
+  ; model_input_projection : Agent_core.Agent.model_input_projection option
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; (* #27349: total wall-clock ceiling for THIS provider call attempt,
@@ -53,9 +53,9 @@ type try_provider_ctx =
        existed. See [run_try_provider]'s use of [Eio.Time.with_timeout_exn]. *)
     provider_call_deadline_sec : float option
   ; temperature : float option
-  ; accept : Agent_sdk.Types.api_response -> bool
-  ; hooks : Agent_sdk.Hooks.hooks option
-  ; raw_trace : Agent_sdk.Raw_trace.t option
+  ; accept : Agent_core.Types.api_response -> bool
+  ; hooks : Agent_core.Hooks.hooks option
+  ; raw_trace : Agent_core.Raw_trace.t option
   ; trace_link : (string * string) option
   ; (* Transport *)
     transport_resolved : Masc_grpc_transport.t
@@ -63,22 +63,22 @@ type try_provider_ctx =
     checkpoint_sidecar : Yojson.Safe.t option
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
-  ; checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option
+  ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
   ; checkpoint_stage_observed : bool Atomic.t
-  ; context_injector : Agent_sdk.Hooks.context_injector option
-  ; context : Agent_sdk.Context.t option
+  ; context_injector : Agent_core.Hooks.context_injector option
+  ; context : Agent_core.Context.t option
   ; enable_thinking : bool option
   ; preserve_thinking : bool option
   ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
-  ; oas_checkpoint : Agent_sdk.Checkpoint.t option
+  ; agent_core_checkpoint : Agent_core.Checkpoint.t option
   ; (* Eio concurrency *)
     sw : Eio.Switch.t
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; (* Callbacks *)
-    on_event : (Agent_sdk.Types.sse_event -> unit) option
+    on_event : (Agent_core.Types.sse_event -> unit) option
   ; on_yield : (unit -> unit) option
   ; on_resume : (unit -> unit) option
-  ; agent_ref : Agent_sdk.Agent.t option ref option
+  ; agent_ref : Agent_core.Agent.t option ref option
   ; on_runtime_observation :
       (Runtime_observation.runtime_observation -> unit) option
   ; on_request_wire_observation :
@@ -88,7 +88,7 @@ type try_provider_ctx =
        unit)
         option
   ; (* Event bus *)
-    event_bus : Agent_sdk.Event_bus.t option
+    event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
   ; turn_start : Mtime.t
@@ -160,7 +160,7 @@ let emit_context_overflow_shrink_manifest
     Keeper_runtime_manifest.Provider_lane_resolved
 ;;
 
-let accept_rejected_error ~runtime_id ~(response : Agent_sdk.Types.api_response) =
+let accept_rejected_error ~runtime_id ~(response : Agent_core.Types.api_response) =
   let rejection =
     Keeper_tooling.Response.accept_rejection_of_response ~runtime_id response
   in
@@ -171,7 +171,7 @@ let accept_rejected_error ~runtime_id ~(response : Agent_sdk.Types.api_response)
     | Keeper_tooling.Response.Predicate_rejected ->
       Some Keeper_internal_error.Accept_predicate_rejected
   in
-  Keeper_internal_error.sdk_error_of_masc_internal_error
+  Keeper_internal_error.core_error_of_masc_internal_error
     (Keeper_internal_error.Accept_rejected
        {
          scope = runtime_id;
@@ -182,7 +182,7 @@ let accept_rejected_error ~runtime_id ~(response : Agent_sdk.Types.api_response)
          reason_kind;
          response_shape =
            Option.map
-             Keeper_internal_error.accept_response_shape_of_agent_sdk
+             Keeper_internal_error.accept_response_shape_of_agent_core
              rejection.response_shape;
          (* RFC-0271 §4.5: preserve the provider's typed stop_reason so the
             classifier can tell a [MaxTokens] truncation from a clean [EndTurn]
@@ -226,18 +226,18 @@ let apply_accept
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the runtime
     accept predicate accepts the response. *)
-let observe_checkpoint_stage observed (_ : Agent_sdk.Agent.checkpoint_stage) =
+let observe_checkpoint_stage observed (_ : Agent_core.Agent.checkpoint_stage) =
   Atomic.set observed true
 ;;
 
 let same_run_retry_allowed observed = not (Atomic.get observed)
 
 let rejected_body_bytes = function
-  | Agent_sdk.Error.Api
+  | Agent_core.Error.Api
       (InvalidRequest
          { reason = Request_body_too_large { actual_bytes; _ }; _ }) ->
     Some actual_bytes
-  | Agent_sdk.Error.Api
+  | Agent_core.Error.Api
       ( InvalidRequest
           { reason =
               ( Json_parse_error
@@ -256,14 +256,14 @@ let rejected_body_bytes = function
       | NotFound _
       | NetworkError _
       | Timeout _ )
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ ->
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _ ->
     None
 ;;
 
@@ -271,11 +271,11 @@ let observe_request_wire_error
       ~runtime_id
       ~max_request_body_bytes
       ~on_request_wire_observation
-      (error : Agent_sdk.Error.sdk_error)
+      (error : Agent_core.Error.t)
   =
   match rejected_body_bytes error, on_request_wire_observation with
   | Some actual_bytes, Some observe ->
-    (* OAS measures this body before rejecting it at serialized-body admission,
+    (* AGENT_CORE measures this body before rejecting it at serialized-body admission,
        so its normal post-admission observer is intentionally not invoked. The
        typed refusal carries the same exact byte count; forwarding it here
        keeps the failed turn observable without parsing an error string or
@@ -288,7 +288,7 @@ let observe_request_wire_error
 (* Share of the declared request capacity held back for the parts of the
    serialized body MASC does not encode: provider-specific request fields, the
    JSON envelope, and any provider-side message reshaping. MASC measures
-   messages, tool schemas, and the system prompt with its own encoder, but OAS
+   messages, tool schemas, and the system prompt with its own encoder, but AGENT_CORE
    owns the wire format, so the remainder is bounded rather than computed.
    A share rather than a constant because the unmeasured remainder scales with
    the request. Under-reserving does not corrupt state — the provider refusal
@@ -299,13 +299,13 @@ let unmeasured_request_reserve_divisor = 10
 (* The canonical MASC message encoder, also used for checkpoint serialization.
    It is not the provider's encoder; [unmeasured_request_reserve_divisor]
    carries that difference. *)
-let measure_message_bytes (message : Agent_sdk.Types.message) =
+let measure_message_bytes (message : Agent_core.Types.message) =
   String.length
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
 module Message_identity = struct
-  type t = Agent_sdk.Types.message
+  type t = Agent_core.Types.message
 
   let equal left right = left == right
 
@@ -331,10 +331,10 @@ module Message_identity = struct
   ;;
 
   let role_hint = function
-    | Agent_sdk.Types.System -> 1
-    | Agent_sdk.Types.User -> 2
-    | Agent_sdk.Types.Assistant -> 3
-    | Agent_sdk.Types.Tool -> 4
+    | Agent_core.Types.System -> 1
+    | Agent_core.Types.User -> 2
+    | Agent_core.Types.Assistant -> 3
+    | Agent_core.Types.Tool -> 4
   ;;
 
   let hash (message : t) =
@@ -374,7 +374,7 @@ let declared_request_reserve_bytes ~capacity_bytes ~system_prompt ~tools =
       (fun acc tool ->
          acc
          + String.length
-             (Yojson.Safe.to_string (Agent_sdk.Tool.schema_to_json tool)))
+             (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)))
       0
       tools
   in
@@ -396,7 +396,7 @@ let declared_request_reserve_bytes ~capacity_bytes ~system_prompt ~tools =
    projected-prefix precondition keeps holding against the list it
    receives. *)
 let budgeted_model_input_projection (ctx : try_provider_ctx)
-  : Agent_sdk.Agent.model_input_projection
+  : Agent_core.Agent.model_input_projection
   =
   let reserved_bytes =
     offload_model_input_cpu (fun () ->
@@ -413,7 +413,7 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
      away between requests.
 
      Safe to share: [run_try_provider] builds one closure per provider
-     attempt, so no two Keepers share a memo; OAS drives the turn loop
+     attempt, so no two Keepers share a memo; AGENT_CORE drives the turn loop
      sequentially (no [Fiber.fork] around [prepare_turn_for_agent] in
      pipeline_stage_prepare.ml); and [Domain_pool.submit_cpu] is
      [Eio.Executor_pool.submit_exn], which blocks until the job finishes, so
@@ -524,7 +524,7 @@ let run_try_provider
     ~status:"resolved"
     ~decision:(`Assoc [ "resolved_lane", `String resolved_lane ])
     Keeper_runtime_manifest.Provider_lane_resolved;
-  let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
+  let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
     observe_checkpoint_stage ctx.checkpoint_stage_observed snapshot.stage;
     match ctx.checkpoint_sink with
     | Some sink -> sink snapshot
@@ -569,15 +569,15 @@ let run_try_provider
           ; initial_messages = ctx.initial_messages
           ; model_input_projection = Some (budgeted_model_input_projection ctx)
             (* The serialized request body is the quantity the provider admits
-               against [max_request_body_bytes]. OAS's provider-specific
+               against [max_request_body_bytes]. AGENT_CORE's provider-specific
                serialization boundary reports every admitted request; a typed
                [Request_body_too_large] below carries the exact rejected size.
                [Keeper_context_core_accessors.serialize_context] cannot stand in
                for it — that covers [{system_prompt, messages}] and excludes
-               tool schemas and every provider-specific stream field. OAS runs
+               tool schemas and every provider-specific stream field. AGENT_CORE runs
                this observer after those are injected and after its own
                admission check, so the value is the exact byte count.
-               Diagnostic only: OAS reports a rejection or a raised callback as
+               Diagnostic only: AGENT_CORE reports a rejection or a raised callback as
                typed failure evidence and does not rewrite the provider
                result. *)
           ; pre_dispatch_serialization_observer =
@@ -598,14 +598,14 @@ let run_try_provider
           ; yield_on_tool = ctx.yield_on_tool
           }
   in
-  let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in
+  let local_agent_ref : Agent_core.Agent.t option ref = ref None in
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->
-    (* Explicit stream stall detection is handled by OAS's
+    (* Explicit stream stall detection is handled by AGENT_CORE's
        [stream_idle_timeout_s]; [None] deliberately leaves it disabled.
        No separate liveness FSM for the common case — provider stall is
-       primarily an OAS-level concern. #27349: when the operator has set
+       primarily an AGENT_CORE-level concern. #27349: when the operator has set
        [ctx.provider_call_deadline_sec], the wrap below adds a total
        wall-clock ceiling on this whole attempt as a MASC-side backstop —
        still opt-in, off by default, same as before this existed.
@@ -626,7 +626,7 @@ let run_try_provider
                 ~sw:attempt_sw
                 ~net:ctx.net
                 ~config
-                ?oas_checkpoint:ctx.oas_checkpoint
+                ?agent_core_checkpoint:ctx.agent_core_checkpoint
                 ?on_event:ctx.on_event
                 ?on_yield:ctx.on_yield
                 ?on_resume:ctx.on_resume
@@ -638,7 +638,7 @@ let run_try_provider
                 ~sw:attempt_sw
                 ~net:ctx.net
                 ~config
-                ?oas_checkpoint:ctx.oas_checkpoint
+                ?agent_core_checkpoint:ctx.agent_core_checkpoint
                 ?on_event:ctx.on_event
                 ?on_yield:ctx.on_yield
                 ?on_resume:ctx.on_resume
@@ -650,14 +650,14 @@ let run_try_provider
     in
     (* #27349: [Eio.Time.with_timeout]'s own signature requires a
        polymorphic-variant error row ([> `Timeout]), which
-       [run_attempt_switch]'s concrete [Agent_sdk.Error.sdk_error] result
+       [run_attempt_switch]'s concrete [Agent_core.Error.t] result
        cannot unify with, so [with_timeout_exn] (raises the [Timeout]
        exception) is the primitive that fits here — the established
        pattern in this repo for wrapping a concretely-typed result
        (graphql_client.ml, server_ide_lsp_proxy.ml). Catches ONLY
        [Eio.Time.Timeout]: [Eio.Cancel.Cancelled] is never caught here, so
        an outer cancellation (switch shutdown, etc.) propagates unmodified.
-       OAS's own internal [stream_idle_timeout_s]/[body_timeout_s] firing
+       AGENT_CORE's own internal [stream_idle_timeout_s]/[body_timeout_s] firing
        is a typed RETURN VALUE inside [Runtime_agent.run]'s result, not a
        raised exception, so it can never reach this handler and be
        misclassified as this deadline firing. *)
@@ -667,7 +667,7 @@ let run_try_provider
         (try Eio.Time.with_timeout_exn clock deadline_sec run_attempt_switch with
          | Eio.Time.Timeout ->
            Error
-             (Agent_sdk.Error.Api
+             (Agent_core.Error.Api
                 (Llm_provider.Retry.Timeout
                    { message =
                        Printf.sprintf
@@ -708,7 +708,7 @@ let run_try_provider
        in
        Runtime_agent.runtime_observation_for_terminal_config
          ~total_duration_ms
-         ~error:(Agent_sdk.Error.to_string err)
+         ~error:(Agent_core.Error.to_string err)
          config
        |> emit
      | None, _ -> ());
@@ -748,20 +748,20 @@ let context_overflow_shrink_divisor = 2
    depends on [Keeper_turn_driver], which depends on this module (it calls
    [run_try_provider]), so reaching it here would close a module cycle. Both
    predicates match the identical single case
-   ([Agent_sdk.Error.Api (ContextOverflow _)] -> [true]); see that function's
+   ([Agent_core.Error.Api (ContextOverflow _)] -> [true]); see that function's
    doc comment for why the byte-axis and token-axis siblings are excluded.
    [same_run_retry_authorized] mirrors the exact same-run authority gate
    [Keeper_turn_driver]'s declared-lane walk applies before rotating
    candidates ([same_run_retry_allowed] / [checkpoint_stage_observed]): a
-   shrink retry is a same-run retry too, so it must not fire once OAS has
+   shrink retry is a same-run retry too, so it must not fire once AGENT_CORE has
    mutated agent state at a durable checkpoint stage. *)
 let context_overflow_shrink_sequence
       ~starting_capacity_bytes
       ~same_run_retry_authorized
       ~record_success
       ~on_shrink_retry
-      ~(attempt : capacity_bytes:int -> ('ok, Agent_sdk.Error.sdk_error) result)
-  : ('ok, Agent_sdk.Error.sdk_error) result
+      ~(attempt : capacity_bytes:int -> ('ok, Agent_core.Error.t) result)
+  : ('ok, Agent_core.Error.t) result
   =
   let rec go ~capacity_bytes ~shrink_attempt =
     match attempt ~capacity_bytes with

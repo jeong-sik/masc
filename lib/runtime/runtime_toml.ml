@@ -332,7 +332,7 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabil
       if should_warn
       then
         Log.Runtime.warn
-          "runtime_toml: %s.capabilities.%s is deprecated and ignored; runtime-MCP capability is resolved from OAS provider bindings"
+          "runtime_toml: %s.capabilities.%s is deprecated and ignored; runtime-MCP capability is resolved from AGENT_CORE provider bindings"
           path
           key
   in
@@ -571,8 +571,8 @@ let parse_provider (id : string) (tbl : Otoml.t)
          | None -> None
          | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
        in
-       (* Optional per-provider connect/headers timeout override (oas#2163).
-          Absent (most providers) leaves the OAS kind-based default in force. *)
+       (* Optional per-provider connect/headers timeout override (agent-core boundary).
+          Absent (most providers) leaves the AGENT_CORE kind-based default in force. *)
        let connect_timeout_key = Runtime_schema.connect_timeout_s_key in
        let connect_timeout_result =
          strict_float_find path tbl connect_timeout_key
@@ -638,7 +638,7 @@ let exact_non_empty_string_opt_field ~(path : string) (tbl : Otoml.t) (key : str
 let parse_thinking_control_format ~(path : string) ~(token : string option) (raw : string)
   : (Runtime_schema.thinking_control_format, parse_error list) result
   =
-  (* Mirrors the OAS catalog contract (oas#2484): [Chat_template_token]
+  (* Mirrors the AGENT_CORE catalog contract (agent-core boundary): [Chat_template_token]
      carries its token, so a chat-template-token declaration without a
      [thinking-control-token] key — or a blank/padded token, or a token on a
      non-token format — fails the load instead of detonating per request. *)
@@ -709,7 +709,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
       error
         (path ^ "." ^ retired_native_streaming_key)
         (Printf.sprintf
-           "%s was removed; streaming support is derived from the OAS model catalog"
+           "%s was removed; streaming support is derived from the AGENT_CORE model catalog"
            retired_native_streaming_key)
   in
   let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
@@ -917,7 +917,7 @@ let parse_model (id : string) (tbl : Otoml.t)
        | None -> id)
   in
   (* [max-context] is an explicit operator override, not a required field: a
-     runtime whose model is covered by the OAS capability catalog can leave it
+     runtime whose model is covered by the AGENT_CORE capability catalog can leave it
      unset and inherit the catalog's max-context (see
      [Runtime.resolve_max_context_of_runtime]). An operator-supplied value
      must still be positive; [materialize_config] fail-closes at load time on
@@ -1062,11 +1062,11 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
               n))
     | Error _ as e -> e
   in
-  (* Paired with max-concurrent on purpose: OAS validates both in one admission
+  (* Paired with max-concurrent on purpose: AGENT_CORE validates both in one admission
      declaration and enforces this one before POST by serializing, measuring and
      returning a typed Request_body_too_large. Only max-concurrent was declarable
-     here, so the byte ceiling could not be expressed at all and the OAS gate
-     passed every size. Same shape as its sibling, including the >= 1 rule OAS
+     here, so the byte ceiling could not be expressed at all and the AGENT_CORE gate
+     passed every size. Same shape as its sibling, including the >= 1 rule AGENT_CORE
      already enforces on the declaration. *)
   let max_request_body_bytes_result =
     match typed_find "an integer" path tbl "max-request-body-bytes" Otoml.get_integer with
@@ -1282,7 +1282,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
              (* Parsed by [parse_lanes] after the runtime section is shaped. *)
              section, errs
            | "exact_output_lanes" ->
-             (* Parsed separately as raw OAS target references. *)
+             (* Parsed separately as raw AGENT_CORE target references. *)
              section, errs
            | _ when is_toml_table value ->
              (* [runtime.<profile>] tables are reserved for runtime profiles and

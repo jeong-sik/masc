@@ -4,7 +4,7 @@
     sink and never reach [system_log_*.jsonl]. See #25148 / #25031. *)
 
 (** [format_line ~ctx message] prefixes the provider subsystem [ctx] onto [message]
-    ([\[oas:http_client\] ...]) for attribution in the shared runtime log, then
+    ([\[agent_core:http_client\] ...]) for attribution in the shared runtime log, then
     applies the provider layer's canonical diagnostic secret redaction. Custom sinks receive
     raw diagnostic messages, so this preserves the default sink's security
     boundary before durable persistence. *)

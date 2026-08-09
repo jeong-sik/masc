@@ -1,6 +1,6 @@
 (** Tests for Builder module — chainable agent construction API. *)
 
-open Agent_sdk
+open Agent_core
 
 let card_interfaces =
   Agent_card.create_supported_interface
@@ -687,7 +687,7 @@ let test_with_contract_injects_context_metadata () =
   Alcotest.(check bool)
     "contract metadata injected"
     true
-    (match Context.get (Agent.context agent) "agent_sdk.contract" with
+    (match Context.get (Agent.context agent) "agent_core.contract" with
      | Some (`Assoc _) -> true
      | _ -> false)
 ;;

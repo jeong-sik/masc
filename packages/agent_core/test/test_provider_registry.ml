@@ -975,7 +975,7 @@ let test_catalog_load_file_and_lookup_alias () =
 ;;
 
 let test_catalog_api_key_env_availability () =
-  let env_name = "OAS_TEST_PROVIDER_CATALOG_API_KEY" in
+  let env_name = "AGENT_CORE_TEST_PROVIDER_CATALOG_API_KEY" in
   let json =
     Printf.sprintf
       {|{

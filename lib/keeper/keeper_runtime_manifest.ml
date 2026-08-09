@@ -28,14 +28,14 @@ let source_clock_to_string = function
   | Monotonic -> "monotonic"
   | Logical -> "logical"
   | Provider -> "provider"
-  | Event_bus -> "oas_event_bus"
+  | Event_bus -> "agent_core_event_bus"
 
 let source_clock_of_string = function
   | "wall" -> Some Wall
   | "monotonic" -> Some Monotonic
   | "logical" -> Some Logical
   | "provider" -> Some Provider
-  | "oas_event_bus" -> Some Event_bus
+  | "agent_core_event_bus" -> Some Event_bus
   | _ -> None
 
 let source_clock_of_event = function
@@ -217,7 +217,7 @@ let clock_lane_of_event = function
     "provider"
   | Checkpoint_loaded
   | Checkpoint_saved ->
-    "oas_agent"
+    "agent_core_agent"
   | Context_injected
   | Context_compacted
   | Event_bus_correlated ->
@@ -228,7 +228,7 @@ let turn_label ctx =
   | Some value -> string_of_int value
   | None -> "unknown"
 
-let oas_turn_label = function
+let agent_core_turn_label = function
   | Some value -> string_of_int value
   | None -> "0"
 
@@ -236,32 +236,32 @@ let context_edge_id ctx event =
   Printf.sprintf "%s:keeper-%s:%s" ctx.manifest_trace_id (turn_label ctx)
     (event_kind_to_string event)
 
-let context_tool_batch_id ctx ?oas_turn_count () =
-  Printf.sprintf "%s:keeper-%s:tool-batch-oas-%s"
-    ctx.manifest_trace_id (turn_label ctx) (oas_turn_label oas_turn_count)
+let context_tool_batch_id ctx ?agent_core_turn_count () =
+  Printf.sprintf "%s:keeper-%s:tool-batch-agent_core-%s"
+    ctx.manifest_trace_id (turn_label ctx) (agent_core_turn_label agent_core_turn_count)
 
-let context_checkpoint_id ctx ?oas_turn_count () =
-  Printf.sprintf "checkpoint:%s:oas-%s" ctx.manifest_trace_id
-    (oas_turn_label oas_turn_count)
+let context_checkpoint_id ctx ?agent_core_turn_count () =
+  Printf.sprintf "checkpoint:%s:agent_core-%s" ctx.manifest_trace_id
+    (agent_core_turn_label agent_core_turn_count)
 
 let context_compaction_id ctx ~source =
   Printf.sprintf "%s:keeper-%s:compaction-%s"
     ctx.manifest_trace_id (turn_label ctx) source
 
-let clock_refs_for_context ctx ~event ?oas_turn_count ?elapsed_ms
+let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
     ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
     ?logical_seq ?compaction_source () =
   let tool_batch_id =
     match event with
     | Provider_lane_resolved ->
-      Some (context_tool_batch_id ctx ?oas_turn_count ())
+      Some (context_tool_batch_id ctx ?agent_core_turn_count ())
     | _ -> None
   in
   let checkpoint_id =
     match event with
     | Checkpoint_loaded
     | Checkpoint_saved ->
-      Some (context_checkpoint_id ctx ?oas_turn_count ())
+      Some (context_checkpoint_id ctx ?agent_core_turn_count ())
     | _ -> None
   in
   let compaction_id =
@@ -313,7 +313,7 @@ let with_compaction_outcome ~compaction_outcome decision =
 ;;
 
 let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
-    ?generation ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ?runtime_id
+    ?generation ?keeper_turn_id ?agent_core_turn_count ?logical_seq ~event ?runtime_id
     ?(status = "ok") ?(decision = `Assoc []) ?receipt_path ?checkpoint_path
     ?tool_call_log_path () =
   {
@@ -324,7 +324,7 @@ let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     trace_id;
     generation;
     keeper_turn_id;
-    oas_turn_count;
+    agent_core_turn_count;
     logical_seq;
     event;
     runtime_id;
@@ -333,12 +333,12 @@ let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     links = { receipt_path; checkpoint_path; tool_call_log_path };
   }
 
-let make_for_context ctx ~event ?oas_turn_count ?logical_seq ?runtime_id
+let make_for_context ctx ~event ?agent_core_turn_count ?logical_seq ?runtime_id
     ?status ?decision ?receipt_path ?checkpoint_path ?tool_call_log_path () =
   make ~keeper_name:ctx.manifest_keeper_name
     ?agent_name:ctx.manifest_agent_name ~trace_id:ctx.manifest_trace_id
     ?generation:ctx.manifest_generation
-    ?keeper_turn_id:ctx.manifest_keeper_turn_id ?oas_turn_count ?logical_seq
+    ?keeper_turn_id:ctx.manifest_keeper_turn_id ?agent_core_turn_count ?logical_seq
     ~event ?runtime_id ?status ?decision ?receipt_path ?checkpoint_path
     ?tool_call_log_path ()
 
@@ -458,7 +458,7 @@ let to_json manifest =
       ("trace_id", `String manifest.trace_id);
       ("generation", json_of_int_opt manifest.generation);
       ("keeper_turn_id", json_of_int_opt manifest.keeper_turn_id);
-      ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
+      ("agent_core_turn_count", json_of_int_opt manifest.agent_core_turn_count);
       ("logical_seq", json_of_int_opt manifest.logical_seq);
       ("event", `String (event_kind_to_string manifest.event));
       ("runtime_id", json_of_string_opt manifest.runtime_id);
@@ -477,7 +477,7 @@ let public_to_json manifest =
       ("trace_id", `String manifest.trace_id);
       ("generation", json_of_int_opt manifest.generation);
       ("keeper_turn_id", json_of_int_opt manifest.keeper_turn_id);
-      ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
+      ("agent_core_turn_count", json_of_int_opt manifest.agent_core_turn_count);
       ("logical_seq", json_of_int_opt manifest.logical_seq);
       ("event", `String (event_kind_to_string manifest.event));
       ("runtime_id", json_of_string_opt manifest.runtime_id);
@@ -551,7 +551,7 @@ type parsed_row = {
   trace_id : string;
   generation : int option;
   keeper_turn_id : int option;
-  oas_turn_count : int option;
+  agent_core_turn_count : int option;
   logical_seq : int option;
   event_wire : string;
   runtime_id : string option;
@@ -688,7 +688,7 @@ let parse_row = function
             required_string "trace_id" fields >>= fun trace_id ->
             optional_int "generation" fields >>= fun generation ->
             optional_int "keeper_turn_id" fields >>= fun keeper_turn_id ->
-            optional_int "oas_turn_count" fields >>= fun oas_turn_count ->
+            optional_int "agent_core_turn_count" fields >>= fun agent_core_turn_count ->
             optional_int "logical_seq" fields >>= fun logical_seq ->
             required_string "event" fields >>= fun event_wire ->
             optional_string "runtime_id" fields >>= fun runtime_id ->
@@ -706,7 +706,7 @@ let parse_row = function
                 trace_id;
                 generation;
                 keeper_turn_id;
-                oas_turn_count;
+                agent_core_turn_count;
                 logical_seq;
                 event_wire;
                 runtime_id;
@@ -735,7 +735,7 @@ let active_row (row : parsed_row) event : t =
     trace_id = row.trace_id;
     generation = row.generation;
     keeper_turn_id = row.keeper_turn_id;
-    oas_turn_count = row.oas_turn_count;
+    agent_core_turn_count = row.agent_core_turn_count;
     logical_seq = row.logical_seq;
     event;
     runtime_id = row.runtime_id;

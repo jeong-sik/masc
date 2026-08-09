@@ -162,7 +162,7 @@ let emit_activity_graph
   try
     let activity_kind = terminal_outcome_to_activity_kind terminal_outcome in
     let cache_miss_input_tokens =
-      Keeper_hooks_oas.cache_miss_input_tokens
+      Keeper_hooks_agent_core.cache_miss_input_tokens
         ~input_tokens:result.Keeper_agent_run.usage.input_tokens
         ~cache_creation_input_tokens:result.usage.cache_creation_input_tokens
         ~cache_read_input_tokens:result.usage.cache_read_input_tokens
@@ -482,7 +482,7 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Log.Keeper.info ~keeper_name:updated_meta.name
       "typed input required after %d turn(s), checkpoint saved request_id=%s"
       turns_used
-      request.Agent_sdk.Error.request_id;
+      request.Agent_core.Error.request_id;
     reset_failure_state ()
   | Runtime_agent.Completed -> reset_failure_state ()
 ;;

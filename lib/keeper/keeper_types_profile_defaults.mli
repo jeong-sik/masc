@@ -1,4 +1,4 @@
-(** Keeper profile default records and derived OAS context. *)
+(** Keeper profile default records and derived AGENT_CORE context. *)
 
 type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
@@ -18,7 +18,7 @@ type keeper_profile_defaults = {
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
   (* Keeper runtime assignment lives in runtime.toml [[runtime.assignments]]. *)
-  oas_env : (string * string) list;
+  agent_core_env : (string * string) list;
 }
 
 val empty_keeper_profile_defaults : keeper_profile_defaults

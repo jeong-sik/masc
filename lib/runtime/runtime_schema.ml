@@ -80,11 +80,11 @@ type provider =
   ; healthcheck_path : string option
   ; headers : (string * string) list option
   ; connect_timeout_s : float option
-    (** Per-provider override for the OAS connect + initial-response-headers
-      wall-clock timeout (seconds). [None] keeps the OAS kind-based default
+    (** Per-provider override for the AGENT_CORE connect + initial-response-headers
+      wall-clock timeout (seconds). [None] keeps the AGENT_CORE kind-based default
       (see [Llm_provider.Provider_config.default_connect_timeout_s]). Declared
       on the provider, not the model, because it is a transport property.
-      oas#2163, RFC-OAS-026 I2: MASC declares the budget; OAS owns enforcement
+      agent-core boundary, Agent Core contract I2: MASC declares the budget; AGENT_CORE owns enforcement
       and phase=Http_operation attribution. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
@@ -98,7 +98,7 @@ type provider =
     Pinned on the model because the same physical model can be served by
     backends with different thinking-control wire shapes.
 
-    This re-exports the OAS capability enum so OAS variant changes break MASC
+    This re-exports the AGENT_CORE capability enum so AGENT_CORE variant changes break MASC
     compile instead of leaving a stale local mirror. *)
 type thinking_control_format =
   Llm_provider.Capabilities.thinking_control_format =
@@ -113,7 +113,7 @@ type thinking_control_format =
   | Enable_thinking
 [@@deriving show, eq]
 
-(** Per-model capabilities, mirroring OAS [Llm_provider.Capabilities] for the
+(** Per-model capabilities, mirroring AGENT_CORE [Llm_provider.Capabilities] for the
     fields callers branch on. Fields already present on {!model_spec}
     ([tools_support]/[thinking_support]/[max_context]/[streaming]) are not
     duplicated here, to avoid two-SSOT drift. *)
@@ -184,7 +184,7 @@ type model_spec =
   ; api_name : string
   ; tools_support : bool
   ; max_context : int option
-      (** [models.<id>.max-context] operator override. [None] means the OAS
+      (** [models.<id>.max-context] operator override. [None] means the AGENT_CORE
           capability catalog's max-context is the sole source; resolved via
           {!Runtime.resolve_max_context_of_runtime}, never read directly. *)
   ; thinking_support : bool
@@ -193,7 +193,7 @@ type model_spec =
   ; streaming : bool
   ; temperature : float option
     (** [temperature] — per-model sampling temperature for keeper turns. [None]
-        keeps the caller fallback ([MASC_KEEPER_UNIFIED_TEMP], then the OAS
+        keeps the caller fallback ([MASC_KEEPER_UNIFIED_TEMP], then the AGENT_CORE
         [agent_default] profile). [Some t] overrides it for every turn on this
         model. Required for models that reject the default value: e.g. Kimi K2.7
         (kimi-for-coding) accepts only temperature = 1.0 and rejects any other
@@ -202,14 +202,14 @@ type model_spec =
         symmetric to the [max-output-tokens]/[max_tokens] path. *)
   ; top_p : float option
     (** [top_p] — per-model nucleus sampling probability forwarded through the
-        materialized OAS [Provider_config]. [None] leaves the caller/OAS profile
+        materialized AGENT_CORE [Provider_config]. [None] leaves the caller/AGENT_CORE profile
         unchanged. *)
   ; top_k : int option
     (** [top_k] — per-model top-k sampling cap forwarded through the materialized
-        OAS [Provider_config]. [None] leaves the caller/OAS profile unchanged. *)
+        AGENT_CORE [Provider_config]. [None] leaves the caller/AGENT_CORE profile unchanged. *)
   ; min_p : float option
     (** [min_p] — per-model minimum probability sampling value forwarded through
-        the materialized OAS [Provider_config]. [None] leaves the caller/OAS
+        the materialized AGENT_CORE [Provider_config]. [None] leaves the caller/AGENT_CORE
         profile unchanged. *)
   ; capabilities : model_capabilities option
   }
@@ -273,7 +273,7 @@ type config =
         TOML does not carry a runtime selector. A keeper absent from this table routes to the default
         runtime; an assignment to an unknown id is rejected at load
         ({!Runtime.load_list}), mirroring [\[runtime\].default] validation. The
-        id is an opaque binding key here — only the OAS adapter parses it into
+        id is an opaque binding key here — only the AGENT_CORE adapter parses it into
         provider/model/spec. *)
   ; media_failover : string list
     (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted
@@ -287,7 +287,7 @@ type config =
         Declarations are resolved against materialized runtimes at load time;
         an unknown candidate id is rejected like [\[runtime\].default]. *)
   ; exact_output_lane_decls : exact_output_lane_decl list
-    (** Raw ordered OAS target references from
+    (** Raw ordered AGENT_CORE target references from
         [\[runtime.exact_output_lanes.<id>\]]. MASC does not interpret them as
         provider/model runtime bindings. *)
   }

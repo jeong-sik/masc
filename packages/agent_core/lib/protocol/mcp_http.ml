@@ -32,7 +32,7 @@ let connect ~sw ~net config =
 
 let initialize t =
   match
-    Sdk_http_client.initialize t.client ~client_name:"oas-sdk" ~client_version:"0.87.1"
+    Sdk_http_client.initialize t.client ~client_name:"agent-core-mcp" ~client_version:"0.87.1"
   with
   | Ok _ -> Ok ()
   | Error detail -> Error (Error.Mcp (InitializeFailed { detail }))
@@ -41,7 +41,7 @@ let initialize t =
 let list_tools t =
   match Sdk_http_client.list_tools_all t.client with
   | Error detail -> Error (Error.Mcp (ToolListFailed { detail }))
-  | Ok tools -> Ok (List.map Mcp.mcp_tool_of_sdk_tool tools)
+  | Ok tools -> Ok (List.map Mcp.mcp_tool_of_agent_core_tool tools)
 ;;
 
 let call_tool t ~name ~arguments =
@@ -68,7 +68,7 @@ type http_spec =
   }
 
 let connect_and_load_managed ~sw ~net (spec : http_spec)
-  : (Mcp.managed, Error.sdk_error) result
+  : (Mcp.managed, Error.t) result
   =
   let* client = connect ~sw ~net { base_url = spec.base_url; headers = spec.headers } in
   let* () = initialize client in
@@ -78,7 +78,7 @@ let connect_and_load_managed ~sw ~net (spec : http_spec)
       (fun (mt : Mcp.mcp_tool) acc ->
          let* tools = acc in
          match
-           Mcp.mcp_tool_to_sdk_tool_result mt ~call_fn:(fun input ->
+           Mcp.mcp_tool_to_agent_core_tool_result mt ~call_fn:(fun input ->
              call_tool client ~name:mt.name ~arguments:input)
          with
          | Ok tool_ -> Ok (tool_ :: tools)

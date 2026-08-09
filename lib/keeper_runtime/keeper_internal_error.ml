@@ -1,8 +1,8 @@
 (** Keeper_internal_error — the [masc_internal_error] ADT, its JSON codec, and the reverse-direction
-    SDK envelope parser.
+    agent-core envelope parser.
 
     This is the structured *typed envelope* carried across the
-    [Agent_sdk.Error.Internal _] boundary for keeper turn failures.  It is the
+    [Agent_core.Error.Internal _] boundary for keeper turn failures.  It is the
     re-homed successor of the deleted runtime dispatch error helpers
     (RFC-0206 runtime purge): the dispatch engine that constructed many of these variants
     is gone, but the envelope itself outlives it — provider/turn failures still
@@ -198,15 +198,15 @@ let accept_response_shape_of_string = function
   | _ -> None
 ;;
 
-let accept_response_shape_of_agent_sdk = function
-  | Agent_sdk.Response_shape.Empty -> Accept_response_empty
-  | Agent_sdk.Response_shape.Thinking_only -> Accept_response_thinking_only
-  | Agent_sdk.Response_shape.Blank_text_only -> Accept_response_blank_text_only
-  | Agent_sdk.Response_shape.Tool_result_only -> Accept_response_tool_result_only
-  | Agent_sdk.Response_shape.Media_only -> Accept_response_media_only
-  | Agent_sdk.Response_shape.Mixed_without_deliverable_content ->
+let accept_response_shape_of_agent_core = function
+  | Agent_core.Response_shape.Empty -> Accept_response_empty
+  | Agent_core.Response_shape.Thinking_only -> Accept_response_thinking_only
+  | Agent_core.Response_shape.Blank_text_only -> Accept_response_blank_text_only
+  | Agent_core.Response_shape.Tool_result_only -> Accept_response_tool_result_only
+  | Agent_core.Response_shape.Media_only -> Accept_response_media_only
+  | Agent_core.Response_shape.Mixed_without_deliverable_content ->
     Accept_response_mixed_without_deliverable_content
-  | Agent_sdk.Response_shape.Has_deliverable_content ->
+  | Agent_core.Response_shape.Has_deliverable_content ->
     Accept_response_has_deliverable_content
 ;;
 
@@ -282,11 +282,11 @@ type masc_internal_error =
       (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
          [MaxTokens] on an empty/thinking_only shape marks a truncation (the
          shared output budget was exhausted, most often by thinking) and must be
-         distinguished from a clean [EndTurn] no-progress terminal — OAS gates
+         distinguished from a clean [EndTurn] no-progress terminal — AGENT_CORE gates
          its own [ended_without_deliverable_content] on [EndTurn] for exactly
          this reason. Groundwork only in this slice: threaded and serialized,
          not yet consumed by classification (§4.5 slices 2-3). *)
-      stop_reason : Agent_sdk.Types.stop_reason option;
+      stop_reason : Agent_core.Types.stop_reason option;
       reason : string;
     }
   | Internal_unhandled_exception of {
@@ -321,12 +321,12 @@ type masc_internal_error =
       detail : string;
     }
 
-let masc_internal_error_prefix = "[masc_oas_error] "
+let masc_internal_error_prefix = "[masc_agent_core_error] "
 let runtime_runner_execute_site = "runtime_runner.execute"
 
 (* #9933: a keeper [blocker_info] detail string may carry a structured
-   [masc_oas_error] JSON payload — [masc_internal_error_prefix] above,
-   possibly wrapped by Agent_sdk.Error.to_string's "Internal error: ".
+   [masc_agent_core_error] JSON payload — [masc_internal_error_prefix] above,
+   possibly wrapped by Agent_core.Error.to_string's "Internal error: ".
    Truncating it at the narrative budget slices the JSON mid-key, so
    downstream consumers (dashboard, retry classifier, log search) lose the
    diagnostic fields (budget_sec, source, …). [cap_blocker_detail] keeps a
@@ -342,15 +342,15 @@ let blocker_detail_narrative_max_chars = 200
    payload is pathological and we cap rather than store unbounded blobs. *)
 let blocker_detail_structured_max_chars = 2000
 
-let masc_oas_error_bare_prefix = String.trim masc_internal_error_prefix
-let masc_oas_error_wrapped_prefix = "Internal error: " ^ masc_oas_error_bare_prefix
+let masc_agent_core_error_bare_prefix = String.trim masc_internal_error_prefix
+let masc_agent_core_error_wrapped_prefix = "Internal error: " ^ masc_agent_core_error_bare_prefix
 
-let has_masc_oas_error_prefix (s : string) : bool =
+let has_masc_agent_core_error_prefix (s : string) : bool =
   let starts_with prefix =
     let pl = String.length prefix in
     String.length s >= pl && String.sub s 0 pl = prefix
   in
-  starts_with masc_oas_error_bare_prefix || starts_with masc_oas_error_wrapped_prefix
+  starts_with masc_agent_core_error_bare_prefix || starts_with masc_agent_core_error_wrapped_prefix
 
 let cap_blocker_detail (s : string) : string =
   (* +3 bytes of headroom for the "…" ellipsis suffix. *)
@@ -358,7 +358,7 @@ let cap_blocker_detail (s : string) : string =
     String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s
     |> String_util.to_string
   in
-  if has_masc_oas_error_prefix (String.trim s) then
+  if has_masc_agent_core_error_prefix (String.trim s) then
     if String.length s <= blocker_detail_structured_max_chars then s
     else truncate ~max_chars:blocker_detail_structured_max_chars s
   else truncate ~max_chars:blocker_detail_narrative_max_chars s
@@ -466,7 +466,7 @@ let masc_internal_error_to_json = function
             (Option.map accept_response_shape_to_string response_shape) );
         ( "stop_reason",
           Json_util.string_opt_to_json
-            (Option.map Agent_sdk.Types.stop_reason_to_string stop_reason) );
+            (Option.map Agent_core.Types.stop_reason_to_string stop_reason) );
         ("reason", `String reason);
       ]
   | Internal_unhandled_exception { site; exn_repr; transport_error_kind } ->
@@ -714,12 +714,12 @@ let accept_rejection_has_no_progress_retry_hint err =
     true
   | None -> false
 
-let sdk_error_of_masc_internal_error err =
-  Agent_sdk.Error.Internal
+let core_error_of_masc_internal_error err =
+  Agent_core.Error.Internal
     (masc_internal_error_prefix ^ Yojson.Safe.to_string (masc_internal_error_to_json err))
 
 (* ------------------------------------------------------------------ *)
-(* Reverse direction: SDK envelope -> typed variant.                  *)
+(* Reverse direction: agent-core envelope -> typed variant.                  *)
 (* ------------------------------------------------------------------ *)
 
 let parse_masc_internal_error_json (json : Yojson.Safe.t) :
@@ -834,7 +834,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                        accept_response_shape_of_string;
                    stop_reason =
                      Option.map
-                       Agent_sdk.Types.stop_reason_of_string
+                       Agent_core.Types.stop_reason_of_string
                        (string_opt_of_assoc "stop_reason" json);
                    reason;
                  })
@@ -944,8 +944,8 @@ let classify_masc_internal_error_of_string (raw : string) :
     (try parse_masc_internal_error_json (Yojson.Safe.from_string payload)
      with Yojson.Json_error _ -> None)
 
-let classify_masc_internal_error (err : Agent_sdk.Error.sdk_error) :
+let classify_masc_internal_error (err : Agent_core.Error.t) :
     masc_internal_error option =
   match err with
-  | Agent_sdk.Error.Internal msg -> classify_masc_internal_error_of_string msg
+  | Agent_core.Error.Internal msg -> classify_masc_internal_error_of_string msg
   | _ -> None

@@ -601,7 +601,7 @@ export function buildOverviewTelemetrySnapshot({
 
   const peakPerBucket = Math.max(0, ...buckets)
   const averagePerBucket = roundOne(buckets.reduce((sum, count) => sum + count, 0) / buckets.length)
-  const oasEventSummary = sources.find(source => source.source === 'oas_event')
+  const agentCoreEventSummary = sources.find(source => source.source === 'agent_core_event')
   const healthySourceCount = sources.filter(source => source.health === 'ok').length
   const activeCoverageGaps = sources.reduce(
     (sum, source) => sum + (source.active_coverage_gap_count ?? 0),
@@ -613,8 +613,8 @@ export function buildOverviewTelemetrySnapshot({
     peakPerBucket,
     averagePerBucket,
     eventCount: totalMatchingEntries ?? entries.length,
-    latestAgeSeconds: oasEventSummary?.latest_age_s ?? null,
-    sourceHealth: oasEventSummary?.health ?? 'unknown',
+    latestAgeSeconds: agentCoreEventSummary?.latest_age_s ?? null,
+    sourceHealth: agentCoreEventSummary?.health ?? 'unknown',
     activeCoverageGaps,
     healthySourceCount,
     sourceCount: sources.length,
@@ -923,7 +923,7 @@ function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
     const sinceMs = nowMs - OVERVIEW_TELEMETRY_WINDOW_MINUTES * 60 * 1000
     const [telemetry, summary] = await Promise.all([
       fetchTelemetry({
-        source: 'oas_event',
+        source: 'agent_core_event',
         since_ms: sinceMs,
         n: OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT,
       }),
@@ -1155,7 +1155,7 @@ function OverviewTelemetry({
       </div>
       ${snapshot
         ? html`
-          <div class="ov-bars v2-overview-bars" role="img" aria-label="Live OAS telemetry histogram">
+          <div class="ov-bars v2-overview-bars" role="img" aria-label="Live Agent Core telemetry histogram">
             ${snapshot.bars.map((b, i) => html`
               <span
                 key=${i}

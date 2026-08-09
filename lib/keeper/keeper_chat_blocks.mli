@@ -133,7 +133,7 @@ type trace_step =
       text : string;
       content_withheld : bool;
       ts : string option;
-      oas_block_index : int option;
+      agent_core_block_index : int option;
     }
       (** [content_withheld = true] states that the step happened and its
           content is not carried on this surface — the public autonomous
@@ -160,7 +160,7 @@ type trace_step =
       args : Yojson.Safe.t option;
       result : Yojson.Safe.t option;
       ts : string option;
-      oas_block_index : int option;
+      agent_core_block_index : int option;
     }
 
 type trace_block = { trace : trace_step list }

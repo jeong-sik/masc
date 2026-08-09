@@ -2,7 +2,7 @@
     from a user's perspective.  These are not unit tests; they exercise
     the Builder -> Agent -> Card -> Registry pipeline end-to-end. *)
 
-open Agent_sdk
+open Agent_core
 
 let card_interfaces =
   Agent_card.create_supported_interface

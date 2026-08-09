@@ -1,6 +1,6 @@
 (** Runtime provider projection for MASC-owned model labels. *)
 
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module Runtime_binding = Agent_core.Provider_runtime_binding
 
 type runtime_kind =
   | Local

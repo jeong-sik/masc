@@ -98,20 +98,20 @@ let repository_fixture ~id ~url ~local_path : Repo_manager_types.repository =
 
 let seed_annotation_scope_repos base_path =
   let masc_path = Filename.concat base_path "workspace/masc" in
-  let oas_path = Filename.concat base_path "workspace/oas" in
+  let agent_core_path = Filename.concat base_path "workspace/agent_core" in
   let repos =
     [ repository_fixture
         ~id:"masc"
         ~url:"https://github.com/jeong-sik/masc.git"
         ~local_path:masc_path
     ; repository_fixture
-        ~id:"oas"
-        ~url:"https://github.com/jeong-sik/oas.git"
-        ~local_path:oas_path
+        ~id:"agent_core"
+        ~url:"https://example.com/agent-core.git"
+        ~local_path:agent_core_path
     ]
   in
   match Repo_store.save_all ~base_path repos with
-  | Ok () -> masc_path, oas_path
+  | Ok () -> masc_path, agent_core_path
   | Error msg -> failf "save repositories failed: %s" msg
 ;;
 
@@ -649,7 +649,7 @@ let test_post_cursors_honors_canonical_url_scope () =
 
 let test_post_cursors_resolves_partition_from_file_path () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
-    let masc_path, _oas_path = seed_annotation_scope_repos base_path in
+    let masc_path, _agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
     (* POST cursor with a file_path that belongs to the scoped repo: the
        server must resolve the write partition from the posted file_path
@@ -681,12 +681,12 @@ let test_post_cursors_resolves_partition_from_file_path () =
 
 let test_post_cursors_rejects_file_path_scope_mismatch () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
-    let _masc_path, oas_path = seed_annotation_scope_repos base_path in
+    let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
     (* POST cursor with a file_path that belongs to a different repo than the
        requested canonical_url scope: the server must reject it (task-1733)
        instead of silently writing to the wrong partition. *)
-    let file_path = Filename.concat oas_path "lib/a.ml" in
+    let file_path = Filename.concat agent_core_path "lib/a.ml" in
     let body =
       Yojson.Safe.to_string
         (`Assoc [ "file_path", `String file_path; "line", `Int 9 ])
@@ -713,7 +713,7 @@ let test_post_cursors_rejects_file_path_scope_mismatch () =
 
 let test_post_annotations_accepts_matching_repo_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
-    let masc_path, _oas_path = seed_annotation_scope_repos base_path in
+    let masc_path, _agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
     let file_path = Filename.concat masc_path "lib/a.ml" in
     let request =
@@ -735,14 +735,14 @@ let test_post_annotations_accepts_matching_repo_scope () =
       int
       "matching annotation is not written to other partition"
       0
-      (annotation_count router "/api/v1/ide/annotations?repo_id=oas"))
+      (annotation_count router "/api/v1/ide/annotations?repo_id=agent_core"))
 ;;
 
 let test_post_annotations_rejects_repo_scope_mismatch () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
-    let _masc_path, oas_path = seed_annotation_scope_repos base_path in
+    let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
-    let file_path = Filename.concat oas_path "lib/a.ml" in
+    let file_path = Filename.concat agent_core_path "lib/a.ml" in
     let request =
       http_request
         ~meth:`POST
@@ -772,14 +772,14 @@ let test_post_annotations_rejects_repo_scope_mismatch () =
       int
       "mismatched annotation is not written to actual partition"
       0
-      (annotation_count router "/api/v1/ide/annotations?repo_id=oas"))
+      (annotation_count router "/api/v1/ide/annotations?repo_id=agent_core"))
 ;;
 
 let test_post_annotations_rejects_canonical_scope_mismatch () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
-    let _masc_path, oas_path = seed_annotation_scope_repos base_path in
+    let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
-    let file_path = Filename.concat oas_path "lib/a.ml" in
+    let file_path = Filename.concat agent_core_path "lib/a.ml" in
     let scoped_path =
       "/api/v1/ide/annotations?canonical_url="
       ^ Uri.pct_encode "https://github.com/jeong-sik/masc.git"

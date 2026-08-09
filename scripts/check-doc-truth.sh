@@ -135,7 +135,7 @@ require_contains docs/spec/10-dashboard.md '`INV-DASH-004`: connection failure i
 # retirement notices were deleted on purpose, but a doc edit that re-describes
 # a removed surface as current is the exact drift this file exists to catch.
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
-require_not_contains docs/OAS-MASC-BOUNDARY.md 'lib/team_session/'
+require_not_contains docs/AGENT_CORE-MASC-BOUNDARY.md 'lib/team_session/'
 
 docs_to_scan=(
   README.md

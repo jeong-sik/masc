@@ -4,7 +4,7 @@
 > across multiple survey-style audit chains in this repo.
 > Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
-> Source: Q-P0-3 (OAS↔MASC boundary) + Q-P0-2 (TLA+ specs gap)
+> Source: Q-P0-3 (agent core↔MASC boundary) + Q-P0-2 (TLA+ specs gap)
 
 ---
 
@@ -26,7 +26,7 @@ This is a **process doc**, not enforced. Survey work doesn't always fit this sha
 
 ## 3. Worked examples
 
-### 3.1 Q-P0-3: OAS↔MASC boundary
+### 3.1 Q-P0-3: agent core↔MASC boundary
 
 | Phase | PR | Result |
 |---|---|---|
@@ -109,7 +109,7 @@ Aim for 1 Phase 3 PR per cycle when running parallel cron-driven fanout.
 ## 8. Phase 4 deferral discipline
 
 Don't wire ratchets into CI immediately after Phase 3 closes. From observation:
-- OAS chain wired the ratchet at the same time as Phase 3 (#12117 + #12119) because the metric (C4 direct calls) was already at 0.
+- agent core chain wired the ratchet at the same time as Phase 3 (#12117 + #12119) because the metric (C4 direct calls) was already at 0.
 - TLA gap chain defers Phase 4 wire-up because two ratchet metrics need ≥2 Phase 3 implementations to cross the meaningful floor (otherwise the gate trivially passes at first enforcement).
 
 Rule of thumb: **defer hard-gating until at least 2 Phase 3 PRs have moved the floor.** Otherwise the ratchet's first CI run carries no signal.

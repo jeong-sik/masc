@@ -1,7 +1,7 @@
 (** Keeper_turn_driver_backpressure — Capacity backpressure classification.
 
     Extracted from [keeper_turn_driver.ml] during godfile decomposition.
-    Pure functions: classify HTTP/SDK errors into capacity backpressure signals.
+    Pure functions: classify HTTP/agent-core errors into capacity backpressure signals.
 
     @since God file decomposition *)
 
@@ -28,7 +28,7 @@ val capacity_backpressure_of_pending :
    * Keeper_internal_error.capacity_retry_after) option ->
   Keeper_internal_error.masc_internal_error option
 
-(* [capacity_backpressure_of_sdk_error] was removed (#23438): a dead substring
+(* [capacity_backpressure_of_core_error] was removed (#23438): a dead substring
    classifier that laundered opaque [Internal] errors into the auto-recoverable
    capacity-backpressure class. Legacy decoded [cooldown_cause] values are
    diagnostic-only. *)

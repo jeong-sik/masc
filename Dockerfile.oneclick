@@ -5,7 +5,7 @@
 # fresh clone produces a runnable image. First build is slow (OCaml 5.5 + deps).
 #
 # The server binary and deployment overlay come from the same tree; the base
-# capability catalog is embedded by OAS. On Apple Silicon this builds a native
+# capability catalog is embedded by AGENT_CORE. On Apple Silicon this builds a native
 # arm64 image (no emulation).
 
 # ---- Stage 1: OCaml server from source --------------------------------------

@@ -28,7 +28,7 @@ type t =
   | Claude_code of claude_code
 
 type checkpoint_owner =
-  | Masc_oas
+  | Masc_agent_core
   | Official_client
 
 let agent_core_provider_config = function
@@ -51,6 +51,6 @@ let label = function
 ;;
 
 let checkpoint_owner = function
-  | Agent_core _ -> Masc_oas
+  | Agent_core _ -> Masc_agent_core
   | Codex_app_server _ | Claude_code _ | Antigravity_cli _ -> Official_client
 ;;

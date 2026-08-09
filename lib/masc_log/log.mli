@@ -285,7 +285,7 @@ module Mcp_transport : LOGGER
 module Startup : LOGGER
 module Model_inference_metrics : LOGGER
 module Runtime_agent : LOGGER
-module Oas_event : LOGGER
+module Agent_core_event : LOGGER
 module H2_gateway : LOGGER
 module Voice : LOGGER
 module Exec_tap : LOGGER

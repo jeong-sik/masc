@@ -1,6 +1,6 @@
 (** Caller-owned observation of redacted provider wire chunks.
 
-    OAS owns the provider boundary and secret redaction. It does not own an
+    AGENT_CORE owns the provider boundary and secret redaction. It does not own an
     observation queue, filesystem path, retention rule, worker, retry policy,
     or capacity decision. A caller that needs persistence supplies a
     nonblocking [try_observe] function and owns every downstream effect.
@@ -8,7 +8,7 @@
     @stability Evolving
     @since 0.212.0 *)
 
-(** One exact provider chunk after {!Secret_redactor.redact_string}. OAS never
+(** One exact provider chunk after {!Secret_redactor.redact_string}. AGENT_CORE never
     invents a capture identity when the caller did not provide one. *)
 type observation =
   { capture_id : string option
@@ -19,19 +19,19 @@ type observation =
 [@@deriving yojson, show]
 
 (** Caller-owned reason for declining an observation. The reason is diagnostic
-    data only; OAS does not interpret or classify it. *)
+    data only; AGENT_CORE does not interpret or classify it. *)
 type rejection = { reason : string } [@@deriving yojson, show]
 
 (** A synchronous nonblocking offer into caller-owned observation state.
 
     Implementations must not perform blocking I/O or wait for downstream
     capacity. They should return [Error rejection] when they cannot accept the
-    observation. OAS cannot make an arbitrary OCaml callback nonblocking; the
+    observation. AGENT_CORE cannot make an arbitrary OCaml callback nonblocking; the
     function type makes the ownership boundary explicit and the returned result
     makes rejection observable. *)
 type try_observe = observation -> (unit, rejection) result
 
-(** OAS-owned sink presented to a transport. The transport supplies an exact
+(** AGENT_CORE-owned sink presented to a transport. The transport supplies an exact
     provider/model identity and one raw chunk; the sink owns all redaction and
     caller interaction. It returns [unit] so a diagnostic observation failure
     cannot be reinterpreted as a provider failure by the transport. *)
@@ -59,7 +59,7 @@ type failure =
 
     Caller rejection and ordinary callback exceptions become [Error failure].
     Cancellation and fatal runtime exceptions retain their original propagation
-    semantics. OAS performs no fallback, buffering, retry, or persistence.
+    semantics. AGENT_CORE performs no fallback, buffering, retry, or persistence.
 
     [redacted_chunk] is best-effort diagnostic sanitization, not proof that the
     value is non-sensitive. Callers must still apply sensitive-data retention

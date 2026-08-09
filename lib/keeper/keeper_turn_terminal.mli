@@ -43,7 +43,7 @@ val of_code : ?source:string -> ?summary:string -> ?next_action:string -> string
 (** Typed constructor. Skips the wire→[Keeper_turn_disposition.t]
     decode step that [of_code] performs; useful for producers that
     have already committed to a typed disposition (e.g. wrapping an
-    SDK error code as [Provider_error (Sdk_error _)] without losing
+    agent-core error code as [Provider_error (Agent_core_error _)] without losing
     the typed identity in an [Unknown { raw_error = _ }] fallback). *)
 val of_disposition
   :  ?source:string
@@ -55,7 +55,7 @@ val of_disposition
 val of_failure
   :  ?tool_call_count:int
   -> raw_error:string
-  -> Agent_sdk.Error.sdk_error
+  -> Agent_core.Error.t
   -> t
 
 val to_json : t -> Yojson.Safe.t

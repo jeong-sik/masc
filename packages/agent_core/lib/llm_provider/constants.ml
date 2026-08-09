@@ -9,14 +9,14 @@
 
 module Http = struct
   (** HTTP status codes that downstream coordinators may use when deciding
-      whether to hand work to another provider. OAS exposes the codes;
-      orchestration lives outside the SDK. 498 = Groq Flex tier capacity
+      whether to hand work to another provider. AGENT_CORE exposes the codes;
+      orchestration lives outside agent core. 498 = Groq Flex tier capacity
       exceeded. *)
   let cascadable_codes = [ 401; 403; 429; 498; 500; 502; 503; 529 ]
 end
 
 (* The former unknown-model [max_tokens] fallback (16384, env
-   OAS_MAX_TOKENS_DEFAULT) was removed: when neither the caller nor the
+   AGENT_CORE_MAX_TOKENS_DEFAULT) was removed: when neither the caller nor the
    capability catalog declares an output ceiling, request builders omit
    the field and the provider applies the model's real limit. An
    invented value is shared by thinking and answer and truncates long

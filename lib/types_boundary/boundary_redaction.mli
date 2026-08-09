@@ -1,6 +1,6 @@
 (** Boundary redaction SSOT.
 
-    External-surface emit sites (dashboard telemetry, OAS boundary,
+    External-surface emit sites (dashboard telemetry, AGENT_CORE boundary,
     operator log) must redact provider/model identity to a small set
     of [public_label] values. The [private string] type prevents
     callers from constructing arbitrary labels — the only labels are

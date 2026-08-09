@@ -8,7 +8,7 @@
        each completed turn onto that default bus, carrying the provider, turn,
        model, token counts, and decode timings reported for the call. *)
 
-open Agent_sdk
+open Agent_core
 
 (* The agent's exact provider config selects [OpenAI_compat], so
    [Complete_common.patch_telemetry] stamps the response telemetry with that kind.
@@ -92,7 +92,7 @@ let sample_usage : Types.api_usage =
   }
 ;;
 
-(* Turn 1: the model interleaves a Thinking block before a ToolUse block. OAS
+(* Turn 1: the model interleaves a Thinking block before a ToolUse block. AGENT_CORE
    must preserve that order in the assembled assistant message so a downstream
    renderer (MASC) can show Thinking → Tool in sequence. *)
 let thinking_then_tool_response : Types.api_response =
@@ -257,7 +257,7 @@ let test_pipeline_emits_inference_telemetry_on_default_bus () =
 
 (* The adversarial core of the observability pillar: with only a Builder (no
    explicit bus wiring), a tool-using multi-turn run must surface Tools and
-   Turns on the default bus in causal order, and OAS must preserve the
+   Turns on the default bus in causal order, and AGENT_CORE must preserve the
    Thinking → Tool interleaving order in the assembled assistant message. This
    is "Tools observed by default — verified, not claimed". *)
 let test_tools_turns_and_interleaving_observed_by_default () =

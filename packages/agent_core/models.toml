@@ -295,7 +295,7 @@ cache_read_multiplier = 1.0
 # tool_choice="required" and a named function tool_choice return HTTP 400.
 # Ref checked 2026-06-30: api-docs.deepseek.com/guides/function_calling and
 # deepseek-ai/DeepSeek-V3 issue #1376. supports_required_tool_choice=false and
-# supports_named_tool_choice=false make OAS reject forced tool_choice (typed
+# supports_named_tool_choice=false make AGENT_CORE reject forced tool_choice (typed
 # Unsupported_required_tool_choice / Unsupported_named_tool_choice) instead of
 # serializing a request the model 400s on. Plain auto still works, so
 # supports_tool_choice stays true (mirrors the Kimi/GLM profiles).
@@ -409,7 +409,7 @@ cache_read_multiplier = 0.02
 # enable_thinking = false was silently dropped at the wire and the reasoning model
 # polluted/emptied the JSON-mode body (librarian "empty response" / "invalid episode
 # JSON"). This entry supersedes the inert MASC runtime.toml [models.minimax-m3.capabilities]
-# block (#21521), which OAS for_model_id never reads.
+# block (#21521), which AGENT_CORE for_model_id never reads.
 # MiniMax-M3 Chat uses thinking.type adaptive|disabled plus reasoning_split=true
 # to expose thinking outside visible content. The Chat schema documents tools but
 # no tool_choice or response_format field, and its interleaved-thinking guide
@@ -1809,7 +1809,7 @@ id_prefix = "kimi-for-coding"
 base = "kimi"
 max_context_tokens = 256000
 # Kimi API parameter docs checked 2026-07-04: K2.7/K2.6/K2.5 use fixed
-# temperature/top_p values and reject non-default overrides. OAS omits caller
+# temperature/top_p values and reject non-default overrides. AGENT_CORE omits caller
 # values instead of sending invalid request fields.
 ignored_sampling_parameters = ["temperature", "top_p"]
 input_per_million = 0.0
@@ -1999,9 +1999,9 @@ output_per_million = 0.0
 
 # NOTE: the former `provider_h_3` (DashScope) qwen3 entry was a dead cipher-era
 # duplicate — brand wire ids ("qwen3*") never matched its `provider_h_3` prefix
-# (RFC-OAS-023 §369), so they resolved to the openai_chat `qwen3` entry below.
+# (Agent Core contract §369), so they resolved to the openai_chat `qwen3` entry below.
 # Removed here to avoid a duplicate `qwen3` id_prefix; the DashScope route stays
-# represented by `dashscope_3`. Proper model×transport split: RFC-OAS-023.
+# represented by `dashscope_3`. Proper model×transport split: Agent Core contract.
 [[models]]
 id_prefix = "dashscope_3"
 base = "dashscope"
@@ -2077,14 +2077,14 @@ supports_native_streaming = true
 supports_top_k = true
 supports_min_p = true
 
-# Serving-contract namespace (RFC-OAS-034 §2 rule 1): the capability set below
+# Serving-contract namespace (Agent Core contract §2 rule 1): the capability set below
 # (MTP, chat_template_kwargs thinking, tools, reasoning) is a function of the
 # serving runtime x model, NOT of where the endpoint is rented. The namespace is
 # named for that contract ("vllm-qwen3-mtp"), not for a hosting provider. A
 # consumer selects it with the explicit pair provider_name = "vllm-qwen3-mtp"
 # and the bare runtime model id. Capability provenance is never inferred from
 # a host such as *.proxy.runpod.net. (Renamed from "runpod_mtp"; RunPod is an
-# opaque transport alias OAS does not classify on.)
+# opaque transport alias AGENT_CORE does not classify on.)
 [[models]]
 id_prefix = "qwen36-35b-a3b-mtp"
 base = "openai_chat"

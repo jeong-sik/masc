@@ -98,7 +98,7 @@ val duplicate_key
     result is passed exactly once to the pure [validate] callback. [Accept]
     terminates the flow; [Reject_and_advance] records opaque evidence and moves
     directly to the predetermined successor without invoking [before_advance].
-    [before_advance] remains reserved for OAS-classified execution failures.
+    [before_advance] remains reserved for AGENT_CORE-classified execution failures.
 
     The outer attempt is affine. A duplicate or concurrent invocation returns
     [Attempt_already_started]. Any exception, including Eio cancellation,

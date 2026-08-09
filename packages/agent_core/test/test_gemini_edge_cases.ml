@@ -150,7 +150,7 @@ let test_sse_function_call () =
   | None -> check "parsed chunk" false
 ;;
 
-(* ── 5. OAS-allocated tool_use_id + roundtrip ── *)
+(* ── 5. AGENT_CORE-allocated tool_use_id + roundtrip ── *)
 let test_tool_use_id_roundtrip () =
   Printf.printf "=== allocated tool_use_id roundtrip ===\n";
   let response_json =

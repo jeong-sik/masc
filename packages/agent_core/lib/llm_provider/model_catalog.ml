@@ -613,7 +613,7 @@ let parse_entry entry_toml =
 
 let%test "parse_entry rejects an unknown/misspelled field, not silently dropped" =
   (* A typo like [suports_tools] must fail closed rather than leave
-     supports_tools at its default with no signal (RFC-OAS-034 silent-swallow). *)
+     supports_tools at its default with no signal (Agent Core contract silent-swallow). *)
   let entry = Otoml.Parser.from_string "id_prefix = \"m\"\nsuports_tools = true" in
   match parse_entry entry with
   | Error _ -> true
@@ -721,7 +721,7 @@ let%test "parse_entry rejects unknown ignored_sampling_parameters" =
 
 let%test "parse_entry rejects an unknown base preset, not silent default" =
   (* An unknown [base] must fail closed here rather than resolve to
-     [default_capabilities] downstream (RFC-OAS-034 §2 rule 4). *)
+     [default_capabilities] downstream (Agent Core contract §2 rule 4). *)
   let entry = Otoml.Parser.from_string "id_prefix = \"m\"\nbase = \"not_a_preset\"" in
   match parse_entry entry with
   | Error _ -> true
@@ -866,7 +866,7 @@ let lookup_for_provider t ~provider_name ~model_id =
     if String.equal canonical requested then None else find_exact canonical
 ;;
 
-(* Row-level catalog merge (RFC-OAS-036). Identity is what lookup keys on:
+(* Row-level catalog merge (Agent Core contract). Identity is what lookup keys on:
    [(provider_name, id_prefix)] for model rows — a bare row and a
    provider-scoped row with the same [id_prefix] are distinct rows — and [id]
    for provider entries, all compared with lookup's normalization. Overlay
@@ -954,7 +954,7 @@ let runtime_override : t option Atomic.t = Atomic.make None
 
 (* Deployment overlay merged onto the embedded catalog by [global]. Kept
    separate from [runtime_override] so a full replacement (tests, explicit
-   OAS_MODEL_CATALOG-style callers) still wins outright, and so the merged
+   AGENT_CORE_MODEL_CATALOG-style callers) still wins outright, and so the merged
    result can be cached and invalidated independently. *)
 let overlay_catalog : t option Atomic.t = Atomic.make None
 

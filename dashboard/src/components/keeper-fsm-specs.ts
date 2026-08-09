@@ -39,7 +39,7 @@ export const TURN_FSM_STATES = [
   'prompting',
   'routing',
   'executing',
-  // UI-side surface for the TLA `awaiting_tool` symbol — the SDK turn
+  // UI-side surface for the TLA `awaiting_tool` symbol — the agent-core turn
   // sits here after invoking a tool until the tool result arrives.
   // `normalizeTurnFsmState` maps the raw `awaiting_tool` backend phase
   // onto this UI state, and `turnFsmTlaSymbol` translates it back.

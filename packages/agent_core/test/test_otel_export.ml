@@ -4,7 +4,7 @@
     via Eio mock network where possible, and unit tests for serialization
     and batch logic. *)
 
-open Agent_sdk
+open Agent_core
 open Otel_export
 
 (* ── Test helpers ────────────────────────────────────────────── *)
@@ -298,7 +298,7 @@ let test_flush_to_collector_exports_metrics () =
     let instance = make_instance ~service_name:"otel-export-metrics" () in
     Otel_tracer.inst_record_metric
       instance
-      ~name:"oas.eval.coverage"
+      ~name:"agent_core.eval.coverage"
       ~value:0.75
       ~metric_type:Otel_tracer.Gauge;
     let config =
@@ -317,7 +317,7 @@ let test_flush_to_collector_exports_metrics () =
       Alcotest.(check bool)
         "body carries metric"
         true
-        (List.exists (body_has_metric "oas.eval.coverage") !bodies)
+        (List.exists (body_has_metric "agent_core.eval.coverage") !bodies)
     | Partial_failure _ -> Alcotest.fail "expected metric export success"
     | Failed { reason } -> Alcotest.failf "expected metric export success: %s" reason)
 ;;

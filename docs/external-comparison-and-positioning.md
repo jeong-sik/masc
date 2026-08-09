@@ -1,6 +1,6 @@
 # External Comparison and Product Positioning
 
-> OAS checklist #7 — MASC product positioning against comparable agent
+> agent core checklist #7 — MASC product positioning against comparable agent
 > frameworks so that design decisions are anchored to explicit tradeoffs
 > rather than implicit comparisons.
 
@@ -52,4 +52,4 @@
 - `docs/spec/04-turn-lifecycle.md` — current turn-level execution contract
 - `lib/keeper/keeper_turn_fsm.mli` — typed FSM states
 - `lib/keeper/keeper_runtime_engine.mli` — runtime routing boundary
-- OAS analysis 2026-05-21 §8 — external comparison checklist origin
+- agent core analysis 2026-05-21 §8 — external comparison checklist origin

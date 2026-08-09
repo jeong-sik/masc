@@ -8,7 +8,7 @@ let run
   ~(meta : Keeper_meta_contract.keeper_meta)
   ~generation
   ~turn
-  ~oas_turn_count
+  ~agent_core_turn_count
   ~actual_tools
   ~librarian_messages
   ~post_turn_t0
@@ -104,14 +104,14 @@ let run
           ; "event", `String "post_turn_eval"
           ; "keeper_name", `String meta.name
           ; "turn", `Int turn
-          ; "oas_turn_count", `Int oas_turn_count
+          ; "agent_core_turn_count", `Int agent_core_turn_count
           ; "used_memory_search", `Bool used_search
           ; "post_turn_ms", `Float post_turn_ms
           ]
           @ (match inference_telemetry with
              | Some t ->
                [ ( "inference_telemetry"
-                 , Keeper_hooks_oas.inference_telemetry_to_runtime_json t )
+                 , Keeper_hooks_agent_core.inference_telemetry_to_runtime_json t )
                ]
              | None -> []))
      in

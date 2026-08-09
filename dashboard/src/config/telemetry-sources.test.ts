@@ -22,8 +22,8 @@ describe('telemetrySourceLabel', () => {
     expect(telemetrySourceLabel('tool_usage')).toBe('Agent 내부 호출')
   })
 
-  it('returns Korean label for oas_event', () => {
-    expect(telemetrySourceLabel('oas_event')).toBe('OAS 이벤트')
+  it('returns Korean label for agent_core_event', () => {
+    expect(telemetrySourceLabel('agent_core_event')).toBe('Agent Core 이벤트')
   })
 
   it('returns Korean label for goal_event', () => {

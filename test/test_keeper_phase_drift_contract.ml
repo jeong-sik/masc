@@ -5,7 +5,7 @@
    cannot silently break KSM.phase_to_string / KSM.phase_of_string round-trip.
    If this test fails after adding a variant, update both functions.
 
-   Also checks that oas Runtime.phase yojson variants are recognized
+   Also checks that agent_core Runtime.phase yojson variants are recognized
    by the masc bridge layer (cross-repo drift detection).
    Reference: specs/AgentLifecycle.tla, specs/AgentCancellation.tla
 *)
@@ -43,12 +43,12 @@ let all_phases_unique () =
   let unique = List.sort_uniq String.compare strings in
   List.length strings = List.length unique
 
-(* ── Cross-repo: oas Runtime.phase recognition ────────────── *)
+(* ── Cross-repo: agent_core Runtime.phase recognition ────────────── *)
 
-(* These strings come from oas Runtime.phase [@@deriving yojson].
-   When oas adds a new phase variant, this list must be updated.
-   Failure here means masc may silently drop events from newer oas. *)
-let oas_runtime_phase_strings =
+(* These strings come from agent_core Runtime.phase [@@deriving yojson].
+   When agent_core adds a new phase variant, this list must be updated.
+   Failure here means masc may silently drop events from newer agent_core. *)
+let agent_core_runtime_phase_strings =
   [ "Bootstrapping"
   ; "Running"
   ; "Waiting_on_workers"
@@ -58,21 +58,21 @@ let oas_runtime_phase_strings =
   ; "Cancelled"
   ]
 
-let oas_runtime_phase_count_is_7 =
-  List.length oas_runtime_phase_strings = 7
+let agent_core_runtime_phase_count_is_7 =
+  List.length agent_core_runtime_phase_strings = 7
 
-let oas_terminal_phases =
+let agent_core_terminal_phases =
   [ "Completed"; "Failed"; "Cancelled" ]
 
-let oas_terminal_count_is_3 =
-  List.length oas_terminal_phases = 3
+let agent_core_terminal_count_is_3 =
+  List.length agent_core_terminal_phases = 3
 
-let oas_terminal_is_subset_of_all () =
-  List.for_all (fun t -> List.mem t oas_runtime_phase_strings) oas_terminal_phases
+let agent_core_terminal_is_subset_of_all () =
+  List.for_all (fun t -> List.mem t agent_core_runtime_phase_strings) agent_core_terminal_phases
 
-(* masc bridge maps oas stop reasons to keeper transitions.
+(* masc bridge maps agent_core stop reasons to keeper transitions.
    This test ensures the mapping surface is documented and complete. *)
-let oas_stop_reason_strings =
+let agent_core_stop_reason_strings =
   [ "completed" ]
 
 let () =
@@ -85,15 +85,15 @@ let () =
         ; Alcotest.test_case "all phase strings are unique" `Quick
           (fun () -> Alcotest.(check bool) "unique" true (all_phases_unique ()))
         ] )
-    ; ( "oas_runtime_phase_contract"
-      , [ Alcotest.test_case "oas Runtime.phase has 7 variants" `Quick (fun () ->
-            Alcotest.(check bool) "7 phases" true oas_runtime_phase_count_is_7)
-        ; Alcotest.test_case "oas terminal phases count is 3" `Quick (fun () ->
-            Alcotest.(check bool) "3 terminal" true oas_terminal_count_is_3)
-        ; Alcotest.test_case "oas terminal phases are subset of all phases" `Quick
-            (fun () -> Alcotest.(check bool) "subset" true (oas_terminal_is_subset_of_all ()))
-        ; Alcotest.test_case "oas stop reason strings documented" `Quick (fun () ->
+    ; ( "agent_core_runtime_phase_contract"
+      , [ Alcotest.test_case "agent_core Runtime.phase has 7 variants" `Quick (fun () ->
+            Alcotest.(check bool) "7 phases" true agent_core_runtime_phase_count_is_7)
+        ; Alcotest.test_case "agent_core terminal phases count is 3" `Quick (fun () ->
+            Alcotest.(check bool) "3 terminal" true agent_core_terminal_count_is_3)
+        ; Alcotest.test_case "agent_core terminal phases are subset of all phases" `Quick
+            (fun () -> Alcotest.(check bool) "subset" true (agent_core_terminal_is_subset_of_all ()))
+        ; Alcotest.test_case "agent_core stop reason strings documented" `Quick (fun () ->
             Alcotest.(check bool) "one lifecycle stop reason" true
-              (List.length oas_stop_reason_strings = 1))
+              (List.length agent_core_stop_reason_strings = 1))
         ] )
     ]

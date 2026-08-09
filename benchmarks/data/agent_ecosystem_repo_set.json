@@ -439,7 +439,7 @@
     "adoption_bucket": "adopt_now",
     "ocaml_status": "usable_but_thin",
     "eio_strategy": "not_applicable",
-    "why_it_matters": "Provides core OpenAPI document modeling that can unify OAS and benchmark schema work in masc.",
+    "why_it_matters": "Provides core OpenAPI document modeling that can unify AGENT_CORE and benchmark schema work in masc.",
     "key_capabilities": [
       "OpenAPI document types",
       "JSON Schema-backed docs",

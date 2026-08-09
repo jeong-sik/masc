@@ -34,7 +34,7 @@ type pending
     [tool_use_id], which is stable across the cut. *)
 
 type plan_result =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
         (** [messages] with each planned demotion replaced by a saturating
             placeholder marker. Physically the input list when nothing was
             planned. *)
@@ -42,9 +42,9 @@ type plan_result =
   }
 
 val plan
-  :  measure_message_bytes:(Agent_sdk.Types.message -> int)
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
   -> demote_before:int
-  -> Agent_sdk.Types.message list
+  -> Agent_core.Types.message list
   -> plan_result
 (** Choose demotions and substitute upper-bound placeholders. Pure: no I/O or
     hashing. The byte budget stays in the cut; this function receives only the
@@ -57,7 +57,7 @@ val plan
       never serializes [content], so replacing [content] would free nothing
       while this function credited a reduction — an under-estimate, the
       direction that lets a materialized request exceed the cap.
-    - {!Tool_output.decode_from_oas} reports [Not_marker]. [Decoded] is already
+    - {!Tool_output.decode_from_agent_core} reports [Not_marker]. [Decoded] is already
       demoted; [Invalid_marker] is marker-shaped content that failed to parse
       and is left exactly as-is rather than being stored as a blob, which would
       make a corrupt payload content-addressed and permanent.
@@ -69,7 +69,7 @@ val plan
     - the placeholder measures strictly smaller than the message does now.
       This replaces a size threshold: the encoded marker runs from about 125
       bytes to 1,154 depending on the preview's bytes, because
-      {!Tool_output.encode_for_oas} escapes the preview and the JSON encoder
+      {!Tool_output.encode_for_agent_core} escapes the preview and the JSON encoder
       escapes it again, so any fixed floor is wrong for one of the two ends.
 
     [measure_message_bytes] must be the encoder the window will use. The bound
@@ -77,7 +77,7 @@ val plan
     by restating the marker's format here. *)
 
 type materialize_outcome =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
   ; reverted : int
         (** Planned demotions whose blob write failed and whose body was
             restored. Non-zero means the list is larger than the plan the cut
@@ -87,7 +87,7 @@ type materialize_outcome =
 val materialize
   :  store:Tool_blob_store.t
   -> pending:pending list
-  -> Agent_sdk.Types.message list
+  -> Agent_core.Types.message list
   -> materialize_outcome
 (** Store the bodies of the demotions still present in [messages] and swap
     their placeholders for real markers. Demotions the cut removed are not

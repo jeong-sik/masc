@@ -60,7 +60,7 @@ let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
               snapshot.tool_audit_at )
         | None ->
             (* Use per-keeper tool tracking as last-resort fallback *)
-            let tracked = Keeper_tools_oas.tool_usage_for_keeper agent_name in
+            let tracked = Keeper_tools_agent_core.tool_usage_for_keeper agent_name in
             if tracked <> [] then
               let names = List.map fst tracked in
               let total = List.fold_left (fun acc (_, e) -> acc + e.Keeper_types.count) 0 tracked in

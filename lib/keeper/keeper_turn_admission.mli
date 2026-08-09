@@ -167,7 +167,7 @@ val chat_waiting : base_path:string -> keeper_name:string -> bool
 (** [true] when at least one chat request is parked on this keeper's slot
     (waiting in [run_serialized] for an in-flight turn to release). Read
     under the slot's state mutex; [false] for an unknown keeper (no slot,
-    hence no waiters). The autonomous lane feeds this into the OAS agent
+    hence no waiters). The autonomous lane feeds this into the AGENT_CORE agent
     loop's exit condition: an idle-filler turn that observes a parked chat
     stops at the next turn boundary so the slot releases and the chat admits
     via direct handoff, instead of the chat starving behind the autonomous

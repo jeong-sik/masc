@@ -19,7 +19,7 @@ code_refs:
 Workspace is the durable collaboration boundary for Keepers. It owns typed
 identity and storage for Keeper, Task, Goal, Board, Channel, Connector, Job,
 Gate, Fusion, and their correlations. It does not own provider/model execution;
-MASC calls OAS for that boundary and OAS does not import MASC concepts.
+MASC calls agent core for that boundary and agent core does not import MASC concepts.
 
 Every path is resolved from the caller's `BasePath`. A repository, connector,
 credential, vendor, or command name is data supplied through a registered

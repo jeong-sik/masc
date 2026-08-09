@@ -102,9 +102,9 @@
       "errors_per_min": 24.9,
       "warnings_per_min": 28.8,
       "clusters_new": [],
-      "clusters_recovered": ["F (D sub-variant: 201, 13h)", "required_tool_contract_violation (181)", "oas_timeout_budget (59)", "alive-but-stuck (10)"],
+      "clusters_recovered": ["F (D sub-variant: 201, 13h)", "required_tool_contract_violation (181)", "agent_core_timeout_budget (59)", "alive-but-stuck (10)"],
       "clusters": {
-        "A": {"issue": "#15526", "name": "cascade providers unavailable", "rate": "5.16/min", "status": "decelerating. 3-axis failure modes confirmed: cascade_exhausted, oas_timeout_budget, required_tool_contract_violation. 178min, 0 recovery, 0 success. alive-but-stuck detected."},
+        "A": {"issue": "#15526", "name": "cascade providers unavailable", "rate": "5.16/min", "status": "decelerating. 3-axis failure modes confirmed: cascade_exhausted, agent_core_timeout_budget, required_tool_contract_violation. 178min, 0 recovery, 0 success. alive-but-stuck detected."},
         "B": {"issue": "#15527", "name": "keeper_bash Path syntax blocked", "rate": "1.2/min", "status": "decelerating. keeper-pause effect, structural fix 0."},
         "D": {"issue": "#15529", "name": "sandbox cwd/config missing", "rate": null, "status": "sub-variant F recovered: multi-sandbox repos. F: 13h/201 missed."},
         "E": {"issue": "#15530", "name": "decisions.jsonl missing_success_model", "rate": null, "status": "stopped (51min+ quiet)"}
@@ -112,7 +112,7 @@
       "recovery_count": 0,
       "success_count": 0,
       "cascade_dead": 3,
-      "key_finding": "First stem normalization (4 patterns recovered: F:201, required_tool:181, oas_timeout:59, alive-but-stuck:10). A identified as 3-axis failure. D sub-variant F (multi-sandbox) recovered."
+      "key_finding": "First stem normalization (4 patterns recovered: F:201, required_tool:181, agent_core_timeout:59, alive-but-stuck:10). A identified as 3-axis failure. D sub-variant F (multi-sandbox) recovered."
     },
 
     {
@@ -294,7 +294,7 @@
       "total_recovery": 157,
       "total_success": 0,
       "cascade_dead_count": 6,
-      "root_cause_hypothesis": "Single upstream SPOF + cooldown 1-way street. 3-axis failure: cascade_exhausted, oas_timeout_budget, required_tool_contract_violation.",
+      "root_cause_hypothesis": "Single upstream SPOF + cooldown 1-way street. 3-axis failure: cascade_exhausted, agent_core_timeout_budget, required_tool_contract_violation.",
       "behaviors_observed": ["pause cycle bistable", "coupled oscillator with recovery", "fiber storm (iter 6, 13)", "back-off cycle", "strike escalation"]
     },
     "#15527": {

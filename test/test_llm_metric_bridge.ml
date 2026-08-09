@@ -106,7 +106,7 @@ let test_metric_store_registers_otel_source_once () =
     true
     (Metrics.otel_source_registered_for_test ())
 
-let test_sink_records_oas_callbacks () =
+let test_sink_records_agent_core_callbacks () =
   let sink : Llm_provider.Metrics.t = Bridge.make_sink () in
   let model_id = Printf.sprintf "bridge-test-model-%d" (Unix.getpid ()) in
   let provider = "bridge-test-provider" in
@@ -770,8 +770,8 @@ let () =
             test_metric_store_exports_otel_samples;
           Alcotest.test_case "metric store registers OTel source once" `Quick
             test_metric_store_registers_otel_source_once;
-          Alcotest.test_case "sink records OAS callbacks" `Quick
-            test_sink_records_oas_callbacks;
+          Alcotest.test_case "sink records AGENT_CORE callbacks" `Quick
+            test_sink_records_agent_core_callbacks;
           Alcotest.test_case "streaming metrics ignore invalid ms" `Quick
             test_streaming_metrics_ignore_invalid_ms;
           Alcotest.test_case

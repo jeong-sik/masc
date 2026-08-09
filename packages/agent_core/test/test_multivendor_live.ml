@@ -30,7 +30,7 @@
       dune exec --root . test/test_multivendor_live.exe *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 let skip_note label reason = Printf.printf "  [SKIP] %s — %s\n%!" label reason
 let min_transcript = [ "turn_started"; "turn_completed" ]

@@ -17,7 +17,7 @@
 
 import { signal } from '@preact/signals'
 import { lastEvent, normalizeSSEDispatchType } from './sse'
-import { parseOasPayload } from './schemas/sse-event-payload'
+import { parseAgentCorePayload } from './schemas/sse-event-payload'
 import { persistentSignal } from './lib/persistent-signal'
 import { assertExhaustive } from './lib/exhaustive'
 import { errorToString } from './lib/format-string'
@@ -31,20 +31,20 @@ export type NotifyEventKind =
   | 'keeper_guardrail'
   | 'keeper_handoff'
   | 'approval:pending'
-  | 'oas:agent_failed'
+  | 'agent_core:agent_failed'
 
 export const NOTIFY_EVENT_KINDS: readonly NotifyEventKind[] = [
   'keeper_guardrail',
   'keeper_handoff',
   'approval:pending',
-  'oas:agent_failed',
+  'agent_core:agent_failed',
 ]
 
 export const NOTIFY_EVENT_LABELS: Record<NotifyEventKind, string> = {
   keeper_guardrail: 'Keeper guardrail triggered',
   keeper_handoff: 'Keeper handoff',
   'approval:pending': 'HITL approval pending',
-  'oas:agent_failed': 'OAS agent run failed',
+  'agent_core:agent_failed': 'Agent Core agent run failed',
 }
 
 function toNotifyEventKind(rawType: string): NotifyEventKind | null {
@@ -53,7 +53,7 @@ function toNotifyEventKind(rawType: string): NotifyEventKind | null {
     case 'keeper_guardrail':
     case 'keeper_handoff':
     case 'approval:pending':
-    case 'oas:agent_failed':
+    case 'agent_core:agent_failed':
       return type
     default:
       return null
@@ -115,7 +115,7 @@ const DEFAULT_NOTIFY_RULES: Record<NotifyEventKind, boolean> = {
   keeper_guardrail: true,
   keeper_handoff: true,
   'approval:pending': true,
-  'oas:agent_failed': true,
+  'agent_core:agent_failed': true,
 }
 
 function decodeNotifyRules(raw: string): Record<NotifyEventKind, boolean> {
@@ -137,10 +137,10 @@ function decodeNotifyRules(raw: string): Record<NotifyEventKind, boolean> {
       typeof record['approval:pending'] === 'boolean'
         ? record['approval:pending']
         : DEFAULT_NOTIFY_RULES['approval:pending'],
-    'oas:agent_failed':
-      typeof record['oas:agent_failed'] === 'boolean'
-        ? record['oas:agent_failed']
-        : DEFAULT_NOTIFY_RULES['oas:agent_failed'],
+    'agent_core:agent_failed':
+      typeof record['agent_core:agent_failed'] === 'boolean'
+        ? record['agent_core:agent_failed']
+        : DEFAULT_NOTIFY_RULES['agent_core:agent_failed'],
   }
 }
 
@@ -174,17 +174,17 @@ function keeperIdentity(event: SSEEvent): string {
 }
 
 function describeAgentFailed(event: SSEEvent): NotifyContent {
-  const parsed = parseOasPayload('oas:agent_failed', event.payload)
+  const parsed = parseAgentCorePayload('agent_core:agent_failed', event.payload)
   if (!parsed.success || parsed.data.kind !== 'agent_failed') {
     return {
-      title: NOTIFY_EVENT_LABELS['oas:agent_failed'],
-      body: 'An OAS agent run failed (payload did not match the typed schema).',
-      identity: event.agent ?? 'oas-agent',
+      title: NOTIFY_EVENT_LABELS['agent_core:agent_failed'],
+      body: 'An Agent Core agent run failed (payload did not match the typed schema).',
+      identity: event.agent ?? 'agent-core-agent',
     }
   }
   const { agent_name, task_id, error } = parsed.data.payload
   return {
-    title: NOTIFY_EVENT_LABELS['oas:agent_failed'],
+    title: NOTIFY_EVENT_LABELS['agent_core:agent_failed'],
     body: `${agent_name}${task_id ? ` · ${task_id}` : ''}${error ? `: ${error}` : ''}`,
     identity: agent_name,
   }
@@ -210,7 +210,7 @@ function describeNotifyEvent(kind: NotifyEventKind, event: SSEEvent): NotifyCont
         body: 'A human approval is waiting for review.',
         identity: 'approvals',
       }
-    case 'oas:agent_failed':
+    case 'agent_core:agent_failed':
       return describeAgentFailed(event)
     default:
       return assertExhaustive(kind, 'NotifyEventKind')

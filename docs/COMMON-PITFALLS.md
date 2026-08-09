@@ -153,13 +153,13 @@ let _ = drain_turn_event_bus ~site:"background_poll" () in
 
 ## 6. Version String Drift (2 occurrences)
 
-`dune-project` version and `sdk_version.ml` (or equivalent) must match.
+`dune-project` version and `packages/agent_core/lib/version.ml` must match.
 CI checks this — but fix it before pushing.
 
 ```bash
 # Check
 grep '(version' dune-project | head -1
-grep 'let version' lib/sdk_version.ml
+grep 'let version' packages/agent_core/lib/version.ml
 ```
 
 ## 7. Prompt Changes Need Checkpoint Reset
@@ -493,7 +493,7 @@ bash scripts/validate-keeper-fsm-graph.sh
 | Pitfall Section | Related ADR | Key Takeaway |
 |----------------|-------------|--------------|
 | #8 Feature Flag Registry Duplicates | [ADR-003: Feature Flag Registry Management](ADR-003-FEATURE-FLAG-REGISTRY-MANAGEMENT.md) | Registry는 SSOT, env_name은 전역 고유, concurrent merge는 semantic validation 필요 |
-| Context handoff pattern | Keeper/OAS checkpoint and handoff docs | Historical mitosis runtime and ADR were removed. Context transfer now uses Relay/Handoff plus keeper/OAS checkpoint paths |
+| Context handoff pattern | Keeper/agent core checkpoint and handoff docs | Historical mitosis runtime and ADR were removed. Context transfer now uses Relay/Handoff plus keeper/agent core checkpoint paths |
 | Dashboard Control Surface | [ADR-002: Dashboard Operator Control Surface](ADR-002-DASHBOARD-OPERATOR-CONTROL-SURFACE.md) | `masc_operator_*` quartet가 canonical, generic tool executor는 admin-only |
 
 **Why ADRs?**

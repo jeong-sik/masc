@@ -167,7 +167,7 @@ if [[ "$duplicate_hits" -ne 0 && "$DUPLICATE_POLICY" == "fail" ]]; then
 fi
 
 # Guard: detect Request_priority type erasure (priority : () or ~priority:())
-# See #4186 — a bulk rewrite once replaced Request_priority.t with () across OAS files.
+# See #4186 — a bulk rewrite once replaced Request_priority.t with () across AGENT_CORE files.
 priority_erasure=0
 while IFS= read -r line; do
   echo "::error title=Priority type erasure::Added line matches erased priority pattern: ${line}"

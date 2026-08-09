@@ -128,8 +128,6 @@ jobs:
           # got a chance to run. Two visible failures from that gap this week:
           # - masc #15531 (Tool_args / Tool_result sub-lib extract) merged
           #   main in a non-building state; recovered by #15540.
-          # - oas #1596 (turn_ready_tool_names signature narrow) — same shape,
-          #   recovered by oas #1599.
           # Running heavy CI on draft PRs costs minutes but catches both
           # classes of regression *before* the admin-merge decision instead
           # of after, when the only remaining lever is fix-forward.
@@ -314,7 +312,7 @@ jobs:
             tla=true
           fi
 
-          if has_match '^(packages/agent_core/|lib/keeper/keeper_event_bridge\.ml$|test/test_keeper_execution_join\.ml$|test/test_keeper_hooks_oas_introspection\.ml$|dune-project$|.*\.opam$|masc\.opam\.locked$)'; then
+          if has_match '^(packages/agent_core/|lib/keeper/keeper_event_bridge\.ml$|test/test_keeper_execution_join\.ml$|test/test_keeper_hooks_agent_core_introspection\.ml$|dune-project$|.*\.opam$|masc\.opam\.locked$)'; then
             agent_core=true
           fi
 
@@ -925,7 +923,7 @@ jobs:
             @test/runtest-test_mcp_h1_h2_admission_parity \
             @test/runtest-test_masc_dirname_ssot \
             @test/runtest-test_nickname_words_ssot \
-            @test/runtest-test_oas_message_constructor_contract \
+            @test/runtest-test_agent_core_message_constructor_contract \
             @test/runtest-test_otel_port_ssot \
             @test/runtest-test_prompt_asset_sync \
             @test/runtest-test_prompt_registry_defaults \

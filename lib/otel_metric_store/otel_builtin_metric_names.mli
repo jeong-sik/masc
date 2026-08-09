@@ -48,7 +48,7 @@ val metric_telemetry_observe_failures : string
     durable-ledger attrition. *)
 val metric_workspace_telemetry_drop : string
 
-include module type of Otel_oas_metric_names
+include module type of Otel_agent_core_metric_names
 
 include module type of Otel_runtime_metric_names
 
@@ -77,7 +77,7 @@ include module type of Otel_policy_metric_names
 (** Total supervisor restart outcomes. Labels:
     [keeper, outcome]. Outcome is one of [started | meta_unavailable]. *)
 
-val metric_oas_bus_capacity : string
+val metric_agent_core_bus_capacity : string
 (** Gauge: total queue capacity for live subscribers grouped by
     [bus], [purpose], [capacity], and [overflow]. *)
 
@@ -105,16 +105,16 @@ include module type of Otel_identity_metric_names
 
 include module type of Otel_transport_metric_names
 
-(** [masc_keeper_oas_run_timeout_total] counter incremented in the
+(** [masc_keeper_agent_core_run_timeout_total] counter incremented in the
     runtime FSM each time an [Agent.run] / [run_stream] returns
     [Llm_provider.Retry.Timeout]. The [source] label is typed provider
-    timeout phase when OAS exposes one, otherwise [provider]. Free-form
+    timeout phase when AGENT_CORE exposes one, otherwise [provider]. Free-form
     timeout messages are not reparsed into [max_execution_time] labels.
 
     Labels: runtime, provider, source. *)
 (* Centralized metric constants for inline string replacement. *)
 
-(** Counter incremented when an OAS after-turn response is accepted but
+(** Counter incremented when an AGENT_CORE after-turn response is accepted but
     its response model field is empty. This tracks malformed or partial
     provider response metadata. *)
 val metric_after_turn_response_model_empty : string

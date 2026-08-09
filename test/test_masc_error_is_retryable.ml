@@ -3,7 +3,7 @@
     Audit-driven addition (2026-04-29 Implementation Quality
     Audit §"Re-tryability"): MASC was missing an
     [is_retryable] predicate on its [masc_error] sum, so callers
-    fell back on an OAS-only helper.  This suite locks the
+    fell back on an AGENT_CORE-only helper.  This suite locks the
     classification so future variant additions force a deliberate
     "retryable or not" decision.
 

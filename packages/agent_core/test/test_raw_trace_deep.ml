@@ -11,13 +11,13 @@
     - create (which exercises ensure_dir internally)
     - Error paths: bad JSON, unknown record_type *)
 
-open Agent_sdk
+open Agent_core
 
 let tmpdir () =
   let dir =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "oas_raw_trace_test_%d_%d" (Unix.getpid ()) (Random.int 0xFFFF))
+      (Printf.sprintf "agent_core_raw_trace_test_%d_%d" (Unix.getpid ()) (Random.int 0xFFFF))
   in
   Unix.mkdir dir 0o755;
   dir
@@ -147,7 +147,7 @@ let mk_record
   ; record_type
   ; prompt
   ; model = Some "glm-5.1"
-  ; tool_choice = Some (Agent_sdk.Types.tool_choice_to_json Agent_sdk.Types.Any)
+  ; tool_choice = Some (Agent_core.Types.tool_choice_to_json Agent_core.Types.Any)
   ; enable_thinking = Some false
   ; preserve_thinking = None
   ; thinking_budget = Some 2048
@@ -381,7 +381,7 @@ let test_read_all_with_records () =
 ;;
 
 let test_read_all_nonexistent_file () =
-  match Raw_trace.read_all ~path:"/tmp/nonexistent_oas_test_file.jsonl" () with
+  match Raw_trace.read_all ~path:"/tmp/nonexistent_agent_core_test_file.jsonl" () with
   | Ok records -> Alcotest.(check int) "empty for missing file" 0 (List.length records)
   | Error _ -> Alcotest.fail "read_all should return Ok [] for missing file"
 ;;
@@ -418,7 +418,7 @@ let test_record_json_all_fields_populated () =
     ; prompt = Some "test prompt"
     ; model = Some "glm-5.1"
     ; tool_choice =
-        Some (Agent_sdk.Types.tool_choice_to_json (Agent_sdk.Types.Tool "complex_tool"))
+        Some (Agent_core.Types.tool_choice_to_json (Agent_core.Types.Tool "complex_tool"))
     ; enable_thinking = Some true
     ; preserve_thinking = Some true
     ; thinking_budget = Some 8192

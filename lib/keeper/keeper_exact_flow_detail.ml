@@ -1,4 +1,4 @@
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 
 (* [Flow_exact_execution_failed] is the branch that carries the provider's own
    verdict. The typed cause alone ("completion failed") says nothing about
@@ -18,7 +18,7 @@ let execution_cause_detail : Exact_output.execution_error_cause -> string = func
   | Internal_non_json_output -> "internal non-json output"
 ;;
 
-(* [flow_evidence] is a private SDK type with no constructor outside the SDK,
+(* [flow_evidence] is a private agent-core type with no constructor outside agent core,
    so the assembled line cannot be built in a test. The part that decides what
    the line says is split out here, where it can. That gap is why the label
    collapse below survived: the leaf renderer [execution_cause_detail] was
@@ -80,7 +80,7 @@ let optional_tokens = function
 (* A capacity refusal happens before any request leaves this process, and the
    receipt carries the typed reason with its token arithmetic. Discarding it
    is what makes a local capacity refusal indistinguishable from a provider
-   outage in the durable row. Matched exhaustively so that a new OAS
+   outage in the durable row. Matched exhaustively so that a new AGENT_CORE
    disposition is a compile error here rather than an unexplained failure
    label in production. *)
 let rec capacity_disposition_detail : Exact_output.input_capacity_disposition -> string

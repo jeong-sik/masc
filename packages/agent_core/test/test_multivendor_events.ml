@@ -1,9 +1,9 @@
 (** Multi-vendor Event_bus taxonomy invariants.
 
-    Every provider OAS supports — Anthropic, Openai (+ compatibles),
+    Every provider AGENT_CORE supports — Anthropic, Openai (+ compatibles),
     Gemini, Glm, Openrouter, llama.cpp, Ollama, vLLM, LM Studio, etc. —
     produces the same native Event_bus payload variants when running
-    through OAS.  This test encodes the taxonomy invariants so any
+    through AGENT_CORE.  This test encodes the taxonomy invariants so any
     refactor that changes the public surface breaks the build here
     instead of silently diverging between providers.
 
@@ -23,7 +23,7 @@
     emerges. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 (* Canonical Types values used for payload construction *)
 let stub_api_response : Types.api_response =
@@ -285,14 +285,14 @@ let test_golden_lifecycle_transcript () =
 (* ── Reserved Custom namespace grammar ────────────────────────── *)
 
 let test_reserved_namespace_grammar () =
-  (* runtime.*, durable.*, provider.*, oas.* are reserved per catalog.
+  (* runtime.*, durable.*, provider.*, agent_core.* are reserved per catalog.
      Any well-formed Custom name uses '.'-separated lowercase segments. *)
   let ok_names =
     [ "runtime.session_started"
     ; "durable.tool_called"
     ; "provider.anthropic.cache_hit"
     ; "provider.ollama.slot_busy"
-    ; "oas.future"
+    ; "agent_core.future"
     ; "myext.subsystem.event"
     ]
   in

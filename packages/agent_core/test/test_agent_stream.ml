@@ -3,7 +3,7 @@
     Llm_provider.Streaming.emit_synthetic_events for various api_response
     shapes. *)
 
-open Agent_sdk
+open Agent_core
 
 (* ------------------------------------------------------------------ *)
 (* Helpers                                                              *)

@@ -45,7 +45,7 @@ let test_unknown_label_is_none () =
     [ ""; "completed"; "checkpoint"; "Visible_reply"; "VISIBLE_REPLY" ]
 
 let test_of_stop_reason () =
-  let request : Agent_sdk.Error.input_required =
+  let request : Agent_core.Error.input_required =
     { request_id = "outcome-input-1"
     ; participant_name = None
     ; question = "Which repository?"
@@ -185,15 +185,15 @@ let test_terminal_effect_defer_kinds_remain_distinct () =
          | Runtime_agent.Repeated_tool_call _ -> "repeated_tool_call"
          | Runtime_agent.Terminal_tool_completed -> "terminal_tool_completed")
     | Ok Runtime_agent.Continue -> fail (label ^ " unexpectedly continued")
-    | Error error -> fail (label ^ ": " ^ Agent_sdk.Error.to_string error)
+    | Error error -> fail (label ^ ": " ^ Agent_core.Error.to_string error)
   in
   expect_yield
     "generic deferred tool preserves existing checkpoint"
-    Masc.Keeper_tools_oas.Deferred_tool_result
+    Masc.Keeper_tools_agent_core.Deferred_tool_result
     "durable_stimulus_waiting";
   expect_yield
     "typed external effect uses Gate acknowledgement path"
-    Masc.Keeper_tools_oas.External_effect_deferred
+    Masc.Keeper_tools_agent_core.External_effect_deferred
     "external_effect_deferred"
 
 let tool_call ?(input = Some "input") ?(output = Some "output") tool_name
@@ -297,7 +297,7 @@ let test_autonomous_yield_boundary_contract () =
 
 let test_terminal_effect_handler_contract () =
   let is_terminal =
-    Masc.Keeper_tools_oas_bundle.For_testing.is_terminal_effect_handler
+    Masc.Keeper_tools_agent_core_bundle.For_testing.is_terminal_effect_handler
   in
   check bool "surface post is a terminal effect" true
     (is_terminal Masc.Keeper_tool_descriptor.Tool_surface_post);
@@ -308,7 +308,7 @@ let test_terminal_effect_handler_contract () =
 
 let test_terminal_externalization_failure_contract () =
   let classify =
-    Masc.Keeper_tools_oas_bundle.For_testing.terminal_externalization_failure
+    Masc.Keeper_tools_agent_core_bundle.For_testing.terminal_externalization_failure
   in
   let error : Masc.Tool_bridge.externalization_error =
     { kind = Masc.Tool_bridge.Artifact_storage_failure
@@ -319,17 +319,17 @@ let test_terminal_externalization_failure_contract () =
     (fun state ->
        check bool "non-completed state remains authoritative" true
          (Option.is_none (classify state error)))
-    [ Masc.Keeper_tools_oas.Terminal_effect_open
-    ; Masc.Keeper_tools_oas.Deferred_tool_result
-    ; Masc.Keeper_tools_oas.External_effect_deferred
-    ; Masc.Keeper_tools_oas.Terminal_effect_failed
+    [ Masc.Keeper_tools_agent_core.Terminal_effect_open
+    ; Masc.Keeper_tools_agent_core.Deferred_tool_result
+    ; Masc.Keeper_tools_agent_core.External_effect_deferred
+    ; Masc.Keeper_tools_agent_core.Terminal_effect_failed
         { failure_class = Tool_result.Workflow_rejection
         ; effect_disposition = Tool_result.Proven_pre_effect
         ; diagnostic = "original failure"
         }
     ];
   match
-    classify Masc.Keeper_tools_oas.Terminal_effect_completed error
+    classify Masc.Keeper_tools_agent_core.Terminal_effect_completed error
   with
   | Some
       { failure_class = Tool_result.Runtime_failure

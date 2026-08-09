@@ -115,7 +115,7 @@ let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
     ?provider ?provider_kind ?usage_trust ?(usage_anomaly_reasons=[])
     ?(cost_usd=0.01) ?(tools_used=[]) () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ?identity_seed ~model ~ts ()
   in
   let extra_telemetry_fields =
@@ -157,7 +157,7 @@ let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=
       ("model_used", `String model);
       ("outcome", `String "success");
       ("turn_count", `Int 1);
-      ("oas_turn_ordinal", `Int oas_turn_ordinal);
+      ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
       ("usage_reported", `Bool true);
       ("telemetry_reported", `Bool true);
       ("tokens_per_second", `Float (Float.of_int output_tokens /. (Float.of_int latency_ms /. 1000.0)));
@@ -175,7 +175,7 @@ let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=
 let cost_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ?(latency_ms=500) ?tokens_per_second ?provider
     ?(provider_kind="ollama") () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ?identity_seed ~model ~ts ()
   in
   let tok_fields =
@@ -201,7 +201,7 @@ let cost_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ("source", `String "auto_trajectory");
     ("trace_id", `String trace_id);
     ("keeper_turn_id", `Int keeper_turn_id);
-    ("oas_turn_ordinal", `Int oas_turn_ordinal);
+    ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
     ("request_latency_ms", `Int latency_ms);
   ] @ provider_fields @ tok_fields)
 
@@ -227,11 +227,11 @@ let error_entry ~runtime_id ~ts ?provider () =
 let success_entry_without_usage ~model ~ts ?provider
     ?(telemetry_reported = false)
     ?(coverage_reason = "missing_usage_and_inference")
-    ?(coverage_stage = "oas")
+    ?(coverage_stage = "agent_core")
     ?turn_lane
     ?stop_reason
     () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model ~ts ()
   in
   let extra_fields =
@@ -264,13 +264,13 @@ let success_entry_without_usage ~model ~ts ?provider
       ("model_used", `String model);
       ("outcome", `String "success");
       ("turn_count", `Int 1);
-      ("oas_turn_ordinal", `Int oas_turn_ordinal);
+      ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
       ("fallback_applied", `Bool false);
     ] @ extra_fields @ diag_fields));
   ]
 
 let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model:runtime_id ~ts ()
   in
   `Assoc [
@@ -286,25 +286,25 @@ let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
         ("runtime_id", `String runtime_id);
         ("outcome", `String "success");
         ("turn_count", `Int 1);
-        ("oas_turn_ordinal", `Int oas_turn_ordinal);
+        ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
         ("stop_reason", `String "completed");
         ("usage_reported", `Bool false);
         ("telemetry_reported", `Bool false);
-        ("coverage_stage", `String "oas");
+        ("coverage_stage", `String "agent_core");
         ("coverage_reason", `String "missing_usage_and_inference");
         ("fallback_applied", `Bool false);
       ] );
   ]
 
 let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model:runtime_id ~ts ()
   in
   let identity_fields =
     if String.equal outcome "success"
     then
       [ "turn_count", `Int 1
-      ; "oas_turn_ordinal", `Int oas_turn_ordinal
+      ; "agent_core_turn_ordinal", `Int agent_core_turn_ordinal
       ]
     else []
   in
@@ -329,7 +329,7 @@ let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
         ("usage_reported", `Bool false);
         ("telemetry_reported", `Bool false);
         ( "coverage_stage",
-          `String (if String.equal outcome "error" then "unknown" else "oas") );
+          `String (if String.equal outcome "error" then "unknown" else "agent_core") );
         ( "coverage_reason",
           `String
             (if String.equal outcome "error"
@@ -350,7 +350,7 @@ let check_hw_decode_field ~name json expected =
 
 let test_hw_decode_parser_reads_current_field () =
   let ts = now_unix () in
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model:"model" ~ts ()
   in
   let row key =
@@ -365,7 +365,7 @@ let test_hw_decode_parser_reads_current_field () =
             [ "model_used", `String "model"
             ; "outcome", `String "success"
             ; "turn_count", `Int 1
-            ; "oas_turn_ordinal", `Int oas_turn_ordinal
+            ; "agent_core_turn_ordinal", `Int agent_core_turn_ordinal
             ; "usage_reported", `Bool false
             ; "telemetry_reported", `Bool true
             ; "fallback_applied", `Bool false
@@ -776,7 +776,7 @@ let test_coverage_diagnostics_survive_aggregation () =
       (Some "missing_usage_and_inference")
       s.primary_coverage_reason;
     check (option string) "primary coverage stage"
-      (Some "oas")
+      (Some "agent_core")
       s.primary_coverage_stage;
     check int "coverage reason counts" 1 (List.length s.coverage_reason_counts);
     let recent = List.hd s.recent_entries in
@@ -795,7 +795,7 @@ let test_coverage_diagnostics_survive_aggregation () =
       (Some "missing_usage_and_inference")
       recent.re_coverage_reason;
     check (option string) "recent coverage stage"
-      (Some "oas")
+      (Some "agent_core")
       recent.re_coverage_stage;
     let json = M.to_json agg in
     let open Yojson.Safe.Util in
@@ -810,7 +810,7 @@ let test_coverage_diagnostics_survive_aggregation () =
       "missing_usage_and_inference"
       (m |> member "primary_coverage_reason" |> to_string);
     check string "json primary coverage stage"
-      "oas"
+      "agent_core"
       (m |> member "primary_coverage_stage" |> to_string);
     let reason_counts = m |> member "coverage_reason_counts" |> to_list in
     check int "json reason count length" 1 (List.length reason_counts);
@@ -820,7 +820,7 @@ let test_coverage_diagnostics_survive_aggregation () =
     let recent_json = m |> member "recent_entries" |> to_list |> List.hd in
     check string "recent json outcome" "success"
       (recent_json |> member "outcome" |> to_string);
-    check string "recent json stage" "oas"
+    check string "recent json stage" "agent_core"
       (recent_json |> member "coverage_stage" |> to_string))
 
 let test_success_without_model_uses_runtime_attribution () =
@@ -1171,7 +1171,7 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
     let path = make_keeper_dir base "cost_latency_missing" in
     let ts = now_unix () in
     let row_ts = ts -. 10.0 in
-    let trace_id, keeper_turn_id, oas_turn_ordinal =
+    let trace_id, keeper_turn_id, agent_core_turn_ordinal =
       inference_identity_values ~model:"unlatenced-model" ~ts:row_ts ()
     in
     write_decisions path [
@@ -1185,7 +1185,7 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
           ("model_used", `String "unlatenced-model");
           ("outcome", `String "success");
           ("turn_count", `Int 1);
-          ("oas_turn_ordinal", `Int oas_turn_ordinal);
+          ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
           ("usage_reported", `Bool true);
           ("telemetry_reported", `Bool false);
           ("provider", `String "local");
@@ -1212,7 +1212,7 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
 (* ── thinking_fraction tests ─────────────────────── *)
 
 let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model ~ts ()
   in
   let thinking_field = match thinking_enabled with
@@ -1229,7 +1229,7 @@ let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
       ("model_used", `String model);
       ("outcome", `String "success");
       ("turn_count", `Int 1);
-      ("oas_turn_ordinal", `Int oas_turn_ordinal);
+      ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
       ("usage_reported", `Bool true);
       ("telemetry_reported", `Bool true);
       ("tokens_per_second", `Float 10.0);
@@ -1310,7 +1310,7 @@ let test_thinking_fraction_json_serialization () =
 (* ── Bucket tests ───────────────────────────────── *)
 
 let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model ~ts ()
   in
   `Assoc [
@@ -1323,7 +1323,7 @@ let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
       ("model_used", `String model);
       ("outcome", `String "success");
       ("turn_count", `Int 1);
-      ("oas_turn_ordinal", `Int oas_turn_ordinal);
+      ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
       ("usage_reported", `Bool true);
       ("telemetry_reported", `Bool true);
       ("tokens_per_second", `Float 10.0);

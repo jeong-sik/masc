@@ -191,10 +191,10 @@ def matching_receipt_rows(
     trace = first_row_value(rows, "trace_id")
     generation = first_row_value(rows, "generation")
     keeper_turn = first_row_value(rows, "keeper_turn_id")
-    oas_turn_counts = {
-        row.get("oas_turn_count")
+    agent_core_turn_counts = {
+        row.get("agent_core_turn_count")
         for row in event_rows(rows, "receipt_appended")
-        if isinstance(row.get("oas_turn_count"), int)
+        if isinstance(row.get("agent_core_turn_count"), int)
     }
     matched: list[dict[str, Any]] = []
     seen_paths: set[Path] = set()
@@ -214,8 +214,8 @@ def matching_receipt_rows(
             if not same_optional_value(generation, receipt_row.get("generation")):
                 continue
             receipt_turn = receipt_row.get("turn_count")
-            if oas_turn_counts:
-                if receipt_turn not in oas_turn_counts:
+            if agent_core_turn_counts:
+                if receipt_turn not in agent_core_turn_counts:
                     continue
             elif isinstance(receipt_turn, int) and isinstance(keeper_turn, int):
                 if receipt_turn != keeper_turn:
@@ -679,7 +679,7 @@ def write_fixture_turn(
         "trace_id": trace,
         "generation": 1,
         "keeper_turn_id": turn,
-        "oas_turn_count": turn,
+        "agent_core_turn_count": turn,
         "runtime_id": "fixture",
         "status": "ok",
         "decision": {},

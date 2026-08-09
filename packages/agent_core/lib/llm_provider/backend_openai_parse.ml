@@ -1,13 +1,13 @@
 (** OpenAI-compatible response parsing.
 
     Parses JSON responses from Openai Chat Completions API into
-    agent_sdk Types (api_response, api_usage).
+    agent_core Types (api_response, api_usage).
 
     @since 0.92.0 extracted from Backend_openai *)
 
 open Types
 
-(* oas#2483: a blank-content 200 must not be accepted as [Ok content=[]] (a
+(* agent-core boundary: a blank-content 200 must not be accepted as [Ok content=[]] (a
    silent empty turn that storms downstream). The parser fails closed with a
    typed [Empty_completion] carrying the response identity so a consumer can
    attribute the empty turn to a runtime binding instead of retrying blindly. *)
@@ -375,7 +375,7 @@ let parse_openai_response_result_json_raw (raw_json : Yojson.Safe.t) =
     Error msg
 ;;
 
-(* oas#2483 fail-closed wrapper: an all-empty completion (no thinking, no text,
+(* agent-core boundary fail-closed wrapper: an all-empty completion (no thinking, no text,
    no tool_calls) becomes a typed [Empty_completion] instead of [Ok content=[]]
    — the silent empty turn that stormed downstream. Blank text WITH tool_calls
    has content=[ToolUse ..] (content <> []) and stays [Ok]. *)

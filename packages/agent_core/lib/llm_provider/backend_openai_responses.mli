@@ -38,7 +38,7 @@ val build_request
   -> unit
   -> string
 
-(** Parse a Responses API JSON response into OAS canonical content blocks.
+(** Parse a Responses API JSON response into AGENT_CORE canonical content blocks.
 
     Reasoning summary items become {!Types.Thinking}; function call items become
     {!Types.ToolUse} with [ToolUse.id = call_id], so existing tool execution can

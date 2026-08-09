@@ -232,7 +232,7 @@ SelectToolPolicy ==
     /\ UNCHANGED <<turn_live, turn_phase, measurement_bound,
                     selected_model_bound>>
 
-\* keeper_unified_turn.ml: retry_loop sets Runtime_trying before OAS run.
+\* keeper_unified_turn.ml: retry_loop sets Runtime_trying before an Agent Core run.
 RuntimeTrying ==
     /\ turn_live
     /\ turn_phase = "prompting"

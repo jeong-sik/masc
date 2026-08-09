@@ -95,10 +95,10 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
     const contentWithheld = raw.content_withheld === true || raw.contentWithheld === true
     const step: ChatTraceStep = { kind, text: contentWithheld ? '' : text }
     const ts = stringValue(raw.ts)
-    const oasBlockIndex = numberValue(raw.oasBlockIndex)
+    const agentCoreBlockIndex = numberValue(raw.agentCoreBlockIndex)
     if (contentWithheld) step.contentWithheld = true
     if (ts !== undefined) step.ts = ts
-    if (oasBlockIndex !== undefined) step.oasBlockIndex = oasBlockIndex
+    if (agentCoreBlockIndex !== undefined) step.agentCoreBlockIndex = agentCoreBlockIndex
     return step
   }
   if (kind === 'reason') {
@@ -116,9 +116,9 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
     if (text === undefined) return null
     const step: ChatTraceStep = { kind, text }
     const ts = stringValue(raw.ts)
-    const oasBlockIndex = numberValue(raw.oasBlockIndex)
+    const agentCoreBlockIndex = numberValue(raw.agentCoreBlockIndex)
     if (ts !== undefined) step.ts = ts
-    if (oasBlockIndex !== undefined) step.oasBlockIndex = oasBlockIndex
+    if (agentCoreBlockIndex !== undefined) step.agentCoreBlockIndex = agentCoreBlockIndex
     return step
   }
   if (kind === 'tool') {
@@ -131,14 +131,14 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
     const args = stringValue(raw.args)
     const result = stringValue(raw.result)
     const ts = stringValue(raw.ts)
-    const oasBlockIndex = numberValue(raw.oasBlockIndex)
+    const agentCoreBlockIndex = numberValue(raw.agentCoreBlockIndex)
     if (toolCallId !== undefined) step.toolCallId = toolCallId
     if (status !== undefined) step.status = status
     if (dur !== undefined) step.dur = dur
     if (args !== undefined) step.args = args
     if (result !== undefined) step.result = result
     if (ts !== undefined) step.ts = ts
-    if (oasBlockIndex !== undefined) step.oasBlockIndex = oasBlockIndex
+    if (agentCoreBlockIndex !== undefined) step.agentCoreBlockIndex = agentCoreBlockIndex
     return step
   }
   return null

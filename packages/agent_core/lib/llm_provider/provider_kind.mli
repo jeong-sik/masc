@@ -28,7 +28,7 @@ val all : t list
     API key (e.g. [Anthropic -> Some "ANTHROPIC_API_KEY"]). Returns [None]
     for kinds that do not have a universally-agreed env var — either the
     kind is local ({!Ollama}) or shares a space where
-    OAS does not dictate the env name ({!OpenAI_compat}). *)
+    AGENT_CORE does not dictate the env name ({!OpenAI_compat}). *)
 val default_api_key_env : t -> string option
 
 (** Canonical lowercase wire form (e.g. [Anthropic -> "anthropic"]).

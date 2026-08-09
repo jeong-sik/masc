@@ -21,7 +21,7 @@ val emit_tool_exec :
   typed_outcome:Keeper_tool_outcome.t option ->
   provider:string ->
   keeper_turn_id:int option ->
-  oas_turn:int ->
+  agent_core_turn:int ->
   task_id:string option ->
   unit ->
   unit
@@ -29,7 +29,7 @@ val emit_tool_exec :
     (the same identity form [keeper.turn_completed] uses, so
     [Tool_agent_timeline.identity_matches] resolves both through one
     predicate); [meta.name] is carried for the payload-side identity fallback.
-    [keeper_turn_id] is the absolute Keeper-lane turn and [oas_turn] is the
+    [keeper_turn_id] is the absolute Keeper-lane turn and [agent_core_turn] is the
     model/tool-loop step inside it; task identity is carried separately and is
     never substituted for either turn id. Typed outcome JSON is preserved
     without reconstructing a string category. *)

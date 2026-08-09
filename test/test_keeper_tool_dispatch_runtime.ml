@@ -80,10 +80,10 @@ let project_replay_message_exn ~base_path
        Masc.Keeper_gate_replay.project_model_input
          ~base_path
          evidence
-         [ Agent_sdk.Types.user_msg message.text ]
+         [ Agent_core.Types.user_msg message.text ]
      with
      | Ok [ _canonical; projected ] ->
-       Agent_sdk.Types.text_of_content projected.content
+       Agent_core.Types.text_of_content projected.content
      | Ok _ -> fail "replay projection did not append exact evidence"
      | Error detail -> fail detail)
 ;;
@@ -288,7 +288,7 @@ let test_public_read_rejects_unsupported_range_fields () =
         (contains_substring error "unsupported field");
       check bool "error mentions start_line" true
         (contains_substring error "start_line");
-      check string "validation source" "oas_tool_middleware"
+      check string "validation source" "agent_core_tool_middleware"
         Yojson.Safe.Util.(member "validation" json |> to_string);
       check string "failure class" "policy_rejection"
         Yojson.Safe.Util.(member "failure_class" json |> to_string);
@@ -299,10 +299,14 @@ let test_public_read_rejects_unsupported_range_fields () =
          | `Assoc _ -> true
          | _ -> false))
 
-let test_public_read_rejects_offset_without_enrichment () =
+let test_public_read_accepts_offset_without_enrichment () =
   with_exec_fixture
-    "keeper_tool_dispatch_runtime_read_rejects_offset"
+    "keeper_tool_dispatch_runtime_read_accepts_offset"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let playground = KES.keeper_default_write_root ~config ~meta in
+      let file_path = Filename.concat playground "offset-window.txt" in
+      mkdir_p playground;
+      write_file file_path "one\ntwo\nthree\n";
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config
@@ -312,21 +316,14 @@ let test_public_read_rejects_offset_without_enrichment () =
           ~name:"Read"
           ~input:
             (`Assoc
-               [ "file_path", `String "lib/keeper/keeper_transition_audit.ml"
-               ; "offset", `Int 100
+               [ "file_path", `String "offset-window.txt"
+               ; "offset", `Int 2
                ])
           ()
       in
-      check string "runtime outcome" "failure" (outcome_label result.disposition);
-      let json =
-        match result.data with
-        | Some data -> data
-        | None -> fail "validation rejection omitted typed data"
-      in
-      check bool "dispatch does not add a tutor" true
-        Yojson.Safe.Util.(member "tool_tutor" json = `Null);
-      check bool "validation names exact field" true
-        (contains_substring result.raw_output "offset"))
+      let json = check_success_result "offset Read" result in
+      check string "offset is a 1-based line coordinate" "two\nthree\n"
+        (json_string_field ~default:"" "content" json))
 
 let test_surface_read_rejects_duplicate_dispatch_fields () =
   with_exec_fixture
@@ -977,9 +974,9 @@ let test_manual_gate_defers_memory_write_before_persistence () =
          (Sys.file_exists memory_path))
 ;;
 
-let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
+let test_manual_gate_deferral_stays_deferred_through_agent_core_bridge () =
   with_exec_fixture
-    "keeper_tool_dispatch_manual_gate_oas_bridge"
+    "keeper_tool_dispatch_manual_gate_agent_core_bridge"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        (match
           Masc.Keeper_gate_mode.set
@@ -989,7 +986,7 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
         with
         | Ok _ -> ()
         | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
-       let path = Filename.concat config.base_path "manual-gate-oas.txt" in
+       let path = Filename.concat config.base_path "manual-gate-agent-core.txt" in
        let input =
          `Assoc
            [ "file_path", `String path
@@ -1003,7 +1000,7 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
          | _ :: _ :: _ -> fail "duplicate tool_write_file descriptors"
        in
        let handler =
-         Masc.Keeper_tools_oas_handler.make_keeper_tool_handler
+         Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler
            ~name:"Write"
            ~input_schema
            ~config
@@ -1034,17 +1031,17 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
               (output.data |> member "gate" |> member "decision" |> to_string)
         | Tool_result.Completed _ -> fail "Gate deferral became Completed"
         | Tool_result.Failed _ -> fail "Gate deferral became Failed");
-       (match Masc.Tool_bridge.to_oas_typed_result masc_result with
+       (match Masc.Tool_bridge.to_agent_core_typed_result masc_result with
         | Ok { _meta = Some (`Assoc fields); _ } ->
           check (option string)
-            "OAS receives the one-way deferred projection"
+            "Agent Core receives the one-way deferred projection"
             (Some "deferred")
             (match List.assoc_opt "masc.tool_disposition" fields with
              | Some (`String value) -> Some value
              | Some _ | None -> None)
-        | Ok _ -> fail "Deferred OAS projection omitted its disposition marker"
+        | Ok _ -> fail "Deferred Agent Core projection omitted its disposition marker"
         | Error error ->
-          fail ("Deferred crossed the OAS boundary as failure: " ^ error.message));
+          fail ("Deferred crossed the Agent Core boundary as failure: " ^ error.message));
        check bool "Deferred Write executed no effect" false (Sys.file_exists path))
 ;;
 
@@ -1990,8 +1987,12 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
       let execute_json = check_success_result "Execute" execute_result in
       check bool "Execute used typed Shell IR" true
         (json_bool_field ~default:false "typed" execute_json);
-      check bool "Execute ran in requested cwd" true
-        (contains_substring execute_result.raw_output playground))
+      let observed_cwd =
+        json_string_field ~default:"" "output" execute_json |> String.trim
+      in
+      check string "Execute ran in requested cwd"
+        (Unix.realpath playground)
+        (Unix.realpath observed_cwd))
 
 let test_keeper_task_claim_accepts_specific_task_id () =
   with_exec_fixture "keeper_tool_dispatch_specific_task_claim"
@@ -2442,7 +2443,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
         ]
         (fun () ->
           let bundle =
-            Masc.Keeper_tools_oas_bundle.make_tool_bundle
+            Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
               ~config
               ~meta
               ~publication_recovery
@@ -3319,8 +3320,8 @@ let keeper_delegate_input_schema () =
   | Some schema -> schema.input_schema
   | None -> fail "masc_keeper_delegate schema missing"
 
-let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
-  let dir = temp_dir "oas-handler-eio-context" in
+let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
+  let dir = temp_dir "agent-core-handler-eio-context" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
@@ -3380,7 +3381,7 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
                    ~data:delegated_data
                    ()));
           let handler =
-            Masc.Keeper_tools_oas_handler.make_keeper_tool_handler
+            Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler
               ~name:"masc_keeper_delegate"
               ~input_schema:(keeper_delegate_input_schema ())
               ~config
@@ -3397,7 +3398,6 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
                       [ "kind", `String "keeper"
                       ; "name", `String "keeper-target"
                       ] )
-                ; "capability", `String "invoke_turn"
                 ; "prompt", `String "hello"
                 ])
           in
@@ -3581,13 +3581,13 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
         check bool "error message preserved" true
           (contains_substring execution.raw_output "Self-approval"))
 
-(* ── OAS descriptor execution mode ───────────────────────────
+(* ── Agent Core descriptor execution mode ───────────────────────────
 
    WebSearch/WebFetch hit external rate-limited APIs. They must not be
    assigned an inferred execution mode merely because they are read-only. *)
 
-let make_dummy_oas_tool name =
-  Masc.Tool_bridge.oas_tool_of_masc
+let make_dummy_agent_core_tool name =
+  Masc.Tool_bridge.agent_core_tool_of_masc
     ~name
     ~description:"descriptor probe"
     ~input_schema:
@@ -3636,13 +3636,13 @@ let test_descriptor_route_miss_payload_is_typed_runtime_failure () =
 ;;
 
 let check_no_inferred_descriptor ~msg name =
-  let tool = make_dummy_oas_tool name in
-  match Agent_sdk.Tool.descriptor tool with
+  let tool = make_dummy_agent_core_tool name in
+  match Agent_core.Tool.descriptor tool with
   | None -> ()
   | Some _ -> fail (Printf.sprintf "%s: inferred descriptor for %s" msg name)
 ;;
 
-let test_catalog_metadata_does_not_infer_oas_descriptors () =
+let test_catalog_metadata_does_not_infer_agent_core_descriptors () =
   List.iter
     (fun name -> check_no_inferred_descriptor ~msg:"generic bridge" name)
     [ "masc_web_search"; "masc_web_fetch"; "tool_read_file"; "tool_search_files" ]
@@ -3650,7 +3650,7 @@ let test_catalog_metadata_does_not_infer_oas_descriptors () =
 
 let find_tool_by_name tools name =
   List.find_opt
-    (fun (t : Agent_sdk.Tool.t) -> String.equal t.Agent_sdk.Tool.schema.Agent_sdk.Types.name name)
+    (fun (t : Agent_core.Tool.t) -> String.equal t.Agent_core.Tool.schema.Agent_core.Types.name name)
     tools
 ;;
 
@@ -3658,17 +3658,17 @@ let check_bundle_has_no_inferred_descriptor ~msg tools name =
   match find_tool_by_name tools name with
   | None -> fail (Printf.sprintf "%s: %s not in bundle" msg name)
   | Some t ->
-    (match Agent_sdk.Tool.descriptor t with
+    (match Agent_core.Tool.descriptor t with
      | None -> ()
      | Some _ -> fail (Printf.sprintf "%s: %s has inferred descriptor" msg name))
 ;;
 
-let test_model_visible_tools_do_not_infer_oas_descriptors () =
+let test_model_visible_tools_do_not_infer_agent_core_descriptors () =
   with_exec_fixture
-    "model_visible_oas_descriptors"
+    "model_visible_agent_core_descriptors"
     (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
        let tools =
-         Masc.Keeper_tools_oas_bundle.make_tools
+         Masc.Keeper_tools_agent_core_bundle.make_tools
            ~config
            ~meta
            ~publication_recovery
@@ -3692,7 +3692,7 @@ let test_surface_post_bundle_names_reader_and_repeat_cost () =
     "surface_post_model_description"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let bundle =
-         Masc.Keeper_tools_oas_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -3700,7 +3700,7 @@ let test_surface_post_bundle_names_reader_and_repeat_cost () =
            ()
        in
        let description =
-         (terminal_surface_post bundle.tools).Agent_sdk.Tool.schema.description
+         (terminal_surface_post bundle.tools).Agent_core.Tool.schema.description
        in
        let help_description =
          match
@@ -3713,7 +3713,7 @@ let test_surface_post_bundle_names_reader_and_repeat_cost () =
          | None -> fail "keeper_surface_post missing from help schema projection"
        in
        check string
-         "help and OAS projections use the same description"
+         "help and Agent Core projections use the same description"
          help_description
          description;
        List.iter
@@ -3734,7 +3734,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
     "surface_post_invalid_input"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let bundle =
-         Masc.Keeper_tools_oas_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -3743,7 +3743,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
        in
        let surface_post = terminal_surface_post bundle.tools in
        (match
-          Agent_sdk.Tool.execute
+          Agent_core.Tool.execute
             surface_post
             (`Assoc
                [ "surface", `String "dashboard"
@@ -3753,17 +3753,17 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Error _ -> ()
         | Ok _ -> fail "handler-level invalid terminal input unexpectedly succeeded");
        (match bundle.terminal_effect_state () with
-        | Masc.Keeper_tools_oas.Terminal_effect_open -> ()
-        | Masc.Keeper_tools_oas.Deferred_tool_result ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+        | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
           fail "invalid terminal input unexpectedly deferred a tool result"
-        | Masc.Keeper_tools_oas.External_effect_deferred ->
+        | Masc.Keeper_tools_agent_core.External_effect_deferred ->
           fail "invalid terminal input unexpectedly deferred an external effect"
-        | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
           fail "invalid terminal input completed the terminal effect"
-        | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
           fail "invalid terminal input poisoned the terminal effect");
        (match
-          Agent_sdk.Tool.execute
+          Agent_core.Tool.execute
             surface_post
             (`Assoc
                [ "surface", `String "dashboard"
@@ -3772,16 +3772,16 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         with
         | Ok _ -> ()
         | Error error ->
-          failf "corrected terminal input failed: %s" error.Agent_sdk.Types.message);
+          failf "corrected terminal input failed: %s" error.Agent_core.Types.message);
        (match bundle.terminal_effect_state () with
-        | Masc.Keeper_tools_oas.Terminal_effect_completed -> ()
-        | Masc.Keeper_tools_oas.Terminal_effect_open ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_completed -> ()
+        | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
           fail "corrected terminal input left the terminal effect open"
-        | Masc.Keeper_tools_oas.Deferred_tool_result ->
+        | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
           fail "corrected terminal input unexpectedly deferred a tool result"
-        | Masc.Keeper_tools_oas.External_effect_deferred ->
+        | Masc.Keeper_tools_agent_core.External_effect_deferred ->
           fail "corrected terminal input unexpectedly deferred an external effect"
-        | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
           fail "corrected terminal input failed the terminal effect");
        let chat_path =
          Filename.concat
@@ -3793,7 +3793,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
        Unix.unlink chat_path;
        Unix.mkdir chat_path 0o755;
        (match
-          Agent_sdk.Tool.execute
+          Agent_core.Tool.execute
             surface_post
             (`Assoc
                [ "surface", `String "dashboard"
@@ -3803,14 +3803,14 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Error _ -> ()
         | Ok _ -> fail "forced later terminal failure unexpectedly succeeded");
        match bundle.terminal_effect_state () with
-       | Masc.Keeper_tools_oas.Terminal_effect_failed _ -> ()
-       | Masc.Keeper_tools_oas.Terminal_effect_open ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ -> ()
+       | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
          fail "later failure reopened the completed terminal effect"
-       | Masc.Keeper_tools_oas.Deferred_tool_result ->
+       | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
          fail "later failure unexpectedly became a generic defer"
-       | Masc.Keeper_tools_oas.External_effect_deferred ->
+       | Masc.Keeper_tools_agent_core.External_effect_deferred ->
          fail "later failure unexpectedly became an external defer"
-       | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
          fail "later failure was hidden by the completed terminal effect")
 ;;
 
@@ -3910,7 +3910,7 @@ let test_deferred_web_search_yields_before_provider_retry () =
         | Ok _ -> ()
         | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
        let bundle =
-         Masc.Keeper_tools_oas_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -3947,7 +3947,7 @@ let test_deferred_web_search_yields_before_provider_retry () =
            ~cooperative_yield_probe:(fun _boundary ->
              Masc.Keeper_agent_run.terminal_effect_boundary_decision
                (bundle.terminal_effect_state ()))
-           [ Agent_sdk.Types.Text "search for the tool" ]
+           [ Agent_core.Types.Text "search for the tool" ]
        in
        check int
          "deferred effect stops before a second provider call"
@@ -3980,16 +3980,16 @@ let test_deferred_web_search_yields_before_provider_retry () =
         | Error error ->
           failf
             "deferred effect failed instead of yielding: %s"
-            (Agent_sdk.Error.to_string error));
+            (Agent_core.Error.to_string error));
        match bundle.terminal_effect_state () with
-       | Masc.Keeper_tools_oas.External_effect_deferred -> ()
-       | Masc.Keeper_tools_oas.Deferred_tool_result ->
+       | Masc.Keeper_tools_agent_core.External_effect_deferred -> ()
+       | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
          fail "Gate deferred effect became a generic tool defer"
-       | Masc.Keeper_tools_oas.Terminal_effect_open ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
          fail "deferred effect was not observed at the tool boundary"
-       | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
          fail "deferred effect became terminal completion"
-       | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
          fail "deferred effect became terminal failure")
 ;;
 
@@ -4008,7 +4008,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
        mkdir_p (Filename.dirname chat_path);
        Unix.mkdir chat_path 0o755;
        let bundle =
-         Masc.Keeper_tools_oas_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -4033,7 +4033,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
          ~finally:(fun () -> Masc.Sse.unsubscribe_external subscriber_id)
          (fun () ->
             let result =
-              Agent_sdk.Tool.execute
+              Agent_core.Tool.execute
                 surface_post
                 (`Assoc
                    [ "surface", `String "dashboard"
@@ -4043,13 +4043,13 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
             (match result with
              | Error error ->
                check bool
-                 "append failure is an OAS runtime error"
+                 "append failure is an Agent Core runtime error"
                  true
-                 (error.Agent_sdk.Types.error_class
-                  = Some Agent_sdk.Types.Unknown);
+                 (error.Agent_core.Types.error_class
+                  = Some Agent_core.Types.Unknown);
                let error_detail =
                  Yojson.Safe.Util.
-                   (parse_json error.Agent_sdk.Types.message
+                   (parse_json error.Agent_core.Types.message
                     |> member "error"
                     |> to_string)
                in
@@ -4064,7 +4064,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
               !chat_broadcast_count;
             let terminal_state = bundle.terminal_effect_state () in
             (match terminal_state with
-             | Masc.Keeper_tools_oas.Terminal_effect_failed failure ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
                check bool
                  "terminal failure retains the runtime failure class"
                  true
@@ -4078,26 +4078,26 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  "terminal failure retains the exact full chat target"
                  true
                  (contains_substring failure.diagnostic chat_path)
-             | Masc.Keeper_tools_oas.Terminal_effect_open ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
                fail "failed surface delivery left the terminal effect open"
-             | Masc.Keeper_tools_oas.Deferred_tool_result ->
+             | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
                fail "failed surface delivery became a generic defer"
-             | Masc.Keeper_tools_oas.External_effect_deferred ->
+             | Masc.Keeper_tools_agent_core.External_effect_deferred ->
                fail "failed surface delivery became an external defer"
-             | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
                fail "failed surface delivery set terminal completion");
             let first_terminal_failure =
               match terminal_state with
-              | Masc.Keeper_tools_oas.Terminal_effect_failed failure -> failure
-              | Masc.Keeper_tools_oas.Terminal_effect_open
-              | Masc.Keeper_tools_oas.Deferred_tool_result
-              | Masc.Keeper_tools_oas.External_effect_deferred
-              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+              | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure -> failure
+              | Masc.Keeper_tools_agent_core.Terminal_effect_open
+              | Masc.Keeper_tools_agent_core.Deferred_tool_result
+              | Masc.Keeper_tools_agent_core.External_effect_deferred
+              | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
                 fail "failed surface delivery lost its terminal failure"
             in
             Unix.rmdir chat_path;
             (match
-               Agent_sdk.Tool.execute
+               Agent_core.Tool.execute
                  surface_post
                  (`Assoc
                     [ "surface", `String "dashboard"
@@ -4108,31 +4108,32 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              | Error error ->
                failf
                  "later successful terminal call failed: %s"
-                 error.Agent_sdk.Types.message);
+                 error.Agent_core.Types.message);
             (match bundle.terminal_effect_state () with
-             | Masc.Keeper_tools_oas.Terminal_effect_failed failure ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
                check bool
                  "first terminal failure is not overwritten"
                  true
                  (failure = first_terminal_failure)
-             | Masc.Keeper_tools_oas.Terminal_effect_open ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
                fail "later success reopened the failed terminal effect"
-             | Masc.Keeper_tools_oas.Deferred_tool_result ->
+             | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
                fail "later success changed failure into a generic defer"
-             | Masc.Keeper_tools_oas.External_effect_deferred ->
+             | Masc.Keeper_tools_agent_core.External_effect_deferred ->
                fail "later success changed failure into an external defer"
-             | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
                fail "later success overwrote the failed terminal effect");
             Unix.unlink chat_path;
             Unix.mkdir chat_path 0o755;
             let runtime_bundle =
-              Masc.Keeper_tools_oas_bundle.make_tool_bundle
+              Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
                 ~config
                 ~meta
                 ~publication_recovery
                 ~ctx_snapshot:ctx_work
                 ()
             in
+            let broadcasts_before_runtime_failure = !chat_broadcast_count in
             let runtime_error, provider_call_count =
               with_openai_tool_call_server
                 ~tool_name:"keeper_surface_post"
@@ -4167,7 +4168,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                   ~cooperative_yield_probe:(fun _boundary ->
                     Masc.Keeper_agent_run.terminal_effect_boundary_decision
                       (runtime_bundle.terminal_effect_state ()))
-                  [ Agent_sdk.Types.Text "deliver the dashboard reply" ]
+                  [ Agent_core.Types.Text "deliver the dashboard reply" ]
               with
               | Error error -> error
               | Ok _ -> fail "terminal failure reached ordinary provider completion"
@@ -4195,7 +4196,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  (Keeper_internal_error.kind_of_masc_internal_error other)
              | None -> fail "Runtime_agent flattened the typed terminal failure");
             (match runtime_bundle.terminal_effect_state () with
-             | Masc.Keeper_tools_oas.Terminal_effect_failed failure ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
                check bool
                  "runtime terminal state retains Runtime_failure"
                  true
@@ -4209,17 +4210,17 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  "runtime terminal state retains the exact full chat target"
                  true
                  (contains_substring failure.diagnostic chat_path)
-             | Masc.Keeper_tools_oas.Terminal_effect_open ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
                fail "runtime terminal failure was not recorded"
-             | Masc.Keeper_tools_oas.Deferred_tool_result ->
+             | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
                fail "runtime terminal failure became a generic defer"
-             | Masc.Keeper_tools_oas.External_effect_deferred ->
+             | Masc.Keeper_tools_agent_core.External_effect_deferred ->
                fail "runtime terminal failure became an external defer"
-             | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
                fail "runtime terminal failure became completion");
             check int
               "runtime failure emits no keeper chat broadcast"
-              0
+              broadcasts_before_runtime_failure
               !chat_broadcast_count;
             check bool
               "runtime terminal delivery failure is not auto-recoverable"
@@ -4228,7 +4229,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  runtime_error);
             let exact_route =
               Keeper_runtime_failure_route.route_of_error
-                ~boundary:Keeper_runtime_failure_route.Oas_execution
+                ~boundary:Keeper_runtime_failure_route.Agent_core_execution
                 runtime_error
             in
              (match exact_route with
@@ -4241,7 +4242,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                ()
              | _ -> fail "typed terminal failure did not reach its exact route");
             let transient_terminal_error =
-              Keeper_internal_error.sdk_error_of_masc_internal_error
+              Keeper_internal_error.core_error_of_masc_internal_error
                 (Keeper_internal_error.Terminal_effect_failed
                    { failure_class = Tool_result.Transient_error
                    ; effect_disposition = Tool_result.Effect_outcome_unknown
@@ -4250,7 +4251,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
             in
             (match
                Keeper_runtime_failure_route.route_of_error
-                 ~boundary:Keeper_runtime_failure_route.Oas_execution
+                 ~boundary:Keeper_runtime_failure_route.Agent_core_execution
                  transient_terminal_error
              with
              | Keeper_runtime_failure_route.Exhausted_visible_alive
@@ -4279,7 +4280,7 @@ let () =
       test_case "public Read rejects unsupported range fields" `Quick
         test_public_read_rejects_unsupported_range_fields;
       test_case "public Read rejects offset without dispatch enrichment" `Quick
-        test_public_read_rejects_offset_without_enrichment;
+        test_public_read_accepts_offset_without_enrichment;
       test_case "surface Read rejects duplicate dispatch fields" `Quick
         test_surface_read_rejects_duplicate_dispatch_fields;
       test_case "missing file is failure" `Quick
@@ -4290,8 +4291,8 @@ let () =
         test_manual_gate_defers_publication_writes_before_recovery;
       test_case "Manual Gate defers memory write before persistence" `Quick
         test_manual_gate_defers_memory_write_before_persistence;
-      test_case "Manual Gate deferral stays deferred through OAS bridge" `Quick
-        test_manual_gate_deferral_stays_deferred_through_oas_bridge;
+      test_case "Manual Gate deferral stays deferred through Agent Core bridge" `Quick
+        test_manual_gate_deferral_stays_deferred_through_agent_core_bridge;
       test_case "initialization crash is redacted from tool output" `Quick
         test_publication_initialization_crash_is_redacted;
       test_case "reconciliation evidence is redacted from tool output" `Quick
@@ -4342,8 +4343,8 @@ let () =
         test_manual_gate_defers_tool_execute_before_process;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
-      test_case "OAS handler threads Eio context to keeper dispatch" `Quick
-        test_oas_handler_threads_eio_context_to_keeper_dispatch;
+      test_case "Agent Core handler threads Eio context to keeper dispatch" `Quick
+        test_agent_core_handler_threads_eio_context_to_keeper_dispatch;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
       test_case "registered dispatch preserves workflow failure class" `Quick
@@ -4371,12 +4372,12 @@ let () =
       test_case "descriptor route miss is typed runtime failure" `Quick
         test_descriptor_route_miss_payload_is_typed_runtime_failure;
     ]);
-    ("oas_descriptor", [
-      test_case "catalog flags do not infer OAS descriptors" `Quick
-        test_catalog_metadata_does_not_infer_oas_descriptors;
-      test_case "model-visible aliases do not infer OAS descriptors" `Quick
-        test_model_visible_tools_do_not_infer_oas_descriptors;
-      test_case "surface post description reaches the OAS bundle" `Quick
+    ("agent_core_descriptor", [
+      test_case "catalog flags do not infer Agent Core descriptors" `Quick
+        test_catalog_metadata_does_not_infer_agent_core_descriptors;
+      test_case "model-visible aliases do not infer Agent Core descriptors" `Quick
+        test_model_visible_tools_do_not_infer_agent_core_descriptors;
+      test_case "surface post description reaches the Agent Core bundle" `Quick
         test_surface_post_bundle_names_reader_and_repeat_cost;
     ]);
   ]

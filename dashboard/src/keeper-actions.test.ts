@@ -1461,7 +1461,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     const cancelledAssistant = (keeperThreads.value.echo ?? [])
       .find(entry => entry.role === 'assistant' && entry.delivery === 'cancelled')
     expect(cancelledAssistant?.traceSteps).toEqual([
-      { kind: 'think', text: 'preserved before cancellation', ts: expect.any(String), oasBlockIndex: 0 },
+      { kind: 'think', text: 'preserved before cancellation', ts: expect.any(String), agentCoreBlockIndex: 0 },
     ])
   })
 

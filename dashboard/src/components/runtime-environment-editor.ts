@@ -857,8 +857,8 @@ export function RuntimeEnvironmentEditor({
            when the key is present. There is no effort/thinking-control-format
            chip here: this list has no runtime binding, so there is no catalog
            entry to resolve it against, and the raw thinking-control-format key
-           in runtime.toml is inert (OAS request-building never reads it — see
-           masc #21521 / oas models.toml). Showing it back to the operator here
+           in runtime.toml is inert (Agent Core request-building never reads it — see
+           masc #21521 / agentCore models.toml). Showing it back to the operator here
            invited editing a dead key as if it mattered. -->
       <div class=${section === 'models' ? '' : 'hidden'} data-testid="runtime-section-models">
         <input
@@ -1024,7 +1024,7 @@ export function RuntimeEnvironmentEditor({
            price-input/price-output (runtime_toml.ml:600-601). The effort mode
            is NOT shown here — it lives in the catalog-derived "effective" row
            rendered by RuntimeBindingCatalogSpec just below, which is the value
-           OAS request-building actually uses (the raw runtime.toml
+           Agent Core request-building actually uses (the raw runtime.toml
            thinking-control-format key is inert; masc #21521). -->
       <div class=${section === 'bindings' ? '' : 'hidden'} data-testid="runtime-section-bindings">
         <div class="rt-binds">

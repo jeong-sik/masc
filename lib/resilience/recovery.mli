@@ -28,11 +28,11 @@
 
     {1 Deferred to follow-up Tiers}
 
-    - [classify_sdk_error]: bridge from OAS [Error.sdk_error] to
-      [error_mode]. Requires importing the OAS error surface;
+    - [classify_core_error]: bridge from AGENT_CORE [Error.t] to
+      [error_mode]. Requires importing the AGENT_CORE error surface;
       deferred to keep this PR's dependency footprint inside
       [shared_types]. Tier A6 (resilience keeper_bridge) introduces
-      this bridge as it actually consumes OAS errors at the seam.
+      this bridge as it actually consumes AGENT_CORE errors at the seam.
     - Eio-driven keeper lifecycle binding for {!execute_strategy}.
       The executor here consumes Retry/Fallback/Handoff/Abort through
       caller-supplied callbacks; the keeper turn loop decides which concrete
@@ -49,7 +49,7 @@
 
 (** {1 Failure-mode classification} *)
 
-(** A resilience-specific failure mode. Richer than OAS errors
+(** A resilience-specific failure mode. Richer than AGENT_CORE errors
     because it encodes the recovery shape. *)
 type error_mode =
   | TransientError of {

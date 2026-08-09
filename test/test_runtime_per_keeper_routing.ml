@@ -74,7 +74,7 @@ let restore_model_catalog = function
 ;;
 
 let with_model_catalog_content content f =
-  let path = Filename.temp_file "runtime-thinking-oas-models" ".toml" in
+  let path = Filename.temp_file "runtime-thinking-agent_core-models" ".toml" in
   let previous = Llm_provider.Model_catalog.global () in
   Fun.protect
     ~finally:(fun () ->
@@ -84,7 +84,7 @@ let with_model_catalog_content content f =
     (fun () ->
       write_file path content;
       match Llm_provider.Model_catalog.load_file path with
-      | Error msg -> Alcotest.failf "test OAS model catalog should load: %s" msg
+      | Error msg -> Alcotest.failf "test AGENT_CORE model catalog should load: %s" msg
       | Ok catalog ->
         Llm_provider.Model_catalog.set_global catalog;
         f ())
@@ -552,18 +552,18 @@ let test_codex_runtime_inventory_is_unverified_until_measured () =
       (verification |> J.member "reason" |> J.to_string))
 ;;
 
-let test_codex_runtime_cannot_enter_oas_runner () =
+let test_codex_runtime_cannot_enter_agent_core_runner () =
   with_codex_runtime_initialized (fun () ->
-    match Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"codex.codex" () with
-    | Ok _ -> Alcotest.fail "Codex official-client runtime entered the OAS runner"
+    match Runtime_agent_core_runner.resolve_runtime_providers ~runtime_id:"codex.codex" () with
+    | Ok _ -> Alcotest.fail "Codex official-client runtime entered the AGENT_CORE runner"
     | Error detail ->
       Alcotest.(check bool)
         "typed ownership diagnostic"
           true
-          (string_contains detail "not the OAS agent_core"))
+          (string_contains detail "not the AGENT_CORE agent_core"))
 ;;
 
-let test_codex_runtime_has_no_oas_thinking_seed () =
+let test_codex_runtime_has_no_agent_core_thinking_seed () =
   with_codex_runtime_initialized (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"codex.codex" in
     Alcotest.(check (option int))
@@ -907,7 +907,7 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
 
 (* ---- rerank resolver: resolve the requested runtime, or fail fast ----
 
-   Audit F8: [Runtime_oas_runner.resolve_runtime_providers] used to discard
+   Audit F8: [Runtime_agent_core_runner.resolve_runtime_providers] used to discard
    [runtime_id] and always return the default runtime, silently substituting
    an operator-selected runtime id.  It must resolve the requested id via the RFC-0207 catalog
    and return [Error] on an unknown id — never the default runtime. *)
@@ -926,7 +926,7 @@ let test_rerank_resolver_resolves_requested_runtime () =
     (* Known non-default id resolves to that runtime's provider, not the
        default's. *)
     (match
-       Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"openai.gpt" ()
+       Runtime_agent_core_runner.resolve_runtime_providers ~runtime_id:"openai.gpt" ()
      with
      | Error msg -> Alcotest.failf "expected openai.gpt to resolve: %s" msg
      | Ok [ provider ] ->
@@ -937,7 +937,7 @@ let test_rerank_resolver_resolves_requested_runtime () =
      | Ok providers ->
        Alcotest.failf "expected exactly one provider, got %d" (List.length providers));
     (* Empty id resolves the default runtime. *)
-    match Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"" () with
+    match Runtime_agent_core_runner.resolve_runtime_providers ~runtime_id:"" () with
     | Error msg -> Alcotest.failf "expected empty id to resolve default: %s" msg
     | Ok [ provider ] ->
       Alcotest.(check string)
@@ -951,7 +951,7 @@ let test_rerank_resolver_resolves_requested_runtime () =
 let test_rerank_resolver_errors_on_unknown_runtime_id () =
   with_runtime_initialized (fun () ->
     match
-      Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"bogus.binding" ()
+      Runtime_agent_core_runner.resolve_runtime_providers ~runtime_id:"bogus.binding" ()
     with
     | Ok _ ->
       Alcotest.fail
@@ -1308,7 +1308,7 @@ let test_thinking_support_true_leaves_preserve_unset () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.thinkdefault" in
     Alcotest.(check (option bool))
-      "OAS request-side preserve capability does not auto-enable preserve"
+      "AGENT_CORE request-side preserve capability does not auto-enable preserve"
       None
       seed.Runtime_inference.preserve_thinking)
 ;;
@@ -1387,7 +1387,7 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
     let caps = thinkdefault |> J.member "effective_capabilities" in
     Alcotest.(check string)
       "effective capability source"
-      "oas-provider-config-model"
+      "agent_core-provider-config-model"
       (caps |> J.member "source" |> J.to_string);
     Alcotest.(check int)
       "effective max output"
@@ -1480,7 +1480,7 @@ let test_runtime_inventory_surfaces_request_config () =
     let request = thinkdefault |> J.member "request_config" in
     Alcotest.(check string)
       "request config source"
-      "oas-provider-config"
+      "agent_core-provider-config"
       (request |> J.member "source" |> J.to_string);
     Alcotest.(check string)
       "provider kind"
@@ -1694,7 +1694,7 @@ let test_max_output_tokens_accessor_projects_catalog () =
 let test_max_context_accessor_clamps_to_provider_cap () =
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))
-      "runtime TOML 524288 is clamped to provider/OAS qwen36 cap 131072"
+      "runtime TOML 524288 is clamped to provider/AGENT_CORE qwen36 cap 131072"
       (Some 131072)
       (Runtime.max_context_of_runtime_id "ollama_cloud.stalecontext");
     let resolution =
@@ -1717,7 +1717,7 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
   let keeper_logged_max_context =
     fixture_int_field fields "keeper_logged_max_context"
   in
-  let oas_provider_limit = fixture_int_field fields "oas_provider_limit" in
+  let agent_core_provider_limit = fixture_int_field fields "agent_core_provider_limit" in
   Alcotest.(check string)
     "fixture runtime id"
     "ollama_cloud.stalecontext"
@@ -1727,13 +1727,13 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
     524288
     keeper_logged_max_context;
   Alcotest.(check int)
-    "fixture captures OAS provider cap"
+    "fixture captures AGENT_CORE provider cap"
     131072
-    oas_provider_limit;
+    agent_core_provider_limit;
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))
       "current runtime accessor replays fixture through provider cap"
-      (Some oas_provider_limit)
+      (Some agent_core_provider_limit)
       (Runtime.max_context_of_runtime_id runtime_id);
     let resolution =
       Keeper_context_runtime.resolve_max_context_resolution
@@ -1742,7 +1742,7 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
     in
     Alcotest.(check int)
       "current keeper budget no longer reproduces historical oversized value"
-      oas_provider_limit
+      agent_core_provider_limit
       resolution.Keeper_context_runtime.effective_budget;
     Alcotest.(check bool)
       "historical oversized keeper budget is not current effective budget"
@@ -1862,7 +1862,7 @@ let test_assignment_materialize_failure_surfaces_reason () =
   Alcotest.(check bool)
     "error explains the missing provider-registry SSOT entry"
     true
-    (string_contains msg "no OAS provider registry entry");
+    (string_contains msg "no AGENT_CORE provider registry entry");
   Alcotest.(check bool)
     "error does NOT fall back to the misleading bare not-found wording"
     false
@@ -1887,7 +1887,7 @@ let test_assignment_typo_keeps_not_found () =
 
 let () =
   (match Llm_provider.Model_catalog.load_default () with
-   | Error msg -> Alcotest.failf "packaged OAS models.toml should load: %s" msg
+   | Error msg -> Alcotest.failf "packaged AGENT_CORE models.toml should load: %s" msg
    | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
   Alcotest.run
     "runtime_per_keeper_routing"
@@ -1987,13 +1987,13 @@ let () =
             `Quick
             test_of_meta_projection_budgets_against_routed_runtime
         ; Alcotest.test_case
-            "Codex official-client runtime cannot enter OAS runner"
+            "Codex official-client runtime cannot enter AGENT_CORE runner"
             `Quick
-            test_codex_runtime_cannot_enter_oas_runner
+            test_codex_runtime_cannot_enter_agent_core_runner
         ; Alcotest.test_case
-            "Codex official-client runtime has no OAS thinking seed"
+            "Codex official-client runtime has no AGENT_CORE thinking seed"
             `Quick
-            test_codex_runtime_has_no_oas_thinking_seed
+            test_codex_runtime_has_no_agent_core_thinking_seed
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case
@@ -2013,15 +2013,15 @@ let () =
             `Quick
             test_thinking_support_false_forces_off
         ; Alcotest.test_case
-            "runtime inventory surfaces OAS parameter policy"
+            "runtime inventory surfaces AGENT_CORE parameter policy"
             `Quick
             test_runtime_inventory_surfaces_parameter_policy
         ; Alcotest.test_case
-            "runtime inventory surfaces OAS effective capabilities"
+            "runtime inventory surfaces AGENT_CORE effective capabilities"
             `Quick
             test_runtime_inventory_surfaces_effective_capabilities
         ; Alcotest.test_case
-            "runtime inventory surfaces OAS request config"
+            "runtime inventory surfaces AGENT_CORE request config"
             `Quick
             test_runtime_inventory_surfaces_request_config
         ; Alcotest.test_case

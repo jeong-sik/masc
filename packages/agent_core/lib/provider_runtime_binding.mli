@@ -3,7 +3,7 @@
     This module exposes the provider catalog / registry facts that embedding
     applications need without exposing registry mutation. It is intentionally
     coordinator-neutral: downstream applications may project local policy over
-    these bindings, but OAS owns provider/model identity and capability truth.
+    these bindings, but AGENT_CORE owns provider/model identity and capability truth.
 
     @since 0.194.0 *)
 
@@ -31,7 +31,7 @@ type t =
   }
 
 (** Return all known runtime bindings from the explicit provider-catalog
-    overlay, embedded OAS catalog, and default provider registry. *)
+    overlay, embedded AGENT_CORE catalog, and default provider registry. *)
 val all : unit -> t list
 
 (** Find a runtime binding by provider id or alias. Lookup is
@@ -58,7 +58,7 @@ val binding_for_provider_config : Llm_provider.Provider_config.t -> t option
     kind. Endpoint URLs, request paths, and model ids are never interpreted. *)
 val provider_id_of_provider_config : Llm_provider.Provider_config.t -> string
 
-(** Resolve OAS-owned provider capabilities for a concrete provider config.
+(** Resolve AGENT_CORE-owned provider capabilities for a concrete provider config.
     Explicit provider identity selects provider facts; otherwise only the typed
     wire kind is used. Exact provider/model or provider-independent model rows
     then override provider-level facts. No endpoint inference occurs. *)
@@ -67,13 +67,13 @@ val capabilities_for_provider_config
   -> Llm_provider.Capabilities.capabilities
 
 (** Resolve an exact caller model or the binding's catalog-declared default.
-    Missing model identity is an explicit configuration error; OAS never
+    Missing model identity is an explicit configuration error; AGENT_CORE never
     invents a provider-specific model or expands aliases. *)
-val resolve_model : t -> requested_model:string option -> (string, Error.sdk_error) result
+val resolve_model : t -> requested_model:string option -> (string, Error.t) result
 
-(** Convert a binding into the low-level provider config used by OAS
+(** Convert a binding into the low-level provider config used by AGENT_CORE
     transports. *)
 val to_provider_config
   :  ?model:string
   -> t
-  -> (Llm_provider.Provider_config.t, Error.sdk_error) result
+  -> (Llm_provider.Provider_config.t, Error.t) result

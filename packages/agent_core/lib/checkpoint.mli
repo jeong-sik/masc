@@ -103,27 +103,27 @@ val to_json : t -> Yojson.Safe.t
 
 (** Deserialize only the exact current v10 checkpoint schema. Every other
     version is rejected. *)
-val of_json : Yojson.Safe.t -> (t, Error.sdk_error) result
+val of_json : Yojson.Safe.t -> (t, Error.t) result
 
 (** Serialize checkpoint to a JSON string. *)
 val to_string : t -> string
 
 (** Deserialize checkpoint from a JSON string under the same current-only
     contract as {!of_json}. *)
-val of_string : string -> (t, Error.sdk_error) result
+val of_string : string -> (t, Error.t) result
 
 (** Serialize a checkpoint delta sidecar to JSON. *)
 val delta_to_json : delta -> Yojson.Safe.t
 
 (** Deserialize a checkpoint delta sidecar from JSON. *)
-val delta_of_json : Yojson.Safe.t -> (delta, Error.sdk_error) result
+val delta_of_json : Yojson.Safe.t -> (delta, Error.t) result
 
 (** Compute a delta from a base checkpoint to a target checkpoint. *)
 val compute_delta : t -> t -> delta
 
 (** Apply a delta to a base checkpoint. Both the base and resulting checkpoint
     must satisfy the exact current v10 contract. *)
-val apply_delta : t -> delta -> (t, Error.sdk_error) result
+val apply_delta : t -> delta -> (t, Error.t) result
 
 (** {1 Queries} *)
 
@@ -141,4 +141,4 @@ val usage_to_json : Types.usage_stats -> Yojson.Safe.t
 
 (** Deserialize exact current usage stats from JSON. Legacy fields are
     rejected explicitly. *)
-val usage_of_json : Yojson.Safe.t -> (Types.usage_stats, Error.sdk_error) result
+val usage_of_json : Yojson.Safe.t -> (Types.usage_stats, Error.t) result

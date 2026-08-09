@@ -26,20 +26,20 @@ open Keeper_agent_prompt_metrics
    ~41 KB remainder of the bundle stays well below the nearest refusal. *)
 let gate_history_budget_bytes = 64 * 1024
 
-let tool_use_ids_of_message (message : Agent_sdk.Types.message) =
+let tool_use_ids_of_message (message : Agent_core.Types.message) =
   List.filter_map
-    (fun (block : Agent_sdk.Types.content_block) ->
+    (fun (block : Agent_core.Types.content_block) ->
        match block with
-       | Agent_sdk.Types.ToolUse { id; _ } -> Some id
+       | Agent_core.Types.ToolUse { id; _ } -> Some id
        | _ -> None)
     message.content
 ;;
 
-let tool_result_ids_of_message (message : Agent_sdk.Types.message) =
+let tool_result_ids_of_message (message : Agent_core.Types.message) =
   List.filter_map
-    (fun (block : Agent_sdk.Types.content_block) ->
+    (fun (block : Agent_core.Types.content_block) ->
        match block with
-       | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+       | Agent_core.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
        | _ -> None)
     message.content
 ;;
@@ -48,7 +48,7 @@ let tool_result_ids_of_message (message : Agent_sdk.Types.message) =
    out. The count is carried into the bundle: a judge that cannot tell it was
    handed a partial view weighs partial evidence as if it were complete, and
    the prompt already asks it to name absent context in its rationale. *)
-let gate_history_slice (messages : Agent_sdk.Types.message list) =
+let gate_history_slice (messages : Agent_core.Types.message list) =
   let sized =
     List.map
       (fun message ->
@@ -102,9 +102,9 @@ let prepare_agent_setup
       ~(turn_system_prompt : string)
       ~(user_message : string)
       ~(dynamic_context : string)
-      ~(history_messages : Agent_sdk.Types.message list)
-      ~(shared_context : Agent_sdk.Context.t)
-      ~(context_injector : Agent_sdk.Hooks.context_injector)
+      ~(history_messages : Agent_core.Types.message list)
+      ~(shared_context : Agent_core.Context.t)
+      ~(context_injector : Agent_core.Hooks.context_injector)
       ~(start_turn_count : int)
       ~(generation : int)
       ~(keeper_turn_id : int)
@@ -118,7 +118,7 @@ let prepare_agent_setup
       ?continuation_channel
       ?hitl_resolution
       ()
-  : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
+  : (Keeper_run_tools_hooks.agent_setup, Agent_core.Error.t) result
   =
   let ( let* ) = Result.bind in
   let runtime_id_string = runtime_id in
@@ -154,13 +154,13 @@ let prepare_agent_setup
     }
   in
   let
-    { Keeper_tools_oas.tools = keeper_tools
+    { Keeper_tools_agent_core.tools = keeper_tools
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
     ; gate_replay_delivery
     }
     =
-    Keeper_tools_oas_bundle.make_tool_bundle
+    Keeper_tools_agent_core_bundle.make_tool_bundle
       ~config
       ~meta
       ~publication_recovery
@@ -172,7 +172,7 @@ let prepare_agent_setup
   in
   let replay_delivery =
     Option.map
-      (fun { Keeper_tools_oas.approval_id; outcome } ->
+      (fun { Keeper_tools_agent_core.approval_id; outcome } ->
          approval_id, outcome)
       gate_replay_delivery
   in
@@ -189,7 +189,7 @@ let prepare_agent_setup
            "keeper tool cleanup after Gate replay repair failure raised: %s"
            (Printexc.to_string exn));
       Error
-        (Keeper_internal_error.sdk_error_of_masc_internal_error
+        (Keeper_internal_error.core_error_of_masc_internal_error
            (Keeper_internal_error.Gate_replay_repair_required
               { approval_id
               ; operation
@@ -288,7 +288,7 @@ let prepare_agent_setup
     - invalid_schema_count
   in
   let all_tool_names =
-    List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) keeper_tools
+    List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
     model_visible_descriptors
@@ -338,7 +338,7 @@ let prepare_agent_setup
     in
     ()
   in
-  let final_oas_turn_ordinal_ref : int option ref = ref None in
+  let final_agent_core_turn_ordinal_ref : int option ref = ref None in
   let receipt_turn_count_ref : int option ref = ref None in
   let receipt_model_used_ref : string option ref = ref None in
   let receipt_stop_reason_ref : Runtime_agent.stop_reason option ref =
@@ -364,7 +364,7 @@ let prepare_agent_setup
       then Lane_tool_optional
       else (
         match current_tool_choice with
-        | Some Agent_sdk.Types.None_ -> Lane_tool_disabled
+        | Some Agent_core.Types.None_ -> Lane_tool_disabled
         | _ -> Lane_text_only)
     in
     (schema_filter, lane)
@@ -382,7 +382,7 @@ let prepare_agent_setup
     ; keeper_turn_id
     ; meta
     ; turn_ctx_cell
-    ; final_oas_turn_ordinal_ref
+    ; final_agent_core_turn_ordinal_ref
     ; receipt_turn_count_ref
     ; receipt_model_used_ref
     ; receipt_stop_reason_ref

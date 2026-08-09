@@ -228,7 +228,7 @@ export interface KeeperApprovalQueueRowViolation {
   tool_name?: string | null
 }
 
-/** Which exact-output lane serves Gate Auto Judge. Slot order is OAS failover
+/** Which exact-output lane serves Gate Auto Judge. Slot order is Agent Core failover
  *  order: the first slot is the model that actually judges. */
 export type GateJudgeLane =
   | { status: 'available'; lane_id: string; slots: string[] }

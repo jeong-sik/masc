@@ -28,7 +28,7 @@ include Server_mcp_transport_http_agui
 
 (** [safe_respond_with_string] is a local guard against the
     [Failure "invalid state, currently handling error"] race that
-    httpun raises when a client disconnects during a long OAS turn
+    httpun raises when a client disconnects during a long AGENT_CORE turn
     (2026-05-05 cycle9 FATAL incident).  All direct
     [Httpun.Reqd.respond_with_string] calls in this file use this
     wrapper instead of the raw httpun call. *)
@@ -39,7 +39,7 @@ let safe_respond_with_string reqd response body =
   | Failure msg ->
       Log.Server.warn
         "[mcp-http-post] respond_with_string skipped (reqd invalid state; \
-         2026-05-05 OAS cancel race): %s"
+         2026-05-05 AGENT_CORE cancel race): %s"
         msg
   | exn ->
       Log.Server.warn
@@ -59,7 +59,7 @@ let safe_respond_with_string reqd response body =
    is RFC-0100 PR-3's auto-upgrade work, not this PR.
 
    Same race-safe wrapping as {!safe_respond_with_string} — the
-   2026-05-05 OAS cancel-race exception class is caught and downgraded
+   2026-05-05 AGENT_CORE cancel-race exception class is caught and downgraded
    to a WARN. *)
 let safe_respond_chunked reqd response body =
   try
@@ -71,7 +71,7 @@ let safe_respond_chunked reqd response body =
   | Failure msg ->
       Log.Server.warn
         "[mcp-http-post] respond_chunked skipped (reqd invalid state; \
-         2026-05-05 OAS cancel race): %s"
+         2026-05-05 AGENT_CORE cancel race): %s"
         msg
   | exn ->
       Log.Server.warn

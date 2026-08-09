@@ -10,7 +10,7 @@ val metric_mcp_requests : string
 val metric_llm_inference_duration : string
 
 (** [masc_llm_prompt_tok_per_sec] - prefill throughput histogram.
-    Observed in [Keeper_hooks_oas] after_turn when [response.telemetry.timings]
+    Observed in [Keeper_hooks_agent_core] after_turn when [response.telemetry.timings]
     is [Some] and [prompt_per_second] is positive. Labels: [model], [provider_kind]. *)
 val metric_llm_prompt_tok_per_sec : string
 

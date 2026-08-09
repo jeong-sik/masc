@@ -2,7 +2,7 @@
 
     This module owns only the Gate receipt payload. The execution disposition
     is represented exclusively by {!Tool_result.Deferred}; payload fields and
-    OAS metadata are never semantic authorities. *)
+    AGENT_CORE metadata are never semantic authorities. *)
 
 type t
 

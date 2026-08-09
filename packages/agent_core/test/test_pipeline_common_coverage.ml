@@ -1,6 +1,6 @@
-open Agent_sdk
-module Internal_agent = Agent_sdk__Agent_types
-module Pipeline_common = Agent_sdk__Pipeline_common
+open Agent_core
+module Internal_agent = Agent_core__Agent_types
+module Pipeline_common = Agent_core__Pipeline_common
 
 let check_bool = Alcotest.(check bool)
 let check_int = Alcotest.(check int)
@@ -238,7 +238,7 @@ let test_event_envelope_uses_trace_and_lifecycle () =
   let root =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "oas-pipeline-common-%d" (Unix.getpid ()))
+      (Printf.sprintf "agent_core-pipeline-common-%d" (Unix.getpid ()))
   in
   Unix.mkdir root 0o755;
   let trace_path = Filename.concat root "trace.jsonl" in

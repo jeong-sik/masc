@@ -121,7 +121,7 @@ let test_profile_update_preserves_owner_runtime_state () =
     ; telemetry_feedback_enabled = Some true
     ; telemetry_feedback_window_hours = Some 24
     ; always_allow = Some false
-    ; oas_env = [ "PROFILE_TEST", "1" ]
+    ; agent_core_env = [ "PROFILE_TEST", "1" ]
     ; updated_at = "profile-updated"
     }
   in

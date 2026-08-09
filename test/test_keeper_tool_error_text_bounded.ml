@@ -1,6 +1,6 @@
-(** The OAS tool-error path must bound its payload before fanning it out.
+(** The AGENT_CORE tool-error path must bound its payload before fanning it out.
 
-    [keeper_tools_oas_handler_exec] builds one [detail] string from the tool's
+    [keeper_tools_agent_core_handler_exec] builds one [detail] string from the tool's
     raw result and hands it to three sinks: the SSE broadcast ([~error_text]),
     the error log line, and the blob store. [raw_result] is whatever the tool
     wrote, so a tool that dumps a file returns the whole file.
@@ -18,7 +18,7 @@
 
 open Alcotest
 
-let exec_module = "lib/keeper/keeper_tools_oas_handler_exec.ml"
+let exec_module = "lib/keeper/keeper_tools_agent_core_handler_exec.ml"
 
 (* Pin the call site, not just the helper: the helper being correct does not
    stop a future edit from dropping it here, which is exactly how the field

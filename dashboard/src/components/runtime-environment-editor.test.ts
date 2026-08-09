@@ -272,7 +272,7 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
     expect(text).toContain('multimodal')
     // No effort/thinking-control-format chip: the models list has no runtime
     // binding to resolve a catalog entry against, and the raw
-    // thinking-control-format key is inert (OAS never reads it — masc #21521).
+    // thinking-control-format key is inert (Agent Core never reads it — masc #21521).
     expect(text).not.toContain('effort:')
 
     render(null, container)
@@ -306,10 +306,10 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
       supports_response_format_json: true,
       supports_structured_output: true,
       supports_multimodal_inputs: true,
-      source: 'oas-provider-config-model',
+      source: 'agent-core-provider-config-model',
       models: ['minimax-m3-api'],
       effective_capabilities: {
-        source: 'oas-provider-config-model',
+        source: 'agent-core-provider-config-model',
         max_context_tokens: 524288,
         max_output_tokens: 65536,
         supports_tools: true,
@@ -326,7 +326,7 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
         supported_models: ['minimax-m3-api'],
       },
       request_config: {
-        source: 'oas-provider-config-model',
+        source: 'agent-core-provider-config-model',
         provider_kind: 'openai_compat',
         request_path_targets_responses_api: true,
         enable_thinking: true,
@@ -386,7 +386,7 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
     expect(text).toContain('Ollama Cloud')
     expect(text).toContain('model')
     expect(text).toContain('minimax-m3-api')
-    expect(text).toContain('source:oas-provider-config-model')
+    expect(text).toContain('source:agent-core-provider-config-model')
     expect(text).toContain('kind:openai_compat')
     expect(text).toContain('responses-api')
     expect(text).toContain('api:chat-completions')

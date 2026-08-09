@@ -1,4 +1,4 @@
-open Agent_sdk
+open Agent_core
 
 let sample_tool_schema : Types.tool_schema =
   Types.tool_schema_of_params

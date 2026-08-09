@@ -1,6 +1,6 @@
 (** Tests for Typed_tool — compile-time type safety + runtime correctness. *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Test fixtures ──────────────────────────────────────── *)
 

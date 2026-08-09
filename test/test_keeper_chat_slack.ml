@@ -232,7 +232,7 @@ let test_protocol_diagnostic_cannot_mask_final_failure () =
   in
   let outcomes =
     run_adapter
-      [ Masc.Keeper_chat_events.Oas_stream_protocol_error protocol_error
+      [ Masc.Keeper_chat_events.Agent_core_stream_protocol_error protocol_error
       ; Masc.Keeper_chat_events.Text_delta "final"
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-2" }
       ]

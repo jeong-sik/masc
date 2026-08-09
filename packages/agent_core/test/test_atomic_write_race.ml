@@ -13,7 +13,7 @@
     runs under bisect don't multiply io_uring instances past the
     memlock limit. *)
 
-open Agent_sdk
+open Agent_core
 
 let read_file path =
   try Some (Eio.Path.load path) with
@@ -108,7 +108,7 @@ let () =
     let fs = Eio.Stdenv.fs env in
     incr counter;
     let suffix = Printf.sprintf "%d_%d" (Unix.getpid ()) !counter in
-    let dir = Eio.Path.(fs / "/tmp" / ("oas-atomic-" ^ suffix)) in
+    let dir = Eio.Path.(fs / "/tmp" / ("agent_core-atomic-" ^ suffix)) in
     Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 dir;
     Fun.protect
       ~finally:(fun () ->

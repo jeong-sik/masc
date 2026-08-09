@@ -50,7 +50,7 @@ let text_json_of_response (response : api_response) =
 ;;
 
 let extract_response_json ?(shape = Any_json) (response : api_response)
-  : (Yojson.Safe.t, Error.sdk_error) result
+  : (Yojson.Safe.t, Error.t) result
   =
   let text = text_json_of_response response in
   if text = ""
@@ -76,14 +76,14 @@ let extract_response_json ?(shape = Any_json) (response : api_response)
 
 (** Extract structured output from the response text JSON. *)
 let extract_text_json ~(schema : _ schema) (response : api_response)
-  : ('a, Error.sdk_error) result
+  : ('a, Error.t) result
   =
   let* json = extract_response_json response in
   parse_schema_text_json schema json
 ;;
 
-let sdk_error_of_http_error =
-  Http_error_sdk.of_http_error
+let core_error_of_http_error =
+  Http_error_agent_core.of_http_error
     ~accept_rejected:(Config_invalid_config { field = "response_format" })
 ;;
 
@@ -99,7 +99,7 @@ let provider_config_for_schema ~provider_config ~config ~(schema : _ schema) =
 (** Extract structured output from a prompt using provider-native JSON
     schema output when available. Unsupported providers fail fast. *)
 let extract ~sw ~net ~provider_config ~config ~(schema : 'a schema) prompt
-  : ('a, Error.sdk_error) result
+  : ('a, Error.t) result
   =
   let messages =
     [ { role = User
@@ -113,7 +113,7 @@ let extract ~sw ~net ~provider_config ~config ~(schema : 'a schema) prompt
   let* provider_cfg = provider_config_for_schema ~provider_config ~config ~schema in
   let* response =
     Llm_provider.Complete.complete ~sw ~net ~config:provider_cfg ~messages ~tools:[] ()
-    |> Result.map_error sdk_error_of_http_error
+    |> Result.map_error core_error_of_http_error
   in
   extract_text_json ~schema response
 ;;
@@ -189,7 +189,7 @@ let extract_stream
       ~(schema : 'a schema)
       ~on_event
       prompt
-  : ('a * api_response, Error.sdk_error) result
+  : ('a * api_response, Error.t) result
   =
   let messages =
     [ { role = User
@@ -211,7 +211,7 @@ let extract_stream
       ~tools:[]
       ~on_event
       ()
-    |> Result.map_error sdk_error_of_http_error
+    |> Result.map_error core_error_of_http_error
   in
   let* value = extract_text_json ~schema response in
   Ok (value, response)

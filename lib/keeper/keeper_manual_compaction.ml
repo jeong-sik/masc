@@ -161,7 +161,7 @@ let append_manifest
     }
   in
   let checkpoint_path =
-    Keeper_checkpoint_store.oas_checkpoint_path
+    Keeper_checkpoint_store.agent_core_checkpoint_path
       ~session_dir:(Filename.concat base_dir recovery.checkpoint.session_id)
       ~session_id:recovery.checkpoint.session_id
   in

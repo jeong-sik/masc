@@ -1,6 +1,6 @@
 open Alcotest
 open Llm_provider
-module EO = Agent_sdk.Exact_output
+module EO = Agent_core.Exact_output
 
 let _load_resolver_snapshot_contract
   :  io:EO.resolver_io

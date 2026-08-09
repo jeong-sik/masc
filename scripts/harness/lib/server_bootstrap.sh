@@ -141,7 +141,7 @@ endpoint = "http://127.0.0.1:9/v1"
 
 [models.smoke]
 # Harness-local opaque runtime alias. The adjacent typed capability block is
-# the sole declaration used when no exact OAS catalog row exists.
+# the sole declaration used when no exact AGENT_CORE catalog row exists.
 api-name = "transport-harness-smoke"
 max-context = 32768
 tools-support = true
@@ -158,8 +158,8 @@ EOF
     seeded_runtime=1
   fi
 
-  if [[ "$seeded_runtime" == "1" && ! -f "$config_dir/oas-models-overlay.toml" ]]; then
-    cat >"$config_dir/oas-models-overlay.toml" <<'EOF'
+  if [[ "$seeded_runtime" == "1" && ! -f "$config_dir/agent-core-models-overlay.toml" ]]; then
+    cat >"$config_dir/agent-core-models-overlay.toml" <<'EOF'
 [[providers]]
 id = "deepseek"
 kind = "openai_compat"

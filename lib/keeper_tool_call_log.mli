@@ -14,7 +14,7 @@ val set_truncation_info :
 (** [set_truncation_info ~keeper_name ~original_bytes ?truncated_to ()]
     records pre-truncation output size for the given keeper. Called by
     the tool handler wrapper before returning the (possibly truncated)
-    result to OAS. Per-keeper isolation prevents cross-keeper corruption
+    result to AGENT_CORE. Per-keeper isolation prevents cross-keeper corruption
     under concurrent tool execution. *)
 
 val consume_truncation_info :
@@ -24,7 +24,7 @@ val consume_truncation_info :
 (** [consume_truncation_info ~keeper_name ()] returns
     [(original_bytes, truncated_to)] for the given keeper and clears
     the pending state. Returns [(0, None)] when no truncation info
-    was set (e.g. OAS-internal tool call that bypassed the wrapper). *)
+    was set (e.g. AGENT_CORE-internal tool call that bypassed the wrapper). *)
 
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 (** Per-run turn-context carrier (RFC-0225 §3.3). Created once per
@@ -167,7 +167,7 @@ val log_call :
     dispatch boundary; the trajectory row for the same execution carries
     the identical value. [tool_use_id] is the provider call id for the
     same execution (when the dispatch lane has one) — the key that the
-    oas:tool_called/oas:tool_completed event rows also carry. Blank and
+    agent_core:tool_called/agent_core:tool_completed event rows also carry. Blank and
     repeated provider ids remain meaningful when scoped by [turn] and
     [planned_index], so they are persisted unchanged.
     Output is truncated to 4000 bytes. [model] is a compatibility input only;

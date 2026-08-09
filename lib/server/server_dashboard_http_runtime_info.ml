@@ -1586,7 +1586,7 @@ let runtime_request_config_json (rt : Runtime.t) =
       ]
   | Runtime_execution.Agent_core cfg ->
     `Assoc
-    [ "source", `String "oas-provider-config"
+    [ "source", `String "agent_core-provider-config"
     ; "provider_kind", `String (Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
     ; "request_path", `String cfg.request_path
     ; ( "request_path_targets_responses_api"
@@ -1772,7 +1772,7 @@ let effective_capabilities_json (rt : Runtime.t) =
       | Some models -> Json_util.json_string_list models
     in
     `Assoc
-      [ "source", `String "oas-provider-config-model"
+      [ "source", `String "agent_core-provider-config-model"
       ; "max_context_tokens", Json_util.int_opt_to_json caps.max_context_tokens
       ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
       ; "supports_tools", `Bool caps.supports_tools

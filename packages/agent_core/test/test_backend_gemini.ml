@@ -563,7 +563,7 @@ let test_parse_function_call () =
   check int "one content block" 1 (List.length resp.content);
   (match List.hd resp.content with
    | Types.ToolUse { id; name; input } ->
-     check bool "allocated id" true (String.starts_with ~prefix:"call_oas_" id);
+     check bool "allocated id" true (String.starts_with ~prefix:"call_agent_core_" id);
      check string "name" "get_weather" name;
      check
        string
@@ -856,7 +856,7 @@ let test_malformed_provider_replay_fails_closed () =
    | Provider_replay.Not_replay
    | Provider_replay.Replay _
    | Provider_replay.Malformed_replay _ ->
-     fail "expected truncated OAS replay envelope to remain recognizably malformed");
+     fail "expected truncated AGENT_CORE replay envelope to remain recognizably malformed");
   check_raises
     "malformed replay carrier"
     (Backend_gemini.Gemini_api_error

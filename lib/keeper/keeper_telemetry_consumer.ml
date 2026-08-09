@@ -1,16 +1,16 @@
-(** Keeper_telemetry_consumer — MASC-side observer for OAS telemetry events.
+(** Keeper_telemetry_consumer — MASC-side observer for AGENT_CORE telemetry events.
 
-    Subscribes to the OAS event bus via [Runtime_event_bus],
+    Subscribes to the AGENT_CORE event bus via [Runtime_event_bus],
     filters [Custom("telemetry_event", json)] payloads, and increments
     an OTel counter for dashboard visibility.
 
     Payloads are intentionally not persisted here: the same bus is fully
-    persisted by {!Keeper_event_bridge} into [.masc/oas-events/] (the
+    persisted by {!Keeper_event_bridge} into [.masc/agent-core-events/] (the
     store {!Telemetry_unified} actually reads), so a second write-only
     copy under [data/harness-telemetry/] was removed (2026-07-20).
 
-    MASC deliberately does not deserialize provider/model-bearing OAS
-    telemetry; concrete runtime identity belongs to OAS.
+    MASC deliberately does not deserialize provider/model-bearing AGENT_CORE
+    telemetry; concrete runtime identity belongs to AGENT_CORE.
 
     State is purely internal: the subscription handle and the fiber are
     bound to the caller's [Eio.Switch.t]. *)
@@ -25,9 +25,9 @@ let spawn_subscriber ~sw ~clock ~bus =
   let sub =
     Runtime_event_bus.subscribe
       ~capacity:256
-      ~overflow:Agent_sdk.Event_bus.Drop_oldest
+      ~overflow:Agent_core.Event_bus.Drop_oldest
       ~purpose:"telemetry_consumer"
-      ~filter:(Agent_sdk.Event_bus.filter_topic "telemetry_event")
+      ~filter:(Agent_core.Event_bus.filter_topic "telemetry_event")
       bus
   in
   Eio.Switch.on_release sw (fun () ->
@@ -37,9 +37,9 @@ let spawn_subscriber ~sw ~clock ~bus =
       (try
          let events = Runtime_event_bus.drain sub in
          List.iter
-           (fun (evt : Agent_sdk.Event_bus.event) ->
+           (fun (evt : Agent_core.Event_bus.event) ->
               match evt.payload with
-              | Agent_sdk.Event_bus.Custom ("telemetry_event", _json) ->
+              | Agent_core.Event_bus.Custom ("telemetry_event", _json) ->
                   Otel_metric_store.inc_counter
                     telemetry_event_counter
                     ~labels:[ "result", "observed" ]

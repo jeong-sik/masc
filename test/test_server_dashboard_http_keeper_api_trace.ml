@@ -375,14 +375,14 @@ let make_checkpoint_inventory_meta ~name ~trace_id =
 ;;
 
 let make_inventory_checkpoint ~session_id ~turn_count ~created_at =
-  Agent_sdk.Checkpoint.
+  Agent_core.Checkpoint.
     { version = checkpoint_version
     ; session_id
     ; agent_name = "checkpoint-inventory-test"
     ; model = "opaque-runtime"
     ; system_prompt = None
     ; messages = []
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Agent_core.Types.empty_usage
     ; turn_count
     ; created_at
     ; tools = []
@@ -395,10 +395,10 @@ let make_inventory_checkpoint ~session_id ~turn_count ~created_at =
     ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.Off
+    ; response_format = Agent_core.Types.Off
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
@@ -438,10 +438,10 @@ let test_checkpoint_load_error_projection_is_total () =
     ~kind:"io_error"
     ~detail:(Some "permission denied");
   check_checkpoint_error_projection
-    (Store.Sdk_other_error "sdk failure")
+    (Store.Agent_core_error "agent core failure")
     ~status:"unavailable"
-    ~kind:"sdk_other_error"
-    ~detail:(Some "sdk failure")
+    ~kind:"agent_core_error"
+    ~detail:(Some "agent core failure")
 ;;
 
 (* The caller that splices this projection into a larger row used to take the
@@ -463,7 +463,7 @@ let test_checkpoint_load_error_projection_is_always_an_object () =
       Store.Store_error "store unavailable";
       Store.Parse_error "invalid checkpoint";
       Store.Io_error "permission denied";
-      Store.Sdk_other_error "sdk failure";
+      Store.Agent_core_error "agent core failure";
     ]
 ;;
 
@@ -479,17 +479,17 @@ let test_checkpoint_inventory_preserves_partial_load_failures () =
   |> Result.get_ok;
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
   let current = make_inventory_checkpoint ~session_id:trace_id ~turn_count:2 ~created_at:2.0 in
-  (match Keeper_checkpoint_store.save_oas_classified ~session_dir current with
+  (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir current with
    | Ok _ -> ()
    | Error detail -> fail ("checkpoint inventory current save failed: " ^ detail));
   let corrupt_history =
     make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:1.0
   in
   let corrupt_snapshot_id =
-    Keeper_checkpoint_store.oas_history_snapshot_id_of_checkpoint corrupt_history
+    Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint corrupt_history
   in
   let corrupt_path =
-    Keeper_checkpoint_store.oas_history_path
+    Keeper_checkpoint_store.agent_core_history_path
       ~session_dir
       ~snapshot_id:corrupt_snapshot_id
   in

@@ -97,7 +97,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_registry_types_turn_phase",
     "masc.keeper_registry_types_decision",
     "masc.keeper_registry_types_compaction",
-    "masc.keeper_hooks_oas_types",
+    "masc.keeper_hooks_agent_core_types",
     "masc.keeper_binding_health_config",
     "masc.keeper_transition_audit_types",
     "masc.keeper_path_rejection",
@@ -130,7 +130,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     # no-op for that leaf family without any signal.
     "masc.event_bus_slots",
     "masc.keeper_synthetic_marker",
-    "masc.keeper_oas_timeout_message",
+    "masc.keeper_agent_core_timeout_message",
     "masc.keeper_tool_response",
     "masc.keeper_discovered_tools",
     "masc.keeper_tool_execute_timeout",

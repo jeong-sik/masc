@@ -12,8 +12,8 @@ async function flushUi(): Promise<void> {
 async function loadRuntimePanel() {
   vi.resetModules()
   vi.doMock('../router', () => ({ route, replaceRoute: vi.fn() }))
-  vi.doMock('./oas-health-chip', () => ({
-    OasHealthChip: () => html`<div data-testid="oas-health">OasHealthChip</div>`,
+  vi.doMock('./agent-core-health-chip', () => ({
+    AgentCoreHealthChip: () => html`<div data-testid="agent-core-health">AgentCoreHealthChip</div>`,
   }))
   vi.doMock('./runtime-monitor', () => ({
     RuntimeMonitor: () => html`<div data-testid="runtime-monitor">RuntimeMonitor</div>`,
@@ -63,7 +63,7 @@ describe('RuntimePanel', () => {
     vi.restoreAllMocks()
     vi.resetModules()
     vi.doUnmock('../router')
-    vi.doUnmock('./oas-health-chip')
+    vi.doUnmock('./agent-core-health-chip')
     vi.doUnmock('./runtime-monitor')
     vi.doUnmock('./runtime-health-snapshot')
     vi.doUnmock('./runtime-toml-editor')
@@ -79,10 +79,10 @@ describe('RuntimePanel', () => {
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('OasHealthChip')
+    expect(container.textContent).toContain('AgentCoreHealthChip')
     expect(container.textContent).toContain('RuntimeHealthSnapshot')
     expect(container.textContent?.indexOf('RuntimeHealthSnapshot')).toBeLessThan(
-      container.textContent?.indexOf('OasHealthChip') ?? Number.POSITIVE_INFINITY,
+      container.textContent?.indexOf('AgentCoreHealthChip') ?? Number.POSITIVE_INFINITY,
     )
     const routeLinks = Array.from(container.querySelectorAll('[data-testid="route-link"]'))
       .map(link => link.getAttribute('data-section'))
@@ -104,9 +104,9 @@ describe('RuntimePanel', () => {
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
-    const oas = container.querySelector('[data-testid="oas-health"]')
-    expect(oas).not.toBeNull()
-    expect(oas?.closest('details')).toBeNull()
+    const agentCore = container.querySelector('[data-testid="agent-core-health"]')
+    expect(agentCore).not.toBeNull()
+    expect(agentCore?.closest('details')).toBeNull()
 
     // #20492 promoted "providers" from a collapsed details to its own
     // selectable view and made RuntimeMonitor a visible default lane, so only
@@ -135,14 +135,14 @@ describe('RuntimePanel', () => {
     expect(specs?.closest('details')).toBeNull()
   })
 
-  it('renders snapshot, OasHealthChip, and RuntimeMonitor for providers view', async () => {
+  it('renders snapshot, AgentCoreHealthChip, and RuntimeMonitor for providers view', async () => {
     route.value.params = { view: 'providers' }
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
     expect(container.textContent).toContain('RuntimeHealthSnapshot')
-    expect(container.textContent).toContain('OasHealthChip')
+    expect(container.textContent).toContain('AgentCoreHealthChip')
     expect(container.textContent).toContain('RuntimeMonitor')
   })
 
@@ -154,7 +154,7 @@ describe('RuntimePanel', () => {
 
     expect(container.textContent).toContain('RuntimeTomlEditor')
     expect(container.textContent).not.toContain('RuntimeHealthSnapshot')
-    expect(container.textContent).not.toContain('OasHealthChip')
+    expect(container.textContent).not.toContain('AgentCoreHealthChip')
     expect(container.textContent).not.toContain('RuntimeMonitor')
   })
 
@@ -196,7 +196,7 @@ describe('RuntimePanel', () => {
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('OasHealthChip')
+    expect(container.textContent).toContain('AgentCoreHealthChip')
     expect(container.textContent).toContain('RuntimeHealthSnapshot')
     expect(container.textContent).toContain('RuntimeMonitor')
   })

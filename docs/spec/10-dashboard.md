@@ -29,7 +29,7 @@ The UI projects source facts from:
 - Gate pending/resolved records and LLM/operator provenance;
 - Fusion panel runs, individual results, Judge results, and failures;
 - Memory events and compaction/consolidation provenance;
-- OAS runtime/provider/model call telemetry.
+- agent core runtime/provider/model call telemetry.
 
 Every projection retains the source id, version, timestamp, and correlation
 needed to trace it back. Missing source data renders as an explicit unavailable

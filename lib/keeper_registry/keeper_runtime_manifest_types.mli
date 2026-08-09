@@ -40,7 +40,7 @@ type t = {
   trace_id : string;
   generation : int option;
   keeper_turn_id : int option;
-  oas_turn_count : int option;
+  agent_core_turn_count : int option;
   logical_seq : int option;
   event : event_kind;
   runtime_id : string option;

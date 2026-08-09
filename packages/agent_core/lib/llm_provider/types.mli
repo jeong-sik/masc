@@ -316,7 +316,7 @@ val reasoning_details_text
 (** Message metadata: extensible typed key-value pairs attached to a message. *)
 type metadata = (string * Yojson.Safe.t) list [@@deriving show]
 
-(** Checkpoint-only conversation metadata owned by OAS. The run boundary is
+(** Checkpoint-only conversation metadata owned by AGENT_CORE. The run boundary is
     deliberately absent from provider payloads; it lets crash recovery avoid
     correlating tool failures across distinct external user runs. *)
 module Conversation_metadata : sig
@@ -480,7 +480,7 @@ type inference_telemetry =
   ; effective_context_window : int option
     (** Model's context window in tokens, from capabilities *)
   ; provider_internal_action_count : int option
-    (** Telemetry-only count of provider-native actions that are not surfaced as OAS tool calls. *)
+    (** Telemetry-only count of provider-native actions that are not surfaced as AGENT_CORE tool calls. *)
   ; ttfrc_ms : float option
     (** Time-to-first-response-chunk in milliseconds (wall-clock). *)
   ; prefill_ms : float option (** Prompt evaluation (prefill) duration in milliseconds. *)
@@ -696,7 +696,7 @@ type sse_event =
       }
   (** The chunk parsed cleanly but [event_type] did not match any
             documented variant. Likely a provider that added a new event
-            type the OAS adapter has not yet learned. Emit explicitly so
+            type the AGENT_CORE adapter has not yet learned. Emit explicitly so
             the consumer can decide (log + skip vs fail-fast) instead of
             silent data loss. *)
   | SSEUnsupportedPart of
@@ -731,7 +731,7 @@ type sse_event =
 (** Terminal error captured while accumulating a streaming response. The accumulator
     stores this typed value (not a flattened string). Provider-owned error
     envelopes, malformed payloads, unknown events, and incomplete streams stay
-    distinct at the transport boundary; retry policy is decided above OAS. *)
+    distinct at the transport boundary; retry policy is decided above AGENT_CORE. *)
 type stream_error =
   | Stream_provider_error of
       { message : string

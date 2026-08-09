@@ -2,8 +2,8 @@ module Types = Masc_domain
 
 module Generic = Test_mcp_tool_matrix_cases
 module KET = Masc.Keeper_tool_dispatch_runtime
-module KTO = Masc.Keeper_tools_oas_bundle
-module Tool = Agent_sdk.Tool
+module KTO = Masc.Keeper_tools_agent_core_bundle
+module Tool = Agent_core.Tool
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
@@ -29,7 +29,7 @@ and fixture = {
   config : Masc.Workspace.config;
   meta : Masc.Keeper_meta_contract.keeper_meta;
   ctx_snapshot : Keeper_types.working_context;
-  tools : Agent_sdk.Tool.t list;
+  tools : Agent_core.Tool.t list;
 }
 
 let string_starts_with = Generic.string_starts_with
@@ -175,7 +175,7 @@ let make_fixture
       ~system_prompt:"keeper tool matrix"
     |> fun ctx ->
     Masc.Keeper_context_runtime.append ctx
-      (Agent_sdk.Types.user_msg "tool matrix memory needle")
+      (Agent_core.Types.user_msg "tool matrix memory needle")
   in
   let ctx_snapshot = ctx in
   Masc.Keeper_registry.For_testing.clear ();
@@ -207,7 +207,7 @@ let make_fixture
 let find_tool fixture name =
   let by_name tool_name =
     List.find_opt
-      (fun (tool : Agent_sdk.Tool.t) -> String.equal tool.schema.name tool_name)
+      (fun (tool : Agent_core.Tool.t) -> String.equal tool.schema.name tool_name)
       fixture.tools
   in
   match by_name name with
@@ -599,7 +599,7 @@ let evaluate_expectation ~name expectation = function
            Error
              (Printf.sprintf "%s expected guard %s but succeeded" name
                 (String.concat ", " fragments)))
-  | Error { Agent_sdk.Types.message; _ } ->
+  | Error { Agent_core.Types.message; _ } ->
       if contains_any message fatal_fragments then
         Error
           (Printf.sprintf "%s hit fatal keeper-tool failure: %s" name message)

@@ -19,8 +19,8 @@ val dashboard_logs_json :
   Yojson.Safe.t
 
 val trimmed_query_param : Httpun.Request.t -> string -> string option
-val oas_telemetry_limit_param : Httpun.Request.t -> int
-val oas_telemetry_provider_param : Httpun.Request.t -> string option
+val agent_core_telemetry_limit_param : Httpun.Request.t -> int
+val agent_core_telemetry_provider_param : Httpun.Request.t -> string option
 
 (** Effective entry limit for /api/v1/dashboard/telemetry. Absent or
     unparseable [n_param] -> bounded default (windowed vs not); explicit

@@ -10,7 +10,7 @@ module Budget = Masc.Keeper_memory_os_budget
    (same pattern as test_keeper_prompt_metrics). *)
 let has_prompt_root path =
   Sys.file_exists
-    (Filename.concat path "config/prompts/librarian.current_selection.md")
+    (Filename.concat path "config/prompts/librarian.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -53,9 +53,9 @@ let input () : Librarian.input =
         { Librarian.facts = [ current_a; current_b ] }
   ; max_recall_fact_bytes = 64 * 1024
   ; messages =
-      [ Agent_sdk.Types.make_message
-          ~role:Agent_sdk.Types.User
-          [ Agent_sdk.Types.Text "new conversation" ]
+      [ Agent_core.Types.make_message
+          ~role:Agent_core.Types.User
+          [ Agent_core.Types.Text "new conversation" ]
       ]
   }
 ;;
@@ -388,17 +388,17 @@ let test_prompt_carries_keeper_instructions () =
 
 let user_text_of_messages messages =
   messages
-  |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
-    if m.role = Agent_sdk.Types.User
+  |> List.filter_map (fun (m : Agent_core.Types.message) ->
+    if m.role = Agent_core.Types.User
     then
       Some
         (m.content
          |> List.filter_map (function
-           | Agent_sdk.Types.Text s -> Some s
-           | Agent_sdk.Types.ToolResult _ | Agent_sdk.Types.ToolUse _
-           | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.ReasoningDetails _
-           | Agent_sdk.Types.RedactedThinking _ | Agent_sdk.Types.Image _
-           | Agent_sdk.Types.Document _ | Agent_sdk.Types.Audio _ -> None)
+           | Agent_core.Types.Text s -> Some s
+           | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolUse _
+           | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+           | Agent_core.Types.RedactedThinking _ | Agent_core.Types.Image _
+           | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
          |> String.concat "\n")
     else None)
   |> String.concat "\n"
@@ -423,14 +423,14 @@ let test_prompt_carries_recall_fact_byte_budget () =
 let test_prompt_omits_tool_result_payload_and_has_one_message () =
   let sentinel = "UNTRUSTED_TOOL_RESULT_MUST_NOT_REACH_MEMORY_FINALIZER" in
   let tool_message =
-    Agent_sdk.Types.make_message
-      ~role:Agent_sdk.Types.Tool
-      [ Agent_sdk.Types.ToolResult
+    Agent_core.Types.make_message
+      ~role:Agent_core.Types.Tool
+      [ Agent_core.Types.ToolResult
           { tool_use_id = "tool-call-1"
           ; content = sentinel
-          ; outcome = Agent_sdk.Types.Tool_succeeded
+          ; outcome = Agent_core.Types.Tool_succeeded
           ; json = Some (`Assoc [ "payload", `String sentinel ])
-          ; content_blocks = Some [ Agent_sdk.Types.Text sentinel ]
+          ; content_blocks = Some [ Agent_core.Types.Text sentinel ]
           }
       ]
   in

@@ -1,6 +1,6 @@
 (** Typed operator command for one Board-attention quarantine.
 
-    The command never invokes OAS and never retries automatically. Candidate
+    The command never invokes AGENT_CORE and never retries automatically. Candidate
     [Requeue_requested], candidate [Requeued], and exact partition [Ready] are
     committed in that order. The opaque quarantine id fences a later failure
     generation on the same singleton partition. *)

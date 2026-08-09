@@ -15,4 +15,4 @@ val classify_history_entry : source:string -> history_line_action
 
 val history_path_for_source : session_dir:string -> source:string option -> string
 
-val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit
+val persist_message : ?source:string -> session_context -> Agent_core.Types.message -> unit

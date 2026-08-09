@@ -1,6 +1,6 @@
 (** Runtime adapter for LLM-owned current Memory OS selection. *)
 
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 
 let exact_lane_id = "librarian_exact"
 
@@ -84,7 +84,7 @@ let select_recent_messages ~max_messages messages =
 ;;
 
 let message role text =
-  Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
+  Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 ;;
 
 type exact_setup_error =
@@ -211,7 +211,7 @@ let prompt_and_input_for_librarian (inp : Keeper_librarian.input) =
 
 let messages_and_input_for_librarian inp =
   Result.map
-    (fun (input, prompt) -> input, [ message Agent_sdk.Types.User prompt ])
+    (fun (input, prompt) -> input, [ message Agent_core.Types.User prompt ])
     (prompt_and_input_for_librarian inp)
 ;;
 
@@ -307,7 +307,7 @@ let exact_execution_error error =
       "unexpected_callback_failure"
     | Flow_exact_execution_failed { candidate; cause; evidence } ->
       Printf.sprintf
-        "oas_execution_failed: %s"
+        "agent_core_execution_failed: %s"
         (Keeper_exact_flow_detail.execution_failure_detail
            ~candidate
            ~cause
@@ -508,7 +508,7 @@ let run_best_effort
                  ~clock
                  ~net
                  ~selected_input
-                 ~messages:[ message Agent_sdk.Types.User prompt ]
+                 ~messages:[ message Agent_core.Types.User prompt ]
              in
              let+ snapshot =
                Keeper_memory_os_current.replace

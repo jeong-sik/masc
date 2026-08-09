@@ -1304,7 +1304,7 @@ let test_append_turn_redacts_all_supplied_block_strings () =
                       { text = "thinking " ^ secret
                       ; content_withheld = false
                       ; ts = Some ("ts-" ^ secret)
-                      ; oas_block_index = None
+                      ; agent_core_block_index = None
                       }
                   ; B.Trace_reason
                       { text = "reason " ^ secret
@@ -1331,7 +1331,7 @@ let test_append_turn_redacts_all_supplied_block_strings () =
                               ; "summary", `String ("result " ^ secret)
                               ])
                       ; ts = Some ("ts " ^ secret)
-                      ; oas_block_index = None
+                      ; agent_core_block_index = None
                       }
                   ]
               }
@@ -1588,7 +1588,7 @@ let test_to_json_array_appends_trace_block_to_assistant_turn () =
                          text = "checking tasks";
                          content_withheld = false;
                          ts = Some "2026-07-01T00:00:00Z";
-                         oas_block_index = None;
+                         agent_core_block_index = None;
                        };
                      B.Trace_tool
                          {
@@ -1599,7 +1599,7 @@ let test_to_json_array_appends_trace_block_to_assistant_turn () =
                          args = Some (`Assoc []);
                          result = Some (`Assoc [ ("ok", `Bool true) ]);
                          ts = Some "2026-07-01T00:00:01Z";
-                         oas_block_index = None;
+                         agent_core_block_index = None;
                        };
                    ];
                })
@@ -1689,7 +1689,7 @@ let test_to_json_array_stream_contract_trace_join () =
                        { text = "thinking";
                          content_withheld = false;
                          ts = Some "2026-07-05T00:00:00Z";
-                         oas_block_index = None;
+                         agent_core_block_index = None;
                        };
                    ];
                })
@@ -1809,7 +1809,7 @@ let test_to_json_array_stream_contract_lifecycle_replay () =
                        { text = "retained trace";
                          content_withheld = false;
                          ts = Some "2026-07-05T00:00:00Z";
-                         oas_block_index = None;
+                         agent_core_block_index = None;
                        };
                    ];
                })

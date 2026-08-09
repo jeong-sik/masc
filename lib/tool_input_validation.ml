@@ -1,11 +1,11 @@
-(** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
+(** Tool_input_validation — Pre-dispatch validation via AGENT_CORE Tool_middleware.
 
-    Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for strict
-    schema checking and structured error feedback. OAS 0.212 removed implicit
+    Delegates to [Agent_core.Tool_middleware.make_validation_hook] for strict
+    schema checking and structured error feedback. AGENT_CORE 0.212 removed implicit
     type coercion: a mistyped scalar (e.g. string for integer) is a
     deterministic Reject carrying the field name, not a silent repair.
 
-    @since 2.220.0 — OAS delegation
+    @since 2.220.0 — AGENT_CORE delegation
     @since 2.221.0 — use Tool_middleware.make_validation_hook *)
 
 (** Register input validation as a Tool_dispatch pre-hook.
@@ -335,9 +335,9 @@ let schema_shape_error schema args =
 (* Declared range/length constraints                                  *)
 (*                                                                    *)
 (* [Tool_bridge.params_of_json_schema] projects a JSON Schema onto the *)
-(* OAS [tool_param] record, which carries name/type/required only.     *)
+(* AGENT_CORE [tool_param] record, which carries name/type/required only.     *)
 (* Every minimum/maximum/minLength/maxLength/minItems/maxItems is      *)
-(* dropped there, so the SDK validation hook cannot see it. These      *)
+(* dropped there, so agent core validation hook cannot see it. These      *)
 (* checks therefore read the raw JSON Schema masc already holds.       *)
 (* ---------------------------------------------------------------- *)
 
@@ -485,7 +485,7 @@ let malformed_bound ~path ~keyword ~declared =
 ;;
 
 (* A value whose JSON kind the keyword does not apply to is left alone:
-   the declared [type] is enforced by the OAS hook that already ran, so a
+   the declared [type] is enforced by the AGENT_CORE hook that already ran, so a
    surviving mismatch means the schema itself pairs a keyword with an
    incompatible type. [test_tool_input_validation] pins that no masc
    schema does. *)
@@ -821,16 +821,16 @@ let pass_reason ~schema ~args ~prepared_args =
   | None -> "missing_schema"
 ;;
 
-let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
+let validation_schema_of_json ~name json_schema : Agent_core.Types.tool_schema =
   let params = Tool_bridge.params_of_json_schema json_schema in
   let json =
     `Assoc
       [ ("name", `String name)
       ; ("description", `String "")
-      ; ("parameters", `List (List.map Agent_sdk.Types.tool_param_to_json params))
+      ; ("parameters", `List (List.map Agent_core.Types.tool_param_to_json params))
       ]
   in
-  match Agent_sdk.Types.tool_schema_of_json json with
+  match Agent_core.Types.tool_schema_of_json json with
   | Ok schema -> schema
   | Error err -> failwith ("validation_schema_of_json: " ^ err)
 ;;
@@ -845,7 +845,7 @@ let reject_validation ~name ~reason ~message =
        ; data =
            `Assoc
              [ "error", `String message
-             ; "validation", `String "oas_tool_middleware"
+             ; "validation", `String "agent_core_tool_middleware"
              ; "reason", `String reason
              ; ( "failure_class"
                , `String
@@ -875,7 +875,7 @@ let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
        ; data =
            `Assoc
              [ "error", `String message
-             ; "validation", `String "oas_tool_middleware"
+             ; "validation", `String "agent_core_tool_middleware"
              ; "exception", `String error_text
              ]
        ; metadata = None
@@ -955,12 +955,12 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
            in
            Option.map (validation_schema_of_json ~name:lookup_name) schema_opt
          in
-         let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
-         (* Declared ranges are checked only once the SDK has accepted the
+         let hook = Agent_core.Tool_middleware.make_validation_hook ~lookup in
+         (* Declared ranges are checked only once agent core has accepted the
             declared types, so a mistyped value reports its type error
             rather than a confusing range error. *)
          (match hook ~name ~args:prepared_args with
-    | Agent_sdk.Tool_middleware.Pass ->
+    | Agent_core.Tool_middleware.Pass ->
       (match schema_constraint_failure schema prepared_args with
        | Some (Argument_out_of_range message) ->
          reject_validation
@@ -982,7 +982,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
              "tool_input_validation normalized args for %s"
              name;
            Tool_dispatch.Proceed prepared_args))
-    | Agent_sdk.Tool_middleware.Reject { message; _ } ->
+    | Agent_core.Tool_middleware.Reject { message; _ } ->
       emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
       Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
       (* Input-schema / policy rejection — classify so the
@@ -995,7 +995,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
            ; data =
                `Assoc
                  [ "error", `String message
-                 ; "validation", `String "oas_tool_middleware"
+                 ; "validation", `String "agent_core_tool_middleware"
                  ; "reason", `String "invalid_args"
                  ; ( "failure_class"
                    , `String

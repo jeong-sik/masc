@@ -1,7 +1,7 @@
 (** Tests for Agent.clone — independent agent duplication. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ──────────────────────────────────────────────────────── *)
 

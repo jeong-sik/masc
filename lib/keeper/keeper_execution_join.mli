@@ -2,7 +2,7 @@
     [execution_id] minted at the masc dispatch boundary (RFC-0233 PR-2).
 
     The keeper [post_tool_use] hook records the pair synchronously inside
-    OAS tool execution, strictly before OAS publishes the matching
+    AGENT_CORE tool execution, strictly before AGENT_CORE publishes the matching
     [ToolCompleted] bus event; the event bridge only sees events after
     publish, so a [take] at serialization time is deterministic:
     insert happens-before publish happens-before drain.

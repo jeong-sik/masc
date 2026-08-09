@@ -6,7 +6,7 @@
     advertised on a given endpoint:
 
     - [Full]: developer / internal MCP surface (full catalog).
-    - [Managed_agent]: spawned agent surface (SDK contract +
+    - [Managed_agent]: spawned agent surface (Agent Core contract +
       passthrough subset).
     - [Operator_remote]: observation and intervention surface.
 
@@ -75,7 +75,7 @@ val tool_schemas_for_profile :
 
     - [Full]: [Config.visible_tool_schemas] gated by [include_hidden], public
       surface membership, and [Tool_catalog.allow_direct_call].
-    - [Managed_agent]: SDK tool contract +
+    - [Managed_agent]: agent-core tool contract +
       [managed_agent_passthrough_tool_names] subset.
     - [Operator_remote]: pinned [Tool_operator.remote_schemas].
 
@@ -93,7 +93,7 @@ val tool_allowed_in_profile :
 
     - [Full]: [tool_name] is in the raw schema inventory, remains active, and
       satisfies [Tool_catalog.allow_direct_call].
-    - [Managed_agent]: SDK binding by name, OR present in the
+    - [Managed_agent]: Agent Core binding by name, OR present in the
       managed-agent profile schema list.
     - [Operator_remote]: in [Tool_operator.remote_tool_names]. *)
 

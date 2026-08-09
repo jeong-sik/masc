@@ -441,15 +441,15 @@ let test_config_seed_skips_each_existing_file_without_force () =
   assert_contains
     "model catalog overlay has config-root destination"
     script
-    {|MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/oas-models-overlay.toml"|};
+    {|MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"|};
   assert_contains
     "model catalog overlay uses config release seed"
     script
-    {|seed_config_if_missing "oas-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"|};
+    {|seed_config_if_missing "agent-core-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"|};
   assert_not_contains
     "legacy full model catalog is not seeded"
     script
-    {|seed_raw_if_missing "oas-models.toml"|};
+    {|seed_raw_if_missing "agent-core-models.toml"|};
 ;;
 
 let test_release_requires_advertised_binary_assets () =
@@ -477,7 +477,7 @@ let test_release_requires_advertised_binary_assets () =
   assert_contains
     "release hashes seeded model catalog overlay"
     workflow
-    "(cd ../config && sha256sum oas-models-overlay.toml) >> SHA256SUMS"
+    "(cd ../config && sha256sum agent-core-models-overlay.toml) >> SHA256SUMS"
 ;;
 
 let test_installer_fetches_deployment_preflight_companions () =
@@ -544,7 +544,7 @@ let test_binary_checks_use_install_environment () =
   assert_not_contains
     "config-root full catalog is not an automatic override"
     script
-    {|MODEL_CATALOG_FILE="$BASE_PATH/.masc/config/oas-models.toml"|};
+    {|MODEL_CATALOG_FILE="$BASE_PATH/.masc/config/agent-core-models.toml"|};
   assert_contains
     "binary helper exports base path"
     script
@@ -560,11 +560,11 @@ let test_binary_checks_use_install_environment () =
   assert_contains
     "binary helper preserves explicit model catalog override"
     script
-    {|OAS_MODEL_CATALOG="$catalog"|};
+    {|AGENT_CORE_MODEL_CATALOG="$catalog"|};
   assert_contains
     "model catalog helper reads only explicit override"
     script
-    {|if [ -n "${OAS_MODEL_CATALOG:-}" ]; then|};
+    {|if [ -n "${AGENT_CORE_MODEL_CATALOG:-}" ]; then|};
   assert_contains
     "binary smoke helper isolates runtime events by default"
     script
@@ -1304,7 +1304,7 @@ let test_release_checksums_include_model_catalog_overlay_seed () =
   assert_contains
     "release checksum includes model catalog overlay seed"
     workflow
-    "(cd ../config && sha256sum oas-models-overlay.toml) >> SHA256SUMS"
+    "(cd ../config && sha256sum agent-core-models-overlay.toml) >> SHA256SUMS"
 ;;
 
 let test_team_flag_and_seed_exist () =

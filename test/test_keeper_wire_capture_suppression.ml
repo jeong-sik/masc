@@ -6,7 +6,7 @@ module Response_text = Masc.Keeper_agent_run_response_text
 module Keeper_metrics = Keeper_metrics
 module Metrics = Masc.Otel_metric_store
 
-let input_required_request () : Agent_sdk.Error.input_required =
+let input_required_request () : Agent_core.Error.input_required =
   { request_id = "wire-input-1"
   ; participant_name = Some "operator"
   ; question = "Which repository should I inspect?"

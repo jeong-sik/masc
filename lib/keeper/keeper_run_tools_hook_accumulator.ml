@@ -1,7 +1,7 @@
-(** Hook accumulator + outputs for OAS Agent.run hook callbacks,
+(** Hook accumulator + outputs for Agent_core.Agent.run hook callbacks,
     extracted from keeper_run_tools.ml.
 
-    OAS hooks (before_turn, on_tool_executed) cannot return values, so
+    AGENT_CORE hooks (before_turn, on_tool_executed) cannot return values, so
     they write into a single mutable {!hook_accumulator} during
     Agent.run execution.  After execution completes, {!freeze} produces
     an immutable {!hook_outputs} snapshot. *)
@@ -20,7 +20,7 @@ type hook_accumulator =
   ; mutable requested_tool_names : string list
   ; mutable receipt_completion_contract_result :
       Keeper_execution_receipt.completion_contract_result
-    (* RFC-0233 PR-3: last SDK turn's context assembly, written by the
+    (* RFC-0233 PR-3: last agent-core turn's context assembly, written by the
        before_turn_params hook, read at the receipt/TurnRecord write site
        in run_turn. Last-write-wins matches the turn-context cell
        semantics the receipt already uses. *)

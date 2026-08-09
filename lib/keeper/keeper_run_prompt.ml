@@ -13,7 +13,7 @@ type turn_prompt_context =
   ; memory_context : string
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
-  ; history_messages : Agent_sdk.Types.message list
+  ; history_messages : Agent_core.Types.message list
   ; ctx_work : Keeper_context_runtime.working_context
   }
 
@@ -27,7 +27,7 @@ type user_turn_record =
           a HITL resolution, chat-lane input, or the autonomous continuation
           cue. *)
   | Skip_already_checkpointed_user_turn
-      (** The resumed OAS checkpoint already owns this exact user turn. Do not
+      (** The resumed AGENT_CORE checkpoint already owns this exact user turn. Do not
           append or persist a second copy before replay. *)
 
 type extra_system_context_assembly =
@@ -66,7 +66,7 @@ let build_turn_context
       ~(ctx : Keeper_run_context.run_context)
       ~(build_turn_prompt :
            base_system_prompt:string
-        -> messages:Agent_sdk.Types.message list
+        -> messages:Agent_core.Types.message list
         -> Keeper_agent_prompt_metrics.turn_prompt)
       ~(user_message : string)
       ~config:(_ : Workspace.config)
@@ -126,7 +126,7 @@ let build_turn_context
      meta.agent_name (start_turn_count + 1) user_seg.Keeper_agent_prompt_metrics.bytes
      (pick_hash16 user_seg) dyn_seg.Keeper_agent_prompt_metrics.bytes (pick_hash16 dyn_seg));
   (* 6. Append user message and persist. *)
-  let user_msg = Agent_sdk.Types.user_msg user_message in
+  let user_msg = Agent_core.Types.user_msg user_message in
   let history_messages =
     Keeper_context_runtime.messages_of_context ctx_work
   in

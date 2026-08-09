@@ -1,7 +1,7 @@
-(** Opaque identity of one resolved OAS provider binding.
+(** Opaque identity of one resolved AGENT_CORE provider binding.
 
     The identity is constructed from the actual resolved provider config and
-    OAS-owned catalog facts.  Embedding runtimes may compare/hash it, but cannot
+    AGENT_CORE-owned catalog facts.  Embedding runtimes may compare/hash it, but cannot
     reconstruct it from display strings or inspect credential material.
 
     @since 0.211.7 *)

@@ -1,4 +1,4 @@
-(** MCP schema bridge — converts between MCP SDK types and OAS types.
+(** MCP schema bridge — converts between MCP SDK types and AGENT_CORE types.
 
     @stability Internal
     @since 0.93.1 *)
@@ -42,10 +42,10 @@ val tool_of_input_schema_result
   -> Tool.tool_handler
   -> (Tool.t, string) result
 
-val mcp_tool_of_sdk_tool : Sdk_types.tool -> mcp_tool
-val mcp_tool_to_sdk_tool : call_fn:Tool.tool_handler -> mcp_tool -> Tool.t
+val mcp_tool_of_agent_core_tool : Sdk_types.tool -> mcp_tool
+val mcp_tool_to_agent_core_tool : call_fn:Tool.tool_handler -> mcp_tool -> Tool.t
 
-val mcp_tool_to_sdk_tool_result
+val mcp_tool_to_agent_core_tool_result
   :  call_fn:Tool.tool_handler
   -> mcp_tool
   -> (Tool.t, string) result

@@ -918,7 +918,7 @@ describe('workspaceTreeIdentity', () => {
 
   it('does not collapse distinct repository sources into one refresh identity', () => {
     const left = workspaceTreeIdentity({ kind: 'repository', repoId: 'masc' }, '/repo/masc')
-    const right = workspaceTreeIdentity({ kind: 'repository', repoId: 'oas' }, '/repo/oas')
+    const right = workspaceTreeIdentity({ kind: 'repository', repoId: 'agentCore' }, '/repo/agentCore')
 
     expect(sameWorkspaceTreeIdentity(left, right)).toBe(false)
   })

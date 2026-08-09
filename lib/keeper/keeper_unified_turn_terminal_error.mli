@@ -6,10 +6,10 @@
     - [Runtime_exhausted] — calls [Keeper_registry.mark_turn_runtime_exhausted],
       increments the [kcl_to_ktc_exhaustion] FSM edge counter, logs a
       structured WARN listing the attempted runtimes, and increments
-      the [oas_execution_errors] counter with phase [Runtime_exhausted].
+      the [agent_core_execution_errors] counter with phase [Runtime_exhausted].
 
     - Otherwise — sets the turn phase to [Turn_finalizing], increments
-      the [oas_execution_errors] counter with phase
+      the [agent_core_execution_errors] counter with phase
       [Terminal_non_exhaustion], and logs a structured WARN.
 
     Side effects only.  The function is unit-returning to keep the 9
@@ -22,5 +22,5 @@ val handle
   -> keeper_name:string
   -> attempt:int
   -> attempted_runtimes:string list
-  -> Agent_sdk.Error.sdk_error
+  -> Agent_core.Error.t
   -> unit

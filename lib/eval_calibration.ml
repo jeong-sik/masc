@@ -293,13 +293,13 @@ let label_record_to_json (r : label_record) : Yojson.Safe.t =
   ]
 
 (* ================================================================ *)
-(* OAS Harness.verdict conversion (#3165)                            *)
+(* AGENT_CORE Harness.verdict conversion (#3165)                            *)
 (* ================================================================ *)
 
-(** Convert a MASC [verdict_record] to an OAS [Harness.verdict].
+(** Convert a MASC [verdict_record] to an AGENT_CORE [Harness.verdict].
     Maps "approve" → passed=true, "reject:*" → passed=false.
     The gate name is recorded as evidence for traceability. *)
-let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
+let to_harness_verdict (r : verdict_record) : Agent_core.Harness.verdict =
   let passed =
     match r.verdict with
     | Task.Anti_rationalization.Approve -> true
@@ -320,7 +320,7 @@ let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
            (Task.Anti_rationalization.gate_to_string r.gate)
            (verdict_to_string r.verdict))
   in
-  { Agent_sdk.Harness.passed; score; evidence; detail }
+  { Agent_core.Harness.passed; score; evidence; detail }
 
 (* ================================================================ *)
 (* Record writing                                                    *)
@@ -330,7 +330,7 @@ let record_verdict
     ~(task_id : string)
     ~(req : Task.Anti_rationalization.review_request)
     ~(result : Task.Anti_rationalization.review_result)
-    ?(on_harness_verdict : (Agent_sdk.Harness.verdict -> unit) option)
+    ?(on_harness_verdict : (Agent_core.Harness.verdict -> unit) option)
     () : unit =
   match result.verdict with
   | None -> ()

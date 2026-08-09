@@ -115,7 +115,7 @@ let merge_execution_links
   }
 ;;
 
-(** Merge optional OAS event_bus envelope identifiers (correlation_id,
+(** Merge optional AGENT_CORE event_bus envelope identifiers (correlation_id,
     run_id) into the task activity payload. When both ids are absent the
     original payload is returned untouched, so existing callers compile
     and behave identically. *)

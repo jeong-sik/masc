@@ -254,12 +254,12 @@ let dashboard_auth_error_code : t -> string option = function
   | Task _ | Agent _ | System _ | RateLimitExceeded _ | CacheError _ ->
       Some "unknown"
 
-(* [is_retryable] mirrors [Error.is_retryable] in OAS so MASC-side
-   callers don't have to fall back on an OAS-only predicate when
+(* [is_retryable] mirrors [Error.is_retryable] in AGENT_CORE so MASC-side
+   callers don't have to fall back on an AGENT_CORE-only predicate when
    reasoning about a [masc_error]. Conservative — when in doubt
    return [false] so callers don't loop on deterministic
    failures. Source for the audit-driven motivation:
-   2026-04-29 OAS↔MASC Implementation Quality Audit
+   2026-04-29 AGENT_CORE↔MASC Implementation Quality Audit
    §"Re-tryability". *)
 let is_retryable = function
   | Task _ | Agent _ -> false

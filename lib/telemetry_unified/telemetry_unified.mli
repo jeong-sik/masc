@@ -8,7 +8,7 @@
     - [<masc_root>/tool_calls/]             — Full I/O for keeper tool calls
     - [<masc_root>/trajectories/<keeper>/]  — Trajectory tool-call rows
     - [<masc_root>/tool_usage/]             — Non-public registered tool calls
-    - [<masc_root>/oas-events/]             — Durable OAS native/custom bus events
+    - [<masc_root>/agent-core-events/]             — Durable AGENT_CORE native/custom bus events
     - [<masc_root>/keepers/<name>/execution-receipts/]
                                               — Keeper execution receipts
     - [<masc_root>/goal_events.jsonl]       — Goal FSM lifecycle events
@@ -26,7 +26,7 @@ type source =
   | Tool_call_io   (** Keeper tool calls with full input/output *)
   | Trajectory_tool_call  (** Trajectory-backed keeper tool call rows *)
   | Tool_usage     (** Non-public registered tool invocations *)
-  | Oas_event      (** Durable OAS native/custom event bus relays *)
+  | Agent_core_event      (** Durable AGENT_CORE native/custom event bus relays *)
   | Execution_receipt  (** Keeper execution receipt rows *)
   | Goal_event     (** Goal FSM lifecycle and verification events *)
   | Tool_metric    (** Tool duration and success metrics *)

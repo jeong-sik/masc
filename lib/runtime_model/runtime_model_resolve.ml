@@ -1,8 +1,8 @@
 (** Model ID resolution for runtime provider labels.
 
-    Pure functions that map user-facing [auto] selectors through the OAS
+    Pure functions that map user-facing [auto] selectors through the AGENT_CORE
     provider runtime binding projection. Provider-specific alias/catalog truth
-    belongs upstream in OAS, not in MASC runtime code.
+    belongs upstream in AGENT_CORE, not in MASC runtime code.
     No side effects beyond reading environment variables.
 
     @since 0.92.0 extracted from Runtime_config *)

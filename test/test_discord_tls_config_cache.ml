@@ -5,7 +5,7 @@
     subprocess per keychain plus a full PEM parse) and reuse the config
     on later calls instead of reloading per reconnect (2026-07-17 masc
     CPU-full diagnosis; the LLM connection-path twin of this cache is
-    tested in oas test_tls_config_cache).
+    tested in agent_core test_tls_config_cache).
 
     Hosts without a readable trust store make the loader raise [Failure];
     there is nothing to cache in that environment, so the case prints a

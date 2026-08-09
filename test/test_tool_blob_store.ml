@@ -55,9 +55,9 @@ let with_temp_dir f =
 
 let test_inline_roundtrip () =
   let s = "hello world\n" in
-  let encoded = O.encode_for_oas (O.Inline s) in
+  let encoded = O.encode_for_agent_core (O.Inline s) in
   Alcotest.(check string) "inline encode = identity" s encoded;
-  match O.decode_from_oas encoded with
+  match O.decode_from_agent_core encoded with
   | O.Not_marker ->
       (* Raw text is not a marker: the content is the string itself,
          already asserted identical above. *)
@@ -73,12 +73,12 @@ let test_stored_roundtrip () =
       ~mime:"text/plain"
   in
   let original = O.Stored artifact_ref in
-  let encoded = O.encode_for_oas original in
+  let encoded = O.encode_for_agent_core original in
   Alcotest.(check bool)
     "encoded starts with marker"
     true
     (O.is_marker encoded);
-  match O.decode_from_oas encoded with
+  match O.decode_from_agent_core encoded with
   | O.Decoded { sha256 = decoded_sha; bytes; preview; mime } ->
       Alcotest.(check string) "sha256" sha256 decoded_sha;
       Alcotest.(check int) "bytes" 128934 bytes;
@@ -113,12 +113,12 @@ let test_encoded_marker_stays_under_externalization_threshold () =
       let store = B.create ~base_path:dir in
       let threshold = Masc.Tool_bridge.default_externalize_threshold_bytes in
       let payload = String.make (threshold + 1) '"' in
-      let encoded = B.put store ~bytes:payload ~mime:"text/plain" |> O.encode_for_oas in
+      let encoded = B.put store ~bytes:payload ~mime:"text/plain" |> O.encode_for_agent_core in
       Alcotest.(check bool)
         "marker stays below default externalization threshold"
         true
         (String.length encoded <= threshold);
-      match O.decode_from_oas encoded with
+      match O.decode_from_agent_core encoded with
       | O.Decoded { preview; _ } ->
         Alcotest.(check int) "preview remains documented cap" 200 (String.length preview)
       | O.Not_marker -> Alcotest.fail "expected Decoded"
@@ -141,7 +141,7 @@ let test_decode_non_marker () =
   in
   List.iter
     (fun s ->
-      match O.decode_from_oas s with
+      match O.decode_from_agent_core s with
       | O.Not_marker -> ()
       | O.Decoded _ ->
           Alcotest.failf "expected Not_marker for %S" s
@@ -161,7 +161,7 @@ let test_decode_malformed_marker () =
   in
   List.iter
     (fun bad ->
-       match O.decode_from_oas bad with
+       match O.decode_from_agent_core bad with
        | O.Invalid_marker { detail } ->
          Alcotest.(check bool)
            "detail explains the failure" true (String.length detail > 0)
@@ -348,7 +348,7 @@ let test_maintenance_keeps_live_and_deletes_stable_dead_after_restart () =
         (Yojson.Safe.to_string
            (`Assoc
              [ "consumer", `String "Tool_bridge"
-             ; "output_ref", `String (O.encode_for_oas (O.Stored live))
+             ; "output_ref", `String (O.encode_for_agent_core (O.Stored live))
              ])
          ^ "\n");
       let replay_sidecar =
@@ -363,7 +363,7 @@ let test_maintenance_keeps_live_and_deletes_stable_dead_after_restart () =
            (`Assoc
              [ "approval_id", `String "approval-maintenance"
              ; ( "outcome"
-               , `String (O.encode_for_oas (O.Stored replay_live)) )
+               , `String (O.encode_for_agent_core (O.Stored replay_live)) )
              ]));
       let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
       Alcotest.(check int) "union includes both consumers" 2 observed.live_references;
@@ -418,7 +418,7 @@ let test_maintenance_keeps_wire_capture_reference_within_retention () =
            (`Assoc
              [ "kind", `String "response"
              ; ( "response_text"
-               , `String (O.encode_for_oas (O.Stored captured)) )
+               , `String (O.encode_for_agent_core (O.Stored captured)) )
              ])
          ^ "\n");
       let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
@@ -462,7 +462,7 @@ let test_maintenance_rejects_uncoordinated_cluster_roots () =
         cluster_capture
         (Yojson.Safe.to_string
            (`Assoc
-             [ "response_text", `String (O.encode_for_oas (O.Stored blob)) ])
+             [ "response_text", `String (O.encode_for_agent_core (O.Stored blob)) ])
          ^ "\n");
       (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
        | Error
@@ -598,7 +598,7 @@ let test_maintenance_rechecks_candidate_referenced_before_startup () =
         durable_consumer
         (Yojson.Safe.to_string
            (`Assoc
-             [ "output_ref", `String (O.encode_for_oas (O.Stored candidate)) ])
+             [ "output_ref", `String (O.encode_for_agent_core (O.Stored candidate)) ])
          ^ "\n");
       let swept =
         maintenance_ok
@@ -794,7 +794,7 @@ let with_one_live_and_one_dead_blob f =
       Fs_compat.save_file
         durable_consumer
         (Yojson.Safe.to_string
-           (`Assoc [ "output_ref", `String (O.encode_for_oas (O.Stored live)) ])
+           (`Assoc [ "output_ref", `String (O.encode_for_agent_core (O.Stored live)) ])
          ^ "\n");
       f ~base_path ~store ~live ~dead)
 
@@ -900,7 +900,7 @@ let test_maintenance_rejects_symbolic_link_durable_source () =
         outside
         (Yojson.Safe.to_string
            (`Assoc
-             [ "output_ref", `String (O.encode_for_oas (O.Stored blob)) ]));
+             [ "output_ref", `String (O.encode_for_agent_core (O.Stored blob)) ]));
       let linked_source =
         Filename.concat
           (Common.masc_dir_from_base_path ~base_path)

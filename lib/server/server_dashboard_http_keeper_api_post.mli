@@ -56,13 +56,13 @@ val handle_keeper_board_attention_quarantine_recovery_post :
   unit
 
 val stat_json_of_path : string -> Yojson.Safe.t
-val oas_checkpoint_summary_json :
+val agent_core_checkpoint_summary_json :
   source_kind:string ->
   snapshot_id:string ->
   path:string ->
   is_current:bool ->
   fallback_generation:int ->
-  Agent_sdk.Checkpoint.t ->
+  Agent_core.Checkpoint.t ->
   Yojson.Safe.t
 val keeper_checkpoint_inventory_json :
   Workspace.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t

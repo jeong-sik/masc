@@ -1,7 +1,7 @@
 (** Opaque-runtime exact-output execution for one durable Board candidate.
 
     MASC owns the immutable Board input, strict domain decoder, and durable
-    callbacks. OAS owns lane admission, affine attempts, dispatch, and
+    callbacks. AGENT_CORE owns lane admission, affine attempts, dispatch, and
     advancement. This interface deliberately exposes no receipt phase or
     dispatch count. *)
 
@@ -26,7 +26,7 @@ type attempt_provenance =
   ; request_body_sha256 : string
   }
 (** Opaque identity of one admitted attempt. It deliberately excludes the raw
-    OAS receipt, effect phase, dispatch count, target, and execution cause. *)
+    AGENT_CORE receipt, effect phase, dispatch count, target, and execution cause. *)
 
 type candidate_visit =
   { flow_id : string
@@ -36,14 +36,14 @@ type candidate_visit =
   ; catalog_evidence_sha256 : string
   ; target_identity_fingerprint : string
   }
-(** Opaque projection of the immutable OAS-selected successor visit. No
+(** Opaque projection of the immutable AGENT_CORE-selected successor visit. No
     execution receipt exists yet, so this type contains no call id, request
     plan, or body hash. *)
 
 type advance_source =
   | Executed_failure of attempt_provenance
   | Predispatch_rejection of candidate_visit
-(** Opaque source of one OAS-selected advancement. Predispatch rejection
+(** Opaque source of one AGENT_CORE-selected advancement. Predispatch rejection
     carries only the immutable candidate visit because no attempt receipt
     exists. *)
 
@@ -77,8 +77,8 @@ val prepare :
   net:Eio_context.eio_net option ->
   Keeper_board_attention_candidate.candidate ->
   (prepared, setup_error) result
-(** Freeze one complete ordered OAS flow. Missing network context fails before
-    OAS allocates an attempt. *)
+(** Freeze one complete ordered AGENT_CORE flow. Missing network context fails before
+    AGENT_CORE allocates an attempt. *)
 
 val execute :
   ?clock:_ Eio.Time.clock ->
@@ -93,10 +93,10 @@ val execute :
   , 'callback_error execution_error )
   result
 (** Execute the prepared affine flow exactly once. Domain identity and
-    provenance failures are terminal results and never request OAS
+    provenance failures are terminal results and never request AGENT_CORE
     advancement. Cancellation is not caught. The caller's durable callback
     progress is the sole terminalization authority and must be quarantined
-    under cancellation protection; no OAS receipt state is inspected. *)
+    under cancellation protection; no AGENT_CORE receipt state is inspected. *)
 (** Cancellation is propagated promptly without protected partition I/O.
     Durable [Bound] or [Advancing] progress is quarantined only by the subsequent
     process-start recovery path. *)

@@ -383,7 +383,7 @@ let functional_capability_projection
            (fun part -> "serving_constraint." ^ part)
            (Serving_constraint.fingerprint_parts constraint_)
   in
-  [ "oas-exact-output-functional-capabilities-v2"
+  [ "agent_core-exact-output-functional-capabilities-v2"
   ; "max_context=" ^ option_int caps.max_context_tokens
   ]
   @ serving_constraint
@@ -532,7 +532,7 @@ let%test "exact functional capability projection has a stable golden" =
   functional_capability_projection
     fixture
     ~anthropic_thinking_control:(Some Caps.Anthropic_adaptive_preferred)
-  = [ "oas-exact-output-functional-capabilities-v2"
+  = [ "agent_core-exact-output-functional-capabilities-v2"
     ; "max_context=some:8"
     ; "serving_constraint=none"
     ; "max_output=some:3"

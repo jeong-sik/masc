@@ -8,7 +8,7 @@
 #
 # Why this gate exists:
 #   PR #15836 cleanup added a comment naming pull-request consumers as
-#     (keeper_tool_call_log, keeper_hooks_oas, audit_keeper_*)
+#     (keeper_tool_call_log, keeper_hooks_agent_core, audit_keeper_*)
 #   The trailing `_*)` closed the surrounding block comment, so the
 #   next line ("already read pull-request data as a typed field ...") was
 #   parsed as OCaml source. `dune build` reported:
@@ -18,7 +18,7 @@
 #
 # Signal:
 #   Substring `_*)` anywhere in tracked *.ml or *.mli files under
-#   lib/, test/, or oas/lib/. The underscore-before-glob form is
+#   lib/, test/, or agent_core/lib/. The underscore-before-glob form is
 #   the practical signature — naked `*)` shows up as the legitimate
 #   comment terminator on almost every comment-ending line and is
 #   not a useful signal.
@@ -42,7 +42,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ALLOWLIST="${ROOT}/scripts/lint/no-ocaml-comment-terminator-trap.allowlist"
 
-ROOTS=("${ROOT}/lib" "${ROOT}/test" "${ROOT}/oas/lib")
+ROOTS=("${ROOT}/lib" "${ROOT}/test" "${ROOT}/agent_core/lib")
 
 # bash 3.2 (macOS dev shell) lacks associative arrays, so allowlist
 # membership is checked via per-line grep against the file directly.

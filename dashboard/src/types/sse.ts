@@ -36,7 +36,7 @@ export type SSEEventType =
   | 'keeper_chat_turn_event'
   | 'keeper_waiting_inventory_changed'
   | 'keeper_compaction_snapshots_changed'
-  | 'oas_telemetry_sample'
+  | 'agent_core_telemetry_sample'
   | 'ide_cursor_changed'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
@@ -59,28 +59,28 @@ export type SSEEventType =
   | 'gate_mode_changed'
   // Task claim notifications. Emitted by lib/task/tool_task_handlers.ml.
   | 'masc/task_claimed'
-  // OAS bridge events (relayed from Event_bus via oas_sse_bridge)
-  | 'oas:masc:keeper:lifecycle'
-  | 'oas:masc:trust_updated'
-  | 'oas:masc:reputation_changed'
-  | 'oas:agent_started'
-  | 'oas:agent_completed'
-  | 'oas:agent_failed'
-  | 'oas:tool_called'
-  | 'oas:tool_completed'
-  | 'oas:turn_started'
-  | 'oas:turn_completed'
-  | 'oas:handoff_requested'
-  | 'oas:handoff_completed'
-  | 'oas:context_compacted'
-  | 'oas:task_state_changed'
+  // Agent Core bridge events (relayed from Event_bus via agent_core_sse_bridge)
+  | 'agent_core:masc:keeper:lifecycle'
+  | 'agent_core:masc:trust_updated'
+  | 'agent_core:masc:reputation_changed'
+  | 'agent_core:agent_started'
+  | 'agent_core:agent_completed'
+  | 'agent_core:agent_failed'
+  | 'agent_core:tool_called'
+  | 'agent_core:tool_completed'
+  | 'agent_core:turn_started'
+  | 'agent_core:turn_completed'
+  | 'agent_core:handoff_requested'
+  | 'agent_core:handoff_completed'
+  | 'agent_core:context_compacted'
+  | 'agent_core:task_state_changed'
   // Harness observability events (#3165)
-  | 'oas:masc:harness:verdict_recorded'
-  | 'oas:masc:harness:pre_compact'
-  | 'oas:masc:harness:handoff'
-  // Forward-compat: the dashboard parser accepts any `oas:*` event so
+  | 'agent_core:masc:harness:verdict_recorded'
+  | 'agent_core:masc:harness:pre_compact'
+  | 'agent_core:masc:harness:handoff'
+  // Forward-compat: the dashboard parser accepts any `agent_core:*` event so
   // newer runtime bridges do not get dropped at the schema boundary.
-  | `oas:${string}`
+  | `agent_core:${string}`
   // Server-push snapshot events (proactive cache broadcasts)
   | 'project_snapshot'
   | 'namespace_truth_snapshot'
@@ -92,7 +92,7 @@ export type SSEEventType =
   | 'audit_event'
   | 'masc/audit_event'
   | 'masc:audit_event'
-  | 'oas:masc:audit_event'
+  | 'agent_core:masc:audit_event'
 
 export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
 // Closed set of journal sources. `'unknown'` is a first-class variant
@@ -218,7 +218,7 @@ export interface SSEEvent {
   cost_usd?: number
   tool_calls_made?: number
   total_turns?: number
-  // OAS bridge payload (generic container for Event_bus events).
+  // Agent Core bridge payload (generic container for Event_bus events).
   payload?: Record<string, unknown> | string
   // Wall-clock time attached to runtime events such as masc/task_claimed.
   timestamp?: number
@@ -228,10 +228,10 @@ export interface SSEEvent {
   actor?: string
   changed_at?: string
   kind?: string
-  // OAS envelope — attached to every oas:* event by oas_sse_bridge since 2.260.0.
+  // Agent Core envelope — attached to every agent_core:* event by agent_core_sse_bridge since 2.260.0.
   // Used to join events into causal chains in the dashboard journal.
   correlation_id?: string
-  // OAS envelope per-run identifier (one per Agent.run invocation).
+  // Agent Core envelope per-run identifier (one per Agent.run invocation).
   run_id?: string
   // Gate attribution envelope — structured verdict metadata. Emitters
   // attach this alongside existing reason/reason_code fields since 2.261.0.
@@ -286,11 +286,11 @@ export type JournalEventType =
   | 'keeper_guardrail'
   | 'keeper_phase_changed'
   | 'keeper_tool_call'
-  | 'oas_tool'
-  | 'oas_turn'
-  | 'oas_context'
-  | 'oas_task'
-  | 'oas_event'
+  | 'agent_core_tool'
+  | 'agent_core_turn'
+  | 'agent_core_context'
+  | 'agent_core_task'
+  | 'agent_core_event'
   | 'unknown'
 
 export interface JournalEntry {
@@ -300,7 +300,7 @@ export interface JournalEntry {
   timestamp: number
   severity?: JournalSeverity
   source?: JournalSource
-  kind?: 'board' | 'tasks' | 'keepers' | 'system' | 'oas'
+  kind?: 'board' | 'tasks' | 'keepers' | 'system' | 'agentCore'
   eventType?: JournalEventType
   author?: string
   preview?: string
@@ -308,13 +308,13 @@ export interface JournalEntry {
   sessionId?: string
   operationId?: string
   workerRunId?: string
-  // OAS envelope — propagated from oas_sse_bridge so the journal can group
+  // Agent Core envelope — propagated from agent_core_sse_bridge so the journal can group
   // consecutive entries belonging to the same logical run.
   correlationId?: string
-  // OAS envelope per-run identifier (one per Agent.run invocation).
+  // Agent Core envelope per-run identifier (one per Agent.run invocation).
   runId?: string
-  // OAS envelope event timestamp (Unix epoch seconds, from envelope, not local clock).
-  oasTs?: number
+  // Agent Core envelope event timestamp (Unix epoch seconds, from envelope, not local clock).
+  agentCoreTs?: number
 }
 
 // --- Sort modes ---

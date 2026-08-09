@@ -83,7 +83,7 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   match blocker_class with
   | Keeper_meta_contract.Stale_turn_timeout ->
       Keeper_turn_disposition.Turn_wall_clock_timeout
-  | Keeper_meta_contract.Sdk_input_required ->
+  | Keeper_meta_contract.Agent_core_input_required ->
       Keeper_turn_disposition.Input_required
   | Keeper_meta_contract.Runtime_exhausted _ ->
       Keeper_turn_disposition.Provider_error
@@ -94,10 +94,10 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   | Keeper_meta_contract.Fiber_unresolved ->
       Keeper_turn_disposition.Provider_error
         Keeper_turn_terminal_code.Fiber_unresolved
-  | Keeper_meta_contract.Sdk_context_window_exceeded
-  | Keeper_meta_contract.Sdk_unrecognized_stop_reason
-  | Keeper_meta_contract.Sdk_guardrail_violation
-  | Keeper_meta_contract.Sdk_tripwire_violation
+  | Keeper_meta_contract.Agent_core_context_window_exceeded
+  | Keeper_meta_contract.Agent_core_unrecognized_stop_reason
+  | Keeper_meta_contract.Agent_core_guardrail_violation
+  | Keeper_meta_contract.Agent_core_tripwire_violation
   | Keeper_meta_contract.Internal_unhandled_exception
   | Keeper_meta_contract.Internal_bridge_exception
   | Keeper_meta_contract.Internal_contract_rejected
@@ -106,7 +106,7 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   | Keeper_meta_contract.Receipt_persistence_failed
   | Keeper_meta_contract.Gate_replay_repair_required ->
     Keeper_turn_disposition.Provider_error
-      (Keeper_turn_terminal_code.Sdk_error raw_blocker_class)
+      (Keeper_turn_terminal_code.Agent_core_error raw_blocker_class)
 
 let disposition_of_runtime_blocker_class raw_blocker_class =
   match Keeper_meta_contract.blocker_class_of_serialized_string raw_blocker_class with

@@ -1,4 +1,4 @@
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 module Registry = struct
   include Runtime_exact_output_registry
   include Runtime_exact_output_registry.For_testing
@@ -218,7 +218,7 @@ let load_snapshot ~getenv catalog =
   let io : Exact_output.resolver_io = { getenv } in
   match Exact_output.load_resolver_snapshot ~io ~catalog () with
   | Ok snapshot -> snapshot
-  | Error _ -> Alcotest.fail "OAS control snapshot must load"
+  | Error _ -> Alcotest.fail "AGENT_CORE control snapshot must load"
 ;;
 
 let load_control_snapshot catalog = load_snapshot ~getenv:(fun _ -> Ok None) catalog
@@ -226,7 +226,7 @@ let load_control_snapshot catalog = load_snapshot ~getenv:(fun _ -> Ok None) cat
 let require_admitted snapshot target_id =
   match Exact_output.admit_target_ref snapshot target_id with
   | Ok _ -> ()
-  | Error _ -> Alcotest.failf "OAS control target %S must be admitted" target_id
+  | Error _ -> Alcotest.failf "AGENT_CORE control target %S must be admitted" target_id
 ;;
 
 let require_not_admitted snapshot target_id =

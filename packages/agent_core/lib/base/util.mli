@@ -13,13 +13,13 @@ val first_some : 'a option -> 'a option -> 'a option
 val string_contains : needle:string -> string -> bool
 
 (** Construct a {!Error.Serialization} [JsonParseError]. *)
-val json_parse_error : string -> Error.sdk_error
+val json_parse_error : string -> Error.t
 
 (** Construct a {!Error.Io} [FileOpFailed] with [op = "read"]. *)
-val file_read_error : path:string -> detail:string -> Error.sdk_error
+val file_read_error : path:string -> detail:string -> Error.t
 
 (** Construct a {!Error.Io} [FileOpFailed] with [op = "write"]. *)
-val file_write_error : path:string -> detail:string -> Error.sdk_error
+val file_write_error : path:string -> detail:string -> Error.t
 
 (** Append a single element to the end of a list. *)
 val snoc : 'a list -> 'a -> 'a list

@@ -1,9 +1,8 @@
 (** Closed ownership and detailed error evidence for resolved provider calls.
 
-    Existing SDK APIs continue to return {!Error.sdk_error}.  Opt-in detailed
-    APIs return {!detailed_error}, whose [error] field is the exact legacy
-    projection and whose optional attribution is constructed before typed
-    transport evidence is discarded.
+    Core APIs return {!Error.t}. Detailed APIs return {!detailed_error}, whose
+    optional attribution is constructed before typed transport evidence is
+    discarded.
 
     @since 0.211.7 *)
 
@@ -37,7 +36,7 @@ type t =
   }
 
 type detailed_error =
-  { error : Error.sdk_error
+  { error : Error.t
   ; provider_failure : t option
   }
 
@@ -45,43 +44,42 @@ type accept_rejected =
   | Api_invalid_request
   | Config_invalid_config of { field : string }
 
-(** Lift an already-projected SDK error.  Coarse [Api] and [Provider] errors
+(** Lift an already-projected agent-core error.  Coarse [Api] and [Provider] errors
     remain explicit [Unclassified] provider evidence with no invented binding;
     non-provider domains carry no provider attribution. *)
-val of_sdk_error : Error.sdk_error -> detailed_error
+val of_core_error : Error.t -> detailed_error
 
 (** A failure while resolving the provider config has no resolved binding.  It
     remains explicitly unclassified instead of being widened downstream. *)
-val of_provider_configuration_error : Error.sdk_error -> detailed_error
+val of_provider_configuration_error : Error.t -> detailed_error
 
 (** A provider implementation that resolved for this call but is unavailable
     at dispatch time is owned by that exact runtime binding. *)
 val of_runtime_binding_error
   :  binding:Binding_identity.t
-  -> Error.sdk_error
+  -> Error.t
   -> detailed_error
 
 val of_request_validation_error
   :  binding:Binding_identity.t
-  -> Error.sdk_error
+  -> Error.t
   -> detailed_error
 
 val of_response_parse_error
   :  binding:Binding_identity.t
-  -> Error.sdk_error
+  -> Error.t
   -> detailed_error
 
-(** Legacy SDK projection used by compatibility adapters.  New provider call
-    paths should prefer {!of_http_error} so attribution cannot be discarded
-    before the public detailed boundary. *)
-val sdk_error_of_http_error
+(** Coarse projection for call sites that do not consume attribution.
+    Provider call paths use {!of_http_error} so attribution is retained through
+    the detailed boundary. *)
+val core_error_of_http_error
   :  ?accept_rejected:accept_rejected
   -> Llm_provider.Http_client.http_error
-  -> Error.sdk_error
+  -> Error.t
 
-(** Central transport-error mapping.  The returned [error] preserves the legacy
-    SDK mapping exactly; ownership is derived only from closed/status evidence
-    and the OAS-constructed binding identity. *)
+(** Central transport-error mapping. Ownership is derived only from closed or
+    status evidence and the agent-core binding identity. *)
 val of_http_error
   :  ?accept_rejected:accept_rejected
   -> binding:Binding_identity.t

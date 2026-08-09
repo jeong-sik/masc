@@ -46,13 +46,13 @@ export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'cancelled', 
 const NON_TERMINAL_REQUEST_STATUSES = new Set(['queued', 'deferred', 'acceptance_uncertain'])
 export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
-const pendingOasToolBlockIndexes = new Map<string, number>()
-const pendingOasTextBlockIndexes = new Map<string, number>()
+const pendingAgentCoreToolBlockIndexes = new Map<string, number>()
+const pendingAgentCoreTextBlockIndexes = new Map<string, number>()
 type ScheduledFlushHandle = ReturnType<typeof setTimeout>
 interface PendingThinkingState {
   chunks: string[]
   preview: string
-  oasBlockIndex?: number
+  agentCoreBlockIndex?: number
   flushHandle: ScheduledFlushHandle | null
 }
 
@@ -70,7 +70,7 @@ function cancelStreamFlush(handle: ScheduledFlushHandle): void {
   clearTimeout(handle)
 }
 
-function sameOasBlockIndex(left: number | undefined, right: number | undefined): boolean {
+function sameAgentCoreBlockIndex(left: number | undefined, right: number | undefined): boolean {
   return left === undefined ? right === undefined : left === right
 }
 
@@ -108,14 +108,14 @@ function flushPendingThinkingDeltas(
   }
   if (mode === 'preview') {
     setAssistantThinkingSnapshot(keeperName, assistantEntryId, pending.preview, {
-      oasBlockIndex: pending.oasBlockIndex,
+      agentCoreBlockIndex: pending.agentCoreBlockIndex,
     })
     persistActiveAssistantDraft(keeperName, assistantEntryId)
     return
   }
   pendingThinkingDeltas.delete(key)
   setAssistantThinkingSnapshot(keeperName, assistantEntryId, fullPendingThinkingText(pending), {
-    oasBlockIndex: pending.oasBlockIndex,
+    agentCoreBlockIndex: pending.agentCoreBlockIndex,
   })
   persistActiveAssistantDraft(keeperName, assistantEntryId)
 }
@@ -133,12 +133,12 @@ function enqueueThinkingDelta(
   keeperName: string,
   assistantEntryId: string,
   delta: string,
-  meta: { oasBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number } = {},
 ): void {
   if (!delta.trim()) return
   const key = streamEntryKey(keeperName, assistantEntryId)
   let pending = pendingThinkingDeltas.get(key)
-  if (pending && !sameOasBlockIndex(pending.oasBlockIndex, meta.oasBlockIndex)) {
+  if (pending && !sameAgentCoreBlockIndex(pending.agentCoreBlockIndex, meta.agentCoreBlockIndex)) {
     flushPendingThinkingDeltas(keeperName, assistantEntryId)
     pending = undefined
   }
@@ -147,7 +147,7 @@ function enqueueThinkingDelta(
     pending = {
       chunks: [text],
       preview: text,
-      oasBlockIndex: meta.oasBlockIndex,
+      agentCoreBlockIndex: meta.agentCoreBlockIndex,
       flushHandle: null,
     }
     pendingThinkingDeltas.set(key, pending)
@@ -176,8 +176,8 @@ export function _resetKeeperStreamBuffersForTests(): void {
     }
   }
   pendingThinkingDeltas.clear()
-  pendingOasToolBlockIndexes.clear()
-  pendingOasTextBlockIndexes.clear()
+  pendingAgentCoreToolBlockIndexes.clear()
+  pendingAgentCoreTextBlockIndexes.clear()
 }
 
 export interface KeeperThreadAbortResult {
@@ -231,11 +231,11 @@ function recordStreamProtocolError(
   }
 }
 
-function oasToolBlockKey(keeperName: string, assistantEntryId: string, toolCallId: string): string {
+function agentCoreToolBlockKey(keeperName: string, assistantEntryId: string, toolCallId: string): string {
   return `${keeperName}\u0000${assistantEntryId}\u0000${toolCallId}`
 }
 
-function rememberOasToolBlockIndex(
+function rememberAgentCoreToolBlockIndex(
   keeperName: string,
   assistantEntryId: string,
   toolCallId: string,
@@ -243,57 +243,57 @@ function rememberOasToolBlockIndex(
 ): void {
   const id = nonBlankToolCallId(toolCallId)
   if (!id || index === undefined) return
-  pendingOasToolBlockIndexes.set(oasToolBlockKey(keeperName, assistantEntryId, id), index)
+  pendingAgentCoreToolBlockIndexes.set(agentCoreToolBlockKey(keeperName, assistantEntryId, id), index)
 }
 
-function takeOasToolBlockIndex(
+function takeAgentCoreToolBlockIndex(
   keeperName: string,
   assistantEntryId: string,
   toolCallId: string,
 ): number | undefined {
-  const key = oasToolBlockKey(keeperName, assistantEntryId, toolCallId)
-  const index = pendingOasToolBlockIndexes.get(key)
-  pendingOasToolBlockIndexes.delete(key)
+  const key = agentCoreToolBlockKey(keeperName, assistantEntryId, toolCallId)
+  const index = pendingAgentCoreToolBlockIndexes.get(key)
+  pendingAgentCoreToolBlockIndexes.delete(key)
   return index
 }
 
-function forgetOasToolBlockIndexByIndex(
+function forgetAgentCoreToolBlockIndexByIndex(
   keeperName: string,
   assistantEntryId: string,
   index: number | undefined,
 ): void {
   if (index === undefined) return
   const prefix = `${keeperName}\u0000${assistantEntryId}\u0000`
-  for (const [key, value] of pendingOasToolBlockIndexes.entries()) {
-    if (key.startsWith(prefix) && value === index) pendingOasToolBlockIndexes.delete(key)
+  for (const [key, value] of pendingAgentCoreToolBlockIndexes.entries()) {
+    if (key.startsWith(prefix) && value === index) pendingAgentCoreToolBlockIndexes.delete(key)
   }
 }
 
-function clearPendingOasToolBlockIndexesForEntry(keeperName: string, assistantEntryId: string): void {
+function clearPendingAgentCoreToolBlockIndexesForEntry(keeperName: string, assistantEntryId: string): void {
   const prefix = `${keeperName}\u0000${assistantEntryId}\u0000`
-  for (const key of pendingOasToolBlockIndexes.keys()) {
-    if (key.startsWith(prefix)) pendingOasToolBlockIndexes.delete(key)
+  for (const key of pendingAgentCoreToolBlockIndexes.keys()) {
+    if (key.startsWith(prefix)) pendingAgentCoreToolBlockIndexes.delete(key)
   }
 }
 
-function rememberOasTextBlockIndex(
+function rememberAgentCoreTextBlockIndex(
   keeperName: string,
   assistantEntryId: string,
   index: number | undefined,
 ): void {
   if (index === undefined) return
-  pendingOasTextBlockIndexes.set(streamEntryKey(keeperName, assistantEntryId), index)
+  pendingAgentCoreTextBlockIndexes.set(streamEntryKey(keeperName, assistantEntryId), index)
 }
 
-function takeOasTextBlockIndex(keeperName: string, assistantEntryId: string): number | undefined {
+function takeAgentCoreTextBlockIndex(keeperName: string, assistantEntryId: string): number | undefined {
   const key = streamEntryKey(keeperName, assistantEntryId)
-  const index = pendingOasTextBlockIndexes.get(key)
-  pendingOasTextBlockIndexes.delete(key)
+  const index = pendingAgentCoreTextBlockIndexes.get(key)
+  pendingAgentCoreTextBlockIndexes.delete(key)
   return index
 }
 
-function clearPendingOasTextBlockIndex(keeperName: string, assistantEntryId: string): void {
-  pendingOasTextBlockIndexes.delete(streamEntryKey(keeperName, assistantEntryId))
+function clearPendingAgentCoreTextBlockIndex(keeperName: string, assistantEntryId: string): void {
+  pendingAgentCoreTextBlockIndexes.delete(streamEntryKey(keeperName, assistantEntryId))
 }
 
 function normalizeStreamUsage(raw: unknown): NonNullable<KeeperConversationDetails['usage']> | null {
@@ -350,8 +350,8 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
       error: null,
       timestamp: new Date().toISOString(),
     })
-    clearPendingOasToolBlockIndexesForEntry(keeperName, entryId)
-    clearPendingOasTextBlockIndex(keeperName, entryId)
+    clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, entryId)
+    clearPendingAgentCoreTextBlockIndex(keeperName, entryId)
   }
   clearActiveStream(keeperName)
   setRecordValue(keeperSending, keeperName, false)
@@ -518,7 +518,7 @@ export function applyKeeperStreamEvent(
     }
     case 'TEXT_MESSAGE_END':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
+      clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
       markFinalizingIfLive('TEXT_MESSAGE_END')
       return null
     case 'TOOL_CALL_START': {
@@ -534,12 +534,12 @@ export function applyKeeperStreamEvent(
         return null
       }
       promoteAssistantTextToProgress(keeperName, assistantEntryId, {
-        oasBlockIndex: takeOasTextBlockIndex(keeperName, assistantEntryId),
+        agentCoreBlockIndex: takeAgentCoreTextBlockIndex(keeperName, assistantEntryId),
       })
       appendAssistantToolTraceStep(keeperName, assistantEntryId, {
         toolCallId,
         name: toolName,
-        oasBlockIndex: takeOasToolBlockIndex(keeperName, assistantEntryId, toolCallId),
+        agentCoreBlockIndex: takeAgentCoreToolBlockIndex(keeperName, assistantEntryId, toolCallId),
       })
       // Insert above the live assistant bubble so the final reply text
       // stays the last entry in the transcript.
@@ -657,7 +657,7 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
+        clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
         markFinalizingIfLive('KEEPER_STREAM_MESSAGE_STOP')
         return null
       }
@@ -674,15 +674,15 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_CONTENT_BLOCK_START') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
-        const oasBlockIndex = asNumber(value?.index)
+        const agentCoreBlockIndex = asNumber(value?.index)
         const contentType = asString(value?.content_type)
         const toolCallId = asString(value?.tool_call_id)
         const toolName = asString(value?.tool_call_name)
         if (contentType === 'text') {
-          rememberOasTextBlockIndex(keeperName, assistantEntryId, oasBlockIndex)
+          rememberAgentCoreTextBlockIndex(keeperName, assistantEntryId, agentCoreBlockIndex)
         }
         if (toolCallId && toolName) {
-          rememberOasToolBlockIndex(keeperName, assistantEntryId, toolCallId, oasBlockIndex)
+          rememberAgentCoreToolBlockIndex(keeperName, assistantEntryId, toolCallId, agentCoreBlockIndex)
         }
         setAssistantStreamState(
           keeperName,
@@ -696,7 +696,7 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_CONTENT_BLOCK_STOP') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
-        forgetOasToolBlockIndexByIndex(
+        forgetAgentCoreToolBlockIndexByIndex(
           keeperName,
           assistantEntryId,
           asNumber(value?.index),
@@ -715,8 +715,8 @@ export function applyKeeperStreamEvent(
         const delta = value && typeof value.delta === 'string'
           ? value.delta
           : undefined
-        const oasBlockIndex = value ? asNumber(value.index) : undefined
-        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { oasBlockIndex })
+        const agentCoreBlockIndex = value ? asNumber(value.index) : undefined
+        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex })
         else {
           setAssistantStreamState(
             keeperName,
@@ -731,7 +731,7 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_STREAM_PROTOCOL_ERROR') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
-        forgetOasToolBlockIndexByIndex(
+        forgetAgentCoreToolBlockIndexByIndex(
           keeperName,
           assistantEntryId,
           asNumber(value?.index),
@@ -928,7 +928,7 @@ export function applyKeeperStreamEvent(
         if (!TERMINAL_REQUEST_STATUSES.has(status)) {
           return 'Keeper request terminal event has invalid status.'
         }
-        clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
+        clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
         if (terminalRequestId) releaseActiveStreamRequestId(terminalRequestId)
         else clearActiveStreamRequestId(keeperName)
         const ok = terminal?.ok === true
@@ -1043,8 +1043,8 @@ export function applyKeeperStreamEvent(
     }
     case 'RUN_FINISHED':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-      clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
+      clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
+      clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       if (source.kind !== 'queued_turn') return null
       updateThreadEntry(keeperName, assistantEntryId, entry => {
         if (!entryHasQueueReceipt(entry, source.receiptId)) return entry
@@ -1073,8 +1073,8 @@ export function applyKeeperStreamEvent(
       return null
     case 'RUN_ERROR':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-      clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
+      clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
+      clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       return asString(event.message, '').trim() || 'Keeper stream failed'
     default:
       return 'Unsupported Keeper stream event'

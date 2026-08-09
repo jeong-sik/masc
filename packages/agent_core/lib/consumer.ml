@@ -3,7 +3,7 @@
     @since 0.55.0 *)
 
 type run_result =
-  { response : (Types.api_response, Error.sdk_error) result
+  { response : (Types.api_response, Error.t) result
   ; trace_ref : Raw_trace.run_ref option
   ; harness_verdict : Harness.verdict option
   ; elapsed : float

@@ -22,16 +22,16 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('masc/agent_unbound')).toBe('masc/agent_unbound')
   })
 
-  it('accepts current and future oas-prefixed event types', () => {
-    expect(SSEEventTypeSchema.parse('oas:agent_failed')).toBe('oas:agent_failed')
-    expect(SSEEventTypeSchema.parse('oas:masc:keeper_gate')).toBe('oas:masc:keeper_gate')
-    expect(SSEEventTypeSchema.parse('oas:future:event')).toBe('oas:future:event')
+  it('accepts current and future agent-core-prefixed event types', () => {
+    expect(SSEEventTypeSchema.parse('agent_core:agent_failed')).toBe('agent_core:agent_failed')
+    expect(SSEEventTypeSchema.parse('agent_core:masc:keeper_gate')).toBe('agent_core:masc:keeper_gate')
+    expect(SSEEventTypeSchema.parse('agent_core:future:event')).toBe('agent_core:future:event')
   })
 
   it('accepts audit event wire aliases', () => {
     expect(SSEEventTypeSchema.parse('audit_event')).toBe('audit_event')
     expect(SSEEventTypeSchema.parse('masc:audit_event')).toBe('masc:audit_event')
-    expect(SSEEventTypeSchema.parse('oas:masc:audit_event')).toBe('oas:masc:audit_event')
+    expect(SSEEventTypeSchema.parse('agent_core:masc:audit_event')).toBe('agent_core:masc:audit_event')
   })
 
   it('accepts board reaction changes', () => {
@@ -179,14 +179,14 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
-  it('parses an OAS event with attribution envelope', () => {
+  it('parses an Agent Core event with attribution envelope', () => {
     const r = SSEMessageSchema.safeParse({
-      type: 'oas:turn_completed',
+      type: 'agent_core:turn_completed',
       correlation_id: 'abc',
       run_id: 'r1',
       attribution: {
         origin: 'det',
-        gate: 'oas_completion',
+        gate: 'agent_core_completion',
         evidence: { reason: 'ok' },
         outcome: { kind: 'passed' },
       },
@@ -322,7 +322,7 @@ describe('SSEMessageSchema', () => {
 
   it('accepts the exact runtime telemetry sample envelope', () => {
     const r = SSEMessageSchema.safeParse({
-      type: 'oas_telemetry_sample',
+      type: 'agent_core_telemetry_sample',
       payload: {
         sample: { provider_id: 'private', model_id: 'private', status: 'ok' },
         recorded_at: 1_712_000_000,
@@ -339,7 +339,7 @@ describe('SSEMessageSchema', () => {
     { payload: { sample: {}, recorded_at: 'bad' }, provider_id: 'runtime', model_id: 'runtime' },
     { payload: { recorded_at: 1 }, provider_id: 'runtime', model_id: 'runtime' },
   ])('rejects malformed runtime telemetry sample envelopes: %o', value => {
-    expect(SSEMessageSchema.safeParse({ type: 'oas_telemetry_sample', ...value }).success).toBe(false)
+    expect(SSEMessageSchema.safeParse({ type: 'agent_core_telemetry_sample', ...value }).success).toBe(false)
   })
 
   it.each([
@@ -516,19 +516,19 @@ describe('parseSSEMessage', () => {
     warnSpy.mockRestore()
   })
 
-  it('keeps unknown oas-prefixed events instead of dropping them', () => {
+  it('keeps unknown agent-core-prefixed events instead of dropping them', () => {
     const msg = parseSSEMessage({
-      type: 'oas:slot_scheduler_observed',
+      type: 'agent_core:slot_scheduler_observed',
       payload: { state: 'saturated', active: 3, max_slots: 3 },
     })
     expect(msg).not.toBeNull()
-    expect(msg?.type).toBe('oas:slot_scheduler_observed')
+    expect(msg?.type).toBe('agent_core:slot_scheduler_observed')
   })
 
-  it('keeps oas telemetry tuple payloads instead of logging schema drift', () => {
+  it('keeps agentCore telemetry tuple payloads instead of logging schema drift', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const msg = parseSSEMessage({
-      type: 'oas:telemetry_event',
+      type: 'agent_core:telemetry_event',
       event_type: 'telemetry_event',
       ts_unix: 1781584363.694713,
       payload: [
@@ -541,7 +541,7 @@ describe('parseSSEMessage', () => {
       ],
     })
     expect(msg).not.toBeNull()
-    expect(msg?.type).toBe('oas:telemetry_event')
+    expect(msg?.type).toBe('agent_core:telemetry_event')
     expect(warnSpy).not.toHaveBeenCalled()
     warnSpy.mockRestore()
   })

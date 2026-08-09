@@ -41,7 +41,7 @@ type glm_error =
     Code mapping from docs.z.ai/api-reference/api-code:
     - 1000-1004,1100-1120: auth/account
     - 1200-1231: parameter/request (terminal)
-    - 1261: prompt exceeds max length (context overflow, oas#2947)
+    - 1261: prompt exceeds max length (context overflow, agent-core boundary)
     - 1113: account arrears (quota)
     - 1300: policy block (terminal)
     - 1301: unsafe content (terminal)
@@ -76,7 +76,7 @@ let classify_glm_error ~code : glm_error_class * bool =
   | "1214"
   | "1215"
   | "1231" -> Glm_invalid_request, false
-  (* oas#2947: 1261 is "Prompt exceeds max length" — a context-window
+  (* agent-core boundary: 1261 is "Prompt exceeds max length" — a context-window
      overflow, not a malformed request. Typed so consumers can shrink. *)
   | "1261" -> Glm_context_overflow, false
   | _unknown_code -> Glm_invalid_request, false
@@ -149,7 +149,7 @@ let build_request_artifact
          [stream] and [tool_stream] are set; [config.tool_stream] defaults
          false, so a streaming request carrying tools would otherwise buffer
          tool args. Default [tool_stream] on when tools are present
-         (RFC-OAS-023). *)
+         (Agent Core contract). *)
         if stream && (config.tool_stream || tools <> [])
         then ("tool_stream", `Bool true) :: fields
         else fields
@@ -254,7 +254,7 @@ let parse_response_result body : (api_response, Backend_openai_parse.parse_error
      all traverse this same [json] instead of each re-parsing the body string
      -- was 3 full Yojson.Safe.from_string of the response per turn.
 
-     oas#2621 P1#2: return the typed parse outcome instead of collapsing an
+     agent-core boundary P1#2: return the typed parse outcome instead of collapsing an
      [Empty_completion] into a stop_reason-less [glm_parse_error]. Preserving
      the typed empty completion lets [Complete_sync]'s Glm_chat seam route it
      through [Http_client.empty_completion_error ~stop_reason] exactly like the
@@ -411,7 +411,7 @@ let%test "build_request maps preserve_thinking to GLM clear_thinking=false" =
 
 let%test
     "build_request replays reasoning via typed dialect, not serialize-time branch \
-     (RFC-OAS-029 S3.1)"
+     (Agent Core contract S3.1)"
   =
   (* The reasoning-replay decision flows from the typed
      [Reasoning_dialect.replay_policy] resolved once in [for_provider_config],
@@ -507,7 +507,7 @@ let%test "build_request preserves ZAI GLM OpenAI-compatible replay and tool cont
   && assistant |> member "tool_calls" |> to_list <> []
 ;;
 
-let%test "build_request emits exactly one thinking key for ZAI GLM (RFC-OAS-023)" =
+let%test "build_request emits exactly one thinking key for ZAI GLM (Agent Core contract)" =
   (* Regression guard for the duplicate-[thinking]-key bug: GLM thinking now
      comes from the shared OpenAI-compatible request builder. Backend_glm must
      not add a second key. Yojson [member] is blind to duplicates, so count the
@@ -724,7 +724,7 @@ let%test "build_request adds tool_stream when enabled" =
   json |> member "tool_stream" |> to_bool
 ;;
 
-let%test "build_request defaults tool_stream on for streaming + tools (RFC-OAS-023)" =
+let%test "build_request defaults tool_stream on for streaming + tools (Agent Core contract)" =
   (* GLM streams tool-call args incrementally only when both [stream] and
      [tool_stream] are set, but [config.tool_stream] defaults false. A
      streaming request carrying tools now defaults [tool_stream] on so the

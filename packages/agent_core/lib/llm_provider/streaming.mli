@@ -1,6 +1,6 @@
 (** SSE event parsing for Anthropic and Openai streaming APIs.
 
-    Pure functions — no I/O or agent_sdk coupling.
+    Pure functions — no I/O or agent_core coupling.
 
     @stability Internal
     @since 0.93.1 *)
@@ -12,7 +12,7 @@ open Types
 val parse_sse_event : string option -> string -> sse_event option
 val emit_synthetic_events : api_response -> (sse_event -> unit) -> unit
 
-(** {1 First-token classification (RFC-OAS-020)}
+(** {1 First-token classification (Agent Core contract)}
 
     These predicates distinguish *prelude / scheduling* events
     (which set [prefill_ms] in [Streaming_summary]) from
@@ -105,7 +105,7 @@ val parse_openai_sse_chunk
   -> string
   -> openai_sse_parse_result
 
-(** RFC-OAS-020: [true] when the chunk carries either a non-empty
+(** Agent Core contract: [true] when the chunk carries either a non-empty
     [delta_content] or a non-empty [delta_reasoning] or any
     [delta_tool_calls] — that is, the consumer would surface a
     visible token (or tool-call argument) to the application. Used
@@ -135,7 +135,7 @@ val openai_sse_parse_result_to_events
   -> openai_sse_parse_result
   -> sse_event list * Telemetry_event.t option
 
-(** Convert one OpenAI Responses API streaming SSE payload into OAS stream
+(** Convert one OpenAI Responses API streaming SSE payload into AGENT_CORE stream
     events. Responses streaming is item/event based, not Chat Completions delta
     based: output text, reasoning summaries, and function call arguments each
     have their own event family. *)
@@ -193,8 +193,8 @@ type gemini_sse_parse_result =
 
 (** Parse one Gemini SSE data payload without collapsing malformed JSON or
     malformed candidate/part shapes into an absent chunk. Official Part kinds
-    that OAS does not project are returned as [Gemini_unsupported_part], not
-    relabelled as malformed bytes. Official response shapes that OAS does not
+    that AGENT_CORE does not project are returned as [Gemini_unsupported_part], not
+    relabelled as malformed bytes. Official response shapes that AGENT_CORE does not
     project are returned as [Gemini_unsupported_response]. Callers must surface
     either capability fact with the raw payload. *)
 val parse_gemini_sse_chunk : string -> gemini_sse_parse_result

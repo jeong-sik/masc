@@ -23,7 +23,7 @@ import { TextInput } from './common/input'
 import { Table, type TableColumn } from './common/table'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
-import { latestOasTelemetrySample } from '../oas-telemetry-store'
+import { latestAgentCoreTelemetrySample } from '../agent-core-telemetry-store'
 import { formatCost, formatNumber, formatPct1 } from '../lib/format-number'
 import { errorToString, MISSING_DATA_DASH } from '../lib/format-string'
 import { formatTimeHms } from '../lib/format-time'
@@ -119,7 +119,7 @@ const COVERAGE_REASON_LABELS: Record<string, string> = {
 }
 
 const COVERAGE_STAGE_LABELS: Record<string, string> = {
-  oas: 'OAS',
+  agent_core: 'Agent Core',
   keeper: 'keeper',
   projection: 'projection',
   unknown: 'unknown stage',
@@ -691,7 +691,7 @@ function recentEntryMissingLabel(
   // Goal: make "why is this cell empty?" observable instead of rendering an
   // opaque `--`. The `telemetry_reported`/`usage_reported` flags land earlier
   // in the response than `coverage_reason`, so they give the most direct
-  // signal when the cell is empty due to missing OAS timings vs. missing
+  // signal when the cell is empty due to missing Agent Core timings vs. missing
   // per-turn usage accounting.
   if (entry.outcome === 'error') return 'error-only'
   if (entry.usage_trust === 'untrusted') return 'untrusted'
@@ -823,7 +823,7 @@ export function RuntimeMonitor() {
   const probe = current.data?.probe ?? null
   const probeError = current.data?.probeError ?? null
   const providerProbes = providerProbeMap(probe)
-  const oasLatest = latestOasTelemetrySample.value
+  const agentCoreLatest = latestAgentCoreTelemetrySample.value
 
   // filterModelMetrics was called twice per render (no-results check + the
   // sorted list) with identical args. Memoize once and reuse so it runs at most
@@ -1008,9 +1008,9 @@ export function RuntimeMonitor() {
             delta=${{ direction: 'flat', text: `${formatNumber(metrics?.models.reduce((sum, m) => sum + (m.total_tool_calls ?? 0), 0))} tool calls` }}
           />
         </div>
-        ${oasLatest
-          ? html`<div class="mb-3 text-2xs text-[var(--color-fg-muted)]" data-testid="oas-latest-telemetry-sample">
-              oas latest · ${oasLatest.provider_id} · ttfb ${formatNumber(oasLatest.ttfb_ms, 0)}ms · total ${formatNumber(oasLatest.total_duration_ms, 0)}ms${oasLatest.throughput_tokens_per_s != null ? ` · ${formatNumber(oasLatest.throughput_tokens_per_s, 1)} tok/s` : ''}${oasLatest.cost_usd != null ? ` · ${formatCost(oasLatest.cost_usd)}` : ''} · ${oasLatest.status_kind}
+        ${agentCoreLatest
+          ? html`<div class="mb-3 text-2xs text-[var(--color-fg-muted)]" data-testid="agent-core-latest-telemetry-sample">
+              agentCore latest · ${agentCoreLatest.provider_id} · ttfb ${formatNumber(agentCoreLatest.ttfb_ms, 0)}ms · total ${formatNumber(agentCoreLatest.total_duration_ms, 0)}ms${agentCoreLatest.throughput_tokens_per_s != null ? ` · ${formatNumber(agentCoreLatest.throughput_tokens_per_s, 1)} tok/s` : ''}${agentCoreLatest.cost_usd != null ? ` · ${formatCost(agentCoreLatest.cost_usd)}` : ''} · ${agentCoreLatest.status_kind}
             </div>`
           : null}
         <div class="flex items-center justify-end mb-2">

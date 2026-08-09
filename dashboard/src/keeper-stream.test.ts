@@ -551,13 +551,13 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.details?.turnRef).toBe('trace-live#42')
   })
 
-  it('keeps OAS stream message metadata through reply details', () => {
+  it('keeps Agent Core stream message metadata through reply details', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_STREAM_MESSAGE_START',
       value: {
-        provider_message_id: 'msg-oas-1',
+        provider_message_id: 'msg-agent-core-1',
         model: 'gpt-5.5',
         usage: {
           input_tokens: 10,
@@ -594,7 +594,7 @@ describe('applyKeeperStreamEvent', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.text).toBe('done')
     expect(entry?.turnRef).toBe('trace-live#43')
-    expect(entry?.details?.providerMessageId).toBe('msg-oas-1')
+    expect(entry?.details?.providerMessageId).toBe('msg-agent-core-1')
     expect(entry?.details?.modelUsed).toBe('gpt-5.5')
     expect(entry?.details?.stopReason).toBe('end_turn')
     expect(entry?.details?.costUsd).toBe(0.125)
@@ -810,7 +810,7 @@ describe('applyKeeperStreamEvent', () => {
     ])
   })
 
-  it('splits thinking trace steps by OAS content block index', () => {
+  it('splits thinking trace steps by Agent Core content block index', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -831,8 +831,8 @@ describe('applyKeeperStreamEvent', () => {
     _flushPendingKeeperStreamDeltasForTests()
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.traceSteps).toEqual([
-      { kind: 'think', text: 'checking tools', ts: expect.any(String), oasBlockIndex: 1 },
-      { kind: 'think', text: 'next block', ts: expect.any(String), oasBlockIndex: 2 },
+      { kind: 'think', text: 'checking tools', ts: expect.any(String), agentCoreBlockIndex: 1 },
+      { kind: 'think', text: 'next block', ts: expect.any(String), agentCoreBlockIndex: 2 },
     ])
   })
 })
@@ -1111,7 +1111,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     ])
   })
 
-  it('replaces tool-call args when OAS emits argument snapshots', () => {
+  it('replaces tool-call args when Agent Core emits argument snapshots', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
@@ -1229,7 +1229,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
         kind: 'progress',
         text: '  PR 목록을 확인하겠다.\n',
         ts: expect.any(String),
-        oasBlockIndex: 2,
+        agentCoreBlockIndex: 2,
       },
       {
         kind: 'tool',
@@ -1277,12 +1277,12 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(reply?.text).toBe('')
     expect(reply?.rawText).toBe('')
     expect(reply?.traceSteps?.filter(step => step.kind === 'progress')).toEqual([
-      expect.objectContaining({ kind: 'progress', text: 'PR 목록을 확인하겠다.', oasBlockIndex: 2 }),
-      expect.objectContaining({ kind: 'progress', text: 'cwd를 설정해서 다시 보겠다.', oasBlockIndex: 4 }),
+      expect.objectContaining({ kind: 'progress', text: 'PR 목록을 확인하겠다.', agentCoreBlockIndex: 2 }),
+      expect.objectContaining({ kind: 'progress', text: 'cwd를 설정해서 다시 보겠다.', agentCoreBlockIndex: 4 }),
     ])
   })
 
-  it('preserves OAS content block index on tool trace steps', () => {
+  it('preserves Agent Core content block index on tool trace steps', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -1290,7 +1290,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
       value: {
         index: 7,
         content_type: 'tool_use',
-        tool_call_id: 'tc-oas',
+        tool_call_id: 'tc-agentCore',
         tool_call_name: 'masc_board_list',
       },
     })
@@ -1299,17 +1299,17 @@ describe('applyKeeperStreamEvent tool calls', () => {
 
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
-      toolCallId: 'tc-oas',
+      toolCallId: 'tc-agentCore',
       toolCallName: 'masc_board_list',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_ARGS',
-      toolCallId: 'tc-oas',
+      toolCallId: 'tc-agentCore',
       delta: '{"limit":1}',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_END',
-      toolCallId: 'tc-oas',
+      toolCallId: 'tc-agentCore',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -1322,11 +1322,11 @@ describe('applyKeeperStreamEvent tool calls', () => {
       {
         kind: 'tool',
         name: 'masc_board_list',
-        toolCallId: 'tc-oas',
+        toolCallId: 'tc-agentCore',
         status: 'ok',
         args: '{"limit":1}',
         ts: expect.any(String),
-        oasBlockIndex: 7,
+        agentCoreBlockIndex: 7,
       },
     ])
   })
@@ -1385,7 +1385,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
         toolCallId: 'tc-first',
         status: 'err',
         ts: expect.any(String),
-        oasBlockIndex: 2,
+        agentCoreBlockIndex: 2,
       },
     ])
     expect(reply?.rawText).toContain('[stream protocol] tool_start_duplicate_index')

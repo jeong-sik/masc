@@ -1,7 +1,7 @@
 (** Unit tests for Util — pure helper functions extracted across the
-    SDK. No IO, no Eio. *)
+    Agent Core. No IO, no Eio. *)
 
-open Agent_sdk
+open Agent_core
 open Alcotest
 
 (* ── first_some ────────────────────────────────────────── *)

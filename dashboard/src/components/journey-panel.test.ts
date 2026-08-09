@@ -79,7 +79,7 @@ function runtimeTrace(): KeeperRuntimeTraceResponse {
       requested_keeper_turn_id: 1,
       manifest_keeper_turn_ids: [1],
       receipt_turn_counts: [2],
-      max_oas_turn_count: 2,
+      max_agent_core_turn_count: 2,
       provider_lane_resolved_count: 1,
       provider_attempt_started_count: 1,
       provider_attempt_finished_count: 1,
@@ -119,7 +119,7 @@ function runtimeTrace(): KeeperRuntimeTraceResponse {
       turn_clock: {
         trace_id: 'trace-1',
         keeper_turn_id: 1,
-        max_oas_turn_count: 2,
+        max_agent_core_turn_count: 2,
         terminal_event_present: true,
         terminal_event: 'turn_finished',
         manifest_total_rows: 5,

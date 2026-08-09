@@ -47,7 +47,7 @@ include module type of Keeper_types_profile_defaults
 val keeper_profile_defaults_materializable_for_name :
   ?base_path:string -> string -> bool
 
-include module type of Keeper_types_profile_oas_env
+include module type of Keeper_types_profile_agent_core_env
 
 val profile_defaults_of_toml :
   Keeper_toml_loader.toml_doc -> (keeper_profile_defaults, string) result

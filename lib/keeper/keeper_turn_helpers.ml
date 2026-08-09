@@ -9,7 +9,7 @@ open Keeper_types_profile
 open Keeper_context_runtime
 
 (* Interval (seconds) for the per-turn background fiber that drains the
-   `keeper_turn` subscription on the OAS event bus.  See
+   `keeper_turn` subscription on the AGENT_CORE event bus.  See
    [start_background_turn_event_bus_drain] for context.
 
    Step 14(b) of the bloodflow restoration plan inlined the env knob
@@ -220,9 +220,9 @@ let record_pre_dispatch_terminal_observation
         (match keeper_turn_id with
          | Some _ -> keeper_turn_id
          | None -> Some meta.runtime.usage.total_turns)
-    ; oas_turn_count = None
-    ; oas_dispatch_mode = None
-    ; oas_internal_runtime_disabled = true
+    ; agent_core_turn_count = None
+    ; agent_core_dispatch_mode = None
+    ; agent_core_internal_runtime_disabled = true
     ; current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; goal_ids = meta.active_goal_ids
     ; outcome
@@ -254,7 +254,7 @@ let record_pre_dispatch_terminal_observation
     ; extra_system_context_digest = None
     ; extra_system_context_injected_size = None
     ; extra_system_context_computed_size = None
-    ; oas_internal_runtime_allowed = false
+    ; agent_core_internal_runtime_allowed = false
     }
   in
   let receipt_path =

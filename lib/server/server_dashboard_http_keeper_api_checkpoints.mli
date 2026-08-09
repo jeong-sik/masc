@@ -2,13 +2,13 @@
 
 val stat_json_of_path : string -> Yojson.Safe.t
 
-val oas_checkpoint_summary_json :
+val agent_core_checkpoint_summary_json :
   source_kind:string ->
   snapshot_id:string ->
   path:string ->
   is_current:bool ->
   fallback_generation:int ->
-  Agent_sdk.Checkpoint.t ->
+  Agent_core.Checkpoint.t ->
   Yojson.Safe.t
 
 (** Total dashboard projection of a typed checkpoint load failure. [Not_found]

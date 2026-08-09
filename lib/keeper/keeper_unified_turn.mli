@@ -1,4 +1,4 @@
-(** Keeper_unified_turn — Single entry point for keeper turns via OAS Agent.run().
+(** Keeper_unified_turn — Single entry point for keeper turns via Agent_core.Agent.run().
 
     Replaces the 3-path dispatcher (social/scheduled-autonomous/autonomy) with a unified
     observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
@@ -16,7 +16,7 @@ val decide_degraded_retry
   :  base_runtime:string
   -> effective_runtime:string
   -> attempted_runtimes:string list
-  -> Agent_sdk.Error.sdk_error
+  -> Agent_core.Error.t
   -> degraded_retry_decision
 
 (** Summary of event-bus signals observed during a single keeper turn.
@@ -29,12 +29,12 @@ type turn_event_bus_summary =
   ; payload_kinds : string list
   }
 
-(** Fold the drained OAS event-bus events for a single keeper turn into
+(** Fold the drained AGENT_CORE event-bus events for a single keeper turn into
     the signals MASC currently consumes. *)
-val summarize_turn_event_bus : Agent_sdk.Event_bus.event list -> turn_event_bus_summary
+val summarize_turn_event_bus : Agent_core.Event_bus.event list -> turn_event_bus_summary
 
 val turn_event_bus_evidence_detail : turn_event_bus_summary -> string
-(** Compact forensic string for observed OAS events around a typed overflow. *)
+(** Compact forensic string for observed AGENT_CORE events around a typed overflow. *)
 
 (** Turn-local tool-event pairing state used to detect event-bus integrity
     failures. Exposed for targeted tests. *)
@@ -45,12 +45,12 @@ val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
 val record_turn_tool_events
   :  keeper_name:string
   -> turn_tool_event_tracker
-  -> Agent_sdk.Event_bus.event list
+  -> Agent_core.Event_bus.event list
   -> turn_tool_event_tracker
 
 val turn_tool_event_integrity_error
   :  turn_tool_event_tracker
-  -> Agent_sdk.Error.sdk_error option
+  -> Agent_core.Error.t option
 
 (** Project the initial keeper turn context budget from the routed runtime's
     prevalidated resolution, so lifecycle context math matches the provider
@@ -100,7 +100,7 @@ val next_fail_open_runtime_for_turn
   :  base_runtime:string
   -> effective_runtime:string
   -> attempted_runtimes:string list
-  -> Agent_sdk.Error.sdk_error
+  -> Agent_core.Error.t
   -> Keeper_error_classify.degraded_retry option
 
 (** Record the streaming-cancel observation shared by the Eio.Cancel handler.
@@ -130,7 +130,7 @@ type source_disposition =
     operator-reset-required escalation with no retry successor. *)
 
 type turn_failure =
-  { error : Agent_sdk.Error.sdk_error
+  { error : Agent_core.Error.t
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
   ; source_disposition : source_disposition
@@ -181,8 +181,8 @@ val run_keeper_cycle
   -> generation:int
   -> wake:Keeper_registry.wake_reason
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
-  -> ?shared_context:Agent_sdk.Context.t
-  -> ?event_bus:Agent_sdk.Event_bus.t
+  -> ?shared_context:Agent_core.Context.t
+  -> ?event_bus:Agent_core.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?continuation_delivery_channel:Keeper_continuation_channel.t
   -> unit

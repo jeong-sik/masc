@@ -1,6 +1,6 @@
 (** Unit tests for Tool_middleware — strict validation primitives. *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ──────────────────────────────────────────────── *)
 

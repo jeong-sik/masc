@@ -172,9 +172,9 @@ let test_fresh_tool_use_id () =
   let id2 = Api_common.fresh_tool_use_id () in
   Alcotest.(check bool) "distinct allocations" true (id1 <> id2);
   Alcotest.(check bool)
-    "starts with OAS namespace"
+    "starts with AGENT_CORE namespace"
     true
-    (String.starts_with ~prefix:"call_oas_" id1)
+    (String.starts_with ~prefix:"call_agent_core_" id1)
 ;;
 
 let test_fresh_tool_use_id_domain_safe () =
@@ -330,11 +330,11 @@ let test_content_block_to_json_tool_result () =
   Alcotest.(check string) "type" "tool_result" (json |> member "type" |> to_string);
   Alcotest.(check bool) "is_error" true (json |> member "is_error" |> to_bool);
   Alcotest.(check bool)
-    "failure_kind is SDK-only"
+    "failure_kind is agent-core-only"
     true
     (json |> member "failure_kind" = `Null);
   Alcotest.(check bool)
-    "error_class is SDK-only"
+    "error_class is agent-core-only"
     true
     (json |> member "error_class" = `Null)
 ;;

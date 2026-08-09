@@ -59,7 +59,7 @@ let locator_of_yojson = Execution_agent_scope.scope_locator_of_yojson
 let locator_run_id = Execution_agent_scope.scope_locator_run_id
 
 let execution_failure detail =
-  Provider_failure_attribution.of_sdk_error
+  Provider_failure_attribution.of_core_error
     (Error.Internal ("durable execution: " ^ detail))
 ;;
 

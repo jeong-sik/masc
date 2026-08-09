@@ -1,4 +1,4 @@
-(** OAS v0.24 End-to-End Integration Tests
+(** AGENT_CORE v0.24 End-to-End Integration Tests
     Exercises the 5 new tracks against a live local LLM (DashScope_3.5 via llama-server).
 
     Run: LLAMA_LIVE_TEST=1 dune exec ./test/test_e2e_v024.exe
@@ -8,7 +8,7 @@
     2. Endpoint handoff: fake primary → real local fallback
     3. Context injection: injector updates context + appends messages *)
 
-open Agent_sdk
+open Agent_core
 open Types
 
 let base_url = "http://127.0.0.1:8085"
@@ -175,7 +175,7 @@ let test_context_injection () =
 let () =
   match Sys.getenv_opt "LLAMA_LIVE_TEST" with
   | Some "1" ->
-    Printf.printf "OAS v0.24 E2E Integration Tests\n%!";
+    Printf.printf "AGENT_CORE v0.24 E2E Integration Tests\n%!";
     Printf.printf "Target: %s (%s)\n%!" base_url provider_config.model_id;
     test_multi_turn_tool_loop ();
     test_context_injection ();

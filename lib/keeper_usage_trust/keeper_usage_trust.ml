@@ -2,7 +2,7 @@
 
     This module validates provider-reported usage shape without inferring
     provider/model-specific behavior. Concrete runtime identity and capability
-    semantics belong to OAS. *)
+    semantics belong to AGENT_CORE. *)
 
 type t =
   | Usage_missing
@@ -38,7 +38,7 @@ let add_reason reason reasons =
   if List.mem reason reasons then reasons else reason :: reasons
 
 let classify ~(usage_reported : bool)
-    ~(usage : Agent_sdk.Types.api_usage) : t =
+    ~(usage : Agent_core.Types.api_usage) : t =
   if not usage_reported then Usage_missing
   else
     let reasons = ref [] in

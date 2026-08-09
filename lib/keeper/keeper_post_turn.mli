@@ -16,7 +16,7 @@
     per-turn context metrics. Explicit compaction has its own request path. *)
 type post_turn_lifecycle =
   { updated_meta : Keeper_meta_contract.keeper_meta
-  ; checkpoint : Agent_sdk.Checkpoint.t option
+  ; checkpoint : Agent_core.Checkpoint.t option
   ; handoff_json : Yojson.Safe.t option
   ; handoff_attempted : bool
   ; handoff_failure_reason : string option
@@ -28,7 +28,7 @@ type post_turn_lifecycle =
 (** Recovered checkpoint after a durably applied explicit compaction request.
     Manual and provider-overflow callers consume the same result. *)
 type compaction_recovery =
-  { checkpoint : Agent_sdk.Checkpoint.t
+  { checkpoint : Agent_core.Checkpoint.t
   ; checkpoint_installation : Keeper_checkpoint_store.installed_checkpoint
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
@@ -67,7 +67,7 @@ val apply_post_turn_lifecycle_with_resilience_handles :
   resilience_audit_store:Shared_audit.Store.t option ->
   resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->
   meta:Keeper_meta_contract.keeper_meta ->
-  checkpoint:Agent_sdk.Checkpoint.t option ->
+  checkpoint:Agent_core.Checkpoint.t option ->
   post_turn_lifecycle
 (** Apply the keeper post-turn lifecycle with explicit resilience handles.
 
@@ -125,8 +125,8 @@ val commit_prepared_compaction :
 module For_testing : sig
   val commit_prepared_compaction_with_history :
     ?after_checkpoint_installed:(unit -> unit) ->
-    save_oas_history:
-      (session_dir:string -> Agent_sdk.Checkpoint.t -> unit) ->
+    save_agent_core_history:
+      (session_dir:string -> Agent_core.Checkpoint.t -> unit) ->
     prepared_compaction ->
     prepared_commit_outcome
 end
@@ -138,7 +138,7 @@ val no_compaction_of_prepared :
   ?cause:Keeper_compaction_outcome.exact_execution_terminal_cause ->
   prepared_compaction -> no_compaction
 
-(** Reload the canonical OAS checkpoint and apply an explicit typed
+(** Reload the canonical AGENT_CORE checkpoint and apply an explicit typed
     compaction request. Composition of {!prepare_compaction} and
     {!commit_prepared_compaction}; the source CAS is the commit authority. *)
 val recover_latest_checkpoint_for_compaction :

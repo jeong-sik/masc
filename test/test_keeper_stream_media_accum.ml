@@ -22,7 +22,7 @@ let expected_token ~media_type data =
     |> to_hex)
 
 let test_image_media_persisted_as_block () =
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let accum = A.create () in
   let raw_media = "raw image bytes" in
   let encoded_media = Base64.encode_string raw_media in
@@ -50,7 +50,7 @@ let test_image_media_persisted_as_block () =
   | _ -> fail "expected exactly one Image block for image media"
 
 let test_audio_media_as_voice_block () =
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let accum = A.create () in
   List.iter
     (A.on_event accum)
@@ -77,7 +77,7 @@ let test_open_media_finalized_on_message_stop () =
   (* Mirrors the bridge's message-end safety net: an open media block is still
      reload-visible when the provider omits ContentBlockStop. Multiple open
      blocks use their protocol indexes as the terminal-order tie-breaker. *)
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let accum = A.create () in
   let raw_media = "z" in
   List.iter
@@ -113,7 +113,7 @@ let test_open_media_finalized_on_message_stop () =
   | _ -> fail "expected Image then Voice blocks finalized at message stop"
 
 let test_tool_block_media_not_persisted () =
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let accum = A.create () in
   List.iter
     (A.on_event accum)
@@ -143,7 +143,7 @@ let test_tool_block_media_not_persisted () =
     (List.length (A.to_chat_blocks ~base_dir accum))
 
 let test_metadata_drift_preserves_first_media_block () =
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let accum = A.create () in
   let raw_media = "first media" in
   List.iter
@@ -186,7 +186,7 @@ let test_metadata_drift_preserves_first_media_block () =
 let test_oversize_media_surfaces_as_dropped_placeholder () =
   let cap_env = "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" in
   with_env cap_env "4" (fun () ->
-    let open Agent_sdk.Types in
+    let open Agent_core.Types in
     let accum = A.create () in
     let rejected_cap = Masc.Keeper_chat_media_store.max_wire_bytes () in
     let oversized_len = rejected_cap + 1 in
@@ -230,7 +230,7 @@ let test_oversize_media_surfaces_as_dropped_placeholder () =
     | _ -> fail "expected exactly one dropped-placeholder Attach block")
 
 let test_media_persist_failure_surfaces_as_placeholder () =
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let accum = A.create () in
   let invalid_base64 = "%%%" in
   List.iter
@@ -260,7 +260,7 @@ let test_media_persist_failure_surfaces_as_placeholder () =
 
 let test_dropped_and_persisted_media_keep_stream_order () =
   with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
-    let open Agent_sdk.Types in
+    let open Agent_core.Types in
     let accum = A.create () in
     let oversized =
       String.make (Masc.Keeper_chat_media_store.max_wire_bytes () + 1) 'A'

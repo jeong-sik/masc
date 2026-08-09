@@ -742,7 +742,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('텔레메트리 저장소')
   }, 60_000)
 
-  it('warns when the OAS relay lags behind fresher agent telemetry', async () => {
+  it('warns when the Agent Core relay lags behind fresher agent telemetry', async () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue(executionResponse)
     const fetchToolQuality = vi.fn().mockResolvedValue(toolQualityResponse)
     const fetchTelemetrySummary = vi.fn().mockResolvedValue({
@@ -757,7 +757,7 @@ describe('FleetTelemetryPanel', () => {
           latest_age_s: 30,
         },
         {
-          source: 'oas_event',
+          source: 'agent_core_event',
           entry_count: 146,
           exists: true,
           latest_ts_unix: 1_000,
@@ -778,7 +778,7 @@ describe('FleetTelemetryPanel', () => {
     await flushUi()
 
     expect(container.textContent).toContain('부분 텔레메트리')
-    expect(container.textContent).toContain('OAS event relay trails agent events by 16m 40s.')
+    expect(container.textContent).toContain('Agent Core event relay trails agent events by 16m 40s.')
     expect(container.textContent).toContain('last 17m 10s ago')
   }, 60_000)
 

@@ -16,7 +16,7 @@
     - Assert transport was invoked once and metrics.on_request_end fired
       exactly once with matching [latency_ms >= 0]. *)
 
-open Agent_sdk
+open Agent_core
 module Retry = Llm_provider.Retry
 
 let mk_mock_response () : Types.api_response =
@@ -227,9 +227,9 @@ let test_agent_run_stream_rejects_injected_empty_completion () =
     [ Types.EndTurn; Types.MaxTokens ]
 ;;
 
-let test_sdk_error_of_http_error_classifies () =
+let test_core_error_of_http_error_classifies () =
   (* Pure smoke test for the conversion helper introduced in pipeline.ml *)
-  let _ : Error.sdk_error =
+  let _ : Error.t =
     Error.Api
       (Retry.classify_error
          ~retry_after_header:None
@@ -239,7 +239,7 @@ let test_sdk_error_of_http_error_classifies () =
   ()
 ;;
 
-let test_sdk_error_preserves_streaming_timeout_phase () =
+let test_core_error_preserves_streaming_timeout_phase () =
   Eio_main.run
   @@ fun env ->
   let net = Eio.Stdenv.net env in
@@ -308,13 +308,13 @@ let () =
             `Quick
             test_sync_dispatches_via_complete_triggers_metrics
         ; Alcotest.test_case
-            "sdk_error_of_http_error compiles"
+            "core_error_of_http_error compiles"
             `Quick
-            test_sdk_error_of_http_error_classifies
+            test_core_error_of_http_error_classifies
         ; Alcotest.test_case
-            "sdk_error preserves streaming timeout phase"
+            "core_error preserves streaming timeout phase"
             `Quick
-            test_sdk_error_preserves_streaming_timeout_phase
+            test_core_error_preserves_streaming_timeout_phase
         ; Alcotest.test_case
             "stage route forwards trace context"
             `Quick

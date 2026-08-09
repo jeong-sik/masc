@@ -4,7 +4,7 @@
     forwards telemetry events to the on_telemetry callback, which Agent.run_stream
     wires to Telemetry_bus when an event_bus is configured. *)
 
-open Agent_sdk
+open Agent_core
 
 let local_provider_config ~base_url ~model_id =
   Llm_provider.Provider_config.make

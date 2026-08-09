@@ -1,5 +1,5 @@
 (* Keeper tool-emission capture accepts only producer-owned typed objects.
-   JSON-looking text from the model-facing OAS body is never reparsed. *)
+   JSON-looking text from the model-facing AGENT_CORE body is never reparsed. *)
 
 module H = Masc.Keeper_tool_emission_hook
 

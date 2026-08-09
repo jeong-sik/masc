@@ -30,7 +30,7 @@ val success : string -> t
     text-only consumers; typed consumers use [data] directly. *)
 val success_data : ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
 
-(** Typed deferral. [metadata] is an opaque one-way OAS projection, never a
+(** Typed deferral. [metadata] is an opaque one-way AGENT_CORE projection, never a
     source from which MASC recovers the disposition. *)
 val deferred_data : ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
 

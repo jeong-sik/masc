@@ -8,7 +8,7 @@
     - Error_domain.tag_error pattern (coordinator)
     - Pipeline.run_turn via mock HTTP (Stages 1-6) *)
 
-open Agent_sdk
+open Agent_core
 
 let invocation tool_use_id =
   let schedule : Tool_contract.schedule =
@@ -667,7 +667,7 @@ let test_context_injection_raises () =
 (** Verify Error_domain functions used by pipeline's tag_error. *)
 let test_tag_error_pattern_internal () =
   let err = Error.Internal "pipeline failure" in
-  let poly = Error_domain.of_sdk_error err in
+  let poly = Error_domain.of_core_error err in
   let ctx = Error_domain.with_stage "route" poly in
   let s = Error_domain.ctx_to_string ctx in
   Alcotest.(check bool)
@@ -680,7 +680,7 @@ let test_tag_error_pattern_internal () =
 
 let test_tag_error_pattern_agent () =
   let err = Error.Agent (UnrecognizedStopReason { reason = "weird" }) in
-  let poly = Error_domain.of_sdk_error err in
+  let poly = Error_domain.of_core_error err in
   let ctx = Error_domain.with_stage "output" poly in
   let s = Error_domain.ctx_to_string ctx in
   Alcotest.(check bool)
@@ -693,7 +693,7 @@ let test_tag_error_pattern_agent () =
 
 let test_tag_error_pattern_collect () =
   let err = Error.Api (AuthError { message = "bad key" }) in
-  let poly = Error_domain.of_sdk_error err in
+  let poly = Error_domain.of_core_error err in
   let ctx = Error_domain.with_stage "collect" poly in
   let s = Error_domain.ctx_to_string ctx in
   Alcotest.(check bool)

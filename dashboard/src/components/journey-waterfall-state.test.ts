@@ -55,7 +55,7 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
       requested_keeper_turn_id: 2,
       manifest_keeper_turn_ids: [2],
       receipt_turn_counts: [4],
-      max_oas_turn_count: 4,
+      max_agent_core_turn_count: 4,
       provider_lane_resolved_count: 1,
       provider_attempt_started_count: 1,
       provider_attempt_finished_count: 1,
@@ -95,7 +95,7 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
       turn_clock: {
         trace_id: 'trace-1',
         keeper_turn_id: 2,
-        max_oas_turn_count: 4,
+        max_agent_core_turn_count: 4,
         terminal_event_present: true,
         terminal_event: 'turn_finished',
         manifest_total_rows: 10,
@@ -165,7 +165,7 @@ describe('buildJourneyWaterfall', () => {
     expect(model.turns[0]?.turn).toBe(2)
     expect(model.turns[0]?.thinkingCount).toBe(1)
     expect(model.turns[0]?.toolCallCount).toBe(1)
-    expect(model.turns[0]?.runtimeEvidence?.maxOasTurnCount).toBe(4)
+    expect(model.turns[0]?.runtimeEvidence?.maxAgentCoreTurnCount).toBe(4)
     const toolEntry = model.turns[0]?.entries.find(entry => entry.kind === 'tool_call')
     expect(toolEntry?.source).toBe('trajectory+tool_call_log')
     expect(toolEntry?.toolArgs).toEqual({ file_path: '/tmp/current' })

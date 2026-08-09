@@ -983,7 +983,7 @@ require_opaque_type \
   "$exact_output_interface" \
   admission_error
 require_code_sequence \
-  "outer exact flow lost its OAS-owned identity" \
+  "outer exact flow lost its AGENT_CORE-owned identity" \
   'type[[:space:]]+flow_id([[:space:]]|$)' \
   "$exact_output_interface"
 require_type_block_pattern \
@@ -1030,7 +1030,7 @@ require_code_sequence \
   'val[[:space:]]+start_flow[[:space:]]*:[[:space:]]*flow_snapshot[[:space:]]*->[[:space:]]*\(flow_attempt,[[:space:]]*flow_start_error\)[[:space:]]*result' \
   "$exact_output_interface"
 require_named_function_pattern \
-  "outer exact flow start stopped allocating one canonical OAS-owned identity" \
+  "outer exact flow start stopped allocating one canonical AGENT_CORE-owned identity" \
   'Random_id[.]create' \
   "$exact_output_source" \
   "start_flow"

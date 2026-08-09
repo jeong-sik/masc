@@ -50,7 +50,7 @@ val execute_tools_with_trace
 val trace_assistant_blocks
   :  Raw_trace.active_run option
   -> Types.content_block list
-  -> (unit, Error.sdk_error) result
+  -> (unit, Error.t) result
 
 (** {1 Response inspection} *)
 
@@ -74,7 +74,7 @@ type trace_success =
     raw-trace error, leaves the agent lifecycle [Ready], and does not invoke
     [on_run_complete]. *)
 val with_raw_trace_run_classified_result
-  :  of_sdk_error:(Error.sdk_error -> 'error)
+  :  of_core_error:(Error.t -> 'error)
   -> error_to_string:('error -> string)
   -> classify_success:('value -> trace_success)
   -> t
@@ -88,10 +88,10 @@ val with_raw_trace_run_classified_result
 val with_raw_trace_run
   :  t
   -> string
-  -> (Raw_trace.active_run option -> (Types.api_response, Error.sdk_error) result)
-  -> (Types.api_response, Error.sdk_error) result
+  -> (Raw_trace.active_run option -> (Types.api_response, Error.t) result)
+  -> (Types.api_response, Error.t) result
 
-(** Error-polymorphic form of {!with_raw_trace_run}.  [of_sdk_error] lifts
+(** Error-polymorphic form of {!with_raw_trace_run}.  [of_core_error] lifts
     trace-infrastructure failures into the caller's carrier, while
     [error_to_string] is used only for lifecycle/raw-trace diagnostics.
 
@@ -99,7 +99,7 @@ val with_raw_trace_run
     A secondary failure to finalize the raw trace is emitted as a structured
     error log before the original exception is re-raised. *)
 val with_raw_trace_run_result
-  :  of_sdk_error:(Error.sdk_error -> 'error)
+  :  of_core_error:(Error.t -> 'error)
   -> error_to_string:('error -> string)
   -> t
   -> string

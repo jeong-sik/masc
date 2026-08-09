@@ -32,7 +32,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
                 ; ( "limit"
                   , `Assoc
                       [ (* #18472 widening removed: a multi-type schema trips
-                           OAS #2343 fail-closed and crashes the keeper cycle.
+                           agent-core boundary fail-closed and crashes the keeper cycle.
                            Runtime coerces string->int, so strict integer is safe. *)
                         ( "type", `String "integer" )
                       ; "description", `String "Max tasks to return (default: 50)"
@@ -63,7 +63,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
                 [ ( "limit"
                   , `Assoc
                       [ (* #18472 widening removed: a multi-type schema trips
-                           OAS #2343 fail-closed and crashes the keeper cycle.
+                           agent-core boundary fail-closed and crashes the keeper cycle.
                            Runtime coerces string->int, so strict integer is safe. *)
                         ( "type", `String "integer" )
                       ; "description", `String "Max orphans to return (default: 20)"

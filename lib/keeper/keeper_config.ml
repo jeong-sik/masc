@@ -148,7 +148,7 @@ let ensure_runtime_params_init () =
 let keeper_enable_thinking_rp =
   _rp_bool ~key:"keeper.turn.enable_thinking"
     ~default:(fun () -> bool_of_env_default "MASC_KEEPER_ENABLE_THINKING" ~default:false)
-    ~description:"Pass enable_thinking to OAS (default: false; Ollama+Qwen3.5 consumes all tokens in thinking mode)" ()
+    ~description:"Pass enable_thinking to AGENT_CORE (default: false; Ollama+Qwen3.5 consumes all tokens in thinking mode)" ()
 
 let keeper_enable_thinking () : bool =
   Runtime_params.get keeper_enable_thinking_rp

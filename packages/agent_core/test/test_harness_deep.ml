@@ -5,7 +5,7 @@
     empty layers, Composability.AllAgentsCompleted, Behavioral score
     aggregation, and verdict detail messages. *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Adversarial: ErrorContains ────────────────────────────── *)
 

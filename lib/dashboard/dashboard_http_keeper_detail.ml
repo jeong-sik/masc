@@ -275,7 +275,7 @@ let compute_metrics_window
                          ; ( "inference_telemetry"
                            , json
                              |> member "inference_telemetry"
-                             |> Keeper_hooks_oas
+                             |> Keeper_hooks_agent_core
                                   .redact_inference_telemetry_json )
                          ])
                  in

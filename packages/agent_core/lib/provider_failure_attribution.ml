@@ -33,7 +33,7 @@ type t =
   }
 
 type detailed_error =
-  { error : Error.sdk_error
+  { error : Error.t
   ; provider_failure : t option
   }
 
@@ -46,7 +46,7 @@ let invalid_request reason =
     (Retry.InvalidRequest { message = reason; reason = Retry.Unknown_invalid_request })
 ;;
 
-let sdk_error_of_http_error ?(accept_rejected = Api_invalid_request) err =
+let core_error_of_http_error ?(accept_rejected = Api_invalid_request) err =
   match err with
   | Http.HttpError { code; body; retry_after_header } ->
     Error.Api (Retry.classify_error ~retry_after_header ~status:code ~body)
@@ -64,7 +64,7 @@ let sdk_error_of_http_error ?(accept_rejected = Api_invalid_request) err =
       (Retry.InvalidRequest
          { message; reason = Retry.Request_body_too_large { actual_bytes; limit_bytes } })
   | Http.ProviderFailure { kind = Http.Context_overflow { limit }; message } ->
-    (* oas#2947: a provider-reported context overflow (e.g. glm 1261) is the
+    (* agent-core boundary: a provider-reported context overflow (e.g. glm 1261) is the
        same consumer contract as a ContextWindowExceeded empty turn — only the
        consumer's context recovery (compaction/shrink) can make progress, so
        it must surface as the typed [Api ContextOverflow] and never as a
@@ -79,7 +79,7 @@ let sdk_error_of_http_error ?(accept_rejected = Api_invalid_request) err =
        provider-unavailability handling as [ProviderTerminal] / other
        [ProviderFailure]. This site's [Error.Api] wrapper is preserved.
 
-       An empty turn whose stop_reason token this SDK does not model is neither
+       An empty turn whose stop_reason token agent core does not model is neither
        case. Routing it to provider-unavailability makes the consumer retry or
        rotate the identical prompt, which never terminates when the real
        condition was an overflow reported with an unmodeled token: the consumer
@@ -89,7 +89,7 @@ let sdk_error_of_http_error ?(accept_rejected = Api_invalid_request) err =
 
        WORKAROUND: [InvalidRequest] is reused because [api_error] has no
        "unmodeled provider contract" variant, and adding one breaks every
-       exhaustive matcher in this SDK and in its consumers. Root fix: a
+       exhaustive matcher in agent core and in its consumers. Root fix: a
        dedicated variant, scheduled with the next breaking API change. *)
     (match Retry.verdict_of_empty_completion ~stop_reason ~message with
      | Retry.Empty_overflow overflow -> Error.Api overflow
@@ -108,7 +108,7 @@ let sdk_error_of_http_error ?(accept_rejected = Api_invalid_request) err =
     Error.Provider (Llm_provider.Error.of_http_error err)
 ;;
 
-let of_sdk_error error =
+let of_core_error error =
   let provider_failure =
     match error with
     | Error.Api _ ->
@@ -275,7 +275,7 @@ let attribution_of_http_error ~binding = function
 ;;
 
 let of_http_error ?(accept_rejected = Api_invalid_request) ~binding http_error =
-  { error = sdk_error_of_http_error ~accept_rejected http_error
+  { error = core_error_of_http_error ~accept_rejected http_error
   ; provider_failure = Some (attribution_of_http_error ~binding http_error)
   }
 ;;

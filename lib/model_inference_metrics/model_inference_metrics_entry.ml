@@ -80,7 +80,7 @@ type model_stats =
   ; (* Hardware decode rate (eval_count / eval_duration from Ollama), separate
      from wall-clock tok_per_sec which includes queue wait + prefill + thinking.
      None when no entry in the window carried timings (e.g. providers other
-     than Ollama or responses before OAS started emitting inference_timings). *)
+     than Ollama or responses before AGENT_CORE started emitting inference_timings). *)
     hw_decode_avg_tok_per_sec : float option
   ; hw_decode_p50_tok_per_sec : float option
   ; hw_decode_p95_tok_per_sec : float option

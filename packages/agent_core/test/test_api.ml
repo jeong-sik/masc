@@ -3,7 +3,7 @@
     message_to_json, SSE event parsing, and the api_common string helpers. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 let rec find_repo_root dir =
   if Sys.file_exists (Filename.concat dir "dune-project")
@@ -446,7 +446,7 @@ let test_parse_openai_response_ollama_reasoning () =
          t;
        check string "content text" "The answer is 42." text;
        (* Token accounting is observation-only: without a provider-reported
-          count OAS must not estimate one from text length. *)
+          count AGENT_CORE must not estimate one from text length. *)
        (match resp.telemetry with
         | Some tel ->
           check (option int) "reasoning_tokens absent" None tel.reasoning_tokens

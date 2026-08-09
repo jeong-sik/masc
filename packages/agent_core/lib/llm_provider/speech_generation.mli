@@ -49,7 +49,7 @@ type response =
 
     [OpenAI_compat] uses the OpenAI Speech API. [Gemini] uses a stateless
     Interactions request. Unsupported provider/format/voice combinations fail
-    before I/O. Omission of [timeout_s] installs no OAS deadline. *)
+    before I/O. Omission of [timeout_s] installs no AGENT_CORE deadline. *)
 val generate
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

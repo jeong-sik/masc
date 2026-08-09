@@ -37,6 +37,6 @@ describe('journalKindIcon', () => {
   })
 
   it('returns S for unknown kind', () => {
-    expect(journalKindIcon(makeEntry('oas'))).toBe('S')
+    expect(journalKindIcon(makeEntry('agentCore'))).toBe('S')
   })
 })

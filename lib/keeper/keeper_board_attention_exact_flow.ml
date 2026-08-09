@@ -1,4 +1,4 @@
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 
 let ( let* ) = Result.bind
 let lane_id = "board_attention_exact"
@@ -61,7 +61,7 @@ type prepared =
   }
 
 let message role text =
-  Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
+  Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 ;;
 
 let messages candidate =
@@ -73,7 +73,7 @@ let messages candidate =
       Prompt_names.judge_board
       [ "judgment_request_json", Yojson.Safe.to_string request ]
   in
-  Ok [ message Agent_sdk.Types.User prompt ]
+  Ok [ message Agent_core.Types.User prompt ]
 ;;
 
 let flow_candidates selected_slots =
@@ -377,7 +377,7 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
       ~output
   in
   let bound = ref None in
-  let oas_before_dispatch receipt =
+  let agent_core_before_dispatch receipt =
     let current = attempt_provenance receipt in
     let* () =
       match !bound with
@@ -391,7 +391,7 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
     bound := Some current;
     Ok ()
   in
-  let oas_before_advance ~failed ~next =
+  let agent_core_before_advance ~failed ~next =
     let* () =
       before_advance
         ~failed:(advance_source_of_failure failed)
@@ -441,8 +441,8 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
           ?clock
           ~before_measurement_dispatch:(fun _ -> Ok ())
           ~on_measurement_terminal:(fun _ -> Ok ())
-          ~before_dispatch:oas_before_dispatch
-          ~before_advance:oas_before_advance
+          ~before_dispatch:agent_core_before_dispatch
+          ~before_advance:agent_core_before_advance
           ~validate
           prepared.attempt
       with

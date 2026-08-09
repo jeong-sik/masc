@@ -274,24 +274,24 @@ let parse_keeper_id fields =
     invalidf "keeper_id must be a string or null, got %s" (Json_util.kind_name other)
 ;;
 
-let parse_oas_env fields =
-  let* value = required_field fields "oas_env" in
+let parse_agent_core_env fields =
+  let* value = required_field fields "agent_core_env" in
   match value with
   | `Assoc env_fields ->
     (match find_duplicate env_fields with
-     | Some key -> invalidf "oas_env has duplicate key %S" key
+     | Some key -> invalidf "agent_core_env has duplicate key %S" key
      | None ->
        let rec collect acc = function
          | [] -> Ok (List.rev acc)
          | (key, `String value) :: rest -> collect ((key, value) :: acc) rest
          | (key, other) :: _ ->
            invalidf
-             "oas_env.%s must be a string, got %s"
+             "agent_core_env.%s must be a string, got %s"
              key
              (Json_util.kind_name other)
        in
        collect [] env_fields)
-  | other -> invalidf "oas_env must be an object, got %s" (Json_util.kind_name other)
+  | other -> invalidf "agent_core_env must be an object, got %s" (Json_util.kind_name other)
 ;;
 
 let decode_current_meta fields =
@@ -347,7 +347,7 @@ let decode_current_meta fields =
   let* latched_reason = parse_latched_reason fields in
   let* current_task_id = parse_current_task_id fields in
   let* keeper_id = parse_keeper_id fields in
-  let* oas_env = parse_oas_env fields in
+  let* agent_core_env = parse_agent_core_env fields in
   if not (String.equal schema "masc.keeper_meta.v1")
   then invalidf "unsupported schema: %S" schema
   else if not (validate_name name)
@@ -449,7 +449,7 @@ let decode_current_meta fields =
       ; telemetry_feedback_enabled = None
       ; telemetry_feedback_window_hours = None
       ; runtime
-      ; oas_env
+      ; agent_core_env
       ; keeper_id
       }
     in

@@ -16,7 +16,7 @@ module Turn = Masc.Keeper_unified_turn
 module Loop = Masc.Keeper_heartbeat_loop
 
 let overflow_error =
-  Agent_sdk.Error.Api
+  Agent_core.Error.Api
     (ContextOverflow { message = "exceeded"; limit = Some 32768 })
 ;;
 
@@ -34,7 +34,7 @@ let overflow_failure ?deferred_runtime_lane () =
      "typed ContextOverflow maps to the Context_overflow terminal". *)
   failure
     ?deferred_runtime_lane
-    ~route:(KFR.route_of_error ~boundary:KFR.Oas_execution overflow_error)
+    ~route:(KFR.route_of_error ~boundary:KFR.Agent_core_execution overflow_error)
     ~source_disposition:Turn.Follow_failure_route
     overflow_error
 ;;
@@ -121,7 +121,7 @@ let test_transcript_corruption_owned_elsewhere () =
     None
     (Loop.failed_selection_terminal_detail
        (failure
-          ~route:(KFR.route_of_error ~boundary:KFR.Oas_execution overflow_error)
+          ~route:(KFR.route_of_error ~boundary:KFR.Agent_core_execution overflow_error)
           ~source_disposition:
             (Turn.Pause_after_transcript_corruption { detail = "corrupt" })
           overflow_error))

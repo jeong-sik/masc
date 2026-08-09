@@ -4,7 +4,7 @@
     mutations are accepted as typed journal transactions, committed by the
     actor, and acknowledged only after the journal authority is durable.
 
-    This module is private to OAS. It owns no product policy and exposes no
+    This module is private to AGENT_CORE. It owns no product policy and exposes no
     storage primitive or raw-event append path. *)
 
 type t
@@ -109,7 +109,7 @@ type page = private
   ; has_more : bool
   }
 
-(** Run a fresh durability scope inside an OAS-owned supervisor. The callback
+(** Run a fresh durability scope inside an AGENT_CORE-owned supervisor. The callback
     may fork work on [sw]. When it returns normally, the wrapper stops
     admission, drains every accepted command, joins the actor, and only then
     returns its value. A callback exception also stops admission and lets the

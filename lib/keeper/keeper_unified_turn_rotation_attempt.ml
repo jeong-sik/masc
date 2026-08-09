@@ -5,7 +5,7 @@ let build
       ~(from_runtime : string)
       ~(retry : Keeper_error_classify.degraded_retry)
       ~(outcome : Keeper_execution_receipt.runtime_rotation_outcome)
-      (err : Agent_sdk.Error.sdk_error)
+      (err : Agent_core.Error.t)
   : Keeper_execution_receipt.runtime_rotation_attempt
   =
   { from_runtime
@@ -18,9 +18,9 @@ let build
   ; retry_phase_elapsed_ms
   ; error_kind =
       Some
-        (Agent_sdk.Error.(category err |> category_label)
+        (Agent_core.Error.(category err |> category_label)
          |> Keeper_execution_receipt.error_kind_of_string)
-  ; error_message = Some (Agent_sdk.Error.to_string err)
+  ; error_message = Some (Agent_core.Error.to_string err)
   ; recorded_at
   }
 ;;

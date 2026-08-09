@@ -128,7 +128,7 @@ let handle_keeper_catchup_judge_post state req reqd body_str =
 (* Trajectory preview helpers moved to Server_dashboard_http_keeper_api_types. *)
 
 let stat_json_of_path = Checkpoints.stat_json_of_path
-let oas_checkpoint_summary_json = Checkpoints.oas_checkpoint_summary_json
+let agent_core_checkpoint_summary_json = Checkpoints.agent_core_checkpoint_summary_json
 let keeper_checkpoint_inventory_json = Checkpoints.inventory_json
 
 let linked_artifact_json = Checkpoints.linked_artifact_json
@@ -280,7 +280,7 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
                     ( "checkpoints",
                       `List
                         (List.map
-                           (linked_artifact_json ~kind:"oas_checkpoint")
+                           (linked_artifact_json ~kind:"agent_core_checkpoint")
                            checkpoint_paths) );
                     ( "tool_call_logs",
                       `List
@@ -359,7 +359,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
              | Ok trace_id ->
                  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
                  let (deleted, missing) =
-                   Keeper_checkpoint_store.delete_oas_history_files
+                   Keeper_checkpoint_store.delete_agent_core_history_files
                      ~session_dir ~snapshot_ids
                  in
                  let (_status, inventory) =

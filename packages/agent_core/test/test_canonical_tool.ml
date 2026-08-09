@@ -1,4 +1,4 @@
-(** Tests for {!Llm_provider.Canonical_tool} — RFC-OAS-024 WP8 Increments 1-2.
+(** Tests for {!Llm_provider.Canonical_tool} — Agent Core contract WP8 Increments 1-2.
 
     Covers result projection (round-trip fidelity, is_error, totality) and the
     structural call projection used by downstream consumers that need to render

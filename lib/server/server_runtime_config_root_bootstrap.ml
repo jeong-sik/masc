@@ -59,7 +59,7 @@ let copy_file_if_missing ~src ~dst =
     Fs_compat.save_file dst (Fs_compat.load_file src))
 ;;
 
-let oas_models_overlay_toml_filename = "oas-models-overlay.toml"
+let agent_core_models_overlay_toml_filename = "agent-core-models-overlay.toml"
 
 let existing_file path =
   try Sys.file_exists path && not (Sys.is_directory path) with
@@ -128,8 +128,8 @@ let copy_missing_prompt_seed ~src_config_root ~dst_config_root =
 ;;
 
 let copy_missing_model_catalog_overlay_seed ~src_config_root ~dst_config_root =
-  let src = Filename.concat src_config_root oas_models_overlay_toml_filename in
-  let dst = Filename.concat dst_config_root oas_models_overlay_toml_filename in
+  let src = Filename.concat src_config_root agent_core_models_overlay_toml_filename in
+  let dst = Filename.concat dst_config_root agent_core_models_overlay_toml_filename in
   if existing_file src && not (Sys.file_exists dst)
   then (
     copy_file_if_missing ~src ~dst;

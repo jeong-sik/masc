@@ -114,7 +114,7 @@ val clock_refs :
 val clock_refs_for_context :
   turn_context ->
   event:event_kind ->
-  ?oas_turn_count:int ->
+  ?agent_core_turn_count:int ->
   ?elapsed_ms:int ->
   ?event_bus_correlation_id:string ->
   ?event_bus_run_id:string ->
@@ -139,7 +139,7 @@ val make :
   trace_id:string ->
   ?generation:int ->
   ?keeper_turn_id:int ->
-  ?oas_turn_count:int ->
+  ?agent_core_turn_count:int ->
   ?logical_seq:int ->
   event:event_kind ->
   ?runtime_id:string ->
@@ -154,7 +154,7 @@ val make :
 val make_for_context :
   turn_context ->
   event:event_kind ->
-  ?oas_turn_count:int ->
+  ?agent_core_turn_count:int ->
   ?logical_seq:int ->
   ?runtime_id:string ->
   ?status:string ->

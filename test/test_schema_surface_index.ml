@@ -94,7 +94,7 @@ let test_required_surfaces_present () =
     ; "masc.keeper_tool_call_log.jsonl.v1"
     ; "masc.runtime_contract_projection.v1"
     ; "masc.mcp_openapi_tool_schema.v1"
-    ; "masc.oas_bridge_events.v1"
+    ; "masc.agent_core_bridge_events.v1"
     ]
 ;;
 
@@ -109,14 +109,14 @@ let test_local_paths_exist () =
       paths)
 ;;
 
-let test_oas_refs_are_external () =
+let test_agent_core_refs_are_external () =
   catalog ()
   |> surfaces
   |> List.iter (fun row ->
     let id = require_string "id" row in
     require_string_list "external_refs" row
     |> List.iter (fun ref_id ->
-      check bool (id ^ " external ref is OAS: " ^ ref_id) true (String.starts_with ~prefix:"oas." ref_id)))
+      check bool (id ^ " external ref is AGENT_CORE: " ^ ref_id) true (String.starts_with ~prefix:"agent_core." ref_id)))
 ;;
 
 let () =
@@ -126,7 +126,7 @@ let () =
       , [ test_case "shape" `Quick test_catalog_shape
         ; test_case "required surfaces" `Quick test_required_surfaces_present
         ; test_case "local paths exist" `Quick test_local_paths_exist
-        ; test_case "OAS refs are external" `Quick test_oas_refs_are_external
+        ; test_case "AGENT_CORE refs are external" `Quick test_agent_core_refs_are_external
         ] )
     ]
 ;;

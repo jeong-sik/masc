@@ -98,7 +98,7 @@
   masc.keeper_checkpoint_ref
   masc.keeper_contract
   masc.keeper_approval
-  masc.keeper_hooks_oas_types
+  masc.keeper_hooks_agent_core_types
   masc.keeper_runtime
   masc.keeper_toml
   masc.keeper_tooling
@@ -113,7 +113,7 @@
   masc.keeper_chat_delivery_identity
   ;; Leaf boundary over masc.agent_core.llm_provider canonical provider labels.
   ;; Runtime_model extracted to lib/runtime_model/.
-  ;; Runtime/OAS provider projection + model-label parsing boundary.
+  ;; Runtime/AGENT_CORE provider projection + model-label parsing boundary.
   masc.runtime_model
   masc.runtime
   masc.provider_tool_support
@@ -184,17 +184,17 @@
   ;; the standalone test executable can link in seconds without the
   ;; main library.
   ;; LAMBDA-HOOK-ERROR (2026-05-19): typed dedupe state for the
-  ;; Keeper_hooks_oas on_tool_error hook ERROR log noise (8 events
+  ;; Keeper_hooks_agent_core on_tool_error hook ERROR log noise (8 events
   ;; from 4 distinct (keeper, tool) triples in a 1000-line system_log
   ;; sample — keeper:verifier × Bash, lifecycle-worker-fast-1 ×
   ;; Execute, lifecycle-reviewer-fast-1 × retired
   ;; PR-review wrapper, analyst × masc_transition). Single
-  ;; emit site at lib/keeper/keeper_hooks_oas.ml:720, keyed by
+  ;; emit site at lib/keeper/keeper_hooks_agent_core.ml:720, keyed by
   ;; (keeper, tool, signature).
   ;; Domain adapter over Bounded_event_dedupe so the standalone
   ;; alcotest builds in seconds without dragging the main library.
   ;; RFC-0086 Phase 2.B prereq — Tool_catalog_surfaces (lib/ root, 554+103 LoC)
-  ;; extracted to lib/tool_catalog_surfaces/. deps: Agent_sdk + stdlib only.
+  ;; extracted to lib/tool_catalog_surfaces/. deps: Agent_core + stdlib only.
   ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.
   masc.tool_catalog_surfaces
   ;; RFC-0086 Phase 2.B prereq — Config_dir_resolver (lib/ root, 563+156 LoC)
@@ -336,7 +336,7 @@
   ;; runtime configuration consumers.
   masc.embedded_config
   ;; RFC-0252 — Fusion panel+judge deliberation pure core (types, gate, config,
-  ;; judge JSON parse). lib/fusion/ (OAS-calling glue) lives in this main lib.
+  ;; judge JSON parse). lib/fusion/ (AGENT_CORE-calling glue) lives in this main lib.
   masc.fusion_core)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))

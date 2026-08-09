@@ -1,5 +1,5 @@
 {
-  "_comment": "RFC-OAS-023 §5.3 Phase 5 catalog draft — cascade.toml × OAS catalog 1:1 identity mapping. Vendor docs research applied 2026-05-26. Load with Capability_manifest.load_file and install with Capability_manifest.set_global.",
+  "_comment": "Agent Core contract §5.3 Phase 5 catalog draft — cascade.toml × AGENT_CORE catalog 1:1 identity mapping. Vendor docs research applied 2026-05-26. Load with Capability_manifest.load_file and install with Capability_manifest.set_global.",
   "schema_version": 1,
   "models": [
     {

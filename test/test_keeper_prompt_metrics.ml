@@ -69,14 +69,14 @@ let base_system_prompt =
 let checkpoint_context_text =
   "Recent checkpoint context:\n\
    Goal: Deploy masc v0.97.0 to production\n\
-   Progress: OAS pinned, keeper hooks updated, CI passing\n\
+   Progress: AGENT_CORE pinned, keeper hooks updated, CI passing\n\
    Next: Run integration tests, prepare release notes\n\
    Decisions: Use squash merge for PR #3895\n\
    Open questions: Dashboard performance under load"
 
 let worktree_text =
   "--- Worktree changes ---\n\
-   M lib/keeper/keeper_hooks_oas.ml\n\
+   M lib/keeper/keeper_hooks_agent_core.ml\n\
    M lib/otel_metric_store.ml\n\
    A test/test_keeper_prompt_metrics.ml"
 
@@ -249,18 +249,18 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
   let input_messages =
     [
       {
-        Agent_sdk.Types.role = Agent_sdk.Types.User;
-        content = [Agent_sdk.Types.Text "Earlier user request"];
+        Agent_core.Types.role = Agent_core.Types.User;
+        content = [Agent_core.Types.Text "Earlier user request"];
         name = None;
         tool_call_id = None;
         metadata = [];
       };
       {
-        Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
+        Agent_core.Types.role = Agent_core.Types.Assistant;
         content =
           [
-            Agent_sdk.Types.Text "Investigating the issue";
-            Agent_sdk.Types.ToolUse
+            Agent_core.Types.Text "Investigating the issue";
+            Agent_core.Types.ToolUse
               {
                 id = "call-1";
                 name = "masc_board_get";
@@ -272,14 +272,14 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
         metadata = [];
       };
       {
-        Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+        Agent_core.Types.role = Agent_core.Types.Tool;
         content =
           [
-            Agent_sdk.Types.ToolResult
+            Agent_core.Types.ToolResult
               {
                 tool_use_id = "call-1";
                 content = "Fetched board post body";
-                outcome = Agent_sdk.Types.Tool_succeeded;
+                outcome = Agent_core.Types.Tool_succeeded;
                 json = None;
                 content_blocks = None;
               };
@@ -289,8 +289,8 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
         metadata = [];
       };
       {
-        Agent_sdk.Types.role = Agent_sdk.Types.User;
-        content = [Agent_sdk.Types.Text "Current user message"];
+        Agent_core.Types.role = Agent_core.Types.User;
+        content = [Agent_core.Types.Text "Current user message"];
         name = None;
         tool_call_id = None;
         metadata = [];
@@ -304,7 +304,7 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
     }
   in
   let tool =
-    Agent_sdk.Tool.create
+    Agent_core.Tool.create
       ~name:"probe_tool"
       ~description:"probe tool"
       ~parameters:[]
@@ -347,11 +347,11 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
        metrics.segments)
     metrics.attributed_bytes
 
-let message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text
+let message text : Agent_core.Types.message = Agent_core.Types.user_msg text
 
 let prompt_carrier text =
   { (message text) with
-    metadata = Agent_sdk.Types.Extra_system_context_provenance.metadata
+    metadata = Agent_core.Types.Extra_system_context_provenance.metadata
   }
 ;;
 
@@ -361,8 +361,8 @@ let test_provider_content_messages_removes_typed_prompt_carrier () =
   let gate_evidence = message "typed gate replay payload" in
   let message_texts =
     Option.map
-      (List.map (fun (message : Agent_sdk.Types.message) ->
-         Agent_sdk.Types.text_of_content message.Agent_sdk.Types.content))
+      (List.map (fun (message : Agent_core.Types.message) ->
+         Agent_core.Types.text_of_content message.Agent_core.Types.content))
   in
   check
     (option (list string))
@@ -400,15 +400,15 @@ let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
   let plain = message "[system context] same text without typed identity" in
   let marked = prompt_carrier "typed prompt context" in
   let invalid =
-    match Agent_sdk.Types.Extra_system_context_provenance.metadata with
+    match Agent_core.Types.Extra_system_context_provenance.metadata with
     | [ key, _ ] -> { marked with metadata = [ key, `Bool false ] }
-    | _ -> fail "OAS prompt carrier metadata must contain exactly one field"
+    | _ -> fail "AGENT_CORE prompt carrier metadata must contain exactly one field"
   in
   let duplicate =
     { marked with
       metadata =
-        Agent_sdk.Types.Extra_system_context_provenance.metadata
-        @ Agent_sdk.Types.Extra_system_context_provenance.metadata
+        Agent_core.Types.Extra_system_context_provenance.metadata
+        @ Agent_core.Types.Extra_system_context_provenance.metadata
     }
   in
   let unavailable ~prompt_context_present messages =

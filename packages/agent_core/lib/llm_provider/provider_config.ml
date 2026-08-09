@@ -562,7 +562,7 @@ let validate_request_path (config : t) =
   else Ok ()
 ;;
 
-(* Structured-output tier admission (OAS #2744 / masc#25550 audit finding P4).
+(* Structured-output tier admission (agent-core boundary / masc#25550 audit finding P4).
    The tier is read from the resolved model/provider capability, never from
    provider identity. [config.kind] used to gate this (GLM hard-denied, three
    kinds hard-allowed), so a capability-driven fact was decided by a vendor

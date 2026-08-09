@@ -10,7 +10,7 @@
     Single public entry: {!run_bench}.  Internal helpers
     ({!pctl} percentile, {!error_message_of_http_error},
     per-runtime breakdown aggregators, runtime-pool resolution
-    helpers, {!ensure_runtime_reachable}, {!oas_completion_at})
+    helpers, {!ensure_runtime_reachable}, {!agent_core_completion_at})
     stay private — the .mli pins the bench result schema, not the
     plumbing that produces it. *)
 
@@ -53,7 +53,7 @@ val run_bench :
     {[
       \{
         "server_url": string,
-        "source": "oas_complete",
+        "source": "agent_core_complete",
         "model_id": string,
         "runtime_pool": string,
         "parallelism": int,

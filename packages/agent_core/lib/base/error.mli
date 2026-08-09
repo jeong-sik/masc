@@ -1,7 +1,7 @@
-(** Structured SDK error types.
+(** Structured agent-core error types.
 
-    Replaces [(_, string) result] with [(_, sdk_error) result] across the SDK.
-    Provides human-readable [to_string] for backward-compatible error messages
+    Replaces [(_, string) result] with [(_, t) result] across agent core.
+    Provides human-readable [to_string] for stable error messages
     and [is_retryable] for automated retry decisions.
 
     @stability Stable
@@ -120,7 +120,7 @@ type orchestration_error =
 
 (** {1 Top-level error} *)
 
-type sdk_error =
+type t =
   | Api of api_error
   | Provider of provider_error
   | Agent of agent_error
@@ -131,7 +131,7 @@ type sdk_error =
   | Orchestration of orchestration_error
   | Internal of string
 
-(** Non-identifying top-level category derived from an [sdk_error].
+(** Non-identifying top-level category derived from a [t].
     This projection is for observation only; it does not define retry,
     fallback, or scheduling policy. *)
 type category =
@@ -147,14 +147,14 @@ type category =
 
 (** {1 Operations} *)
 
-(** Project an SDK error to its top-level category. *)
-val category : sdk_error -> category
+(** Project an agent-core error to its top-level category. *)
+val category : t -> category
 
 (** Canonical observation label for a top-level category. *)
 val category_label : category -> string
 
 (** Human-readable error message. *)
-val to_string : sdk_error -> string
+val to_string : t -> string
 
 (** Whether the error is transient and the operation can be retried. *)
-val is_retryable : sdk_error -> bool
+val is_retryable : t -> bool

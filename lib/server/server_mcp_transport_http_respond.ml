@@ -3,7 +3,7 @@
 
 (** [safe_respond_with_string] guards [Httpun.Reqd.respond_with_string]
     against the [Failure "invalid state, currently handling error"] race
-    that occurs when a client disconnects while a long OAS turn is in
+    that occurs when a client disconnects while a long AGENT_CORE turn is in
     progress and httpun's error_handler has already started responding
     (2026-05-05 cycle9 FATAL incident). *)
 let safe_respond_with_string reqd response body =
@@ -18,13 +18,13 @@ let safe_respond_with_string reqd response body =
      RFC-0106 P1: routed via [Cancel_safe.observe] so the Cancelled
      re-raise discipline lives in one place. The [Failure] arm is
      preserved inside [on_exn] because it is a typed boundary
-     (2026-05-05 OAS cancel race), not a catch-all. *)
+     (2026-05-05 AGENT_CORE cancel race), not a catch-all. *)
   Cancel_safe.observe
     ~on_exn:(function
       | Failure msg ->
           Log.Server.warn
             "[mcp-http] respond_with_string skipped (reqd invalid state; \
-             2026-05-05 OAS cancel race): %s"
+             2026-05-05 AGENT_CORE cancel race): %s"
             msg
       | exn ->
           let backtrace = Printexc.get_backtrace () in

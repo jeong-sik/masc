@@ -94,7 +94,7 @@ if [[ -s "$new_tmp" ]]; then
   echo
   echo "[no-provider-name-hardcoding] DRIFT UP: new provider/model literals in runtime boundary" >&2
   sed 's/^/  - /' "$new_tmp" >&2
-  echo "  Route provider/model truth through OAS runtime bindings or a MASC-local policy overlay." >&2
+  echo "  Route provider/model truth through AGENT_CORE runtime bindings or a MASC-local policy overlay." >&2
 fi
 
 if [[ -s "$stale_tmp" ]]; then

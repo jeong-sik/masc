@@ -26,11 +26,11 @@ let trimmed_query_param req key =
   | Some value when value <> "" -> Some value
   | _ -> None
 
-let oas_telemetry_limit_param req =
+let agent_core_telemetry_limit_param req =
   Server_utils.int_query_param req "limit" ~default:50
   |> Server_utils.clamp ~min_v:1 ~max_v:200
 
-let oas_telemetry_provider_param req = trimmed_query_param req "provider"
+let agent_core_telemetry_provider_param req = trimmed_query_param req "provider"
 
 (** Broadcast handler: parse JSON body, extract "message" string field, and
     relay via Workspace.broadcast.  Error responses are encoded through Yojson so

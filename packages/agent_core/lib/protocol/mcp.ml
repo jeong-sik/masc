@@ -1,7 +1,7 @@
 (** MCP (Model Context Protocol) client.
 
     Uses a tolerant NDJSON-over-stdio client for runtime interop while
-    keeping the pure SDK bridge helpers for tests. This lets OAS talk to
+    keeping the pure SDK bridge helpers for tests. This lets AGENT_CORE talk to
     MCP servers that paginate [tools/list] and add non-standard fields. *)
 
 open Types
@@ -94,7 +94,7 @@ let mcp_tool_of_json = function
 
 let initialize t =
   match
-    Sdk_client.initialize t.client ~client_name:"oas-mcp-client" ~client_version:"0.10.0"
+    Sdk_client.initialize t.client ~client_name:"agent-core-mcp-client" ~client_version:"0.10.0"
   with
   | Ok _ -> Ok ()
   | Error detail -> Error (Error.Mcp (InitializeFailed { detail }))
@@ -104,7 +104,7 @@ let initialize t =
 let list_tools t =
   match Sdk_client.list_tools_all t.client with
   | Error detail -> Error (Error.Mcp (ToolListFailed { detail }))
-  | Ok tools -> Ok (List.map mcp_tool_of_sdk_tool tools)
+  | Ok tools -> Ok (List.map mcp_tool_of_agent_core_tool tools)
 ;;
 
 let decode_items field decode result_json =
@@ -177,7 +177,7 @@ let to_tools t (tools : mcp_tool list) =
     (fun (mt : mcp_tool) acc ->
        let* tools = acc in
        let call_fn input = call_tool t ~name:mt.name ~arguments:input in
-       match mcp_tool_to_sdk_tool_result ~call_fn mt with
+       match mcp_tool_to_agent_core_tool_result ~call_fn mt with
        | Ok tool_ -> Ok (tool_ :: tools)
        | Error detail -> Error (schema_error detail))
     tools
@@ -284,7 +284,7 @@ let%test "close attempts process release and preserves the client-close exceptio
 (** Server start specification.
     [command] is the executable, [args] its arguments.
     [env] contains explicit overrides applied to the inherited process
-    environment. [name] identifies the server. OAS passes the caller's argv
+    environment. [name] identifies the server. AGENT_CORE passes the caller's argv
     unchanged and does not infer command meaning. *)
 type server_spec =
   { command : string
@@ -305,7 +305,7 @@ type transport =
       ; headers : (string * string) list
       }
 
-(** A connected MCP server together with its converted SDK tools. *)
+(** A connected MCP server together with its converted agent-core tools. *)
 type managed =
   { tools : Tool.t list
   ; name : string
@@ -543,8 +543,8 @@ let%test "merge_env empty extras returns environment unchanged" =
 ;;
 
 let%test "merge_env adds new entries" =
-  let env = merge_env [ "__OAS_TEST_VAR_INLINE__", "test_value" ] in
-  Array.exists (fun entry -> entry = "__OAS_TEST_VAR_INLINE__=test_value") env
+  let env = merge_env [ "__AGENT_CORE_TEST_VAR_INLINE__", "test_value" ] in
+  Array.exists (fun entry -> entry = "__AGENT_CORE_TEST_VAR_INLINE__=test_value") env
 ;;
 
 let%test "merge_env overrides existing keys" =
@@ -629,7 +629,7 @@ let%test "decode_items field is not a list returns Ok []" =
 ;;
 
 let%test "merge_env multiple overrides" =
-  let env = merge_env [ "__OAS_TEST_A__", "val_a"; "__OAS_TEST_B__", "val_b" ] in
-  Array.exists (fun e -> e = "__OAS_TEST_A__=val_a") env
-  && Array.exists (fun e -> e = "__OAS_TEST_B__=val_b") env
+  let env = merge_env [ "__AGENT_CORE_TEST_A__", "val_a"; "__AGENT_CORE_TEST_B__", "val_b" ] in
+  Array.exists (fun e -> e = "__AGENT_CORE_TEST_A__=val_a") env
+  && Array.exists (fun e -> e = "__AGENT_CORE_TEST_B__=val_b") env
 ;;

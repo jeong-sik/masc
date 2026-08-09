@@ -8,7 +8,7 @@
     to the wire. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 (* The production case that surfaced the loss: a byte cap the model must stay
    inside. Named so the expectations below cannot drift from the fixture. *)

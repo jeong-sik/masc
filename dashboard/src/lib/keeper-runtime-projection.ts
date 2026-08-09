@@ -325,7 +325,7 @@ function terminalEventLabel(trace: KeeperRuntimeTraceResponse | null): KeeperRun
           ? 'ok'
           : 'info'
   const detailParts = [
-    `oas ${clock.max_oas_turn_count ?? '-'}`,
+    `agentCore ${clock.max_agent_core_turn_count ?? '-'}`,
     `manifest ${trace.manifest_total_rows}`,
     `health ${compactToken(trace.health)}`,
     gapCount > 0 ? `${gapCount} lens gap${gapCount === 1 ? '' : 's'}` : 'no lens gaps',

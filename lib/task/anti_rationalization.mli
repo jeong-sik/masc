@@ -91,7 +91,7 @@ val run_llm_reviewer_fn
       -> lookup:lookup_surface
       -> on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
       -> unit
-      -> (verdict option, Agent_sdk.Error.sdk_error) result)
+      -> (verdict option, Agent_core.Error.t) result)
        Atomic.t
 (** The system agent supplies its owning workspace BasePath explicitly; this
     callback must not substitute a process-global BasePath. *)

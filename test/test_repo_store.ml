@@ -432,18 +432,18 @@ let test_discover_finds_grouped_workspace_repos () =
     with_temp_base_path (fun base_path ->
         let workspace = Filename.concat base_path "workspace" in
         let group = Filename.concat workspace "yousleepwhen" in
-        let repo_dir = Filename.concat group "oas" in
+        let repo_dir = Filename.concat group "agent_core" in
         Unix.mkdir workspace 0o755;
         Unix.mkdir group 0o755;
         Unix.mkdir repo_dir 0o755;
-        init_git_repo repo_dir "https://github.com/test/oas";
+        init_git_repo repo_dir "https://example.com/agent-core";
         match Repo_store.discover_repositories ~base_path with
         | Error e -> Alcotest.fail ("discover failed: " ^ e)
         | Ok repos ->
             Alcotest.(check int) "finds grouped workspace repo" 1
               (List.length repos);
             let repo = List.hd repos in
-            Alcotest.(check string) "id" "oas" repo.id;
+            Alcotest.(check string) "id" "agent_core" repo.id;
             Alcotest.(check string) "local_path" (canonical_path repo_dir) repo.local_path)
 
 let test_discover_keeps_depth_cap () =
@@ -619,10 +619,10 @@ let with_two_absolute_repos f =
   with_temp_base_path (fun base_path ->
     init_empty_store base_path;
     let masc_path = Filename.concat base_path "workspace/masc" in
-    let oas_path = Filename.concat base_path "workspace/oas" in
+    let agent_core_path = Filename.concat base_path "workspace/agent_core" in
     Unix.mkdir (Filename.concat base_path "workspace") 0o755;
     Unix.mkdir masc_path 0o755;
-    Unix.mkdir oas_path 0o755;
+    Unix.mkdir agent_core_path 0o755;
     let masc =
       { (sample_repo "masc") with
         url = "https://github.com/jeong-sik/masc"
@@ -630,19 +630,19 @@ let with_two_absolute_repos f =
       ; aliases = [ "masc-mcp" ]
       }
     in
-    let oas =
-      { (sample_repo "oas") with
-        url = "https://github.com/jeong-sik/oas"
-      ; local_path = oas_path
+    let agent_core =
+      { (sample_repo "agent_core") with
+        url = "https://example.com/agent-core"
+      ; local_path = agent_core_path
       }
     in
-    (match Repo_store.save_all ~base_path [ masc; oas ] with
+    (match Repo_store.save_all ~base_path [ masc; agent_core ] with
      | Ok () -> ()
      | Error e -> Alcotest.fail ("save_all: " ^ e));
-    f ~base_path ~masc_path ~oas_path)
+    f ~base_path ~masc_path ~agent_core_path)
 
 let test_find_url_by_id_known () =
-  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
+  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~agent_core_path:_ ->
     match Repo_store.find_url_by_id ~base_path "masc" with
     | Ok (Some url) ->
       Alcotest.(check string)
@@ -653,14 +653,14 @@ let test_find_url_by_id_known () =
     | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
 let test_find_url_by_id_unknown () =
-  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
+  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~agent_core_path:_ ->
     match Repo_store.find_url_by_id ~base_path "nonexistent" with
     | Ok None -> ()
     | Ok (Some s) -> Alcotest.fail ("expected None for unknown, got: " ^ s)
     | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
 let test_find_repo_by_path_prefix_match () =
-  with_two_absolute_repos (fun ~base_path ~masc_path ~oas_path:_ ->
+  with_two_absolute_repos (fun ~base_path ~masc_path ~agent_core_path:_ ->
     let abs = Filename.concat masc_path "lib/foo.ml" in
     match Repo_store.find_repo_by_path_prefix ~base_path abs with
     | Ok (Some (repo, rel)) ->
@@ -670,7 +670,7 @@ let test_find_repo_by_path_prefix_match () =
     | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
 let test_find_repo_by_path_prefix_outside () =
-  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
+  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~agent_core_path:_ ->
     match Repo_store.find_repo_by_path_prefix ~base_path "/tmp/elsewhere.ml" with
     | Ok None -> ()
     | Ok (Some (repo, _)) -> Alcotest.fail ("unexpected match: " ^ repo.id)
@@ -712,7 +712,7 @@ let test_find_repo_by_path_prefix_sibling_not_matched () =
 
 let test_find_repo_by_path_prefix_root () =
   (* abs_path equals the repo's local_path itself → empty rel. *)
-  with_two_absolute_repos (fun ~base_path ~masc_path ~oas_path:_ ->
+  with_two_absolute_repos (fun ~base_path ~masc_path ~agent_core_path:_ ->
     match Repo_store.find_repo_by_path_prefix ~base_path masc_path with
     | Ok (Some (repo, rel)) ->
       Alcotest.(check string) "matched repo id" "masc" repo.id;

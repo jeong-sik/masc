@@ -77,7 +77,7 @@ export const interleaveEntries: KeeperConversationEntry[] = [
         kind: 'think',
         text: 'First structural thought appears before the tool even though its timestamp is later.',
         ts: '2026-07-05T14:20:05.000Z',
-        oasBlockIndex: 10,
+        agentCoreBlockIndex: 10,
       },
       {
         kind: 'tool',
@@ -86,13 +86,13 @@ export const interleaveEntries: KeeperConversationEntry[] = [
         status: 'ok',
         args: '{"scope":"current"}',
         ts: '2026-07-05T14:20:01.000Z',
-        oasBlockIndex: 11,
+        agentCoreBlockIndex: 11,
       },
       {
         kind: 'think',
         text: 'Second structural thought must remain after the joined tool despite an earlier timestamp.',
         ts: '2026-07-05T14:20:02.000Z',
-        oasBlockIndex: 12,
+        agentCoreBlockIndex: 12,
       },
       {
         kind: 'tool',
@@ -100,7 +100,7 @@ export const interleaveEntries: KeeperConversationEntry[] = [
         toolCallId: 'tc-missing',
         args: '{"query":"old task context"}',
         ts: '2026-07-05T14:20:03.000Z',
-        oasBlockIndex: 13,
+        agentCoreBlockIndex: 13,
       },
     ],
     details: null,

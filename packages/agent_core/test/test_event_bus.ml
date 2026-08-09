@@ -1,7 +1,7 @@
 (** Tests for Event_bus — typed publish/subscribe for agent lifecycle events. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ──────────────────────────────────────────────────────── *)
 
@@ -355,7 +355,7 @@ let test_payload_kind_canonical_labels () =
 ;;
 
 (* Stable-API guard: the snake_case label set is documented as part of
-   OAS's public surface.  Subscribers may persist these strings, so an
+   AGENT_CORE's public surface.  Subscribers may persist these strings, so an
    accidental rename (e.g. "agent_started" → "agentStarted") would be a
    silent breaking change for consumers reading historical event logs.
    This test pins the exact characters so any rename trips a code

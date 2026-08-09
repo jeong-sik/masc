@@ -2,18 +2,18 @@
 
     Publishes the current keeper lifecycle and runtime audit events to the
     MASC-owned Event_bus. Events follow dot-separated snake_case naming per
-    OAS Custom-name convention.
+    AGENT_CORE Custom-name convention.
 
-    Every publish routes to [Event_bus_slots.get_masc ()] so the OAS/MASC
-    layer boundary is preserved. OAS's [event_bus.mli:103-107]
-    explicitly warns against publishing domain events onto OAS's bus.
+    Every publish routes to [Event_bus_slots.get_masc ()] so the AGENT_CORE/MASC
+    layer boundary is preserved. AGENT_CORE's [event_bus.mli:103-107]
+    explicitly warns against publishing domain events onto AGENT_CORE's bus.
 
     SSE wire-name translation is owned by the relay, not this module.
 
     @since 2.90.0 (bus-separated since 2.353.0) *)
 
-(* Route every publish to the MASC-owned bus. This closes the OAS boundary
-   violation where MASC was publishing Custom("masc:...") onto OAS's shared
+(* Route every publish to the MASC-owned bus. This closes the AGENT_CORE boundary
+   violation where MASC was publishing Custom("masc:...") onto AGENT_CORE's shared
    bus. *)
 let masc_publish event =
   match Event_bus_slots.get_masc () with
@@ -68,7 +68,7 @@ let publish_keeper_lifecycle
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
+    (Agent_core.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
 
 (** {1 Audit Ledger Events} *)
 
@@ -97,7 +97,7 @@ let publish_audit_event ~id ~ts ~actor ~kind ?target ~summary ~severity
     ("severity", `String severity);
     ("payload", payload_json);
   ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.audit_event", event_payload)))
+  masc_publish (Agent_core.Event_bus.mk_event (Custom ("masc.audit_event", event_payload)))
 
 (** {1 Runtime Execution Telemetry Events} *)
 
@@ -128,4 +128,4 @@ let publish_runtime_execution_built
       ]
   in
   masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload)))
+    (Agent_core.Event_bus.mk_event (Custom ("telemetry_event", payload)))

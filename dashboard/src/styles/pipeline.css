@@ -1,6 +1,6 @@
-/* OAS Pipeline — oas-event-*, keeper-bar, pipeline-stage-*, badge--*. Extracted from global.css for #3915. */
+/* Agent Core Pipeline — agent-core-event-*, keeper-bar, pipeline-stage-*, badge--*. Extracted from global.css for #3915. */
 
-/* ═══ OAS Pipeline ═══ */
+/* ═══ Agent Core Pipeline ═══ */
 
 /* ── Pipeline Stage Indicator ── */
 @utility pipeline-stage-label { transition: color var(--t-slow) var(--ease); }

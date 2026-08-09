@@ -1,6 +1,6 @@
 (** Tests for Log module — structured logging. *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ──────────────────────────────────────────────────── *)
 
@@ -99,9 +99,9 @@ let test_field_to_json () =
 
 let test_explicit_env_secret_field_is_redacted () =
   let getenv name =
-    if String.equal name "OAS_TEST_EXPLICIT_SECRET" then Some "opaque-env-value" else None
+    if String.equal name "AGENT_CORE_TEST_EXPLICIT_SECRET" then Some "opaque-env-value" else None
   in
-  match Llm_provider.Secret.of_env ~getenv "OAS_TEST_EXPLICIT_SECRET" with
+  match Llm_provider.Secret.of_env ~getenv "AGENT_CORE_TEST_EXPLICIT_SECRET" with
   | None -> Alcotest.fail "expected the injected environment value"
   | Some secret ->
     let key, value = Log.field_to_json (Log.Secret ("credential", secret)) in

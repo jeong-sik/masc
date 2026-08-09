@@ -1,4 +1,4 @@
-(** Immutable OAS exact-output publication for MASC runtime routing. *)
+(** Immutable AGENT_CORE exact-output publication for MASC runtime routing. *)
 
 type t
 type publication_error =
@@ -28,7 +28,7 @@ type publication_error =
       { lane_id : string
       ; position : int
       ; slot_id : string
-      ; cause : Agent_sdk.Exact_output.target_ref_error
+      ; cause : Agent_core.Exact_output.target_ref_error
       }
   | Unknown_lane_slot of
       { lane_id : string
@@ -45,7 +45,7 @@ type ('not_committed, 'committed) replacement_effect =
 
 type selected_slot =
   { slot_id : string
-  ; admitted_target : Agent_sdk.Exact_output.admitted_target
+  ; admitted_target : Agent_core.Exact_output.admitted_target
   }
 
 type resolved_lane =
@@ -57,14 +57,14 @@ type lane_resolution_error =
 
 val publish
   :  lanes:Runtime_schema.exact_output_lane_decl list
-  -> Agent_sdk.Exact_output.resolver_snapshot
+  -> Agent_core.Exact_output.resolver_snapshot
   -> (t, publication_error) result
 (** Validate and atomically publish one complete resolver-and-lane registry.
     Each successful publication advances the MASC-local generation
     monotonically. Invalid declarations are rejected before the Atomic is
     changed.
 
-    Every declaration string is converted to an immutable OAS admitted-target
+    Every declaration string is converted to an immutable AGENT_CORE admitted-target
     handle before publication. Credential presence is deliberately excluded
     from publication admission. Config-level errors — blank or duplicate ids,
     malformed or unknown target refs — remain fatal at publish. Returns
@@ -101,7 +101,7 @@ val generation : t -> int64
 val resolve_lane : t -> lane_id:string -> (resolved_lane, lane_resolution_error) result
 (** Acquire one lane exclusively from the immutable admitted handles retained
     by the supplied registry generation. This does not resolve credentials or
-    select provider targets; OAS owns those operations while executing the
+    select provider targets; AGENT_CORE owns those operations while executing the
     exact flow. Slot declaration order is preserved. *)
 
 val publication_error_to_string : publication_error -> string

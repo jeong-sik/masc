@@ -3,7 +3,7 @@
     Reservations are process-local concurrency barriers keyed by canonical
     workspace base path and keeper name. The opaque token is the only
     authority that may cross a reserved durable-meta or registry mutation
-    boundary. This module deliberately contains no MASC/OAS runtime policy. *)
+    boundary. This module deliberately contains no MASC/AGENT_CORE runtime policy. *)
 
 type purpose = Keeper_registry_types.lifecycle_transaction_purpose =
   | Paused_work_disposition

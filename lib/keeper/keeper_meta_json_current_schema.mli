@@ -56,7 +56,7 @@ type field =
   | Latched_reason
   | Current_task_id
   | Keeper_id
-  | Oas_env
+  | Agent_core_env
 
 val all_fields : field list
 val field_name : field -> string

@@ -3,7 +3,7 @@
 RFC-0351:105 requires the operational cleanup procedure (backup included) to
 be documented before S2. This runbook covers the Dashboard action and
 `masc-checkpoint-purge` (#25537): the deterministic reduction of a stopped
-keeper's canonical OAS checkpoint. No LLM is involved at any step.
+keeper's canonical agent core checkpoint. No LLM is involved at any step.
 
 ## What the tool does
 

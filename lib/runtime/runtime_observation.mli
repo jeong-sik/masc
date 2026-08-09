@@ -72,7 +72,7 @@ type runtime_observation = {
   fallback_events : runtime_fallback_event list;
   attempt_details_available : bool;
   attempt_details_source : string;
-  oas_internal_runtime_allowed : bool;
+  agent_core_internal_runtime_allowed : bool;
   streaming_ttfrc_ms : float option;
   streaming_inter_chunk_count : int;
   streaming_inter_chunk_avg_ms : float option;
@@ -82,7 +82,7 @@ type runtime_observation = {
     it reversed and {!runtime_observation_with_metrics}
     flips it on materialise).  [attempt_details_source]
     distinguishes the capture path (the canonical
-    [oas_metrics_callbacks] tag vs legacy fallbacks) so
+    [agent_core_metrics_callbacks] tag vs legacy fallbacks) so
     operators can tell at-a-glance whether the per-call
     metrics sink was wired. *)
 
@@ -104,12 +104,12 @@ val model_label_of_config :
 (** {1 Runtime metrics capture} *)
 
 type runtime_metrics_capture
-(** Mutable accumulator threaded through OAS's per-call
+(** Mutable accumulator threaded through AGENT_CORE's per-call
     metrics sink to record per-attempt latency / errors
     and per-fallback events.  Held abstract because
     callers do not pattern-match on the internal
     counter / list state — they construct one via
-    {!runtime_metrics_for_candidates}, hand it to OAS
+    {!runtime_metrics_for_candidates}, hand it to AGENT_CORE
     through a direct [Llm_provider.Metrics.t] record, then materialise
     a {!runtime_observation} via
     {!runtime_observation_with_metrics}. *)
@@ -141,7 +141,7 @@ val record_attempt_terminal :
   unit
 (** Records one terminal provider attempt in [capture]. This is for
     named-runtime runners that receive provider-attempt completion
-    directly but cannot thread OAS's per-call metrics sink through the
+    directly but cannot thread AGENT_CORE's per-call metrics sink through the
     provider invocation path. *)
 
 val runtime_metrics_for_candidates :
@@ -164,14 +164,14 @@ val runtime_observation_with_metrics :
   selected_model_raw:string option ->
   capture:runtime_metrics_capture ->
   ?attempt_details_source:string ->
-  ?oas_internal_runtime_allowed:bool ->
+  ?agent_core_internal_runtime_allowed:bool ->
   unit ->
   runtime_observation
 (** Materialises a {!runtime_observation} from a finished
     capture.  [attempts] / [fallback_events] are flipped
     into chronological order;
     [attempt_details_source] is set to
-    ["oas_metrics_callbacks"] to flag that the per-call
+    ["agent_core_metrics_callbacks"] to flag that the per-call
     metrics path was wired. *)
 
 (** {1 Fallback recorder} *)

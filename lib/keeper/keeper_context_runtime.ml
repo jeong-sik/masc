@@ -26,14 +26,14 @@ let serialized_bytes = Keeper_context_core.serialized_bytes
 let checkpoint_of_context = Keeper_context_core.checkpoint_of_context
 let resume_checkpoint_of_context =
   Keeper_context_core.resume_checkpoint_of_context
-let oas_context_of_context = Keeper_context_core.oas_context_of_context
+let agent_core_context_of_context = Keeper_context_core.agent_core_context_of_context
 let system_prompt_of_context = Keeper_context_core.system_prompt_of_context
 let messages_of_context = Keeper_context_core.messages_of_context
 let create = Keeper_context_core.create
 let set_system_prompt = Keeper_context_core.set_system_prompt
 let append = Keeper_context_core.append
 let append_many = Keeper_context_core.append_many
-let sync_oas_context = Keeper_context_core.sync_oas_context
+let sync_agent_core_context = Keeper_context_core.sync_agent_core_context
 let role_to_string = Keeper_context_core.role_to_string
 let role_of_string_opt = Keeper_context_core.role_of_string_opt
 let message_to_json = Keeper_context_core.message_to_json
@@ -43,8 +43,8 @@ let create_session = Keeper_context_core.create_session
 let persist_message = Keeper_context_core.persist_message
 
 let log_keeper_exn = Keeper_context_core.log_keeper_exn
-let context_of_oas_checkpoint = Keeper_context_core.context_of_oas_checkpoint
-let save_oas_checkpoint = Keeper_context_core.save_oas_checkpoint
+let context_of_agent_core_checkpoint = Keeper_context_core.context_of_agent_core_checkpoint
+let save_agent_core_checkpoint = Keeper_context_core.save_agent_core_checkpoint
 let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
 
 (* ================================================================ *)
@@ -74,7 +74,7 @@ let compaction_decision_prepared =
 
 type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   updated_meta : keeper_meta;
-  checkpoint : Agent_sdk.Checkpoint.t option;
+  checkpoint : Agent_core.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
@@ -87,7 +87,7 @@ type max_context_resolution = {
   requested_override : int option;
   primary_budget : int;
   runtime_budget : int;
-  (* Where [runtime_budget] came from: the OAS capability catalog, a
+  (* Where [runtime_budget] came from: the AGENT_CORE capability catalog, a
      runtime.toml override, or that override clamped by the capability.
      [None] only on the legacy ordered-label path when no label resolved and
      the precomputed default budget filled in. Dropping this rendered a

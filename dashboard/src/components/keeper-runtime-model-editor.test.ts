@@ -123,7 +123,7 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
     supports_code_execution: true,
     source: 'runtime.toml',
     effective_capabilities: {
-      source: 'oas-provider-config-model',
+      source: 'agent-core-provider-config-model',
       max_context_tokens: 128000,
       max_output_tokens: 8192,
       supports_tools: true,

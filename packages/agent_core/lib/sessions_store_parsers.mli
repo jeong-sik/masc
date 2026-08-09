@@ -8,14 +8,14 @@
 
 (** {1 Generic JSON parsing} *)
 
-val parse_json_string : string -> (Yojson.Safe.t, Error.sdk_error) result
+val parse_json_string : string -> (Yojson.Safe.t, Error.t) result
 
 val parse_runtime_json
   :  (Yojson.Safe.t -> ('a, string) result)
   -> string
-  -> ('a, Error.sdk_error) result
+  -> ('a, Error.t) result
 
-val decode_json_with : (Yojson.Safe.t -> 'a) -> string -> ('a, Error.sdk_error) result
+val decode_json_with : (Yojson.Safe.t -> 'a) -> string -> ('a, Error.t) result
 
 (** {1 Domain decoders} *)
 

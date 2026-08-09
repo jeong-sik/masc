@@ -27,11 +27,11 @@ type measurement_receipt_phase =
 
 (** Provider-neutral, exact structured-output Single Surface.
 
-    The canonical downstream path is [Agent_sdk.Exact_output]. The
+    The canonical downstream path is [Agent_core.Exact_output]. The
     [Llm_provider.Exact_output] path is the same packaged module, not a second
     contract or entrypoint.
 
-    The caller supplies an immutable OAS resolver snapshot, one exact target
+    The caller supplies an immutable AGENT_CORE resolver snapshot, one exact target
     reference, messages, a raw domain JSON schema, and the minimum guarantee. Provider
     config, wire response formats, schema envelopes, capability overrides,
     tools, reasoning controls, token measurement, and retry/fallback are
@@ -122,7 +122,7 @@ type resolver_snapshot_error =
 
 type minimum_guarantee =
   | Json_syntax
-  (** Prompt-only JSON contract.  OAS appends the schema instruction and
+  (** Prompt-only JSON contract.  AGENT_CORE appends the schema instruction and
           validates the response locally; it does not send a provider-native
           response-format request. *)
   | Provider_schema (** Explicit opt-in to a provider-native schema request. *)
@@ -199,7 +199,7 @@ type effect_phase =
   | Response_received
   | Terminal
 
-(** Provider-neutral response evidence owned by OAS. Detailed headers and
+(** Provider-neutral response evidence owned by AGENT_CORE. Detailed headers and
     provider metadata remain opaque; consumers compare only its fingerprint. *)
 type provider_trace
 
@@ -327,7 +327,7 @@ type flow_snapshot_error =
 (** Construct one provider-neutral candidate from a catalog-admitted target.
     Credential selection remains frozen but unresolved until this candidate is
     reached by the declared-order flow. The trimmed caller identity must be
-    nonempty and is otherwise opaque to OAS. *)
+    nonempty and is otherwise opaque to AGENT_CORE. *)
 val make_flow_candidate
   :  id:string
   -> admitted_target:admitted_target
@@ -348,7 +348,7 @@ val snapshot_flow
   -> (flow_snapshot, flow_snapshot_error) result
 
 (** Parse exactly one typed catalog input and freeze a private immutable target
-    map. The default input is the embedded OAS catalog. [Embedded_with_overlay]
+    map. The default input is the embedded AGENT_CORE catalog. [Embedded_with_overlay]
     applies the existing sparse exact-output overlay precedence to that
     embedded base. A full replacement, supplied as owned bytes or a file path,
     suppresses every embedded and overlay row; the input type provides no way
@@ -388,7 +388,7 @@ val admit_target_ref
     or reports the frozen missing, invalid, or read-failed credential outcome. *)
 val resolve_target : admitted_target -> (selected_target, target_selection_error) result
 
-(** Brand an opaque domain JSON schema. OAS never interprets domain keys as a
+(** Brand an opaque domain JSON schema. AGENT_CORE never interprets domain keys as a
     provider wire envelope; it always constructs the selected target's wire
     envelope itself. *)
 val make_output_requirement
@@ -768,11 +768,11 @@ val flow_execution_error_generation_dispatch
 val flow_attempt_evidence : flow_attempt -> flow_evidence
 
 (** Execute one affine declared-order flow with caller-owned pure semantic
-    validation. OAS invokes [validate] exactly once after each successful
+    validation. AGENT_CORE invokes [validate] exactly once after each successful
     candidate transport. [Reject_and_advance] preserves the opaque evidence and
     moves directly to the predetermined successor without using [before_advance].
     Every candidate performs at most one generation POST. A final semantic
-    rejection returns a typed nonempty exhaustion trace. OAS performs no domain
+    rejection returns a typed nonempty exhaustion trace. AGENT_CORE performs no domain
     durable commit, recovery, retirement, or preference update. *)
 val execute_flow_once
   :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

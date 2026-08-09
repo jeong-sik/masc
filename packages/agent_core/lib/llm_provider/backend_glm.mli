@@ -25,7 +25,7 @@ type glm_error_class =
   | Glm_server_error
   | Glm_invalid_request
   | Glm_context_overflow
-  (** oas#2947: code 1261 "Prompt exceeds max length" — the request
+  (** agent-core boundary: code 1261 "Prompt exceeds max length" — the request
         exceeded the model context window. Not retryable at the transport:
         only the consumer's context recovery can make progress. *)
 
@@ -60,7 +60,7 @@ val http_code_of_glm_error_class : glm_error_class -> int
 (** Parse glm's structured error envelope from a raw response body.
     [None] when the body is not JSON or carries no error object. Used by the
     streaming path to classify a non-200 rejection by its documented [code]
-    field before provider identity is erased (oas#2947). *)
+    field before provider identity is erased (agent-core boundary). *)
 val check_glm_error : string -> glm_error option
 
 (** Build a Glm chat completion request body.
@@ -91,7 +91,7 @@ val build_request_artifact
     [Error (Backend_openai_parse.Empty_completion _)] carrying the typed
     [stop_reason], so the caller can route an overflow empty turn to the
     shared empty-completion overflow classifier rather than dropping the
-    stop_reason (oas#2621). *)
+    stop_reason (agent-core boundary). *)
 val parse_response_result
   :  string
   -> (api_response, Backend_openai_parse.parse_error) result
@@ -101,7 +101,7 @@ val parse_response_result
     {!Glm_api_error} on any parse/provider error (an empty completion raises
     rather than surfacing its typed [stop_reason]). Production paths use
     {!parse_response_result} so an overflow empty turn's [stop_reason] reaches
-    the overflow classifier (oas#2621). *)
+    the overflow classifier (agent-core boundary). *)
 val parse_response : string -> api_response
 
 (** Extract [reasoning_content] from Glm response body and prepend

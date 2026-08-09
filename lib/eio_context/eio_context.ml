@@ -3,7 +3,7 @@
     Set once during server startup (main_eio.ml), read from any context.
 
     Uses Atomic.t (lock-free WORM pattern): each field is written once at
-    init and read many times from Eio fibers, CI tests, and OAS callbacks.
+    init and read many times from Eio fibers, CI tests, and AGENT_CORE callbacks.
     No mutex needed — Atomic.get/set are single-instruction operations. *)
 
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t

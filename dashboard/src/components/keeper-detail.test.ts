@@ -429,7 +429,7 @@ describe('KeeperDetailPage', () => {
 function makeSummary(overrides: Partial<KeeperCheckpointSummary> = {}): KeeperCheckpointSummary {
   return {
     snapshot_id: 'snap-000',
-    source_kind: 'oas_history',
+    source_kind: 'agent_core_history',
     is_current: false,
     path: '/tmp/snap-000.json',
     created_at: 1_700_000_000,
@@ -446,17 +446,17 @@ describe('filterCheckpointHistory', () => {
   const rows: readonly KeeperCheckpointSummary[] = [
     makeSummary({
       snapshot_id: 'snap-abc123',
-      source_kind: 'oas_history',
+      source_kind: 'agent_core_history',
       latest_preview: '유저 질문에 답변 완료',
     }),
     makeSummary({
       snapshot_id: 'snap-def456',
-      source_kind: 'oas_current',
+      source_kind: 'agent_core_current',
       latest_preview: 'Compaction triggered',
     }),
     makeSummary({
       snapshot_id: 'snap-ghi789',
-      source_kind: 'oas_history',
+      source_kind: 'agent_core_history',
       latest_preview: null,
     }),
   ]
@@ -476,7 +476,7 @@ describe('filterCheckpointHistory', () => {
   })
 
   it('matches by source_kind', () => {
-    const result = filterCheckpointHistory(rows, 'oas_current')
+    const result = filterCheckpointHistory(rows, 'agent_core_current')
     expect(result).toHaveLength(1)
     expect(result[0]?.snapshot_id).toBe('snap-def456')
   })

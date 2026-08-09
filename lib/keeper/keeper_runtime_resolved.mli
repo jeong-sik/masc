@@ -62,7 +62,7 @@ val stream_idle_timeout_sec : unit -> float option
 
 (** Non-streaming HTTP body-consumption deadline override.
     [None] (env unset) skips [Builder.with_body_timeout]. [Some s] is
-    forwarded through [Runtime_agent_context.body_timeout_s] for OAS sync
+    forwarded through [Runtime_agent_context.body_timeout_s] for AGENT_CORE sync
     completion paths. Streaming paths ignore this knob and rely on an
     explicitly configured [stream_idle_timeout_sec] plus the attempt liveness
     observer.
@@ -83,6 +83,6 @@ val provider_call_deadline_sec : unit -> float option
 (** CLI subprocess stdout-idle timeout, read fresh per turn from
     [MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC] and clamped to [10, 600].
     Default 120 s. Honoured by [Json_stream_cli_transport_local]; other CLI
-    transports require an OAS upstream change to expose
+    transports require an AGENT_CORE upstream change to expose
     [stdout_idle_timeout_s]. *)
 val cli_subprocess_idle_sec : unit -> float

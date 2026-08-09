@@ -1,6 +1,6 @@
 open Alcotest
-open Agent_sdk
-module Internal = Agent_sdk__
+open Agent_core
+module Internal = Agent_core__
 module Runtime_internal = Internal.Execution_runtime
 module Codec = Internal.Execution_codec_executor
 module Event = Internal.Execution_event

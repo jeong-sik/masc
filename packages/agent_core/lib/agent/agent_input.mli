@@ -5,7 +5,7 @@ val trace_prompt_of_blocks : Types.content_block list -> string
 
 val validate_user_input_blocks
   :  Types.content_block list
-  -> (unit, Error.sdk_error) result
+  -> (unit, Error.t) result
 
 val append_user_input
   :  Agent_types.t
@@ -15,4 +15,4 @@ val append_user_input
 val resume_user_input
   :  Agent_types.t
   -> Types.content_block list
-  -> (Types.content_block list, Error.sdk_error) result
+  -> (Types.content_block list, Error.t) result

@@ -1,7 +1,7 @@
 (** Single source of truth for the wall-clock duration bucket label used
     in cancel/timeout metrics.
 
-    [keeper_llm_bridge] and [masc_oas_bridge] both emit the same cancel
+    [keeper_llm_bridge] and [masc_agent_core_bridge] both emit the same cancel
     metric and must agree on boundaries so dashboards can union the two
     sources into one bimodal view (#10942). The boundaries previously
     lived as a named function in one file and inline literals in the

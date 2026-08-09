@@ -13,22 +13,22 @@ val run_model_by_label :
   model_label:string ->
   goal:string ->
   ?system_prompt:string ->
-  ?tools:Agent_sdk.Tool.t list ->
+  ?tools:Agent_core.Tool.t list ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?accept:(Agent_sdk.Types.api_response -> bool) ->
-  ?hooks:Agent_sdk.Hooks.hooks ->
+  ?accept:(Agent_core.Types.api_response -> bool) ->
+  ?hooks:Agent_core.Hooks.hooks ->
   ?enable_thinking:bool ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
-    (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+    (Llm_provider.Provider_config.t, Agent_core.Error.t) result) ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->
-  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+  (Runtime_agent.run_result, Agent_core.Error.t) result
 (** Run a single [Agent.run] using a model label string
     (e.g. ["llama:qwen3.5"]).  Validates the label before execution. *)
 
@@ -44,23 +44,23 @@ val run_named_with_masc_tools :
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
-  ?accept:(Agent_sdk.Types.api_response -> bool) ->
-  ?hooks:Agent_sdk.Hooks.hooks ->
-  ?raw_trace:Agent_sdk.Raw_trace.t ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?accept:(Agent_core.Types.api_response -> bool) ->
+  ?hooks:Agent_core.Hooks.hooks ->
+  ?raw_trace:Agent_core.Raw_trace.t ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
-    (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
+    (Llm_provider.Provider_config.t, Agent_core.Error.t) result) ->
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->
-  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
-(** [run_named] variant that bridges MASC tool schemas into OAS tools
-    via {!Tool_bridge.oas_tool_of_masc}. [keeper_name] preserves per-Keeper
+  (Runtime_agent.run_result, Agent_core.Error.t) result
+(** [run_named] variant that bridges MASC tool schemas into AGENT_CORE tools
+    via {!Tool_bridge.agent_core_tool_of_masc}. [keeper_name] preserves per-Keeper
     lane ownership in runtime manifests and metrics; the default retains
     compatibility for non-Keeper callers. *)
 
@@ -73,16 +73,16 @@ val run_model_with_masc_tools :
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?hooks:Agent_sdk.Hooks.hooks ->
+  ?hooks:Agent_core.Hooks.hooks ->
   ?enable_thinking:bool ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
-    (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
-  ?raw_trace:Agent_sdk.Raw_trace.t ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+    (Llm_provider.Provider_config.t, Agent_core.Error.t) result) ->
+  ?raw_trace:Agent_core.Raw_trace.t ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->
-  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
-(** [run_model_by_label] variant that bridges MASC tool schemas into OAS tools. *)
+  (Runtime_agent.run_result, Agent_core.Error.t) result
+(** [run_model_by_label] variant that bridges MASC tool schemas into AGENT_CORE tools. *)

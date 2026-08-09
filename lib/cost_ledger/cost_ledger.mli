@@ -4,13 +4,13 @@
     and inference metrics. It does not read or translate alternate stores or
     field names. *)
 
-(** Runtime-owned identity for one inference. [oas_turn_ordinal] is the exact
-    zero-based ordinal carried by OAS [AfterTurn], not a value reconstructed
+(** Runtime-owned identity for one inference. [agent_core_turn_ordinal] is the exact
+    zero-based ordinal carried by AGENT_CORE [AfterTurn], not a value reconstructed
     from a completed-turn count. *)
 type inference_identity =
   { trace_id : string
   ; keeper_turn_id : int
-  ; oas_turn_ordinal : int
+  ; agent_core_turn_ordinal : int
   }
 
 type source =

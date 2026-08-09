@@ -125,7 +125,7 @@ let test_conflicting_declaration_first_wins () =
     check int "first declaration stays authoritative" 1 snap.Slot_scheduler.max_slots
 ;;
 
-(* oas#2641: the conflict warning names the endpoint, and a custom base_url can
+(* agent-core boundary: the conflict warning names the endpoint, and a custom base_url can
    carry userinfo or a `?token=`/`?password=` query credential. Assert the
    emitted diagnostic is routed through sanitize_url_for_log so no raw secret
    reaches the Diag sink, matching the sibling log sites in complete_common and

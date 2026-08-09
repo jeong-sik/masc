@@ -2,7 +2,7 @@
 
     Reduces per-property boilerplate from ~5 lines of raw Yojson.Safe.t
     to 1 line. Consolidated from duplicate definitions in
-    Sdk_tool_contract. *)
+    Agent_core_tool_contract. *)
 
 let string_prop description =
   `Assoc [ ("type", `String "string"); ("description", `String description) ]

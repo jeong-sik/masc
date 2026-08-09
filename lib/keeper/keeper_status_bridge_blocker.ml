@@ -27,7 +27,7 @@ let blocker_reason_of_turn_driver_reason
   | Keeper_turn_driver.Other_detail detail -> Other_detail detail
 ;;
 
-let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
+let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class option =
   match Keeper_error_classify.recoverable_runtime_failure_reason err with
   | Some Keeper_error_classify.Capacity_backpressure -> Some Capacity_backpressure
   | _ ->
@@ -56,26 +56,26 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
     Some Gate_replay_repair_required
   | None ->
     (match err with
-     | Agent_sdk.Error.Internal _ -> None
-     | Agent_sdk.Error.Agent
+     | Agent_core.Error.Internal _ -> None
+     | Agent_core.Error.Agent
          ( HookExecutionFailed _
          | TerminalToolEffectFailed _
          | TerminalToolDurabilityFailed _ ) ->
        None
-     | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
-       Some Sdk_unrecognized_stop_reason
-     | Agent_sdk.Error.Agent (GuardrailViolation _) -> Some Sdk_guardrail_violation
-     | Agent_sdk.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
-     | Agent_sdk.Error.Agent (InputRequired _) -> Some Sdk_input_required
-     (* Provider-level [Api] errors are surfaced via OAS retry / runtime
+     | Agent_core.Error.Agent (UnrecognizedStopReason _) ->
+       Some Agent_core_unrecognized_stop_reason
+     | Agent_core.Error.Agent (GuardrailViolation _) -> Some Agent_core_guardrail_violation
+     | Agent_core.Error.Agent (TripwireViolation _) -> Some Agent_core_tripwire_violation
+     | Agent_core.Error.Agent (InputRequired _) -> Some Agent_core_input_required
+     (* Provider-level [Api] errors are surfaced via AGENT_CORE retry / runtime
          layers and do not map to a typed blocker_class by themselves. *)
-     | Agent_sdk.Error.Api _
-     | Agent_sdk.Error.Provider _
-     | Agent_sdk.Error.Mcp _
-     | Agent_sdk.Error.Config _
-     | Agent_sdk.Error.Serialization _
-     | Agent_sdk.Error.Io _
-     | Agent_sdk.Error.Orchestration _ -> None)
+     | Agent_core.Error.Api _
+     | Agent_core.Error.Provider _
+     | Agent_core.Error.Mcp _
+     | Agent_core.Error.Config _
+     | Agent_core.Error.Serialization _
+     | Agent_core.Error.Io _
+     | Agent_core.Error.Orchestration _ -> None)
 ;;
 
 (* ── Runtime blocker surface ───────────────────────────────── *)
@@ -132,11 +132,11 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       else summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
-    | Sdk_context_window_exceeded
-    | Sdk_unrecognized_stop_reason
-    | Sdk_guardrail_violation
-    | Sdk_tripwire_violation
-    | Sdk_input_required
+    | Agent_core_context_window_exceeded
+    | Agent_core_unrecognized_stop_reason
+    | Agent_core_guardrail_violation
+    | Agent_core_tripwire_violation
+    | Agent_core_input_required
     | Internal_unhandled_exception
     | Internal_bridge_exception
     | Internal_contract_rejected

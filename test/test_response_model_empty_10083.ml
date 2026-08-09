@@ -1,11 +1,11 @@
 (* test/test_response_model_empty_10083.ml
 
    #10083: pin the keeper-facing response.model normalization contract.
-   OAS owns concrete provider/model identity; MASC keeps only the neutral
+   AGENT_CORE owns concrete provider/model identity; MASC keeps only the neutral
    runtime lane while still counting transport quality issues.
 
    The resolver returns ["runtime"] for every path and counts every
-   recovery/selector shape so operators can see missing or aliased OAS output
+   recovery/selector shape so operators can see missing or aliased AGENT_CORE output
    without MASC reconstructing canonical model IDs:
 
      raw non-empty            -> runtime, no missing-model counter
@@ -16,7 +16,7 @@
    The test asserts that concrete raw/canonical labels never become the
    returned keeper-facing model string or metric alias label. *)
 
-module Hooks = Masc.Keeper_hooks_oas
+module Hooks = Masc.Keeper_hooks_agent_core
 module Metrics = Masc.Otel_metric_store
 
 let runtime_lane = "runtime"
@@ -35,7 +35,7 @@ let alias_counter_for ~keeper ~alias ~source =
     ()
 ;;
 
-let make_zero_usage : Agent_sdk.Types.api_usage =
+let make_zero_usage : Agent_core.Types.api_usage =
   { input_tokens = 0
   ; output_tokens = 0
   ; cache_creation_input_tokens = 0
@@ -44,7 +44,7 @@ let make_zero_usage : Agent_sdk.Types.api_usage =
   }
 ;;
 
-let make_response ?(model = "") ?telemetry () : Agent_sdk.Types.api_response =
+let make_response ?(model = "") ?telemetry () : Agent_core.Types.api_response =
   { id = "msg-test-10083"
   ; model
   ; stop_reason = EndTurn
@@ -54,7 +54,7 @@ let make_response ?(model = "") ?telemetry () : Agent_sdk.Types.api_response =
   }
 ;;
 
-let make_telemetry ?canonical_model_id () : Agent_sdk.Types.inference_telemetry =
+let make_telemetry ?canonical_model_id () : Agent_core.Types.inference_telemetry =
   { system_fingerprint = None
   ; timings = None
   ; reasoning_tokens = None
@@ -75,7 +75,7 @@ let test_non_empty_raw_is_redacted () =
   let keeper = "test-keeper-raw-ok-10083" in
   let before_telemetry = counter_for ~keeper ~source:"telemetry_resolved" in
   let before_unknown = counter_for ~keeper ~source:"unknown_source" in
-  let response = make_response ~model:"oas-owned-model-id" () in
+  let response = make_response ~model:"agent_core-owned-model-id" () in
   let resolved = Hooks.resolve_after_turn_model ~keeper_name:keeper ~response in
   Alcotest.(check string) "raw redacted to runtime lane" runtime_lane resolved;
   Alcotest.(check (float 0.0001))
@@ -92,7 +92,7 @@ let test_empty_raw_records_telemetry_presence () =
   let keeper = "test-keeper-telemetry-fallback-10083" in
   let before = counter_for ~keeper ~source:"telemetry_resolved" in
   let telemetry =
-    make_telemetry ~canonical_model_id:"oas-owned-canonical-id" ()
+    make_telemetry ~canonical_model_id:"agent_core-owned-canonical-id" ()
   in
   let response = make_response ~model:"" ~telemetry () in
   let resolved = Hooks.resolve_after_turn_model ~keeper_name:keeper ~response in
@@ -139,7 +139,7 @@ let test_auto_raw_records_redacted_alias () =
     alias_counter_for ~keeper ~alias:runtime_lane ~source:"telemetry_canonical"
   in
   let telemetry =
-    make_telemetry ~canonical_model_id:"oas-owned-canonical-id" ()
+    make_telemetry ~canonical_model_id:"agent_core-owned-canonical-id" ()
   in
   let response = make_response ~model:"auto" ~telemetry () in
   let resolved = Hooks.resolve_after_turn_model ~keeper_name:keeper ~response in
@@ -156,7 +156,7 @@ let test_prefixed_auto_records_redacted_alias () =
     alias_counter_for ~keeper ~alias:runtime_lane ~source:"telemetry_canonical"
   in
   let telemetry =
-    make_telemetry ~canonical_model_id:"oas-owned-canonical-id" ()
+    make_telemetry ~canonical_model_id:"agent_core-owned-canonical-id" ()
   in
   let response = make_response ~model:"opaque_runtime:auto" ~telemetry () in
   let resolved = Hooks.resolve_after_turn_model ~keeper_name:keeper ~response in

@@ -156,7 +156,7 @@ let save_file_unix (path : string) (content : string) : unit =
    not domain-safe — two domains writing through the same cached
    channel corrupted records mid-line (observed 2026-05-17:
    utf-8 multibyte tears across trajectories/, keepers/*/reaction-
-   ledger/, plus "}{"-concat in oas-events/ — total 243 live
+   ledger/, plus "}{"-concat in agent-core-events/ — total 243 live
    malformed lines).
 
    PR #15936 (RFC-0108 root-fix scope #1) addressed [append_jsonl]

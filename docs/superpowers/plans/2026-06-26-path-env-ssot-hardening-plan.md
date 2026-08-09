@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove MASC init-path duplication and record OAS env parser consolidation as cross-repo follow-up work.
+**Goal:** Remove MASC init-path duplication and record agent core env parser consolidation as cross-repo follow-up work.
 
 **Architecture:**
 - MASC: `bin/main_eio.ml` uses `Config_dir_resolver.base_path_config_root` instead of rebuilding `.masc/config` locally.
-- OAS: parser consolidation is deferred to a dedicated OAS PR/backlog item. This MASC branch does not edit the OAS repo.
+- agent core: parser consolidation is deferred to a dedicated agent core PR/backlog item. This MASC branch does not edit the agent core repo.
 
 **Tech Stack:** OCaml 5.4, dune, Alcotest, inline expect tests (`let%test`).
 
@@ -77,11 +77,11 @@ Create a markdown note at `docs/superpowers/notes/2026-06-26-sys-getcwd-audit.md
 
 ---
 
-## Part B — OAS Env SSOT Follow-Up
+## Part B — agent core Env SSOT Follow-Up
 
-- [ ] Track OAS parser consolidation in a dedicated OAS issue or PR.
-- [ ] Keep the OAS changes out of this MASC branch so reviewers can merge the bridge/path hardening without cross-repo drift.
-- [ ] When implementing in OAS, add parser tests for missing, empty, invalid, negative, and non-numeric values next to the OAS helper.
+- [ ] Track agent core parser consolidation in a dedicated agent core issue or PR.
+- [ ] Keep the agent core changes out of this MASC branch so reviewers can merge the bridge/path hardening without cross-repo drift.
+- [ ] When implementing in agent core, add parser tests for missing, empty, invalid, negative, and non-numeric values next to the agent core helper.
 
 ---
 
@@ -130,7 +130,7 @@ Eliminates a literal string concatenation that bypassed the path SSOT helpers."
 
 - [x] MASC path literal `.masc/config` → Task 1.
 - [x] `Sys.getcwd` audit documented → Task 2.
-- [x] OAS duplicated env parsers deferred → Part B follow-up.
+- [x] agent core duplicated env parsers deferred → Part B follow-up.
 - [x] Tests added/updated → Tasks 3, 7, 8.
 - [x] CI verification → Tasks 7–8 (full CI run before merge).
 

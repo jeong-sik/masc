@@ -14,7 +14,7 @@ function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
     phase: 'Running',
     lifecycle_phase: 'Running',
     active_model_label: 'claude-sonnet-4',
-    runtime_canonical: 'oas-seoul-1',
+    runtime_canonical: 'agent-core-seoul-1',
     active_goal_ids: ['goal-runtime-lane-cleanup'],
     context_ratio: 0.62,
     context_tokens: 124_000,
@@ -87,7 +87,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(sectionHeaders).toContain('런타임')
     expect(container.textContent).not.toContain('claude-sonnet-4')
     expect(container.querySelector('.rtc-model')?.textContent).toContain('—')
-    expect(container.textContent).toContain('oas-seoul-1')
+    expect(container.textContent).toContain('agent-core-seoul-1')
     expect(container.textContent).toContain('62%')
     expect(container.textContent).toContain('T-1')
     // The rail no longer renders keeper.recent_tool_names; #21266 migrated the

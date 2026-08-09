@@ -400,7 +400,7 @@ let install () =
            provider_cfg)
     in
     match
-      Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Anti_rationalization (fun () ->
+      Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
         Keeper_turn_driver_wrappers.run_named_with_masc_tools
           ~runtime_id:evaluator_runtime
           ~base_path
@@ -415,7 +415,7 @@ let install () =
       (match !protocol_error_ref with
        | Some detail ->
          Error
-           (Agent_sdk.Error.Internal
+           (Agent_core.Error.Internal
               ("task completion verdict protocol violation: " ^ detail))
        | None -> Ok !verdict_ref)
     | Error err ->

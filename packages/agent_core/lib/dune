@@ -1,7 +1,7 @@
 (include_subdirs unqualified)
 
 (library
- (name agent_sdk)
+ (name agent_core)
  (public_name masc.agent_core)
  (modules_without_implementation agent_execution_projection_intf)
  (private_modules
@@ -35,8 +35,8 @@
   agent_execution_event_writer)
  (libraries
   llm_provider
-  (re_export agent_sdk_base)
-  (re_export agent_sdk_protocol)
+  (re_export agent_core_base)
+  (re_export agent_core_protocol)
   eio
   eio.unix
   eio_main
@@ -58,7 +58,7 @@
   str
   mcp_protocol_bundle)
  (flags
-  (:standard -open Agent_sdk_base -open Agent_sdk_protocol))
+  (:standard -open Agent_core_base -open Agent_core_protocol))
  (inline_tests)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let))

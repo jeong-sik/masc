@@ -1,7 +1,7 @@
 open Types
 module Sdk_types = Mcp_protocol.Mcp_types
 
-(* ── JSON Schema -> SDK tool_param (oas-specific bridge) ─────────── *)
+(* ── JSON Schema -> agent-core tool_param (agent_core-specific bridge) ─────────── *)
 
 (* The conversion itself lives in {!Types}, next to the constructor that has to
    apply it to keep [tool_schema.parameters] in agreement with
@@ -22,7 +22,7 @@ let json_schema_to_params schema =
   | Error detail -> invalid_arg detail
 ;;
 
-(* ── MCP tool type (oas-local, bridged from SDK) ─────────────────── *)
+(* ── MCP tool type (agent_core-local, bridged from SDK) ─────────────────── *)
 
 type mcp_tool =
   { name : string
@@ -35,8 +35,8 @@ type mcp_resource_contents = Sdk_types.resource_contents
 type mcp_prompt = Sdk_types.prompt
 type mcp_prompt_result = Sdk_types.prompt_result
 
-(** Convert SDK {!Sdk_types.tool} to oas {!mcp_tool}. *)
-let mcp_tool_of_sdk_tool (t : Sdk_types.tool) : mcp_tool =
+(** Convert SDK {!Sdk_types.tool} to agent_core {!mcp_tool}. *)
+let mcp_tool_of_agent_core_tool (t : Sdk_types.tool) : mcp_tool =
   { name = t.name
   ; description = Option.value ~default:"" t.description
   ; input_schema = t.input_schema
@@ -63,7 +63,7 @@ let tool_of_input_schema_result
 ;;
 
 (** Convert {!mcp_tool} to SDK {!Tool.t} with the given call handler. *)
-let mcp_tool_to_sdk_tool_result ~call_fn mcp_tool =
+let mcp_tool_to_agent_core_tool_result ~call_fn mcp_tool =
   tool_of_input_schema_result
     ~name:mcp_tool.name
     ~description:mcp_tool.description
@@ -71,8 +71,8 @@ let mcp_tool_to_sdk_tool_result ~call_fn mcp_tool =
     call_fn
 ;;
 
-let mcp_tool_to_sdk_tool ~call_fn mcp_tool =
-  match mcp_tool_to_sdk_tool_result ~call_fn mcp_tool with
+let mcp_tool_to_agent_core_tool ~call_fn mcp_tool =
+  match mcp_tool_to_agent_core_tool_result ~call_fn mcp_tool with
   | Ok tool_ -> tool_
   | Error detail -> invalid_arg detail
 ;;
@@ -147,8 +147,8 @@ let%test "json_schema_to_params_result non-assoc properties fails" =
   | Ok _ -> false
 ;;
 
-let%test "mcp_tool_of_sdk_tool converts correctly" =
-  let sdk_tool : Sdk_types.tool =
+let%test "mcp_tool_of_agent_core_tool converts correctly" =
+  let agent_core_tool : Sdk_types.tool =
     { name = "test_tool"
     ; description = Some "A test tool"
     ; input_schema = `Assoc [ "type", `String "object" ]
@@ -159,12 +159,12 @@ let%test "mcp_tool_of_sdk_tool converts correctly" =
     ; execution = None
     }
   in
-  let result = mcp_tool_of_sdk_tool sdk_tool in
+  let result = mcp_tool_of_agent_core_tool agent_core_tool in
   result.name = "test_tool" && result.description = "A test tool"
 ;;
 
-let%test "mcp_tool_of_sdk_tool None description becomes empty" =
-  let sdk_tool : Sdk_types.tool =
+let%test "mcp_tool_of_agent_core_tool None description becomes empty" =
+  let agent_core_tool : Sdk_types.tool =
     { name = "tool2"
     ; description = None
     ; input_schema = `Assoc []
@@ -175,6 +175,6 @@ let%test "mcp_tool_of_sdk_tool None description becomes empty" =
     ; execution = None
     }
   in
-  let result = mcp_tool_of_sdk_tool sdk_tool in
+  let result = mcp_tool_of_agent_core_tool agent_core_tool in
   result.description = ""
 ;;

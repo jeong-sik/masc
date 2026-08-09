@@ -15,8 +15,8 @@
 let max_output_len = 4000
 
 (** Pre-truncation info, keyed by keeper name.
-    Set by the tool handler wrapper (keeper_tools_oas), consumed by the
-    OAS on_tool_result hook (keeper_hooks_oas).  Per-keeper isolation
+    Set by the tool handler wrapper (keeper_tools_agent_core), consumed by the
+    AGENT_CORE on_tool_result hook (keeper_hooks_agent_core).  Per-keeper isolation
     prevents cross-keeper corruption when multiple keepers call tools
     concurrently. Within a single keeper's Agent.run, tool calls are
     sequential so set→consume ordering is guaranteed. *)
@@ -178,7 +178,7 @@ let record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn =
     Telemetry_coverage_gap.record
       ~masc_root
       ~source:"tool_call_io"
-      ~producer:"keeper_hooks_oas|mcp_server_eio_call_tool"
+      ~producer:"keeper_hooks_agent_core|mcp_server_eio_call_tool"
       ~durable_store
       ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
       ~stale_reason:"tool_call_io_append_failed"
@@ -205,7 +205,7 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
        Telemetry_coverage_gap.record
          ~masc_root
          ~source:"tool_call_io"
-         ~producer:"keeper_hooks_oas|mcp_server_eio_call_tool"
+         ~producer:"keeper_hooks_agent_core|mcp_server_eio_call_tool"
          ~durable_store
          ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
          ~stale_reason:"tool_call_io_store_unavailable"
@@ -327,7 +327,7 @@ let start_flush_fiber ~sw ~clock =
 (** [blob_aware_output_json safe_output] wraps a tool-output string for
     persistence as the [output] field. When [safe_output] is the OCaml
     [%S]-quoted [masc:blob ...] marker produced by
-    [Tool_output.encode_for_oas], the wire format escapes the inner
+    [Tool_output.encode_for_agent_core], the wire format escapes the inner
     preview JSON twice (OCaml string-literal + JSON string), which makes
     the telemetry record illegible and inflates disk usage by 30-40%.
 
@@ -338,7 +338,7 @@ let start_flush_fiber ~sw ~clock =
     older readers (dashboard, jq scripts) keep working. The dashboard
     consumers are updated in the same change to accept either shape. *)
 let blob_aware_output_json (output : string) : Yojson.Safe.t =
-  match Tool_output.decode_from_oas output with
+  match Tool_output.decode_from_agent_core output with
   | Tool_output.Decoded reference ->
     Tool_output.normalized_artifact_ref_to_json reference
   | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> `String output
@@ -394,7 +394,7 @@ let log_call
     | None -> record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ()
     | Some store ->
       (* RFC-0225 §3.3: no ambient turn-context fallback. Both production
-         callers (keeper_hooks_oas, mcp_server_eio_call_tool) pass their
+         callers (keeper_hooks_agent_core, mcp_server_eio_call_tool) pass their
          run identity explicitly; filling [None] from a keeper-name-keyed
          global could attach an unrelated concurrent run's identity. A
          [None] field now persists as absent, which is honest. *)
@@ -456,8 +456,8 @@ let log_call
           [ "execution_id", `String (Ids.Execution_id.to_string value) ]
         | None -> []
       in
-      (* RFC-0233 PR-2: provider call id — the key the oas-event rows
-         carry, joining this store to oas:tool_called/oas:tool_completed. *)
+      (* RFC-0233 PR-2: provider call id — the key the agent_core-event rows
+         carry, joining this store to agent_core:tool_called/agent_core:tool_completed. *)
       let tool_use_id_field =
         match tool_use_id with
         | Some value -> [ "tool_use_id", `String value ]

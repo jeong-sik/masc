@@ -1,7 +1,7 @@
 (** Integration tests: multi-keeper context isolation.
 
     Verifies that when multiple keepers run concurrently (simulated),
-    each keeper's OAS Context.t remains independent.
+    each keeper's AGENT_CORE Context.t remains independent.
 
     Covers:
     - Two keepers with separate contexts never cross-contaminate
@@ -11,7 +11,7 @@
 
 open Alcotest
 
-module Ctx = Agent_sdk.Context
+module Ctx = Agent_core.Context
 
 (* ── Helpers ─────────────────────────────────────── *)
 

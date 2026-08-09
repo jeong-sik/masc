@@ -3,12 +3,12 @@
 
     After the SDK migration (mcp-protocol-sdk v0.10.0), JSON-RPC
     encoding/decoding and MCP type parsing are handled by the SDK.
-    These tests cover the oas-specific bridge layer:
-    - JSON Schema -> SDK tool_param conversion
+    These tests cover the agent_core-specific bridge layer:
+    - JSON Schema -> agent-core tool_param conversion
     - MCP tool -> SDK Tool.t bridge
-    - SDK Mcp_types.tool -> oas mcp_tool conversion *)
+    - SDK Mcp_types.tool -> agent_core mcp_tool conversion *)
 
-open Agent_sdk
+open Agent_core
 
 let make_tool_result ?is_error ?structured_content content =
   let fields =
@@ -29,7 +29,7 @@ let make_tool_result ?is_error ?structured_content content =
   | Error detail -> failwith ("tool_result_of_yojson failed: " ^ detail)
 ;;
 
-(* ── JSON Schema -> SDK tool_param ───────────────────────────────── *)
+(* ── JSON Schema -> agent-core tool_param ───────────────────────────────── *)
 
 let check_param_type = Alcotest.testable Types.pp_param_type (fun a b -> a = b)
 
@@ -258,7 +258,7 @@ let test_json_schema_heterogeneous_enum_omits_property () =
 
 (* ── Tool bridge ────────────────────────────────────────────────── *)
 
-let test_mcp_tool_to_sdk_tool () =
+let test_mcp_tool_to_agent_core_tool () =
   let mcp_tool : Mcp.mcp_tool =
     { name = "echo"
     ; description = "Echoes input"
@@ -278,12 +278,12 @@ let test_mcp_tool_to_sdk_tool () =
     let text = input |> member "text" |> to_string in
     Ok { content = "echo: " ^ text; _meta = None }
   in
-  let sdk_tool = Mcp.mcp_tool_to_sdk_tool ~call_fn mcp_tool in
-  Alcotest.(check string) "tool name" "echo" sdk_tool.schema.name;
-  Alcotest.(check string) "tool desc" "Echoes input" sdk_tool.schema.description;
-  Alcotest.(check int) "param count" 1 (List.length sdk_tool.schema.parameters);
+  let agent_core_tool = Mcp.mcp_tool_to_agent_core_tool ~call_fn mcp_tool in
+  Alcotest.(check string) "tool name" "echo" agent_core_tool.schema.name;
+  Alcotest.(check string) "tool desc" "Echoes input" agent_core_tool.schema.description;
+  Alcotest.(check int) "param count" 1 (List.length agent_core_tool.schema.parameters);
   let input = `Assoc [ "text", `String "hello" ] in
-  let result = Tool.execute sdk_tool input in
+  let result = Tool.execute agent_core_tool input in
   match result with
   | Ok { content; _meta = _ } -> Alcotest.(check string) "execution" "echo: hello" content
   | Error _ -> Alcotest.fail "expected Ok"
@@ -299,17 +299,17 @@ let test_mcp_tool_bridge_error () =
   let call_fn _input : Types.tool_result =
     Error { message = "server error"; recoverable = true; error_class = None }
   in
-  let sdk_tool = Mcp.mcp_tool_to_sdk_tool ~call_fn mcp_tool in
-  let result = Tool.execute sdk_tool (`Assoc []) in
+  let agent_core_tool = Mcp.mcp_tool_to_agent_core_tool ~call_fn mcp_tool in
+  let result = Tool.execute agent_core_tool (`Assoc []) in
   match result with
   | Error { message; _ } -> Alcotest.(check string) "error" "server error" message
   | Ok _ -> Alcotest.fail "expected Error"
 ;;
 
-(* ── SDK tool -> oas mcp_tool conversion ─────────────────────────── *)
+(* ── agent-core tool -> agent_core mcp_tool conversion ─────────────────────────── *)
 
-let test_mcp_tool_of_sdk_tool () =
-  let sdk_tool : Mcp_protocol.Mcp_types.tool =
+let test_mcp_tool_of_agent_core_tool () =
+  let agent_core_tool : Mcp_protocol.Mcp_types.tool =
     { name = "read_file"
     ; description = Some "Read a file"
     ; input_schema =
@@ -330,7 +330,7 @@ let test_mcp_tool_of_sdk_tool () =
     ; execution = None
     }
   in
-  let mcp_tool = Mcp.mcp_tool_of_sdk_tool sdk_tool in
+  let mcp_tool = Mcp.mcp_tool_of_agent_core_tool agent_core_tool in
   Alcotest.(check string) "name" "read_file" mcp_tool.name;
   Alcotest.(check string) "description" "Read a file" mcp_tool.description;
   let params = Mcp.json_schema_to_params mcp_tool.input_schema in
@@ -339,8 +339,8 @@ let test_mcp_tool_of_sdk_tool () =
   Alcotest.(check bool) "param required" true (List.hd params).required
 ;;
 
-let test_mcp_tool_of_sdk_tool_no_description () =
-  let sdk_tool : Mcp_protocol.Mcp_types.tool =
+let test_mcp_tool_of_agent_core_tool_no_description () =
+  let agent_core_tool : Mcp_protocol.Mcp_types.tool =
     { name = "bare"
     ; description = None
     ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
@@ -351,7 +351,7 @@ let test_mcp_tool_of_sdk_tool_no_description () =
     ; execution = None
     }
   in
-  let mcp_tool = Mcp.mcp_tool_of_sdk_tool sdk_tool in
+  let mcp_tool = Mcp.mcp_tool_of_agent_core_tool agent_core_tool in
   Alcotest.(check string) "default desc" "" mcp_tool.description
 ;;
 
@@ -513,15 +513,15 @@ let () =
             test_json_schema_heterogeneous_enum_omits_property
         ] )
     ; ( "tool_bridge"
-      , [ test_case "mcp_tool_to_sdk_tool" `Quick test_mcp_tool_to_sdk_tool
+      , [ test_case "mcp_tool_to_agent_core_tool" `Quick test_mcp_tool_to_agent_core_tool
         ; test_case "bridge error propagation" `Quick test_mcp_tool_bridge_error
         ] )
     ; ( "sdk_bridge"
-      , [ test_case "mcp_tool_of_sdk_tool" `Quick test_mcp_tool_of_sdk_tool
+      , [ test_case "mcp_tool_of_agent_core_tool" `Quick test_mcp_tool_of_agent_core_tool
         ; test_case
-            "sdk_tool no description"
+            "agent_core_tool no description"
             `Quick
-            test_mcp_tool_of_sdk_tool_no_description
+            test_mcp_tool_of_agent_core_tool_no_description
         ; test_case "text_of_tool_result" `Quick test_text_of_tool_result
         ; test_case "text_of_tool_result empty" `Quick test_text_of_tool_result_empty
         ; test_case

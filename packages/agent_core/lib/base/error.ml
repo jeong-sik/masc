@@ -1,13 +1,13 @@
-(** Structured SDK error types — 2-level hierarchy.
+(** Structured agent-core error types — 2-level hierarchy.
 
     Domain-specific inner types wrap context-rich payloads.
-    The top-level [sdk_error] sum type unifies all error domains
-    for a single [(_, sdk_error) result] return type across the SDK.
+    The top-level [t] sum type unifies all error domains
+    for a single [(_, t) result] return type across agent core.
 
     Design decisions:
     - [api_error] is a type alias for {!Retry.api_error} (no duplication).
-    - [Internal] is reserved for unreachable SDK invariant failures.
-    - [to_string] produces human-readable messages compatible with v0.8.x. *)
+    - [Internal] is reserved for unreachable agent-core invariant failures.
+    - [to_string] produces human-readable messages. *)
 
 module Retry = Llm_provider.Retry
 
@@ -119,8 +119,8 @@ type orchestration_error =
       ; detail : string
       }
 
-(** Top-level SDK error. *)
-type sdk_error =
+(** Top-level agent-core error. *)
+type t =
   | Api of api_error
   | Provider of provider_error
   | Agent of agent_error
@@ -142,7 +142,7 @@ type category =
   | Orchestration_category
   | Internal_category
 
-let category : sdk_error -> category = function
+let category : t -> category = function
   | Api _ -> Api_category
   | Provider _ -> Provider_category
   | Agent _ -> Agent_category

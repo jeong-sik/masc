@@ -35,7 +35,7 @@ type t =
   ; provider_id : string option
     (** Exact provider/catalog identity carried independently from [model_id]
         and endpoint location. [None] means only the generic wire [kind] is
-        known; OAS never reconstructs a provider id from URL or model syntax. *)
+        known; AGENT_CORE never reconstructs a provider id from URL or model syntax. *)
   ; model_id : string
   ; base_url : string
   ; api_key : Secret.t
@@ -50,7 +50,7 @@ type t =
     (** Provider's context window limit in tokens. When set, downstream callers may truncate messages to fit before dispatch. @since 0.120.0 *)
   ; max_request_body_bytes : int option
     (** Exact serialized HTTP request-body limit for this resolved target.
-        [None] means the target declares no byte limit; OAS never invents one
+        [None] means the target declares no byte limit; AGENT_CORE never invents one
         from provider kind, endpoint URL, or model id.  The final provider wire
         body is measured after serialization and rejected before dispatch when
         it exceeds this value. @since 0.223.0 *)
@@ -74,7 +74,7 @@ type t =
   ; reasoning_effort : Reasoning_effort.t option
     (** Explicit effort value for provider wires that accept categorical
         reasoning effort. [None] omits the field. This is independent of
-        [thinking_budget]; the SDK never converts token counts into effort
+        [thinking_budget]; agent core never converts token counts into effort
         categories. *)
   ; clear_thinking : bool option
   ; tool_stream : bool
@@ -89,10 +89,10 @@ type t =
 
       Kept on this low-level config so downstream callers (e.g. declaring
       per-entry capability facts in their own config file) can inject
-      a verified model-side support flag without the SDK matching on
-      [model_id]. The SDK stays model-agnostic; the consumer declares.
+      a verified model-side support flag without agent core matching on
+      [model_id]. Agent Core stays model-agnostic; the consumer declares.
 
-      Design principle: declaration-over-probing. The SDK does not run
+      Design principle: declaration-over-probing. Agent Core does not run
       any capability probe against the provider endpoint (Ollama's
       [/api/show] exposes no authoritative tool_choice flag; LiteLLM
       encodes this in a static JSON table and has the same blind spot).
@@ -128,7 +128,7 @@ type t =
   ; keep_alive : string option
     (** Ollama [keep_alive] request field. Accepted values: integer
       seconds ({"-1"}, {"0"}, {"3600"}) or duration strings ({"5m"},
-      {"30m"}, {"24h"}). [None] omits the field. The SDK does not
+      {"30m"}, {"24h"}). [None] omits the field. Agent Core does not
       invent a residency policy; callers that require permanent residency
       must explicitly provide {"-1"}. Honored only by the Ollama backend;
       ignored by other kinds.
@@ -136,7 +136,7 @@ type t =
   ; internal_model_rotation_count : int option
     (** Number of model attempts the subprocess CLI is configured to
       cycle through internally before yielding a final response.
-      [None] = SDK has no opinion (the default for non-CLI providers
+      [None] = Agent Core has no opinion (the default for non-CLI providers
       and CLI providers that do not expose rotation visibility).
 
       Some vendor CLIs cycle through multiple candidate models and return only
@@ -146,7 +146,7 @@ type t =
       Consumers can render that declared rotation in traces without hard-coding
       a vendor-specific count.
 
-      The SDK does not enforce or schedule the rotation; it remains
+      Agent Core does not enforce or schedule the rotation; it remains
       the CLI binary's responsibility. This field is purely
       declarative metadata for observing one [Complete.complete] call.
 
@@ -172,17 +172,17 @@ type t =
       [request_path] targets [/v1/responses], the Responses request includes
       ["previous_response_id": id]. This is intentionally separate from manual
       item replay: callers choose the state strategy explicitly instead of the
-      SDK inferring one from message history. Ignored by non-Responses request
+      agent core inferring one from message history. Ignored by non-Responses request
       builders.
       @since 0.207.10 *)
   ; connect_timeout_s : float option
     (** Explicit connect + initial-response-headers wall-clock timeout.
-      [None] applies no SDK-owned deadline. [Some s] forces [s] seconds for
+      [None] applies no agent-core-owned deadline. [Some s] forces [s] seconds for
       the connect/headers phase only — it is independent of
       the body deadline ([body_timeout_s]) and the inter-chunk stream-idle
       deadline ([stream_idle_timeout_s]).
 
-      The consumer declares any deadline; OAS never selects one from provider
+      The consumer declares any deadline; AGENT_CORE never selects one from provider
       kind, URL, model, or process environment.
       @since 0.207.9 *)
   ; max_concurrent_requests : int option
@@ -193,7 +193,7 @@ type t =
       order (see {!Provider_admission}). Must be [>= 1] when declared;
       {!Complete.complete} rejects the request otherwise.
 
-      The consumer declares the allowance its provider account grants; OAS
+      The consumer declares the allowance its provider account grants; AGENT_CORE
       never selects one from provider kind, URL, model, or process
       environment.
       @since 0.216.0 *)

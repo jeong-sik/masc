@@ -132,7 +132,7 @@ type registry_entry =
   ; transition_seq : int
   ; waiting_for_inference : bool Atomic.t
     (** Ephemeral flag: true when keeper is blocked in admission queue.
-          Set/cleared around the OAS inference boundary.
+          Set/cleared around the AGENT_CORE inference boundary.
           Does not affect state machine phase derivation. *)
   ; last_context_actions : (float * Keeper_state_machine.context_actions) option
   ; last_event_bus_correlation : string option

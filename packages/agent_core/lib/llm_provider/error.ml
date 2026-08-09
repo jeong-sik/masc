@@ -1,7 +1,7 @@
 (** Provider-level error types.
 
-    Independent of the OAS sdk_error hierarchy. Can be mapped to
-    sdk_error at the boundary or used directly by consumers.
+    Independent of the AGENT_CORE core_error hierarchy. Can be mapped to
+    core_error at the boundary or used directly by consumers.
 
     @since 0.42.0 *)
 
@@ -234,7 +234,7 @@ let of_retry_api_error ?provider err =
     InvalidRequest { provider; reason = Retry.error_message (Retry.ContextOverflow r) }
   | Retry.InputCapacity r ->
     (* [Error.t] is the legacy provider-only surface and cannot preserve the
-       constraint evidence. The Agent SDK [Error.Api] / error-domain path keeps
+       constraint evidence. The Agent Core [Error.Api] / error-domain path keeps
        [Retry.InputCapacity] typed end to end; new consumers must use it. *)
     InvalidRequest { provider; reason = Retry.error_message (Retry.InputCapacity r) }
   | Retry.NetworkError r ->
@@ -319,12 +319,12 @@ let of_provider_failure ?provider kind message =
           ContextWindowExceeded empty completion is a caller-fixable context
           overflow, not provider unavailability. The overflow VALUE comes from
           the shared [Retry.verdict_of_empty_completion] classifier; this
-          deliberate SDK boundary flattens it to a string via
+          deliberate agent-core boundary flattens it to a string via
           [Retry.error_message] into [InvalidRequest], preserving the typed →
           string boundary that keeps the public surface source-compatible. *)
        InvalidRequest { provider; reason = Retry.error_message overflow }
      | Retry.Empty_unattributed { token } ->
-       (* An empty turn whose stop_reason token this SDK does not model is not
+       (* An empty turn whose stop_reason token agent core does not model is not
           evidence of provider unavailability, and rendering it as such invites
           the caller to retry the identical prompt — which never terminates when
           the real condition was an overflow reported with an unmodeled token.
@@ -339,7 +339,7 @@ let of_provider_failure ?provider kind message =
                message
          }
      | Retry.Empty_attributed ->
-       (* [stop_reason] stays typed until this deliberate SDK boundary.  The
+       (* [stop_reason] stays typed until this deliberate agent-core boundary.  The
           public error surface remains source-compatible: callers already handle
           a recognized non-overflow empty completion as provider unavailability,
           and no control flow reparses this diagnostic rendering. *)
@@ -352,7 +352,7 @@ let of_provider_failure ?provider kind message =
                message
          })
   | Http_client.Context_overflow { limit } ->
-    (* oas#2947: same SDK-boundary flattening as the Empty_overflow arm above —
+    (* agent-core boundary: same agent-core-boundary flattening as the Empty_overflow arm above —
        the typed overflow value is rendered via [Retry.error_message] into
        [InvalidRequest] so the public surface stays source-compatible, while
        the attribution path ([Provider_failure_attribution]) keeps the typed

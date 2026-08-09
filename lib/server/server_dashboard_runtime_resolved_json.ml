@@ -2,7 +2,7 @@
    model, and max-context is actually applied" (bugs #14/#15/#36):
 
    - #15: max-context previously diverged across three sources (runtime.toml
-     override, OAS hardcoded defaults, OAS capability catalog cap). This
+     override, AGENT_CORE hardcoded defaults, AGENT_CORE capability catalog cap). This
      document reports the one value [Runtime.max_context_of_runtime] resolves,
      plus which of [override]/[capability]/[override_clamped_by_capability]
      produced it ([Runtime.resolve_max_context_of_runtime]).

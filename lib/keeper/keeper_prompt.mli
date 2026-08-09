@@ -1,5 +1,5 @@
 (** Keeper_prompt — System prompts, Keeper instructions, and text processing
-    for keeper agents. OAS-aligned: these functions define agent identity and
+    for keeper agents. AGENT_CORE-aligned: these functions define agent identity and
     text output. *)
 
 val exact_direct_mention_present : targets:string list -> string -> bool

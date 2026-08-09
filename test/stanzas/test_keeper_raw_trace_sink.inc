@@ -1,4 +1,4 @@
-; Keeper OAS raw-trace wiring guard: keeper dispatch must pass ?raw_trace
+; Keeper AGENT_CORE raw-trace wiring guard: keeper dispatch must pass ?raw_trace
 ; into Keeper_turn_driver.run_named (dead ?raw_trace regression), the
 ; per-turn store (.masc/keepers/<name>/raw-traces/turn-*.jsonl) must stay
 ; bounded and immune to corrupt history, and a degraded trace store must

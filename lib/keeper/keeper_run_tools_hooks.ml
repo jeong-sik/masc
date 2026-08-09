@@ -11,16 +11,16 @@ open Keeper_agent_prompt_metrics
 type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator
 
 type agent_setup =
-  { tools : Agent_sdk.Tool.t list
+  { tools : Agent_core.Tool.t list
   ; cleanup : unit -> unit
-  ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
+  ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
-  ; hooks : Agent_sdk.Hooks.hooks
-  ; model_input_projection : Agent_sdk.Agent.model_input_projection
+  ; hooks : Agent_core.Hooks.hooks
+  ; model_input_projection : Agent_core.Agent.model_input_projection
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
-  ; final_oas_turn_ordinal_ref : int option ref
+  ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
@@ -33,30 +33,30 @@ type ctx =
   ; agent_name : string
   ; all_tool_names : string list
   ; compute_tool_surface :
-      turn:int -> current_tool_choice:Agent_sdk.Types.tool_choice option -> unit ->
+      turn:int -> current_tool_choice:Agent_core.Types.tool_choice option -> unit ->
       string list * turn_lane
   ; record_tool_assignment :
       turn:int -> tool_list:string list -> lane:turn_lane -> unit
   ; config : Workspace.config
   ; keeper_tools_cleanup : unit -> unit
-  ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
+  ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; keeper_turn_id : int
   ; meta : Keeper_meta_contract.keeper_meta
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
-       below, read by the post-tool hooks in Keeper_hooks_oas. *)
-  ; final_oas_turn_ordinal_ref : int option ref
+       below, read by the post-tool hooks in Keeper_hooks_agent_core. *)
+  ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
-  ; tools : Agent_sdk.Tool.t list
+  ; tools : Agent_core.Tool.t list
   }
 
 let relax_strict_tool_choice_for_keeper = function
-  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
-    Some Agent_sdk.Types.Auto
+  | Some (Agent_core.Types.Any | Agent_core.Types.Tool _) ->
+    Some Agent_core.Types.Auto
   | other -> other
 
 let project_model_input ~base_path ~gate_replay_evidence messages =
@@ -135,9 +135,9 @@ let assemble_hooks
       ~(turn_system_prompt : string)
       ~(user_message : string)
       ~(dynamic_context : string)
-      ~(history_messages : Agent_sdk.Types.message list)
+      ~(history_messages : Agent_core.Types.message list)
       ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
-      ~(shared_context : Agent_sdk.Context.t)
+      ~(shared_context : Agent_core.Context.t)
       ~(start_turn_count : int)
       ~(generation : int)
       ~(runtime_id_string : string)
@@ -149,7 +149,7 @@ let assemble_hooks
       ?runtime_manifest_context
       ?runtime_manifest_append
       ()
-  : (agent_setup, Agent_sdk.Error.sdk_error) result
+  : (agent_setup, Agent_core.Error.t) result
   =
   let acc = ctx.acc in
   let compute_tool_surface = ctx.compute_tool_surface in
@@ -164,7 +164,7 @@ let assemble_hooks
   let keeper_turn_id = ctx.keeper_turn_id in
   let meta = ctx.meta in
   let turn_ctx_cell = ctx.turn_ctx_cell in
-  let final_oas_turn_ordinal_ref = ctx.final_oas_turn_ordinal_ref in
+  let final_agent_core_turn_ordinal_ref = ctx.final_agent_core_turn_ordinal_ref in
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
@@ -188,14 +188,14 @@ let assemble_hooks
       initial_schema_filter;
     let meta_ref = ref acc.meta in
     let base_hooks =
-      Keeper_hooks_oas.make_hooks
+      Keeper_hooks_agent_core.make_hooks
         ~config
         ~meta_ref
         ~turn_ctx_cell
         ~generation
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~keeper_turn_id
-        ~on_after_turn_ordinal:(fun turn -> final_oas_turn_ordinal_ref := Some turn)
+        ~on_after_turn_ordinal:(fun turn -> final_agent_core_turn_ordinal_ref := Some turn)
         ?trajectory_acc
         ~on_tool_executed:
           (fun
@@ -296,24 +296,24 @@ let assemble_hooks
              ~typed_outcome
              ~provider
              ~keeper_turn_id:(Some keeper_turn_id)
-             ~oas_turn:acc.current_turn
+             ~agent_core_turn:acc.current_turn
              ~task_id
              ()))
         ()
     in
-    let before_turn_hook : Agent_sdk.Hooks.hooks =
-      { Agent_sdk.Hooks.empty with
+    let before_turn_hook : Agent_core.Hooks.hooks =
+      { Agent_core.Hooks.empty with
         before_turn_params =
           Some
             (fun event ->
               match event with
-              | Agent_sdk.Hooks.BeforeTurnParams
+              | Agent_core.Hooks.BeforeTurnParams
                   { turn; current_params; messages; last_tool_results; _ } ->
                 let hook_t0 = Time_compat.now () in
                 acc.current_turn <- turn;
-                (* Reset the in-turn FSM before this hook writes the next SDK
+                (* Reset the in-turn FSM before this hook writes the next agent-core
                    turn's runtime, policy, and prompt phases. *)
-                Keeper_registry.mark_sdk_turn_started
+                Keeper_registry.mark_agent_core_turn_started
                   ~base_path:config.base_path
                   meta.name;
                 let runtime_seed =
@@ -422,7 +422,7 @@ let assemble_hooks
                     ~config
                     ~keeper:meta.name
                     ~absolute_turn:turn;
-                (* OAS treats [None] in AdjustParams as "keep the base
+                (* AGENT_CORE treats [None] in AdjustParams as "keep the base
                    config", so strict choices must be explicitly relaxed.
                    Tools remain available, but the model may finish without
                    another forced tool call. *)
@@ -453,7 +453,7 @@ let assemble_hooks
                     (Option.map
                        (fun choice ->
                           Yojson.Safe.to_string
-                            (Agent_sdk.Types.tool_choice_to_json choice))
+                            (Agent_core.Types.tool_choice_to_json choice))
                        tool_choice)
                   ~thinking_enabled:thinking_enabled_effective
                   ?thinking_budget:current_params.thinking_budget
@@ -502,7 +502,7 @@ let assemble_hooks
                  Keeper_registry.mark_turn_provider_attempt_started
                    ~base_path:config.base_path
                    meta.name);
-                (* RFC-0233 PR-3 + #20936: snapshot this SDK turn's
+                (* RFC-0233 PR-3 + #20936: snapshot this agent-core turn's
                    assembly into the accumulator the receipt/TurnRecord
                    writer reads. Appended blocks hash their raw appended
                    text; Keeper instructions reuse the prompt-metrics fingerprint
@@ -541,7 +541,7 @@ let assemble_hooks
                      (Keeper_runtime_manifest.make_for_context
                         manifest_context
                         ~event:Keeper_runtime_manifest.Context_injected
-                        ~oas_turn_count:turn
+                        ~agent_core_turn_count:turn
                         ~runtime_id:runtime_id_string
                         ~status:
                           (if post_tool_context
@@ -551,7 +551,7 @@ let assemble_hooks
                           (Keeper_runtime_manifest.with_payload_role
                              ~payload_role:Keeper_runtime_manifest.Model_input
                              (`Assoc
-                               [ ( "sdk_turn", `Int turn )
+                               [ ( "agent_core_turn", `Int turn )
                                ; ( "post_tool_context_injection",
                                    `Bool post_tool_context )
                                ; ( "last_tool_result_count",
@@ -567,7 +567,7 @@ let assemble_hooks
                                ]))
                         ())
                  | _ -> ());
-                (* Phase O observability: capture the effective OAS request
+                (* Phase O observability: capture the effective AGENT_CORE request
                    boundary after keeper-owned context injection has finalized
                    [extra_system_context]. *)
                 Keeper_wire_capture.capture_request
@@ -576,7 +576,7 @@ let assemble_hooks
                   ~keeper_name:meta.name
                   ~turn_id:keeper_turn_id
                   ~trace_id:meta.runtime.trace_id
-                  ~sdk_turn:turn
+                  ~agent_core_turn:turn
                   ~system_prompt:turn_system_prompt
                   ~extra_system_context:ctx
                   ~user_message
@@ -584,15 +584,15 @@ let assemble_hooks
                   ~tools
                   ();
                 Eio.Fiber.yield ();
-                Agent_sdk.Hooks.AdjustParams
+                Agent_core.Hooks.AdjustParams
                   { current_params with
                     extra_system_context = ctx
                   ; tool_choice
                   }
-              | _event -> Agent_sdk.Hooks.Continue)
+              | _event -> Agent_core.Hooks.Continue)
       }
     in
-    let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
+    let hooks = Agent_core.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
     let model_input_projection messages =
       (* Stored Tool results are already the canonical provider-bound
          representation. Fetching their bytes here would undo externalization
@@ -612,7 +612,7 @@ let assemble_hooks
       ; gate_replay_evidence
       ; acc
       ; all_tool_names
-      ; final_oas_turn_ordinal_ref
+      ; final_agent_core_turn_ordinal_ref
       ; receipt_turn_count_ref
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref

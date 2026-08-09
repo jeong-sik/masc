@@ -11,8 +11,8 @@ let level_to_string = function
   | Error -> "ERROR"
 ;;
 
-let debug_env_var = "OAS_LLM_PROVIDER_DEBUG"
-let cascade_diag_env_var = "OAS_CASCADE_DIAG"
+let debug_env_var = "AGENT_CORE_LLM_PROVIDER_DEBUG"
+let cascade_diag_env_var = "AGENT_CORE_CASCADE_DIAG"
 
 let debug_enabled () =
   Env_parse.bool_env debug_env_var || Env_parse.bool_env cascade_diag_env_var
@@ -44,7 +44,7 @@ let info ctx fmt = emit Info ctx fmt
 let warn ctx fmt = emit Warn ctx fmt
 let error ctx fmt = emit Error ctx fmt
 
-let%test "debug_enabled reads OAS_LLM_PROVIDER_DEBUG at call time" =
+let%test "debug_enabled reads AGENT_CORE_LLM_PROVIDER_DEBUG at call time" =
   Env_parse.with_env cascade_diag_env_var "" (fun () ->
     Env_parse.with_env debug_env_var "" (fun () ->
       (not (debug_enabled ()))
@@ -53,7 +53,7 @@ let%test "debug_enabled reads OAS_LLM_PROVIDER_DEBUG at call time" =
        debug_enabled ())))
 ;;
 
-let%test "debug_enabled reads OAS_CASCADE_DIAG alias at call time" =
+let%test "debug_enabled reads AGENT_CORE_CASCADE_DIAG alias at call time" =
   Env_parse.with_env debug_env_var "" (fun () ->
     Env_parse.with_env cascade_diag_env_var "" (fun () ->
       (not (debug_enabled ()))

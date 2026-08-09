@@ -56,8 +56,8 @@ const BACKEND_EMITTED: Record<string, string> = {
   ide_cursor_changed: '../lib/server/server_ide_http.ml',
   keeper_composite_changed: '../lib/keeper/keeper_registry_broadcast.ml',
   keeper_heartbeat: '../lib/keeper/keeper_heartbeat_snapshot.ml',
-  keeper_turn_complete: '../lib/keeper/keeper_hooks_oas.ml',
-  oas_telemetry_sample: '../lib/runtime/dashboard_oas_bridge.ml',
+  keeper_turn_complete: '../lib/keeper/keeper_hooks_agent_core.ml',
+  agent_core_telemetry_sample: '../lib/runtime/dashboard_agent_core_bridge.ml',
   namespace_truth_snapshot: '../lib/server/server_dashboard_http_namespace_truth.ml',
   operator_digest: '../lib/server/server_dashboard_http_core_digest_refresh.ml',
   operator_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
@@ -70,10 +70,10 @@ const BACKEND_EMITTED: Record<string, string> = {
 // event-type -> why it has no masc backend literal to bind to. Keep short and
 // justified; every entry is an event the FE routes but masc lib/ does not emit.
 const FE_ONLY_OR_EXTERNAL: Record<string, string> = {
-  'oas:agent_failed':
-    'OAS-subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (oas: prefix).',
-  'oas:context_compacted':
-    'OAS-subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (oas: prefix).',
+  'agent_core:agent_failed':
+    'Agent Core subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (agent_core: prefix).',
+  'agent_core:context_compacted':
+    'Agent Core subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (agent_core: prefix).',
 }
 
 function parseExportedStringConstants(source: string): Map<string, string> {

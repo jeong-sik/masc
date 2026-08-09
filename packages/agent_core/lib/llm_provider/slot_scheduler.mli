@@ -29,7 +29,7 @@ val queue_length : t -> int
 (** {2 Capacity Query} *)
 
 (** Point-in-time snapshot of scheduler state.
-    All counts reflect this OAS process only; other clients sharing the same
+    All counts reflect this AGENT_CORE process only; other clients sharing the same
     provider server are not visible. *)
 type snapshot =
   { max_slots : int

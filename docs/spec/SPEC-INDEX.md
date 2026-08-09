@@ -39,7 +39,7 @@ used as evidence.
 
 ```mermaid
 graph TB
-    L6["Layer 6: Integration<br/>OAS bridge, research loop"]
+    L6["Layer 6: Integration<br/>agent core bridge, research loop"]
     L5["Layer 5: Surface<br/>dashboard, operator, TUI, web"]
     L4["Layer 4: Protocol<br/>MCP server, HTTP transport, gRPC, SSE"]
     L3["Layer 3: Engine<br/>keeper, scheduling, execution"]
@@ -69,7 +69,7 @@ graph TB
 | `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
 | `11-board.md` | Board System | Posts, comments, votes, filesystem/JSONL backend | Draft |
 | `12-memory-systems.md` | Memory Systems | Memory OS fact store, context budget | Draft |
-| `13-oas-integration.md` | OAS Integration | OAS Agent SDK bridge, runtime config, completion authority/evaluator, event bus, boundary rules | Draft |
+| `13-agent-core-integration.md` | agent core Integration | agent core Agent SDK bridge, runtime config, completion authority/evaluator, event bus, boundary rules | Draft |
 | `14-configuration.md` | Configuration | env, profile, prompt, runtime 설정 | Draft |
 | `15-testing.md` | Testing | 검증 계층, contract suites, fixture/manual 분리 | Draft |
 | `16-root-cause-rubric.md` | Root-Cause Rubric | 7-category taxonomy (SSOT/TEL/BND/SIL/VAR/STR/DET) for issue triage and Keeper benchmark | Reference |
@@ -83,8 +83,8 @@ graph TB
 | Document | Description | Related Spec |
 |----------|-------------|--------------|
 | `docs/ADR-002-DASHBOARD-OPERATOR-CONTROL-SURFACE.md` | Dashboard operator control surface and review queue UX | `10-dashboard.md` |
-| `docs/design/checkpoint-truth-and-replay-rfc.md` | Checkpoint truth hierarchy, replay semantics, side-effect boundary | `13-oas-integration.md` |
-| `docs/KEEPER-STATE-OWNERSHIP.md` | Keeper lane, checkpoint, domain state, and receipt ownership | `05-keeper-agent.md`, `13-oas-integration.md` |
+| `docs/design/checkpoint-truth-and-replay-rfc.md` | Checkpoint truth hierarchy, replay semantics, side-effect boundary | `13-agent-core-integration.md` |
+| `docs/KEEPER-STATE-OWNERSHIP.md` | Keeper lane, checkpoint, domain state, and receipt ownership | `05-keeper-agent.md`, `13-agent-core-integration.md` |
 
 ## Conventions
 
@@ -115,7 +115,7 @@ graph TB
 | `INV-BRD` | Board |
 | `INV-CSC` | Runtime |
 | `INV-MEM` | Memory |
-| `INV-OAS` | OAS Integration |
+| `INV-agent core` | agent core Integration |
 
 ### Cross-Reference Format
 

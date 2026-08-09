@@ -311,7 +311,7 @@ masc/
 |---|---|---|
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 빌드/테스트/PR 기대치 | contributor workflow 문서이며 제품 홍보 문서가 아님 |
 | [`ROADMAP.md`](ROADMAP.md) | 6-8주 운영 관점 | 버전 헤더는 `dune-project`와 `CHANGELOG.md`에 맞는지 확인 |
-| [`docs/OAS-MASC-BOUNDARY.md`](docs/OAS-MASC-BOUNDARY.md) | MASC ↔ OAS 경계 | reference 문서; 오래된 본문보다 `last_verified`와 generated pin block 우선 |
+| [`docs/agent core-MASC-BOUNDARY.md`](docs/agent core-MASC-BOUNDARY.md) | MASC ↔ agent core 경계 | reference 문서; 오래된 본문보다 `last_verified`와 generated pin block 우선 |
 | [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | spec suite 진입점 | living draft; 개별 spec에는 migration context가 남아 있을 수 있음 |
 | [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Keeper 개념과 운영 메모 | 오래된 manual; config truth는 [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md), [`config/runtime.toml`](config/runtime.toml), live code 우선 |
 | [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | release evidence bundle | 형식 문서; 사용 전 version line을 current release metadata와 맞출 것 |

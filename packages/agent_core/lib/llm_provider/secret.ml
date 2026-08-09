@@ -93,13 +93,13 @@ let%test "secret of string round-trips through header_value" =
 ;;
 
 let%test "secret of_env honors injected env boundary" =
-  let getenv name = if String.equal name "OAS_TEST_SECRET" then Some "  k  " else None in
-  match of_env ~getenv "OAS_TEST_SECRET" with
+  let getenv name = if String.equal name "AGENT_CORE_TEST_SECRET" then Some "  k  " else None in
+  match of_env ~getenv "AGENT_CORE_TEST_SECRET" with
   | Some secret -> header_value secret = "k"
   | None -> false
 ;;
 
 let%test "secret of_env treats empty env value as absent" =
-  let getenv name = if String.equal name "OAS_TEST_SECRET" then Some "   " else None in
-  of_env ~getenv "OAS_TEST_SECRET" = None
+  let getenv name = if String.equal name "AGENT_CORE_TEST_SECRET" then Some "   " else None in
+  of_env ~getenv "AGENT_CORE_TEST_SECRET" = None
 ;;

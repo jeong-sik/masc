@@ -34,7 +34,7 @@ let accepted_reasoning_effort_strings caps =
 ;;
 
 let with_temp_manifest contents f =
-  let path = Filename.temp_file "oas-capability-manifest" ".json" in
+  let path = Filename.temp_file "agent_core-capability-manifest" ".json" in
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
@@ -47,7 +47,7 @@ let with_temp_manifest contents f =
 ;;
 
 let with_temp_model_catalog contents f =
-  let path = Filename.temp_file "oas-model-catalog" ".toml" in
+  let path = Filename.temp_file "agent_core-model-catalog" ".toml" in
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
@@ -718,7 +718,7 @@ let test_lookup_grok () =
 ;;
 
 let test_lookup_qwen3_thinking_control () =
-  (* RFC-OAS-023: self-served Qwen3 (vLLM / llama-server, OpenAI_compat kind)
+  (* Agent Core contract: self-served Qwen3 (vLLM / llama-server, OpenAI_compat kind)
      toggles reasoning on the wire via
      {"chat_template_kwargs":{"enable_thinking":b}}. Without an explicit
      thinking_control_format the Qwen_3 record defaulted to
@@ -2241,7 +2241,7 @@ let test_manifest_intlit_out_of_range_rejects () =
 ;;
 
 let test_manifest_load_file_missing_returns_error () =
-  let path = Filename.temp_file "oas-capability-manifest-missing" ".json" in
+  let path = Filename.temp_file "agent_core-capability-manifest-missing" ".json" in
   Sys.remove path;
   match Capability_manifest.load_file path with
   | Error msg ->

@@ -76,15 +76,15 @@ let test_dashboard_perf_reads_root_benchmarks () =
     [
       "mcp_session_init,12,12,20,24,session";
       "mcp_read_status,5,5,9,11,source=live";
-      "oas_runtime_status,140,138,165,190,configured_capacity=16;healthy_runtime_count=4";
-      "oas_runtime_single,1000,980,1300,1450,measured_ceiling=1";
+      "agent_core_runtime_status,140,138,165,190,configured_capacity=16;healthy_runtime_count=4";
+      "agent_core_runtime_single,1000,980,1300,1450,measured_ceiling=1";
     ];
   write_csv latest_file
     [
       "mcp_session_init,9,9,14,18,session";
       "mcp_read_status,8,7,66,88,source=live";
-      "oas_runtime_status,116,115,140,170,configured_capacity=16;healthy_runtime_count=4";
-      "oas_runtime_single,866,850,1100,1260,measured_ceiling=1";
+      "agent_core_runtime_status,116,115,140,170,configured_capacity=16;healthy_runtime_count=4";
+      "agent_core_runtime_single,866,850,1100,1260,measured_ceiling=1";
     ];
   write_json
     (Filename.chop_suffix latest_file ".csv" ^ ".meta.json")
@@ -117,7 +117,7 @@ let test_dashboard_perf_reads_root_benchmarks () =
   check string "runtime healthy tag" "4"
     (json |> member "highlights" |> member "runtime_status" |> member "note_tags"
      |> member "healthy_runtime_count" |> to_string);
-  check string "top change benchmark" "oas_runtime_single"
+  check string "top change benchmark" "agent_core_runtime_single"
     (json |> member "comparison" |> member "top_changes" |> index 0
      |> member "benchmark" |> to_string)
 
@@ -131,8 +131,8 @@ let test_dashboard_perf_reads_worktree_benchmarks () =
     [
       "mcp_session_init,7,7,9,12,session";
       "mcp_read_status,4,4,7,9,source=live";
-      "oas_runtime_status,111,110,132,150,configured_capacity=16;healthy_runtime_count=4";
-      "oas_runtime_single,820,805,1010,1160,measured_ceiling=1";
+      "agent_core_runtime_status,111,110,132,150,configured_capacity=16;healthy_runtime_count=4";
+      "agent_core_runtime_single,820,805,1010,1160,measured_ceiling=1";
     ];
   set_mtime latest_file 3_000.0;
   with_env "MASC_BENCHMARK_RESULTS_DIR" worktree_results_dir @@ fun () ->
@@ -160,12 +160,12 @@ let test_dashboard_perf_prefers_latest_scoped_artifact () =
   write_csv root_file
     [
       "mcp_session_init,6,6,8,10,session";
-      "oas_runtime_single,790,780,980,1100,measured_ceiling=1";
+      "agent_core_runtime_single,790,780,980,1100,measured_ceiling=1";
     ];
   write_csv worktree_file
     [
       "mcp_session_init,7,7,9,12,session";
-      "oas_runtime_single,820,805,1010,1160,measured_ceiling=1";
+      "agent_core_runtime_single,820,805,1010,1160,measured_ceiling=1";
     ];
   set_mtime worktree_file 2_000.0;
   set_mtime root_file 3_000.0;

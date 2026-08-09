@@ -85,23 +85,23 @@ let artifact_handle_of_placeholder text =
     in
     String.sub text start (stop start - start)
 
-let ok_response text : Agent_sdk.Types.api_response =
+let ok_response text : Agent_core.Types.api_response =
   let text_json =
     Yojson.Safe.to_string (`Assoc [ "text", `String text ])
   in
   { id = "vision-test"
   ; model = "vision-test-model"
-  ; stop_reason = Agent_sdk.Types.EndTurn
-  ; content = [ Agent_sdk.Types.Text text_json ]
+  ; stop_reason = Agent_core.Types.EndTurn
+  ; content = [ Agent_core.Types.Text text_json ]
   ; usage = None
   ; telemetry = None
   }
 
-let text_response text : Agent_sdk.Types.api_response =
+let text_response text : Agent_core.Types.api_response =
   { id = "vision-test"
   ; model = "vision-test-model"
-  ; stop_reason = Agent_sdk.Types.EndTurn
-  ; content = [ Agent_sdk.Types.Text text ]
+  ; stop_reason = Agent_core.Types.EndTurn
+  ; content = [ Agent_core.Types.Text text ]
   ; usage = None
   ; telemetry = None
   }
@@ -175,23 +175,23 @@ let assert_metric_increment label before after =
          after)
 ;;
 
-(* Only MaxTokens -> true. Exhaustive over all 12 SDK variants so a new one
+(* Only MaxTokens -> true. Exhaustive over all 12 agent-core variants so a new one
    forces a decision rather than silently bucketing to false. *)
 let test_truncated_of_stop_reason () =
-  assert (Vt.truncated_of_stop_reason Agent_sdk.Types.MaxTokens = true);
+  assert (Vt.truncated_of_stop_reason Agent_core.Types.MaxTokens = true);
   List.iter
     (fun r -> assert (Vt.truncated_of_stop_reason r = false))
-    [ Agent_sdk.Types.EndTurn
-    ; Agent_sdk.Types.StopToolUse
-    ; Agent_sdk.Types.StopSequence
-    ; Agent_sdk.Types.Refusal
-    ; Agent_sdk.Types.ContentFilter
-    ; Agent_sdk.Types.RepetitionTruncation
-    ; Agent_sdk.Types.PauseTurn
-    ; Agent_sdk.Types.Compaction
-    ; Agent_sdk.Types.ContextWindowExceeded
-    ; Agent_sdk.Types.UnmatchedToolCalls
-    ; Agent_sdk.Types.Unknown "some_novel_reason"
+    [ Agent_core.Types.EndTurn
+    ; Agent_core.Types.StopToolUse
+    ; Agent_core.Types.StopSequence
+    ; Agent_core.Types.Refusal
+    ; Agent_core.Types.ContentFilter
+    ; Agent_core.Types.RepetitionTruncation
+    ; Agent_core.Types.PauseTurn
+    ; Agent_core.Types.Compaction
+    ; Agent_core.Types.ContextWindowExceeded
+    ; Agent_core.Types.UnmatchedToolCalls
+    ; Agent_core.Types.Unknown "some_novel_reason"
     ]
 
 (* One User message [text query; image]; image data is base64 of the raw bytes
@@ -207,16 +207,16 @@ let test_message_of_request () =
   | Error e -> failwith e
   | Ok req ->
     let msg = Vt.message_of_request req in
-    assert (msg.Agent_sdk.Types.role = Agent_sdk.Types.User);
-    (match msg.Agent_sdk.Types.content with
-     | [ Agent_sdk.Types.Text q; Agent_sdk.Types.Image img ] ->
+    assert (msg.Agent_core.Types.role = Agent_core.Types.User);
+    (match msg.Agent_core.Types.content with
+     | [ Agent_core.Types.Text q; Agent_core.Types.Image img ] ->
        assert (contains_substring q "what color?");
        assert (contains_substring q "Return only a JSON object");
        assert (contains_substring q "field named text");
        assert (String.equal img.media_type "image/png");
        assert (
          String.equal
-           (Agent_sdk.Types.media_source_kind_to_string img.source_type)
+           (Agent_core.Types.media_source_kind_to_string img.source_type)
            "base64");
        assert (String.equal img.data (Base64.encode_string bytes));
        assert (not (String.equal img.data bytes))
@@ -246,9 +246,9 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
   in
   assert (fallback.max_tokens = Some Vt.vision_default_max_tokens);
   (match configured.response_format with
-   | Agent_sdk.Types.Off -> ()
-   | Agent_sdk.Types.JsonMode
-   | Agent_sdk.Types.JsonSchema _ -> failwith "vision provider must not request a wire format")
+   | Agent_core.Types.Off -> ()
+   | Agent_core.Types.JsonMode
+   | Agent_core.Types.JsonSchema _ -> failwith "vision provider must not request a wire format")
 
 let test_max_image_bytes_reads_env_config () =
   with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->
@@ -882,13 +882,13 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
       metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels
     in
     let blocks =
-      [ Agent_sdk.Types.Text "before"
-      ; Agent_sdk.Types.Image
+      [ Agent_core.Types.Text "before"
+      ; Agent_core.Types.Image
           { media_type = "image/png"
           ; data = Base64.encode_string bytes
-          ; source_type = Agent_sdk.Types.Base64
+          ; source_type = Agent_core.Types.Base64
           }
-      ; Agent_sdk.Types.Text "after"
+      ; Agent_core.Types.Text "after"
       ]
     in
     match
@@ -898,9 +898,9 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
         ~keeper_name
         blocks
     with
-    | [ Agent_sdk.Types.Text "before"
-      ; Agent_sdk.Types.Text placeholder
-      ; Agent_sdk.Types.Text "after"
+    | [ Agent_core.Types.Text "before"
+      ; Agent_core.Types.Text placeholder
+      ; Agent_core.Types.Text "after"
       ] ->
       assert (contains_substring placeholder "[image artifact:");
       assert (contains_substring placeholder "media_type:image/png");
@@ -934,14 +934,14 @@ let test_delegate_eviction_rejects_invalid_media_type_before_store () =
         ~mode:Vi.Store_only
         ~policy:Masc.Keeper_types_profile.Mm_delegate
         ~keeper_name
-        [ Agent_sdk.Types.Image
+        [ Agent_core.Types.Image
             { media_type = "text/plain"
             ; data = Base64.encode_string bytes
-            ; source_type = Agent_sdk.Types.Base64
+            ; source_type = Agent_core.Types.Base64
             }
         ]
     with
-    | [ Agent_sdk.Types.Text placeholder ] ->
+    | [ Agent_core.Types.Text placeholder ] ->
       assert (contains_substring placeholder "unsupported image media type");
       assert_metric_increment
         "vision_ingest invalid_media_type"
@@ -959,14 +959,14 @@ let test_delegate_eviction_rejects_oversize_before_store () =
           ~mode:Vi.Store_only
           ~policy:Masc.Keeper_types_profile.Mm_delegate
           ~keeper_name
-          [ Agent_sdk.Types.Image
+          [ Agent_core.Types.Image
               { media_type = "image/png"
               ; data = Base64.encode_string bytes
-              ; source_type = Agent_sdk.Types.Base64
+              ; source_type = Agent_core.Types.Base64
               }
           ]
       with
-      | [ Agent_sdk.Types.Text placeholder ] ->
+      | [ Agent_core.Types.Text placeholder ] ->
         assert (contains_substring placeholder "image too large")
       | _ -> failwith "oversize image must surface as a text placeholder"))
 
@@ -976,14 +976,14 @@ let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
       ~mode:Vi.Store_only
       ~policy:Masc.Keeper_types_profile.Mm_delegate
       ~keeper_name:"vision-ingest-bad-base64"
-      [ Agent_sdk.Types.Image
+      [ Agent_core.Types.Image
           { media_type = "image/png"
           ; data = "not base64"
-          ; source_type = Agent_sdk.Types.Base64
+          ; source_type = Agent_core.Types.Base64
           }
       ]
   with
-  | [ Agent_sdk.Types.Text placeholder ] ->
+  | [ Agent_core.Types.Text placeholder ] ->
     assert (contains_substring placeholder "could not store");
     assert (contains_substring placeholder "invalid image payload");
     assert (not (contains_substring placeholder "bad base64"))
@@ -992,7 +992,7 @@ let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
 let test_delegate_eviction_rejects_non_base64_source_before_store () =
   List.iter
     (fun source_type ->
-      let source_name = Agent_sdk.Types.media_source_kind_to_string source_type in
+      let source_name = Agent_core.Types.media_source_kind_to_string source_type in
       let metric_labels =
         [ "mode", "store_only"; "result", "error"; "reason", "invalid_source_type" ]
       in
@@ -1004,14 +1004,14 @@ let test_delegate_eviction_rejects_non_base64_source_before_store () =
           ~mode:Vi.Store_only
           ~policy:Masc.Keeper_types_profile.Mm_delegate
           ~keeper_name:("vision-ingest-source-" ^ source_name)
-          [ Agent_sdk.Types.Image
+          [ Agent_core.Types.Image
               { media_type = "image/png"
               ; data = "https://example.invalid/image.png"
               ; source_type
               }
           ]
       with
-      | [ Agent_sdk.Types.Text placeholder ] ->
+      | [ Agent_core.Types.Text placeholder ] ->
         assert (contains_substring placeholder "could not store");
         assert (contains_substring placeholder "unsupported image source");
         assert_metric_increment
@@ -1019,15 +1019,15 @@ let test_delegate_eviction_rejects_non_base64_source_before_store () =
           before
           (metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels)
       | _ -> failwith "non-base64 image source must surface as a text placeholder")
-    [ Agent_sdk.Types.Url; Agent_sdk.Types.File_id ]
+    [ Agent_core.Types.Url; Agent_core.Types.File_id ]
 
 let test_non_delegate_eviction_preserves_inline_image () =
   let bytes = "raw-image" in
   let blocks =
-    [ Agent_sdk.Types.Image
+    [ Agent_core.Types.Image
         { media_type = "image/png"
         ; data = Base64.encode_string bytes
-        ; source_type = Agent_sdk.Types.Base64
+        ; source_type = Agent_core.Types.Base64
         }
     ]
   in
@@ -1038,7 +1038,7 @@ let test_non_delegate_eviction_preserves_inline_image () =
       ~keeper_name:"vision-ingest-inherit"
       blocks
   with
-  | [ Agent_sdk.Types.Image img ] ->
+  | [ Agent_core.Types.Image img ] ->
     assert (String.equal img.data (Base64.encode_string bytes))
   | _ -> failwith "non-delegate policy should preserve image blocks"
 
@@ -1047,13 +1047,13 @@ let test_evicted_history_has_no_image_modality () =
     let keeper_name = "vision-ingest-modality" in
     let bytes = "\x89PNG\r\n\x1a\nmodality-test" in
     let msg =
-      Agent_sdk.Types.make_message
-        ~role:Agent_sdk.Types.User
-        [ Agent_sdk.Types.Text "look at this"
-        ; Agent_sdk.Types.Image
+      Agent_core.Types.make_message
+        ~role:Agent_core.Types.User
+        [ Agent_core.Types.Text "look at this"
+        ; Agent_core.Types.Image
             { media_type = "image/png"
             ; data = Base64.encode_string bytes
-            ; source_type = Agent_sdk.Types.Base64
+            ; source_type = Agent_core.Types.Base64
             }
         ]
     in

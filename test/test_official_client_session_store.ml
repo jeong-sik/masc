@@ -599,21 +599,21 @@ let test_ambiguous_json_is_rejected () =
 ;;
 
 let fixture_tool ?(parameters = []) ~name ~description () =
-  Agent_sdk.Tool.create
+  Agent_core.Tool.create
     ~name
     ~description
     ~parameters
-    (fun _ -> Ok { Agent_sdk.Types.content = "fixture"; _meta = None })
+    (fun _ -> Ok { Agent_core.Types.content = "fixture"; _meta = None })
 ;;
 
 let test_tool_surface_fingerprint_is_canonical () =
   let alpha = fixture_tool ~name:"alpha" ~description:"first" () in
   let beta = fixture_tool ~name:"beta" ~description:"second" () in
   let changed = fixture_tool ~name:"alpha" ~description:"changed" () in
-  let first : Agent_sdk.Types.tool_param =
+  let first : Agent_core.Types.tool_param =
     { name = "first"; description = "first"; param_type = String; required = true }
   in
-  let second : Agent_sdk.Types.tool_param =
+  let second : Agent_core.Types.tool_param =
     { name = "second"; description = "second"; param_type = Integer; required = true }
   in
   let ordered =

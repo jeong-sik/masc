@@ -1,7 +1,7 @@
 (** Tests for otel_tracer.ml — OpenTelemetry-compatible tracer. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 let with_eio f () = Eio_main.run (fun _env -> f ())
 
@@ -494,13 +494,13 @@ let test_record_metric_counter () =
   in
   Otel_tracer.inst_record_metric
     inst
-    ~name:"oas.eval.total"
+    ~name:"agent_core.eval.total"
     ~value:42.0
     ~metric_type:Otel_tracer.Counter;
   let metrics = Otel_tracer.inst_get_metrics inst in
   check int "one metric recorded" 1 (List.length metrics);
   let name, value, mt = List.hd metrics in
-  check string "metric name" "oas.eval.total" name;
+  check string "metric name" "agent_core.eval.total" name;
   check (float 0.01) "metric value" 42.0 value;
   check string "metric type" "counter" (Otel_tracer.metric_type_to_string mt)
 ;;
@@ -517,7 +517,7 @@ let test_record_metric_gauge () =
   in
   Otel_tracer.inst_record_metric
     inst
-    ~name:"oas.eval.coverage"
+    ~name:"agent_core.eval.coverage"
     ~value:0.85
     ~metric_type:Otel_tracer.Gauge;
   let metrics = Otel_tracer.inst_get_metrics inst in
@@ -594,14 +594,14 @@ let test_metric_type_to_string () =
 
 let test_metric_entry_to_json () =
   let entry : Otel_tracer.metric_entry =
-    { m_name = "oas.eval.total"; m_value = 5.0; m_type = Otel_tracer.Counter }
+    { m_name = "agent_core.eval.total"; m_value = 5.0; m_type = Otel_tracer.Counter }
   in
   let json = Otel_tracer.metric_entry_to_json entry in
   check bool "has name" true (json_assoc_field "name" json <> None);
   check
     (option string)
     "name value"
-    (Some "oas.eval.total")
+    (Some "agent_core.eval.total")
     (match json_assoc_field "name" json with
      | Some (`String s) -> Some s
      | _ -> None);
@@ -610,7 +610,7 @@ let test_metric_entry_to_json () =
 
 let test_metric_entry_gauge_json () =
   let entry : Otel_tracer.metric_entry =
-    { m_name = "oas.eval.coverage"; m_value = 0.95; m_type = Otel_tracer.Gauge }
+    { m_name = "agent_core.eval.coverage"; m_value = 0.95; m_type = Otel_tracer.Gauge }
   in
   let json = Otel_tracer.metric_entry_to_json entry in
   check bool "has gauge" true (json_assoc_field "gauge" json <> None);

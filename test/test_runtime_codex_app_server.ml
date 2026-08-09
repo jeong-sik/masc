@@ -53,17 +53,23 @@ let rec drop count values =
 let fixture_script ?capture_path lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
-  let read_request () =
-    output_string output "IFS= read -r ignored\n";
+  let read_request ?(expect_version = false) () =
+    output_string output "IFS= read -r request\n";
+    if expect_version
+    then
+      output_string output
+        (Printf.sprintf
+           "printf '%%s' \"$request\" | grep -F %s >/dev/null || exit 97\n"
+           (shell_quote (Printf.sprintf {|"version":"%s"|} Runtime_build_version.current)));
     Option.iter
       (fun capture_path ->
          output_string
            output
-           ("printf '%s\\n' \"$ignored\" >> " ^ shell_quote capture_path ^ "\n"))
+           ("printf '%s\\n' \"$request\" >> " ^ shell_quote capture_path ^ "\n"))
       capture_path
   in
   output_string output "#!/bin/sh\n";
-  read_request ();
+  read_request ~expect_version:true ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 0) ^ "\n");
   read_request ();
   read_request ();
@@ -200,6 +206,37 @@ let test_chatgpt_subscription_turn () =
         check string "model" "gpt-fixture" result.model;
         check string "plan" "pro" result.subscription.plan_type;
         check bool "new thread" false result.resumed)
+;;
+
+let test_subscription_probe_stops_before_thread () =
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+      let outcome =
+        Eio_main.run (fun env ->
+          let config =
+            { (Runtime_codex_app_server.default_config ()) with
+              cli_path = path
+            ; timeout_s = 2.0
+            }
+          in
+          Runtime_codex_app_server.probe_subscription
+            ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            config)
+      in
+      match outcome with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok probe ->
+        check string "plan" "pro" probe.subscription.plan_type;
+        check (option string) "user agent" (Some "fixture/0.147.0") probe.user_agent)
 ;;
 
 let test_thread_resume_skips_history_injection () =
@@ -576,7 +613,7 @@ let test_protocol_uses_spawn_cwd_and_named_permissions () =
        let params = Yojson.Safe.Util.member "params" thread_start in
        check string
          "client version SSOT"
-         Version.version
+         Runtime_build_version.current
          (client_info |> Yojson.Safe.Util.member "version" |> Yojson.Safe.Util.to_string);
        check string
          "protocol cwd"
@@ -1881,6 +1918,10 @@ let () =
   run "runtime codex app-server"
     [ ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
+        ; test_case
+            "probe stops before thread"
+            `Quick
+            test_subscription_probe_stops_before_thread
         ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn
         ; test_case
             "protocol and spawn share cwd authority"

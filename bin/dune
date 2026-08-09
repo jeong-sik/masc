@@ -58,6 +58,7 @@
  (package masc)
  (libraries
   masc
+  masc.runtime
   masc.crypto_rng
   masc.server
   masc.config

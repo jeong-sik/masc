@@ -268,6 +268,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       match
         Runtime_claude_code.probe_subscription
           ~mgr:process_mgr
+          ~clock
           ~cwd:process_cwd
           client_config
       with

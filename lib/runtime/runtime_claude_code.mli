@@ -96,6 +96,7 @@ val validate_turn :
 
 val probe_subscription :
   mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   config ->
   (subscription, error) result

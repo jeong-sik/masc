@@ -9,6 +9,11 @@ type subscription =
   ; email : string option
   }
 
+type probe_result =
+  { subscription : subscription
+  ; user_agent : string option
+  }
+
 type config =
   { cli_path : string
   ; model : string option
@@ -86,6 +91,15 @@ val validate_turn :
 (** Validate every deterministic client-side admission condition. Keeper calls
     this before it durably claims a session; [run_turn] repeats the same check
     at the process boundary. *)
+
+val probe_subscription :
+  mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config ->
+  (probe_result, error) result
+(** Start the official app-server and measure only [initialize] plus
+    [account/read]. No thread or model turn is created. *)
 
 val run_turn :
   ?dynamic_tools:dynamic_tool list ->

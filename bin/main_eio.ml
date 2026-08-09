@@ -1186,7 +1186,7 @@ let setup_gc () =
 
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
-  let info = Cmd.info "masc" ~version:Masc.Version.version ~doc in
+  let info = Cmd.info "masc" ~version:Runtime_build_version.current ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ run_base_path)
     info
     [ init_cmd

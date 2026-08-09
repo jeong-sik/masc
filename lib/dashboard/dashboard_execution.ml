@@ -71,7 +71,7 @@ let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
     ; "project", `String project
     ; "tempo_interval_s", `Float tempo.current_interval_s
     ; "paused", `Bool paused
-    ; "version", `String Version.version
+    ; "version", `String Runtime_build_version.current
     ]
 ;;
 

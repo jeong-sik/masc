@@ -15,7 +15,7 @@ let server_meta () =
   in
   `Assoc
     [
-      ("version", `String Version.version);
+      ("version", `String Runtime_build_version.current);
       ("git_commit", Json_util.string_opt_to_json git_commit);
       ("ocaml_version", `String Sys.ocaml_version);
       ("uptime_seconds", `Float (Server_startup_state.elapsed_since_start ()));

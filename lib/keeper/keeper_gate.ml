@@ -259,6 +259,55 @@ let audit_receipts_to_yojson receipts =
   `List (List.map Keeper_approval.Audit.receipt_to_yojson receipts)
 ;;
 
+let approval_sse_audit_event = "approval:audit"
+
+let authorization_subject_id = function
+  | One_shot_resolution approval_id -> Some approval_id
+  | Exact_always_rule rule_id -> Some rule_id
+  | Keeper_always_allow | Workspace_always_allow -> None
+;;
+
+(* Authorization is already committed when these receipts exist.  A failed
+   audit append therefore cannot turn [Allow] into an error or invite the tool
+   caller to retry the external effect.  Publish only the failed receipts as
+   observation; the append boundary has already recorded the same failure in
+   logs and metrics if no Dashboard SSE client is connected. *)
+let broadcast_failed_authorization_audits ~keeper_name ~source receipts =
+  let id = authorization_subject_id source in
+  List.iter
+    (fun (receipt : Keeper_approval.Audit.receipt) ->
+       match receipt.write_result with
+       | Ok () -> ()
+       | Error _ ->
+         (try
+            Sse.broadcast
+              (`Assoc
+                  [ "type", `String approval_sse_audit_event
+                  ; ( "payload"
+                    , `Assoc
+                        [ "id", Json_util.string_opt_to_json id
+                        ; "audit", Keeper_approval.Audit.receipt_to_yojson receipt
+                        ] )
+                  ])
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Log.Keeper.warn
+              ~keeper_name
+              "approval audit failure SSE publish failed event=%s err=%s"
+              (Keeper_approval.Audit.event_to_string receipt.event_type)
+              (Printexc.to_string exn)))
+    receipts
+;;
+
+let allow request source audit_receipts =
+  broadcast_failed_authorization_audits
+    ~keeper_name:request.keeper_name
+    ~source
+    audit_receipts;
+  Allow { source; audit_receipts }
+;;
+
 let decision_to_yojson = function
   | Allow authorization ->
     `Assoc
@@ -1542,7 +1591,7 @@ let decide_from_selected_mode request = function
         ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
         source
     in
-    Allow { source; audit_receipts = [ audit_receipt ] }
+    allow request source [ audit_receipt ]
 ;;
 
 let decide_without_cycle_grant ~keeper_always_allow request =
@@ -1555,7 +1604,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
         ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
         source
     in
-    Allow { source; audit_receipts = [ audit_receipt ] })
+    allow request source [ audit_receipt ])
   else
     let mode = Keeper_gate_mode.read ~base_path:request.base_path in
     (match mode with
@@ -1567,7 +1616,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
            ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
            source
        in
-       Allow { source; audit_receipts = [ audit_receipt ] }
+       allow request source [ audit_receipt ]
      | Error _ | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Auto_judge) ->
        (match
           Keeper_approval_queue_rules.find_matching_rule
@@ -1589,7 +1638,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
               ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
               source
           in
-          Allow { source; audit_receipts = [ audit_receipt ] }
+          allow request source [ audit_receipt ]
         | Ok (Keeper_approval_queue_rules_types.Rule_match_expired rule_match) ->
           observe_exact_rule_expired request rule_match;
           decide_from_selected_mode request mode
@@ -1609,10 +1658,7 @@ let decide ?cycle_grant ~keeper_always_allow request =
     let gate_audit_receipt =
       audit_allow request ~source_approval_id:approval_id source
     in
-    Allow
-      { source
-      ; audit_receipts = [ grant_audit_receipt; gate_audit_receipt ]
-      }
+    allow request source [ grant_audit_receipt; gate_audit_receipt ]
   | Cycle_grant_not_applicable ->
     decide_without_cycle_grant ~keeper_always_allow request
   | Cycle_grant_temporarily_unavailable (approval_id, reason) ->

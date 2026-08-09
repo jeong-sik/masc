@@ -29,6 +29,7 @@ type SchemaLike<T> = {
 
 export const SSE_APPROVAL_PENDING_EVENT = 'approval:pending'
 export const SSE_APPROVAL_RESOLVED_EVENT = 'approval:resolved'
+export const SSE_APPROVAL_AUDIT_EVENT = 'approval:audit'
 export const SSE_APPROVAL_SUMMARY_UPDATED_EVENT = 'approval:summary_updated'
 
 const FIXED_SSE_EVENT_TYPES = new Set([
@@ -83,6 +84,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'runtime_param_changed',
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
+  SSE_APPROVAL_AUDIT_EVENT,
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.

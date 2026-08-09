@@ -297,6 +297,38 @@ describe('setupServerPushReaction reconnect hydration', () => {
     )
   })
 
+  it('projects a failed authorization audit receipt without refreshing Gate state', async () => {
+    const { sseStore } = await loadSseStore()
+    const observe = vi.fn()
+    const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
+    sseStore.registerGateAuditReceiptObserver(observe)
+    sseStore.registerGateRefresh(refreshGate)
+
+    sseStore.routeServerPushEvent({
+      type: 'approval:audit',
+      payload: {
+        id: 'appr-consumed',
+        audit: {
+          event: 'grant_consumed',
+          recorded: false,
+          stage: 'append',
+          detail: 'audit append unavailable',
+        },
+      },
+    })
+
+    expect(observe).toHaveBeenCalledWith(
+      [{
+        event: 'grant_consumed',
+        recorded: false,
+        stage: 'append',
+        detail: 'audit append unavailable',
+      }],
+      { id: 'appr-consumed', transport: 'sse' },
+    )
+    expect(refreshGate).not.toHaveBeenCalled()
+  })
+
   it('routes an approval:summary_updated SSE event to the Gate refresh (Auto Judge verdict contract)', async () => {
     const { sseStore } = await loadSseStore()
     const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()

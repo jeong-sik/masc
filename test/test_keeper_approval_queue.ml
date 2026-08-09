@@ -3749,18 +3749,69 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
          ; continuation_channel = None
          }
        in
-       (match Gate.decide ~cycle_grant ~keeper_always_allow:false request with
-        | Gate.Allow
-            { source = Gate.One_shot_resolution actual
-            ; audit_receipts = [ consumed_receipt; allowed_receipt ]
-            } ->
-          Alcotest.(check string) "exact grant id" approval_id actual;
-          check_append_failure Keeper_approval.Audit.Grant_consumed consumed_receipt;
-          check_append_failure Keeper_approval.Audit.Gate_allowed allowed_receipt
-        | Gate.Allow _ -> Alcotest.fail "one-shot authorization receipts were incomplete"
-        | Gate.Deferred _ -> Alcotest.fail "committed grant did not authorize"
-        | Gate.Unavailable reason ->
-          Alcotest.fail (Gate.unavailable_reason_to_string reason));
+       let audit_frames = ref [] in
+       let subscriber_id = "approval-audit-append-failure" in
+       Masc.Sse.subscribe_external
+         ~id:subscriber_id
+         ~callback:(fun (event : Masc.Sse.external_event) ->
+           audit_frames := event.Masc.Sse.ext_frame :: !audit_frames)
+         ();
+       Fun.protect
+         ~finally:(fun () -> Masc.Sse.unsubscribe_external subscriber_id)
+         (fun () ->
+            (match Gate.decide ~cycle_grant ~keeper_always_allow:false request with
+             | Gate.Allow
+                 { source = Gate.One_shot_resolution actual
+                 ; audit_receipts = [ consumed_receipt; allowed_receipt ]
+                 } ->
+               Alcotest.(check string) "exact grant id" approval_id actual;
+               check_append_failure
+                 Keeper_approval.Audit.Grant_consumed
+                 consumed_receipt;
+               check_append_failure
+                 Keeper_approval.Audit.Gate_allowed
+                 allowed_receipt
+             | Gate.Allow _ ->
+               Alcotest.fail "one-shot authorization receipts were incomplete"
+             | Gate.Deferred _ -> Alcotest.fail "committed grant did not authorize"
+             | Gate.Unavailable reason ->
+               Alcotest.fail (Gate.unavailable_reason_to_string reason));
+            let audit_events =
+              !audit_frames
+              |> List.rev
+              |> List.filter_map (fun frame ->
+                match Masc.Sse.data_payload_of_frame frame with
+                | Error Masc.Sse.Missing_data_payload -> None
+                | Ok payload ->
+                  let json = Yojson.Safe.from_string payload in
+                  let open Yojson.Safe.Util in
+                  if json |> member "type" |> to_string_option = Some "approval:audit"
+                  then Some json
+                  else None)
+            in
+            Alcotest.(check int)
+              "failed authorization audits are projected"
+              2
+              (List.length audit_events);
+            let open Yojson.Safe.Util in
+            Alcotest.(check (list string))
+              "authorization audit event order"
+              [ "grant_consumed"; "gate_allowed" ]
+              (List.map
+                 (fun event -> event |> member "payload" |> member "audit" |> member "event" |> to_string)
+                 audit_events);
+            List.iter
+              (fun event ->
+                 let payload = event |> member "payload" in
+                 Alcotest.(check string)
+                   "authorization audit subject"
+                   approval_id
+                   (payload |> member "id" |> to_string);
+                 Alcotest.(check bool)
+                   "authorization audit reports append failure"
+                   false
+                   (payload |> member "audit" |> member "recorded" |> to_bool))
+              audit_events);
        (match
           AQ.consume_approved_resolution
             ~base_path

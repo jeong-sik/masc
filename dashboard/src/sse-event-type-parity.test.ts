@@ -44,6 +44,7 @@ import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from './lib/keeper-chat-stream-contrac
 // (`"type", `String "..."` or `~event_type:"..."`), not the site that branches
 // on it.
 const BACKEND_EMITTED: Record<string, string> = {
+  'approval:audit': '../lib/keeper/keeper_gate.ml',
   'approval:pending': '../lib/keeper/keeper_approval_queue.ml',
   'approval:resolved': '../lib/keeper/keeper_approval_queue.ml',
   'approval:summary_updated': '../lib/keeper/keeper_approval_queue.ml',

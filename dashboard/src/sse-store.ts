@@ -57,6 +57,7 @@ import type { ErrorCode } from './types/error'
 import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
 import { hydrateOasTelemetrySample } from './oas-telemetry-store'
 import {
+  SSE_APPROVAL_AUDIT_EVENT,
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
@@ -676,7 +677,8 @@ export function routeServerPushEvent(event: SSEEvent): void {
 
   if (
     (event.type === SSE_APPROVAL_PENDING_EVENT
-      || event.type === SSE_APPROVAL_RESOLVED_EVENT)
+      || event.type === SSE_APPROVAL_RESOLVED_EVENT
+      || event.type === SSE_APPROVAL_AUDIT_EVENT)
     && isRecord(event.payload)
   ) {
     const receipt = normalizeKeeperApprovalAuditReceipt(event.payload.audit)

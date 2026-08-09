@@ -65,7 +65,6 @@ type phase =
 type recovery_resolution =
   | Retry_previous
   | Restart_fresh
-  | Adopt_verified of settlement
 
 type recovery_resolution_record =
   { recovery_id : string
@@ -213,7 +212,6 @@ val resolve_recovery :
   (t, string) result
 (** Resolve one exact recovery claim with compare-and-swap authority.
     [Retry_previous] restores the last settled session, [Restart_fresh] makes
-    the next claim start a new session, and [Adopt_verified] records an
-    operator-verified terminal turn. *)
+    the next claim start a new session. *)
 (** Every phase change is a process-safe durable compare-and-swap followed by
     exact read-back. Any incomplete phase blocks a later automatic claim. *)

@@ -46,18 +46,27 @@ let rec drop count values =
     | _ :: rest -> drop (count - 1) rest
 ;;
 
-let fixture_script lines =
+let fixture_script ?capture_path lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
+  let read_request () =
+    output_string output "IFS= read -r ignored\n";
+    Option.iter
+      (fun capture_path ->
+         output_string
+           output
+           ("printf '%s\\n' \"$ignored\" >> " ^ shell_quote capture_path ^ "\n"))
+      capture_path
+  in
   output_string output "#!/bin/sh\n";
-  output_string output "IFS= read -r ignored\n";
+  read_request ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 0) ^ "\n");
-  output_string output "IFS= read -r ignored\n";
-  output_string output "IFS= read -r ignored\n";
+  read_request ();
+  read_request ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 1) ^ "\n");
-  output_string output "IFS= read -r ignored\n";
+  read_request ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
-  output_string output "IFS= read -r ignored\n";
+  read_request ();
   List.iter
     (fun line -> output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     (drop 3 lines);
@@ -67,8 +76,8 @@ let fixture_script lines =
   path
 ;;
 
-let with_fixture lines f =
-  let path = fixture_script lines in
+let with_fixture ?capture_path lines f =
+  let path = fixture_script ?capture_path lines in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
@@ -200,6 +209,53 @@ let test_thread_resume_skips_history_injection () =
        | Ok result ->
          check bool "resumed" true result.resumed;
          check string "thread" "thread-1" result.thread_id)
+;;
+
+let test_thread_resume_sends_dynamic_tools () =
+  let capture_path = Filename.temp_file "masc-codex-resume-requests-" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove capture_path)
+    (fun () ->
+       let tool : Runtime_codex_app_server.dynamic_tool =
+         { name = "masc_probe"
+         ; description = "Return a deterministic fixture marker"
+         ; input_schema = `Assoc [ "type", `String "object" ]
+         ; call = (fun ~call_id:_ _ -> { success = true; content = "unused" })
+         }
+       in
+       with_fixture
+         ~capture_path
+         [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+         (fun path ->
+            match
+              run_fixture
+                ~dynamic_tools:[ tool ]
+                ~thread_mode:(Runtime_codex_app_server.Resume { thread_id = "thread-1" })
+                path
+            with
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> ());
+       let requests =
+         In_channel.with_open_bin capture_path (fun input ->
+           In_channel.input_lines input |> List.map Yojson.Safe.from_string)
+       in
+       let resume_request =
+         List.find
+           (fun json -> Yojson.Safe.Util.member "id" json = `Int 3)
+           requests
+       in
+       let dynamic_tools =
+         resume_request
+         |> Yojson.Safe.Util.member "params"
+         |> Yojson.Safe.Util.member "dynamicTools"
+         |> Yojson.Safe.Util.to_list
+       in
+       check int "resume tool count" 1 (List.length dynamic_tools);
+       check string "resume tool name" "masc_probe"
+         (dynamic_tools
+          |> List.hd
+          |> Yojson.Safe.Util.member "name"
+          |> Yojson.Safe.Util.to_string))
 ;;
 
 let test_thread_resume_rejects_identity_mismatch () =
@@ -1253,6 +1309,10 @@ let () =
             "thread resume skips history injection"
             `Quick
             test_thread_resume_skips_history_injection
+        ; test_case
+            "thread resume sends dynamic tools"
+            `Quick
+            test_thread_resume_sends_dynamic_tools
         ; test_case
             "thread resume rejects identity mismatch"
             `Quick

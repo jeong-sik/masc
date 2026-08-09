@@ -656,6 +656,10 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~histor
         ]
         @ optional_field "model" config.model
         @ optional_field "developerInstructions" config.developer_instructions
+        @
+        (match dynamic_tools with
+         | [] -> []
+         | tools -> [ "dynamicTools", `List (List.map dynamic_tool_spec tools) ])
       , true )
   in
   send_request io ~id:3 ~method_:thread_method ~params:(`Assoc thread_fields);

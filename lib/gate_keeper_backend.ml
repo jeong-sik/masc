@@ -9,151 +9,10 @@ type connector_delivery =
   ; workspace_id : string option
   }
 
-(* ── Keeper response parsing ─────────────────────────────────── *)
-
-let extract_turn_stats (body : string) : Gate_protocol.turn_stats option =
-  Safe_ops.protect ~default:None (fun () ->
-    let json = Yojson.Safe.from_string body in
-    match
-      Json_util.get_int json "duration_ms",
-      Json_util.get_int json "total_tokens"
-    with
-    | Some dur, Some tok when dur > 0 || tok > 0 ->
-      Some
-        { Gate_protocol.model_used = "runtime"; duration_ms = dur; tokens_used = tok }
-    | _ -> None)
-
-let extract_reply_text (body : string) : string =
-  Safe_ops.protect ~default:body (fun () ->
-    let json = Yojson.Safe.from_string body in
-    match Json_util.get_string json "reply" with
-    | Some r -> r
-    | None -> body)
-
-let extract_structured (body : string) : Yojson.Safe.t option =
-  Safe_ops.protect ~default:None (fun () ->
-    let json = Yojson.Safe.from_string body in
-    match Json_util.assoc_member_opt "structured" json with
-    | None | Some `Null -> None
-    | Some v -> Some v)
-
 let non_empty_opt value =
   match String.trim value with
   | "" -> None
   | trimmed -> Some trimmed
-
-(** Typed parse failures for the async ACK envelope.
-
-    The previous [Safe_ops.protect ~default:None] wrapper collapsed two
-    distinct failure modes into a single [None]: the keeper returned a
-    legitimate reply *without* an ACK contract (queued, running — handled
-    separately by the [Streaming] arm of the dispatch match), and the
-    backend could not parse the ACK contract at all (malformed JSON,
-    missing request_id, missing status, unknown future status). The
-    connector could not distinguish "queued" from "parse failed".
-
-    Exposing the failure as a typed sum lets the dispatch site surface
-    a deliberate degraded/error ACK shape and log the backend drift,
-    rather than silently substituting the keeper's reply text. *)
-type ack_parse_failure =
-  | Invalid_json of string
-  | Missing_request_id
-  | Empty_request_id
-  | Missing_status
-  | Invalid_status of string
-
-let ack_parse_failure_to_string = function
-  | Invalid_json detail ->
-      Printf.sprintf "invalid json: %s" detail
-  | Missing_request_id -> "missing request_id"
-  | Empty_request_id -> "empty request_id"
-  | Missing_status -> "missing status"
-  | Invalid_status raw ->
-      Printf.sprintf "unknown status %S (not in the closed status set)" raw
-
-(** Parse the async ACK envelope from a keeper tool response body.
-
-    Returns [Ok request] when the body is a valid JSON object with both
-    a non-empty [request_id] and a [status] that maps to one of the
-    closed [Gate_protocol.message_request_status] variants.
-
-    Returns [Error reason] otherwise. JSON parse failures are isolated
-    from the closed-sum status check so that a malformed envelope is
-    surfaced as a backend-degraded path, distinct from a legitimately
-    absent ACK field. *)
-let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata body :
-    (Gate_protocol.message_request, ack_parse_failure) result =
-  let json =
-    try Ok (Yojson.Safe.from_string body)
-    with Yojson.Json_error detail -> Error (Invalid_json detail)
-  in
-  match json with
-  | Error failure -> Error failure
-  | Ok json ->
-      let request_id =
-        match Json_util.get_string json "request_id" with
-        | None -> None
-        | Some value -> non_empty_opt value
-      in
-      (match request_id with
-       | None ->
-           (match Json_util.get_string json "request_id" with
-            | Some _ -> Error Empty_request_id
-            | None -> Error Missing_request_id)
-       | Some trimmed_request_id -> (
-           match Json_util.get_string json "status" with
-           | None -> Error Missing_status
-           | Some raw ->
-               let normalized = String.lowercase_ascii (String.trim raw) in
-               (match
-                  Gate_protocol.message_request_status_of_string normalized
-                with
-               | Some status ->
-                   let destination_id =
-                     match Json_util.get_string json "keeper_name" with
-                     | Some value ->
-                       (match non_empty_opt value with
-                        | Some trimmed -> trimmed
-                        | None -> keeper_name)
-                     | None -> keeper_name
-                   in
-                   let request : Gate_protocol.message_request =
-                     { request_id = trimmed_request_id
-                     ; destination_type = "keeper"
-                     ; destination_id
-                     ; channel
-                     ; actor_id = non_empty_opt channel_user_id
-                     ; status
-                     ; modalities = [ "text" ]
-                     ; transport = non_empty_opt channel
-                     ; metadata = ("status_source", "keeper_msg_async") :: metadata
-                     }
-                   in
-                   Ok request
-               | None -> Error (Invalid_status normalized))))
-
-let in_flight_metadata (info : Keeper_turn_admission.in_flight_info option) =
-  match info with
-  | None -> []
-  | Some { Keeper_turn_admission.lane; started_at = _ } ->
-      [ "in_flight_lane", Keeper_turn_admission.lane_to_string lane ]
-
-let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
-  let status = Gate_protocol.message_request_status_to_string request.status in
-  let in_flight_text =
-    match in_flight with
-    | None -> ""
-    | Some { Keeper_turn_admission.lane; started_at = _ } ->
-        Printf.sprintf
-          " (현재 턴: %s)"
-          (Keeper_turn_admission.lane_to_string lane)
-  in
-  Printf.sprintf
-    "⏳ [%s] 님이 작업을 처리 중입니다 (status=%s, request_id=%s).%s"
-    request.destination_id
-    status
-    request.request_id
-    in_flight_text
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
@@ -280,13 +139,6 @@ let external_message_id_for_channel_context ~idempotency_key ~metadata =
   match metadata_value "external_message_id" metadata with
   | Some value -> Some value
   | None -> non_empty_opt idempotency_key
-
-let ensure_metadata key value metadata =
-  match value with
-  | None -> metadata
-  | Some value ->
-      if Option.is_some (List.assoc_opt key metadata) then metadata
-      else metadata @ [ (key, value) ]
 
 let reconcile_delivery_metadata key expected metadata =
   let observed =
@@ -485,294 +337,47 @@ let accept_connector ~delivery ~clock:_ ~config ~channel ~channel_user_id
                ; message_request = Some message_request
                })))
 
-let persist_connector_assistant_reply ~base_dir ~keeper_name ~surface
-    ?conversation_id ?turn_ref ?blocks ~reply () =
-  let has_status =
-    Option.exists
-      (List.exists (function Keeper_chat_blocks.Status _ -> true | _ -> false))
-      blocks
-  in
-  let content = if has_status then "" else String.trim reply in
-  let has_blocks =
-    match blocks with
-    | Some (_ :: _) -> true
-    | Some [] | None -> false
-  in
-  if content <> "" || has_blocks then begin
-    let source = Surface_ref.lane_label surface in
-    (* RFC-0233 §7: [turn_ref] is the join key the keeper minted into the
-       reply payload, carried onto this connector turn's assistant row. *)
-    Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
-      ~content ~surface ?conversation_id ?blocks ?turn_ref ();
-    Keeper_chat_broadcast.chat_appended ~keeper_name ~source ~content ()
-  end
-
-(* Trailing [()] keeps [?on_text_snapshot] erasable (warning 16): the wrappers
-   below either pass it ([dispatch_with_text_snapshot]) or omit it so it defaults
-   to [None] ([dispatch]). Without the unit the optional leaks into [dispatch]'s
-   inferred type and breaks the .mli signature. Do not drop the [()]. *)
-let dispatch_core ?on_text_snapshot ~submitted_by ~sw ~clock ~proc_mgr ~net
-    ~publication_recovery_provider ~config
-    ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-    ~keeper_name ~idempotency_key ~metadata ~content () =
-  let keeper_name = String.trim keeper_name in
-  let redaction =
-    Keeper_secret_redaction.snapshot
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-  in
-  let redact_text = Keeper_secret_redaction.redact_text redaction in
-  let redact_json = Keeper_secret_redaction.redact_json redaction in
-  let agent_name =
-    agent_name_for_channel_actor ~channel ~channel_workspace_id ~channel_user_id
-  in
-  (* Use filesystem-safe sanitizer: this key is later used as a directory
-     component in session_dir. An unsanitized channel_workspace_id with '..' or '/'
-     would escape the intended traces/channels/ subtree. Discord passes
-     numeric IDs so this is defensive for future integrations (webhooks,
-     custom channels) that could pass attacker-controlled values. *)
-  let channel_session_key =
-    Printf.sprintf "%s_%s"
-      (filesystem_safe_or_unknown channel)
-      (filesystem_safe_or_unknown channel_workspace_id)
-  in
-  (* RFC-0226: the gate inbound boundary is the sole recorder of
-     connector user lines. Recording happens here — post
-     validation/dedup ([Channel_gate.handle_inbound]), pre turn — so a
-     failed or silent turn cannot drop the inbound message. The final
-     connector reply is appended below after the direct-delivery stream returns
-     the keeper's direct reply. The user line carries the raw [content];
-     the contextualized wrapper below is turn input, not conversation
-     history. *)
-  let lane = String.trim channel in
-  let opt value = match String.trim value with "" -> None | v -> Some v in
+let dispatch ~clock ~config ~channel
+    ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
+    ~idempotency_key ~metadata ~content =
   let conversation_id =
-    conversation_id_for_channel_context ~channel ~channel_workspace_id ~metadata
+    conversation_id_for_channel_context
+      ~channel
+      ~channel_workspace_id
+      ~metadata
   in
   let external_message_id =
     external_message_id_for_channel_context ~idempotency_key ~metadata
   in
-  let metadata =
-    metadata
-    |> ensure_metadata "conversation_id" conversation_id
-    |> ensure_metadata "external_message_id" external_message_id
-  in
   let surface =
-    surface_for_channel_context ~channel ~channel_workspace_id
-      ?conversation_id ?external_message_id ()
-  in
-  (* RFC-0232 §3.3: the connector decoded a structured mention of this
-     channel's bound keeper (e.g. Discord <@snowflake>, invisible to
-     the content token parser), so the recorder persists it as an
-     explicit mention of the lane owner. *)
-  let extra_mentions = extra_mentions_for_metadata ~keeper_name metadata in
-  Keeper_chat_store.append_user_message
-    ~base_dir:config.Workspace.base_path
-    ~keeper_name
-    ~content:(String.trim content)
-    ~surface
-    ?conversation_id
-    ?external_message_id
-    ~speaker:
-      { Keeper_chat_store.speaker_id = opt channel_user_id
-      ; speaker_name = opt channel_user_name
-      ; speaker_authority = Keeper_chat_store.External
-      }
-    ~extra_mentions
-    ();
-  Keeper_chat_broadcast.chat_appended
-    ~keeper_name ~source:lane ();
-  let direct_message =
-    Keeper_invocation_contract.direct_message
-      ~keeper_name
-      ~prompt:
-        (contextualize_message ~channel ~channel_user_id ~channel_user_name
-           ~channel_workspace_id ~metadata ~content)
-      ~direct_reply:true
-      ~channel_session_key
+    surface_for_channel_context
       ~channel
-      ~user_blocks:[]
-      ~attachments:[]
+      ~channel_workspace_id
+      ?conversation_id
+      ?external_message_id
       ()
-    |> Result.map_error Keeper_invocation_contract.request_error_to_string
   in
-  let keeper_ctx : _ Keeper_tool_surface.context = {
-    config;
-    agent_name;
-    sw;
-    clock;
-    proc_mgr;
-    net;
-    publication_recovery_provider;
-  } in
-  let start_mtime = Mtime_clock.now () in
-  let on_text_delta =
-    match on_text_snapshot with
-    | None -> (fun _ -> ())
-    | Some publish_snapshot ->
-        let streamed_text = Buffer.create 1024 in
-        fun delta ->
-          Buffer.add_string streamed_text delta;
-          let snapshot = redact_text (Buffer.contents streamed_text) in
-          (try publish_snapshot snapshot with
-           | Eio.Cancel.Cancelled _ as exn -> raise exn
-           | exn ->
-               Log.Server.warn
-                 "channel gate text snapshot callback failed (keeper=%s): %s"
-                 keeper_name (Printexc.to_string exn))
-  in
-  let defer_to_existing_work message
-      (admission_rejection : Keeper_turn_admission.rejection) =
-    `Async_ack
-      ( admission_rejection.in_flight
-      , Some
-          (Keeper_tool_surface.dispatch_keeper_msg ~submitted_by keeper_ctx
-             ~message) )
-  in
-  let dispatch_result =
-    match direct_message with
-    | Error error -> `Invalid_message error
-    | Ok message ->
-      (* The admission boundary, not a route-level peek, owns the FIFO decision.
-         It rechecks the durable queue after acquiring the Keeper turn slot. *)
-      (match
-         Keeper_tool_surface.dispatch_keeper_msg_stream_if_free
-           ~on_text_delta keeper_ctx ~message
-       with
-       | `Ran result -> `Streaming result
-       | `Busy admission_rejection ->
-         defer_to_existing_work message admission_rejection)
-  in
-  match dispatch_result with
-  | `Invalid_message error -> Gate_protocol.Keeper_error_result error
-  | `Async_ack (in_flight, Some result) when not (Tool_result.is_failed result) ->
-      let body = Tool_result.message result in
-      let duration_ms =
-        Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)
-        |> Int64.div 1_000_000L
-        |> Int64.to_int
-      in
-      let ack_with_in_flight =
-        extract_message_request_ack ~channel ~channel_user_id ~keeper_name
-          ~metadata:(metadata @ in_flight_metadata in_flight)
-          body
-      in
-      let message_request, reply =
-        match ack_with_in_flight with
-        | Ok request ->
-            ( Some request
-            , busy_ack_reply_text ?in_flight request )
-        | Error failure ->
-            (* Backend drift: the keeper accepted the message into its
-               async queue but the wire envelope we expected is missing or
-               malformed. Do not silently substitute the keeper's reply
-               body — that collapses the queued state with a degraded
-               parse path and breaks the connector's "is this queued?"
-               decision. Log the parse failure with the same
-               [status_source=keeper_msg_async] surface so on-call can
-               triage whether the keeper contract regressed or the body
-               was truncated mid-flight, and emit a degraded reply that
-               names the parse failure without leaking the raw body. *)
-            Log.Server.warn
-              "channel gate async ACK parse failure (keeper=%s, lane=%s, \
-               request_id_context=%s, failure=%s): connector will see a \
-               degraded ACK, not the keeper's reply body."
-              keeper_name lane (extract_reply_text body |> String.length |> string_of_int)
-              (ack_parse_failure_to_string failure);
-            ( None
-            , Printf.sprintf
-                "%s is busy; the gate could not parse the async ACK \
-                 envelope (%s). Your message was forwarded to the keeper, \
-                 but no durable request id is available. Treat this as a \
-                 transient backend degradation rather than a queued reply."
-                keeper_name
-                (ack_parse_failure_to_string failure) )
-      in
-      let reply = redact_text reply in
-      let structured = Option.map redact_json (extract_structured body) in
-      let stats =
-        Some
-          { Gate_protocol.model_used = "runtime"
-          ; duration_ms
-          ; tokens_used = 0
-          }
-      in
-      Gate_protocol.Reply { content = reply; structured; stats; message_request }
-  | `Streaming (Some result) when not (Tool_result.is_failed result) ->
-      let body = Tool_result.message result in
-      let duration_ms =
-        Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)
-        |> Int64.div 1_000_000L
-        |> Int64.to_int
-      in
-      let payload_json_opt =
-        try Some (Yojson.Safe.from_string body)
-        with Yojson.Json_error _ -> None
-      in
-      let reply = extract_reply_text body |> redact_text in
-      (match Keeper_turn_outcome.of_reply_payload payload_json_opt with
-       | Error error ->
-         Gate_protocol.Keeper_error_result
-           (redact_text
-              ("keeper reply contract error: "
-               ^ Keeper_turn_outcome.decode_error_to_string error))
-       | Ok turn_outcome ->
-         let connector_reply, blocks =
-           match
-             Keeper_chat_blocks.connector_projection ~turn_outcome
-               ~reply:(Some reply)
-           with
-           | Connector_text text -> text, None
-           | Connector_status { kind } ->
-             ( Keeper_chat_blocks.status_kind_connector_text kind
-             , Some [ Keeper_chat_blocks.Status { kind } ] )
-           | Connector_no_visible_reply -> "", None
-         in
-         let structured = Option.map redact_json (extract_structured body) in
-         let stats =
-           match extract_turn_stats body with
-           | Some s -> Some { s with duration_ms }
-           | None ->
-             Some
-               { Gate_protocol.model_used = "runtime"
-               ; duration_ms
-               ; tokens_used = 0
-               }
-         in
-         (* RFC-0233 §7: pull the turn's join key out of the same reply payload
-            (parse, don't repair) so the connector assistant row joins to its
-            Turn_record. *)
-         let turn_ref =
-           Keeper_turn_outcome.turn_ref_of_reply_payload payload_json_opt
-         in
-         persist_connector_assistant_reply
-           ~base_dir:config.Workspace.base_path ~keeper_name ~surface
-           ?conversation_id ?turn_ref ?blocks ~reply ();
-         Gate_protocol.Reply
-           { content = connector_reply
-           ; structured
-           ; stats
-           ; message_request = None
-           })
-  | `Async_ack (_, Some result) | `Streaming (Some result) ->
-      Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))
-  | `Async_ack (_, None) | `Streaming None ->
-      Gate_protocol.Unavailable_result
-
-let dispatch ~submitted_by ~sw ~clock ~proc_mgr ~net
-    ~publication_recovery_provider ~config ~channel
-    ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-    ~idempotency_key ~metadata ~content =
-  dispatch_core ~submitted_by ~sw ~clock ~proc_mgr ~net
-    ~publication_recovery_provider ~config ~channel ~channel_user_id
-    ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
-    ~metadata ~content ()
-
-let dispatch_with_text_snapshot ~submitted_by ~on_text_snapshot ~sw ~clock
-    ~proc_mgr ~net ~publication_recovery_provider ~config ~channel
-    ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-    ~idempotency_key ~metadata ~content =
-  dispatch_core ~submitted_by ~on_text_snapshot ~sw ~clock ~proc_mgr ~net
-    ~publication_recovery_provider ~config ~channel ~channel_user_id
-    ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
-    ~metadata ~content ()
+  match
+    Keeper_continuation_channel.dashboard
+      ~thread_id:("keeper:" ^ String.trim keeper_name)
+  with
+  | Error detail -> Gate_protocol.Keeper_error_result detail
+  | Ok continuation_channel ->
+    accept_connector
+      ~delivery:
+        { continuation_channel
+        ; surface
+        ; conversation_id
+        ; external_message_id
+        ; workspace_id = non_empty_opt channel_workspace_id
+        }
+      ~clock
+      ~config
+      ~channel
+      ~channel_user_id
+      ~channel_user_name
+      ~channel_workspace_id
+      ~keeper_name
+      ~idempotency_key
+      ~metadata
+      ~content

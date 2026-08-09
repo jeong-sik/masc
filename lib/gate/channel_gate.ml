@@ -56,18 +56,6 @@ type dispatch_fn =
   content:string ->
   Gate_protocol.dispatch_result
 
-type streaming_dispatch_fn =
-  on_text_snapshot:(string -> unit) ->
-  channel:string ->
-  channel_user_id:string ->
-  channel_user_name:string ->
-  channel_workspace_id:string ->
-  keeper_name:string ->
-  idempotency_key:string ->
-  metadata:(string * string) list ->
-  content:string ->
-  Gate_protocol.dispatch_result
-
 (* ── Configuration ──────────────────────────────────────────── *)
 
 (* [max 1] for the same reason as the sibling below: the caller compares
@@ -163,6 +151,3 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
 
 let handle_inbound ~dispatch msg =
   handle_inbound_with ~dispatch msg
-
-let handle_inbound_streaming ~dispatch ~on_text_snapshot msg =
-  handle_inbound_with ~dispatch:(dispatch ~on_text_snapshot) msg

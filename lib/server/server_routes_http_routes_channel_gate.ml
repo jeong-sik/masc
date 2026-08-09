@@ -134,20 +134,13 @@ let request_elapsed_ms request_started =
   Keeper_timing.elapsed_duration_ms ~start_time:request_started
     ~end_time:(Unix.gettimeofday ())
 
-let handle_gate_message ~sw ~clock ~submitted_by state request reqd =
+let handle_gate_message ~clock state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let request_started = Unix.gettimeofday () in
     let workspace_scope = Mcp_server.workspace_scope state in
     let dispatch =
-      (* The HTTP gate route posts and awaits synchronously. A busy Keeper keeps
-         the async [masc_keeper_msg] poll contract; durable connector leaves use
-         [accept_connector] before entering their Keeper lane. *)
       Gate_keeper_backend.dispatch
-        ~submitted_by ~sw ~clock
-        ~proc_mgr:state.Mcp_server.proc_mgr
-        ~net:state.Mcp_server.net
-        ~publication_recovery_provider:
-          (Mcp_server.publication_recovery_availability_provider state)
+        ~clock
         ~config:workspace_scope.config
     in
     let result =
@@ -504,8 +497,8 @@ let handle_gate_connector_unbind _state request reqd =
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/gate/message" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"channel_gate" (fun state submitted_by _req reqd ->
-         handle_gate_message ~sw ~clock ~submitted_by state request reqd
+       with_tool_actor_auth ~tool_name:"channel_gate" (fun state _submitted_by _req reqd ->
+         handle_gate_message ~clock state request reqd
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/health" (fun request reqd ->

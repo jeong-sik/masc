@@ -285,6 +285,9 @@ let read_subscription ~mgr ~cwd config =
     |> fun result -> Result.bind result parse_subscription
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Exn.Io
+      (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
+    Error (Spawn_failed (Printf.sprintf "executable %S was not found" executable))
   | exn -> Error (Subscription_required (Printexc.to_string exn))
 ;;
 
@@ -893,14 +896,19 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
             ~on_turn_started)))
 ;;
 
-let validate_config config ~session_mode ~prompt =
+let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
   else if String.trim config.cwd = "" || Filename.is_relative config.cwd
   then Error (Invalid_config "cwd must be an absolute path")
   else if not (Float.is_finite config.timeout_s) || config.timeout_s <= 0.0
   then Error (Invalid_config "timeout_s must be positive and finite")
-  else if String.trim prompt = ""
+  else Ok ()
+;;
+
+let validate_config config ~session_mode ~prompt =
+  let* () = validate_process_config config in
+  if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
   else
     match session_mode with
@@ -941,7 +949,13 @@ let validate_turn ?(dynamic_tools = []) ?(session_mode = Start) config ~prompt =
   validate_dynamic_tools dynamic_tools
 ;;
 
+let probe_subscription ~mgr ~cwd config =
+  let* () = validate_process_config config in
+  read_subscription ~mgr ~cwd config
+;;
+
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
+    ?admitted_subscription
     ~mgr ~clock ~cwd ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
     ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) config
@@ -949,7 +963,11 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
   let result =
     let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt in
     let* _ = reasoning_args reasoning_effort in
-    let* subscription = read_subscription ~mgr ~cwd config in
+    let* subscription =
+      match admitted_subscription with
+      | Some subscription -> Ok subscription
+      | None -> probe_subscription ~mgr ~cwd config
+    in
     let session_id =
       match session_mode with
       | Start -> Random_id.uuid_v7 ()

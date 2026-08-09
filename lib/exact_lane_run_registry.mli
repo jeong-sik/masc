@@ -1,6 +1,5 @@
 (** Admin-only durable execution records for model-driven Keeper exact-output
-    lanes. Input/output values are exact; provider events remain separately
-    identified by RAW trace references. *)
+    lanes. Input/output values are exact. *)
 
 type lane =
   | Librarian
@@ -11,10 +10,6 @@ type lane =
 type outcome =
   | Succeeded
   | Cancelled
-  | Deferred of
-      { code : string
-      ; detail : string
-      }
   | Failed of
       { code : string
       ; detail : string
@@ -28,12 +23,7 @@ type run_status =
       ; output : Yojson.Safe.t
       }
 
-type run_input =
-  | Exact_input of Yojson.Safe.t
-  | Research_input of
-      { raw_trace_path : string option
-      ; payload : Yojson.Safe.t
-      }
+type run_input = Exact_input of Yojson.Safe.t
 
 type run =
   { run_id : string
@@ -79,10 +69,6 @@ val lane_key : lane -> string
 val outcome_label : outcome -> string
 val status_label : run_status -> string
 val run_to_yojson : run -> Yojson.Safe.t
-
-(** Raw-trace paths retained by registered research/exact executions for one
-    Keeper actor. *)
-val research_raw_trace_paths : t -> actor:string -> string list
 
 (** Called after a registry mutation is durable/in-memory-visible. The server
     installs a WS invalidation broadcaster; tests and library-only users keep

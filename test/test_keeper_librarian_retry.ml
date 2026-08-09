@@ -420,6 +420,36 @@ let test_prompt_carries_recall_fact_byte_budget () =
          "within 12345 UTF-8 bytes")
 ;;
 
+let test_prompt_omits_tool_result_payload_and_has_one_message () =
+  let sentinel = "UNTRUSTED_TOOL_RESULT_MUST_NOT_REACH_MEMORY_FINALIZER" in
+  let tool_message =
+    Agent_sdk.Types.make_message
+      ~role:Agent_sdk.Types.Tool
+      [ Agent_sdk.Types.ToolResult
+          { tool_use_id = "tool-call-1"
+          ; content = sentinel
+          ; outcome = Agent_sdk.Types.Tool_succeeded
+          ; json = Some (`Assoc [ "payload", `String sentinel ])
+          ; content_blocks = Some [ Agent_sdk.Types.Text sentinel ]
+          }
+      ]
+  in
+  let constrained = { (input ()) with messages = [ tool_message ] } in
+  match Runtime.messages_for_librarian constrained with
+  | Error detail -> failf "librarian render failed: %s" detail
+  | Ok messages ->
+    check int "exact finalizer receives one rendered message" 1 (List.length messages);
+    let rendered = user_text_of_messages messages in
+    check bool
+      "tool payload is omitted"
+      false
+      (String_util.contains_substring rendered sentinel);
+    check bool
+      "typed omission marker remains"
+      true
+      (String_util.contains_substring rendered "[tool result omitted:")
+;;
+
 (* The constraint category is scoped to rules something outside the agent
    applies. Measured on the live workspace 2026-08-05: excluding taskmaster,
    12 of 25 stored facts were category constraint, and five of those were the
@@ -597,6 +627,8 @@ let () =
             test_prompt_carries_keeper_instructions
         ; test_case "prompt carries recall byte budget" `Quick
             test_prompt_carries_recall_fact_byte_budget
+        ; test_case "prompt omits tool payload and stays single-message" `Quick
+            test_prompt_omits_tool_result_payload_and_has_one_message
         ; test_case "repo template renders Keeper instructions" `Quick
             test_repo_template_renders_keeper_instructions
         ; test_case "constraint category excludes self-imposed scope" `Quick

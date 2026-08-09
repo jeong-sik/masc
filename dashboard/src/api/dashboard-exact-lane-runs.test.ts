@@ -37,8 +37,8 @@ describe('parseExactLaneRunsResponse', () => {
     })).toThrow('unknown value')
   })
 
-  it('decodes a typed research trace join without guessing fields', () => {
-    const parsed = parseExactLaneRunsResponse({
+  it('rejects removed research input instead of replaying it', () => {
+    expect(() => parseExactLaneRunsResponse({
       generated_at: '2026-08-09T00:00:00Z',
       count: 1,
       runs: [{
@@ -54,30 +54,6 @@ describe('parseExactLaneRunsResponse', () => {
         },
         status: 'running',
       }],
-    })
-    expect(parsed.runs[0]?.input).toEqual({
-      kind: 'research',
-      rawTracePath: '/tmp/raw-traces/librarian-research-1.jsonl',
-      payload: { message_count: 4 },
-    })
-  })
-
-  it('keeps an external-effect wait distinct from failure', () => {
-    const parsed = parseExactLaneRunsResponse({
-      generated_at: '2026-08-09T00:00:00Z',
-      count: 1,
-      runs: [{
-        run_id: 'librarian-deferred', lane: 'librarian_exact', subject_id: 'trace-wait',
-        actor: 'keeper-a', started_at: 1,
-        input: { kind: 'research', raw_trace_path: '/tmp/raw.jsonl', payload: {} },
-        status: 'deferred', elapsed_s: 0.2, output: { outcome: { kind: 'deferred' } },
-        code: 'librarian_external_effect_deferred', detail: 'approval is pending',
-      }],
-    })
-    expect(parsed.runs[0]).toMatchObject({
-      status: 'deferred',
-      code: 'librarian_external_effect_deferred',
-      detail: 'approval is pending',
-    })
+    })).toThrow('unknown value')
   })
 })

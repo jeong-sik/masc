@@ -11,10 +11,6 @@
 val run :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
-  publication_recovery:Keeper_publication_recovery_availability.turn_context ->
-  ctx_snapshot:Keeper_types.working_context ->
-  runtime_id:string ->
-  ?continuation_channel:Keeper_continuation_channel.t ->
   generation:int ->
   turn:int ->
   oas_turn_count:int ->

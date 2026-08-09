@@ -240,10 +240,6 @@ let finalize
     Keeper_agent_run_post_turn_memory.run
       ~config
       ~meta
-      ~publication_recovery
-      ~ctx_snapshot
-      ~runtime_id:runtime_id_string
-      ?continuation_channel
       ~generation
       ~turn:manifest_keeper_turn_id
       ~oas_turn_count:result.turns

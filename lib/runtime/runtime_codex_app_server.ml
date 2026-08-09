@@ -25,11 +25,7 @@ let approval_policy = "never"
 let permissions_profile = ":read-only"
 let thread_is_ephemeral = false
 
-let client_version =
-  match Build_info.V1.version () with
-  | None -> "dev"
-  | Some version -> Build_info.V1.Version.to_string version
-;;
+let client_version = Runtime_build_version.current
 
 let default_config () =
   { cli_path = "codex"

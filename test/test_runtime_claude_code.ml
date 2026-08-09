@@ -187,7 +187,7 @@ let test_quota_is_structurally_classified () =
 ;;
 
 let mcp_initialize =
-  {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}}}|}
+  {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"claude-code-fixture","version":"1"}}}}}|}
 ;;
 
 let mcp_list =
@@ -226,6 +226,7 @@ let test_dynamic_tool_callback () =
   in
   with_fixture
     [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
     ; Emit_and_read mcp_list
     ; Emit_and_read mcp_call
     ; Emit assistant
@@ -245,7 +246,8 @@ let test_dynamic_tool_callback () =
 
 let test_mcp_notification_has_no_response () =
   with_fixture
-    [ Emit mcp_initialized_notification
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
     ; Emit_and_expect_request_id
         (mcp_list_after_notification, "mcp-list-after-notification")
     ; Emit assistant
@@ -271,14 +273,122 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
     then None
     else failf "unexpected tool dispatch reached the callback: %s" name
   in
+  let session = Runtime_official_client_mcp.create_session () in
   let dispatch json =
     Runtime_official_client_mcp.handle_message
+      ~session
       ~server_name:"masc"
       ~tool_specs
       ~call_tool
-      (Yojson.Safe.to_string json)
+      json
     |> Result.get_ok
   in
+  let callback_count = ref 0 in
+  let guarded_call_tool ~name:_ ~call_id:_ ~arguments:_ =
+    incr callback_count;
+    Some { Runtime_official_client_mcp.success = true; content = "unexpected" }
+  in
+  let fresh_session = Runtime_official_client_mcp.create_session () in
+  let rejects_phase label message =
+    match
+      Runtime_official_client_mcp.handle_message
+        ~session:fresh_session
+        ~server_name:"masc"
+        ~tool_specs
+        ~call_tool:guarded_call_tool
+        message
+    with
+    | Error { stage; _ } when String.starts_with ~prefix:"MCP " stage -> ()
+    | Error _ -> failf "%s had the wrong lifecycle error stage" label
+    | Ok _ -> failf "%s bypassed the MCP lifecycle" label
+  in
+  rejects_phase
+    "list before initialize"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 90
+       ; "method", `String "tools/list"
+       ; "params", `Assoc []
+       ]);
+  rejects_phase
+    "call before initialize"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 91
+       ; "method", `String "tools/call"
+       ; ( "params"
+         , `Assoc
+             [ "name", `String "masc_probe"
+             ; "arguments", `Assoc []
+             ] )
+       ]);
+  check int "pre-initialize callback count" 0 !callback_count;
+  let initialized =
+    Runtime_official_client_mcp.handle_message
+      ~session:fresh_session
+      ~server_name:"masc"
+      ~tool_specs
+      ~call_tool:guarded_call_tool
+      (`Assoc
+         [ "jsonrpc", `String "2.0"
+         ; "id", `Int 92
+         ; "method", `String "initialize"
+         ; ( "params"
+           , `Assoc
+               [ "protocolVersion", `String "2025-11-25"
+               ; "capabilities", `Assoc []
+               ; ( "clientInfo"
+                 , `Assoc
+                     [ "name", `String "official-client-test"
+                     ; "version", `String "1"
+                     ] )
+               ] )
+         ])
+    |> Result.get_ok
+  in
+  check bool "initialize has response" true (Option.is_some initialized.response);
+  rejects_phase
+    "call before initialized notification"
+    (`Assoc
+       [ "jsonrpc", `String "2.0"
+       ; "id", `Int 93
+       ; "method", `String "tools/call"
+       ; ( "params"
+         , `Assoc
+             [ "name", `String "masc_probe"
+             ; "arguments", `Assoc []
+             ] )
+       ]);
+  check int "pre-ready callback count" 0 !callback_count;
+  let initialize =
+    dispatch
+      (`Assoc
+         [ "jsonrpc", `String "2.0"
+         ; "id", `Int 0
+         ; "method", `String "initialize"
+         ; ( "params"
+           , `Assoc
+               [ "protocolVersion", `String "2025-11-25"
+               ; "capabilities", `Assoc []
+               ; ( "clientInfo"
+                 , `Assoc
+                     [ "name", `String "official-client-test"
+                     ; "version", `String "1"
+                     ] )
+               ] )
+         ])
+  in
+  check bool "initialize has response" true (Option.is_some initialize.response);
+  let notification =
+    dispatch
+      (`Assoc
+         [ "jsonrpc", `String "2.0"
+         ; "method", `String "notifications/initialized"
+         ; "params", `Assoc []
+         ])
+  in
+  check (option string) "notification has no response" None
+    (Option.map Yojson.Safe.to_string notification.response);
   let list =
     dispatch
       (`Assoc
@@ -290,16 +400,6 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
   in
   check bool "list has response" true (Option.is_some list.response);
   check bool "list did not call a tool" false list.tool_called;
-  let notification =
-    dispatch
-      (`Assoc
-         [ "jsonrpc", `String "2.0"
-         ; "method", `String "notifications/initialized"
-         ; "params", `Assoc []
-         ])
-  in
-  check (option string) "notification has no response" None
-    (Option.map Yojson.Safe.to_string notification.response);
   let unknown =
     dispatch
       (`Assoc
@@ -321,27 +421,35 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
     (unknown.response |> Option.get |> member "error" |> member "code" |> to_int);
   (match
      Runtime_official_client_mcp.handle_message
+       ~session
        ~server_name:"masc"
        ~tool_specs
        ~call_tool
-       {|{"jsonrpc":"2.0","id":true,"method":"tools/list"}|}
+       (`Assoc
+          [ "jsonrpc", `String "2.0"
+          ; "id", `Bool true
+          ; "method", `String "tools/list"
+          ])
    with
    | Error { stage = "MCP message"; _ } -> ()
    | Error _ -> fail "invalid request id had the wrong error stage"
    | Ok _ -> fail "boolean JSON-RPC request id was admitted");
-  let rejects_raw label raw_message =
+  let rejects label message =
     match
       Runtime_official_client_mcp.handle_message
+        ~session
         ~server_name:"masc"
         ~tool_specs
         ~call_tool
-        raw_message
+        message
     with
     | Error { stage = "MCP message"; _ } -> ()
     | Error _ -> failf "%s had the wrong error stage" label
     | Ok _ -> failf "%s was admitted" label
   in
-  let rejects label json = rejects_raw label (Yojson.Safe.to_string json) in
+  let rejects_raw label raw_message =
+    rejects label (Yojson.Safe.from_string raw_message)
+  in
   rejects
     "explicit null notification id"
     (`Assoc
@@ -375,8 +483,86 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
        ]);
   rejects_raw
     "non-finite nested value"
-    {|{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"missing","arguments":{"score":NaN}}}|};
-  rejects_raw "malformed JSON" {|{"jsonrpc":"2.0","id":7|}
+    {|{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"missing","arguments":{"score":NaN}}}|}
+;;
+
+let test_shared_mcp_protocol_is_negotiated () =
+  let tool_specs () = [] in
+  let call_tool ~name:_ ~call_id:_ ~arguments:_ = None in
+  let initialize protocol_version =
+    `Assoc
+      [ "jsonrpc", `String "2.0"
+      ; "id", `Int 1
+      ; "method", `String "initialize"
+      ; ( "params"
+        , `Assoc
+            [ "protocolVersion", `String protocol_version
+            ; "capabilities", `Assoc []
+            ; ( "clientInfo"
+              , `Assoc
+                  [ "name", `String "official-client-test"
+                  ; "version", `String "1"
+                  ] )
+            ] )
+      ]
+  in
+  let open Yojson.Safe.Util in
+  let handle message =
+    Runtime_official_client_mcp.handle_message
+      ~session:(Runtime_official_client_mcp.create_session ())
+      ~server_name:"masc"
+      ~tool_specs
+      ~call_tool
+      message
+  in
+  match
+    handle (initialize "2025-11-25")
+  with
+  | Error error -> fail (error.stage ^ ": " ^ error.detail)
+  | Ok dispatch ->
+    check string
+      "measured Antigravity protocol"
+      "2025-11-25"
+      (dispatch.response
+       |> Option.get
+       |> member "result"
+       |> member "protocolVersion"
+       |> to_string);
+    check string
+      "MCP server version uses the canonical build owner"
+      Version.version
+      (dispatch.response
+       |> Option.get
+       |> member "result"
+       |> member "serverInfo"
+       |> member "version"
+       |> to_string);
+    (match
+       handle (initialize "2099-01-01")
+     with
+     | Error { stage = "MCP initialize"; _ } -> ()
+     | Error _ -> fail "unsupported protocol version had the wrong stage"
+     | Ok _ -> fail "unsupported protocol version was silently normalized");
+    (match
+       handle
+         (`Assoc
+            [ "jsonrpc", `String "2.0"
+            ; "id", `Int 2
+            ; "method", `String "initialize"
+            ; ( "params"
+              , `Assoc
+                  [ "capabilities", `Assoc []
+                  ; ( "clientInfo"
+                    , `Assoc
+                        [ "name", `String "official-client-test"
+                        ; "version", `String "1"
+                        ] )
+                  ] )
+            ])
+     with
+     | Error { stage = "MCP initialize"; _ } -> ()
+     | Error _ -> fail "missing protocol version had the wrong stage"
+     | Ok _ -> fail "missing protocol version inherited a hidden default")
 ;;
 
 let test_malformed_json_fails_closed () =
@@ -503,6 +689,10 @@ let () =
             "shared bridge owns exact dispatch"
             `Quick
             test_shared_mcp_bridge_owns_exact_dispatch
+        ; test_case
+            "shared protocol is negotiated"
+            `Quick
+            test_shared_mcp_protocol_is_negotiated
         ; test_case
             "notification has no response"
             `Quick

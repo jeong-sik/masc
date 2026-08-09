@@ -17,6 +17,7 @@
   masc.agent_core
   masc.agent_core.base
   masc.agent_core.llm_provider
+  masc.mcp_transport_protocol
   masc.masc_core
   masc.masc_types
   uri

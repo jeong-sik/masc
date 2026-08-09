@@ -1,9 +1,9 @@
 (** Exact JSON-RPC/MCP bridge shared by official subscription clients.
 
     Client adapters own their transport and tool representation. This module's
-    raw-text entrypoint owns JSON parsing and the protocol state: initialize,
-    tools/list, tools/call, notification no-response semantics, and typed
-    protocol failures. *)
+    parsed-message entrypoint owns protocol validation and dispatch:
+    initialize, tools/list, tools/call, and notification no-response
+    semantics. Each client adapter owns its raw transport parsing. *)
 
 type error =
   { stage : string
@@ -20,7 +20,13 @@ type dispatch =
   ; tool_called : bool
   }
 
+type session
+
+val create_session : unit -> session
+(** Fresh closed lifecycle: initialize, initialized notification, then Ready. *)
+
 val handle_message :
+  session:session ->
   server_name:string ->
   tool_specs:(unit -> Yojson.Safe.t list) ->
   call_tool:
@@ -28,5 +34,5 @@ val handle_message :
      call_id:string ->
      arguments:Yojson.Safe.t ->
      tool_result option) ->
-  string ->
+  Yojson.Safe.t ->
   (dispatch, error) result

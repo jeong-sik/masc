@@ -120,6 +120,34 @@ let protocol_error_response id code message =
     ]
 ;;
 
+let protocol_version_header t request =
+  let values =
+    Cohttp.Header.get_multi
+      (Cohttp.Request.headers request)
+      "mcp-protocol-version"
+  in
+  let session = Runtime_official_client_mcp.snapshot_session t.session in
+  match session.phase, session.negotiated_protocol_version, values with
+  | Awaiting_initialize, None, [] -> Ok ()
+  | Awaiting_initialize, None, [ value ] ->
+    Mcp_transport_protocol.validate_protocol_version value
+    |> Result.map (fun _ -> ())
+  | (Awaiting_initialized | Ready), Some expected, [ value ]
+    when String.equal expected value -> Ok ()
+  | (Awaiting_initialized | Ready), Some _, [] ->
+    Error "missing MCP-Protocol-Version header"
+  | (Awaiting_initialized | Ready), Some expected, [ value ] ->
+    Error
+      (Printf.sprintf
+         "MCP-Protocol-Version mismatch: expected %S, got %S"
+         expected
+         value)
+  | _, _, _ :: _ :: _ -> Error "duplicate MCP-Protocol-Version header"
+  | Awaiting_initialize, Some _, _
+  | (Awaiting_initialized | Ready), None, _ ->
+    Error "MCP session has no negotiated protocol version"
+;;
+
 type dispatch_error =
   | Protocol_error of Runtime_official_client_mcp.error
   | Protocol_header_error of string
@@ -231,34 +259,6 @@ let content_type_is_json request =
   | [ value ] ->
     Mcp_transport_protocol.Http_negotiation.is_json_content_type (Some value)
   | [] | _ :: _ :: _ -> false
-;;
-
-let protocol_version_header t request =
-  let values =
-    Cohttp.Header.get_multi
-      (Cohttp.Request.headers request)
-      "mcp-protocol-version"
-  in
-  let session = Runtime_official_client_mcp.snapshot_session t.session in
-  match session.phase, session.negotiated_protocol_version, values with
-  | Awaiting_initialize, None, [] -> Ok ()
-  | Awaiting_initialize, None, [ value ] ->
-    Mcp_transport_protocol.validate_protocol_version value
-    |> Result.map (fun _ -> ())
-  | (Awaiting_initialized | Ready), Some expected, [ value ]
-    when String.equal expected value -> Ok ()
-  | (Awaiting_initialized | Ready), Some _, [] ->
-    Error "missing MCP-Protocol-Version header"
-  | (Awaiting_initialized | Ready), Some expected, [ value ] ->
-    Error
-      (Printf.sprintf
-         "MCP-Protocol-Version mismatch: expected %S, got %S"
-         expected
-         value)
-  | _, _, _ :: _ :: _ -> Error "duplicate MCP-Protocol-Version header"
-  | Awaiting_initialize, Some _, _
-  | (Awaiting_initialized | Ready), None, _ ->
-    Error "MCP session has no negotiated protocol version"
 ;;
 
 let content_length request =

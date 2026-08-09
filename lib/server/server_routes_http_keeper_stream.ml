@@ -909,7 +909,7 @@ and queued_turn_outcome =
 type turn_submission =
   | Owner_operation of
       { operation_id : Keeper_owner.Chat_operation.Operation_id.t
-      ; admission_token : Keeper_turn_admission.token
+      ; admission_token : Keeper_turn_dispatch_authority.token
       ; execution_sw : Eio.Switch.t
       ; surface : Surface_ref.t
       ; speaker : Keeper_chat_store.speaker
@@ -2001,21 +2001,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                failed "Turn_invariant" "Owner operation returned no terminal turn outcome")))
   in
   match
-    Keeper_turn_admission.run_if_free_with_token
-      ~base_path:(Mcp_server.workspace_config state).base_path
-      ~keeper_name
-      execute_admitted
+    Keeper_turn_dispatch_authority.run execute_admitted
   with
-  | `Ran execution -> execution
-  | `Busy (Keeper_turn_admission.Shutdown_requested operation_id) ->
-    failed
-      "Owner_stopping"
-      ("Keeper shutdown owns turn admission: "
-       ^ Keeper_shutdown_types.Operation_id.to_string operation_id)
-  | `Busy (Keeper_turn_admission.Turn_busy _) ->
-    failed
-      "Owner_invariant"
-      "Keeper Owner admitted a chat child while the retired turn fence was busy"
+  | execution -> execution
 ;;
 
 let keeper_chat_stream_headers origin =

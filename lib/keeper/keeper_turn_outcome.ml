@@ -45,7 +45,7 @@ let turn_ref_wire_key = "turn_ref"
 
 let of_stop_reason = function
   | Runtime_agent.Completed -> Visible_reply
-  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Yielded_after_repeated_tool_call _ ->
     Continuation_checkpoint
@@ -55,7 +55,7 @@ let of_stop_reason = function
 let of_result_surface ~response_text = function
   | Runtime_agent.Completed ->
       if String.trim response_text = "" then No_visible_reply else Visible_reply
-  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Yielded_after_repeated_tool_call _ ->
     Continuation_checkpoint

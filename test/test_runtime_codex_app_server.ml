@@ -110,7 +110,7 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp
       ~prompt:"Return the fixture marker")
 ;;
 
-let test_turn_admission_validation_is_process_free () =
+let test_dispatch_validation_is_process_free () =
   let config =
     { (Runtime_codex_app_server.default_config ()) with cli_path = "" }
   in
@@ -1960,9 +1960,9 @@ let () =
              `Quick
              test_item_output_deltas_are_typed_and_unbounded
         ; test_case
-            "turn admission validation is process-free"
+            "dispatch validation is process-free"
             `Quick
-            test_turn_admission_validation_is_process_free
+            test_dispatch_validation_is_process_free
         ; test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
         ; test_case "history injects before turn" `Quick test_history_is_injected_before_turn
         ; test_case

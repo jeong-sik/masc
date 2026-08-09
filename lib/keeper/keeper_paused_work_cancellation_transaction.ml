@@ -63,7 +63,7 @@ let failure_to_string = function
 let error_to_string = function
   | Admission_busy block ->
     Printf.sprintf
-      "keeper_turn_admission_busy: operation=cancel_pending %s"
+      "keeper_owner_busy: operation=cancel_pending %s"
       (Keeper_owner.autonomous_block_to_string block)
   | Owner_unavailable detail -> "Keeper owner unavailable: " ^ detail
   | Reservation_conflict owner ->

@@ -21,6 +21,7 @@ type inventory =
   { queued_count : int
   ; running_operation_id : Operation.Operation_id.t option
   ; terminal_count : int
+  ; interrupted_count : int
   }
 
 val database_file : string

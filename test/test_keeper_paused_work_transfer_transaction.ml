@@ -359,16 +359,18 @@ let test_transfer_busy_has_zero_mutation () =
   with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
     let base_path = config.Workspace.base_path in
     (match
-       Keeper_turn_admission.run_if_free
+       Keeper_owner_registry.run_maintenance_if_idle
          ~base_path
          ~keeper_name:from_keeper
          (fun () ->
             Transaction.transfer_pending config ~from_keeper ~to_keeper request)
      with
-     | `Ran (Error { cause = Transaction.Admission_busy _; _ }) -> ()
-     | `Ran (Error error) -> Alcotest.fail (Transaction.error_to_string error)
-     | `Ran (Ok _) | `Busy _ ->
-       Alcotest.fail "transfer was not deferred by turn admission");
+     | Ok (`Ran (Error { cause = Transaction.Admission_busy _; _ })) -> ()
+     | Ok (`Ran (Error error)) -> Alcotest.fail (Transaction.error_to_string error)
+     | Error error ->
+       Alcotest.fail (Keeper_owner_registry.command_error_to_string error)
+     | Ok (`Ran (Ok _) | `Busy _) ->
+       Alcotest.fail "transfer was not deferred by Keeper Owner");
     let source =
       Persistence.load_state_result ~base_path ~keeper_name:from_keeper
       |> require_ok "load admission-busy source"
@@ -976,7 +978,7 @@ let () =
             `Quick
             test_stale_source_incarnation_has_no_receipt_or_target_effect
         ; Alcotest.test_case
-            "source shutdown fences transfer before turn admission"
+            "source shutdown fences transfer before Owner mutation"
             `Quick
             test_source_shutdown_fences_transfer_before_receipt
         ; Alcotest.test_case

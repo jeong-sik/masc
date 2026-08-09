@@ -115,7 +115,7 @@ let run_keeper_cycle = Cycle.run_keeper_cycle
 type keepalive_cycle_status =
   | Turn_cycle_completed
   | Turn_cycle_crashed
-  | Turn_cycle_busy of Keeper_turn_admission.autonomous_block
+  | Turn_cycle_busy of Keeper_owner.autonomous_block
 
 type keepalive_cycle_accounting =
   { record_turn_status : bool
@@ -339,10 +339,7 @@ let run_keepalive_unified_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         (fun () ->
-           Keeper_turn_admission.run_if_free_with_token
-             ~base_path:ctx.config.base_path
-             ~keeper_name:meta_after_triage.name
-             (fun admission_token ->
+           Keeper_turn_dispatch_authority.run (fun admission_token ->
     let consumed_stimuli = ref [] in
     let pending_selection
       : Keeper_event_queue_state.pending_selection option ref
@@ -423,7 +420,7 @@ let run_keepalive_unified_turn
                ~selection)
       in
       (match
-         Keeper_turn_admission.install_before_dispatch_authority
+         Keeper_turn_dispatch_authority.install
            admission_token
            selected_source_authority
        with
@@ -870,38 +867,15 @@ let run_keepalive_unified_turn
         exn;
       { meta = meta_after_triage; cycle_status = Turn_cycle_crashed }))
     with
-  | Ok (`Ran (`Ran outcome)) -> outcome
-  | Ok (`Ran (`Busy block)) ->
-    Log.Keeper.info
-      ~keeper_name:meta_after_triage.name
-      "keeper turn admission busy before stimulus intake: %s"
-      (Keeper_turn_admission.autonomous_block_to_string block);
-    { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
-  | Ok (`Busy (Keeper_owner.Turn_busy (Some in_flight))) ->
-    let lane =
-      match in_flight.Keeper_owner.lane with
-      | Keeper_owner.Autonomous -> Keeper_turn_admission.Autonomous
-      | Keeper_owner.Chat_operation -> Keeper_turn_admission.Chat
-      | Keeper_owner.Maintenance -> Keeper_turn_admission.Autonomous
-    in
-    let block =
-      Keeper_turn_admission.Turn_busy
-        (Some
-           { Keeper_turn_admission.lane = lane
-           ; started_at = in_flight.started_at
-           })
-    in
+  | Ok (`Ran outcome) -> outcome
+  | Ok (`Busy ((Keeper_owner.Turn_busy (Some in_flight)) as block)) ->
     Log.Keeper.info
       ~keeper_name:meta_after_triage.name
       "keeper owner busy before stimulus intake: %s"
       (Keeper_owner.autonomous_block_to_string
          (Keeper_owner.Turn_busy (Some in_flight)));
     { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
-  | Ok (`Busy (Keeper_owner.Turn_busy None)) ->
-    let block = Keeper_turn_admission.Turn_busy None in
-    { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
-  | Ok (`Busy (Keeper_owner.Shutdown_requested operation_id)) ->
-    let block = Keeper_turn_admission.Shutdown_requested operation_id in
+  | Ok (`Busy block) ->
     { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
   | Error error ->
     Log.Keeper.error
@@ -1211,14 +1185,14 @@ let run_heartbeat_loop
               ~base_path:ctx.config.base_path
               m.name
               ~reasons:
-                [ "turn_admission_"
-                  ^ Keeper_turn_admission.autonomous_block_kind block
+                [ "keeper_owner_"
+                  ^ Keeper_owner.autonomous_block_kind block
                 ];
             Log.Keeper.info
               ~keeper_name:m.name
-              "turn admission deferred autonomous work: %s; this keepalive cycle \
+              "Keeper Owner deferred autonomous work: %s; this keepalive cycle \
                records no turn status, crash, or work-health refresh"
-              (Keeper_turn_admission.autonomous_block_to_string block)
+              (Keeper_owner.autonomous_block_to_string block)
           | Turn_cycle_completed | Turn_cycle_crashed -> assert false)
         else if not lifecycle_blocked
         then (

@@ -129,7 +129,7 @@ type turn_success =
 
 let turn_success_of_stop_reason ~meta = function
   | Runtime_agent.Completed -> Turn_completed meta
-  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
   | Runtime_agent.Yielded_after_repeated_tool_call _ ->
@@ -145,7 +145,7 @@ let chat_yield_request ~base_path ~keeper_name =
      | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
      | Ok operations ->
        if operations.Keeper_owner.queued_count > 0
-       then Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
+       then Ok (Some Keeper_agent_run.{ reason = Operation_queued })
        else Ok None)
 ;;
 
@@ -237,7 +237,7 @@ let manual_compaction_yield_request ~wake ~base_path ~keeper_name =
     Option.iter
       (fun (request : Keeper_agent_run.autonomous_yield_request) ->
          match request.reason with
-         | Keeper_agent_run.Chat_waiting -> ()
+         | Keeper_agent_run.Operation_queued -> ()
          | Keeper_agent_run.Durable_stimulus_waiting summary ->
            Log.Keeper.info
              ~keeper_name

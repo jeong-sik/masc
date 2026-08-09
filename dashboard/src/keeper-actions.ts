@@ -599,14 +599,15 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       const failure = operation.state.kind === 'failed' ? operation.state : null
       const interrupted =
         failure?.failureKind === 'Interrupted_by_restart'
-      const errorMessage = failure
-        ? interrupted
+      let errorMessage: string | null = null
+      if (failure) {
+        errorMessage = interrupted
           ? 'Interrupted'
           : `${failure.failureKind}: ${failure.detail}`
-        : null
-      const userDelivery: KeeperConversationDelivery = isCancelled
-        ? 'cancelled'
-        : failure ? 'error' : 'delivered'
+      }
+      let userDelivery: KeeperConversationDelivery = 'delivered'
+      if (isCancelled) userDelivery = 'cancelled'
+      else if (failure) userDelivery = 'error'
       const assistantDelivery: KeeperConversationDelivery = userDelivery
       finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
         delivery: userDelivery,

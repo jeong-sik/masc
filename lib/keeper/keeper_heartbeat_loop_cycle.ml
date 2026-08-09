@@ -96,7 +96,7 @@ let rec deferred_runtime_lane = function
 ;;
 
 (* Body of [run_keeper_cycle], runnable only while holding the keeper's
-   turn slot ([Keeper_turn_admission]). The post-failure meta re-reads stay
+   Keeper Owner child. The post-failure meta re-reads stay
    inside the slot for the same reason as the chat lane: a concurrent turn
    must not interleave with this lane's meta writes (RFC-0225 §1). *)
 let run_keeper_cycle_admitted
@@ -220,7 +220,7 @@ let run_keeper_cycle_with
   let run_standard_cycle () =
     run_keeper_cycle_admitted
       ~before_dispatch_authority:
-        (fun () -> Keeper_turn_admission.validate_before_dispatch admission_token)
+        (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ~ctx
@@ -244,7 +244,7 @@ let run_keeper_cycle_with
        run_manual_compaction
          ~before_dispatch_authority:
            (fun _observation ->
-              Keeper_turn_admission.validate_before_dispatch admission_token)
+              Keeper_turn_dispatch_authority.validate admission_token)
          ~config:ctx.config
          ~meta:meta_after_triage
          ()
@@ -294,7 +294,7 @@ run_keeper_cycle_with
        Keeper_manual_compaction.run_under_admission
          ~before_dispatch_authority:
            (fun _observation ->
-              Keeper_turn_admission.validate_before_dispatch admission_token)
+              Keeper_turn_dispatch_authority.validate admission_token)
          ~config
          ~meta
          ())

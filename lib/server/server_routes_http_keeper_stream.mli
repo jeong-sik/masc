@@ -161,7 +161,7 @@ type queued_turn_outcome =
 type turn_submission =
   | Owner_operation of
       { operation_id : Keeper_owner.Chat_operation.Operation_id.t
-      ; admission_token : Keeper_turn_admission.token
+      ; admission_token : Keeper_turn_dispatch_authority.token
       ; execution_sw : Eio.Switch.t
       ; surface : Surface_ref.t
       ; speaker : Keeper_chat_store.speaker
@@ -204,7 +204,7 @@ val operation_executor :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   Keeper_owner.operation_executor
 (** Production executor installed into every Keeper Owner. It claims the FIFO
-    head only after acquiring turn admission, streams Dashboard events by
+    head only after the Keeper Owner starts it, streams Dashboard events by
     operation id, and joins Discord/Slack terminal delivery before returning. *)
 
 (** {1 Testing helpers} *)

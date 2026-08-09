@@ -70,7 +70,7 @@ type pending_board_event = {
 (** [false] for a scheduled-work or system-authority carrier that shares the
     historical observation container but must not be projected as Board activity.
 
-    This partition decides prompt placement, contributes to turn admission,
+    This partition decides prompt placement, contributes to Owner turn selection,
     and feeds the classifier. {!Keeper_unified_prompt} renders only
     [is_scheduled_automation_event] events under Scheduled Automation,
     [is_completion_authority_rejection_event] events under their own completion

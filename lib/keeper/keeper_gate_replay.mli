@@ -156,7 +156,7 @@ val replayable_of_operation : string -> replayable option
     path supplies. A re-derived input mismatch follows that producer's existing
     ordinary Gate semantics; replay adds no second authorization constraint.
 
-    The caller already holds [Keeper_turn_admission]'s per-Keeper turn mutex.
+    The caller already runs in the Keeper Owner child.
     Replay does not add an approval claim or workspace-wide backpressure Gate.
     Consumption is the durable one-shot grant. A repeated call after a
     successful replay returns the durable outcome without invoking the effect.

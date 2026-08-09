@@ -248,7 +248,7 @@ let run (ctx : ctx)
                       checkpoint_stage_observed)
                    (* This module is the autonomous lane's turn runner
                       ([Keeper_unified_turn.run_keeper_cycle] → here, only ever
-                      reached via [Keeper_turn_admission.run_if_free]); the chat
+                      reached via the Keeper Owner child); the chat
                       lane runs [run_keeper_msg_turn_admitted] on a separate
                       path. Thus the probe is lane-gated and runs only at AGENT_CORE's
                       post-tool boundary. Its signals come from the exact chat

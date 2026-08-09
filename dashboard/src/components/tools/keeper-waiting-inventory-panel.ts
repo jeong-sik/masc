@@ -44,10 +44,11 @@ export function sourceTone(source: string | null | undefined): StatusChipTone {
     case 'hitl_pending':
     case 'operator_pending_confirm':
     case 'schedule_waiting':
-    case 'turn_admission_waiting':
+    case 'chat_operation_queued':
       return 'warn'
     case 'fusion_running':
-    case 'turn_admission_shutdown':
+    case 'chat_operation_running':
+    case 'owner_shutdown':
       return 'info'
     default:
       return 'neutral'
@@ -112,7 +113,7 @@ function WaitingRowOperationDetail({ row }: { row: DashboardKeeperWaitingRow }) 
 }
 
 function WaitingRowShutdownDetail({ row }: { row: DashboardKeeperWaitingRow }) {
-  if (row.source !== 'turn_admission_shutdown') return null
+  if (row.source !== 'owner_shutdown') return null
   const detail = asDetailRecord(row.detail)
   const operationId = typeof detail?.shutdown_operation_id === 'string'
     ? detail.shutdown_operation_id.trim()

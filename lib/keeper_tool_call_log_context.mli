@@ -6,7 +6,7 @@
     of the same keeper overwrote each other and tool-call rows were logged
     with the wrong run identity (trace_id / keeper_turn_id
     cross-attribution, 2026-06-10 voice incident). A cell per run makes
-    attribution correct independently of turn admission. *)
+    attribution correct independently of Owner scheduling. *)
 
 type turn_context =
   { agent_name : string option

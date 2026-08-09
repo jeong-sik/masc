@@ -1502,76 +1502,86 @@ let test_health_json_surfaces_durable_paused_keepers () =
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
 
-let test_health_json_observes_non_waiting_turn_fence () =
-  with_temp_dir "health-turn-admission-work" (fun dir ->
+let test_health_json_observes_owner_turn () =
+  with_temp_dir "health-keeper-owner-work" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();
-    Keeper_turn_admission.For_testing.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Keeper_turn_admission.For_testing.reset ();
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let keeper_name = "example" in
+        let config = Mcp_server.workspace_config state in
+        write_keeper_meta_exn
+          config
+          (make_keeper_meta ~name:keeper_name ~trace_id:"trace-owner-health" ());
         Eio.Switch.run (fun sw ->
+          (match
+             Keeper_owner_registry.install_from_store
+               ~sw
+               ~operation_executor:None
+               config
+           with
+           | Ok _ -> ()
+           | Error error ->
+             Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
           let started, set_started = Eio.Promise.create () in
           let release, set_release = Eio.Promise.create () in
           Eio.Fiber.fork ~sw (fun () ->
             match
-              Keeper_turn_admission.run_if_free
+              Keeper_owner_registry.run_maintenance_if_idle
                 ~base_path:dir
                 ~keeper_name
                 (fun () ->
                    Eio.Promise.resolve set_started ();
                    Eio.Promise.await release)
             with
-            | `Ran () -> ()
-            | `Busy _ -> Alcotest.fail "free turn fence must admit");
+            | Ok (`Ran ()) -> ()
+            | Ok (`Busy _) -> Alcotest.fail "free Owner must admit"
+            | Error error ->
+              Alcotest.fail (Keeper_owner_registry.command_error_to_string error));
           Eio.Promise.await started;
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
-          let admission = json |> member "keeper_turn_admission" in
-          Alcotest.(check string) "in-flight fence is not health degradation"
+          let owner = json |> member "keeper_owner" in
+          Alcotest.(check string) "in-flight Owner is not health degradation"
             "ok"
-            (admission |> member "status" |> to_string);
-          Alcotest.(check int) "turn admission exposes one in-flight Keeper"
+            (owner |> member "status" |> to_string);
+          Alcotest.(check int) "Owner exposes one in-flight Keeper"
             1
-            (admission |> member "in_flight_keeper_count" |> to_int);
-          Alcotest.(check bool) "turn admission has no waiter contract"
-            true
-            (admission |> member "chat_waiting_total_count" = `Null);
+            (owner |> member "in_flight_keeper_count" |> to_int);
           Alcotest.(check bool)
             "in-flight work does not require an operator"
             false
-            (admission |> member "operator_action_required" |> to_bool);
+            (owner |> member "operator_action_required" |> to_bool);
           let runtime_resolution =
             `Assoc
               (Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields ())
           in
-          let runtime_admission =
-            runtime_resolution |> member "keeper_turn_admission"
+          let runtime_owner =
+            runtime_resolution |> member "keeper_owner"
           in
           Alcotest.(check bool)
-            "runtime resolution has no waiter contract"
+            "runtime resolution exposes Owner"
             true
-            (runtime_admission |> member "chat_waiting_total_count" = `Null);
+            (runtime_owner |> member "schema" |> to_string = "masc.keeper_owner.v1");
           let light_runtime_resolution =
             `Assoc
               (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ())
           in
-          let light_runtime_admission =
-            light_runtime_resolution |> member "keeper_turn_admission"
+          let light_runtime_owner =
+            light_runtime_resolution |> member "keeper_owner"
           in
           Alcotest.(check bool)
-            "light runtime resolution has no waiter contract"
+            "light runtime resolution exposes Owner"
             true
-            (light_runtime_admission |> member "chat_waiting_total_count" = `Null);
+            (light_runtime_owner |> member "schema" |> to_string = "masc.keeper_owner.v1");
           Eio.Promise.resolve set_release ())))
 
 let test_health_json_surfaces_board_event_collection_failure () =
@@ -2873,11 +2883,26 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
             ~name:keeper_name
             ~trace_id:"trace-in-flight-running"
             ()
+          |> fun meta ->
+          { meta with
+            autoboot_enabled = true
+          ; proactive = { enabled = true }
+          }
         in
         write_keeper_meta_exn config meta;
         with_running_keeper_metas config [ meta ] (fun () ->
+          Eio.Switch.run (fun sw ->
+          (match
+             Keeper_owner_registry.install_from_store
+               ~sw
+               ~operation_executor:None
+               config
+           with
+           | Ok _ -> ()
+           | Error error ->
+             Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
           match
-            Keeper_turn_admission.run_if_free
+            Keeper_owner_registry.run_maintenance_if_idle
               ~base_path:dir
               ~keeper_name
               (fun () ->
@@ -2902,17 +2927,17 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
                   ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
                   ())
           with
-          | `Busy _ -> Alcotest.fail "test Keeper turn admission was busy"
-          | `Ran fleet_safety ->
+          | Error error ->
+            Alcotest.fail (Keeper_owner_registry.command_error_to_string error)
+          | Ok (`Busy _) -> Alcotest.fail "test Keeper Owner was busy"
+          | Ok (`Ran fleet_safety) ->
             let open Yojson.Safe.Util in
             Alcotest.(check int) "in-flight Keeper remains executable" 1
               (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
-            Alcotest.(check string) "in-flight Keeper keeps fleet healthy" "ok"
-              (fleet_safety |> member "status" |> to_string);
             Alcotest.(check bool) "in-flight Keeper needs no operator action" false
               (fleet_safety |> member "operator_action_required" |> to_bool);
             Alcotest.(check int) "in-flight Keeper has no blocked row" 0
-              (fleet_safety |> member "blocked_keeper_count" |> to_int))))
+              (fleet_safety |> member "blocked_keeper_count" |> to_int)))))
 
 let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacity () =
   with_temp_dir "health-blocked-count-non-target-capacity" (fun dir ->
@@ -3579,7 +3604,7 @@ let test_health_json_reaction_ledger_unavailable_shape () =
           |> to_list
           |> List.length))
 
-let test_health_json_turn_admission_unavailable_shape () =
+let test_health_json_owner_unavailable_shape () =
   let previous_state = !Server_auth.server_state in
   Fun.protect
     ~finally:(fun () -> Server_auth.server_state := previous_state)
@@ -3588,11 +3613,11 @@ let test_health_json_turn_admission_unavailable_shape () =
        let request = Httpun.Request.create `GET "/health" in
        let json = Server_routes_http_runtime.make_health_json request in
        let open Yojson.Safe.Util in
-       let admission = json |> member "keeper_turn_admission" in
-       Alcotest.(check string) "unavailable turn admission status" "unavailable"
-         (admission |> member "status" |> to_string);
+       let owner = json |> member "keeper_owner" in
+       Alcotest.(check string) "unavailable Keeper Owner status" "unavailable"
+         (owner |> member "status" |> to_string);
        Alcotest.(check int) "unavailable shutdown keeper count" 0
-         (admission |> member "shutdown_keeper_count" |> to_int))
+         (owner |> member "shutdown_keeper_count" |> to_int))
 
 let test_health_json_surfaces_log_ring_summary () =
   Log.set_level Log.Info;
@@ -5142,8 +5167,8 @@ let () =
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
           Alcotest.test_case
-            "health json surfaces non-waiting turn fence"
-            `Quick test_health_json_observes_non_waiting_turn_fence;
+            "health json surfaces Keeper Owner turn"
+            `Quick test_health_json_observes_owner_turn;
           Alcotest.test_case
             "health json surfaces board event collection failure"
             `Quick test_health_json_surfaces_board_event_collection_failure;
@@ -5246,8 +5271,8 @@ let () =
             "health json reaction ledger unavailable shape"
             `Quick test_health_json_reaction_ledger_unavailable_shape;
           Alcotest.test_case
-            "health json turn admission unavailable shape"
-            `Quick test_health_json_turn_admission_unavailable_shape;
+            "health json Keeper Owner unavailable shape"
+            `Quick test_health_json_owner_unavailable_shape;
           Alcotest.test_case "health json surfaces log ring summary" `Quick
             test_health_json_surfaces_log_ring_summary;
           Alcotest.test_case

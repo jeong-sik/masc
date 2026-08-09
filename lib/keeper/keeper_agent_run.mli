@@ -36,7 +36,7 @@ type durable_stimulus_summary = {
     healthy cooperation from a keeper that never finishes a turn. *)
 
 type autonomous_yield_reason =
-  | Chat_waiting
+  | Operation_queued
   | Durable_stimulus_waiting of durable_stimulus_summary
 
 type autonomous_yield_request = {

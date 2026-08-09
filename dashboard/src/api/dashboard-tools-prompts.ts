@@ -295,8 +295,7 @@ export type DashboardKeeperWaitingSource =
   | 'external_attention'
   | 'fusion_running'
   | 'schedule_waiting'
-  | 'turn_admission_waiting'
-  | 'turn_admission_shutdown'
+  | 'owner_shutdown'
   | 'operator_pending_confirm'
   | 'read_error'
 
@@ -308,8 +307,7 @@ export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
   'external_attention',
   'fusion_running',
   'schedule_waiting',
-  'turn_admission_waiting',
-  'turn_admission_shutdown',
+  'owner_shutdown',
   'operator_pending_confirm',
   'read_error',
 ] as const satisfies ReadonlyArray<DashboardKeeperWaitingSource>

@@ -26,11 +26,11 @@ let keeper_reaction_ledger_health_json () =
       ~limit_per_keeper:20
 ;;
 
-let keeper_turn_admission_health_json () =
+let keeper_owner_health_json () =
   match current_server_state_opt () with
   | None ->
     `Assoc
-      [ "schema", `String "masc.keeper_turn_admission.v1"
+      [ "schema", `String "masc.keeper_owner.v1"
       ; "status", `String "unavailable"
       ; "operator_action_required", `Bool false
       ; "status_reasons", `List []
@@ -38,6 +38,11 @@ let keeper_turn_admission_health_json () =
       ; "keeper_names", `List []
       ; "in_flight_keeper_count", `Int 0
       ; "shutdown_keeper_count", `Int 0
+      ; "queued_operation_count", `Int 0
+      ; "running_operation_count", `Int 0
+      ; "terminal_operation_count", `Int 0
+      ; "interrupted_operation_count", `Int 0
+      ; "operation_store_unavailable_count", `Int 0
       ; "keepers", `List []
       ]
   | Some state ->
@@ -47,11 +52,96 @@ let keeper_turn_admission_health_json () =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.warn
-          "health: failed to compute keeper turn admission names: %s"
+          "health: failed to compute keeper owner names: %s"
           (Printexc.to_string exn);
         []
     in
-    Keeper_turn_admission.fleet_health_json ~base_path:config.base_path ~keeper_names
+    let lane_to_string = function
+      | Keeper_owner.Autonomous -> "autonomous"
+      | Keeper_owner.Chat_operation -> "chat_operation"
+      | Keeper_owner.Maintenance -> "maintenance"
+    in
+    let row keeper_name =
+      match
+        Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name
+      with
+      | Error error ->
+        ( `Assoc
+            [ "keeper_name", `String keeper_name
+            ; "status", `String "unavailable"
+            ; ( "detail"
+              , `String (Keeper_owner_registry.lookup_error_to_string error) )
+            ]
+        , 0, 0, 0, 0, 0, 0, 1 )
+      | Ok owner ->
+        let turn = Keeper_owner.turn_in_flight owner in
+        let shutdown = Keeper_owner.shutdown_operation_id owner in
+        let operations = Keeper_owner.operation_projection owner in
+        let running_count =
+          Option.fold ~none:0 ~some:(fun _ -> 1) operations.running_operation_id
+        in
+        let turn_json =
+          match turn with
+          | None -> `Null
+          | Some turn ->
+            `Assoc
+              [ "lane", `String (lane_to_string turn.lane)
+              ; "started_at_unix", `Float turn.started_at
+              ]
+        in
+        ( `Assoc
+            [ "keeper_name", `String keeper_name
+            ; ( "status"
+              , `String
+                  (if operations.store_unavailable then "unavailable" else "ok") )
+            ; "turn", turn_json
+            ; ( "shutdown_operation_id"
+              , match shutdown with
+                | None -> `Null
+                | Some operation_id ->
+                  `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
+            ; "queued_operation_count", `Int operations.queued_count
+            ; "running_operation_count", `Int running_count
+            ; "terminal_operation_count", `Int operations.terminal_count
+            ; "interrupted_operation_count", `Int operations.interrupted_count
+            ; "operation_store_unavailable", `Bool operations.store_unavailable
+            ]
+        , Option.fold ~none:0 ~some:(fun _ -> 1) turn
+        , Option.fold ~none:0 ~some:(fun _ -> 1) shutdown
+        , operations.queued_count
+        , running_count
+        , operations.terminal_count
+        , operations.interrupted_count
+        , if operations.store_unavailable then 1 else 0 )
+    in
+    let rows = List.map row keeper_names in
+    let sum select = List.fold_left (fun total row -> total + select row) 0 rows in
+    let unavailable_count = sum (fun (_, _, _, _, _, _, _, count) -> count) in
+    `Assoc
+      [ "schema", `String "masc.keeper_owner.v1"
+      ; "status", `String (if unavailable_count = 0 then "ok" else "degraded")
+      ; "operator_action_required", `Bool (unavailable_count > 0)
+      ; ( "status_reasons"
+        , if unavailable_count = 0
+          then `List []
+          else `List [ `String "operation_store_unavailable" ] )
+      ; "keeper_count", `Int (List.length keeper_names)
+      ; "keeper_names", `List (List.map (fun name -> `String name) keeper_names)
+      ; ( "in_flight_keeper_count"
+        , `Int (sum (fun (_, count, _, _, _, _, _, _) -> count)) )
+      ; ( "shutdown_keeper_count"
+        , `Int (sum (fun (_, _, count, _, _, _, _, _) -> count)) )
+      ; ( "queued_operation_count"
+        , `Int (sum (fun (_, _, _, count, _, _, _, _) -> count)) )
+      ; ( "running_operation_count"
+        , `Int (sum (fun (_, _, _, _, count, _, _, _) -> count)) )
+      ; ( "terminal_operation_count"
+        , `Int (sum (fun (_, _, _, _, _, count, _, _) -> count)) )
+      ; ( "interrupted_operation_count"
+        , `Int (sum (fun (_, _, _, _, _, _, count, _) -> count)) )
+      ; "operation_store_unavailable_count", `Int unavailable_count
+      ; "keepers", `List (List.map (fun (json, _, _, _, _, _, _, _) -> json) rows)
+      ]
 ;;
 
 let keeper_board_event_collection_health_json () =
@@ -241,7 +331,7 @@ let keeper_fleet_runtime_resolution_base_fields
           () )
     ; "disk_observation", disk_observation
     ; "keeper_fleet_safety", fleet_safety
-    ; "keeper_turn_admission", keeper_turn_admission_health_json ()
+    ; "keeper_owner", keeper_owner_health_json ()
     ; "keeper_board_event_collection", keeper_board_event_collection_health_json ()
     ]
   in

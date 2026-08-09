@@ -237,7 +237,7 @@ let error_to_yojson error =
   | Some block ->
     `Assoc
       (fields
-       @ [ "error_code", `String "keeper_turn_admission_busy"
+       @ [ "error_code", `String "keeper_owner_busy"
          ; "admission", Keeper_owner.autonomous_block_to_yojson block
          ])
 ;;

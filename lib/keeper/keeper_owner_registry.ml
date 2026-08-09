@@ -477,14 +477,13 @@ let await_idle_after_shutdown ~base_path ~keeper_name =
   match get ~base_path ~keeper_name with
   | Error error -> Error (Command_lookup_failed error)
   | Ok owner ->
-    Eio.Cancel.protect (fun () ->
-      match Keeper_owner.await_idle_after_shutdown owner with
-      | Error error -> Error (Command_rejected error)
-      | Ok () ->
-        Keeper_shutdown_intake_fence.await_idle_after_shutdown
-          ~base_path
-          ~keeper_name;
-        Ok ())
+    (match Keeper_owner.await_idle_after_shutdown owner with
+     | Error error -> Error (Command_rejected error)
+     | Ok () ->
+       Keeper_shutdown_intake_fence.await_idle_after_shutdown
+         ~base_path
+         ~keeper_name;
+       Ok ())
 ;;
 
 let run_autonomous_if_idle ~base_path ~keeper_name run =
@@ -499,33 +498,8 @@ let run_maintenance_if_idle ~base_path ~keeper_name run =
   match get ~base_path ~keeper_name with
   | Error error -> Error (Command_lookup_failed error)
   | Ok owner ->
-    (match
-       Keeper_owner.run_maintenance_if_idle owner (fun () ->
-         Keeper_turn_admission.run_if_free ~base_path ~keeper_name run)
-       |> Result.map_error (fun error -> Command_rejected error)
-     with
-     | Error _ as error -> error
-     | Ok (`Busy block) -> Ok (`Busy block)
-     | Ok (`Ran (`Ran value)) -> Ok (`Ran value)
-     | Ok (`Ran (`Busy block)) ->
-       let block =
-         match block with
-         | Keeper_turn_admission.Turn_busy None -> Keeper_owner.Turn_busy None
-         | Keeper_turn_admission.Turn_busy (Some in_flight) ->
-           let lane =
-             match in_flight.Keeper_turn_admission.lane with
-             | Keeper_turn_admission.Autonomous -> Keeper_owner.Maintenance
-             | Keeper_turn_admission.Chat -> Keeper_owner.Chat_operation
-           in
-           Keeper_owner.Turn_busy
-             (Some
-                { Keeper_owner.lane = lane
-                ; started_at = in_flight.started_at
-                })
-         | Keeper_turn_admission.Shutdown_requested operation_id ->
-           Keeper_owner.Shutdown_requested operation_id
-       in
-       Ok (`Busy block))
+    Keeper_owner.run_maintenance_if_idle owner run
+    |> Result.map_error (fun error -> Command_rejected error)
 ;;
 
 let refresh_registry_projection ?lifecycle_token entry meta =

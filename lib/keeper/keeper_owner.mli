@@ -19,6 +19,8 @@ type operation_projection =
   { queued_count : int
   ; running_operation_id : Chat_operation.Operation_id.t option
   ; terminal_count : int
+  ; interrupted_count : int
+  ; store_unavailable : bool
   }
 
 type turn_lane =
@@ -120,6 +122,7 @@ val turn_in_flight : t -> turn_in_flight option
 val shutdown_operation_id : t -> Keeper_shutdown_types.Operation_id.t option
 (** Lock-free immutable projection of the lifecycle shutdown reservation. *)
 
+val autonomous_block_kind : autonomous_block -> string
 val autonomous_block_to_string : autonomous_block -> string
 val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
 

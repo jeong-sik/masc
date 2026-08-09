@@ -6,7 +6,6 @@ module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_owner_registry = Masc.Keeper_owner_registry
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_shutdown_types = Masc.Keeper_shutdown_types
-module Keeper_turn_admission = Masc.Keeper_turn_admission
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Otel_metric_store = Masc.Otel_metric_store
 module Server_keeper_waiting_inventory = Masc.Server_keeper_waiting_inventory
@@ -315,9 +314,8 @@ let test_owner_shutdown_row_is_deferred () =
   @@ fun config ->
   let keeper_name = "admission-shutdown-keeper" in
   ensure_keeper config keeper_name;
-  Keeper_turn_admission.For_testing.reset ();
   Fun.protect
-    ~finally:(fun () -> Keeper_turn_admission.For_testing.reset ())
+    ~finally:(fun () -> ())
     (fun () ->
       let base_path = config.Workspace_utils_backend_setup.base_path in
       let operation_id = Keeper_shutdown_types.Operation_id.generate () in
@@ -370,8 +368,6 @@ let test_owner_shutdown_row_is_deferred () =
                 |> to_string);
             check bool "admission fence is explicit" true
               U.(row |> member "detail" |> member "admission_fenced" |> to_bool);
-            check bool "shutdown has no chat waiter field" true
-              U.(row |> member "detail" |> member "chat_waiting_count" = `Null);
             check bool "shutdown has no in-flight turn" true
               U.(row |> member "detail" |> member "in_flight" = `Null)
           | rows -> failf "expected one shutdown row, got %d" (List.length rows)));

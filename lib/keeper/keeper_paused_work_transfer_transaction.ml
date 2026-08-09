@@ -82,7 +82,7 @@ let failure_to_string = function
   | Invalid_request detail -> "invalid Transfer_owner request: " ^ detail
   | Admission_busy block ->
     Printf.sprintf
-      "keeper_turn_admission_busy: operation=transfer_pending %s"
+      "keeper_owner_busy: operation=transfer_pending %s"
       (Keeper_owner.autonomous_block_to_string block)
   | Owner_unavailable detail -> "Transfer_owner Keeper owner unavailable: " ^ detail
   | Reservation_conflict owner ->

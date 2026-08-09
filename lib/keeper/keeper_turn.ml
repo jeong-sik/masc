@@ -376,12 +376,12 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
 (* Body of [handle_keeper_msg], runnable only while holding the keeper's
-   turn slot ([Keeper_turn_admission]). Covers [Keeper_agent_run.run_turn]
-   AND the post-turn meta/lifecycle writes — both must stay inside the slot
+   Keeper Owner child. Covers [Keeper_agent_run.run_turn]
+   AND the post-turn meta/lifecycle writes — both must stay inside the child
    or a concurrent turn can clobber the checkpoint and regress
    [total_turns] (2026-06-10 RCA, RFC-0225 §1).
 
-   Precondition: the caller holds the keeper's turn slot. Public direct-message
+   Precondition: the caller runs in the Keeper Owner child. Public direct-message
    and typed-delegate entrypoints construct a valid invocation request before
    reaching this function. *)
 let run_keeper_invocation_turn_admitted_inner

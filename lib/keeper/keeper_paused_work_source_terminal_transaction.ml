@@ -54,7 +54,7 @@ let failure_to_string = function
     "invalid Ack_source_terminal request: " ^ detail
   | Admission_busy block ->
     Printf.sprintf
-      "keeper_turn_admission_busy: operation=ack_source_terminal %s"
+      "keeper_owner_busy: operation=ack_source_terminal %s"
       (Keeper_owner.autonomous_block_to_string block)
   | Owner_unavailable detail ->
     "Ack_source_terminal Keeper owner unavailable: " ^ detail

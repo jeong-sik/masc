@@ -31,7 +31,7 @@ let normalize_response_text_for_finalization
   =
   match run_result.stop_reason with
   | Runtime_agent.Awaiting_external_effect _
-  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Yielded_after_repeated_tool_call _
   | Runtime_agent.Completed
@@ -87,7 +87,7 @@ type durable_stimulus_summary =
   }
 
 type autonomous_yield_reason =
-  | Chat_waiting
+  | Operation_queued
   | Durable_stimulus_waiting of durable_stimulus_summary
 
 type autonomous_yield_request =
@@ -132,7 +132,7 @@ let durable_stimulus_summary_to_string summary =
 
 let runtime_yield_reason request =
   match request.reason with
-  | Chat_waiting -> Runtime_agent.Chat_waiting
+  | Operation_queued -> Runtime_agent.Operation_queued
   | Durable_stimulus_waiting _ ->
     Runtime_agent.Durable_stimulus_waiting
 ;;

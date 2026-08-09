@@ -820,15 +820,17 @@ let test_source_terminal_busy_has_zero_mutation () =
   with_source_terminal_lane (fun config keeper_name _meta request ->
     let base_path = config.Workspace.base_path in
     (match
-       Keeper_turn_admission.run_if_free
+       Keeper_owner_registry.run_maintenance_if_idle
          ~base_path
          ~keeper_name
          (fun () -> Transaction.ack_pending config ~keeper_name request)
      with
-     | `Ran (Error { cause = Transaction.Admission_busy _; _ }) -> ()
-     | `Ran (Error error) -> Alcotest.fail (Transaction.error_to_string error)
-     | `Ran (Ok _) | `Busy _ ->
-       Alcotest.fail "source-terminal ACK was not deferred by turn admission");
+     | Ok (`Ran (Error { cause = Transaction.Admission_busy _; _ })) -> ()
+     | Ok (`Ran (Error error)) -> Alcotest.fail (Transaction.error_to_string error)
+     | Error error ->
+       Alcotest.fail (Keeper_owner_registry.command_error_to_string error)
+     | Ok (`Ran (Ok _) | `Busy _) ->
+       Alcotest.fail "source-terminal ACK was not deferred by Keeper Owner");
     let state =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "load admission-busy source-terminal lane"

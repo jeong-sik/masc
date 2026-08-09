@@ -192,8 +192,8 @@ type t =
 
 let stop_reason_to_string = function
   | Runtime_agent.Completed -> "completed"
-  | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
-    Printf.sprintf "yielded_to_chat_waiting:%d" turns_used
+  | Runtime_agent.Yielded_to_operation_queued { turns_used } ->
+    Printf.sprintf "yielded_to_operation_queued:%d" turns_used
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
     Printf.sprintf "yielded_to_durable_stimulus:%d" turns_used
   | Runtime_agent.Awaiting_external_effect { turns_used } ->
@@ -217,7 +217,7 @@ let receipt_terminal_reason_code_of_stop_reason = function
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
   | Runtime_agent.Completed ->
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success
-  | ( Runtime_agent.Yielded_to_chat_waiting _
+  | ( Runtime_agent.Yielded_to_operation_queued _
     | Runtime_agent.Yielded_to_durable_stimulus _
     | Runtime_agent.Awaiting_external_effect _
     | Runtime_agent.Yielded_after_repeated_tool_call _ ) as stop_reason ->

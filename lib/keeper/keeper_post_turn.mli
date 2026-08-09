@@ -98,7 +98,7 @@ type prepared_compaction
 (** Fully-planned compaction: durable source loaded, policy and LLM plan
     computed, nothing committed yet.  Carrying this value lets a caller run
     the provider call outside any keeper admission and commit later — the
-    source CAS, not the turn slot, is the interleaving guard. The token is
+    source CAS, not the Keeper Owner child, is the interleaving guard. The token is
     opaque and owns the exact Keeper identity and commit policy captured at
     preparation; callers cannot construct it or combine a plan with another
     Keeper's metadata. The exact execution identity is retained as immutable

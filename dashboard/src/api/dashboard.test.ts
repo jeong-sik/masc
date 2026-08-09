@@ -1017,12 +1017,12 @@ describe('fetchTlcResults', () => {
 })
 
 describe('fetchDashboardTools', () => {
-  it('parses the shutdown admission source without accepting source drift', () => {
-    expect(parseDashboardKeeperWaitingSource('turn_admission_shutdown')).toBe('turn_admission_shutdown')
+  it('parses the owner shutdown source without accepting source drift', () => {
+    expect(parseDashboardKeeperWaitingSource('owner_shutdown')).toBe('owner_shutdown')
     expect(parseDashboardKeeperWaitingSource('chat_operation_queued')).toBe('chat_operation_queued')
     expect(parseDashboardKeeperWaitingSource('chat_operation_running')).toBe('chat_operation_running')
-    expect(parseDashboardKeeperWaitingSource(' turn_admission_shutdown ')).toBeNull()
-    expect(parseDashboardKeeperWaitingSource('turn_admission_stopping')).toBeNull()
+    expect(parseDashboardKeeperWaitingSource(' owner_shutdown ')).toBeNull()
+    expect(parseDashboardKeeperWaitingSource('owner_stopping')).toBeNull()
     expect(parseDashboardKeeperWaitingSource(null)).toBeNull()
   })
 

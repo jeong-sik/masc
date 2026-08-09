@@ -367,7 +367,7 @@ let max_health_status = Health_status.max_string
 
 let full_health_operator_summary ~keeper_fleet_safety
     ~keeper_identity_drift_json ~publication_recovery_activation_json
-    ~reaction_ledger_json ~turn_admission_json ~board_event_collection_json
+    ~reaction_ledger_json ~keeper_owner_json ~board_event_collection_json
     ~keeper_event_queue_json ~runtime_startup_degradation_json
     ~keeper_config_schema_status ~keeper_config_schema_blocking
     ~keeper_config_schema_terminal_reason ~keeper_config_operator_action_required
@@ -418,7 +418,7 @@ let full_health_operator_summary ~keeper_fleet_safety
     publication_recovery_activation_json
     (assoc_string_opt "reason" publication_recovery_activation_json);
   note_status "keeper_reaction_ledger" reaction_ledger_json None;
-  note_status "keeper_turn_admission" turn_admission_json None;
+  note_status "keeper_owner" keeper_owner_json None;
   note_status "keeper_board_event_collection" board_event_collection_json None;
   note_status "keeper_event_queue" keeper_event_queue_json None;
   note_status "runtime_startup_degradation" runtime_startup_degradation_json
@@ -547,9 +547,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     compute_section ~name:"keeper_reaction_ledger" ?section_timings_ref
       keeper_reaction_ledger_health_json
   in
-  let turn_admission_json =
-    compute_section ~name:"keeper_turn_admission" ?section_timings_ref
-      keeper_turn_admission_health_json
+  let keeper_owner_json =
+    compute_section ~name:"keeper_owner" ?section_timings_ref
+      keeper_owner_health_json
   in
   let board_event_collection_json =
     compute_section ~name:"keeper_board_event_collection" ?section_timings_ref
@@ -612,7 +612,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       ~keeper_identity_drift_json
       ~publication_recovery_activation_json
       ~reaction_ledger_json
-      ~turn_admission_json
+      ~keeper_owner_json
       ~board_event_collection_json
       ~keeper_event_queue_json
       ~runtime_startup_degradation_json
@@ -667,7 +667,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("keeper_identity_drift", keeper_identity_drift_json);
     ("publication_recovery_activation", publication_recovery_activation_json);
     ("keeper_reaction_ledger", reaction_ledger_json);
-    ("keeper_turn_admission", turn_admission_json);
+    ("keeper_owner", keeper_owner_json);
     ("keeper_board_event_collection", board_event_collection_json);
     ("keeper_event_queue", keeper_event_queue_json);
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
@@ -773,7 +773,7 @@ let full_health_cached_field_names =
     "keeper_identity_drift";
     "publication_recovery_activation";
     "keeper_reaction_ledger";
-    "keeper_turn_admission";
+    "keeper_owner";
     "keeper_board_event_collection";
     "keeper_event_queue";
     "paused_keepers";
@@ -844,9 +844,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "keeper_reaction_ledger",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_reaction_ledger" );
-    ( "keeper_turn_admission",
+    ( "keeper_owner",
       full_health_component_placeholder ?error ~component_timed_out ~status
-        "keeper_turn_admission" );
+        "keeper_owner" );
     ( "keeper_board_event_collection",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_board_event_collection" );

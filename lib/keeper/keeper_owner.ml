@@ -13,6 +13,8 @@ type operation_projection =
   { queued_count : int
   ; running_operation_id : Operation_id.t option
   ; terminal_count : int
+  ; interrupted_count : int
+  ; store_unavailable : bool
   }
 
 type turn_lane =
@@ -217,6 +219,11 @@ let turn_lane_to_string = function
   | Maintenance -> "maintenance"
 ;;
 
+let autonomous_block_kind = function
+  | Turn_busy _ -> "turn_busy"
+  | Shutdown_requested _ -> "shutdown_requested"
+;;
+
 let autonomous_block_to_string = function
   | Turn_busy None -> "reason=turn_busy holder=unpublished"
   | Turn_busy (Some { lane; started_at }) ->
@@ -321,6 +328,8 @@ let operation_projection_of_inventory inventory =
   { queued_count = inventory.Chat_operation_store.queued_count
   ; running_operation_id = inventory.running_operation_id
   ; terminal_count = inventory.terminal_count
+  ; interrupted_count = inventory.interrupted_count
+  ; store_unavailable = false
   }
 ;;
 
@@ -328,6 +337,11 @@ let read_operation_inventory operation_store =
   run_operation_store ~label:"keeper chat operation inventory" (fun () ->
     Chat_operation_store.inventory operation_store)
   |> Result.map_error owner_error_of_operation_error
+;;
+
+let mark_operation_store_unavailable t =
+  let projection = Atomic.get t.operation_projection in
+  Atomic.set t.operation_projection { projection with store_unavailable = true }
 ;;
 
 let run_operation_command t ~label f =
@@ -340,12 +354,14 @@ let run_operation_command t ~label f =
      with
      | Error (Store_unavailable detail as error) ->
        t.store_error := Some detail;
+       mark_operation_store_unavailable t;
        Error error
      | Error _ as error -> error
      | Ok value ->
        (match read_operation_inventory t.operation_store with
         | Error (Store_unavailable detail as error) ->
           t.store_error := Some detail;
+          mark_operation_store_unavailable t;
           Error error
         | Error _ as error -> error
         | Ok inventory ->
@@ -364,6 +380,7 @@ let run_operation_read t ~label f =
   with
   | Error (Store_unavailable detail as error) ->
     t.store_error := Some detail;
+    mark_operation_store_unavailable t;
     Error error
   | (Error _ | Ok _) as result -> result
 ;;

@@ -4,7 +4,6 @@ open Alcotest
 
 module Compact_policy = Masc.Keeper_compact_policy
 module Post_turn = Masc.Keeper_post_turn
-module Admission = Masc.Keeper_turn_admission
 module Cycle = Masc.Keeper_heartbeat_loop_cycle
 module Queue = Keeper_event_queue
 module Registry_queue = Masc.Keeper_registry_event_queue

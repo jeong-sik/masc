@@ -54,8 +54,7 @@ const LANE_SOURCE_LABELS: Record<string, string> = {
   external_attention: '외부 알림',
   fusion_running: 'Fusion 실행 중',
   schedule_waiting: '예약 실행',
-  turn_admission_waiting: '실행 슬롯 대기',
-  turn_admission_shutdown: '종료 정리',
+  owner_shutdown: '종료 정리',
   operator_pending_confirm: '운영자 확인',
   read_error: '읽기 오류',
 }
@@ -68,8 +67,7 @@ const LANE_SOURCE_GRAPH_COLORS: Record<DashboardKeeperWaitingSource, string> = {
   external_attention: 'var(--color-accent)',
   fusion_running: 'var(--status-ok)',
   schedule_waiting: 'var(--status-warn)',
-  turn_admission_waiting: 'var(--color-fg-muted)',
-  turn_admission_shutdown: 'var(--color-fg-muted)',
+  owner_shutdown: 'var(--color-fg-muted)',
   operator_pending_confirm: 'var(--status-warn)',
   read_error: 'var(--color-danger)',
 }

@@ -42,7 +42,7 @@ module For_testing : sig
 end
 
 val dispatch_keeper_msg_stream_admitted :
-  admission_token:Keeper_turn_admission.token ->
+  admission_token:Keeper_turn_dispatch_authority.token ->
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?continuation_channel:Keeper_continuation_channel.t ->

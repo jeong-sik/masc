@@ -41,9 +41,9 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
           },
           {
             keeper_name: 'sangsu',
-            source: 'turn_admission_waiting',
-            waiting_on: 'chat_lane',
-            wake_producer: 'keeper_turn_admission',
+            source: 'chat_operation_running',
+            waiting_on: 'keeper_turn',
+            wake_producer: 'keeper_owner_actor',
             since_iso: '2026-07-07T08:58:00Z',
             next_action: 'keeper_finish_in_flight_turn',
           },
@@ -143,7 +143,7 @@ describe('KeeperLaneStrip', () => {
     expect(text).toContain('작업 대기열')
     expect(text).toContain('외부 완료 대기 중')
     expect(text).toContain('owner_fifo')
-    expect(text).toContain('chat_lane')
+    expect(text).toContain('keeper_turn')
     expect(text).toContain('keeper finish in flight turn')
     expect(el.querySelector('[data-missing="keeper-lane"]')).toBeNull()
   })

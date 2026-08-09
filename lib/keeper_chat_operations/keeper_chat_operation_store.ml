@@ -25,6 +25,7 @@ type inventory =
   { queued_count : int
   ; running_operation_id : Id.t option
   ; terminal_count : int
+  ; interrupted_count : int
   }
 
 let database_file = "chat-operations.sqlite3"
@@ -416,14 +417,22 @@ let inventory store =
       ~operation:"count terminal operations"
       "SELECT COUNT(*) FROM operations WHERE state IN ('succeeded', 'failed', 'cancelled')"
   in
+  let* interrupted =
+    single_int64
+      store.db
+      ~operation:"count interrupted operations"
+      "SELECT COUNT(*) FROM operations WHERE state = 'failed' AND failure_kind = 'Interrupted_by_restart'"
+  in
   if Int64.compare queued (Int64.of_int max_int) > 0
      || Int64.compare terminal (Int64.of_int max_int) > 0
+     || Int64.compare interrupted (Int64.of_int max_int) > 0
   then Error (Integrity_error "operation inventory count exceeds OCaml int")
   else
     Ok
       { queued_count = Int64.to_int queued
       ; running_operation_id
       ; terminal_count = Int64.to_int terminal
+      ; interrupted_count = Int64.to_int interrupted
       }
 ;;
 

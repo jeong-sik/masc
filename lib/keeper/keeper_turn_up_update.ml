@@ -107,7 +107,7 @@ let turn_in_flight_rejection ~keeper_name
    permanently held after its provider run completed (#26542 — a keeper
    calling masc_keeper_up on itself mid-turn locked itself out of every
    subsequent turn until process restart). The swap therefore requires an
-   idle turn slot, enforced with the same admission fence the shutdown
+   idle Owner, enforced with the same lifecycle reservation the shutdown
    path uses:
 
    - [begin_shutdown] fences new admissions and samples the current holder

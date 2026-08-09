@@ -47,7 +47,7 @@ let test_post_tool_boundary_targets_manual_compaction () =
          selected.post_id
      | None -> fail "manual compaction yield lost its selected source");
     check (float 0.001) "selected-source age is exact" 10. summary.head_age_sec
-  | Some { reason = Keeper_agent_run.Chat_waiting } ->
+  | Some { reason = Keeper_agent_run.Operation_queued } ->
     fail "manual compaction preemption was mislabeled as chat"
   | None ->
     fail "pending manual compaction did not preempt the in-flight source"

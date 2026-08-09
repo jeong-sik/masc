@@ -135,7 +135,7 @@ let test_busy_cycle_records_no_turn_status_or_work_heartbeat () =
   let accounting =
     Masc.Keeper_heartbeat_loop.keepalive_cycle_accounting
       (Masc.Keeper_heartbeat_loop.Turn_cycle_busy
-         (Masc.Keeper_turn_admission.Turn_busy None))
+         (Masc.Keeper_owner.Turn_busy None))
   in
   check bool "busy cycle records no turn status" false accounting.record_turn_status;
   check

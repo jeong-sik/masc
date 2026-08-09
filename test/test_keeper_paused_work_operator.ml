@@ -409,7 +409,7 @@ let test_admission_busy_http_json_preserves_typed_detail () =
   in
   Alcotest.(check string)
     "holder error code"
-    "keeper_turn_admission_busy"
+    "keeper_owner_busy"
     (holder |> member "error_code" |> to_string);
   Alcotest.(check string)
     "holder kind"

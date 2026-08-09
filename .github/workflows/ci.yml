@@ -731,8 +731,6 @@ jobs:
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
-        with:
-          dune-cache-save: "true"
 
       - name: Pin external OCaml dependencies
         uses: ./.github/actions/pin-ocaml-deps
@@ -1746,14 +1744,6 @@ jobs:
         with:
           name: release-evidence-main
           path: .release-evidence/
-
-      - name: Trim Dune cache for main publication
-        if: ${{ always() && steps.build_step.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        run: |
-          set -euo pipefail
-          echo "Dune cache before trim: $(du -sh "${HOME}/.cache/dune" | cut -f1)"
-          opam exec -- dune cache trim --size=6GiB
-          echo "Dune cache after trim: $(du -sh "${HOME}/.cache/dune" | cut -f1)"
 
       - name: Config diagnostic drift report
         if: ${{ always() && steps.build_step.outcome == 'success' }}

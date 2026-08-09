@@ -22,8 +22,6 @@ jobs:
 
       - name: Setup OCaml
         uses: ./.github/actions/setup-ocaml-toolchain
-        with:
-          dune-cache: true
 
       - name: Setup Node
         uses: actions/setup-node@v7

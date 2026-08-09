@@ -12,7 +12,7 @@ describe('parseExactLaneRunsResponse', () => {
         subject_id: 'trace-1',
         actor: 'keeper-a',
         started_at: 1,
-        input: { message_count: 4 },
+        input: { kind: 'exact', payload: { message_count: 4 } },
         status: 'succeeded',
         elapsed_s: 0.4,
         output: { fact_count: 3 },
@@ -21,7 +21,7 @@ describe('parseExactLaneRunsResponse', () => {
     expect(parsed.runs[0]).toMatchObject({
       lane: 'librarian_exact',
       status: 'succeeded',
-      input: { message_count: 4 },
+      input: { kind: 'exact', payload: { message_count: 4 } },
       output: { fact_count: 3 },
     })
   })
@@ -32,8 +32,33 @@ describe('parseExactLaneRunsResponse', () => {
       count: 1,
       runs: [{
         run_id: 'x', lane: 'mystery', subject_id: 's', actor: 'a',
-        started_at: 1, input: {}, status: 'running',
+        started_at: 1, input: { kind: 'exact', payload: {} }, status: 'running',
       }],
     })).toThrow('unknown value')
+  })
+
+  it('decodes a typed research trace join without guessing fields', () => {
+    const parsed = parseExactLaneRunsResponse({
+      generated_at: '2026-08-09T00:00:00Z',
+      count: 1,
+      runs: [{
+        run_id: 'librarian-research-1',
+        lane: 'librarian_exact',
+        subject_id: 'trace-1',
+        actor: 'keeper-a',
+        started_at: 1,
+        input: {
+          kind: 'research',
+          raw_trace_path: '/tmp/raw-traces/librarian-research-1.jsonl',
+          payload: { message_count: 4 },
+        },
+        status: 'running',
+      }],
+    })
+    expect(parsed.runs[0]?.input).toEqual({
+      kind: 'research',
+      rawTracePath: '/tmp/raw-traces/librarian-research-1.jsonl',
+      payload: { message_count: 4 },
+    })
   })
 })

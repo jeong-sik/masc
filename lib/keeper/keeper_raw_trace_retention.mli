@@ -34,6 +34,7 @@ type error =
       ; actual : string
       }
   | Invalid_raw_trace_reference of string
+  | Invalid_exact_lane_raw_trace_reference of string
   | Raw_trace_directory_unreadable of string
 
 val error_to_string : error -> string

@@ -22,17 +22,29 @@ type run_status =
       ; output : Yojson.Safe.t
       }
 
+type run_input =
+  | Exact_input of Yojson.Safe.t
+  | Research_input of
+      { raw_trace_path : string option
+      ; payload : Yojson.Safe.t
+      }
+
 type run =
   { run_id : string
   ; lane : lane
   ; subject_id : string
   ; actor : string
   ; started_at : float
-  ; input : Yojson.Safe.t
+  ; input : run_input
   ; status : run_status
   }
 
 type t
+
+(** Current-only durable registry. The v2 file starts at the closed
+    [run_input] contract; the removed open-JSON rows are not replayed or
+    migrated into this store. *)
+val storage_filename : string
 
 val create : ?path:string -> unit -> t
 val replay : string -> t
@@ -44,7 +56,7 @@ val register_running
   -> subject_id:string
   -> actor:string
   -> started_at:float
-  -> input:Yojson.Safe.t
+  -> input:run_input
   -> unit
 
 val mark_completed
@@ -61,6 +73,10 @@ val lane_key : lane -> string
 val outcome_label : outcome -> string
 val status_label : run_status -> string
 val run_to_yojson : run -> Yojson.Safe.t
+
+(** Raw-trace paths retained by registered research/exact executions for one
+    Keeper actor. *)
+val research_raw_trace_paths : t -> actor:string -> string list
 
 (** Called after a registry mutation is durable/in-memory-visible. The server
     installs a WS invalidation broadcaster; tests and library-only users keep

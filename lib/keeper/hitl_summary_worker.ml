@@ -1214,14 +1214,15 @@ let spawn_with
       ~actor:entry.keeper_name
       ~started_at
       ~input:
-        (`Assoc
+        (Exact_lane_run_registry.Exact_input
+           (`Assoc
            [ "tool_name", `String entry.tool_name
            ; "turn_id", Json_util.int_opt_to_json entry.turn_id
            ; "task_id", Json_util.string_opt_to_json entry.task_id
            ; "goal_id", Json_util.string_opt_to_json entry.goal_id
            ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
            ; "partial_context", `Bool (Option.is_none entry.request_context)
-           ]);
+           ]));
     let complete outcome output =
       Exact_lane_run_registry.mark_completed
         registry

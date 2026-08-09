@@ -761,7 +761,7 @@ let initialize_owner_state_blocking
        (Owner_initialization_failed
           (Run_registry_already_installed `Verification)));
   let exact_lane_registry =
-    Filename.concat masc_dir "exact-lane-runs.jsonl"
+    Filename.concat masc_dir Exact_lane_run_registry.storage_filename
     |> Exact_lane_run_registry.replay
   in
   (match Exact_lane_run_registry.install_global exact_lane_registry with

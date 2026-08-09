@@ -45,6 +45,10 @@ let empty_reasoning_summary =
   { thinking_blocks = []; has_uncertainty = false; tool_rationale = None }
 ;;
 
+type tool_failure_stage =
+  | Validation_before_execution
+  | Execution
+
 (** Extract structured reasoning summary from message list.
     This only preserves provider-emitted Thinking blocks; it does not infer
     uncertainty or tool rationale from prose. *)
@@ -106,6 +110,8 @@ type hook_event =
       { invocation : Tool_contract.Invocation.t
       ; tool_name : string
       ; input : Yojson.Safe.t
+      ; stage : tool_failure_stage
+      ; duration_ms : float
       ; error : string
       }
   | OnStop of

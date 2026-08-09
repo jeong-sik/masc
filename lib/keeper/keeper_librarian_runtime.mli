@@ -1,8 +1,11 @@
 (** Runtime adapter for LLM-owned current Memory OS selection.
 
-    One OAS exact-output call selects the complete current memory. After domain
-    validation, one atomic current-snapshot replacement is the only MASC-side
-    effect. There is no secondary journal or episode/facts fan-out. *)
+    A Librarian-owned research phase receives the complete Keeper model-visible
+    tool bundle and records exact tool lifecycle evidence. The existing
+    tool-free exact-output flow remains the sole selection authority and one
+    atomic current-snapshot replacement remains the sole Memory OS mutation.
+    If research or its RAW trace is unavailable, the exact flow continues from
+    the original immutable Librarian input and records that degradation. *)
 
 val cadence_step : cadence:int -> counter:int -> int * bool
 val cadence_step_keyed
@@ -17,6 +20,16 @@ val messages_for_librarian
   :  Keeper_librarian.input
   -> (Agent_sdk.Types.message list, string) result
 
+type research_context =
+  { config : Workspace.config
+  ; meta : Keeper_meta_contract.keeper_meta
+  ; publication_recovery :
+      Keeper_publication_recovery_availability.turn_context
+  ; ctx_snapshot : Keeper_types.working_context
+  ; runtime_id : string
+  ; continuation_channel : Keeper_continuation_channel.t option
+  }
+
 type extraction_error
 
 (** Which failure kind this error records in the memory journal. The vocabulary
@@ -25,7 +38,8 @@ type extraction_error
     happens, so adding an [extraction_error] case fails to compile until it
     names its journal kind. *)
 val run_best_effort
-  :  keepers_dir:string
+  :  research_context:research_context
+  -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int option
   -> Keeper_librarian.input

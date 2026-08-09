@@ -205,6 +205,151 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
           check int "bundle contains no duplicate model names" (List.length actual_names)
             (List.length bundle.tools)))
 
+let test_librarian_research_bundle_exactly_matches_model_visible_descriptors () =
+  ignore (init_registry ());
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_librarian_research_bundle_%d" (Random.int 1_000_000))
+  in
+  (try Unix.mkdir dir 0o755 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      try Unix.rmdir dir with
+      | _ -> ())
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Eio.Switch.run
+       @@ fun sw ->
+       let config = Workspace.default_config dir in
+       let meta = make_meta ~name:"test-librarian-research-bundle" () in
+       let ctx_snapshot =
+         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+       in
+       Masc_test_deps.with_publication_recovery_registry
+         ~sw
+         ~fs:(Eio.Stdenv.fs env)
+         ~registry_root:dir
+       @@ fun publication_recovery_registry ->
+       let publication_recovery =
+         publication_recovery_turn_context
+           ~registry:publication_recovery_registry
+           ~keeper_name:meta.name
+       in
+       let request : Keeper_librarian_research.request =
+         { execution_id = Keeper_librarian_research.Execution_id.generate ()
+         ; runtime_id = "test-runtime"
+         ; frozen_system_prompt = "test"
+         ; frozen_prompt = "test"
+         ; frozen_input = `Assoc [ "test", `Bool true ]
+         ; evidence_budget_bytes = 1024
+         ; config
+         ; meta
+         ; publication_recovery
+         ; ctx_snapshot
+         ; clock = Eio.Stdenv.clock env
+         ; net = Eio.Stdenv.net env
+         ; continuation_channel = None
+         ; raw_trace = None
+         }
+       in
+       let actual_names, cleanup =
+         Keeper_librarian_research.For_testing.tool_names_for_request request
+       in
+       let expected_names =
+         Keeper_tool_descriptor.model_visible_descriptors ()
+         |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+         |> List.sort_uniq String.compare
+       in
+       check
+         (list string)
+         "research runner receives the complete descriptor projection"
+         expected_names
+         (List.sort_uniq String.compare actual_names);
+       check int
+         "research runner bundle contains no duplicates"
+         (List.length expected_names)
+         (List.length actual_names);
+       match cleanup with
+       | Keeper_librarian_research.Cleanup_succeeded -> ()
+       | Cleanup_failed detail -> failf "research bundle cleanup failed: %s" detail
+       | Cleanup_cancelled -> fail "research bundle cleanup was cancelled")
+;;
+
+let test_librarian_research_cleanup_contract () =
+  let first_execution_id =
+    Keeper_librarian_research.Execution_id.generate ()
+    |> Keeper_librarian_research.Execution_id.to_string
+  in
+  let second_execution_id =
+    Keeper_librarian_research.Execution_id.generate ()
+    |> Keeper_librarian_research.Execution_id.to_string
+  in
+  check bool
+    "generated research execution id names its phase"
+    true
+    (String.starts_with ~prefix:"librarian-research-" first_execution_id);
+  check bool
+    "generated research execution ids are distinct"
+    false
+    (String.equal first_execution_id second_execution_id);
+  let cleanup_count = ref 0 in
+  let observed = ref None in
+  let value =
+    Keeper_librarian_research.For_testing.protect_with_cleanup
+      ~cleanup:(fun () -> incr cleanup_count)
+      ~on_cleanup:(fun outcome -> observed := Some outcome)
+      (fun () -> 42)
+  in
+  check int "success body result" 42 value;
+  check int "success cleanup exactly once" 1 !cleanup_count;
+  (match !observed with
+   | Some Keeper_librarian_research.Cleanup_succeeded -> ()
+   | _ -> fail "successful cleanup outcome was not recorded");
+  let raised = ref false in
+  (try
+     ignore
+       (Keeper_librarian_research.For_testing.protect_with_cleanup
+          ~cleanup:(fun () -> incr cleanup_count)
+          ~on_cleanup:(fun outcome -> observed := Some outcome)
+          (fun () -> raise (Failure "research failed"))
+        : unit)
+   with
+   | Failure detail when String.equal detail "research failed" -> raised := true
+   | _ -> ());
+  check bool "body failure propagated" true !raised;
+  check int "failure cleanup exactly once" 2 !cleanup_count;
+  let cancelled = ref false in
+  (try
+     ignore
+       (Keeper_librarian_research.For_testing.protect_with_cleanup
+          ~cleanup:(fun () -> incr cleanup_count)
+          ~on_cleanup:(fun outcome -> observed := Some outcome)
+          (fun () -> raise (Eio.Cancel.Cancelled (Failure "cancel research")))
+        : unit)
+   with
+   | Eio.Cancel.Cancelled _ -> cancelled := true);
+  check bool "cancellation propagated" true !cancelled;
+  check int "cancellation cleanup exactly once" 3 !cleanup_count;
+  let cleanup_failure = ref None in
+  let value =
+    Keeper_librarian_research.For_testing.protect_with_cleanup
+      ~cleanup:(fun () -> raise (Failure "cleanup failed"))
+      ~on_cleanup:(fun outcome -> cleanup_failure := Some outcome)
+      (fun () -> 7)
+  in
+  check int "cleanup failure does not replace body result" 7 value;
+  match !cleanup_failure with
+  | Some (Keeper_librarian_research.Cleanup_failed detail) ->
+    check bool
+      "cleanup failure detail retained"
+      true
+      (string_contains detail "cleanup failed")
+  | _ -> fail "cleanup failure outcome was not recorded"
+;;
+
 let test_missing_current_task_reconciled_before_transition_hint () =
   ignore (init_registry ());
   let dir =
@@ -436,6 +581,10 @@ let () =
             test_fusion_default_descriptor_is_bundle_visible;
           test_case "bundle exactly matches model-visible descriptors" `Quick
             test_bundle_exactly_matches_model_visible_descriptors;
+          test_case "librarian research bundle matches model-visible descriptors" `Quick
+            test_librarian_research_bundle_exactly_matches_model_visible_descriptors;
+          test_case "librarian research cleanup covers success error cancellation" `Quick
+            test_librarian_research_cleanup_contract;
           test_case "missing current task reconciles before transition hint" `Quick
             test_missing_current_task_reconciled_before_transition_hint;
           test_case "bundle assembly does not emit assignment" `Quick

@@ -141,6 +141,14 @@ let test_codex_and_claude_login_are_measured_separately () =
     check string "codex status" "ready" (json_string [ "login"; "status" ] codex);
     check bool "codex authenticated" true (json_bool [ "login"; "authenticated" ] codex);
     check string
+      "codex evidence source"
+      "configured_executable_self_report"
+      (json_string [ "login"; "evidence_source" ] codex);
+    check bool
+      "codex identity remains unverified"
+      false
+      (json_bool [ "login"; "identity_verified" ] codex);
+    check string
       "codex plan"
       "pro"
       (json_string [ "login"; "subscription_type" ] codex);
@@ -165,6 +173,10 @@ let test_codex_and_claude_login_are_measured_separately () =
       "claude status"
       "ready"
       (json_string [ "login"; "status" ] claude);
+    check bool
+      "claude identity remains unverified"
+      false
+      (json_bool [ "login"; "identity_verified" ] claude);
     check string
       "claude auth"
       "claude.ai"
@@ -197,6 +209,10 @@ let test_cli_unavailable_is_measured_login_evidence () =
       "not authenticated"
       false
       (json_bool [ "login"; "authenticated" ] response);
+    check bool
+      "missing executable identity remains unverified"
+      false
+      (json_bool [ "login"; "identity_verified" ] response);
     check string
       "execution remains unknown"
       "not_measured"

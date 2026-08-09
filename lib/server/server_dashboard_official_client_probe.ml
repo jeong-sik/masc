@@ -63,6 +63,8 @@ let failed_login_json ~status ~detail =
   `Assoc
     [ "status", `String status
     ; "authenticated", `Bool false
+    ; "evidence_source", `String "configured_executable_self_report"
+    ; "identity_verified", `Bool false
     ; "detail", `String detail
     ]
 ;;
@@ -113,6 +115,8 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
         (`Assoc
            [ "status", `String "ready"
            ; "authenticated", `Bool true
+           ; "evidence_source", `String "configured_executable_self_report"
+           ; "identity_verified", `Bool false
            ; "auth_method", `String "chatgpt"
            ; "subscription_type", `String measured.subscription.plan_type
            ; "api_provider", `Null
@@ -158,6 +162,8 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
         (`Assoc
            [ "status", `String "ready"
            ; "authenticated", `Bool true
+           ; "evidence_source", `String "configured_executable_self_report"
+           ; "identity_verified", `Bool false
            ; "auth_method", `String measured.auth_method
            ; "subscription_type", `String measured.subscription_type
            ; "api_provider", `String measured.api_provider

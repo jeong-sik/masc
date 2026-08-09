@@ -374,7 +374,11 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
                ; disable_slash_commands
                ; timeout_s
                })))
-  | Messages_api | Chat_completions_api | Ollama_api | Codex_app_server_runtime ->
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+  | Codex_app_server_runtime
+  | Claude_code_runtime ->
     (match
        List.find_opt
          (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))

@@ -248,6 +248,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~context_injector
         ~context
         ~terminal_error
+        ~raw_trace_run:None
     in
     let dynamic_tools = List.map claude_dynamic_tool host_dynamic_tools in
     let* () =

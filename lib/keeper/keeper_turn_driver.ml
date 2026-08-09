@@ -807,6 +807,24 @@ let run_named
                   }))
         , None )
       | Runtime_execution.Claude_code config ->
+        let run_claude ~initial_messages () =
+          Keeper_claude_code_runtime.run
+            ~runtime_id:attempt_runtime_id
+            ~keeper_name
+            ~base_path
+            ~goal
+            ~goal_blocks
+            ~system_prompt
+            ~tools
+            ~initial_messages
+            ~model_input_projection
+            ~hooks
+            ~context_injector
+            ~context
+            ~event_bus
+            ~enable_thinking:inference_policy.attempt_enable_thinking
+            ~config
+        in
         let claude_result =
           match provider_config_transform, oas_checkpoint with
           | Some _, _ ->
@@ -818,30 +836,20 @@ let run_named
                         "provider config transforms cannot target a claude-code runtime"
                     }))
           | None, Some _ ->
-            Error
-              (Agent_sdk.Error.Config
-                 (Agent_sdk.Error.InvalidConfig
-                    { field = "oas_checkpoint"
-                    ; detail =
-                        "an OAS agent_core checkpoint cannot resume through a claude-code runtime"
-                    }))
-          | None, None ->
-            Keeper_claude_code_runtime.run
-              ~runtime_id:attempt_runtime_id
-              ~keeper_name
-              ~base_path
-              ~goal
-              ~goal_blocks
-              ~system_prompt
-              ~tools
-              ~initial_messages
-              ~model_input_projection
-              ~hooks
-              ~context_injector
-              ~context
-              ~event_bus
-              ~enable_thinking:inference_policy.attempt_enable_thinking
-              ~config
+            Log.Keeper.info
+              "%s: starting official-client runtime %s without OAS checkpoint history"
+              keeper_name
+              attempt_runtime_id;
+            emit_runtime_manifest
+              ~status:"fresh_session"
+              ~decision:
+                (`Assoc
+                  [ ("routing_action", `String "official_client_fresh_session")
+                  ; ("routing_reason", `String "official_client_owns_session_state")
+                  ])
+              Keeper_runtime_manifest.Runtime_routed;
+            run_claude ~initial_messages:[] ()
+          | None, None -> run_claude ~initial_messages ()
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let claude_result =

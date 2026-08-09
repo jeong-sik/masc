@@ -18,6 +18,7 @@ type config =
   ; timeout_s : float
   }
 
+val default_timeout_s : float
 val default_config : cwd:string -> config
 
 type session_mode =

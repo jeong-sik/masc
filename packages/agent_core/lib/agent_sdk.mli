@@ -65,6 +65,7 @@ module Handoff = Handoff
 
 module Agent_types = Agent_types
 module Agent_lifecycle = Agent_lifecycle
+module Agent_lifecycle_events = Agent_lifecycle_events
 module Agent_turn = Agent_turn
 module Agent_tools = Agent_tools
 module Agent_checkpoint = Agent_checkpoint

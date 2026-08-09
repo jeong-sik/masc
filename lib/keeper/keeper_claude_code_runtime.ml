@@ -11,31 +11,24 @@ module Session_store = Keeper_official_client_session_store
 
 let runtime_label = "Claude Code"
 
-type history_message =
-  { role : string
-  ; text : string
-  }
-
 let project_messages messages =
   let rec loop system history = function
     | [] -> Ok (List.rev system, List.rev history)
     | (message : Agent_sdk.Types.message) :: rest ->
-      let* text =
-        Host.text_of_blocks
-          ~runtime_label
-          ~field:"initial_messages"
-          message.content
-      in
       (match message.role with
-       | Agent_sdk.Types.System -> loop (text :: system) history rest
-       | Agent_sdk.Types.User -> loop system ({ role = "user"; text } :: history) rest
-       | Agent_sdk.Types.Assistant ->
-         loop system ({ role = "assistant"; text } :: history) rest
-       | Agent_sdk.Types.Tool ->
-         Error
-           (config_error
-              ~field:"initial_messages"
-              "claude-code history injection does not admit OAS tool messages"))
+       | Agent_sdk.Types.System ->
+         let* text =
+           Host.text_of_blocks
+             ~runtime_label
+             ~field:"initial_messages"
+             message.content
+         in
+         loop (text :: system) history rest
+       | Agent_sdk.Types.User | Agent_sdk.Types.Assistant | Agent_sdk.Types.Tool ->
+         loop
+           system
+           (Keeper_context_core.message_to_json message :: history)
+           rest)
   in
   loop [] [] messages
 ;;
@@ -47,14 +40,7 @@ let initial_turn_prompt ~history ~goal =
     `Assoc
       [ "schema", `String "masc.claude-code.initial-turn.v1"
       ; ( "history"
-        , `List
-            (List.map
-               (fun message ->
-                 `Assoc
-                   [ "role", `String message.role
-                   ; "text", `String message.text
-                   ])
-               history) )
+        , `List history )
       ; "current_goal", `String goal
       ]
     |> Yojson.Safe.to_string
@@ -130,7 +116,7 @@ let recovery_failure_of_client_error = function
     Session_store.Provider_rejected
 ;;
 
-let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
+let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context ~event_bus ~enable_thinking
     ~(config : Runtime_execution.claude_code) =
@@ -572,4 +558,26 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
                   "Claude Code turn failed and recovery state persistence also failed: original=%s recovery=%s"
                   original_detail
                   recovery_detail))))
+;;
+
+let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
+    ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
+    ~context ~event_bus ~enable_thinking ~config =
+  Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+    run_without_lifecycle
+      ~runtime_id
+      ~keeper_name
+      ~base_path
+      ~goal
+      ~goal_blocks
+      ~system_prompt
+      ~tools
+      ~initial_messages
+      ~model_input_projection
+      ~hooks
+      ~context_injector
+      ~context
+      ~event_bus
+      ~enable_thinking
+      ~config)
 ;;

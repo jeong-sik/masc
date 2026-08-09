@@ -288,7 +288,7 @@ let read_subscription ~mgr ~cwd config =
   | Eio.Exn.Io
       (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
     Error (Spawn_failed (Printf.sprintf "executable %S was not found" executable))
-  | exn -> Error (Subscription_required (Printexc.to_string exn))
+  | exn -> Error (Spawn_failed (Printexc.to_string exn))
 ;;
 
 let dynamic_tool_spec (tool : dynamic_tool) =

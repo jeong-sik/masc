@@ -148,8 +148,15 @@ let message role text : Agent_sdk.Types.message =
   { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
-let run_keeper_turn ?(tools = []) ?(initial_messages = []) ~base_path ~cli_path
-    ~goal () =
+let content_of_wire_message raw =
+  Yojson.Safe.from_string raw
+  |> Yojson.Safe.Util.member "message"
+  |> Yojson.Safe.Util.member "content"
+  |> Yojson.Safe.Util.to_string
+;;
+
+let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
+    ?oas_checkpoint ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -180,9 +187,194 @@ let run_keeper_turn ?(tools = []) ?(initial_messages = []) ~base_path ~cli_path
                       ~tools
                       ~initial_messages
                       ?context
+                      ?event_bus
+                      ?oas_checkpoint
                       ~sw
                       ~net:(Eio.Stdenv.net env)
                       ())))))
+;;
+
+let checkpoint_with_messages messages : Agent_sdk.Checkpoint.t =
+  { version = Agent_sdk.Checkpoint.checkpoint_version
+  ; session_id = "oas-session"
+  ; agent_name = "oas-agent"
+  ; model = "oas-model"
+  ; system_prompt = None
+  ; messages
+  ; usage = Agent_sdk.Types.empty_usage
+  ; turn_count = 1
+  ; created_at = 1.0
+  ; tools = []
+  ; tool_choice = None
+  ; disable_parallel_tool_use = false
+  ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
+  ; enable_thinking = None
+  ; preserve_thinking = None
+  ; response_format = Off
+  ; thinking_budget = None
+  ; reasoning_effort = None
+  ; cache_system_prompt = false
+  ; context = Agent_sdk.Context.create ()
+  ; mcp_sessions = []
+  ; working_context = None
+  }
+;;
+
+let test_oas_checkpoint_starts_official_client_turn () =
+  let base_path = temp_workspace () in
+  let prompt_marker = Filename.concat base_path "checkpoint-prompt.json" in
+  let checkpoint_history =
+    [ { role = Assistant
+      ; content =
+          [ ToolUse
+              { id = "oas-tool-call"
+              ; name = "oas_tool"
+              ; input = `Assoc []
+              }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; Agent_sdk.Types.tool_result_msg
+        ~tool_use_id:"oas-tool-call"
+        ~content:"oas tool result"
+        ()
+    ]
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         ~prompt_marker
+         [ assistant ~turn_id:"turn-checkpoint-1" "MASC_CLAUDE_CHECKPOINT"
+         ; result ~turn_id:"turn-checkpoint-1" "MASC_CLAUDE_CHECKPOINT"
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~initial_messages:checkpoint_history
+                ~oas_checkpoint:(checkpoint_with_messages checkpoint_history)
+                ~base_path
+                ~cli_path
+                ~goal:"CHECKPOINT_GOAL"
+                ()
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok turn ->
+              check string
+                "checkpoint response"
+                "MASC_CLAUDE_CHECKPOINT"
+                (keeper_response_text turn));
+       let input = open_in_bin prompt_marker in
+       let raw =
+         Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
+       in
+       check string
+         "checkpoint history is not imported"
+         "CHECKPOINT_GOAL"
+         (content_of_wire_message raw))
+;;
+
+let test_keeper_projects_typed_tool_history_and_lifecycle () =
+  let base_path = temp_workspace () in
+  let prompt_marker = Filename.concat base_path "typed-history-prompt.json" in
+  let bus = Agent_sdk.Event_bus.create () in
+  let subscription =
+    Runtime_event_bus.subscribe
+      ~capacity:16
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
+      ~purpose:"claude-code-lifecycle-test"
+      bus
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_event_bus.unsubscribe bus subscription;
+      cleanup_tree base_path)
+    (fun () ->
+       let tool_use : Agent_sdk.Types.message =
+         { role = Assistant
+         ; content =
+             [ ToolUse
+                 { id = "prior-tool-call"
+                 ; name = "prior_tool"
+                 ; input = `Assoc [ "path", `String "README.md" ]
+                 }
+             ]
+         ; name = None
+         ; tool_call_id = None
+         ; metadata = []
+         }
+       in
+       let tool_result =
+         Agent_sdk.Types.tool_result_msg
+           ~tool_use_id:"prior-tool-call"
+           ~content:"prior result"
+           ()
+       in
+       with_fixture
+         ~prompt_marker
+         [ assistant ~turn_id:"turn-history-1" "MASC_CLAUDE_HISTORY"
+         ; result ~turn_id:"turn-history-1" "MASC_CLAUDE_HISTORY"
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~initial_messages:[ tool_use; tool_result ]
+                ~event_bus:bus
+                ~base_path
+                ~cli_path
+                ~goal:"CURRENT_GOAL"
+                ()
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok turn ->
+              check string
+                "history response"
+                "MASC_CLAUDE_HISTORY"
+                (keeper_response_text turn));
+       let input = open_in_bin prompt_marker in
+       let raw =
+         Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
+       in
+       let history =
+         content_of_wire_message raw
+         |> Yojson.Safe.from_string
+         |> Yojson.Safe.Util.member "history"
+         |> Yojson.Safe.Util.to_list
+       in
+       (match history with
+        | [ assistant_history; tool_history ] ->
+          check string
+            "assistant history role"
+            "assistant"
+            Yojson.Safe.Util.(assistant_history |> member "role" |> to_string);
+          let tool_use_block =
+            Yojson.Safe.Util.(assistant_history |> member "content" |> to_list)
+            |> List.hd
+          in
+          check string
+            "typed tool use"
+            "tool_use"
+            Yojson.Safe.Util.(tool_use_block |> member "type" |> to_string);
+          check string
+            "tool result history role"
+            "tool"
+            Yojson.Safe.Util.(tool_history |> member "role" |> to_string)
+        | _ -> fail "typed history projection did not preserve the tool cycle");
+       let lifecycle_kinds =
+         Runtime_event_bus.drain subscription
+         |> List.map (fun event ->
+           Agent_sdk.Event_bus.payload_kind event.Agent_sdk.Event_bus.payload)
+       in
+       check
+         (list string)
+         "official-client lifecycle"
+         [ "agent_started"; "agent_completed" ]
+         lifecycle_kinds)
 ;;
 
 let test_keeper_projects_masc_tool () =
@@ -244,13 +436,6 @@ let load_state base_path =
   | Error detail -> fail detail
   | Ok None -> fail "Claude Code current-owner state disappeared"
   | Ok (Some state) -> state
-;;
-
-let content_of_wire_message raw =
-  Yojson.Safe.from_string raw
-  |> Yojson.Safe.Util.member "message"
-  |> Yojson.Safe.Util.member "content"
-  |> Yojson.Safe.Util.to_string
 ;;
 
 let test_keeper_settles_and_resumes () =
@@ -374,6 +559,14 @@ let () =
     "keeper_claude_code_runtime"
     [ ( "lifecycle"
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
+        ; test_case
+            "OAS checkpoint starts official-client turn"
+            `Quick
+            test_oas_checkpoint_starts_official_client_turn
+        ; test_case
+            "projects typed tool history and lifecycle"
+            `Quick
+            test_keeper_projects_typed_tool_history_and_lifecycle
         ; test_case "projects MASC tool" `Quick test_keeper_projects_masc_tool
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
         ; test_case

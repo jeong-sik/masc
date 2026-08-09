@@ -65,7 +65,6 @@ val mark_completed
 
 val list_runs : t -> run list
 val get : t -> run_id:string -> run option
-val lane_key : lane -> string
 val outcome_label : outcome -> string
 val status_label : run_status -> string
 val run_to_yojson : run -> Yojson.Safe.t

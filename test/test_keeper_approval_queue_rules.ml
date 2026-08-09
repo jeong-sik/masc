@@ -3,6 +3,7 @@ open Alcotest
 module AQ = Masc.Keeper_approval_queue
 module Gate = Masc.Keeper_gate
 module Gate_mode = Masc.Keeper_gate_mode
+module Rules = Masc.Keeper_approval_queue_rules
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_rules_" "" in
@@ -32,7 +33,7 @@ let rec ensure_dir path =
 ;;
 
 let write_rules ~base_path json =
-  let path = AQ.For_testing.always_allowed_store_path ~base_path in
+  let path = Rules.For_testing.store_path ~base_path in
   ensure_dir (Filename.dirname path);
   Out_channel.with_open_text path (fun channel ->
     output_string channel (Yojson.Safe.pretty_to_string json))
@@ -40,20 +41,39 @@ let write_rules ~base_path json =
 
 let upsert_exn ~base_path ~input =
   match
-    AQ.upsert_rule
+    Rules.upsert_rule
       ~base_path
       ~keeper_name:"keeper"
       ~tool_name:"external-effect"
       ~input
+      ~created_by:"operator"
+      ~source_approval_id:"approval-test"
+      ~expires_at:None
       ()
   with
   | Ok result -> result
-  | Error error -> fail (AQ.rule_store_error_to_string error)
+  | Error error -> fail (Keeper_approval_queue_rules_types.rule_store_error_to_string error)
+;;
+
+let upsert_with_expiry_exn ~base_path ~input ~expires_at =
+  match
+    Rules.upsert_rule
+      ~base_path
+      ~keeper_name:"keeper"
+      ~tool_name:"external-effect"
+      ~input
+      ~created_by:"operator"
+      ~source_approval_id:"approval-test"
+      ~expires_at:(Some expires_at)
+      ()
+  with
+  | Ok result -> result
+  | Error error -> fail (Keeper_approval_queue_rules_types.rule_store_error_to_string error)
 ;;
 
 let find ~base_path ~input =
   match
-    AQ.find_matching_rule
+    Rules.find_matching_rule
       ~base_path
       ~keeper_name:"keeper"
       ~tool_name:"external-effect"
@@ -61,13 +81,13 @@ let find ~base_path ~input =
       ()
   with
   | Ok lookup -> lookup
-  | Error error -> fail (AQ.rule_store_error_to_string error)
+  | Error error -> fail (Keeper_approval_queue_rules_types.rule_store_error_to_string error)
 ;;
 
 let find_active_opt ~base_path ~input =
   match find ~base_path ~input with
-  | AQ.Rule_match_active matched -> Some matched
-  | AQ.Rule_match_expired _ | AQ.Rule_match_absent -> None
+  | Keeper_approval_queue_rules_types.Rule_match_active matched -> Some matched
+  | Keeper_approval_queue_rules_types.Rule_match_expired _ | Keeper_approval_queue_rules_types.Rule_match_absent -> None
 ;;
 
 let test_rule_matches_only_complete_exact_request () =
@@ -101,16 +121,16 @@ let test_rule_matches_only_complete_exact_request () =
          (Option.is_none (find_active_opt ~base_path ~input:changed_nonce));
        check bool "different operation identity cannot match" true
          (match
-            AQ.find_matching_rule
+            Rules.find_matching_rule
               ~base_path
               ~keeper_name:"keeper"
               ~tool_name:"another-effect"
               ~input
               ()
           with
-          | Ok AQ.Rule_match_absent -> true
-          | Ok (AQ.Rule_match_active _ | AQ.Rule_match_expired _) -> false
-          | Error error -> fail (AQ.rule_store_error_to_string error)))
+          | Ok Keeper_approval_queue_rules_types.Rule_match_absent -> true
+          | Ok (Keeper_approval_queue_rules_types.Rule_match_active _ | Keeper_approval_queue_rules_types.Rule_match_expired _) -> false
+          | Error error -> fail (Keeper_approval_queue_rules_types.rule_store_error_to_string error)))
 ;;
 
 let test_equivalent_upsert_is_idempotent () =
@@ -124,6 +144,79 @@ let test_equivalent_upsert_is_idempotent () =
        check bool "first created" true first_created;
        check bool "second reused" false second_created;
        check string "same rule id" first.id second.id)
+;;
+
+let test_existing_rule_requires_the_requested_expiry () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let input = `Assoc [ "request", `String "exact" ] in
+       let expires_at = Unix.gettimeofday () +. 3600.0 in
+       let first, created = upsert_with_expiry_exn ~base_path ~input ~expires_at in
+       check bool "created" true created;
+       let same, same_created = upsert_with_expiry_exn ~base_path ~input ~expires_at in
+       check bool "same expiry reuses" false same_created;
+       check string "same expiry id" first.id same.id;
+       match
+         Rules.upsert_rule
+           ~base_path
+           ~keeper_name:"keeper"
+           ~tool_name:"external-effect"
+           ~input
+           ~created_by:"operator"
+           ~source_approval_id:"approval-test"
+           ~expires_at:None
+           ()
+       with
+       | Ok _ -> fail "different expiry policy must not report success"
+       | Error error ->
+         check
+           string
+           "expiry conflict is explicit"
+           "the exact approval rule has a different expiry"
+           error.reason)
+;;
+
+let test_expired_existing_rule_is_not_reused () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let input = `Assoc [ "request", `String "exact" ] in
+       let active, _ =
+         upsert_with_expiry_exn
+           ~base_path
+           ~input
+           ~expires_at:(Unix.gettimeofday () +. 3600.0)
+       in
+       let expired =
+         { active with
+           Keeper_approval_queue_rules_types.expires_at =
+             Some (Unix.gettimeofday () -. 1.0)
+         }
+       in
+       write_rules
+         ~base_path
+         (`List [ Keeper_approval_queue_rules_types.approval_rule_to_yojson expired ]);
+       match
+         Rules.upsert_rule
+           ~base_path
+           ~keeper_name:"keeper"
+           ~tool_name:"external-effect"
+           ~input
+           ~created_by:"operator"
+           ~source_approval_id:"approval-test"
+           ~expires_at:None
+           ()
+       with
+       | Ok _ -> fail "expired exact rule must not report remembered success"
+       | Error error ->
+         check
+           string
+           "expired conflict is explicit"
+           "the exact approval rule is expired; delete it before creating another"
+           error.reason)
 ;;
 
 let test_gate_allows_only_the_exact_persisted_rule () =
@@ -158,23 +251,9 @@ let test_gate_allows_only_the_exact_persisted_rule () =
          fail (Gate.unavailable_reason_to_string reason))
 ;;
 
-let upsert_with_expiry_exn ~base_path ~input ~expires_at =
-  match
-    AQ.upsert_rule
-      ~base_path
-      ~keeper_name:"keeper"
-      ~tool_name:"external-effect"
-      ~input
-      ~expires_at
-      ()
-  with
-  | Ok result -> result
-  | Error error -> fail (AQ.rule_store_error_to_string error)
-;;
-
 let find_at ~base_path ~input ~now =
   match
-    AQ.find_matching_rule
+    Rules.find_matching_rule
       ~base_path
       ~keeper_name:"keeper"
       ~tool_name:"external-effect"
@@ -183,7 +262,7 @@ let find_at ~base_path ~input ~now =
       ()
   with
   | Ok lookup -> lookup
-  | Error error -> fail (AQ.rule_store_error_to_string error)
+  | Error error -> fail (Keeper_approval_queue_rules_types.rule_store_error_to_string error)
 ;;
 
 let test_unexpired_rule_matches_with_injected_now () =
@@ -192,17 +271,18 @@ let test_unexpired_rule_matches_with_injected_now () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
        let input = `Assoc [ "request", `String "exact" ] in
+       let expires_at = Unix.gettimeofday () +. 3600.0 in
        let rule, created =
-         upsert_with_expiry_exn ~base_path ~input ~expires_at:2000.0
+         upsert_with_expiry_exn ~base_path ~input ~expires_at
        in
        check bool "created" true created;
-       check (option (float 0.0)) "expiry persisted on rule" (Some 2000.0)
+       check (option (float 0.0)) "expiry persisted on rule" (Some expires_at)
          rule.expires_at;
-       match find_at ~base_path ~input ~now:1999.0 with
-       | AQ.Rule_match_active matched ->
+       match find_at ~base_path ~input ~now:(expires_at -. 1.0) with
+       | Keeper_approval_queue_rules_types.Rule_match_active matched ->
          check string "unexpired rule matches" rule.id matched.rule_id
-       | AQ.Rule_match_expired _ -> fail "unexpired rule reported as expired"
-       | AQ.Rule_match_absent -> fail "unexpired rule did not match")
+       | Keeper_approval_queue_rules_types.Rule_match_expired _ -> fail "unexpired rule reported as expired"
+       | Keeper_approval_queue_rules_types.Rule_match_absent -> fail "unexpired rule did not match")
 ;;
 
 let test_expired_rule_is_reported_and_retained () =
@@ -211,25 +291,26 @@ let test_expired_rule_is_reported_and_retained () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
        let input = `Assoc [ "request", `String "exact" ] in
-       let rule, _ = upsert_with_expiry_exn ~base_path ~input ~expires_at:2000.0 in
-       (match find_at ~base_path ~input ~now:2000.0 with
-        | AQ.Rule_match_expired matched ->
+       let expires_at = Unix.gettimeofday () +. 3600.0 in
+       let rule, _ = upsert_with_expiry_exn ~base_path ~input ~expires_at in
+       (match find_at ~base_path ~input ~now:expires_at with
+        | Keeper_approval_queue_rules_types.Rule_match_expired matched ->
           check string "expiry boundary is expired" rule.id matched.rule_id
-        | AQ.Rule_match_active _ -> fail "expired rule still matched"
-        | AQ.Rule_match_absent -> fail "expired rule must be reported, not absent");
-       (match find_at ~base_path ~input ~now:2001.0 with
-        | AQ.Rule_match_expired matched ->
+        | Keeper_approval_queue_rules_types.Rule_match_active _ -> fail "expired rule still matched"
+        | Keeper_approval_queue_rules_types.Rule_match_absent -> fail "expired rule must be reported, not absent");
+       (match find_at ~base_path ~input ~now:(expires_at +. 1.0) with
+        | Keeper_approval_queue_rules_types.Rule_match_expired matched ->
           check string "after expiry is expired" rule.id matched.rule_id
-        | AQ.Rule_match_active _ -> fail "expired rule still matched"
-        | AQ.Rule_match_absent -> fail "expired rule must be reported, not absent");
+        | Keeper_approval_queue_rules_types.Rule_match_active _ -> fail "expired rule still matched"
+        | Keeper_approval_queue_rules_types.Rule_match_absent -> fail "expired rule must be reported, not absent");
        let stored =
-         match AQ.list_rules ~base_path () with
+         match Rules.list_rules ~base_path () with
          | Ok rules -> rules
-         | Error error -> fail (AQ.rule_store_error_to_string error)
+         | Error error -> fail (Keeper_approval_queue_rules_types.rule_store_error_to_string error)
        in
        check bool "expired rule is retained for operator cleanup" true
-         (List.exists (fun (stored : AQ.approval_rule) ->
-            String.equal stored.id rule.id && stored.expires_at = Some 2000.0)
+         (List.exists (fun (stored : Keeper_approval_queue_rules_types.approval_rule) ->
+            String.equal stored.id rule.id && stored.expires_at = Some expires_at)
             stored))
 ;;
 
@@ -242,10 +323,146 @@ let test_rule_without_expiry_matches_at_any_now () =
        let rule, _ = upsert_exn ~base_path ~input in
        check (option (float 0.0)) "no expiry by default" None rule.expires_at;
        match find_at ~base_path ~input ~now:1e12 with
-       | AQ.Rule_match_active matched ->
+       | Keeper_approval_queue_rules_types.Rule_match_active matched ->
          check string "rule without expiry stays active" rule.id matched.rule_id
-       | AQ.Rule_match_expired _ -> fail "rule without expiry reported as expired"
-       | AQ.Rule_match_absent -> fail "rule without expiry did not match")
+       | Keeper_approval_queue_rules_types.Rule_match_expired _ -> fail "rule without expiry reported as expired"
+       | Keeper_approval_queue_rules_types.Rule_match_absent -> fail "rule without expiry did not match")
+;;
+
+let test_nonfinite_expiry_is_rejected () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       match
+         Rules.upsert_rule
+           ~base_path
+           ~keeper_name:"keeper"
+           ~tool_name:"external-effect"
+           ~input:(`Assoc [ "request", `String "exact" ])
+           ~created_by:"operator"
+           ~source_approval_id:"approval-test"
+           ~expires_at:(Some Float.nan)
+           ()
+       with
+       | Ok _ -> fail "non-finite expiry must be rejected"
+       | Error error ->
+         check
+           string
+           "typed rejection"
+           "expires_at must be a finite number"
+           error.reason)
+;;
+
+let test_past_expiry_is_rejected () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       match
+         Rules.upsert_rule
+           ~base_path
+           ~keeper_name:"keeper"
+           ~tool_name:"external-effect"
+           ~input:(`Assoc [ "request", `String "exact" ])
+           ~created_by:"operator"
+           ~source_approval_id:"approval-test"
+           ~expires_at:(Some 1.0)
+           ()
+       with
+       | Ok _ -> fail "past expiry must be rejected"
+       | Error error ->
+         check string "typed rejection" "expires_at must be in the future" error.reason)
+;;
+
+let test_upsert_validates_persisted_string_contract () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let input = `Assoc [ "request", `String "exact" ] in
+       let expect_rejection label expected result =
+         match result with
+         | Ok _ -> fail (label ^ " must be rejected")
+         | Error error -> check string label expected error.reason
+       in
+       expect_rejection
+         "blank keeper_name"
+         "keeper_name must be a non-blank string"
+         (Rules.upsert_rule
+            ~base_path
+            ~keeper_name:" "
+            ~tool_name:"external-effect"
+            ~input
+            ~created_by:"operator"
+            ~source_approval_id:"approval-test"
+            ~expires_at:None
+            ());
+       expect_rejection
+         "blank tool_name"
+         "tool_name must be a non-blank string"
+         (Rules.upsert_rule
+            ~base_path
+            ~keeper_name:"keeper"
+            ~tool_name:""
+            ~input
+            ~created_by:"operator"
+            ~source_approval_id:"approval-test"
+            ~expires_at:None
+            ());
+       expect_rejection
+         "blank created_by"
+         "created_by must be a non-blank string"
+         (Rules.upsert_rule
+            ~base_path
+            ~keeper_name:"keeper"
+            ~tool_name:"external-effect"
+            ~input
+            ~created_by:"\t"
+            ~source_approval_id:"approval-test"
+            ~expires_at:None
+            ());
+       expect_rejection
+         "blank source_approval_id"
+         "source_approval_id must be a non-blank string"
+         (Rules.upsert_rule
+            ~base_path
+            ~keeper_name:"keeper"
+            ~tool_name:"external-effect"
+            ~input
+            ~created_by:"operator"
+            ~source_approval_id:"  "
+            ~expires_at:None
+            ());
+       let created_by = "operator" in
+       let source_approval_id = "approval-1" in
+       (match
+          Rules.upsert_rule
+            ~base_path
+            ~keeper_name:"keeper"
+            ~tool_name:"external-effect"
+            ~input
+            ~created_by
+            ~source_approval_id
+            ~expires_at:None
+            ()
+        with
+        | Error error ->
+          fail (Keeper_approval_queue_rules_types.rule_store_error_to_string error)
+        | Ok (written, true) ->
+          (match Rules.list_rules ~base_path () with
+           | Error error ->
+             fail (Keeper_approval_queue_rules_types.rule_store_error_to_string error)
+           | Ok [ loaded ] ->
+             check string "roundtrip id" written.id loaded.id;
+             check string "roundtrip created_by" created_by loaded.created_by;
+             check
+               string
+               "roundtrip source approval"
+               source_approval_id
+               loaded.source_approval_id
+           | Ok _ -> fail "expected exactly one persisted rule")
+        | Ok (_, false) -> fail "first valid rule must be newly created"))
 ;;
 
 let test_unknown_persisted_shape_is_reported_and_rejected () =
@@ -255,10 +472,10 @@ let test_unknown_persisted_shape_is_reported_and_rejected () =
     (fun () ->
        let input = `Assoc [ "request", `String "exact" ] in
        let rule, _ = upsert_exn ~base_path ~input in
-       let json = AQ.approval_rule_to_yojson rule in
+       let json = Keeper_approval_queue_rules_types.approval_rule_to_yojson rule in
        let extended =
          match json with
-         | `Assoc fields -> `Assoc (("classification", `String "legacy") :: fields)
+         | `Assoc fields -> `Assoc (("classification", `String "unsupported") :: fields)
          | other -> other
        in
        let before =
@@ -271,7 +488,7 @@ let test_unknown_persisted_shape_is_reported_and_rejected () =
            ()
        in
        write_rules ~base_path (`List [ json; extended ]);
-       (match AQ.list_rules ~base_path () with
+       (match Rules.list_rules ~base_path () with
         | Ok _ -> fail "unsupported entry must fail the whole rules file"
         | Error _ -> ());
        let after =
@@ -286,7 +503,7 @@ let test_unknown_persisted_shape_is_reported_and_rejected () =
        check bool "rejection is observed" true (after -. before >= 1.0))
 ;;
 
-let with_rule_id id (rule : AQ.approval_rule) = { rule with id }
+let with_rule_id id (rule : Keeper_approval_queue_rules_types.approval_rule) = { rule with id }
 
 let test_duplicate_persisted_rules_reject_whole_store () =
   let base_path = temp_dir () in
@@ -302,10 +519,10 @@ let test_duplicate_persisted_rules_reject_whole_store () =
        write_rules
          ~base_path
          (`List
-             [ AQ.approval_rule_to_yojson first
-             ; AQ.approval_rule_to_yojson (with_rule_id first.id second)
+             [ Keeper_approval_queue_rules_types.approval_rule_to_yojson first
+             ; Keeper_approval_queue_rules_types.approval_rule_to_yojson (with_rule_id first.id second)
              ]);
-       (match AQ.list_rules ~base_path () with
+       (match Rules.list_rules ~base_path () with
         | Ok _ -> fail "duplicate rule ids must fail the whole rules store"
         | Error error ->
           check bool "duplicate id named" true
@@ -315,10 +532,10 @@ let test_duplicate_persisted_rules_reject_whole_store () =
        write_rules
          ~base_path
          (`List
-             [ AQ.approval_rule_to_yojson first
-             ; AQ.approval_rule_to_yojson (with_rule_id "different-id" first)
+             [ Keeper_approval_queue_rules_types.approval_rule_to_yojson first
+             ; Keeper_approval_queue_rules_types.approval_rule_to_yojson (with_rule_id "different-id" first)
              ]);
-       match AQ.list_rules ~base_path () with
+       match Rules.list_rules ~base_path () with
        | Ok _ -> fail "duplicate exact identities must fail the whole rules store"
        | Error error ->
          check bool "duplicate identity named" true
@@ -362,13 +579,13 @@ let exact_rule_lookup_failure_count () =
     ()
 ;;
 
-let eligibility_summary : AQ.hitl_context_summary =
+let eligibility_summary : Keeper_approval_queue_rules_types.hitl_context_summary =
   { summary_version = 2
   ; generated_at = 1.0
   ; model_run_id = "gate-eligibility-judge"
   ; context_summary = "The exact request is supported by the visible context."
   ; key_questions = []
-  ; judgment = AQ.Approve
+  ; judgment = Keeper_approval_queue_rules_types.Approve
   ; rationale = "The request is safe to finalize."
   }
 ;;
@@ -422,7 +639,7 @@ let exact_identity label =
   }
 ;;
 
-let bind_exact_entry (entry : AQ.pending_approval) identity =
+let bind_exact_entry (entry : Keeper_approval_queue_rules_types.pending_approval) identity =
   exact_update_exn
     "bind exact attempt"
     (AQ.bind_summary_exact_attempt
@@ -484,7 +701,7 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
            ~call_id:identity.call_id
            ~plan_fingerprint:identity.plan_fingerprint
            ~request_body_sha256:identity.request_body_sha256
-           ~cause:AQ.Exact_flow_execution_failed))
+           ~cause:Keeper_approval_queue_rules_types.Exact_flow_execution_failed))
   in
   let completed =
     make_bound "completed" (fun entry identity ->
@@ -503,24 +720,24 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
                model_run_id = identity.call_id
              }))
   in
-let with_exact_status (entry : AQ.pending_approval) status =
+let with_exact_status (entry : Keeper_approval_queue_rules_types.pending_approval) status =
     match entry.exact_attempt with
-    | AQ.Exact_bound binding ->
+    | Keeper_approval_queue_rules_types.Exact_bound binding ->
       { entry with
         exact_attempt =
-          AQ.Exact_bound
-            (AQ.exact_attempt_binding_with_status binding status)
+          Keeper_approval_queue_rules_types.Exact_bound
+            (Keeper_approval_queue_rules_types.exact_attempt_binding_with_status binding status)
       }
-    | AQ.Exact_unbound ->
+    | Keeper_approval_queue_rules_types.Exact_unbound ->
       fail "bound exact eligibility fixture became unbound"
   in
   let released_recovery_required =
     with_exact_status
       released_before_dispatch
-      AQ.Exact_released_recovery_required
+      Keeper_approval_queue_rules_types.Exact_released_recovery_required
   in
   let restart_quarantined =
-    with_exact_status dispatch_uncertain AQ.Exact_restart_quarantined
+    with_exact_status dispatch_uncertain Keeper_approval_queue_rules_types.Exact_restart_quarantined
   in
   let check_ready label expected entry =
     check bool label expected (Gate.For_testing.auto_judge_entry_ready entry)
@@ -543,13 +760,13 @@ let with_exact_status (entry : AQ.pending_approval) status =
     restart_quarantined;
   check_ready "completed binding is finalize-only" false completed;
   (match quarantined.exact_attempt with
-   | AQ.Exact_bound { status = AQ.Exact_quarantined AQ.Exact_flow_execution_failed; _ } ->
+   | Keeper_approval_queue_rules_types.Exact_bound { status = Keeper_approval_queue_rules_types.Exact_quarantined Keeper_approval_queue_rules_types.Exact_flow_execution_failed; _ } ->
      ()
-   | AQ.Exact_unbound
-   | AQ.Exact_bound _ ->
+   | Keeper_approval_queue_rules_types.Exact_unbound
+   | Keeper_approval_queue_rules_types.Exact_bound _ ->
      fail "typed quarantine cause was not persisted");
   (match completed.exact_attempt, completed.summary_status with
-   | AQ.Exact_bound { status = AQ.Exact_completed; _ }, AQ.Summary_available _ -> ()
+   | Keeper_approval_queue_rules_types.Exact_bound { status = Keeper_approval_queue_rules_types.Exact_completed; _ }, Keeper_approval_queue_rules_types.Summary_available _ -> ()
    | _ -> fail "exact completion did not atomically persist its available summary");
   let other_owner =
     submit_eligibility_entry ~base_path ~keeper_name:"other-keeper" "other-owner"
@@ -572,7 +789,7 @@ let with_exact_status (entry : AQ.pending_approval) status =
   check int "operator recovery exposes only the FIFO head" 1 (List.length ready);
   check (list string) "operator recovery cannot skip the FIFO head"
     [ not_requested.id ]
-    (List.map (fun (entry : AQ.pending_approval) -> entry.id) ready)
+    (List.map (fun (entry : Keeper_approval_queue_rules_types.pending_approval) -> entry.id) ready)
 ;;
 
 let test_completed_exact_judgment_finalizes_without_worker () =
@@ -605,7 +822,7 @@ let test_completed_exact_judgment_finalizes_without_worker () =
    | Error error -> fail (AQ.install_error_to_string error));
   let completed = approval_entry_exn completed.id in
   (match completed.exact_attempt, completed.summary_status with
-   | AQ.Exact_bound { status = AQ.Exact_completed; _ }, AQ.Summary_available _ -> ()
+   | Keeper_approval_queue_rules_types.Exact_bound { status = Keeper_approval_queue_rules_types.Exact_completed; _ }, Keeper_approval_queue_rules_types.Summary_available _ -> ()
    | _ -> fail "completed available judgment did not survive restart");
   check bool "completed available judgment is finalize-only" false
     (Gate.For_testing.auto_judge_entry_ready completed);
@@ -717,12 +934,20 @@ let test_gate_defers_and_observes_expired_exact_rule () =
    | Ok _ -> ()
    | Error reason -> fail reason);
   let input = `Assoc [ "target", `String "exact" ] in
-  let rule, _ =
+  let active_rule, _ =
     upsert_with_expiry_exn
       ~base_path
       ~input
-      ~expires_at:(Unix.gettimeofday () -. 60.0)
+      ~expires_at:(Unix.gettimeofday () +. 3600.0)
   in
+  let rule =
+    { active_rule with
+      Keeper_approval_queue_rules_types.expires_at = Some (Unix.gettimeofday () -. 60.0)
+    }
+  in
+  write_rules
+    ~base_path
+    (`List [ Keeper_approval_queue_rules_types.approval_rule_to_yojson rule ]);
   (match Gate.decide ~keeper_always_allow:false (gate_request ~base_path) with
    | Gate.Deferred { reason = Gate.Human_requested; _ } -> ()
    | Gate.Deferred _ -> fail "expired exact rule used the wrong deferred reason"
@@ -795,6 +1020,14 @@ let () =
             test_rule_matches_only_complete_exact_request
         ; test_case "idempotent upsert" `Quick test_equivalent_upsert_is_idempotent
         ; test_case
+            "existing rule requires requested expiry"
+            `Quick
+            test_existing_rule_requires_the_requested_expiry
+        ; test_case
+            "expired existing rule is not reused"
+            `Quick
+            test_expired_existing_rule_is_not_reused
+        ; test_case
             "Gate consumes exact persisted rule"
             `Quick
             test_gate_allows_only_the_exact_persisted_rule
@@ -810,6 +1043,15 @@ let () =
             "rule without expiry matches at any now"
             `Quick
             test_rule_without_expiry_matches_at_any_now
+        ; test_case
+            "non-finite expiry is rejected"
+            `Quick
+            test_nonfinite_expiry_is_rejected
+        ; test_case "past expiry is rejected" `Quick test_past_expiry_is_rejected
+        ; test_case
+            "upsert validates its persisted string contract"
+            `Quick
+            test_upsert_validates_persisted_string_contract
         ; test_case
             "Gate allows unexpired exact rule"
             `Quick

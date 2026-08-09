@@ -2658,7 +2658,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
               ~keeper_name:meta.name)
              .snapshot_shutdown_operation_id);
       (match Approval_queue.For_testing.get_pending_entry_unchecked ~id:approval_id with
-       | Some { summary_status = Approval_queue.Summary_pending; _ } -> ()
+       | Some { summary_status = Keeper_approval_queue_rules_types.Summary_pending; _ } -> ()
        | Some _ | None -> fail "retain-meta shutdown changed pending summary");
       match Keeper_meta_store.read_meta config meta.name with
       | Ok (Some retained) ->
@@ -2796,7 +2796,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
                  ~call_id:"shutdown-call"
                  ~plan_fingerprint:(String.make 64 'p')
                  ~request_body_sha256:(String.make 64 'a')
-                 ~cause:Approval_queue.Exact_flow_execution_failed
+                 ~cause:Keeper_approval_queue_rules_types.Exact_flow_execution_failed
              with
              | Ok _ -> ()
              | Error error ->

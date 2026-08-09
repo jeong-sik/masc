@@ -30,6 +30,19 @@ function queueItem(overrides: Partial<KeeperApprovalQueueItem> & { id: string })
   }
 }
 
+function approvalRule(
+  overrides: Partial<KeeperApprovalRule> & Pick<KeeperApprovalRule, 'id' | 'keeper_name' | 'tool_name'>,
+): KeeperApprovalRule {
+  return {
+    request_fingerprint: 'a'.repeat(64),
+    created_at: 1_782_525_723,
+    created_by: 'operator',
+    source_approval_id: 'appr-source',
+    expires_at: null,
+    ...overrides,
+  }
+}
+
 function completedExactAttempt(id: string, callId: string) {
   return {
     state: 'bound' as const,
@@ -58,12 +71,14 @@ function responseWithQueue(
   approval_rules: KeeperApprovalRule[] = [],
   hitl: DashboardGateResponse['hitl'] = {
     gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+    judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
   },
   approval_queue_state: DashboardGateResponse['approval_queue_state'] = {
     state: 'ready',
   },
   recent_resolved_page: DashboardGateResponse['recent_resolved_page'] = null,
   approval_queue_violations: DashboardGateResponse['approval_queue_violations'] = [],
+  approval_rules_state: DashboardGateResponse['approval_rules_state'] = { state: 'ready' },
 ): DashboardGateResponse {
   return {
     generated_at: '2026-06-19T00:00:00Z',
@@ -73,6 +88,7 @@ function responseWithQueue(
     recent_resolved,
     recent_resolved_page,
     approval_rules,
+    approval_rules_state,
     hitl,
   } as DashboardGateResponse
 }
@@ -89,14 +105,22 @@ async function loadSurface(
   },
   recent_resolved_page: DashboardGateResponse['recent_resolved_page'] = null,
   approval_queue_violations: DashboardGateResponse['approval_queue_violations'] = [],
+  approval_rules_state: DashboardGateResponse['approval_rules_state'] = { state: 'ready' },
 ) {
   vi.resetModules()
   const resolveGateApproval = vi
     .fn()
-    .mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' })
+    .mockResolvedValue({
+      ok: true,
+      id: 'appr-1',
+      decision: 'approve',
+      rule_id: null,
+      rule_error: null,
+    })
   const retryGateAutoJudge = vi
     .fn()
     .mockResolvedValue({ ok: true, id: 'appr-1' })
+  const deleteGateApprovalRule = vi.fn().mockResolvedValue({ ok: true, id: 'rule-1' })
   const setGateMode = vi
     .fn()
     .mockResolvedValue({
@@ -121,6 +145,7 @@ async function loadSurface(
         approval_queue_state,
         recent_resolved_page,
         approval_queue_violations,
+        approval_rules_state,
       )
     : responseWithQueue(
         approval_queue,
@@ -130,12 +155,13 @@ async function loadSurface(
         approval_queue_state,
         recent_resolved_page,
         approval_queue_violations,
+        approval_rules_state,
       )
   const apiMock = () => ({
     fetchDashboardGate: vi.fn().mockResolvedValue(response),
     resolveGateApproval,
     retryGateAutoJudge,
-    deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+    deleteGateApprovalRule,
     setGateMode,
   })
   vi.doMock('../../api', apiMock)
@@ -149,13 +175,25 @@ async function loadSurface(
     navigate,
   }))
   const mod = await import('./approvals-surface')
-  return { ApprovalsSurface: mod.ApprovalsSurface, resolveGateApproval, retryGateAutoJudge, setGateMode, navigate }
+  return {
+    ApprovalsSurface: mod.ApprovalsSurface,
+    resolveGateApproval,
+    retryGateAutoJudge,
+    deleteGateApprovalRule,
+    setGateMode,
+    navigate,
+  }
 }
 
 describe('ApprovalsSurface', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
+    Object.defineProperty(window, 'prompt', {
+      value: vi.fn().mockReturnValue('operator rejected'),
+      configurable: true,
+      writable: true,
+    })
     container = document.createElement('div')
     document.body.appendChild(container)
   })
@@ -697,7 +735,7 @@ describe('ApprovalsSurface', () => {
     expect(history?.querySelector('.ap-history-at')?.textContent).toContain('2026')
   }, 20000)
 
-  it('unfolds judge evidence and slot on resolved rows that carry it, none on legacy rows', async () => {
+  it('unfolds judge evidence and slot only on rows that carry judge evidence', async () => {
     const { ApprovalsSurface } = await loadSurface(
       [],
       [
@@ -734,7 +772,7 @@ describe('ApprovalsSurface', () => {
           },
         },
         {
-          id: 'appr-legacy',
+          id: 'appr-plain',
           keeper_name: 'keeper-a',
           tool_name: 'fs_write',
           decision: 'approve',
@@ -760,9 +798,9 @@ describe('ApprovalsSurface', () => {
     expect(fold?.textContent).toContain('Keeper requested a read-only listing.')
     expect(fold?.textContent).toContain('Is the path inside the sandbox?')
     expect(fold?.textContent).toContain('Read-only and scoped.')
-    const legacy = container.querySelector('[data-approval-id="appr-legacy"]')
-    expect(legacy?.querySelector('[data-testid="approval-history-slot"]')).toBeNull()
-    expect(legacy?.querySelector('[data-testid="approval-history-judge"]')).toBeNull()
+    const plain = container.querySelector('[data-approval-id="appr-plain"]')
+    expect(plain?.querySelector('[data-testid="approval-history-slot"]')).toBeNull()
+    expect(plain?.querySelector('[data-testid="approval-history-judge"]')).toBeNull()
   }, 20000)
 
   it('shows contract-violating queue rows as a visible banner instead of a clean empty queue', async () => {
@@ -843,12 +881,16 @@ describe('ApprovalsSurface', () => {
         },
       ],
       [
-        {
+        approvalRule({
           id: 'rule-1',
           keeper_name: 'keeper-a',
           tool_name: 'fs_write',
-          request_fingerprint: 'abcdef1234567890',
-        },
+          request_fingerprint: 'a'.repeat(64),
+          created_at: 1782525723,
+          created_by: 'operator',
+          source_approval_id: 'appr-approved',
+          expires_at: null,
+        }),
       ],
     )
 
@@ -859,8 +901,7 @@ describe('ApprovalsSurface', () => {
     expect(aside?.textContent).toContain('Always Rules')
     expect(aside?.textContent).toContain('keeper-a')
     expect(aside?.textContent).toContain('fs_write')
-    expect(aside?.textContent).toContain('abcdef123456')
-    expect(aside?.textContent).not.toContain('abcdef1234567890')
+    expect(aside?.textContent).toContain('aaaaaaaaaaaa')
 
     container.querySelector<HTMLButtonElement>('.ap-viewbtn:not(.on)')?.click()
     await flushUi()
@@ -879,12 +920,12 @@ describe('ApprovalsSurface', () => {
   }, 20000)
 
   it('makes hidden Always rules explicit when the aside list overflows its cap', async () => {
-    const rules = Array.from({ length: 8 }, (_, i) => ({
+    const rules = Array.from({ length: 8 }, (_, i) => approvalRule({
       id: `rule-${i}`,
       keeper_name: 'keeper-a',
       tool_name: 'fs_write',
-      request_fingerprint: `fp-${i}`,
-    })) as KeeperApprovalRule[]
+      request_fingerprint: i.toString(16).padStart(64, '0'),
+    }))
     const { ApprovalsSurface } = await loadSurface([], [], rules)
 
     render(html`<${ApprovalsSurface} />`, container)
@@ -898,18 +939,61 @@ describe('ApprovalsSurface', () => {
   }, 20000)
 
   it('omits the rules overflow note when the list fits the cap', async () => {
-    const rules = Array.from({ length: 6 }, (_, i) => ({
+    const rules = Array.from({ length: 6 }, (_, i) => approvalRule({
       id: `rule-${i}`,
       keeper_name: 'k',
       tool_name: 't',
-      request_fingerprint: `fp-${i}`,
-    })) as KeeperApprovalRule[]
+      request_fingerprint: i.toString(16).padStart(64, '0'),
+    }))
     const { ApprovalsSurface } = await loadSurface([], [], rules)
 
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
     expect(container.querySelector('[data-testid="approvals-rules-overflow"]')).toBeNull()
+  }, 20000)
+
+  it('renders rule-store unavailability instead of an empty rule list', async () => {
+    const { ApprovalsSurface } = await loadSurface(
+      [],
+      [],
+      [],
+      undefined,
+      { state: 'ready' },
+      null,
+      [],
+      { state: 'unavailable', error: 'approval rules store unreadable' },
+    )
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="approval-rules-unavailable"]')?.textContent)
+      .toContain('approval rules store unreadable')
+    expect(container.textContent).not.toContain('저장된 Always 규칙 없음')
+  }, 20000)
+
+  it('shows expired rules and deletes the exact rule through the live action', async () => {
+    const expiredRule = approvalRule({
+      id: 'rule-expired',
+      keeper_name: 'keeper-expired',
+      tool_name: 'fs_write',
+      created_at: 1_700_000_000,
+      expires_at: 1_700_000_100,
+    })
+    const { ApprovalsSurface, deleteGateApprovalRule } = await loadSurface([], [], [expiredRule])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="approval-rule-expiry"]')?.textContent)
+      .toContain('만료됨')
+    const deleteButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.getAttribute('aria-label') === 'fs_write Always 규칙 삭제')
+    deleteButton?.click()
+    await flushUi()
+
+    expect(deleteGateApprovalRule).toHaveBeenCalledWith('rule-expired')
   }, 20000)
 
   it('shows the empty state when no approvals are pending', async () => {
@@ -1028,7 +1112,10 @@ describe('ApprovalsSurface', () => {
     approveBtn?.click()
     await flushUi()
 
-    expect(resolveGateApproval).toHaveBeenCalledWith('appr-9', 'approve', false)
+    expect(resolveGateApproval).toHaveBeenCalledWith(
+      'appr-9',
+      { decision: 'approve', rememberRule: false },
+    )
   })
 
   it('routes the 거부 action through resolveGateApproval with the reject decision', async () => {
@@ -1039,10 +1126,16 @@ describe('ApprovalsSurface', () => {
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValueOnce('작업 범위를 벗어남')
     container.querySelector<HTMLButtonElement>('.ap-card .ap-act.deny')?.click()
     await flushUi()
 
-    expect(resolveGateApproval).toHaveBeenCalledWith('appr-r', 'reject', false)
+    expect(prompt).toHaveBeenCalledWith('승인 요청을 거부하는 이유를 입력하세요.')
+    expect(resolveGateApproval).toHaveBeenCalledWith(
+      'appr-r',
+      { decision: 'reject', reason: '작업 범위를 벗어남' },
+    )
+    prompt.mockRestore()
   })
 
   it('routes the 항상 승인 action through resolveGateApproval with rememberRule=true', async () => {
@@ -1056,12 +1149,16 @@ describe('ApprovalsSurface', () => {
     container.querySelector<HTMLButtonElement>('.ap-card .ap-act.always')?.click()
     await flushUi()
 
-    expect(resolveGateApproval).toHaveBeenCalledWith('appr-a', 'approve', true)
+    expect(resolveGateApproval).toHaveBeenCalledWith(
+      'appr-a',
+      { decision: 'approve', rememberRule: true },
+    )
   })
 
   it('binds the three non-hierarchical choices to hitl.gate_mode', async () => {
     const { ApprovalsSurface } = await loadSurface([], [], [], {
       gate_mode: { mode: 'auto_judge', configured: true, state: 'ready' },
+      judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
     })
 
     render(html`<${ApprovalsSurface} />`, container)
@@ -1080,6 +1177,7 @@ describe('ApprovalsSurface', () => {
   it('shows Human as the selected Gate mode when configured', async () => {
     const { ApprovalsSurface } = await loadSurface([], [], [], {
       gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+      judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
     })
 
     render(html`<${ApprovalsSurface} />`, container)
@@ -1093,6 +1191,7 @@ describe('ApprovalsSurface', () => {
   it('routes a Gate mode choice through setGateMode', async () => {
     const { ApprovalsSurface, setGateMode } = await loadSurface([], [], [], {
       gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+      judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
     })
 
     render(html`<${ApprovalsSurface} />`, container)

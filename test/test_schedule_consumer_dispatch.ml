@@ -1843,7 +1843,11 @@ let approved_grant_fixture ~base_path ~keeper_name ~input =
      Keeper_approval_queue.resolve_with_policy
        ~base_path
        ~id:approval_id
-       ~decision:Keeper_approval_queue.Decision.Approve
+       ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+       ~source:Keeper_approval_queue_rules_types.Human_operator
+       ~remember_rule:false
+       ~rule_expires_at:None
+       ~created_by:"test-operator"
        ()
    with
    | Ok _ -> ()

@@ -121,7 +121,6 @@ module Decision : sig
   type t =
     | Approve
     | Reject of string
-    | Edit of Yojson.Safe.t
 end
 
 type decision = Decision.t
@@ -157,8 +156,8 @@ type approval_rule =
   ; tool_name : string
   ; request_fingerprint : string
   ; created_at : float
-  ; created_by : string option
-  ; source_approval_id : string option
+  ; created_by : string
+  ; source_approval_id : string
   ; expires_at : float option
   }
 
@@ -176,8 +175,6 @@ type rule_store_error =
   ; reason : string
   }
 
-type resolution_result = { remembered_rule : approval_rule option }
-
 val advisory_judgment_to_string : advisory_judgment -> string
 val advisory_judgment_values : string list
 val advisory_judgment_of_string : string -> advisory_judgment option
@@ -186,8 +183,7 @@ val decision_source_to_string : decision_source -> string
 val decision_source_of_string : string -> decision_source option
 val authorization_source_to_string : authorization_source -> string
 val authorization_source_of_string : string -> authorization_source option
-val string_opt_of_json : Yojson.Safe.t -> string option
-val bool_member : string -> Yojson.Safe.t -> default:bool -> bool
+val request_fingerprint : Yojson.Safe.t -> string
 val rule_match_to_yojson : rule_match -> Yojson.Safe.t
 
 val rule_expired : now:float -> approval_rule -> bool
@@ -223,5 +219,3 @@ val summary_attempt_disposition_of_yojson_with_error :
 val approval_rule_of_yojson_with_error :
   Yojson.Safe.t -> (approval_rule, string) Stdlib.result
 (** Parse an approval rule, returning the first validation failure reason. *)
-
-val approval_rule_of_yojson : Yojson.Safe.t -> approval_rule option

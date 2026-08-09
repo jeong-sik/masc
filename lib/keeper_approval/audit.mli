@@ -23,7 +23,6 @@ val event_of_string : string -> event option
 type decision_kind =
   | Decision_approve
   | Decision_reject
-  | Decision_edit
 
 val decision_kind_to_string : decision_kind -> string
 val decision_kind_of_string : string -> decision_kind option
@@ -52,7 +51,8 @@ val record :
   unit ->
   unit
 
-val record_rule : base_path:string -> event_type:event -> approval_rule -> unit
+val record_rule :
+  base_path:string -> event_type:event -> actor:string -> approval_rule -> unit
 
 val recent_resolved_history_limit : int
 val recent_resolved_max_limit : int

@@ -198,20 +198,23 @@ export interface KeeperApprovalRule {
   id: string
   keeper_name: string
   tool_name: string
-  request_fingerprint?: string
-  created_at?: string | null
-  created_by?: string | null
-  source_approval_id?: string | null
+  request_fingerprint: string
+  created_at: number
+  created_by: string
+  source_approval_id: string
+  expires_at: number | null
 }
+
+export type KeeperApprovalRulesState =
+  | { state: 'ready' }
+  | { state: 'unavailable'; error: string }
 
 export type GateMode = 'manual' | 'auto_judge' | 'always_allow'
 
-export interface GateModeStatus {
-  mode: GateMode
-  configured?: boolean
-  state?: 'ready' | 'invalid' | string
-  read_error?: string
-}
+export type GateModeStatus =
+  | { mode: GateMode; configured: boolean; state: 'ready' }
+  | { mode: 'auto_judge'; configured: boolean; state: 'unavailable'; read_error: string }
+  | { mode: 'manual'; configured: true; state: 'invalid'; read_error: string }
 
 /**
  * Bounds that produced `recent_resolved`. Read them with the rows: `returned`
@@ -237,11 +240,12 @@ export interface DashboardGateResponse {
   approval_queue_violations?: KeeperApprovalQueueRowViolation[]
   recent_resolved?: KeeperResolvedApprovalItem[]
   recent_resolved_page?: KeeperResolvedApprovalPage | null
-  approval_rules?: KeeperApprovalRule[]
-  hitl?: {
-    gate_mode?: GateModeStatus
-    judge_lane?: GateJudgeLane
-  }
+  approval_rules: KeeperApprovalRule[]
+  approval_rules_state: KeeperApprovalRulesState
+  hitl: {
+    gate_mode: GateModeStatus
+    judge_lane: GateJudgeLane
+  } | null
 }
 
 export interface OperatorActionDescriptor {

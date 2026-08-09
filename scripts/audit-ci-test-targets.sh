@@ -95,7 +95,7 @@ echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, al
 # test_tool_workspace_coverage while it was open. Measured on the merged tree --
 # the audit reported "706 unwired, 707 baseline" so 707 would have passed while
 # leaving the ratchet a notch loose.
-UNWIRED_BASELINE=706
+UNWIRED_BASELINE=701
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

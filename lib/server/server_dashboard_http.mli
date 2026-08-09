@@ -45,8 +45,6 @@ type approval_resolve_http_error =
 val approval_resolve_http_error_to_string :
   approval_resolve_http_error -> string
 
-val approval_resolve_decision_required_message : string
-
 (** {1 Board / memory / Gate HTTP entries} *)
 
 val handle_repository_observation_snapshot :
@@ -55,20 +53,6 @@ val handle_repository_observation_snapshot :
   Httpun.Request.t ->
   Httpun.Reqd.t ->
   unit
-
-val dashboard_board_json :
-  ?config:Workspace.config ->
-  ?hearth:string ->
-  ?author_filter:string ->
-  ?sort_by:Board_dispatch.sort_order ->
-  ?exclude_system:bool ->
-  ?exclude_automation:bool ->
-  ?limit:int ->
-  ?offset:int ->
-  ?voter:string ->
-  ?blind_votes:bool ->
-  unit ->
-  Yojson.Safe.t
 
 val dashboard_memory_http_json :
   ?config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
@@ -96,6 +80,7 @@ val dashboard_gate_retry_http_json :
 
 val dashboard_gate_rule_delete_http_json :
   base_path:string ->
+  deleted_by:string ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 

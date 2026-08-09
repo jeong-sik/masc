@@ -1,6 +1,41 @@
 (** Durable, nonblocking HITL requests for Keeper external effects. *)
 
-include Keeper_approval_queue_rules
+open Keeper_approval_queue_rules_types
+
+module SMap = Set_util.StringMap
+
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then () else atomic_update atomic f
+;;
+
+let pending : pending_approval SMap.t Atomic.t = Atomic.make SMap.empty
+
+let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
+  Otel_metric_store_core.inc_counter
+    Keeper_metrics.(to_string ApprovalQueueFailures)
+    ~labels:[ "keeper", keeper_name; "site", site ]
+    ();
+  Log.Keeper.warn
+    "approval_queue: %s failed keeper=%s id=%s event=%s err=%s"
+    site
+    keeper_name
+    id
+    event_type
+    (Printexc.to_string exn)
+;;
+
+let approval_id_rng = Random.State.make_self_init ()
+let approval_id_rng_mu = Stdlib.Mutex.create ()
+
+let make_approval_id () =
+  let uuid =
+    Stdlib.Mutex.protect approval_id_rng_mu (fun () ->
+      Uuidm.v4_gen approval_id_rng ())
+  in
+  "appr_" ^ Uuidm.to_string uuid
+;;
 
 type storage_error =
   { path : string
@@ -120,7 +155,7 @@ type persisted_delivery =
   ; source : decision_source
   ; remember_rule : bool
   ; rule_expires_at : float option
-  ; created_by : string option
+  ; created_by : string
   ; grant_consumed : bool
   ; replay_outcome : resolution_replay_outcome option
   }
@@ -285,7 +320,7 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 8
+let pending_store_version = 9
 let pending_store_surface = "keeper_gate_pending"
 let replay_results_store_version = 1
 let replay_results_store_surface = "keeper_gate_replay_results"
@@ -383,15 +418,12 @@ let report_replay_results_read_drop ~reason ~path ~detail =
 
 let exact_request_context_version = 1
 
-let pending_entry_to_yojson
-      ?(include_request_context = true)
-      (entry : pending_approval)
-  =
-  let request_context =
-    if include_request_context then entry.request_context else None
-  in
-  `Assoc
-    [ "id", `String entry.id
+type request_context_wire =
+  | Pending_request_context
+  | Delivery_without_request_context
+
+let pending_entry_fields_prefix (entry : pending_approval) =
+  [ "id", `String entry.id
     ; "keeper_name", `String entry.keeper_name
     ; "tool_name", `String entry.tool_name
     ; "input_hash", `String entry.input_hash
@@ -399,32 +431,47 @@ let pending_entry_to_yojson
     ; "sequence", `Int entry.sequence
     ; "requested_at", `Float entry.requested_at
     ; "turn_id", Json_util.int_opt_to_json entry.turn_id
-    ; ( "request_context"
-      , match request_context with
+  ]
+;;
+
+let pending_entry_fields_suffix (entry : pending_approval) =
+  [ "task_id", Json_util.string_opt_to_json entry.task_id
+    ; "goal_id", Json_util.string_opt_to_json entry.goal_id
+    ; "goal_ids", Json_util.json_string_list entry.goal_ids
+  ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
+  ; "summary_status", summary_status_to_yojson entry.summary_status
+  ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
+  ; ( "summary_attempt_disposition"
+    , summary_attempt_disposition_to_yojson entry.summary_attempt_disposition )
+  ]
+;;
+
+let pending_entry_to_yojson (entry : pending_approval) =
+  let request_context_fields =
+    [ ( "request_context"
+      , match entry.request_context with
         | Some context -> context
         | None -> `Null )
     ; ( "request_context_version"
-      , match request_context with
+      , match entry.request_context with
         | Some _ -> `Int exact_request_context_version
         | None -> `Null )
-    ; "task_id", Json_util.string_opt_to_json entry.task_id
-    ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-    ; "goal_ids", Json_util.json_string_list entry.goal_ids
-      ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
-      ; "summary_status", summary_status_to_yojson entry.summary_status
-      ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
-      ; ( "summary_attempt_disposition"
-        , summary_attempt_disposition_to_yojson
-            entry.summary_attempt_disposition )
-      ]
+    ]
+  in
+  `Assoc
+    (pending_entry_fields_prefix entry
+     @ request_context_fields
+     @ pending_entry_fields_suffix entry)
+;;
+
+let persisted_delivery_entry_to_yojson (entry : pending_approval) =
+  `Assoc (pending_entry_fields_prefix entry @ pending_entry_fields_suffix entry)
 ;;
 
 let approval_decision_to_yojson = function
   | Decision.Approve -> `Assoc [ "kind", `String "approve" ]
   | Decision.Reject reason ->
     `Assoc [ "kind", `String "reject"; "reason", `String reason ]
-  | Decision.Edit input ->
-    `Assoc [ "kind", `String "edit"; "input", input ]
 ;;
 
 let resolution_replay_outcome_to_yojson = function
@@ -454,22 +501,16 @@ let resolution_replay_outcome_to_yojson = function
    causal evidence (bounded history lead-up, the triggering user message,
    current dynamic context, and completed tool calls) captured at request time.
    It is not the whole Keeper turn or its system prompts. Its only reader is
-   Hitl_summary_worker, which runs while the entry is still pending. A delivery
-   is already resolved, so the context is dead weight there — and it dominated
-   the store: 71 deliveries held ~30MB of duplicated context against 19 bytes
-   of decision each.
-
-   Dropping it on the delivery wire shape stays decode-compatible: the reader
-   treats [request_context] as optional and keys the version field off its
-   presence, so existing snapshots still load and re-save smaller. *)
+   Hitl_summary_worker, which runs while the entry is still pending. A resolved
+   delivery therefore has no request-context fields. *)
 let persisted_delivery_to_yojson delivery =
   `Assoc
-    [ "entry", pending_entry_to_yojson ~include_request_context:false delivery.entry
+    [ "entry", persisted_delivery_entry_to_yojson delivery.entry
     ; "decision", approval_decision_to_yojson delivery.decision
     ; "source", `String (decision_source_to_string delivery.source)
     ; "remember_rule", `Bool delivery.remember_rule
     ; "rule_expires_at", Json_util.float_opt_to_json delivery.rule_expires_at
-    ; "created_by", Json_util.string_opt_to_json delivery.created_by
+    ; "created_by", `String delivery.created_by
     ; "grant_consumed", `Bool delivery.grant_consumed
     ]
 ;;
@@ -483,9 +524,7 @@ let map_values_for_base ~base_path map project =
 let snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map =
   let pending_entries =
     map_values_for_base ~base_path pending_map Fun.id
-    (* Wrapped rather than passed bare: [pending_entry_to_yojson] now leads with
-       an optional argument, which OCaml only erases at application. *)
-    |> List.map (fun entry -> pending_entry_to_yojson entry)
+    |> List.map pending_entry_to_yojson
   in
   let delivery_entries =
     map_values_for_base ~base_path delivery_map (fun delivery -> delivery.entry)
@@ -687,7 +726,6 @@ let persist_snapshot_exact_unlocked
    sites in this module short. *)
 let reject_unknown_fields = Json_util.reject_unknown_fields
 let required_string = Json_util.require_field_string
-let required_float = Json_util.require_field_float
 let required_positive_int = Json_util.require_field_positive_int
 let required_string_list = Json_util.require_field_string_list
 
@@ -697,28 +735,32 @@ let required_member ~surface field fields =
   | None -> Error (Printf.sprintf "%s.%s is required" surface field)
 ;;
 
-let optional_string ~surface field fields =
+let required_nullable_string ~surface field fields =
   match List.assoc_opt field fields with
-  | None | Some `Null -> Ok None
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+  | Some `Null -> Ok None
   | Some (`String value) when String.trim value <> "" -> Ok (Some value)
   | Some (`String _) -> Error (Printf.sprintf "%s.%s must be non-blank" surface field)
   | Some _ -> Error (Printf.sprintf "%s.%s must be a string or null" surface field)
 ;;
 
-let optional_nonnegative_int ~surface field fields =
+let required_nullable_nonnegative_int ~surface field fields =
   match List.assoc_opt field fields with
-  | None | Some `Null -> Ok None
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+  | Some `Null -> Ok None
   | Some (`Int value) when value >= 0 -> Ok (Some value)
   | Some _ ->
     Error (Printf.sprintf "%s.%s must be a non-negative integer or null" surface field)
 ;;
 
-let optional_float ~surface field fields =
+let required_nullable_finite_float ~surface field fields =
   match List.assoc_opt field fields with
-  | None | Some `Null -> Ok None
-  | Some (`Float value) -> Ok (Some value)
+  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+  | Some `Null -> Ok None
+  | Some (`Float value) when Float.is_finite value -> Ok (Some value)
   | Some (`Int value) -> Ok (Some (Float.of_int value))
-  | Some _ -> Error (Printf.sprintf "%s.%s must be a number or null" surface field)
+  | Some _ ->
+    Error (Printf.sprintf "%s.%s must be a finite number or null" surface field)
 ;;
 
 let exact_attempt_identity_matches
@@ -818,16 +860,21 @@ let summary_attempt_allows_exact_bind = function
     false
 ;;
 
-let pending_entry_of_yojson ~base_path json =
+let pending_entry_of_yojson ~base_path ~request_context_wire json =
   match json with
   | `Assoc fields ->
     let ( let* ) = Result.bind in
     let surface = "gate_pending.entry" in
+    let request_context_fields =
+      match request_context_wire with
+      | Pending_request_context -> [ "request_context"; "request_context_version" ]
+      | Delivery_without_request_context -> []
+    in
     let* () =
       reject_unknown_fields
         ~surface
         ~allowed:
-          [ "id"
+          ([ "id"
           ; "keeper_name"
           ; "tool_name"
           ; "input_hash"
@@ -835,16 +882,15 @@ let pending_entry_of_yojson ~base_path json =
           ; "sequence"
           ; "requested_at"
           ; "turn_id"
-          ; "request_context"
-          ; "request_context_version"
           ; "task_id"
           ; "goal_id"
           ; "goal_ids"
           ; "continuation_channel"
           ; "summary_status"
           ; "exact_attempt"
-          ; "summary_attempt_disposition"
-          ]
+           ; "summary_attempt_disposition"
+           ]
+           @ request_context_fields)
         fields
     in
     let* id = required_string ~surface "id" fields in
@@ -852,46 +898,57 @@ let pending_entry_of_yojson ~base_path json =
     let* tool_name = required_string ~surface "tool_name" fields in
     let* input_hash = required_string ~surface "input_hash" fields in
     let* input = required_member ~surface "input" fields in
-    let expected_hash = request_fingerprint input in
+    let expected_hash = Keeper_approval_queue_rules_types.request_fingerprint input in
     let* () =
       if String.equal input_hash expected_hash
       then Ok ()
       else Error (Printf.sprintf "%s.input_hash does not match input" surface)
     in
     let* sequence = required_positive_int ~surface "sequence" fields in
-    let* requested_at = required_float ~surface "requested_at" fields in
-    let* turn_id = optional_nonnegative_int ~surface "turn_id" fields in
-    let* request_context =
-      match
-        List.assoc_opt "request_context" fields,
-        List.assoc_opt "request_context_version" fields
-      with
-      | (None | Some `Null), (None | Some `Null) -> Ok None
-      | Some context, Some (`Int version)
-        when Int.equal version exact_request_context_version ->
-        Ok (Some context)
-      | Some _, (None | Some `Null) ->
-        Error (surface ^ ".request_context requires request_context_version")
-      | (None | Some `Null), Some (`Int version) ->
-        Error
-          (Printf.sprintf
-             "%s.request_context_version=%d requires request_context"
-             surface
-             version)
-      | Some _, Some (`Int version) ->
-        Error
-          (Printf.sprintf
-             "%s.request_context_version=%d is unsupported"
-             surface
-             version)
-      | _, Some _ ->
-        Error
-          (Printf.sprintf
-             "%s.request_context_version must be an integer or null"
-             surface)
+    let* requested_at =
+      match List.assoc_opt "requested_at" fields with
+      | Some (`Float value) when Float.is_finite value && value >= 0.0 -> Ok value
+      | Some (`Int value) when value >= 0 -> Ok (Float.of_int value)
+      | None | Some _ ->
+        Error (surface ^ ".requested_at must be a finite non-negative number")
     in
-    let* task_id = optional_string ~surface "task_id" fields in
-    let* goal_id = optional_string ~surface "goal_id" fields in
+    let* turn_id = required_nullable_nonnegative_int ~surface "turn_id" fields in
+    let* request_context =
+      match request_context_wire with
+      | Delivery_without_request_context -> Ok None
+      | Pending_request_context ->
+        (match
+           List.assoc_opt "request_context" fields,
+           List.assoc_opt "request_context_version" fields
+         with
+         | None, _ -> Error (surface ^ ".request_context is required")
+         | _, None -> Error (surface ^ ".request_context_version is required")
+         | Some `Null, Some `Null -> Ok None
+         | Some context, Some (`Int version)
+           when Int.equal version exact_request_context_version ->
+           Ok (Some context)
+         | Some _, Some `Null ->
+           Error (surface ^ ".request_context requires request_context_version")
+         | Some `Null, Some (`Int version) ->
+           Error
+             (Printf.sprintf
+                "%s.request_context_version=%d requires request_context"
+                surface
+                version)
+         | Some _, Some (`Int version) ->
+           Error
+             (Printf.sprintf
+                "%s.request_context_version=%d is unsupported"
+                surface
+                version)
+         | _, Some _ ->
+           Error
+             (Printf.sprintf
+                "%s.request_context_version must be an integer or null"
+                surface))
+    in
+    let* task_id = required_nullable_string ~surface "task_id" fields in
+    let* goal_id = required_nullable_string ~surface "goal_id" fields in
     let* goal_ids = required_string_list ~surface "goal_ids" fields in
     let* continuation_json = required_member ~surface "continuation_channel" fields in
     let* continuation_channel = Keeper_continuation_channel.of_yojson continuation_json in
@@ -960,15 +1017,6 @@ let approval_decision_of_yojson json =
        in
        let* reason = required_string ~surface:"gate_pending.decision" "reason" fields in
        Ok (Decision.Reject reason)
-     | "edit" ->
-       let* () =
-         reject_unknown_fields
-           ~surface:"gate_pending.decision"
-           ~allowed:[ "kind"; "input" ]
-           fields
-       in
-       let* input = required_member ~surface:"gate_pending.decision" "input" fields in
-       Ok (Decision.Edit input)
      | other -> Error (Printf.sprintf "gate_pending.decision kind %S is unknown" other))
   | _ -> Error "gate_pending.decision must be a JSON object"
 ;;
@@ -1068,7 +1116,12 @@ let persisted_delivery_of_yojson ~base_path json =
         fields
     in
     let* entry_json = required_member ~surface "entry" fields in
-    let* entry = pending_entry_of_yojson ~base_path entry_json in
+    let* entry =
+      pending_entry_of_yojson
+        ~base_path
+        ~request_context_wire:Delivery_without_request_context
+        entry_json
+    in
     let* decision_json = required_member ~surface "decision" fields in
     let* decision = approval_decision_of_yojson decision_json in
     let* source_raw = required_string ~surface "source" fields in
@@ -1083,8 +1136,10 @@ let persisted_delivery_of_yojson ~base_path json =
       | Some _ -> Error (surface ^ ".remember_rule must be a boolean")
       | None -> Error (surface ^ ".remember_rule is required")
     in
-    let* rule_expires_at = optional_float ~surface "rule_expires_at" fields in
-    let* created_by = optional_string ~surface "created_by" fields in
+    let* rule_expires_at =
+      required_nullable_finite_float ~surface "rule_expires_at" fields
+    in
+    let* created_by = required_string ~surface "created_by" fields in
     let* grant_consumed =
       match List.assoc_opt "grant_consumed" fields with
       | Some (`Bool value) -> Ok value
@@ -1094,9 +1149,21 @@ let persisted_delivery_of_yojson ~base_path json =
     let* () =
       match decision, grant_consumed with
       | Decision.Approve, (true | false) -> Ok ()
-      | (Decision.Reject _ | Decision.Edit _), false -> Ok ()
-      | (Decision.Reject _ | Decision.Edit _), true ->
+      | Decision.Reject _, false -> Ok ()
+      | Decision.Reject _, true ->
         Error (surface ^ ".grant_consumed is valid only for approve")
+    in
+    let* () =
+      match decision, remember_rule, rule_expires_at with
+      | Decision.Approve, true, (None | Some _) -> Ok ()
+      | Decision.Approve, false, None -> Ok ()
+      | Decision.Approve, false, Some _ ->
+        Error (surface ^ ".rule_expires_at requires remember_rule=true")
+      | Decision.Reject _, false, None -> Ok ()
+      | Decision.Reject _, true, _ ->
+        Error (surface ^ ".remember_rule is valid only for approve")
+      | Decision.Reject _, false, Some _ ->
+        Error (surface ^ ".rule_expires_at is valid only for approve")
     in
     Ok
       { entry
@@ -1262,7 +1329,9 @@ let snapshot_of_yojson ~base_path json =
     let* pending_entries =
       parse_list
         ~surface:"gate_pending.pending"
-        (pending_entry_of_yojson ~base_path)
+        (pending_entry_of_yojson
+           ~base_path
+           ~request_context_wire:Pending_request_context)
         pending_json
     in
     let* delivery_entries =
@@ -1445,8 +1514,7 @@ let attach_replay_results ~delivery_map replay_results =
               (Printf.sprintf
                  "gate_replay_results outcome %s requires a consumed approve grant"
                  approval_id)
-          | Some
-              { decision = (Decision.Reject _ | Decision.Edit _); _ } ->
+          | Some { decision = Decision.Reject _; _ } ->
             Error
               (Printf.sprintf
                  "gate_replay_results outcome %s belongs to a non-approved delivery"
@@ -1531,13 +1599,13 @@ let approval_sse_pending_event = "approval:pending"
 let approval_sse_resolved_event = "approval:resolved"
 let approval_sse_summary_event = "approval:summary_updated"
 
-let generate_id () = make_generated_id "appr"
+let generate_id = make_approval_id
 
 let default_continuation_channel () =
   Keeper_continuation_channel.unrouted "no originating connector"
 ;;
 
-let normalized_input_hash = request_fingerprint
+let normalized_input_hash = Keeper_approval_queue_rules_types.request_fingerprint
 
 type approved_delivery_lookup =
   | Approved_delivery_unconsumed of persisted_delivery
@@ -1570,7 +1638,7 @@ let approved_delivery_unlocked ~base_path ~id =
             if delivery.grant_consumed
             then Ok (Approved_delivery_consumed delivery)
             else Ok (Approved_delivery_unconsumed delivery)
-          | Decision.Reject _ | Decision.Edit _ ->
+          | Decision.Reject _ ->
             Error (Grant_resolution_not_approved id))
      | None ->
        (match SMap.find_opt id (Atomic.get pending) with
@@ -2820,7 +2888,6 @@ let commit_keeper_approval_resolution
 let hitl_resolution_decision_of_approval_decision = function
   | Decision.Approve -> Keeper_event_queue.Hitl_approved
   | Decision.Reject rationale -> Keeper_event_queue.Hitl_rejected rationale
-  | Decision.Edit input -> Keeper_event_queue.Hitl_edited input
 ;;
 
 let deliver_resolution ~base_path (entry : pending_approval) decision =
@@ -2837,6 +2904,7 @@ let resolve_entry
       ~base_path
       (entry : pending_approval)
       ~(source : decision_source)
+      ~actor
       (decision : decision)
   =
   let decision_str = approval_decision_to_string decision in
@@ -2857,6 +2925,7 @@ let resolve_entry
     ?goal_id:entry.goal_id
     ~goal_ids:entry.goal_ids
     ~decision_source:source
+    ~actor
     ~decision
     ~summary_status:entry.summary_status
     ~exact_attempt:entry.exact_attempt
@@ -3044,6 +3113,7 @@ let submit_pending
 (* ── Resolve (operator action) ────────────────────────────── *)
 
 type resolve_error =
+  | Invalid_resolution_policy of string
   | Not_found of string
   | Already_resolved of string
   | Delivery_failed of
@@ -3055,7 +3125,13 @@ type resolve_error =
       ; storage_error : storage_error
       }
 
+type resolution_result =
+  { remembered_rule : Keeper_approval_queue_rules_types.approval_rule option
+  ; remember_rule_error : storage_error option
+  }
+
 let resolve_error_to_string = function
+  | Invalid_resolution_policy reason -> reason
   | Not_found id -> Printf.sprintf "approval %s not found" id
   | Already_resolved id -> Printf.sprintf "approval %s already resolved" id
   | Delivery_failed { approval_id; reason } ->
@@ -3113,8 +3189,9 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~rule_expires_at ~cr
     match SMap.find_opt id pending_map with
     | None -> Error Journal_not_found
     | Some entry ->
+      let delivery_entry = { entry with request_context = None } in
       let delivery =
-        { entry
+        { entry = delivery_entry
         ; decision
         ; source
         ; remember_rule
@@ -3159,54 +3236,38 @@ let approval_decision_equal left right =
   match left, right with
   | Decision.Approve, Decision.Approve -> true
   | Decision.Reject left, Decision.Reject right -> String.equal left right
-  | Decision.Edit left, Decision.Edit right -> Yojson.Safe.equal left right
-  | (Decision.Approve | Decision.Reject _ | Decision.Edit _),
-    (Decision.Approve | Decision.Reject _ | Decision.Edit _) ->
+  | (Decision.Approve | Decision.Reject _),
+    (Decision.Approve | Decision.Reject _) ->
     false
 ;;
 
-let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pending_approval) =
-  try
-    match
-      upsert_rule
-        ~base_path
-        ~keeper_name:entry.keeper_name
-        ~tool_name:entry.tool_name
-        ~input:entry.input
-        ?created_by
-        ~source_approval_id:entry.id
-        ?expires_at:rule_expires_at
-        ()
-    with
-    | Ok (rule, created) ->
-      if created
-      then
-        Keeper_approval.Audit.record_rule
-          ~base_path
-          ~event_type:Keeper_approval.Audit.Rule_created
-          rule;
-      Ok rule
-    | Error reason -> Error reason
+let remember_rule_for_entry
+      ~base_path
+      ~created_by
+      ~rule_expires_at
+      (entry : pending_approval)
+  =
+  match
+    Keeper_approval_queue_rules.upsert_rule
+      ~base_path
+      ~keeper_name:entry.keeper_name
+      ~tool_name:entry.tool_name
+      ~input:entry.input
+      ~created_by
+      ~source_approval_id:entry.id
+      ~expires_at:rule_expires_at
+      ()
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    let reason = Printexc.to_string exn in
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ApprovalQueueFailures)
-      ~labels:
-        [ "keeper", entry.keeper_name
-        ; "site", Keeper_approval_queue_failure_site.(to_label Remember_rule)
-        ]
-      ();
-    Log.Keeper.warn
-      "approval_queue: remember rule failed id=%s err=%s"
-      entry.id
-      reason;
-    Error
-      ({ path = rules_path ~base_path ()
-       ; reason
-       }
-       : rule_store_error)
+  | Ok (rule, created) ->
+    if created
+    then
+      Keeper_approval.Audit.record_rule
+        ~base_path
+        ~event_type:Keeper_approval.Audit.Rule_created
+        ~actor:rule.created_by
+        rule;
+    Ok rule
+  | Error reason -> Error reason
 ;;
 
 let remember_rule_for_delivery delivery =
@@ -3215,8 +3276,8 @@ let remember_rule_for_delivery delivery =
     (match
        remember_rule_for_entry
          ~base_path:delivery.entry.audit_base_path
-         ?created_by:delivery.created_by
-         ?rule_expires_at:delivery.rule_expires_at
+         ~created_by:delivery.created_by
+         ~rule_expires_at:delivery.rule_expires_at
          delivery.entry
      with
      | Ok rule -> Ok (Some rule)
@@ -3225,51 +3286,55 @@ let remember_rule_for_delivery delivery =
          { path = rule_error.path
          ; reason = rule_error.reason
          })
-  | (Decision.Approve | Decision.Reject _ | Decision.Edit _),
-    false ->
+  | (Decision.Approve | Decision.Reject _), false ->
     Ok None
-  | (Decision.Reject _ | Decision.Edit _), true -> Ok None
+  | Decision.Reject _, true -> Ok None
 ;;
 
 let complete_delivery delivery =
   let id = delivery.entry.id in
   let base_path = delivery.entry.audit_base_path in
+  let remember_rule_outcome () =
+    match remember_rule_for_delivery delivery with
+    | Ok remembered_rule -> remembered_rule, None
+    | Error storage_error -> None, Some storage_error
+  in
   match resolve_store_readiness_error ~base_path ~approval_id:id with
   | Error _ as error -> error
   | Ok () ->
     if delivery.grant_consumed
-    then Ok { remembered_rule = None }
+    then
+      let remembered_rule, remember_rule_error = remember_rule_outcome () in
+      Ok { remembered_rule; remember_rule_error }
     else
       (match deliver_resolution ~base_path delivery.entry delivery.decision with
        | Error reason -> Error (Delivery_failed { approval_id = id; reason })
        | Ok () ->
-         (match remember_rule_for_delivery delivery with
-          | Error storage_error ->
-            Error (Persistence_failed { approval_id = id; storage_error })
-          | Ok remembered_rule ->
-            let finish () =
-              resolve_entry
-                ~base_path
-                delivery.entry
-                ~source:delivery.source
-                delivery.decision;
-              signal_resolution_after_commit
-                ~base_path
-                ~keeper_name:delivery.entry.keeper_name
-                ~approval_id:id;
-              Ok { remembered_rule }
-            in
-            (match delivery.decision with
-             | Decision.Approve ->
-               (* Keep the resolved journal entry until the exact Gate request
-                  consumes it. The wake event is only a correlation message and
-                  cannot become a second authorization SSOT. *)
-               finish ()
-             | Decision.Reject _ | Decision.Edit _ ->
-               (match remove_delivery_from_store delivery with
-                | Error storage_error ->
-                  Error (Persistence_failed { approval_id = id; storage_error })
-               | Ok () -> finish ()))))
+         let remembered_rule, remember_rule_error = remember_rule_outcome () in
+         let finish () =
+           resolve_entry
+             ~base_path
+             delivery.entry
+             ~source:delivery.source
+             ~actor:delivery.created_by
+             delivery.decision;
+           signal_resolution_after_commit
+             ~base_path
+             ~keeper_name:delivery.entry.keeper_name
+             ~approval_id:id;
+           Ok { remembered_rule; remember_rule_error }
+         in
+         (match delivery.decision with
+          | Decision.Approve ->
+            (* Keep the resolved journal entry until the exact Gate request
+               consumes it. The wake event is only a correlation message and
+               cannot become a second authorization SSOT. *)
+            finish ()
+          | Decision.Reject _ ->
+            (match remove_delivery_from_store delivery with
+             | Error storage_error ->
+               Error (Persistence_failed { approval_id = id; storage_error })
+             | Ok () -> finish ())))
 ;;
 
 let delivery_wake_was_observed delivery =
@@ -3417,7 +3482,20 @@ let install_persistence_internal ~after_load ~base_path =
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
   | Ok (loaded_pending, loaded_deliveries, replay_projection_error) ->
-    let rec replay count failures = function
+    let rec replay_rule_outcome count failures delivery rest =
+      match remember_rule_for_delivery delivery with
+      | Ok _ -> replay count failures rest
+      | Error storage_error ->
+        let failure =
+          { approval_id = delivery.entry.id
+          ; reason =
+              Printf.sprintf
+                "approval committed but remembered rule was not persisted: %s"
+                (storage_error_to_string storage_error)
+          }
+        in
+        replay count (failure :: failures) rest
+    and replay count failures = function
       | [] ->
         Ok
           { loaded_pending
@@ -3426,13 +3504,21 @@ let install_persistence_internal ~after_load ~base_path =
           ; replay_projection_error
           }
       | delivery :: rest ->
-        if delivery.grant_consumed
-        then replay count failures rest
-        else if delivery_wake_was_observed delivery
-        then replay count failures rest
+        if delivery.grant_consumed || delivery_wake_was_observed delivery
+        then replay_rule_outcome count failures delivery rest
         else
           (match complete_delivery delivery with
-           | Ok _ -> replay (count + 1) failures rest
+           | Ok { remember_rule_error = None; _ } -> replay (count + 1) failures rest
+           | Ok { remember_rule_error = Some storage_error; _ } ->
+             let failure =
+               { approval_id = delivery.entry.id
+               ; reason =
+                   Printf.sprintf
+                     "approval committed but remembered rule was not persisted: %s"
+                     (storage_error_to_string storage_error)
+               }
+             in
+             replay count (failure :: failures) rest
            | Error error ->
              let failure =
                { approval_id = delivery.entry.id
@@ -3454,6 +3540,9 @@ module For_testing = struct
 
   let with_pending_store_lock = with_pending_store_lock
   let get_pending_entry_unchecked = find_pending_entry_unchecked
+  let get_delivery_entry_unchecked ~id =
+    Option.map (fun delivery -> delivery.entry) (SMap.find_opt id (Atomic.get deliveries))
+  ;;
 
   let reset_runtime_state () =
     with_pending_store_lock (fun () ->
@@ -3471,7 +3560,6 @@ module For_testing = struct
 
   let pending_store_path = pending_store_path
   let replay_results_store_path = replay_results_store_path
-  let always_allowed_store_path ~base_path = rules_path ~base_path ()
 
   let bind_summary_exact_attempt_with_writer = bind_summary_exact_attempt_with
 
@@ -3492,13 +3580,40 @@ let resolve_with_policy
       ~base_path
       ~id
       ~(decision : decision)
-      ?(source = Human_operator)
-      ?(remember_rule = false)
-      ?rule_expires_at
-      ?created_by
+      ~source
+      ~remember_rule
+      ~rule_expires_at
+      ~created_by
       ()
   : (resolution_result, resolve_error) result
   =
+  let now = Unix.gettimeofday () in
+  let policy_validation =
+    match String.trim created_by with
+    | "" ->
+      Error (Invalid_resolution_policy "created_by must be a non-blank string")
+    | _ ->
+    match decision with
+    | Decision.Reject reason when String.trim reason = "" ->
+      Error (Invalid_resolution_policy "rejection reason must be a non-blank string")
+    | Decision.Approve | Decision.Reject _ ->
+    match decision, remember_rule, rule_expires_at with
+    | Decision.Approve, true, Some expires_at
+      when not (Float.is_finite expires_at) || expires_at <= now ->
+      Error (Invalid_resolution_policy "rule_expires_at must be a finite future timestamp")
+    | Decision.Approve, true, (None | Some _) -> Ok ()
+    | Decision.Approve, false, None -> Ok ()
+    | Decision.Approve, false, Some _ ->
+      Error (Invalid_resolution_policy "rule_expires_at requires remember_rule=true")
+    | Decision.Reject _, false, None -> Ok ()
+    | Decision.Reject _, true, _ ->
+      Error (Invalid_resolution_policy "remember_rule is valid only for approval")
+    | Decision.Reject _, false, Some _ ->
+      Error (Invalid_resolution_policy "rule_expires_at is valid only for approval")
+  in
+  match policy_validation with
+  | Error _ as error -> error
+  | Ok () ->
   match resolve_store_readiness_error ~base_path ~approval_id:id with
   | Error _ as error -> error
   | Ok () ->
@@ -3522,14 +3637,6 @@ let resolve_with_policy
            then Error (Not_found id)
            else match SMap.find_opt id (Atomic.get pending) with
            | Some _ ->
-             let remember_rule =
-               match decision with
-               | Decision.Approve -> remember_rule
-               | Decision.Reject _ | Decision.Edit _ -> false
-             in
-             let rule_expires_at =
-               if remember_rule then rule_expires_at else None
-             in
              (match
                 journal_resolution
                   ~id

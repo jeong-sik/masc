@@ -141,7 +141,6 @@ and fusion_terminal =
 and hitl_resolution_decision =
   | Hitl_approved
   | Hitl_rejected of string
-  | Hitl_edited of Yojson.Safe.t
 
 and hitl_resolution = {
   approval_id : string;
@@ -150,9 +149,9 @@ and hitl_resolution = {
 }
 (** Payload for [Hitl_resolved]: [approval_id] is the correlation identity.
     The durable Gate journal remains the SSOT for an approved exact request.
-    Rejection rationale and edited input are resolution output, not
-    authorization state, and travel durably in the event so the wake is
-    actionable. Only [Hitl_approved] can produce a one-shot grant. *)
+    Rejection rationale is resolution output, not authorization state, and
+    travels durably in the event so the wake is actionable. Only
+    [Hitl_approved] can produce a one-shot grant. *)
 
 and connector_attention = {
   event_id : string;

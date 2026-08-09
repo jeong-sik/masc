@@ -20,14 +20,26 @@ export async function respondToKeeperApproval(
   rememberRule = false,
 ) {
   if (!id) return
+  const resolution = (() => {
+    if (decision === 'approve') return { decision, rememberRule } as const
+    const reason = window.prompt('승인 요청을 거부하는 이유를 입력하세요.')
+    if (reason === null || reason.trim() === '') return null
+    return { decision, reason } as const
+  })()
+  if (resolution === null) {
+    showToast('거부 이유를 입력해야 합니다', 'warning')
+    return
+  }
   gateApprovalActing.value = id
   try {
-    await resolveGateApproval(id, decision, rememberRule)
-    const message =
-      decision === 'approve'
+    const result = await resolveGateApproval(id, resolution)
+    const ruleFailed = decision === 'approve' && rememberRule && result.rule_error !== null
+    const message = ruleFailed
+      ? `keeper 승인 요청은 승인했지만 Always 규칙을 저장하지 못했습니다: ${result.rule_error}`
+      : decision === 'approve'
         ? (rememberRule ? 'keeper 승인 요청을 승인하고 Always 규칙을 저장했습니다' : 'keeper 승인 요청을 승인했습니다')
         : 'keeper 승인 요청을 거부했습니다'
-    showToast(message, 'success')
+    showToast(message, ruleFailed ? 'warning' : 'success')
     await refreshGate({ force: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'keeper 승인 요청을 처리하지 못했습니다'

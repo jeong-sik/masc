@@ -330,7 +330,6 @@ let approval_resolve_approve_name = "approve"
 let approval_resolve_reject_name = "reject"
 let approval_resolve_decision_required_message = "decision is required"
 let approval_resolve_decision_invalid_message = "decision must be 'approve' or 'reject'"
-let approval_resolve_default_reject_reason = "dashboard rejected approval"
 
 type approval_resolve_decision =
   | Approval_resolve_approve
@@ -342,24 +341,24 @@ let approval_resolve_decision_name = function
 ;;
 
 let approval_resolve_decision_to_queue_decision = function
-  | Approval_resolve_approve -> Keeper_approval_queue.Decision.Approve
-  | Approval_resolve_reject reason -> Keeper_approval_queue.Decision.Reject reason
+  | Approval_resolve_approve -> Keeper_approval_queue_rules_types.Decision.Approve
+  | Approval_resolve_reject reason -> Keeper_approval_queue_rules_types.Decision.Reject reason
 ;;
 
-let approval_resolve_decision_of_json args =
-  match Safe_ops.json_string_opt approval_resolve_decision_field args with
+let approval_resolve_decision_of_fields fields =
+  match List.assoc_opt approval_resolve_decision_field fields with
   | None -> Error (Bad_request approval_resolve_decision_required_message)
-  | Some raw ->
-    (match raw |> String.trim |> String.lowercase_ascii with
-     | name when String.equal name approval_resolve_approve_name ->
-       Ok Approval_resolve_approve
-     | name when String.equal name approval_resolve_reject_name ->
-       let reason =
-         Safe_ops.json_string_opt approval_resolve_reason_field args
-         |> Option.value ~default:approval_resolve_default_reject_reason
-       in
+  | Some (`String name) when String.equal name approval_resolve_approve_name ->
+    (match List.assoc_opt approval_resolve_reason_field fields with
+     | None -> Ok Approval_resolve_approve
+     | Some _ -> Error (Bad_request "reason is valid only for rejection"))
+  | Some (`String name) when String.equal name approval_resolve_reject_name ->
+    (match List.assoc_opt approval_resolve_reason_field fields with
+     | None -> Error (Bad_request "reason is required for rejection")
+     | Some (`String reason) when String.trim reason <> "" ->
        Ok (Approval_resolve_reject reason)
-     | _ -> Error (Bad_request approval_resolve_decision_invalid_message))
+     | Some _ -> Error (Bad_request "reason must be a non-blank string"))
+  | Some _ -> Error (Bad_request approval_resolve_decision_invalid_message)
 ;;
 
 let approval_resolve_http_error_to_string = function
@@ -371,53 +370,71 @@ let approval_resolve_http_error_to_string = function
 let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, approval_resolve_http_error) result
   =
-  match Safe_ops.json_string_opt "id" args with
-  | None -> Error (Bad_request "id is required")
-  | Some id ->
-    let remember_rule =
-      Safe_ops.json_bool_opt "remember_rule" args |> Option.value ~default:false
-    in
-    let rule_expires_at = Safe_ops.json_float_opt "rule_expires_at" args in
-    (* RFC-0305: a missing [decision] field must not default to approve — this
-       resolves a pending HITL approval, so an omitted/malformed decision is a
-       bad request, not a silent grant. Mirrors the [id]-required check above. *)
-    (* Carry the canonical name alongside the decision so the success response
-       echoes what was applied without re-matching [approval_decision] (whose
-       [Edit] arm is never produced here). *)
-    (match approval_resolve_decision_of_json args with
-     | Error _ as err -> err
-     | Ok decision ->
-       let decision_name = approval_resolve_decision_name decision in
-       let decision = approval_resolve_decision_to_queue_decision decision in
-       (match
-          Keeper_approval_queue.resolve_with_policy
-            ~base_path
-            ~id
-            ~decision
-            ~remember_rule
-            ?rule_expires_at
-            ~created_by
-            ()
-        with
-        | Ok result ->
-          Ok
-            (`Assoc
-                [ "ok", `Bool true
-                ; "id", `String id
-                ; "decision", `String decision_name
-                ; ( "rule_id"
-                  , match result.remembered_rule with
-                    | Some rule -> `String rule.id
-                    | None -> `Null )
-                ])
-        | Error (Keeper_approval_queue.Delivery_failed _ as err) ->
-          Error (Unavailable err)
-        | Error (Keeper_approval_queue.Persistence_failed _ as err) ->
-          Error (Unavailable err)
-        | Error
-            (( Keeper_approval_queue.Not_found _
-             | Keeper_approval_queue.Already_resolved _ ) as err) ->
-          Error (Gone err)))
+  let ( let* ) = Result.bind in
+  let* fields =
+    match args with
+    | `Assoc fields -> Ok fields
+    | _ -> Error (Bad_request "resolve request must be an object")
+  in
+  let allowed = [ "id"; "decision"; "reason"; "remember_rule"; "rule_expires_at" ] in
+  let* () =
+    Json_util.reject_unknown_fields ~surface:"resolve request" ~allowed fields
+    |> Result.map_error (fun reason -> Bad_request reason)
+  in
+  let* id =
+    match List.assoc_opt "id" fields with
+    | Some (`String value) when String.trim value <> "" -> Ok value
+    | _ -> Error (Bad_request "id must be a non-blank string")
+  in
+  let* remember_rule =
+    match List.assoc_opt "remember_rule" fields with
+    | Some (`Bool value) -> Ok value
+    | None | Some _ -> Error (Bad_request "remember_rule must be a boolean")
+  in
+  let* rule_expires_at =
+    match List.assoc_opt "rule_expires_at" fields with
+    | None -> Ok None
+    | Some (`Float value) -> Ok (Some value)
+    | Some (`Int value) -> Ok (Some (Float.of_int value))
+    | Some _ -> Error (Bad_request "rule_expires_at must be a number")
+  in
+  let* decision = approval_resolve_decision_of_fields fields in
+  let decision_name = approval_resolve_decision_name decision in
+  let decision = approval_resolve_decision_to_queue_decision decision in
+  match
+    Keeper_approval_queue.resolve_with_policy
+      ~base_path
+      ~id
+      ~decision
+      ~source:Keeper_approval_queue_rules_types.Human_operator
+      ~remember_rule
+      ~rule_expires_at
+      ~created_by
+      ()
+  with
+  | Ok result ->
+    Ok
+      (`Assoc
+          [ "ok", `Bool true
+          ; "id", `String id
+          ; "decision", `String decision_name
+          ; ( "rule_id"
+            , match result.remembered_rule with
+              | Some rule -> `String rule.id
+              | None -> `Null )
+          ; ( "rule_error"
+            , match result.remember_rule_error with
+              | Some error -> `String (Keeper_approval_queue.storage_error_to_string error)
+              | None -> `Null )
+          ])
+  | Error (Keeper_approval_queue.Delivery_failed _ as err) -> Error (Unavailable err)
+  | Error (Keeper_approval_queue.Persistence_failed _ as err) -> Error (Unavailable err)
+  | Error (Keeper_approval_queue.Invalid_resolution_policy reason) ->
+    Error (Bad_request reason)
+  | Error
+      (( Keeper_approval_queue.Not_found _
+       | Keeper_approval_queue.Already_resolved _ ) as err) ->
+    Error (Gone err)
 ;;
 
 let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe.t) =
@@ -463,7 +480,7 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
   let* input_hash_json = required "input_hash" in
   let* expected_input_hash =
     match input_hash_json with
-    | `String value when Keeper_approval_queue.is_lowercase_sha256 value ->
+    | `String value when Keeper_approval_queue_rules_types.is_lowercase_sha256 value ->
       Ok value
     | _ -> Error "retry request.input_hash must be a lowercase SHA-256"
   in
@@ -475,20 +492,20 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
   in
   let* exact_attempt_json = required "exact_attempt" in
   let* expected_exact_attempt =
-    Keeper_approval_queue.exact_attempt_state_of_yojson_with_error
+    Keeper_approval_queue_rules_types.exact_attempt_state_of_yojson_with_error
       exact_attempt_json
   in
   let* disposition_json = required "summary_attempt_disposition" in
   let* expected_disposition =
-    Keeper_approval_queue.summary_attempt_disposition_of_yojson_with_error
+    Keeper_approval_queue_rules_types.summary_attempt_disposition_of_yojson_with_error
       disposition_json
   in
   let* () =
     match expected_disposition with
-    | Keeper_approval_queue.Summary_attempt_identity_unbound
-    | Keeper_approval_queue.Summary_attempt_persistence_uncertain ->
+    | Keeper_approval_queue_rules_types.Summary_attempt_identity_unbound
+    | Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain ->
       Ok ()
-    | Keeper_approval_queue.Summary_attempt_pre_worker_unavailable _ ->
+    | Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable _ ->
       Ok ()
     | _ -> Error "retry request disposition is not operator-rearmable"
   in
@@ -506,21 +523,27 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
   | Ok () -> Ok (`Assoc [ "ok", `Bool true; "id", `String id ])
 ;;
 
-let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
+let dashboard_gate_rule_delete_http_json ~base_path ~deleted_by ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, string) result
   =
-  match Safe_ops.json_string_opt "id" args with
-  | None -> Error "id is required"
-  | Some id ->
-    (match Keeper_approval_queue.delete_rule ~base_path ~id () with
+  let open Result.Syntax in
+  let* fields =
+    match args with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "rule delete request must be an object"
+  in
+  let* () = Json_util.reject_unknown_fields ~surface:"rule delete request" ~allowed:[ "id" ] fields in
+  let* id = Json_util.require_field_string ~surface:"rule delete request" "id" fields in
+    (match Keeper_approval_queue_rules.delete_rule ~base_path ~id () with
      | Ok deleted ->
          Keeper_approval.Audit.record_rule
            ~base_path
            ~event_type:Keeper_approval.Audit.Rule_deleted
+           ~actor:deleted_by
            deleted;
          Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
        | Error error ->
-         Error (Keeper_approval_queue.rule_store_error_to_string error))
+         Error (Keeper_approval_queue_rules_types.rule_store_error_to_string error))
 ;;
 
 let dashboard_schedule_prune_http_json

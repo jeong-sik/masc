@@ -272,7 +272,7 @@ let test_parse_typed_judgments () =
          | Error reason -> fail reason
        in
        check bool wire true (summary.judgment = expected))
-    [ "approve", Q.Approve; "deny", Q.Deny; "require_human", Q.Require_human ]
+    [ "approve", Keeper_approval_queue_rules_types.Approve; "deny", Keeper_approval_queue_rules_types.Deny; "require_human", Keeper_approval_queue_rules_types.Require_human ]
 ;;
 
 let test_invalid_judgment_fails_loud () =
@@ -493,9 +493,9 @@ let test_flow_order_completion_and_replay () =
        (match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
         | Some
             { exact_attempt =
-                Q.Exact_bound
-                  { slot_id = "hitl-first"; status = Q.Exact_completed; _ }
-            ; summary_status = Q.Summary_available _
+                Keeper_approval_queue_rules_types.Exact_bound
+                  { slot_id = "hitl-first"; status = Keeper_approval_queue_rules_types.Exact_completed; _ }
+            ; summary_status = Keeper_approval_queue_rules_types.Summary_available _
             ; _
             } ->
           ()
@@ -565,8 +565,8 @@ let test_predispatch_failure_advances_only_to_oas_successor () =
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
-               Q.Exact_bound
-                 { slot_id = "hitl-successor"; status = Q.Exact_completed; _ }
+               Keeper_approval_queue_rules_types.Exact_bound
+                 { slot_id = "hitl-successor"; status = Keeper_approval_queue_rules_types.Exact_completed; _ }
            ; _
            } ->
          ()
@@ -642,12 +642,12 @@ let test_cancellation_between_candidates_terminalizes_released_identity () =
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
-               Q.Exact_bound
+               Keeper_approval_queue_rules_types.Exact_bound
                  { slot_id = "hitl-cancel-between-unreachable"
-                 ; status = Q.Exact_quarantined Q.Exact_cancellation
+                 ; status = Keeper_approval_queue_rules_types.Exact_quarantined Keeper_approval_queue_rules_types.Exact_cancellation
                  ; _
                  }
-           ; summary_attempt_disposition = Q.Summary_attempt_settled
+           ; summary_attempt_disposition = Keeper_approval_queue_rules_types.Summary_attempt_settled
            ; _
            } ->
          ()
@@ -735,10 +735,10 @@ let test_json_syntax_candidate_is_admitted_without_structured_capability () =
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
-               Q.Exact_bound
-                 { status = Q.Exact_quarantined Q.Exact_flow_execution_failed; _ }
-           ; summary_status = Q.Summary_failed _
-           ; summary_attempt_disposition = Q.Summary_attempt_settled
+               Keeper_approval_queue_rules_types.Exact_bound
+                 { status = Keeper_approval_queue_rules_types.Exact_quarantined Keeper_approval_queue_rules_types.Exact_flow_execution_failed; _ }
+           ; summary_status = Keeper_approval_queue_rules_types.Summary_failed _
+           ; summary_attempt_disposition = Keeper_approval_queue_rules_types.Summary_attempt_settled
            ; _
            } ->
          ()
@@ -779,9 +779,9 @@ let test_visible_bind_blocks_dispatch () =
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
-               Q.Exact_bound
+               Keeper_approval_queue_rules_types.Exact_bound
                  { status =
-                     Q.Exact_quarantined Q.Exact_terminal_persistence_failure
+                     Keeper_approval_queue_rules_types.Exact_quarantined Keeper_approval_queue_rules_types.Exact_terminal_persistence_failure
                  ; _
                  }
            ; _
@@ -827,9 +827,9 @@ let test_visible_advance_blocks_successor () =
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
-               Q.Exact_bound
+               Keeper_approval_queue_rules_types.Exact_bound
                  { status =
-                     Q.Exact_quarantined Q.Exact_terminal_persistence_failure
+                     Keeper_approval_queue_rules_types.Exact_quarantined Keeper_approval_queue_rules_types.Exact_terminal_persistence_failure
                  ; _
                  }
            ; _
@@ -880,8 +880,8 @@ let test_visible_completion_blocks_gate_delivery () =
        (match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
-               Q.Exact_bound { status = Q.Exact_completed; _ }
-           ; summary_status = Q.Summary_available _
+               Keeper_approval_queue_rules_types.Exact_bound { status = Keeper_approval_queue_rules_types.Exact_completed; _ }
+           ; summary_status = Keeper_approval_queue_rules_types.Summary_available _
            ; _
            } ->
          ()
@@ -901,8 +901,8 @@ let test_visible_completion_blocks_gate_delivery () =
        check int "restart did not dispatch successor" 1 (F.post_count server);
        (match Q.For_testing.get_pending_entry_unchecked ~id:successor.id with
         | Some
-            { exact_attempt = Q.Exact_unbound
-            ; summary_status = Q.Summary_pending
+            { exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound
+            ; summary_status = Keeper_approval_queue_rules_types.Summary_pending
             ; _
             } ->
           ()
@@ -937,7 +937,7 @@ let test_completion_identity_conflict_stays_deterministic () =
        let replacement_call_id = "replacement-call" in
        let replace_bound_identity () =
          match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
-         | Some { exact_attempt = Q.Exact_bound binding; _ } ->
+         | Some { exact_attempt = Keeper_approval_queue_rules_types.Exact_bound binding; _ } ->
            let transition_exn operation = function
              | Ok { Q.write_outcome = Q.Fsync_completed; _ } -> ()
              | Ok { Q.write_outcome = Q.Visible_sync_unconfirmed detail; _ } ->
@@ -966,7 +966,7 @@ let test_completion_identity_conflict_stays_deterministic () =
              ~plan_fingerprint:(String.make 64 'a')
              ~request_body_sha256:(String.make 64 'b')
            |> transition_exn "bind replacement identity"
-         | Some { exact_attempt = Q.Exact_unbound; _ } ->
+         | Some { exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound; _ } ->
            fail "after_bind observed an unbound exact attempt"
          | None -> fail "after_bind lost the pending approval"
        in
@@ -999,9 +999,9 @@ let test_completion_identity_conflict_stays_deterministic () =
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
-               Q.Exact_bound { call_id; status = Q.Exact_dispatch_uncertain; _ }
-           ; summary_status = Q.Summary_pending
-           ; summary_attempt_disposition = Q.Summary_attempt_in_flight
+               Keeper_approval_queue_rules_types.Exact_bound { call_id; status = Keeper_approval_queue_rules_types.Exact_dispatch_uncertain; _ }
+           ; summary_status = Keeper_approval_queue_rules_types.Summary_pending
+           ; summary_attempt_disposition = Keeper_approval_queue_rules_types.Summary_attempt_in_flight
            ; _
            } ->
          check string
@@ -1042,14 +1042,14 @@ let test_flow_execution_failure_quarantines_and_allows_successor () =
         | Some
             { input_hash
             ; sequence
-            ; summary_status = Q.Summary_failed { reason }
+            ; summary_status = Keeper_approval_queue_rules_types.Summary_failed { reason }
             ; exact_attempt =
-                Q.Exact_bound
+                Keeper_approval_queue_rules_types.Exact_bound
                   { slot_id
                   ; call_id
                   ; plan_fingerprint
                   ; request_body_sha256
-                  ; status = Q.Exact_quarantined Q.Exact_flow_execution_failed
+                  ; status = Keeper_approval_queue_rules_types.Exact_quarantined Keeper_approval_queue_rules_types.Exact_flow_execution_failed
                   ; _
                   }
             ; _
@@ -1111,7 +1111,7 @@ let test_manual_resolution_race_is_conclusive () =
        install_queue base_path;
        Prompt_registry.set_markdown_dir
          (Masc_test_deps.source_path "config/prompts");
-       let in_flight_entry : Q.pending_approval option ref = ref None in
+       let in_flight_entry : Keeper_approval_queue_rules_types.pending_approval option ref = ref None in
        let server =
          F.start_server
            ~on_request_before_reply:(fun () ->
@@ -1122,7 +1122,11 @@ let test_manual_resolution_race_is_conclusive () =
                   Q.resolve_with_policy
                     ~base_path
                     ~id:entry.id
-                    ~decision:(Q.Decision.Reject "manual operator resolution")
+                    ~decision:(Keeper_approval_queue_rules_types.Decision.Reject "manual operator resolution")
+                    ~source:Keeper_approval_queue_rules_types.Human_operator
+                    ~remember_rule:false
+                    ~rule_expires_at:None
+                    ~created_by:"test-operator"
                     ()
                 with
                 | Ok _ -> ()
@@ -1215,8 +1219,8 @@ let test_cancellation_after_dispatch_is_terminal () =
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
-               Q.Exact_bound
-                 { status = Q.Exact_quarantined Q.Exact_cancellation; _ }
+               Keeper_approval_queue_rules_types.Exact_bound
+                 { status = Keeper_approval_queue_rules_types.Exact_quarantined Keeper_approval_queue_rules_types.Exact_cancellation; _ }
            ; _
            } ->
          ()
@@ -1402,19 +1406,19 @@ let test_prebind_cancellation_withholds_production_gate_drain () =
               (F.post_count server);
             (match Q.For_testing.get_pending_entry_unchecked ~id:cancelled.id with
              | Some
-                 { exact_attempt = Q.Exact_unbound
-                 ; summary_status = Q.Summary_pending
+                 { exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound
+                 ; summary_status = Keeper_approval_queue_rules_types.Summary_pending
                  ; summary_attempt_disposition =
-                     Q.Summary_attempt_identity_unbound
+                     Keeper_approval_queue_rules_types.Summary_attempt_identity_unbound
                  ; _
                  } ->
                ()
              | _ -> fail "Gate drained or mutated the cancelled pending entry");
             match Q.For_testing.get_pending_entry_unchecked ~id:successor.id with
             | Some
-                { exact_attempt = Q.Exact_unbound
-                ; summary_status = Q.Summary_pending
-                ; summary_attempt_disposition = Q.Summary_attempt_ready
+                { exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound
+                ; summary_status = Keeper_approval_queue_rules_types.Summary_pending
+                ; summary_attempt_disposition = Keeper_approval_queue_rules_types.Summary_attempt_ready
                 ; _
                 } ->
               ()
@@ -1512,8 +1516,8 @@ let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
               (F.post_count server);
             match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
             | Some
-                { exact_attempt = Q.Exact_bound _
-                ; summary_status = Q.Summary_pending
+                { exact_attempt = Keeper_approval_queue_rules_types.Exact_bound _
+                ; summary_status = Keeper_approval_queue_rules_types.Summary_pending
                 ; _
                 } ->
               ()
@@ -1547,12 +1551,12 @@ let test_pre_worker_start_failure_preserves_unbound_pending () =
         | Ok _ -> fail "pre-worker failure was reported as a successful start");
        (match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
-           { exact_attempt = Q.Exact_unbound
-           ; summary_status = Q.Summary_pending
+           { exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound
+           ; summary_status = Keeper_approval_queue_rules_types.Summary_pending
            ; summary_attempt_disposition =
-               Q.Summary_attempt_pre_worker_unavailable
+               Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable
                  { reason_code =
-                     Q.Summary_pre_worker_auto_judge_unavailable
+                     Keeper_approval_queue_rules_types.Summary_pre_worker_auto_judge_unavailable
                  ; operator_detail = "no usable exact-output lane slots"
                  }
            ; _
@@ -1633,18 +1637,18 @@ let test_visible_uncertainty_withholds_production_drain () =
        (match Q.For_testing.get_pending_entry_unchecked ~id:uncertain.id with
        | Some
            { exact_attempt =
-               Q.Exact_bound { status = Q.Exact_completed; _ }
-           ; summary_status = Q.Summary_available _
+               Keeper_approval_queue_rules_types.Exact_bound { status = Keeper_approval_queue_rules_types.Exact_completed; _ }
+           ; summary_status = Keeper_approval_queue_rules_types.Summary_available _
            ; summary_attempt_disposition =
-               Q.Summary_attempt_persistence_uncertain
+               Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain
            ; _
            } ->
          ()
        | _ -> fail "uncertain completion did not remain durably visible");
        (match Q.For_testing.get_pending_entry_unchecked ~id:successor.id with
         | Some
-            { exact_attempt = Q.Exact_unbound
-            ; summary_status = Q.Summary_pending
+            { exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound
+            ; summary_status = Keeper_approval_queue_rules_types.Summary_pending
             ; _
             } ->
           ()
@@ -1716,8 +1720,8 @@ let test_owner_fifo_atomic_drain_is_nonsharing () =
          (F.post_count server);
        (match Q.For_testing.get_pending_entry_unchecked ~id:second.id with
         | Some
-            { exact_attempt = Q.Exact_unbound
-            ; summary_status = Q.Summary_pending
+            { exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound
+            ; summary_status = Keeper_approval_queue_rules_types.Summary_pending
             ; _
             } ->
           ()
@@ -1802,10 +1806,10 @@ let test_require_human_head_does_not_stop_owner_drain () =
        (match Q.For_testing.get_pending_entry_unchecked ~id:head.id with
         | Some
             { exact_attempt =
-                Q.Exact_bound { status = Q.Exact_completed; _ }
+                Keeper_approval_queue_rules_types.Exact_bound { status = Keeper_approval_queue_rules_types.Exact_completed; _ }
             ; summary_status =
-                Q.Summary_available { judgment = Q.Require_human; _ }
-            ; summary_attempt_disposition = Q.Summary_attempt_settled
+                Keeper_approval_queue_rules_types.Summary_available { judgment = Keeper_approval_queue_rules_types.Require_human; _ }
+            ; summary_attempt_disposition = Keeper_approval_queue_rules_types.Summary_attempt_settled
             ; _
             } ->
           ()
@@ -1834,13 +1838,13 @@ let test_judge_effect_prompt_comes_from_registry () =
    Both arms are pinned here because the decision is now a named function and
    the outcome type has a variant for each. *)
 
-let summary_fixture () : Q.hitl_context_summary =
-  { summary_version = Q.current_hitl_context_summary_version
+let summary_fixture () : Keeper_approval_queue_rules_types.hitl_context_summary =
+  { summary_version = Keeper_approval_queue_rules_types.current_hitl_context_summary_version
   ; generated_at = 1000.0
   ; model_run_id = "run-fixture"
   ; context_summary = "context"
   ; key_questions = [ "q1" ]
-  ; judgment = Q.Approve
+  ; judgment = Keeper_approval_queue_rules_types.Approve
   ; rationale = "because"
   }
 ;;

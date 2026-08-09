@@ -1,23 +1,9 @@
 (** Property tests for [Keeper_cwd_response].
 
-    These pin the contract that LLM-facing JSON responses
-    constructed via {!Keeper_cwd_response.to_yojson_response}
-    never reveal the host abs path of a Docker-backend keeper.
-
-    Background: PR #11080 removed [sandbox_host_root] /
-    [playground_path] from [execution_context], but sibling
-    [cwd] fields in [keeper_sandbox_docker] / [keeper_tool_command_runtime]
-    response builders still echoed the host abs path. The Docker
-    [--workdir] argument was translated via
-    [docker_private_workspace_cwd], yet that translation was not
-    propagated into the response JSON, so the LLM re-emitted
-    [cd /Users/...] on the next turn — invalid inside the
-    container.
-
-    These tests are the layer-1 guard: they pin the audience
-    semantics of the [Keeper_cwd_response] module itself. The
-    layer-2/3 guards (response builders + MLI gate) live in
-    follow-up PRs. *)
+    LLM-facing JSON responses constructed via
+    {!Keeper_cwd_response.to_yojson_response} never reveal the host absolute
+    path of a Docker-backed Keeper. Docker responses expose the translated
+    in-container working directory. *)
 
 open Alcotest
 open Masc

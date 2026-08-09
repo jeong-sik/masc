@@ -36,6 +36,11 @@ function response(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
     approval_queue_state: { state: 'ready' },
     recent_resolved: [],
     approval_rules: [],
+    approval_rules_state: { state: 'ready' },
+    hitl: {
+      gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+      judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
+    },
   } as DashboardGateResponse
 }
 
@@ -120,6 +125,11 @@ describe('Gate resource (stale-while-revalidate)', () => {
       // unknown, and a zeroed page would render as "nothing was decided".
       recent_resolved_page: null,
       approval_rules: [],
+      approval_rules_state: {
+        state: 'unavailable',
+        error: 'Gate 새로고침 실패',
+      },
+      hitl: null,
     })
     expect(signals.gateError.value).toContain('Gate 새로고침 실패')
     expect(signals.gateLoading.value).toBe(false)

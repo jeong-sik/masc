@@ -1314,12 +1314,27 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_observability_redact"
 
-      # The Gate is the boundary every external effect crosses, and its audit
-      # log is the only durable record of what it let through. Seven suites
-      # cover it (approval queue, rules, rules types, resolved history, audit
-      # timeline, gate effect coverage, gate replay) and none was named here, so
-      # none ran. This wires the audit-vocabulary suite, which is the one that
-      # pins what a reader of ~/.masc/audit-approvals can actually tell apart.
+      # Queue persistence, exact-rule storage, and their wire codecs form one
+      # Gate contract. Run all three owner suites together so an interface move
+      # cannot compile while its persisted representation or dispatch behavior
+      # diverges.
+      - name: Run approval owner contract suites
+        id: approval_owner_contract_suites
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . \
+            @test/runtest-test_keeper_approval_queue \
+            @test/runtest-test_keeper_approval_queue_rules \
+            @test/runtest-test_keeper_approval_queue_rules_types"
+
+      # The audit vocabulary is the durable operator-facing account of Gate
+      # decisions and must remain executable independently of the queue store.
       - name: Run approval audit vocabulary suite
         id: approval_audit_vocabulary_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

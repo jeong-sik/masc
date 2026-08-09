@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import type {
   KeeperApprovalQueueItem,
   KeeperApprovalRule,
+  KeeperApprovalRulesState,
   KeeperResolvedApprovalItem,
   KeeperResolvedApprovalPage,
   GateDecisionSource,
@@ -41,6 +42,7 @@ import {
   gateLoading,
   gateApprovalActing,
   refreshGate,
+  deleteKeeperApprovalRule,
   respondToKeeperApproval,
   retryKeeperAutoJudge,
   setKeeperGateMode,
@@ -589,12 +591,26 @@ function ApprovalDetailPanel({
 }
 
 function ApprovalRuleRow({ rule }: { rule: KeeperApprovalRule }) {
-  const fingerprintPreview = rule.request_fingerprint?.slice(0, 12)
+  const fingerprintPreview = rule.request_fingerprint.slice(0, 12)
+  const expired = rule.expires_at !== null && rule.expires_at <= Date.now() / 1000
+  const expiryLabel = rule.expires_at === null
+    ? '만료 없음'
+    : `${expired ? '만료됨' : '만료'} ${formatDateTimeKo(rule.expires_at * 1000)}`
+  const deleting = gateApprovalActing.value === `rule:${rule.id}`
   return html`
     <li class="ap-rule-row" data-testid="approval-rule-row">
       <span class="ap-rule-keeper mono">${rule.keeper_name}</span>
       <span class="ap-rule-tool mono">${rule.tool_name}</span>
-      ${fingerprintPreview ? html`<span class="ap-rule-fingerprint mono">${fingerprintPreview}</span>` : null}
+      <span class="ap-rule-fingerprint mono">${fingerprintPreview}</span>
+      <span class="ap-rule-provenance mono">${rule.created_by} · ${rule.source_approval_id}</span>
+      <span class=${`ap-rule-expiry ${expired ? 'sev-bad' : ''}`} data-testid="approval-rule-expiry">${expiryLabel}</span>
+      <button
+        type="button"
+        class="ap-rule-delete"
+        disabled=${deleting}
+        onClick=${() => void deleteKeeperApprovalRule(rule.id)}
+        aria-label=${rule.tool_name + ' Always 규칙 삭제'}
+      >${deleting ? '삭제 중' : '삭제'}</button>
     </li>
   `
 }
@@ -609,10 +625,12 @@ function ApAside({
   openCount,
   resolvedItems,
   rules,
+  rulesState,
 }: {
   openCount: number
   resolvedItems: KeeperResolvedApprovalItem[]
   rules: KeeperApprovalRule[]
+  rulesState: KeeperApprovalRulesState
 }) {
   const hitl = gateData.value?.hitl
   const recent = [...resolvedItems]
@@ -649,7 +667,7 @@ function ApAside({
               `)}
             </div>
           </div>
-          <div class="wka-auto-stat">${rules.length.toLocaleString()}개 Always 규칙 · 열린 승인 ${openCount.toLocaleString()}건</div>
+          <div class="wka-auto-stat">${rulesState.state === 'ready' ? `${rules.length.toLocaleString()}개 Always 규칙` : 'Always 규칙 확인 불가'} · 열린 승인 ${openCount.toLocaleString()}건</div>
           <div class="wka-auto-note">
             Human은 사람이 판단하고, Auto Judge는 LLM이 판단하며, Always Allow는 workspace의 명시적 선택입니다.
           </div>
@@ -668,8 +686,8 @@ function ApAside({
                   </div>
                 `
             : null}
-          ${gateMode?.state === 'invalid' || gateMode?.state === 'unavailable' || gateMode?.read_error
-            ? html`<div class="ap-env-warn mono">Gate mode ${gateMode.state ?? 'invalid'}: ${gateMode.read_error ?? '상태 확인 실패'}</div>`
+          ${gateMode && gateMode.state !== 'ready'
+            ? html`<div class="ap-env-warn mono">Gate mode ${gateMode.state}: ${gateMode.read_error}</div>`
             : null}
         </div>
       </section>
@@ -679,7 +697,9 @@ function ApAside({
           <h3>Always Rules</h3>
           <span class="mono">${rules.length}</span>
         </div>
-        ${rules.length > 0
+        ${rulesState.state === 'unavailable'
+          ? html`<div class="ap-env-warn" role="alert" data-testid="approval-rules-unavailable">${rulesState.error}</div>`
+          : rules.length > 0
           ? html`
               <ul class="ap-rule-list">${rules.slice(0, ASIDE_RULES_LIMIT).map(rule => html`<${ApprovalRuleRow} key=${rule.id} rule=${rule} />`)}</ul>
               ${hiddenRules > 0
@@ -737,6 +757,7 @@ export function ApprovalsSurface() {
   const resolvedItems = gateData.value?.recent_resolved ?? []
   const resolvedPage = gateData.value?.recent_resolved_page ?? null
   const rules = gateData.value?.approval_rules ?? []
+  const rulesState = gateData.value?.approval_rules_state ?? null
   const queueViolations = gateData.value?.approval_queue_violations ?? []
   const error = gateError.value
   // First load only: gateResource is stale-while-revalidate, so a refetch
@@ -844,7 +865,7 @@ export function ApprovalsSurface() {
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">Always 규칙</div>
-            <div class="ov-kpi-v">${rules.length}</div>
+            <div class="ov-kpi-v">${rulesState?.state === 'ready' ? rules.length : '—'}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">처리 완료</div>
@@ -884,11 +905,12 @@ export function ApprovalsSurface() {
           : null}
       `}
       </div>
-      ${!firstLoad && !queueUnavailable && items !== null ? html`
+      ${!firstLoad && !queueUnavailable && items !== null && rulesState !== null ? html`
         <${ApAside}
           openCount=${items.length}
           resolvedItems=${resolvedItems}
           rules=${rules}
+          rulesState=${rulesState}
         />
       ` : null}
     </main>

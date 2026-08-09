@@ -147,12 +147,7 @@ let test_resolution_reads_the_decision_kind () =
     (option string)
     "approve"
     (Some "ok")
-    (field "severity" (rendered ~decision_kind:Audit.Decision_approve Audit.Resolved));
-  check
-    (option string)
-    "edit"
-    (Some "ok")
-    (field "severity" (rendered ~decision_kind:Audit.Decision_edit Audit.Resolved))
+    (field "severity" (rendered ~decision_kind:Audit.Decision_approve Audit.Resolved))
 ;;
 
 (* The old reader scanned the rendered decision for "reject", so an approval
@@ -204,15 +199,15 @@ let test_unknown_spelling_says_so () =
    came from the workspace being in Always_allow mode and 2,100 from a per-keeper
    blanket, while operator-approved exact rules accounted for none. *)
 let every_authorization_source =
-  [ Q.One_shot_resolution
-  ; Q.Exact_always_rule
-  ; Q.Keeper_always_allow
-  ; Q.Workspace_always_allow
+  [ Keeper_approval_queue_rules_types.One_shot_resolution
+  ; Keeper_approval_queue_rules_types.Exact_always_rule
+  ; Keeper_approval_queue_rules_types.Keeper_always_allow
+  ; Keeper_approval_queue_rules_types.Workspace_always_allow
   ]
 ;;
 
 let test_authorization_sources_are_distinct () =
-  let rendered = List.map Q.authorization_source_to_string every_authorization_source in
+  let rendered = List.map Keeper_approval_queue_rules_types.authorization_source_to_string every_authorization_source in
   check (list string) "each authority renders as itself"
     [ "one_shot_resolution"; "exact_always_rule"; "keeper_always_allow";
       "workspace_always_allow" ]
@@ -225,16 +220,16 @@ let test_authorization_sources_are_distinct () =
 let test_authorization_source_round_trips () =
   List.iter
     (fun source ->
-      let spelling = Q.authorization_source_to_string source in
+      let spelling = Keeper_approval_queue_rules_types.authorization_source_to_string source in
       check (option string) ("round-trips: " ^ spelling) (Some spelling)
-        (Option.map Q.authorization_source_to_string
-           (Q.authorization_source_of_string spelling)))
+        (Option.map Keeper_approval_queue_rules_types.authorization_source_to_string
+           (Keeper_approval_queue_rules_types.authorization_source_of_string spelling)))
     every_authorization_source
 ;;
 
 let test_unknown_authorization_source_is_none () =
   check bool "an unknown spelling is not coerced to a default" true
-    (Option.is_none (Q.authorization_source_of_string "always_allowed"))
+    (Option.is_none (Keeper_approval_queue_rules_types.authorization_source_of_string "always_allowed"))
 ;;
 
 let () =

@@ -1,11 +1,7 @@
 (** See .mli for contract.
 
-    The current Docker invocation mirrors the hardened-Execute sandbox in
-    [keeper_tool_command_runtime.ml] (read-only rootfs, no caps, no network) with the
-    playground mounted read-only and the default read program reduced to a
-    single [cat]. The argv assembly is duplicated rather than shared so a
-    future surgical change to either path does not need to wade through the
-    other's flags. *)
+    The Docker read invocation uses a read-only rootfs, no capabilities, no
+    network, a read-only playground mount, and a single [cat] program. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -50,9 +46,7 @@ let container_path_of_host ~config ~(meta : keeper_meta) ~host_path
          "container_path_of_host: %s is not inside playground %s"
          host_norm host_root)
 
-(* Argv prefix kept private — distinct from keeper_tool_command_runtime's bash
-   argv to avoid coupling the two surfaces. The trailing
-   [program ; arg1 ; ... ] is appended by the caller via
+(* The trailing [program ; arg1 ; ... ] is appended by the caller via
    [build_docker_argv ~command_argv]. *)
 let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
     ~uid ~gid ~seccomp_args ~secret_args ~command_argv =

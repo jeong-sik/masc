@@ -176,7 +176,7 @@ type approval_summary = {
 let approval_queue_summary_of_entries ~now_ts entries : approval_summary =
   let waits =
     List.map
-      (fun (entry : Keeper_approval_queue.pending_approval) ->
+      (fun (entry : Keeper_approval_queue_rules_types.pending_approval) ->
         Float.max 0.0 (now_ts -. entry.requested_at))
       entries
   in

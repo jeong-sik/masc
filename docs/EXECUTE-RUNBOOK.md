@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-06-11
+last_verified: 2026-08-09
 code_refs:
   - lib/core/exec_buffer.ml
   - lib/exec_core.ml
@@ -9,19 +9,18 @@ code_refs:
   - lib/exec/command_gate/shell_command_gate.ml
   - lib/exec_policy/exec_policy.ml
   - lib/keeper/keeper_tool_execute_runtime.ml
+  - lib/keeper/keeper_workspace_ops.ml
 ---
 
 # Execute Runbook
 
 This runbook documents the current operator surface for `Execute` and
 adjacent structured process routing. Execute is typed-only: callers provide
-one non-empty `argv` process vector or `pipeline`. Raw command strings and the old
-background task lifecycle are not part of the callable surface.
+one non-empty `argv` process vector or `pipeline`.
 
 ## Related Documents
 
 - [`ENV-CONTRACT.md`](./ENV-CONTRACT.md) §4 — authoritative flag matrix
-- `planning/graceful-panda/Legendary-Execute-plan.md` — historical source plan
 
 ## Scope
 
@@ -32,15 +31,6 @@ background task lifecycle are not part of the callable surface.
   tools.
 - Async boundary: the typed `Execute` callable surface is synchronous. There is
   no background shell lifecycle surface anywhere below it.
-
-## Current Rollout State
-
-| Phase | Feature | Default | Status |
-| --- | --- | --- | --- |
-| P1 | `semantic_exit` typed return code | **on** | flipped |
-| P3 | head+tail truncation | on | delivered |
-| P5 | Shell IR command gate | on | authoritative |
-| P6 | `verifiable_markers` emission | **on** | flipped |
 
 ## Flag Matrix
 
@@ -113,7 +103,7 @@ scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_docker_streaming.ex
 ## Async Boundary Proof
 
 `Execute` remains synchronous at the callable-surface level. The public schema
-rejects legacy background flags and accepts only typed command fields:
+accepts only typed command fields:
 `executable`, `argv`, `pipeline`, `env`, `cwd`, `timeout_sec`, `stdin`,
 `stdout`, and `stderr`. It does not expose `job_id`, `request_id`, `poll`, or
 `cancel` fields.

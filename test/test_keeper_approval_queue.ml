@@ -1,6 +1,7 @@
 module AQ = Masc.Keeper_approval_queue
+module Rules = Masc.Keeper_approval_queue_rules
 
-let reserve_retry_exact ~base_path (entry : AQ.pending_approval) =
+let reserve_retry_exact ~base_path (entry : Keeper_approval_queue_rules_types.pending_approval) =
   AQ.reserve_summary_attempt_retry
     ~base_path
     ~id:entry.id
@@ -21,11 +22,19 @@ module Registry_queue = Masc.Keeper_registry_event_queue
 module Event_queue_persistence = Keeper_event_queue_persistence
 module Reaction_ledger = Masc.Keeper_reaction_ledger
 
-(* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
-   reproduces its unit projection over [resolve_with_policy] so these
-   assertions keep exercising the production resolution path. *)
+(* Unit projection used by assertions that do not inspect the remembered rule. *)
 let aq_resolve ~base_path ~id ~decision =
-  match AQ.resolve_with_policy ~base_path ~id ~decision () with
+  match
+    AQ.resolve_with_policy
+      ~base_path
+      ~id
+      ~decision
+      ~source:Keeper_approval_queue_rules_types.Human_operator
+      ~remember_rule:false
+      ~rule_expires_at:None
+      ~created_by:"test-operator"
+      ()
+  with
   | Ok _ -> Ok ()
   | Error _ as error -> error
 ;;
@@ -139,7 +148,7 @@ let submit ~base_path ~keeper_name ~input =
 ;;
 
 let reject_and_cleanup ~base_path id =
-  match aq_resolve ~base_path ~id ~decision:(AQ.Decision.Reject "test cleanup") with
+  match aq_resolve ~base_path ~id ~decision:(Keeper_approval_queue_rules_types.Decision.Reject "test cleanup") with
   | Ok () -> ()
   | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
 ;;
@@ -407,14 +416,14 @@ let expect_summary_rejection label = function
 ;;
 
 let exact_summary ?(context_summary = "Exact attempt summary") model_run_id :
-    AQ.hitl_context_summary
+    Keeper_approval_queue_rules_types.hitl_context_summary
   =
   { summary_version = 2
   ; generated_at = Unix.gettimeofday ()
   ; model_run_id
   ; context_summary
   ; key_questions = []
-  ; judgment = AQ.Approve
+  ; judgment = Keeper_approval_queue_rules_types.Approve
   ; rationale = "The exact durable attempt supports this judgment."
   }
 ;;
@@ -443,7 +452,7 @@ let delivery_json ~entry ~remember_rule =
     ; "source", `String "human_operator"
     ; "remember_rule", `Bool remember_rule
     ; "rule_expires_at", `Null
-    ; "created_by", `Null
+    ; "created_by", `String "operator"
     ; "grant_consumed", `Bool false
     ]
 ;;
@@ -459,7 +468,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
@@ -610,7 +619,7 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
         | None -> Alcotest.fail "pending request missing"
         | Some entry ->
           Alcotest.(check bool) "summary is not started by queue" true
-            (entry.summary_status = AQ.Summary_not_requested);
+            (entry.summary_status = Keeper_approval_queue_rules_types.Summary_not_requested);
           Alcotest.check (Alcotest.option yojson)
             "exact outer-turn context"
             (Some request_context)
@@ -682,7 +691,7 @@ let test_same_owner_drain_uses_sequence_not_wall_clock () =
          |> List.concat_map (fun base_path ->
               AQ.list_pending_entries_for_workspace ~base_path
               |> require_ok "read workspace-local FIFO")
-         |> List.map (fun (entry : AQ.pending_approval) -> entry.id)
+         |> List.map (fun (entry : Keeper_approval_queue_rules_types.pending_approval) -> entry.id)
        in
        Alcotest.(check (list string))
          "workspace projections compose deterministic FIFO"
@@ -709,20 +718,20 @@ let test_same_owner_drain_uses_sequence_not_wall_clock () =
    the oldest for 2416s. *)
 let head_of_line_owner = "head-of-line-owner"
 
-let require_human_summary () : AQ.hitl_context_summary =
-  { summary_version = AQ.current_hitl_context_summary_version
+let require_human_summary () : Keeper_approval_queue_rules_types.hitl_context_summary =
+  { summary_version = Keeper_approval_queue_rules_types.current_hitl_context_summary_version
   ; generated_at = 1.0
   ; model_run_id = "model-run-head-of-line"
   ; context_summary = "head approval was handed to a human"
   ; key_questions = []
-  ; judgment = AQ.Require_human
+  ; judgment = Keeper_approval_queue_rules_types.Require_human
   ; rationale = "operator decision required"
   }
 ;;
 
-let completed_exact_binding (entry : AQ.pending_approval) =
-  AQ.exact_attempt_binding_with_status
-    (AQ.make_exact_attempt_binding
+let completed_exact_binding (entry : Keeper_approval_queue_rules_types.pending_approval) =
+  Keeper_approval_queue_rules_types.exact_attempt_binding_with_status
+    (Keeper_approval_queue_rules_types.make_exact_attempt_binding
        ~approval_id:entry.id
        ~input_hash:entry.input_hash
        ~sequence:entry.sequence
@@ -731,7 +740,7 @@ let completed_exact_binding (entry : AQ.pending_approval) =
        ~plan_fingerprint:"plan-head-of-line"
        ~request_body_sha256:"sha256-head-of-line"
        ())
-    AQ.Exact_completed
+    Keeper_approval_queue_rules_types.Exact_completed
 ;;
 
 let check_owner_selection label ~base_path ~expected entries =
@@ -742,7 +751,7 @@ let check_owner_selection label ~base_path ~expected entries =
       entries
   with
   | [ selected ] ->
-    Alcotest.(check string) label expected selected.AQ.id
+    Alcotest.(check string) label expected selected.id
   | [] -> Alcotest.failf "%s: owner selection returned nothing" label
   | selected ->
     Alcotest.failf "%s: expected one entry, got %d" label (List.length selected)
@@ -776,9 +785,10 @@ let test_terminal_head_does_not_stall_owner_queue () =
          [ follower; head ];
        let judged_head =
          { head with
-           AQ.summary_status = AQ.Summary_available (require_human_summary ())
-         ; AQ.summary_attempt_disposition = AQ.Summary_attempt_settled
-         ; AQ.exact_attempt = AQ.Exact_bound (completed_exact_binding head)
+           Keeper_approval_queue_rules_types.summary_status = Keeper_approval_queue_rules_types.Summary_available (require_human_summary ())
+         ; Keeper_approval_queue_rules_types.summary_attempt_disposition = Keeper_approval_queue_rules_types.Summary_attempt_settled
+         ; Keeper_approval_queue_rules_types.exact_attempt =
+             Keeper_approval_queue_rules_types.Exact_bound (completed_exact_binding head)
          }
        in
        check_owner_selection
@@ -788,10 +798,10 @@ let test_terminal_head_does_not_stall_owner_queue () =
          [ judged_head; follower ];
        let blocked_head =
          { head with
-           AQ.summary_status = AQ.Summary_pending
-         ; AQ.summary_attempt_disposition =
-             AQ.Summary_attempt_pre_worker_unavailable
-               { reason_code = AQ.Summary_pre_worker_auto_judge_unavailable
+           Keeper_approval_queue_rules_types.summary_status = Keeper_approval_queue_rules_types.Summary_pending
+         ; Keeper_approval_queue_rules_types.summary_attempt_disposition =
+             Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable
+               { reason_code = Keeper_approval_queue_rules_types.Summary_pre_worker_auto_judge_unavailable
                ; operator_detail =
                    "HITL summary: exact outer-turn request context is unavailable"
                }
@@ -944,9 +954,16 @@ let test_delivery_wire_shape_drops_request_context () =
            ~input:(`Assoc [ "target", `String "document" ])
            ()
        in
-       (match aq_resolve ~base_path ~id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id ~decision:Keeper_approval_queue_rules_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       (match AQ.For_testing.get_delivery_entry_unchecked ~id with
+        | Some entry ->
+          Alcotest.(check bool)
+            "live delivery drops the summary-only request context"
+            true
+            (Option.is_none entry.request_context)
+        | None -> Alcotest.fail "approved request did not create a live delivery");
        let open Yojson.Safe.Util in
        let delivery_entry =
          read_pending_snapshot ~base_path
@@ -959,14 +976,15 @@ let test_delivery_wire_shape_drops_request_context () =
        (match delivery_entry with
         | None -> Alcotest.fail "approved request did not persist a delivery"
         | Some delivery_entry ->
-          Alcotest.check yojson
-            "delivery drops the summary-only request context"
-            `Null
-            (delivery_entry |> member "request_context");
-          Alcotest.check yojson
-            "delivery drops the context version marker"
-            `Null
-            (delivery_entry |> member "request_context_version"));
+          let fields = to_assoc delivery_entry in
+          Alcotest.(check bool)
+            "delivery omits the summary-only request context"
+            true
+            (Option.is_none (List.assoc_opt "request_context" fields));
+          Alcotest.(check bool)
+            "delivery omits the context version marker"
+            true
+            (Option.is_none (List.assoc_opt "request_context_version" fields)));
        let snapshot_bytes = String.length (read_pending_snapshot_bytes ~base_path) in
        Alcotest.(check bool)
          (Printf.sprintf
@@ -975,10 +993,65 @@ let test_delivery_wire_shape_drops_request_context () =
             context_bytes)
          true
          (snapshot_bytes < context_bytes);
-       (* The trimmed delivery shape must still load: the reader keys the
-          version field off request_context presence, so absent is legal. *)
+       (* The delivery reader accepts exactly the context-free delivery shape. *)
        AQ.For_testing.reset_runtime_state ();
        ignore (install_exn ~base_path))
+;;
+
+let test_delivery_rejects_request_context_fields () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let id =
+         submit_with_context
+           ~turn_id:7
+           ~request_context:(`Assoc [ "initial", `Assoc [] ])
+           ~base_path
+           ~keeper_name:"queue-context-free-delivery"
+           ~input:(`Assoc [ "target", `String "document" ])
+           ()
+       in
+       (match
+          aq_resolve
+            ~base_path
+            ~id
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+        with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let snapshot = read_pending_snapshot ~base_path in
+       let with_request_context =
+         match snapshot with
+         | `Assoc snapshot_fields ->
+           let deliveries =
+             match List.assoc_opt "deliveries" snapshot_fields with
+             | Some (`List [ `Assoc delivery_fields ]) ->
+               let entry =
+                 match List.assoc_opt "entry" delivery_fields with
+                 | Some (`Assoc entry_fields) ->
+                   `Assoc
+                     (("request_context", `Null)
+                      :: ("request_context_version", `Null)
+                      :: entry_fields)
+                 | _ -> Alcotest.fail "delivery entry fixture is missing"
+               in
+               `List
+                 [ `Assoc (("entry", entry) :: List.remove_assoc "entry" delivery_fields) ]
+             | _ -> Alcotest.fail "delivery fixture is missing"
+           in
+           `Assoc
+             (("deliveries", deliveries) :: List.remove_assoc "deliveries" snapshot_fields)
+         | _ -> Alcotest.fail "pending snapshot fixture is not an object"
+       in
+       write_pending_snapshot ~base_path with_request_context;
+       AQ.For_testing.reset_runtime_state ();
+       match AQ.install_persistence ~base_path with
+       | Ok _ -> Alcotest.fail "delivery request-context fields must be rejected"
+       | Error (AQ.Install_storage_failed _) -> ())
 ;;
 
 let test_resolution_is_durable_and_origin_scoped () =
@@ -997,8 +1070,10 @@ let test_resolution_is_durable_and_origin_scoped () =
          AQ.resolve_with_policy
            ~base_path
            ~id
-           ~decision:AQ.Decision.Approve
+           ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+           ~source:Keeper_approval_queue_rules_types.Human_operator
            ~remember_rule:true
+           ~rule_expires_at:None
            ~created_by:"operator"
            ()
        in
@@ -1018,7 +1093,7 @@ let test_resolution_is_durable_and_origin_scoped () =
        in
        (match resolution.decision with
         | Keeper_event_queue.Hitl_approved -> ()
-        | Keeper_event_queue.Hitl_rejected _ | Keeper_event_queue.Hitl_edited _ ->
+        | Keeper_event_queue.Hitl_rejected _ ->
           Alcotest.fail "expected approved resolution");
        (match AQ.approved_resolution_request ~base_path ~id with
         | Ok (Some request) ->
@@ -1036,16 +1111,16 @@ let test_resolution_is_durable_and_origin_scoped () =
                ~approval_id:id));
        Alcotest.(check bool) "exact remembered request matches" true
          (match
-            AQ.find_matching_rule
+            Rules.find_matching_rule
               ~base_path
               ~keeper_name
               ~tool_name:"external-effect"
               ~input
               ()
           with
-          | Ok (AQ.Rule_match_active _) -> true
-          | Ok (AQ.Rule_match_expired _ | AQ.Rule_match_absent) -> false
-          | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error));
+          | Ok (Keeper_approval_queue_rules_types.Rule_match_active _) -> true
+          | Ok (Keeper_approval_queue_rules_types.Rule_match_expired _ | Keeper_approval_queue_rules_types.Rule_match_absent) -> false
+          | Error error -> Alcotest.fail (Keeper_approval_queue_rules_types.rule_store_error_to_string error));
        (match
           AQ.consume_approved_resolution
             ~base_path
@@ -1148,7 +1223,7 @@ let test_resolution_is_durable_and_origin_scoped () =
          true
          (replay_outcome_wire |> member "output_ref" <> `Null);
        Alcotest.(check bool)
-         "current sidecar carries no raw legacy output field"
+         "current sidecar carries no unexpected output field"
          true
          (replay_outcome_wire |> member "output" = `Null);
        let fresh_replay_message =
@@ -1267,17 +1342,23 @@ let test_remembered_rule_carries_requested_expiry () =
          AQ.resolve_with_policy
            ~base_path
            ~id
-           ~decision:AQ.Decision.Approve
+           ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+           ~source:Keeper_approval_queue_rules_types.Human_operator
            ~remember_rule:true
-           ~rule_expires_at:expires_at
+           ~rule_expires_at:(Some expires_at)
            ~created_by:"operator"
            ()
        in
        (match result with
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
-        | Ok { remembered_rule = None } ->
+        | Ok { remembered_rule = None; remember_rule_error = None } ->
           Alcotest.fail "approved remember_rule resolution must persist a rule"
-        | Ok { remembered_rule = Some rule } ->
+        | Ok { remembered_rule = None; remember_rule_error = Some error } ->
+          Alcotest.fail
+            ("remembered rule persistence failed: " ^ AQ.storage_error_to_string error)
+        | Ok { remembered_rule = Some _; remember_rule_error = Some _ } ->
+          Alcotest.fail "remembered rule and persistence error cannot coexist"
+        | Ok { remembered_rule = Some rule; remember_rule_error = None } ->
           Alcotest.(check (option (float 0.0)))
             "rule carries requested expiry"
             (Some expires_at)
@@ -1287,9 +1368,10 @@ let test_remembered_rule_carries_requested_expiry () =
           AQ.resolve_with_policy
             ~base_path
             ~id
-            ~decision:AQ.Decision.Approve
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+            ~source:Keeper_approval_queue_rules_types.Human_operator
             ~remember_rule:true
-            ~rule_expires_at:expires_at
+            ~rule_expires_at:(Some expires_at)
             ~created_by:"operator"
             ()
         with
@@ -1298,8 +1380,8 @@ let test_remembered_rule_carries_requested_expiry () =
           Alcotest.fail
             ("identical expiry re-resolution must be idempotent: "
              ^ AQ.resolve_error_to_string error));
-       match AQ.list_rules ~base_path () with
-       | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error)
+       match Rules.list_rules ~base_path () with
+       | Error error -> Alcotest.fail (Keeper_approval_queue_rules_types.rule_store_error_to_string error)
        | Ok [ rule ] ->
          Alcotest.(check (option (float 0.0)))
            "persisted rule carries requested expiry"
@@ -1337,7 +1419,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
            ~input
            ()
        in
-       (match aq_resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id:approval_id ~decision:Keeper_approval_queue_rules_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -1492,8 +1574,8 @@ let test_exact_binding_codec_validates_entry_identity () =
          |> List.hd
          |> member "exact_attempt"
        in
-       (match AQ.exact_attempt_state_of_yojson_with_error exact_json with
-        | Ok (AQ.Exact_bound binding) ->
+       (match Keeper_approval_queue_rules_types.exact_attempt_state_of_yojson_with_error exact_json with
+        | Ok (Keeper_approval_queue_rules_types.Exact_bound binding) ->
           Alcotest.(check string)
             "codec approval identity"
             identity.approval_id_arg
@@ -1516,7 +1598,7 @@ let test_exact_binding_codec_validates_entry_identity () =
        check_exact_update
          "quarantine exact codec fixture"
          true
-         (quarantine_exact identity AQ.Exact_flow_execution_failed);
+         (quarantine_exact identity Keeper_approval_queue_rules_types.Exact_flow_execution_failed);
        let quarantined_exact_json =
          read_pending_snapshot ~base_path
          |> member "pending"
@@ -1531,13 +1613,13 @@ let test_exact_binding_codec_validates_entry_identity () =
           |> member "quarantine_cause"
           |> to_string);
        (match
-          AQ.exact_attempt_state_of_yojson_with_error quarantined_exact_json
+          Keeper_approval_queue_rules_types.exact_attempt_state_of_yojson_with_error quarantined_exact_json
         with
         | Ok
-            (AQ.Exact_bound
+            (Keeper_approval_queue_rules_types.Exact_bound
               { status =
-                  AQ.Exact_quarantined
-                    AQ.Exact_flow_execution_failed
+                  Keeper_approval_queue_rules_types.Exact_quarantined
+                    Keeper_approval_queue_rules_types.Exact_flow_execution_failed
               ; _
               }) ->
           ()
@@ -1545,26 +1627,17 @@ let test_exact_binding_codec_validates_entry_identity () =
           Alcotest.fail
             "flow execution failure decoded as another exact state"
         | Error reason -> Alcotest.fail reason);
-       List.iter
-         (fun removed_cause ->
-            match
-              AQ.exact_attempt_state_of_yojson_with_error
-                (replace_field
-                   "quarantine_cause"
-                   (`String removed_cause)
-                   quarantined_exact_json)
-            with
-            | Error _ -> ()
-            | Ok _ ->
-              Alcotest.failf
-                "removed quarantine cause %s was decoded"
-                removed_cause)
-         [ "post_dispatch_failure"
-         ; "provenance_mismatch"
-         ; "restart_uncertainty"
-         ];
        (match
-          AQ.exact_attempt_state_of_yojson_with_error
+          Keeper_approval_queue_rules_types.exact_attempt_state_of_yojson_with_error
+            (replace_field
+               "quarantine_cause"
+               (`String "unexpected")
+               quarantined_exact_json)
+        with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail "unknown quarantine cause was decoded");
+       (match
+          Keeper_approval_queue_rules_types.exact_attempt_state_of_yojson_with_error
             (replace_field "call_id" (`String " ") exact_json)
         with
         | Error _ -> ()
@@ -1572,7 +1645,7 @@ let test_exact_binding_codec_validates_entry_identity () =
        List.iter
          (fun (label, hash) ->
             match
-              AQ.exact_attempt_state_of_yojson_with_error
+              Keeper_approval_queue_rules_types.exact_attempt_state_of_yojson_with_error
                 (replace_field
                    "request_body_sha256"
                    (`String hash)
@@ -1691,18 +1764,18 @@ let test_exact_attempt_binding_release_and_conflicts () =
          "bound restart is not rearmed"
          false
          (reserve_retry_exact ~base_path (pending_entry_exn id));
-       let quarantine_cause = AQ.Exact_domain_invalid_output in
+       let quarantine_cause = Keeper_approval_queue_rules_types.Exact_domain_invalid_output in
        check_exact_update
          "quarantine replacement"
          true
          (quarantine_exact replacement quarantine_cause);
        (match pending_entry_exn id with
-        | { summary_status = AQ.Summary_failed { reason }
+        | { summary_status = Keeper_approval_queue_rules_types.Summary_failed { reason }
           ; exact_attempt =
-              AQ.Exact_bound
+              Keeper_approval_queue_rules_types.Exact_bound
                 { status =
-                    AQ.Exact_quarantined
-                      AQ.Exact_domain_invalid_output
+                    Keeper_approval_queue_rules_types.Exact_quarantined
+                      Keeper_approval_queue_rules_types.Exact_domain_invalid_output
                 ; _
                 }
           ; _
@@ -1716,7 +1789,7 @@ let test_exact_attempt_binding_release_and_conflicts () =
          "same quarantine cause is idempotent"
          false
          (quarantine_exact replacement quarantine_cause);
-       (match quarantine_exact replacement AQ.Exact_cancellation with
+       (match quarantine_exact replacement Keeper_approval_queue_rules_types.Exact_cancellation with
         | Error
             (AQ.Exact_attempt_rejected
               (AQ.Exact_attempt_status_conflict _)) ->
@@ -1778,9 +1851,9 @@ let test_restart_classifies_uncertain_and_released_recovery () =
          (reserve_retry_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
         | { exact_attempt =
-              AQ.Exact_bound
-                { status = AQ.Exact_released_before_dispatch; _ }
-          ; summary_status = AQ.Summary_pending
+              Keeper_approval_queue_rules_types.Exact_bound
+                { status = Keeper_approval_queue_rules_types.Exact_released_before_dispatch; _ }
+          ; summary_status = Keeper_approval_queue_rules_types.Summary_pending
           ; _
           } ->
           ()
@@ -1790,8 +1863,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
        let assert_restart_states label =
          (match pending_entry_exn uncertain_id with
           | { exact_attempt =
-                AQ.Exact_bound
-                  { status = AQ.Exact_restart_quarantined
+                Keeper_approval_queue_rules_types.Exact_bound
+                  { status = Keeper_approval_queue_rules_types.Exact_restart_quarantined
                   ; slot_id
                   ; call_id
                   ; _
@@ -1811,8 +1884,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
               (label ^ " did not quarantine dispatch-uncertain attempt"));
          match pending_entry_exn released_id with
          | { exact_attempt =
-               AQ.Exact_bound
-                 { status = AQ.Exact_released_recovery_required
+               Keeper_approval_queue_rules_types.Exact_bound
+                 { status = Keeper_approval_queue_rules_types.Exact_released_recovery_required
                  ; slot_id
                  ; call_id
                  ; _
@@ -1848,8 +1921,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
          true
          (reserve_retry_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
-        | { summary_status = AQ.Summary_pending
-          ; exact_attempt = AQ.Exact_unbound
+        | { summary_status = Keeper_approval_queue_rules_types.Summary_pending
+          ; exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound
           ; _
           } ->
           ()
@@ -1870,8 +1943,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
          true
          (reserve_retry_exact ~base_path (pending_entry_exn bulk_id));
        match pending_entry_exn bulk_id with
-       | { summary_status = AQ.Summary_pending
-         ; exact_attempt = AQ.Exact_unbound
+       | { summary_status = Keeper_approval_queue_rules_types.Summary_pending
+         ; exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound
          ; _
          } ->
          ()
@@ -1920,9 +1993,9 @@ let test_exact_attempt_completion_is_atomic () =
         | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "mismatched completion provenance was accepted");
        (match pending_entry_exn id with
-        | { summary_status = AQ.Summary_pending
+        | { summary_status = Keeper_approval_queue_rules_types.Summary_pending
           ; exact_attempt =
-              AQ.Exact_bound { status = AQ.Exact_dispatch_uncertain; _ }
+              Keeper_approval_queue_rules_types.Exact_bound { status = Keeper_approval_queue_rules_types.Exact_dispatch_uncertain; _ }
           ; _
           } ->
           ()
@@ -1933,9 +2006,9 @@ let test_exact_attempt_completion_is_atomic () =
          true
          (complete_exact identity summary);
        (match pending_entry_exn id with
-        | { summary_status = AQ.Summary_available durable_summary
+        | { summary_status = Keeper_approval_queue_rules_types.Summary_available durable_summary
           ; exact_attempt =
-              AQ.Exact_bound { status = AQ.Exact_completed; _ }
+              Keeper_approval_queue_rules_types.Exact_bound { status = Keeper_approval_queue_rules_types.Exact_completed; _ }
           ; _
           } ->
           Alcotest.(check string)
@@ -2006,7 +2079,7 @@ let test_exact_attempt_bind_storage_failure_is_not_success () =
         | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "failed exact binding persistence reported success");
        match pending_entry_exn id with
-       | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+       | { exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound; _ } -> ()
        | _ -> Alcotest.fail "failed exact binding persistence mutated memory")
 ;;
 
@@ -2034,11 +2107,11 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
        in
        let assert_status label id expected =
          match pending_entry_exn id with
-         | { exact_attempt = AQ.Exact_bound { status; _ }; _ } ->
+         | { exact_attempt = Keeper_approval_queue_rules_types.Exact_bound { status; _ }; _ } ->
            Alcotest.(check string)
              label
              expected
-             (AQ.exact_attempt_status_to_string status)
+             (Keeper_approval_queue_rules_types.exact_attempt_status_to_string status)
          | _ -> Alcotest.failf "%s did not retain an exact binding" label
        in
        let resolved_id =
@@ -2051,7 +2124,11 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
           AQ.resolve_with_policy
             ~base_path
             ~id:resolved_id
-            ~decision:AQ.Decision.Approve
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+            ~source:Keeper_approval_queue_rules_types.Human_operator
+            ~remember_rule:false
+            ~rule_expires_at:None
+            ~created_by:"test-operator"
             ()
         with
         | Ok _ -> ()
@@ -2108,7 +2185,11 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             AQ.resolve_with_policy
               ~base_path
               ~id:resolved_id
-              ~decision:AQ.Decision.Approve
+              ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+              ~source:Keeper_approval_queue_rules_types.Human_operator
+              ~remember_rule:false
+              ~rule_expires_at:None
+              ~created_by:"test-operator"
               ()
           with
           | Error (AQ.Persistence_failed _) -> ()
@@ -2119,7 +2200,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          AQ.For_testing.reset_runtime_state ();
          ignore (install_exn ~base_path);
          (match pending_entry_exn before_id with
-          | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+          | { exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound; _ } -> ()
           | _ -> Alcotest.fail "pre-rename failure mutated exact binding memory");
          let cancel_before_id, cancel_before_identity =
            prepare "cancel-before-rename"
@@ -2162,7 +2243,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
           | Ok _ ->
             Alcotest.fail "pre-rename cancellation reported a write outcome");
          (match pending_entry_exn cancel_before_id with
-          | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+          | { exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound; _ } -> ()
           | _ -> Alcotest.fail "pre-rename cancellation mutated exact memory");
          let cancel_after_id, cancel_after_identity =
            prepare "cancel-after-rename"
@@ -2214,8 +2295,8 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
               Alcotest.failf
                 "released binding accepted %s"
                 label)
-         [ "domain-invalid output", AQ.Exact_domain_invalid_output
-         ; "attempt replay", AQ.Exact_attempt_replay
+         [ "domain-invalid output", Keeper_approval_queue_rules_types.Exact_domain_invalid_output
+         ; "attempt replay", Keeper_approval_queue_rules_types.Exact_attempt_replay
          ];
        assert_status
          "rejected causes preserve release"
@@ -2226,7 +2307,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          true
          (quarantine_exact
             release_identity
-            AQ.Exact_terminal_persistence_failure);
+            Keeper_approval_queue_rules_types.Exact_terminal_persistence_failure);
        assert_status "release terminal memory" release_id "quarantined";
        let terminalize_released label cause =
          let id, identity = prepare label in
@@ -2248,8 +2329,8 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
            (quarantine_exact identity cause);
          match pending_entry_exn id with
          | { exact_attempt =
-               AQ.Exact_bound
-                 { status = AQ.Exact_quarantined actual; _ }
+               Keeper_approval_queue_rules_types.Exact_bound
+                 { status = Keeper_approval_queue_rules_types.Exact_quarantined actual; _ }
            ; _
            } when actual = cause ->
            ()
@@ -2260,10 +2341,10 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
        in
        terminalize_released
          "release-cancellation"
-         AQ.Exact_cancellation;
+         Keeper_approval_queue_rules_types.Exact_cancellation;
        terminalize_released
          "release-flow-execution-failed"
-         AQ.Exact_flow_execution_failed;
+         Keeper_approval_queue_rules_types.Exact_flow_execution_failed;
        let quarantine_id, quarantine_identity = prepare "quarantine" in
        check_exact_update
          "bind quarantine fixture"
@@ -2281,7 +2362,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             ~call_id:quarantine_identity.call_id_arg
             ~plan_fingerprint:quarantine_identity.plan_fingerprint_arg
             ~request_body_sha256:quarantine_identity.request_body_sha256_arg
-            ~cause:AQ.Exact_flow_execution_failed);
+            ~cause:Keeper_approval_queue_rules_types.Exact_flow_execution_failed);
        assert_status
          "visible quarantine memory"
          quarantine_id
@@ -2291,7 +2372,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          false
          (quarantine_exact
             quarantine_identity
-            AQ.Exact_flow_execution_failed);
+            Keeper_approval_queue_rules_types.Exact_flow_execution_failed);
        let complete_id, complete_identity = prepare "complete" in
        check_exact_update
          "bind completion fixture"
@@ -2356,7 +2437,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
              ~call_id
              ~plan_fingerprint
              ~request_body_sha256
-             ~summary:(actual_summary : AQ.hitl_context_summary)
+             ~summary:(actual_summary : Keeper_approval_queue_rules_types.hitl_context_summary)
          =
          incr observed_calls;
          Alcotest.(check string) "recovery approval identity" id actual_id;
@@ -2418,7 +2499,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
           Alcotest.fail
             "deterministic completion rejection lost its typed recovery code");
        (match AQ.For_testing.get_pending_entry_unchecked ~id with
-        | Some { summary_attempt_disposition = AQ.Summary_attempt_settled; _ } ->
+        | Some { summary_attempt_disposition = Keeper_approval_queue_rules_types.Summary_attempt_settled; _ } ->
           ()
         | _ ->
           Alcotest.fail
@@ -2542,8 +2623,8 @@ let test_current_snapshot_rejects_unbound_available_summary () =
                      then
                        `Assoc
                          (("summary_status",
-                            AQ.summary_status_to_yojson
-                              (AQ.Summary_available summary))
+                            Keeper_approval_queue_rules_types.summary_status_to_yojson
+                              (Keeper_approval_queue_rules_types.Summary_available summary))
                           :: List.remove_assoc "summary_status" entry_fields)
                      else entry_json
                    | entry_json -> entry_json)
@@ -2608,7 +2689,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
         | Error
             (AQ.Exact_attempt_rejected
                (AQ.Exact_attempt_disposition_conflict
-                  { disposition = AQ.Summary_attempt_identity_unbound; _ })) ->
+                  { disposition = Keeper_approval_queue_rules_types.Summary_attempt_identity_unbound; _ })) ->
           ()
         | Error error ->
           Alcotest.fail
@@ -2656,11 +2737,11 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
          (reserve_retry_exact ~base_path retryable_entry);
        (match AQ.For_testing.get_pending_entry_unchecked ~id with
         | Some
-            { summary_status = AQ.Summary_pending
-            ; exact_attempt = AQ.Exact_unbound
+            { summary_status = Keeper_approval_queue_rules_types.Summary_pending
+            ; exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound
             ; summary_attempt_disposition =
-                AQ.Summary_attempt_pre_worker_unavailable
-                  { reason_code = AQ.Summary_pre_worker_start_reserved
+                Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable
+                  { reason_code = Keeper_approval_queue_rules_types.Summary_pre_worker_start_reserved
                   ; operator_detail
                   }
             ; _
@@ -2714,18 +2795,18 @@ let test_operator_recovery_skips_terminal_exact_failure () =
          true
          (quarantine_exact
             quarantined_identity
-            AQ.Exact_flow_execution_failed);
+            Keeper_approval_queue_rules_types.Exact_flow_execution_failed);
        check_rearm
          "explicit operator action cannot reopen exact quarantine"
          false
          (reserve_retry_exact ~base_path (pending_entry_exn quarantined_id));
        (match AQ.For_testing.get_pending_entry_unchecked ~id:quarantined_id with
         | Some
-            { summary_status = AQ.Summary_failed _
+            { summary_status = Keeper_approval_queue_rules_types.Summary_failed _
             ; exact_attempt =
-                AQ.Exact_bound
+                Keeper_approval_queue_rules_types.Exact_bound
                   { status =
-                      AQ.Exact_quarantined AQ.Exact_flow_execution_failed
+                      Keeper_approval_queue_rules_types.Exact_quarantined Keeper_approval_queue_rules_types.Exact_flow_execution_failed
                   ; _
                   }
             ; _
@@ -2782,8 +2863,8 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
         | Ok _ -> Alcotest.fail "bound owner retirement succeeded");
        (match AQ.For_testing.get_pending_entry_unchecked ~id:bound with
         | Some
-            { summary_status = AQ.Summary_pending
-            ; exact_attempt = AQ.Exact_bound binding
+            { summary_status = Keeper_approval_queue_rules_types.Summary_pending
+            ; exact_attempt = Keeper_approval_queue_rules_types.Exact_bound binding
             ; _
             } ->
           Alcotest.(check string)
@@ -2793,7 +2874,7 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
         | Some _ | None ->
           Alcotest.fail "bound entry changed on failed retirement");
        (match AQ.For_testing.get_pending_entry_unchecked ~id:sibling with
-        | Some { summary_status = AQ.Summary_pending; _ } -> ()
+        | Some { summary_status = Keeper_approval_queue_rules_types.Summary_pending; _ } -> ()
         | Some _ | None ->
           Alcotest.fail "blocked retirement partially mutated");
        (match
@@ -2812,7 +2893,7 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
             ids);
        match AQ.For_testing.get_pending_entry_unchecked ~id:retirable with
        | Some
-           { summary_status = AQ.Summary_failed { reason = "retired" }
+           { summary_status = Keeper_approval_queue_rules_types.Summary_failed { reason = "retired" }
            ; _
            } ->
          ()
@@ -2839,6 +2920,11 @@ let test_dashboard_resolve_rejects_cross_workspace_approval () =
        in
        ignore (install_exn ~base_path:base_b);
        let resolve ~decision ~remember_rule =
+         let decision_fields =
+           if String.equal decision "reject"
+           then [ "reason", `String "wrong workspace" ]
+           else []
+         in
          Server_dashboard_http.dashboard_gate_resolve_http_json
            ~base_path:base_b
            ~created_by:"operator-b"
@@ -2847,7 +2933,8 @@ let test_dashboard_resolve_rejects_cross_workspace_approval () =
                  [ "id", `String approval_id
                  ; "decision", `String decision
                  ; "remember_rule", `Bool remember_rule
-                 ])
+                 ]
+                @ decision_fields)
        in
        List.iter
          (fun (decision, remember_rule) ->
@@ -2874,10 +2961,254 @@ let test_dashboard_resolve_rejects_cross_workspace_approval () =
               "cross-workspace resolve did not persist a rule"
               false
               (Sys.file_exists
-                 (AQ.For_testing.always_allowed_store_path ~base_path)))
+                 (Rules.For_testing.store_path ~base_path)))
          [ base_a; base_b ];
        ignore (install_exn ~base_path:base_a);
        reject_and_cleanup ~base_path:base_a approval_id)
+;;
+
+let test_dashboard_resolve_rejects_malformed_contract_fields () =
+  let base =
+    [ "id", `String "appr-contract"
+    ; "decision", `String "approve"
+    ; "remember_rule", `Bool false
+    ]
+  in
+  let replace field value =
+    (field, value) :: List.remove_assoc field base
+  in
+  let cases =
+    [ ( "decision is exact"
+      , replace "decision" (`String " APPROVE ")
+      , "decision must be 'approve' or 'reject'" )
+    ; ( "remember_rule has exact type"
+      , ("remember_rule", `String "false") :: base
+      , "remember_rule must be a boolean" )
+    ; ( "remember_rule is required"
+      , List.remove_assoc "remember_rule" base
+      , "remember_rule must be a boolean" )
+    ; ( "expiry has exact type"
+      , ("rule_expires_at", `String "tomorrow") :: base
+      , "rule_expires_at must be a number" )
+    ; ( "expiry is finite"
+      , ("rule_expires_at", `Float Float.nan) :: base
+      , "rule_expires_at must be a finite future timestamp" )
+    ; ( "expiry does not accept null"
+      , ("rule_expires_at", `Null) :: base
+      , "rule_expires_at must be a number" )
+    ; ( "expiry requires remembered approval"
+      , ("rule_expires_at", `Float 4102444800.0) :: base
+      , "rule_expires_at requires remember_rule=true" )
+    ; ( "approval has no rejection reason"
+      , ("reason", `String "not applicable") :: base
+      , "reason is valid only for rejection" )
+    ; ( "rejection reason has exact type"
+      , [ "id", `String "appr-contract"
+        ; "decision", `String "reject"
+        ; "reason", `Null
+        ; "remember_rule", `Bool false
+        ]
+      , "reason must be a non-blank string" )
+    ; ( "rejection reason is required"
+      , [ "id", `String "appr-contract"
+        ; "decision", `String "reject"
+        ; "remember_rule", `Bool false
+        ]
+      , "reason is required for rejection" )
+    ; ( "unknown field is rejected"
+      , ("mode", `String "other") :: base
+      , "resolve request contains unsupported field mode" )
+    ; ( "duplicate field is rejected"
+      , ("id", `String "duplicate") :: base
+      , "resolve request contains duplicate field id" )
+    ]
+  in
+  List.iter
+    (fun (label, fields, expected) ->
+       match
+         Server_dashboard_http.dashboard_gate_resolve_http_json
+           ~base_path:"/not-used"
+           ~created_by:"operator"
+           ~args:(`Assoc fields)
+       with
+       | Error (Server_dashboard_http.Bad_request reason) ->
+         Alcotest.(check string) label expected reason
+       | Error error ->
+         Alcotest.fail
+           (Server_dashboard_http.approval_resolve_http_error_to_string error)
+       | Ok _ -> Alcotest.fail (label ^ " must be rejected"))
+    cases
+;;
+
+let test_queue_rejects_invalid_resolution_policy_before_mutation () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-policy-validation"
+           ~input:(`Assoc [ "request", `String "exact" ])
+       in
+       let future = Unix.gettimeofday () +. 600.0 in
+       let cases =
+         [ ( "blank creator"
+           , fun () ->
+               AQ.resolve_with_policy
+                 ~base_path
+                 ~id
+                 ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+                 ~source:Keeper_approval_queue_rules_types.Human_operator
+                 ~remember_rule:false
+                 ~rule_expires_at:None
+                 ~created_by:" "
+                 () )
+         ; ( "blank rejection reason"
+           , fun () ->
+               AQ.resolve_with_policy
+                 ~base_path
+                 ~id
+                 ~decision:(Keeper_approval_queue_rules_types.Decision.Reject " ")
+                 ~source:Keeper_approval_queue_rules_types.Human_operator
+                 ~remember_rule:false
+                 ~rule_expires_at:None
+                 ~created_by:"test-operator"
+                 () )
+         ; ( "expiry without remembered rule"
+           , fun () ->
+               AQ.resolve_with_policy
+                 ~base_path
+                 ~id
+                 ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+                 ~source:Keeper_approval_queue_rules_types.Human_operator
+                 ~remember_rule:false
+                 ~rule_expires_at:(Some future)
+                 ~created_by:"test-operator"
+                 () )
+         ; ( "remembered rejection"
+           , fun () ->
+               AQ.resolve_with_policy
+                 ~base_path
+                 ~id
+                 ~decision:(Keeper_approval_queue_rules_types.Decision.Reject "operator")
+                 ~source:Keeper_approval_queue_rules_types.Human_operator
+                 ~remember_rule:true
+                 ~rule_expires_at:None
+                 ~created_by:"test-operator"
+                 () )
+         ; ( "non-finite expiry"
+           , fun () ->
+               AQ.resolve_with_policy
+                 ~base_path
+                 ~id
+                 ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+                 ~source:Keeper_approval_queue_rules_types.Human_operator
+                 ~remember_rule:true
+                 ~rule_expires_at:(Some Float.nan)
+                 ~created_by:"test-operator"
+                 () )
+         ]
+       in
+       List.iter
+         (fun (label, resolve) ->
+            (match resolve () with
+             | Error (AQ.Invalid_resolution_policy _) -> ()
+             | Error error ->
+               Alcotest.failf "%s returned %s" label (AQ.resolve_error_to_string error)
+             | Ok _ -> Alcotest.fail (label ^ " must be rejected"));
+            Alcotest.(check bool)
+              (label ^ " keeps pending entry")
+              true
+              (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id));
+            Alcotest.(check bool)
+              (label ^ " creates no delivery")
+              true
+              (Option.is_none (AQ.For_testing.get_delivery_entry_unchecked ~id)))
+         cases;
+       match
+         AQ.resolve_with_policy
+           ~base_path
+           ~id
+           ~decision:(Keeper_approval_queue_rules_types.Decision.Reject "operator rejected")
+           ~source:Keeper_approval_queue_rules_types.Human_operator
+           ~remember_rule:false
+           ~rule_expires_at:None
+           ~created_by:"test-operator"
+           ()
+       with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.fail
+           ("invalid policy attempt retained a resolution claim: "
+            ^ AQ.resolve_error_to_string error))
+;;
+
+let test_dashboard_resolve_reports_committed_rule_failure () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-partial-rule-failure" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let input = `Assoc [ "request", `String "exact" ] in
+       let id = submit ~base_path ~keeper_name ~input in
+       let rules_path = Rules.For_testing.store_path ~base_path in
+       ensure_dir (Filename.dirname rules_path);
+       Unix.mkdir rules_path 0o755;
+       let resolve () =
+         Server_dashboard_http.dashboard_gate_resolve_http_json
+           ~base_path
+           ~created_by:"operator"
+           ~args:
+             (`Assoc
+                 [ "id", `String id
+                 ; "decision", `String "approve"
+                 ; "remember_rule", `Bool true
+                 ])
+       in
+       let check_partial label = function
+         | Error error ->
+           Alcotest.fail
+             (label ^ ": "
+              ^ Server_dashboard_http.approval_resolve_http_error_to_string error)
+         | Ok json ->
+           let open Yojson.Safe.Util in
+           Alcotest.(check bool) (label ^ " committed") true (json |> member "ok" |> to_bool);
+           Alcotest.(check bool)
+             (label ^ " has no rule id")
+             true
+             Yojson.Safe.(equal (json |> member "rule_id") `Null);
+           Alcotest.(check bool)
+             (label ^ " exposes rule failure")
+             true
+             (String.trim (json |> member "rule_error" |> to_string) <> "")
+       in
+       check_partial "initial resolution" (resolve ());
+       Alcotest.(check bool)
+         "approval reaches the owner despite rule failure"
+         true
+         (Option.is_some (durable_resolution_opt ~base_path ~keeper_name ~approval_id:id));
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok AQ.Consumption_committed -> ()
+        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+          Alcotest.fail "committed approval was not consumable"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       check_partial "consumed retry" (resolve ()))
 ;;
 
 let test_malformed_snapshot_fails_install_and_is_observed () =
@@ -2891,7 +3222,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 8
+            [ "version", `Int 9
             ; "next_sequence", `Int 1
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
@@ -2926,7 +3257,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 8
+               [ "version", `Int 9
                ; "next_sequence", `Int 1
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
@@ -2940,6 +3271,78 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        Alcotest.(check bool) "malformed snapshot observed" true (after -. before >= 1.0))
 ;;
 
+let test_current_snapshot_requires_nullable_fields () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       ignore
+         (submit
+            ~base_path
+            ~keeper_name:"queue-required-nullable"
+            ~input:(`Assoc [ "request", `String "required-nullable" ]));
+       let pending_entry =
+         match read_pending_snapshot ~base_path with
+         | `Assoc fields ->
+           (match List.assoc_opt "pending" fields with
+            | Some (`List [ entry ]) -> entry
+            | _ -> Alcotest.fail "expected one persisted pending entry")
+         | _ -> Alcotest.fail "expected pending snapshot object"
+       in
+       let delivery_entry =
+         match pending_entry with
+         | `Assoc fields ->
+           `Assoc
+             (fields
+              |> List.remove_assoc "request_context"
+              |> List.remove_assoc "request_context_version")
+         | _ -> Alcotest.fail "expected pending entry object"
+       in
+       let expect_invalid_snapshot label snapshot =
+         AQ.For_testing.reset_runtime_state ();
+         write_pending_snapshot ~base_path snapshot;
+         match AQ.install_persistence ~base_path with
+         | Error (AQ.Install_storage_failed _) -> ()
+         | Ok _ -> Alcotest.fail (label ^ " must reject a missing current field")
+       in
+       List.iter
+         (fun field ->
+            let entry =
+              match pending_entry with
+              | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+              | _ -> assert false
+            in
+            expect_invalid_snapshot
+              ("pending." ^ field)
+              (`Assoc
+                  [ "version", `Int 9
+                  ; "next_sequence", `Int 2
+                  ; "pending", `List [ entry ]
+                  ; "deliveries", `List []
+                  ]))
+         [ "turn_id"; "task_id"; "goal_id" ];
+       List.iter
+         (fun field ->
+            let delivery =
+              match delivery_json ~entry:delivery_entry ~remember_rule:false with
+              | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+              | _ -> assert false
+            in
+            expect_invalid_snapshot
+              ("delivery." ^ field)
+              (`Assoc
+                  [ "version", `Int 9
+                  ; "next_sequence", `Int 2
+                  ; "pending", `List []
+                  ; "deliveries", `List [ delivery ]
+                  ]))
+         [ "rule_expires_at"; "created_by" ])
+;;
+
 let test_unsupported_version_snapshot_requires_runtime_reset () =
   let base_path = temp_dir () in
   Fun.protect
@@ -2951,7 +3354,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 7
+            [ "version", `Int 8
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -2961,7 +3364,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 7 is unsupported (current 8); reset \
+                  "gate_pending.version 8 is unsupported (current 9); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -3041,7 +3444,7 @@ let test_malformed_replay_sidecar_is_scoped_and_preserved () =
          (In_channel.with_open_bin sidecar_path In_channel.input_all))
 ;;
 
-let test_replay_sidecar_rejects_raw_output_wire () =
+let test_replay_sidecar_rejects_unknown_output_field () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -3064,7 +3467,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
                       ; ( "outcome"
                         , `Assoc
                             [ "kind", `String "applied"
-                            ; "output", `String "legacy raw output"
+                            ; "unexpected_output", `String "unexpected"
                             ] )
                       ]
                   ] )
@@ -3078,10 +3481,10 @@ let test_replay_sidecar_rejects_raw_output_wire () =
             sidecar_path
             path
         | Ok _ ->
-          Alcotest.fail "raw replay output wire was not rejected"
+          Alcotest.fail "unknown replay output field was not rejected"
         | Error error ->
           Alcotest.fail
-            ("raw replay output wire blocked the authorization store: "
+            ("unknown replay output field blocked the authorization store: "
              ^ AQ.install_error_to_string error));
        let keeper_name = "queue-ready-despite-raw-replay-wire" in
        let input = `Assoc [ "target", `String "current" ] in
@@ -3090,7 +3493,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
           aq_resolve
             ~base_path
             ~id:approval_id
-            ~decision:AQ.Decision.Approve
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
         with
         | Ok () -> ()
         | Error error ->
@@ -3134,14 +3537,14 @@ let test_replay_sidecar_rejects_raw_output_wire () =
           Alcotest.fail "invalid projection was overwritten automatically");
        let persisted = Yojson.Safe.from_file sidecar_path in
        Alcotest.(check string)
-         "rejected raw output remains untouched"
-         "legacy raw output"
+         "rejected unknown output remains untouched"
+         "unexpected"
          Yojson.Safe.Util.(
            persisted
            |> member "outcomes"
            |> index 0
            |> member "outcome"
-           |> member "output"
+           |> member "unexpected_output"
            |> to_string))
 ;;
 
@@ -3169,20 +3572,30 @@ let test_persisted_delivery_replays_before_origin_wake () =
             | _ -> Alcotest.fail "expected one persisted pending entry")
          | _ -> Alcotest.fail "expected pending snapshot object"
        in
+       let delivery_entry =
+         match pending_entry with
+         | `Assoc fields ->
+           `Assoc
+             (fields
+              |> List.remove_assoc "request_context"
+              |> List.remove_assoc "request_context_version")
+         | _ -> Alcotest.fail "expected pending entry object"
+       in
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
               , `List
                   [ `Assoc
-                      [ "entry", pending_entry
+                      [ "entry", delivery_entry
                       ; "decision", `Assoc [ "kind", `String "approve" ]
                       ; "source", `String "human_operator"
                       ; "remember_rule", `Bool false
-                      ; "created_by", `Null
+                      ; "rule_expires_at", `Null
+                      ; "created_by", `String "operator"
                       ; "grant_consumed", `Bool false
                       ]
                   ] )
@@ -3237,14 +3650,23 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
        AQ.For_testing.reset_runtime_state ();
        ignore (install_exn ~base_path);
        let id = submit ~base_path ~keeper_name ~input in
+       let rules_path = Rules.For_testing.store_path ~base_path in
+       ensure_dir (Filename.dirname rules_path);
+       Unix.mkdir rules_path 0o755;
        (match
-          aq_resolve
+          AQ.resolve_with_policy
             ~base_path
             ~id
-            ~decision:AQ.Decision.Approve
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+            ~source:Keeper_approval_queue_rules_types.Human_operator
+            ~remember_rule:true
+            ~rule_expires_at:None
+            ~created_by:"operator"
+            ()
         with
-        | Ok () -> ()
-       | Error error ->
+        | Ok { remembered_rule = None; remember_rule_error = Some _ } -> ()
+        | Ok _ -> Alcotest.fail "unavailable rule store was reported as remembered"
+        | Error error ->
           Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
          match
@@ -3303,12 +3725,28 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
           Alcotest.fail
             (Reaction_ledger.event_queue_reaction_evidence_error_to_string
                error));
+       Unix.rmdir rules_path;
        AQ.For_testing.reset_runtime_state ();
        let report = install_exn ~base_path in
        Alcotest.(check int)
          "observed wake is not replayed"
          0
          report.replayed_deliveries;
+       Alcotest.(check int)
+         "recovered rule store has no replay failure"
+         0
+         (List.length report.delivery_replay_failures);
+       (match Rules.list_rules ~base_path () with
+        | Ok [ rule ] ->
+          Alcotest.(check (option string))
+            "rule recovered"
+            (Some id)
+            rule.source_approval_id
+        | Ok rules ->
+          Alcotest.failf "one recovered rule expected, got %d" (List.length rules)
+        | Error error ->
+          Alcotest.fail
+            (Keeper_approval_queue_rules_types.rule_store_error_to_string error));
        Alcotest.(check bool)
          "observed wake stays absent after ack"
          true
@@ -3381,7 +3819,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"
@@ -3397,7 +3835,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
                       ~remember_rule:false
                   ] )
             ]);
-       let rules_path = AQ.For_testing.always_allowed_store_path ~base_path in
+       let rules_path = Rules.For_testing.store_path ~base_path in
        ensure_dir (Filename.dirname rules_path);
        Unix.mkdir rules_path 0o755;
        AQ.For_testing.reset_runtime_state ();
@@ -3479,12 +3917,12 @@ let test_default_auto_judge_defers_without_blocking () =
            (String.length detail > 0);
          (match AQ.For_testing.get_pending_entry_unchecked ~id:approval_id with
           | Some
-              { summary_status = AQ.Summary_pending
-              ; exact_attempt = AQ.Exact_unbound
+              { summary_status = Keeper_approval_queue_rules_types.Summary_pending
+              ; exact_attempt = Keeper_approval_queue_rules_types.Exact_unbound
               ; summary_attempt_disposition =
-                  AQ.Summary_attempt_pre_worker_unavailable
+                  Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable
                     { reason_code =
-                        AQ.Summary_pre_worker_auto_judge_unavailable
+                        Keeper_approval_queue_rules_types.Summary_pre_worker_auto_judge_unavailable
                     ; operator_detail
                     }
               ; _
@@ -3522,7 +3960,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
     (fun () ->
        ignore (install_exn ~base_path);
        let approval_id = submit ~base_path ~keeper_name ~input in
-       (match aq_resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id:approval_id ~decision:Keeper_approval_queue_rules_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -3564,7 +4002,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
-let test_nonapproved_resolution_payload_is_delivered () =
+let test_rejection_payload_is_delivered () =
   let base_path = temp_dir () in
   let keeper_name = "queue-resolution-payload" in
   Fun.protect
@@ -3584,7 +4022,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
           aq_resolve
             ~base_path
             ~id:reject_id
-            ~decision:(AQ.Decision.Reject rationale)
+            ~decision:(Keeper_approval_queue_rules_types.Decision.Reject rationale)
         with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
@@ -3603,35 +4041,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
          "rejection is not a grant"
          true
          (Option.is_none (Gate.cycle_grant_of_resolution rejected));
-       let edit_id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "target", `String "before" ])
-       in
-       let edited_input =
-         `Assoc [ "target", `String "after"; "confirmed", `Bool true ]
-       in
-       (match aq_resolve ~base_path ~id:edit_id ~decision:(AQ.Decision.Edit edited_input) with
-        | Ok () -> ()
-        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
-       let edited =
-         durable_resolution_opt ~base_path ~keeper_name ~approval_id:edit_id
-         |> require_some "edited resolution was not delivered"
-       in
-       (match edited.decision with
-        | Keeper_event_queue.Hitl_edited actual ->
-          Alcotest.(check bool)
-            "edited input"
-            true
-            (Yojson.Safe.equal edited_input actual)
-        | _ -> Alcotest.fail "edited resolution lost its typed input");
-       Alcotest.(check bool)
-         "edit is not a grant"
-         true
-         (Option.is_none (Gate.cycle_grant_of_resolution edited));
-       drop_resolution ~base_path ~keeper_name rejected;
-       drop_resolution ~base_path ~keeper_name edited)
+       drop_resolution ~base_path ~keeper_name rejected)
 ;;
 
 (* #26126: resolution writes the judge evidence the entry carried onto the
@@ -3649,7 +4059,7 @@ let test_resolved_audit_event_carries_judge_evidence () =
        let id =
          submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `String "doc" ])
        in
-       (match aq_resolve ~base_path ~id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id ~decision:Keeper_approval_queue_rules_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let history =
@@ -3674,7 +4084,7 @@ let test_resolved_audit_event_carries_judge_evidence () =
            (row |> member "summary_status");
          Alcotest.check yojson
            "exact_attempt recorded at resolution"
-           (AQ.exact_attempt_state_to_yojson AQ.Exact_unbound)
+           (Keeper_approval_queue_rules_types.exact_attempt_state_to_yojson Keeper_approval_queue_rules_types.Exact_unbound)
            (row |> member "exact_attempt"))
 ;;
 
@@ -3763,6 +4173,18 @@ let () =
             `Quick
             test_dashboard_resolve_rejects_cross_workspace_approval
         ; Alcotest.test_case
+            "dashboard resolve rejects malformed contract fields"
+            `Quick
+            test_dashboard_resolve_rejects_malformed_contract_fields
+        ; Alcotest.test_case
+            "queue rejects invalid resolution policy before mutation"
+            `Quick
+            test_queue_rejects_invalid_resolution_policy_before_mutation
+        ; Alcotest.test_case
+            "dashboard resolve exposes committed rule failure"
+            `Quick
+            test_dashboard_resolve_reports_committed_rule_failure
+        ; Alcotest.test_case
             "operator recovery skips terminal exact failures"
             `Quick
             test_operator_recovery_skips_terminal_exact_failure
@@ -3791,6 +4213,10 @@ let () =
             `Quick
             test_unsupported_version_snapshot_requires_runtime_reset
         ; Alcotest.test_case
+            "current snapshot requires nullable fields"
+            `Quick
+            test_current_snapshot_requires_nullable_fields
+        ; Alcotest.test_case
             "unreadable current snapshot is preserved"
             `Quick
             test_unreadable_snapshot_fails_closed_and_is_preserved
@@ -3799,9 +4225,9 @@ let () =
             `Quick
             test_malformed_replay_sidecar_is_scoped_and_preserved
         ; Alcotest.test_case
-            "raw replay output wire is rejected"
+            "unknown replay output field is rejected"
             `Quick
-            test_replay_sidecar_rejects_raw_output_wire
+            test_replay_sidecar_rejects_unknown_output_field
         ; Alcotest.test_case
             "delivery journal replays"
             `Quick
@@ -3827,13 +4253,17 @@ let () =
             `Quick
             test_unavailable_cycle_grant_never_falls_through
         ; Alcotest.test_case
-            "non-approved resolution payload is delivered"
+            "rejection payload is delivered"
             `Quick
-            test_nonapproved_resolution_payload_is_delivered
+            test_rejection_payload_is_delivered
         ; Alcotest.test_case
             "delivery wire shape drops the request context"
             `Quick
             test_delivery_wire_shape_drops_request_context
+        ; Alcotest.test_case
+            "delivery rejects request-context fields"
+            `Quick
+            test_delivery_rejects_request_context_fields
         ] )
     ]
 ;;

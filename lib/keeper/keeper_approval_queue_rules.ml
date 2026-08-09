@@ -1,38 +1,4 @@
-(** Durable, nonblocking HITL queue state and exact Always Allowed rules.
-
-    This module does not classify an effect, interpret an operation name, or
-    own a Keeper lane. *)
-
-(** Types, conversions, and JSON serialization extracted to
-    [Keeper_approval_queue_rules_types].  State management below. *)
-
-include Keeper_approval_queue_rules_types
-
-let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string ApprovalQueueFailures)
-    ~labels:[ "keeper", keeper_name; "site", site ]
-    ();
-  Log.Keeper.warn
-    "approval_queue: %s failed keeper=%s id=%s event=%s err=%s"
-    site
-    keeper_name
-    id
-    event_type
-    (Printexc.to_string exn)
-;;
-
-(* ── Global queue (Lock-free Atomic.t) ───────────────────── *)
-
-module SMap = Set_util.StringMap
-
-let rec atomic_update atomic f =
-  let old_val = Atomic.get atomic in
-  let new_val = f old_val in
-  if Atomic.compare_and_set atomic old_val new_val then () else atomic_update atomic f
-;;
-
-let pending : pending_approval SMap.t Atomic.t = Atomic.make SMap.empty
+open Keeper_approval_queue_rules_types
 
 let id_rng = Random.State.make_self_init ()
 let id_rng_mu = Stdlib.Mutex.create ()
@@ -53,7 +19,7 @@ let rules_mutex = Cross_context_mutex.create ()
 let with_rules_read_lock f = Cross_context_mutex.with_lock rules_mutex f
 let with_rules_write_lock f = Cross_context_mutex.with_durable_lock rules_mutex f
 
-let rules_path ~base_path () =
+let store_path ~base_path =
   Keeper_gate_path.always_allowed ~base_path
 ;;
 
@@ -62,8 +28,8 @@ let approval_rules_persistence_surface = "keeper_approval_rules"
 let report_rules_read_drop ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
-      Otel_metric_store.inc_counter
-        Otel_metric_store.metric_persistence_read_drops
+      Otel_metric_store_core.inc_counter
+        Otel_metric_names.metric_persistence_read_drops
         ~labels:[ "surface", approval_rules_persistence_surface; "reason", reason ]
         ())
     ~surface:approval_rules_persistence_surface
@@ -76,24 +42,12 @@ let rule_json_preview json =
   Yojson.Safe.to_string json |> String_util.utf8_prefix ~max_bytes:240
 ;;
 
-let rec canonical_request_json = function
-  | `Assoc fields ->
-    fields
-    |> List.map (fun (key, value) -> key, canonical_request_json value)
-    |> List.stable_sort (fun (left, _) (right, _) -> String.compare left right)
-    |> fun canonical -> `Assoc canonical
-  | `List items -> `List (List.map canonical_request_json items)
-  | other -> other
-;;
+let string_is_nonblank value = String.trim value <> ""
 
-let request_fingerprint (input : Yojson.Safe.t) =
-  let canonical_json = canonical_request_json input |> Yojson.Safe.to_string in
-  Digestif.SHA256.(digest_string canonical_json |> to_hex)
-;;
-
-let nonempty_string_opt = function
-  | Some value when String.trim value <> "" -> Some (String.trim value)
-  | _ -> None
+let require_nonblank_rule_field ~path field value =
+  if string_is_nonblank value
+  then Ok ()
+  else Error { path; reason = field ^ " must be a non-blank string" }
 ;;
 
 let rule_identity_matches left right =
@@ -121,7 +75,7 @@ let validate_unique_rules rules =
 ;;
 
 let load_rules_unlocked ~base_path () =
-  let path = rules_path ~base_path () in
+  let path = store_path ~base_path in
   let rec parse_entries index acc = function
     | [] ->
       let rules = List.rev acc in
@@ -185,7 +139,7 @@ let load_rules_unlocked ~base_path () =
 ;;
 
 let save_rules_unlocked ~base_path rules : (unit, rule_store_error) result =
-  let path = rules_path ~base_path () in
+  let path = store_path ~base_path in
   try
     Fs_compat.mkdir_p (Filename.dirname path);
     let json = `List (List.map approval_rule_to_yojson rules) in
@@ -197,8 +151,15 @@ let save_rules_unlocked ~base_path rules : (unit, rule_store_error) result =
   | exn -> Error { path; reason = Printexc.to_string exn }
 ;;
 
+let protect_store ~base_path f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error { path = store_path ~base_path; reason = Printexc.to_string exn }
+;;
+
 let list_rules ~base_path () =
-  with_rules_read_lock (fun () -> load_rules_unlocked ~base_path ())
+  protect_store ~base_path (fun () ->
+    with_rules_read_lock (fun () -> load_rules_unlocked ~base_path ()))
 ;;
 
 let list_rules_dashboard_json ~base_path () =
@@ -216,34 +177,67 @@ let upsert_rule
       ~keeper_name
       ~tool_name
       ~input
-      ?created_by
-      ?source_approval_id
-      ?expires_at
+      ~created_by
+      ~source_approval_id
+      ~expires_at
       ()
   =
-  with_rules_write_lock (fun () ->
+  protect_store ~base_path (fun () ->
+    with_rules_write_lock (fun () ->
+    let path = store_path ~base_path in
+    let open Result.Syntax in
+    let* () = require_nonblank_rule_field ~path "keeper_name" keeper_name in
+    let* () = require_nonblank_rule_field ~path "tool_name" tool_name in
+    let* () = require_nonblank_rule_field ~path "created_by" created_by in
+    let* () = require_nonblank_rule_field ~path "source_approval_id" source_approval_id in
+    let now = Unix.gettimeofday () in
+    match expires_at with
+    | Some value when not (Float.is_finite value) ->
+      Error
+        { path
+        ; reason = "expires_at must be a finite number"
+        }
+    | Some value when value <= now ->
+      Error
+        { path
+        ; reason = "expires_at must be in the future"
+        }
+    | None | Some _ ->
     match load_rules_unlocked ~base_path () with
     | Error _ as error -> error
     | Ok rules ->
-      let request_fingerprint = request_fingerprint input in
+      let request_fingerprint =
+        Keeper_approval_queue_rules_types.request_fingerprint input
+      in
       let candidate =
         { id = make_generated_id "rule"
         ; keeper_name
         ; tool_name
         ; request_fingerprint
-        ; created_at = Unix.gettimeofday ()
+        ; created_at = now
         ; created_by
         ; source_approval_id
         ; expires_at
         }
       in
       (match List.find_opt (fun rule -> rule_identity_matches rule candidate) rules with
+       | Some existing when rule_expired ~now existing ->
+         Error
+           { path
+           ; reason = "the exact approval rule is expired; delete it before creating another"
+           }
+       | Some existing
+         when not (Option.equal Float.equal existing.expires_at candidate.expires_at) ->
+         Error
+           { path
+           ; reason = "the exact approval rule has a different expiry"
+           }
        | Some existing -> Ok (existing, false)
        | None ->
          (match save_rules_unlocked ~base_path (candidate :: rules) with
           | Ok () -> Ok (candidate, true)
           | Error error ->
-            Otel_metric_store.inc_counter
+            Otel_metric_store_core.inc_counter
               Keeper_metrics.(to_string ApprovalQueueFailures)
               ~labels:
                 [ "keeper", keeper_name
@@ -251,25 +245,26 @@ let upsert_rule
                 ]
               ();
             Log.Keeper.warn "upsert_rule: save failed: %s" (rule_store_error_to_string error);
-            Error error)))
+            Error error))))
 ;;
 
 let delete_rule ~base_path ~id () =
-  with_rules_write_lock (fun () ->
+  protect_store ~base_path (fun () ->
+    with_rules_write_lock (fun () ->
     match load_rules_unlocked ~base_path () with
     | Error _ as error -> error
     | Ok rules ->
       (match List.find_opt (fun rule -> String.equal rule.id id) rules with
        | None ->
          Error
-           { path = rules_path ~base_path ()
+           { path = store_path ~base_path
            ; reason = Printf.sprintf "approval rule %s not found" id
            }
        | Some deleted ->
          let remaining = List.filter (fun rule -> not (String.equal rule.id id)) rules in
          (match save_rules_unlocked ~base_path remaining with
           | Ok () -> Ok deleted
-          | Error _ as error -> error)))
+          | Error _ as error -> error))))
 ;;
 
 let find_matching_rule
@@ -281,11 +276,14 @@ let find_matching_rule
       ?(now = Unix.gettimeofday ())
       ()
   =
-  with_rules_read_lock (fun () ->
+  protect_store ~base_path (fun () ->
+    with_rules_read_lock (fun () ->
     match load_rules_unlocked ~base_path () with
     | Error _ as error -> error
     | Ok rules ->
-      let request_fingerprint = request_fingerprint input in
+      let request_fingerprint =
+        Keeper_approval_queue_rules_types.request_fingerprint input
+      in
       (match
          List.find_opt
            (fun rule ->
@@ -299,5 +297,9 @@ let find_matching_rule
          let matched = { rule_id = rule.id } in
          if rule_expired ~now rule
          then Ok (Rule_match_expired matched)
-         else Ok (Rule_match_active matched)))
+         else Ok (Rule_match_active matched))))
 ;;
+
+module For_testing = struct
+  let store_path = store_path
+end

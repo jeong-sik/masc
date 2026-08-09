@@ -121,7 +121,6 @@ module Decision = struct
   type t =
     | Approve
     | Reject of string
-    | Edit of Yojson.Safe.t
 end
 
 type decision = Decision.t
@@ -143,8 +142,8 @@ type approval_rule =
   ; tool_name : string
   ; request_fingerprint : string
   ; created_at : float
-  ; created_by : string option
-  ; source_approval_id : string option
+  ; created_by : string
+  ; source_approval_id : string
   ; expires_at : float option
   }
 
@@ -161,8 +160,6 @@ type rule_store_error =
   { path : string
   ; reason : string
   }
-
-type resolution_result = { remembered_rule : approval_rule option }
 
 let advisory_judgment_to_string = function
   | Approve -> "approve"
@@ -184,7 +181,6 @@ let advisory_judgment_of_string = function
 let approval_decision_to_string = function
   | Decision.Approve -> "approve"
   | Decision.Reject reason -> "reject:" ^ reason
-  | Decision.Edit _ -> "edit"
 ;;
 
 let decision_source_to_string = function
@@ -215,17 +211,19 @@ let authorization_source_of_string = function
   | _ -> None
 ;;
 
-let string_opt_of_json = function
-  | `String value ->
-    let trimmed = String.trim value in
-    if String.equal trimmed "" then None else Some trimmed
-  | _ -> None
+let rec canonical_request_json = function
+  | `Assoc fields ->
+    fields
+    |> List.map (fun (key, value) -> key, canonical_request_json value)
+    |> List.stable_sort (fun (left, _) (right, _) -> String.compare left right)
+    |> fun canonical -> `Assoc canonical
+  | `List items -> `List (List.map canonical_request_json items)
+  | other -> other
 ;;
 
-let bool_member key json ~default =
-  match Json_util.assoc_member_opt key json with
-  | Some (`Bool value) -> value
-  | _ -> default
+let request_fingerprint input =
+  let canonical_json = canonical_request_json input |> Yojson.Safe.to_string in
+  Digestif.SHA256.(digest_string canonical_json |> to_hex)
 ;;
 
 let rule_match_to_yojson (matched : rule_match) =
@@ -249,8 +247,8 @@ let approval_rule_to_yojson (rule : approval_rule) =
     ; "tool_name", `String rule.tool_name
     ; "request_fingerprint", `String rule.request_fingerprint
     ; "created_at", `Float rule.created_at
-    ; "created_by", Json_util.string_opt_to_json rule.created_by
-    ; "source_approval_id", Json_util.string_opt_to_json rule.source_approval_id
+    ; "created_by", `String rule.created_by
+    ; "source_approval_id", `String rule.source_approval_id
     ; "expires_at", Json_util.float_opt_to_json rule.expires_at
     ]
 ;;
@@ -704,19 +702,32 @@ let approval_rule_of_yojson_with_error json =
     let* keeper_name = require "keeper_name" in
     let* tool_name = require "tool_name" in
     let* request_fingerprint = require "request_fingerprint" in
+    let* () =
+      if is_lowercase_sha256 request_fingerprint
+      then Ok ()
+      else Error "request_fingerprint must be a lowercase SHA-256"
+    in
     let* created_at =
       match Json_util.get_float json "created_at" with
-      | Some value -> Ok value
-      | None -> Error "created_at must be a number"
+      | Some value when Float.is_finite value && value >= 0.0 -> Ok value
+      | Some _ -> Error "created_at must be a finite non-negative number"
+      | None -> Error "created_at must be a finite non-negative number"
     in
-    let created_by = Json_util.get_string json "created_by" in
-    let source_approval_id = Json_util.get_string json "source_approval_id" in
+    let* created_by = require "created_by" in
+    let* source_approval_id = require "source_approval_id" in
     let* expires_at =
       match List.assoc_opt "expires_at" fields with
-      | None | Some `Null -> Ok None
-      | Some (`Float value) -> Ok (Some value)
+      | None -> Error "expires_at is required"
+      | Some `Null -> Ok None
+      | Some (`Float value) when Float.is_finite value -> Ok (Some value)
       | Some (`Int value) -> Ok (Some (Float.of_int value))
-      | Some _ -> Error "expires_at must be a number or null"
+      | Some _ -> Error "expires_at must be a finite number or null"
+    in
+    let* () =
+      match expires_at with
+      | None -> Ok ()
+      | Some value when value > created_at -> Ok ()
+      | Some _ -> Error "expires_at must be later than created_at or null"
     in
     Ok
       { id
@@ -729,10 +740,4 @@ let approval_rule_of_yojson_with_error json =
       ; expires_at
       }
   | _ -> Error "approval rule must be a JSON object"
-;;
-
-let approval_rule_of_yojson json =
-  match approval_rule_of_yojson_with_error json with
-  | Ok rule -> Some rule
-  | Error _ -> None
 ;;

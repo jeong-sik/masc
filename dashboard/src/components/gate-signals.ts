@@ -20,6 +20,8 @@ export function gateObservationErrorSnapshot(operatorDetail: string): DashboardG
     // are unknown, and a zeroed page would read as "nothing was decided".
     recent_resolved_page: null,
     approval_rules: [],
+    approval_rules_state: { state: 'unavailable', error: operatorDetail },
+    hitl: null,
   }
 }
 

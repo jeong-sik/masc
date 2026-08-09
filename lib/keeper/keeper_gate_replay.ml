@@ -688,26 +688,6 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
          ; Printf.sprintf "- rationale: %s" rationale
          ; "This resolution grants no authorization."
          ])
-  | Some
-      { Keeper_event_queue.approval_id
-      ; decision = Keeper_event_queue.Hitl_edited edited_input
-      ; _
-      } ->
-    let edited_input = Yojson.Safe.pretty_to_string edited_input in
-    plain_model_message
-      (String.concat
-         "\n"
-         [ user_message
-         ; ""
-         ; "Gate resolution delivered:"
-         ; Printf.sprintf "- approval_id: %s" approval_id
-         ; "- decision: edited"
-         ; "- edited input:"
-         ; "```json"
-         ; edited_input
-         ; "```"
-         ; "This edit grants no authorization; any external effect follows the ordinary Gate independently."
-         ])
   | None -> plain_model_message user_message
 ;;
 

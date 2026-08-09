@@ -15,6 +15,7 @@
   (:standard -w +4 -w +33))
  (libraries
   eio
+  digestif
   masc.keeper_registry
   masc.keeper_runtime
   masc.keeper_metrics

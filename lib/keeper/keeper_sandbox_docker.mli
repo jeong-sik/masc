@@ -1,9 +1,8 @@
 (** Docker / sandbox shell execution infrastructure.
 
-    Extracted from keeper_tool_command_runtime.ml — Docker container
-    lifecycle, sandbox profile resolution, and container invocation. Command
-    syntax belongs to the invoked CLI; this layer enforces sandbox and path
-    containment.
+    This module owns Docker container lifecycle, sandbox profile resolution,
+    and container invocation. Command syntax belongs to the invoked CLI; this
+    layer enforces sandbox and path containment.
 
     Sandbox backend failure-message and failure-recording surfaces live
     in [Keeper_sandbox_exec_failure]. Call those qualified rather than
@@ -24,15 +23,6 @@ val docker_private_workspace_cwd :
   string ->
   string
 
-(** Translate keeper-private in-container absolute paths back to their host
-    playground paths for host-side path validation. Actual Docker execution
-    still receives the original container paths. *)
-val rewrite_docker_command_paths_for_host_validation :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  string ->
-  string
-
 (** Resolve [(sandbox_profile, network_mode)] from the keeper's declared
     profile. The declared sandbox profile is the execution contract:
     [sandbox_profile=local] never becomes Docker because of call-site cwd. *)
@@ -45,13 +35,6 @@ val ensure_keeper_sandbox_runtime :
   timeout_sec:float -> (string list, string) result
 (** Direct alias of [Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime];
     returns the [--security-opt seccomp=...] argv fragment on success. *)
-
-(** [-v <host>:<container>:ro] mount list, or [[]] when [host] is
-    blank or missing. *)
-val optional_ro_mount :
-  host:string -> container:string -> string list
-
-
 
 (** Result envelope returned by [run_docker_shell_command_with_status]. *)
 type docker_shell_result =

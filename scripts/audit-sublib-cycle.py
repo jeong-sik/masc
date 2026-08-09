@@ -64,6 +64,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     # RFC-0056 Phase 1N: Keeper deterministic lifecycle FSM cluster.
     "masc.keeper_registry",
     "masc.keeper_contract",
+    "masc.keeper_approval",
     "masc.keeper_runtime",
     "masc.keeper_tooling",
     # Model inference aggregate domain and its runtime label boundary.
@@ -101,7 +102,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_binding_health_config",
     "masc.keeper_transition_audit_types",
     "masc.keeper_path_rejection",
-    "masc.keeper_approval_queue_rules_types",
     "masc.keeper_toml_parser",
     "masc.keeper_toml_loader",
     "masc.keeper_runtime_config",

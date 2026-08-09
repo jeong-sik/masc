@@ -8,10 +8,10 @@ let sample_rule =
   { Q.id = "rule-1"
   ; keeper_name = "keeper"
   ; tool_name = "external-effect"
-  ; request_fingerprint = "abcdef1234567890"
+  ; request_fingerprint = String.make 64 'a'
   ; created_at = 1780587600.0
-  ; created_by = Some "operator"
-  ; source_approval_id = Some "approval-1"
+  ; created_by = "operator"
+  ; source_approval_id = "approval-1"
   ; expires_at = None
   }
 ;;
@@ -58,12 +58,16 @@ let without_field field = function
   | json -> json
 ;;
 
+let parse_rule json =
+  match Q.approval_rule_of_yojson_with_error json with
+  | Ok rule -> rule
+  | Error reason -> fail reason
+;;
+
 let test_approval_rule_json_round_trip () =
-  match Q.approval_rule_of_yojson (Q.approval_rule_to_yojson sample_rule) with
-  | None -> fail "expected exact approval rule to parse"
-  | Some parsed ->
-    check string "id" sample_rule.id parsed.id;
-    check string "fingerprint" sample_rule.request_fingerprint parsed.request_fingerprint
+  let parsed = Q.approval_rule_to_yojson sample_rule |> parse_rule in
+  check string "id" sample_rule.id parsed.id;
+  check string "fingerprint" sample_rule.request_fingerprint parsed.request_fingerprint
 ;;
 
 let test_approval_rule_expiry_round_trip () =
@@ -71,21 +75,23 @@ let test_approval_rule_expiry_round_trip () =
   let json = Q.approval_rule_to_yojson rule in
   check yojson "expires_at persisted" (`Float 1780591200.0)
     (Yojson.Safe.Util.member "expires_at" json);
-  match Q.approval_rule_of_yojson json with
-  | None -> fail "expected expiring approval rule to parse"
-  | Some parsed ->
-    check (option (float 0.0)) "expires_at round trip" rule.expires_at parsed.expires_at
+  let parsed = parse_rule json in
+  check (option (float 0.0)) "expires_at round trip" rule.expires_at parsed.expires_at
 ;;
 
 let test_approval_rule_without_expiry_round_trip () =
   let json = Q.approval_rule_to_yojson sample_rule in
   check yojson "expires_at serialized as null" `Null
     (Yojson.Safe.Util.member "expires_at" json);
-  let legacy = without_field "expires_at" json in
-  match Q.approval_rule_of_yojson legacy with
-  | None -> fail "pre-expiry persisted rule must still parse"
-  | Some parsed ->
-    check (option (float 0.0)) "missing expires_at is no expiry" None parsed.expires_at
+  let parsed = parse_rule json in
+  check (option (float 0.0)) "null expires_at is no expiry" None parsed.expires_at
+;;
+
+let test_approval_rule_requires_expiry_field () =
+  let json = Q.approval_rule_to_yojson sample_rule |> without_field "expires_at" in
+  match Q.approval_rule_of_yojson_with_error json with
+  | Ok _ -> fail "missing expires_at must be rejected"
+  | Error reason -> check string "failure names expires_at" "expires_at is required" reason
 ;;
 
 let test_rule_parser_rejects_malformed_expiry () =
@@ -98,8 +104,56 @@ let test_rule_parser_rejects_malformed_expiry () =
   match Q.approval_rule_of_yojson_with_error malformed with
   | Ok _ -> fail "malformed expires_at must not silently become a permanent rule"
   | Error reason ->
-    check string "failure names expires_at" "expires_at must be a number or null"
+    check string "failure names expires_at" "expires_at must be a finite number or null"
       reason
+;;
+
+let test_rule_parser_requires_exact_nullable_fields () =
+  let valid = Q.approval_rule_to_yojson sample_rule in
+  let replace field value =
+    match valid with
+    | `Assoc fields -> `Assoc ((field, value) :: List.remove_assoc field fields)
+    | json -> json
+  in
+  let cases =
+    [ ( "missing created_by"
+      , without_field "created_by" valid
+      , "created_by is required" )
+    ; ( "invalid created_by"
+      , replace "created_by" (`Int 1)
+      , "created_by must be a non-blank string" )
+    ; ( "blank created_by"
+      , replace "created_by" (`String " ")
+      , "created_by must be a non-blank string" )
+    ; ( "missing source_approval_id"
+      , without_field "source_approval_id" valid
+      , "source_approval_id is required" )
+    ; ( "invalid source_approval_id"
+      , replace "source_approval_id" (`Bool false)
+      , "source_approval_id must be a non-blank string" )
+    ; ( "invalid request fingerprint"
+      , replace "request_fingerprint" (`String "abc")
+      , "request_fingerprint must be a lowercase SHA-256" )
+    ; ( "non-finite creation time"
+      , replace "created_at" (`Float Float.nan)
+      , "created_at must be a finite non-negative number" )
+    ; ( "non-finite expiry"
+      , replace "expires_at" (`Float Float.infinity)
+      , "expires_at must be a finite number or null" )
+    ; ( "expiry before creation"
+      , replace "expires_at" (`Float (sample_rule.created_at -. 1.0))
+      , "expires_at must be later than created_at or null" )
+    ; ( "expiry at creation"
+      , replace "expires_at" (`Float sample_rule.created_at)
+      , "expires_at must be later than created_at or null" )
+    ]
+  in
+  List.iter
+    (fun (label, json, expected) ->
+       match Q.approval_rule_of_yojson_with_error json with
+       | Ok _ -> fail (label ^ " must be rejected")
+       | Error reason -> check string label expected reason)
+    cases
 ;;
 
 let test_rule_expired_is_deterministic () =
@@ -112,14 +166,12 @@ let test_rule_expired_is_deterministic () =
 
 let test_rule_parser_is_closed_and_explicit () =
   let valid = Q.approval_rule_to_yojson sample_rule in
-  check
-    (option reject)
-    "missing identity"
-    None
-    (Q.approval_rule_of_yojson (without_field "keeper_name" valid));
+  (match Q.approval_rule_of_yojson_with_error (without_field "keeper_name" valid) with
+   | Ok _ -> fail "missing identity must be rejected"
+   | Error _ -> ());
   let extended =
     match valid with
-    | `Assoc fields -> `Assoc (("classification", `String "legacy") :: fields)
+    | `Assoc fields -> `Assoc (("classification", `String "unsupported") :: fields)
     | json -> json
   in
   match Q.approval_rule_of_yojson_with_error extended with
@@ -148,42 +200,6 @@ let test_rule_parser_rejects_duplicate_fields () =
       reason
 ;;
 
-let test_summary_failed_has_no_retryable () =
-  let failed = Q.Summary_failed { reason = "provider down" } in
-  (match Q.summary_status_to_yojson failed with
-   | `Assoc fields ->
-     check
-       (list string)
-       "serialized fields"
-       [ "status"; "reason" ]
-       (List.map fst fields)
-   | _ -> fail "Summary_failed must serialize as an object");
-  let decode json = Q.summary_status_of_yojson_with_error json in
-  (match
-     decode (`Assoc [ "status", `String "failed"; "reason", `String "provider down" ])
-   with
-   | Ok status -> check bool "modern decode" true (status = failed)
-   | Error e -> fail e);
-  List.iter
-    (fun retryable ->
-       match
-         decode
-           (`Assoc
-               [ "status", `String "failed"
-               ; "reason", `String "provider down"
-               ; "retryable", retryable
-               ])
-       with
-       | Ok _ -> fail "removed retryable field must reject"
-       | Error reason ->
-         check
-           string
-           "removed field is explicit"
-           "summary_status contains unsupported field retryable"
-           reason)
-    [ `Bool true; `String "yes" ]
-;;
-
 let () =
   run
     "Keeper_approval_queue_rules_types"
@@ -191,23 +207,25 @@ let () =
       , [ test_case "typed judgment round trip" `Quick test_advisory_judgment_round_trip
         ; test_case "summary has no hierarchy" `Quick test_summary_json_is_nonhierarchical
         ] )
-    ; ( "summary status"
-      , [ test_case
-            "retryable is rejected by the current contract"
-            `Quick
-            test_summary_failed_has_no_retryable
-        ] )
     ; ( "exact rule"
       , [ test_case "JSON round trip" `Quick test_approval_rule_json_round_trip
         ; test_case "expiry JSON round trip" `Quick test_approval_rule_expiry_round_trip
         ; test_case
-            "missing expiry parses as no expiry"
+            "null expiry parses as no expiry"
             `Quick
             test_approval_rule_without_expiry_round_trip
+        ; test_case
+            "expiry field is required"
+            `Quick
+            test_approval_rule_requires_expiry_field
         ; test_case
             "malformed expiry rejected"
             `Quick
             test_rule_parser_rejects_malformed_expiry
+        ; test_case
+            "nullable fields and numbers are exact"
+            `Quick
+            test_rule_parser_requires_exact_nullable_fields
         ; test_case "expiry check is deterministic" `Quick test_rule_expired_is_deterministic
         ; test_case "closed explicit parser" `Quick test_rule_parser_is_closed_and_explicit
         ; test_case

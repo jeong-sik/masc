@@ -28,10 +28,19 @@ module Process_switch = Masc.Keeper_process_switch
 module Tool_accumulator = Masc.Keeper_tool_emission_hook
 module Latched_reason = Keeper_latched_reason
 
-(* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
-   unit projection over [resolve_with_policy] (production resolution path). *)
+(* Unit projection used by assertions that do not inspect the remembered rule. *)
 let aq_resolve ~base_path ~id ~decision =
-  match AQ.resolve_with_policy ~base_path ~id ~decision () with
+  match
+    AQ.resolve_with_policy
+      ~base_path
+      ~id
+      ~decision
+      ~source:Keeper_approval_queue_rules_types.Human_operator
+      ~remember_rule:false
+      ~rule_expires_at:None
+      ~created_by:"test-operator"
+      ()
+  with
   | Ok _ -> Ok ()
   | Error _ as error -> error
 ;;
@@ -349,7 +358,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
             (aq_resolve
                ~base_path:base_dir
                ~id
-               ~decision:(AQ.Decision.Reject "test cleanup")))
+               ~decision:(Keeper_approval_queue_rules_types.Decision.Reject "test cleanup")))
         !approval_ids;
       cleanup_dir base_dir)
     (fun () ->
@@ -1092,7 +1101,7 @@ let test_sweep_reports_pending_hitl_approval () =
              (aq_resolve
                 ~base_path:base_dir
                 ~id
-                ~decision:(AQ.Decision.Reject "test cleanup")))
+                ~decision:(Keeper_approval_queue_rules_types.Decision.Reject "test cleanup")))
         !approval_id;
       Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
@@ -1144,7 +1153,7 @@ let test_sweep_reports_pending_hitl_approval () =
            ~keeper_name:name
          |> Result.get_ok
          |> fun count -> count > 0);
-      (match aq_resolve ~base_path:base_dir ~id ~decision:AQ.Decision.Approve with
+      (match aq_resolve ~base_path:base_dir ~id ~decision:Keeper_approval_queue_rules_types.Decision.Approve with
        | Ok () -> approval_id := None
        | Error err -> fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
       check bool "resolution removes pending request" false

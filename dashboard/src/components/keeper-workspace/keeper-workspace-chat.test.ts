@@ -36,6 +36,11 @@ function gateResponse(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
     approval_queue_state: { state: 'ready' },
     recent_resolved: [],
     approval_rules: [],
+    approval_rules_state: { state: 'ready' },
+    hitl: {
+      gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+      judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
+    },
   } as DashboardGateResponse
 }
 

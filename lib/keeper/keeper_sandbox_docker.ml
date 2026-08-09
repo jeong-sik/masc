@@ -1,9 +1,8 @@
 (** Docker/sandbox shell execution infrastructure.
 
-    Extracted from keeper_tool_command_runtime.ml — Docker container lifecycle,
-    sandbox profile resolution, and container invocation functions.
-    These are pure infrastructure; command dispatch remains in
-    keeper_tool_command_runtime.ml. *)
+    This module owns Docker container lifecycle, sandbox profile resolution,
+    and container invocation. Command dispatch is owned by the typed Keeper
+    execution path. *)
 
 open Keeper_types
 open Keeper_meta_contract

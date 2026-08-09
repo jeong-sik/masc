@@ -1,7 +1,7 @@
 # Keeper Tool Boundary Matrix
 
 Status: P0 ratchet source for keeper agent tool boundaries.
-Last updated: 2026-07-12.
+Last updated: 2026-08-09.
 
 This matrix freezes the owner map for keeper modules that participate in the
 agent tool path. A new file in scope must be added here with exactly one owner

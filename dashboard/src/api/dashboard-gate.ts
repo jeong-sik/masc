@@ -18,6 +18,7 @@ import type {
   KeeperResolvedApprovalItem,
   KeeperResolvedApprovalPage,
   KeeperApprovalQueueState,
+  KeeperApprovalRulesState,
   KeeperAutoJudgeRearmExpectation,
   GateDecisionSource,
   GateJudgeLane,
@@ -77,66 +78,147 @@ function normalizeApprovalQueueState(raw: unknown): KeeperApprovalQueueState {
 
 function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
   if (!isRecord(raw)) return null
-  const id = asString(raw.id, '').trim()
-  const keeperName = asString(raw.keeper_name, '').trim()
-  const toolName = asString(raw.tool_name, '').trim()
-  if (!id || !keeperName || !toolName) return null
+  const keys = Object.keys(raw).sort()
+  const expectedKeys = [
+    'created_at',
+    'created_by',
+    'expires_at',
+    'id',
+    'keeper_name',
+    'request_fingerprint',
+    'source_approval_id',
+    'tool_name',
+  ]
+  if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
+    return null
+  }
+  const id = typeof raw.id === 'string' ? raw.id.trim() : ''
+  const keeperName = typeof raw.keeper_name === 'string' ? raw.keeper_name.trim() : ''
+  const toolName = typeof raw.tool_name === 'string' ? raw.tool_name.trim() : ''
+  const requestFingerprint = typeof raw.request_fingerprint === 'string'
+    ? raw.request_fingerprint
+    : ''
+  const createdAt = typeof raw.created_at === 'number' ? raw.created_at : Number.NaN
+  const createdBy = typeof raw.created_by === 'string' && raw.created_by.trim() !== ''
+    ? raw.created_by
+    : undefined
+  const sourceApprovalId =
+    typeof raw.source_approval_id === 'string' && raw.source_approval_id.trim() !== ''
+      ? raw.source_approval_id
+      : undefined
+  const expiresAt = raw.expires_at === null
+    ? null
+    : typeof raw.expires_at === 'number' && Number.isFinite(raw.expires_at)
+      ? raw.expires_at
+      : undefined
+  if (
+    !id
+    || !keeperName
+    || !toolName
+    || !/^[a-f0-9]{64}$/.test(requestFingerprint)
+    || !Number.isFinite(createdAt)
+    || createdAt < 0
+    || createdBy === undefined
+    || sourceApprovalId === undefined
+    || expiresAt === undefined
+    || (expiresAt !== null && expiresAt <= createdAt)
+  ) return null
   return {
     id,
     keeper_name: keeperName,
     tool_name: toolName,
-    request_fingerprint: asNullableString(raw.request_fingerprint) ?? undefined,
-    created_at: asNullableIsoTimestamp(raw.created_at),
-    created_by: asNullableString(raw.created_by),
-    source_approval_id: asNullableString(raw.source_approval_id),
+    request_fingerprint: requestFingerprint,
+    created_at: createdAt,
+    created_by: createdBy,
+    source_approval_id: sourceApprovalId,
+    expires_at: expiresAt,
   }
+}
+
+function normalizeApprovalRulesState(raw: unknown): KeeperApprovalRulesState {
+  if (!isRecord(raw)) return gateSnapshotProtocolDrift('approval_rules_state is not an object')
+  if (raw.state === 'ready' && Object.keys(raw).length === 1) return { state: 'ready' }
+  if (
+    raw.state === 'unavailable'
+    && typeof raw.error === 'string'
+    && raw.error.trim() !== ''
+    && Object.keys(raw).length === 2
+  ) {
+    return { state: 'unavailable', error: raw.error }
+  }
+  return gateSnapshotProtocolDrift('approval_rules_state is not a current closed variant')
 }
 
 function normalizeGateModeValue(raw: unknown): GateMode | null {
   return raw === 'manual' || raw === 'auto_judge' || raw === 'always_allow' ? raw : null
 }
 
-function normalizeGateMode(raw: unknown): GateModeStatus | undefined {
-  if (!isRecord(raw)) return undefined
-  const mode = normalizeGateModeValue(raw.mode)
-  if (!mode) {
-    return {
-      mode: 'manual',
-      state: 'invalid',
-      read_error: `unsupported Gate mode: ${String(raw.mode)}`,
-    }
-  }
-  return {
-    mode,
-    configured: asBoolean(raw.configured) ?? undefined,
-    state: asNullableString(raw.state) ?? undefined,
-    read_error: asNullableString(raw.read_error) ?? undefined,
-  }
+function hasExactKeys(raw: Record<string, unknown>, expected: string[]): boolean {
+  const keys = Object.keys(raw).sort()
+  const sortedExpected = [...expected].sort()
+  return keys.length === sortedExpected.length
+    && keys.every((key, index) => key === sortedExpected[index])
 }
 
-/** Parse the closed `judge_lane` variant emitted by `dashboard_gate.ml`.
- *  Returns undefined for an absent field (older server) or a shape outside
- *  the contract — the header then simply omits the judge model. */
-function normalizeGateJudgeLane(raw: unknown): GateJudgeLane | undefined {
-  if (!isRecord(raw)) return undefined
+function normalizeGateMode(raw: unknown): GateModeStatus {
+  if (!isRecord(raw)) return gateSnapshotProtocolDrift('hitl.gate_mode is not an object')
+  const mode = normalizeGateModeValue(raw.mode)
+  if (!mode || typeof raw.configured !== 'boolean') {
+    return gateSnapshotProtocolDrift('hitl.gate_mode has an invalid mode or configured flag')
+  }
+  if (raw.state === 'ready' && hasExactKeys(raw, ['mode', 'configured', 'state'])) {
+    return { mode, configured: raw.configured, state: 'ready' }
+  }
+  if (
+    mode === 'auto_judge'
+    && raw.state === 'unavailable'
+    && typeof raw.read_error === 'string'
+    && raw.read_error.trim() !== ''
+    && hasExactKeys(raw, ['mode', 'configured', 'state', 'read_error'])
+  ) {
+    return { mode, configured: raw.configured, state: 'unavailable', read_error: raw.read_error }
+  }
+  if (
+    mode === 'manual'
+    && raw.configured === true
+    && raw.state === 'invalid'
+    && typeof raw.read_error === 'string'
+    && raw.read_error.trim() !== ''
+    && hasExactKeys(raw, ['mode', 'configured', 'state', 'read_error'])
+  ) {
+    return { mode, configured: true, state: 'invalid', read_error: raw.read_error }
+  }
+  return gateSnapshotProtocolDrift('hitl.gate_mode is not a current closed variant')
+}
+
+function normalizeGateJudgeLane(raw: unknown): GateJudgeLane {
+  if (!isRecord(raw)) return gateSnapshotProtocolDrift('hitl.judge_lane is not an object')
   const laneId = asString(raw.lane_id, '').trim()
-  if (!laneId) return undefined
-  if (raw.status === 'available' && Array.isArray(raw.slots)) {
+  if (!laneId) return gateSnapshotProtocolDrift('hitl.judge_lane.lane_id is invalid')
+  if (
+    raw.status === 'available'
+    && Array.isArray(raw.slots)
+    && hasExactKeys(raw, ['status', 'lane_id', 'slots'])
+  ) {
     const slots = raw.slots.filter(
       (slot): slot is string => typeof slot === 'string' && slot.trim() !== '',
     )
-    if (slots.length === 0 || slots.length !== raw.slots.length) return undefined
+    if (slots.length === 0 || slots.length !== raw.slots.length) {
+      return gateSnapshotProtocolDrift('hitl.judge_lane.slots is invalid')
+    }
     return { status: 'available', lane_id: laneId, slots }
   }
-  if (raw.status === 'unavailable') {
+  if (raw.status === 'unavailable' && hasExactKeys(raw, ['status', 'lane_id', 'reason'])) {
     const reason = asString(raw.reason, '').trim()
-    return reason ? { status: 'unavailable', lane_id: laneId, reason } : undefined
+    if (reason) return { status: 'unavailable', lane_id: laneId, reason }
   }
-  return undefined
+  return gateSnapshotProtocolDrift('hitl.judge_lane is not a current closed variant')
 }
 
-function normalizeHitlStatus(raw: unknown): DashboardGateResponse['hitl'] | undefined {
-  if (!isRecord(raw)) return undefined
+function normalizeHitlStatus(raw: unknown): DashboardGateResponse['hitl'] {
+  if (!isRecord(raw) || !hasExactKeys(raw, ['gate_mode', 'judge_lane'])) {
+    return gateSnapshotProtocolDrift('hitl is not the current exact object')
+  }
   return {
     gate_mode: normalizeGateMode(raw.gate_mode),
     judge_lane: normalizeGateJudgeLane(raw.judge_lane),
@@ -285,11 +367,17 @@ export function fetchDashboardGate(
           .filter((item): item is KeeperResolvedApprovalItem => item !== null)
       : []
     const recentResolvedPage = normalizeKeeperResolvedApprovalPage(raw.recent_resolved_page)
-    const approvalRules = Array.isArray(raw.approval_rules)
-      ? raw.approval_rules
-          .map(item => normalizeKeeperApprovalRule(item))
-          .filter((item): item is KeeperApprovalRule => item !== null)
-      : []
+    const approvalRulesState = normalizeApprovalRulesState(raw.approval_rules_state)
+    if (!Array.isArray(raw.approval_rules)) {
+      return gateSnapshotProtocolDrift('approval_rules must be an array')
+    }
+    const approvalRules = raw.approval_rules.map(item => normalizeKeeperApprovalRule(item))
+    if (approvalRules.some(rule => rule === null)) {
+      return gateSnapshotProtocolDrift('approval_rules contains an invalid rule')
+    }
+    if (approvalRulesState.state === 'unavailable' && approvalRules.length !== 0) {
+      return gateSnapshotProtocolDrift('unavailable approval_rules must be empty')
+    }
     return {
       generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
       note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
@@ -298,25 +386,33 @@ export function fetchDashboardGate(
       approval_queue_violations: approvalQueueViolations,
       recent_resolved: recentResolved,
       recent_resolved_page: recentResolvedPage,
-      approval_rules: approvalRules,
+      approval_rules: approvalRules as KeeperApprovalRule[],
+      approval_rules_state: approvalRulesState,
       hitl: normalizeHitlStatus(raw.hitl),
     }
   })
 }
 
+export type GateApprovalResolution =
+  | { decision: 'approve'; rememberRule: boolean; ruleExpiresAt?: number }
+  | { decision: 'reject'; reason: string }
+
 export function resolveGateApproval(
   id: string,
-  decision: 'approve' | 'reject',
-  rememberRule?: boolean,
-  reason?: string,
-  ruleExpiresAt?: number,
-): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject'; rule_id?: string | null }> {
+  resolution: GateApprovalResolution,
+): Promise<{
+  ok: boolean
+  id: string
+  decision: 'approve' | 'reject'
+  rule_id: string | null
+  rule_error: string | null
+}> {
   return post('/api/v1/dashboard/gate/resolve', {
     id,
-    decision,
-    remember_rule: rememberRule,
-    reason,
-    rule_expires_at: ruleExpiresAt,
+    decision: resolution.decision,
+    remember_rule: resolution.decision === 'approve' ? resolution.rememberRule : false,
+    reason: resolution.decision === 'reject' ? resolution.reason : undefined,
+    rule_expires_at: resolution.decision === 'approve' ? resolution.ruleExpiresAt : undefined,
   })
 }
 

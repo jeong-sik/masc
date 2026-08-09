@@ -107,8 +107,7 @@ let severity_of_approval_event (event : Keeper_approval.Audit.event)
          out as a rejection. *)
       match decision_kind with
       | Some Keeper_approval.Audit.Decision_reject -> "bad"
-      | Some (Keeper_approval.Audit.Decision_approve | Decision_edit) | None ->
-          "ok")
+      | Some Keeper_approval.Audit.Decision_approve | None -> "ok")
 
 let tool_call_timeline_event json =
   match json_float_opt_member "ts" json, json_string_opt_member "tool" json with

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   refreshGate: vi.fn(),
+  resolveGateApproval: vi.fn(),
   setGateMode: vi.fn(),
   retryGateAutoJudge: vi.fn(),
   showToast: vi.fn(),
@@ -13,7 +14,7 @@ vi.mock('./common/toast', () => ({
 
 vi.mock('../api/dashboard-gate', () => ({
   deleteGateApprovalRule: vi.fn(),
-  resolveGateApproval: vi.fn(),
+  resolveGateApproval: mocks.resolveGateApproval,
   retryGateAutoJudge: mocks.retryGateAutoJudge,
   setGateMode: mocks.setGateMode,
 }))
@@ -22,7 +23,11 @@ vi.mock('./gate-refresh', () => ({
   refreshGate: mocks.refreshGate,
 }))
 
-import { retryKeeperAutoJudge, setKeeperGateMode } from './gate-actions'
+import {
+  respondToKeeperApproval,
+  retryKeeperAutoJudge,
+  setKeeperGateMode,
+} from './gate-actions'
 import { gateApprovalActing, gateError } from './gate-signals'
 
 const baseResponse = {
@@ -39,12 +44,67 @@ const baseResponse = {
 } as const
 
 beforeEach(() => {
+  Object.defineProperty(window, 'prompt', {
+    value: vi.fn().mockReturnValue('operator rejected'),
+    configurable: true,
+    writable: true,
+  })
   mocks.refreshGate.mockReset().mockResolvedValue(undefined)
+  mocks.resolveGateApproval.mockReset().mockResolvedValue({
+    ok: true,
+    id: 'appr-1',
+    decision: 'approve',
+    rule_id: null,
+    rule_error: null,
+  })
   mocks.setGateMode.mockReset()
   mocks.retryGateAutoJudge.mockReset().mockResolvedValue({ ok: true, id: 'appr-1' })
   mocks.showToast.mockReset()
   gateApprovalActing.value = null
   gateError.value = ''
+})
+
+describe('respondToKeeperApproval rejection reason', () => {
+  it('sends the operator-entered reason unchanged', async () => {
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValueOnce('  범위 밖 작업  ')
+
+    await respondToKeeperApproval('appr-1', 'reject')
+
+    expect(mocks.resolveGateApproval).toHaveBeenCalledWith(
+      'appr-1',
+      { decision: 'reject', reason: '  범위 밖 작업  ' },
+    )
+    expect(mocks.refreshGate).toHaveBeenCalledWith({ force: true })
+    prompt.mockRestore()
+  })
+
+  it('does not resolve without an operator-entered reason', async () => {
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValueOnce('   ')
+
+    await respondToKeeperApproval('appr-1', 'reject')
+
+    expect(mocks.resolveGateApproval).not.toHaveBeenCalled()
+    expect(mocks.showToast).toHaveBeenCalledWith('거부 이유를 입력해야 합니다', 'warning')
+    prompt.mockRestore()
+  })
+
+  it('shows committed approval and failed rule persistence separately', async () => {
+    mocks.resolveGateApproval.mockResolvedValueOnce({
+      ok: true,
+      id: 'appr-1',
+      decision: 'approve',
+      rule_id: null,
+      rule_error: 'approval-rules.json: exact rule has a different expiry',
+    })
+
+    await respondToKeeperApproval('appr-1', 'approve', true)
+
+    expect(mocks.showToast).toHaveBeenCalledWith(
+      'keeper 승인 요청은 승인했지만 Always 규칙을 저장하지 못했습니다: '
+      + 'approval-rules.json: exact rule has a different expiry',
+      'warning',
+    )
+  })
 })
 
 describe('retryKeeperAutoJudge exact observation', () => {

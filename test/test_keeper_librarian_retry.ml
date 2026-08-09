@@ -10,7 +10,7 @@ module Budget = Masc.Keeper_memory_os_budget
    (same pattern as test_keeper_prompt_metrics). *)
 let has_prompt_root path =
   Sys.file_exists
-    (Filename.concat path "config/prompts/librarian.current_selection.md")
+    (Filename.concat path "config/prompts/librarian.md")
 
 let repo_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -423,14 +423,14 @@ let test_prompt_carries_recall_fact_byte_budget () =
 let test_prompt_omits_tool_result_payload_and_has_one_message () =
   let sentinel = "UNTRUSTED_TOOL_RESULT_MUST_NOT_REACH_MEMORY_FINALIZER" in
   let tool_message =
-    Agent_sdk.Types.make_message
-      ~role:Agent_sdk.Types.Tool
-      [ Agent_sdk.Types.ToolResult
+    Agent_core.Types.make_message
+      ~role:Agent_core.Types.Tool
+      [ Agent_core.Types.ToolResult
           { tool_use_id = "tool-call-1"
           ; content = sentinel
-          ; outcome = Agent_sdk.Types.Tool_succeeded
+          ; outcome = Agent_core.Types.Tool_succeeded
           ; json = Some (`Assoc [ "payload", `String sentinel ])
-          ; content_blocks = Some [ Agent_sdk.Types.Text sentinel ]
+          ; content_blocks = Some [ Agent_core.Types.Text sentinel ]
           }
       ]
   in

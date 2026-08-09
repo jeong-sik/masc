@@ -15,7 +15,7 @@ val make_tool_bundle
   -> ?gate_context:Keeper_gate_causal_context.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> unit
-  -> Keeper_tools_oas.tool_bundle
+  -> Keeper_tools_agent_core.tool_bundle
 
 (** Convenience over [make_tool_bundle] returning only [.tools]. *)
 val make_tools
@@ -32,7 +32,7 @@ module For_testing : sig
   val is_terminal_effect_handler : Keeper_tool_descriptor.runtime_handler -> bool
 
   val terminal_externalization_failure :
-    Keeper_tools_oas.terminal_effect_state ->
+    Keeper_tools_agent_core.terminal_effect_state ->
     Tool_bridge.externalization_error ->
-    Keeper_tools_oas.terminal_effect_failure option
+    Keeper_tools_agent_core.terminal_effect_failure option
 end

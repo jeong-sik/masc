@@ -97,7 +97,7 @@ let test_web_tools_are_bundle_visible () =
           ~keeper_name:meta.name
       in
       let bundle =
-        Keeper_tools_oas_bundle.make_tool_bundle
+        Keeper_tools_agent_core_bundle.make_tool_bundle
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -144,7 +144,7 @@ let test_fusion_default_descriptor_is_bundle_visible () =
           ~keeper_name:meta.name
       in
       let bundle =
-        Keeper_tools_oas_bundle.make_tool_bundle
+        Keeper_tools_agent_core_bundle.make_tool_bundle
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -181,7 +181,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
           ~keeper_name:meta.name
       in
       let bundle =
-        Keeper_tools_oas_bundle.make_tool_bundle
+        Keeper_tools_agent_core_bundle.make_tool_bundle
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -239,7 +239,7 @@ let test_missing_current_task_reconciled_before_transition_hint () =
           ~keeper_name:meta.name
       in
       let bundle =
-        Keeper_tools_oas_bundle.make_tool_bundle
+        Keeper_tools_agent_core_bundle.make_tool_bundle
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -315,7 +315,7 @@ let test_tool_bundle_does_not_emit_full_universe_assignment () =
           ~keeper_name:meta.name
       in
       let bundle =
-        Keeper_tools_oas_bundle.make_tool_bundle
+        Keeper_tools_agent_core_bundle.make_tool_bundle
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       Fun.protect
@@ -331,11 +331,11 @@ let test_tool_bundle_does_not_emit_full_universe_assignment () =
 let test_tool_assignment_telemetry_is_before_turn_scoped () =
   check bool "bundle source does not emit assignment" true
     (file_not_contains_pattern
-       "lib/keeper/keeper_tools_oas_bundle.ml"
+       "lib/keeper/keeper_tools_agent_core_bundle.ml"
        "Tool_assignment_telemetry.emit_assigned");
   check bool "legacy bundle reason removed" true
     (file_not_contains_pattern
-       "lib/keeper/keeper_tools_oas_bundle.ml"
+       "lib/keeper/keeper_tools_agent_core_bundle.ml"
        "keeper tool bundle assembly");
   check bool "before-turn hook records computed schema filter" true
     (file_contains_pattern
@@ -412,7 +412,7 @@ let test_concurrent_atomic_writes_never_empty () =
 let test_keeper_mainline_failures_log_at_error () =
   check bool "missing checkpoint after run logs at ERROR" true
     (file_contains_pattern "lib/keeper/keeper_agent_run_finalize_response.ml"
-       {|"runtime=%s missing Agent Core checkpoint after run"|});
+       {|"runtime=%s missing AGENT_CORE checkpoint after run"|});
   (* The deterministic memory-bank write (and its "memory_write failed" log
      site) was removed with the bank — RFC keeper-memory-consolidation
      Stage 4. *)

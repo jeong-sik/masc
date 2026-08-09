@@ -307,7 +307,7 @@ let exact_execution_error error =
       "unexpected_callback_failure"
     | Flow_exact_execution_failed { candidate; cause; evidence } ->
       Printf.sprintf
-        "oas_execution_failed: %s"
+        "agent_core_execution_failed: %s"
         (Keeper_exact_flow_detail.execution_failure_detail
            ~candidate
            ~cause

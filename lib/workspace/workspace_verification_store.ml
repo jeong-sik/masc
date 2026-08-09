@@ -228,9 +228,22 @@ let submitted_evidence_item_of_yojson = function
     in
     (match List.assoc_opt "kind" fields with
      | Some (`String "note") ->
+       let open Result.Syntax in
+       let* () =
+         Json_util.reject_unknown_fields
+           ~surface:"submitted evidence note"
+           ~allowed:[ "kind"; "content" ]
+           fields
+       in
        Result.map (fun note -> Evidence_note note) (string_field "content")
      | Some (`String "artifact") ->
        let open Result.Syntax in
+       let* () =
+         Json_util.reject_unknown_fields
+           ~surface:"submitted evidence artifact"
+           ~allowed:[ "kind"; "reference"; "content"; "bytes"; "truncated" ]
+           fields
+       in
        let* reference = string_field "reference" in
        let* content = string_field "content" in
        let* bytes =

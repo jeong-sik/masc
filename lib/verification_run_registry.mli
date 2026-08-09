@@ -1,9 +1,16 @@
 (** Bounded observation registry for completion-authority reviews. *)
 
+type infrastructure_stage =
+  | Review_preparation
+  | Lookup_surface
+
 type outcome =
   | Approved
   | Rejected of { reason : string }
-  | Contract_rejected of { detail : string }
+  | Infrastructure_unavailable of
+      { stage : infrastructure_stage
+      ; detail : string
+      }
   | Not_reviewed of
       { gate : string
       ; detail : string

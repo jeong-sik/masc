@@ -891,13 +891,32 @@ let commit_verdict_r
            in
            let producer = decided.Workspace_task_lifecycle.producer in
            let verification_id = decided.Workspace_task_lifecycle.verification_id in
+           let rejection_handoff =
+             match verdict with
+             | Masc_domain.Verdict_approved -> None
+             | Masc_domain.Verdict_rejected { reason } ->
+               Some
+                 { Masc_domain.summary = reason
+                 ; reason = Some reason
+                 ; next_step = None
+                 ; failure_mode = None
+                 ; reclaim_policy = None
+                 ; evidence_refs = [ verification_id ]
+                 ; updated_at = Some now
+                 ; updated_by = Some authority_actor
+                 }
+           in
            let new_backlog =
              { backlog with
                tasks =
                  List.map
                    (fun (t : task) ->
                       if String.equal t.id task_id
-                      then { t with task_status = new_status }
+                      then
+                        { t with
+                          task_status = new_status
+                        ; handoff_context = rejection_handoff
+                        }
                       else t)
                    backlog.tasks
              }

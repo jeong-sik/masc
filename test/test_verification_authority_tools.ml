@@ -30,10 +30,7 @@ let rec rm_rf path =
 
 (* [agent_name] is deliberately omitted: [meta_of_json_fixture] fills in the
    canonical [Keeper_identity.keeper_agent_name], so this fixture cannot drift
-   from the identity rule the meta parser enforces.
-
-   [always_allow] is the producer's Gate posture. These cases exercise the
-   immediate execution branch. *)
+   from the identity rule the meta parser enforces. *)
 let ensure_producer config name =
   match
     Result.bind
@@ -56,15 +53,6 @@ let with_surface f =
   Eio.Switch.on_release sw (fun () -> rm_rf dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
-  (* [tool_execute] submits through the external-effect Gate, which refuses to
-     run at all until its durable store exists. Without this the execute cases
-     would fail on missing infrastructure and prove nothing about the surface. *)
-  (match Masc.Keeper_approval_queue.install_persistence ~base_path:dir with
-   | Ok _ -> ()
-   | Error err ->
-     Alcotest.failf
-       "gate store install failed: %s"
-       (Masc.Keeper_approval_queue.install_error_to_string err));
   ensure_producer config producer;
   match VAT.create ~config ~producer with
   | Error reason -> Alcotest.failf "surface creation failed: %s" reason
@@ -72,12 +60,12 @@ let with_surface f =
 ;;
 
 (* Create the producer playground used to resolve relative tool paths. *)
-let producer_playground (config : Workspace_core.config) =
+let producer_playground (config : Workspace_core.config) producer_name =
   let path =
     Keeper_sandbox_config.host_root_abs_of_agent
       ~base_path:
         (Workspace_verification_store.project_root_of_base_path config.base_path)
-      ~agent_name:producer
+      ~agent_name:producer_name
   in
   let rec mkdir_p dir =
     if not (Sys.file_exists dir)
@@ -97,8 +85,8 @@ let test_schemas_are_the_descriptor_schemas () =
       List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) offered
     in
     Alcotest.(check (list string))
-      "the surface is read, search, execute"
-      [ "tool_read_file"; "tool_search_files"; "tool_execute" ]
+      "the surface is read-only"
+      [ "tool_read_file"; "tool_search_files" ]
       names;
     List.iter
       (fun (schema : Masc_domain.tool_schema) ->
@@ -124,7 +112,7 @@ let test_schemas_are_the_descriptor_schemas () =
    a missing required argument must be rejected at the same boundary. *)
 let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () =
   with_surface (fun config surface ->
-    let playground = producer_playground config in
+    let playground = producer_playground config producer in
     let name = "advertised-argument-probe.txt" in
     let contents = "written by the probe" in
     (try
@@ -176,7 +164,7 @@ let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () 
 (* A search requires an explicit non-empty pattern. *)
 let test_search_refuses_a_call_without_its_required_pattern () =
   with_surface (fun config surface ->
-    ignore (producer_playground config);
+    ignore (producer_playground config producer);
     (match
        VAT.dispatch surface ~name:"tool_search_files" ~args:(`Assoc [])
      with
@@ -200,26 +188,6 @@ let test_search_refuses_a_call_without_its_required_pattern () =
       Alcotest.failf "a search carrying its pattern was refused: %s" detail)
 ;;
 
-(* [argv] is a process vector, never a shell-line string. *)
-let test_execute_refuses_argv_that_is_not_a_process_vector () =
-  with_surface (fun _config surface ->
-    match
-      VAT.dispatch
-        surface
-        ~name:"tool_execute"
-        ~args:(`Assoc [ "argv", `String "echo durable-marker" ])
-    with
-    | Ok output ->
-      Alcotest.failf
-        "argv as a bare string resolved instead of being refused: %s"
-        output
-    | Error detail ->
-      Alcotest.(check bool)
-        "the refusal names argv"
-        true
-        (Astring.String.is_infix ~affix:"argv" detail))
-;;
-
 (* A judge that calls a name this surface does not offer must be told so. A
    dropped call would read to the model as a tool that returned nothing. *)
 let test_unknown_tool_name_is_an_error () =
@@ -230,90 +198,13 @@ let test_unknown_tool_name_is_an_error () =
       Alcotest.(check bool)
         "names the offered tools"
         true
-        (Astring.String.is_infix ~affix:"tool_execute" detail))
+        (Astring.String.is_infix ~affix:"tool_search_files" detail))
 ;;
 
-(* Where the judge's process would run is the safety property this layer owns.
-   The keeper runtime resolves it and reports the resolution back, so the
-   assertion is on that resolution rather than on process output: whether the
-   effect then executes or defers is the Gate's decision, and standing the Gate
-   and its Auto Judge up belongs to an integration test, not here.
-
-   The judge borrows the producer's meta, so it borrows the producer's jail. A
-   [cwd] of "." must land in the producer's playground — not the host, not
-   another keeper's tree, and not the workspace root. *)
-let test_execute_resolves_inside_the_producer_playground () =
-  with_surface (fun _config surface ->
-    let root = VAT.ownership_root surface in
-    let report =
-      match
-        VAT.dispatch
-          surface
-          ~name:"tool_execute"
-          ~args:
-            (`Assoc
-               [ "argv", `List [ `String "echo"; `String "durable-marker" ]
-               ; "cwd", `String "."
-               ])
-      with
-      | Ok output | Error output -> output
-    in
-    Alcotest.(check bool)
-      "the resolved working directory is the producer playground"
-      true
-      (Astring.String.is_infix ~affix:root report);
-    Alcotest.(check bool)
-      "the resolution names the playground scope"
-      true
-      (Astring.String.is_infix ~affix:"playground_root" report))
-;;
-
-(* An escape must not resolve. A judge that can point [cwd] outside the
-   producer's jail reaches trees no one authorized it to touch, and with write
-   capability that is not a read of the wrong file but a change to it. *)
-let test_execute_cannot_escape_the_producer_playground () =
-  with_surface (fun _config surface ->
-    match
-      VAT.dispatch
-        surface
-        ~name:"tool_execute"
-        ~args:
-          (`Assoc
-             [ "argv", `List [ `String "echo"; `String "escaped" ]
-             ; "cwd", `String "../../.."
-             ])
-    with
-    | Ok output ->
-      Alcotest.failf "an escaping cwd must not resolve; got %s" output
-    | Error detail ->
-      Alcotest.(check bool)
-        "the rejection does not report a resolved playground scope"
-        false
-        (Astring.String.is_infix ~affix:"\"scope\":\"playground_root\"" detail))
-;;
-
-(* A failed process is a failed lookup result. *)
-let test_a_failed_run_is_an_error_not_empty_output () =
-  with_surface (fun _config surface ->
-    match
-      VAT.dispatch
-        surface
-        ~name:"tool_execute"
-        ~args:
-          (`Assoc
-             [ "argv", `List [ `String "false" ]
-             ; "cwd", `String "."
-             ])
-    with
-    | Ok output ->
-      Alcotest.failf "a non-zero exit must not resolve as success; got %s" output
-    | Error _ -> ())
-;;
-
-(* A producer with no keeper meta has no tree to point at. Handing back a
-   surface anyway would advertise three tools whose every call fails, which
-   reads to the model as a broken tree rather than as an absent one. *)
-let test_unknown_producer_yields_no_surface () =
+(* Workspace agents are valid verification producers even though they have no
+   Keeper runtime metadata. Their surface is rooted directly at the producer
+   playground and exposes only the owned regular-file reader. *)
+let test_workspace_producer_gets_owned_read_surface () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -323,13 +214,44 @@ let test_unknown_producer_yields_no_surface () =
   Eio.Switch.on_release sw (fun () -> rm_rf dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
-  match VAT.create ~config ~producer:"no-such-producer" with
-  | Ok _ -> Alcotest.fail "a producer with no meta must not yield a surface"
-  | Error reason ->
-    Alcotest.(check bool)
-      "the reason names the producer"
-      true
-      (Astring.String.is_infix ~affix:"no-such-producer" reason)
+  let producer_name = "workspace-producer" in
+  let playground = producer_playground config producer_name in
+  let path = Filename.concat playground "evidence.txt" in
+  Out_channel.with_open_text path (fun channel ->
+    output_string channel "first line\nsecond line\n");
+  match VAT.create ~config ~producer:producer_name with
+  | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
+  | Ok surface ->
+    Alcotest.(check (list string))
+      "workspace producer surface"
+      [ "tool_read_file" ]
+      (VAT.schemas surface
+       |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
+    (match
+       VAT.dispatch
+         surface
+         ~name:"tool_read_file"
+         ~args:
+           (`Assoc
+               [ "file_path", `String "evidence.txt"
+               ; "offset", `Int 2
+               ; "limit", `Int 1
+               ])
+     with
+     | Error detail -> Alcotest.failf "owned read failed: %s" detail
+     | Ok payload ->
+       let json = Yojson.Safe.from_string payload in
+       Alcotest.(check string)
+         "reads the requested line"
+         "second line\n"
+         Yojson.Safe.Util.(json |> member "content" |> to_string));
+    (match VAT.dispatch surface ~name:"tool_search_files" ~args:(`Assoc []) with
+     | Ok output -> Alcotest.failf "workspace search unexpectedly ran: %s" output
+     | Error detail ->
+       Alcotest.(check bool)
+         "error lists only the exact offered surface"
+         false
+         (Astring.String.is_infix ~affix:"this review offers tool_search_files" detail))
 ;;
 
 (* The prompt states the exact tools attached to the review request. *)
@@ -362,21 +284,17 @@ let test_prompt_states_the_available_surface () =
     Alcotest.(check bool)
       "toolless prompt does not advertise a tool"
       false
-      (Astring.String.is_infix ~affix:"tool_execute" without);
+      (Astring.String.is_infix ~affix:"tool_search_files" without);
     Alcotest.(check bool)
       "tool prompt names the tools"
       true
-      (Astring.String.is_infix ~affix:"tool_execute" with_tools);
+      (Astring.String.is_infix ~affix:"tool_search_files" with_tools);
     Alcotest.(check bool)
       "tool prompt does not deny having tools"
       false
       (Astring.String.is_infix
          ~affix:"You have no tool that opens anything else"
          with_tools);
-    Alcotest.(check bool)
-      "tool prompt does not promise the surface cannot change anything"
-      false
-      (Astring.String.is_infix ~affix:"cannot change anything" with_tools);
     Alcotest.(check bool)
       "tool prompt forbids repairing the work under review"
       true
@@ -396,22 +314,12 @@ let () =
             test_read_translates_the_advertised_argument_and_refuses_a_malformed_one
         ; Alcotest.test_case "search refuses a call without its required pattern"
             `Quick test_search_refuses_a_call_without_its_required_pattern
-        ; Alcotest.test_case "execute refuses argv that is not a process vector"
-            `Quick test_execute_refuses_argv_that_is_not_a_process_vector
-        ; Alcotest.test_case "unknown producer yields no surface" `Quick
-            test_unknown_producer_yields_no_surface
+        ; Alcotest.test_case "workspace producer gets owned read surface" `Quick
+            test_workspace_producer_gets_owned_read_surface
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick
             test_unknown_tool_name_is_an_error
-        ] )
-    ; ( "execution"
-      , [ Alcotest.test_case "execute resolves inside the producer playground" `Quick
-            test_execute_resolves_inside_the_producer_playground
-        ; Alcotest.test_case "execute cannot escape the producer playground" `Quick
-            test_execute_cannot_escape_the_producer_playground
-        ; Alcotest.test_case "a failed run is an error, not empty output" `Quick
-            test_a_failed_run_is_an_error_not_empty_output
         ] )
     ; ( "prompt"
       , [ Alcotest.test_case "prompt states the available surface" `Quick

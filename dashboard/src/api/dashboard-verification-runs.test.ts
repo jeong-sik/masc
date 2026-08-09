@@ -1,5 +1,3 @@
-// RFC-0361 D4 — completion-authority review registry decoding.
-//
 // The registry exists so a review that produced no verdict is visible. These
 // cases pin that the decoder never turns such a row into something healthier
 // than it is, and that each outcome's cause survives into the one column the
@@ -118,6 +116,35 @@ describe('parseVerificationRunsResponse', () => {
     expect(onlyRun(parsed).status).toBe('not_reviewed')
     expect(onlyRun(parsed).cause).toBe('no runtime')
     expect(onlyRun(parsed).gate).toBe('evaluator_unavailable')
+  })
+
+  it('keeps the typed infrastructure stage without inventing a verdict', () => {
+    const parsed = parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
+      runs: [row({
+        status: 'infrastructure_unavailable',
+        stage: 'lookup_surface',
+        detail: 'producer metadata unavailable',
+      })],
+    })
+    expect(onlyRun(parsed)).toMatchObject({
+      status: 'infrastructure_unavailable',
+      infrastructureStage: 'lookup_surface',
+      cause: 'producer metadata unavailable',
+    })
+  })
+
+  it('rejects an unknown infrastructure stage', () => {
+    expect(() => parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
+      runs: [row({
+        status: 'infrastructure_unavailable',
+        stage: 'probably_available',
+        detail: 'producer metadata unavailable',
+      })],
+    })).toThrow('runs[0].stage has unknown value')
   })
 
   it('rejects an unrecognized status as a protocol break', () => {

@@ -374,6 +374,108 @@ let handle_read_file_with_outcome
          (error_json ~fields:[ "path", `String target ] msg))
 ;;
 
+let handle_owned_read_file_with_outcome
+      ~ownership_root
+      ~(args : Yojson.Safe.t)
+  =
+  let path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
+  let max_bytes = read_file_default_max_bytes in
+  let cwd = string_opt_nonempty "cwd" args in
+  let resolve_target () =
+    if String.equal path ""
+    then Error "path is required"
+    else
+      let cwd_abs =
+        match cwd with
+        | None -> ownership_root
+        | Some cwd ->
+          if Filename.is_relative cwd
+          then Filename.concat ownership_root cwd
+          else cwd
+      in
+      match Fs_compat.inspect_owned_directory_chain ~ownership_root cwd_abs with
+      | Error rejection ->
+        Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+      | Ok Fs_compat.Owned_directory_missing ->
+        Error
+          (Printf.sprintf
+             "cwd_not_directory: %s (directory does not exist)"
+             cwd_abs)
+      | Ok (Fs_compat.Owned_directory _) ->
+        let target =
+          if Filename.is_relative path then Filename.concat cwd_abs path else path
+        in
+        Ok target
+  in
+  match read_line_window_of_args args, resolve_target () with
+  | Error window_error, _ -> Keeper_tool_execution.failure (error_json window_error)
+  | Ok _, Error detail -> Keeper_tool_execution.failure (error_json detail)
+  | Ok window, Ok target ->
+    let fetch_bytes = read_window_fetch_bytes ~max_bytes window in
+    (match
+       Fs_compat.load_owned_regular_file_prefix
+         ~ownership_root
+         ~max_bytes:fetch_bytes
+         target
+     with
+     | Error error ->
+       Keeper_tool_execution.failure
+         (error_json
+            ~fields:[ "path", `String target ]
+            (Fs_compat.owned_regular_file_read_error_to_string error))
+     | Ok None ->
+       Keeper_tool_execution.failure
+         (missing_file_error_json
+            ~cwd
+            ~raw_path:(Some path)
+            ~target
+            ~error:"owned file is missing")
+     | Ok (Some prefix) ->
+       (match
+          slice_read_window
+            ~window
+            ~max_bytes
+            ~scan_complete:(not prefix.truncated)
+            prefix.content
+        with
+        | Error `Offset_beyond_scan ->
+          Keeper_tool_execution.failure
+            (error_json
+               ~fields:
+                 [ "path", `String target
+                 ; "offset", `Int window.start_line
+                 ; "scanned_bytes", `Int (String.length prefix.content)
+                 ]
+               (Printf.sprintf
+                  "offset %d is beyond the scanned window (%d bytes)"
+                  window.start_line
+                  (String.length prefix.content)))
+        | Ok slice ->
+          let optional_fields =
+            List.concat
+              [ (match slice.next_offset with
+                 | Some next -> [ "next_offset", `Int next ]
+                 | None -> [])
+              ; (if slice.last_line_partial
+                 then [ "last_line_partial", `Bool true ]
+                 else [])
+              ]
+          in
+          Keeper_tool_execution.success
+            (Yojson.Safe.to_string
+               (`Assoc
+                   ([ "ok", `Bool true
+                    ; "path", `String target
+                    ; "bytes", `Int (String.length slice.window_content)
+                    ; "file_bytes", `Int prefix.file_size
+                    ; "truncated", `Bool slice.window_truncated
+                    ; "offset", `Int window.start_line
+                    ; "returned_lines", `Int slice.returned_lines
+                    ; "content", `String slice.window_content
+                    ]
+                    @ optional_fields)))))
+;;
+
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
    [replace_all=false], requires exactly one occurrence so accidental
    multi-edits are rejected (mirrors Edit semantics). *)

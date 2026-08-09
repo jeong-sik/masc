@@ -17,7 +17,7 @@ export type VerificationRunStatusLabel =
   | 'running'
   | 'approved'
   | 'rejected'
-  | 'contract_rejected'
+  | 'infrastructure_unavailable'
   | 'not_reviewed'
   | 'commit_failed'
   | 'raised'
@@ -38,7 +38,7 @@ const BACKEND_STATUSES: readonly string[] = [
   'running',
   'approved',
   'rejected',
-  'contract_rejected',
+  'infrastructure_unavailable',
   'not_reviewed',
   'commit_failed',
   'raised',
@@ -63,6 +63,8 @@ export interface VerificationRunRecord {
   cause?: string
   /** Which gate declined to produce a verdict; `not_reviewed` rows only. */
   gate?: string
+  /** Which pre-review boundary was unavailable. */
+  infrastructureStage?: 'review_preparation' | 'lookup_surface'
   tools?: VerificationToolObservation[]
 }
 
@@ -180,7 +182,10 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
       requiredOutcomeFields = ['elapsed_s', 'gate', 'detail', 'tools']
       optionalFields = ['evaluator_runtime']
       break
-    case 'contract_rejected':
+    case 'infrastructure_unavailable':
+      requiredOutcomeFields = ['elapsed_s', 'stage', 'detail', 'tools']
+      optionalFields = ['evaluator_runtime']
+      break
     case 'commit_failed':
     case 'raised':
       requiredOutcomeFields = ['elapsed_s', 'detail', 'tools']
@@ -213,12 +218,17 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
     evaluatorRuntime: optionalNonEmptyString(raw.evaluator_runtime, `${context}.evaluator_runtime`),
     cause: status === 'rejected'
       ? nonEmptyString(raw.reason, `${context}.reason`)
-      : status === 'contract_rejected' || status === 'not_reviewed'
+      : status === 'infrastructure_unavailable' || status === 'not_reviewed'
         || status === 'commit_failed' || status === 'raised'
         ? nonEmptyString(raw.detail, `${context}.detail`)
         : undefined,
     gate: status === 'not_reviewed'
       ? nonEmptyString(raw.gate, `${context}.gate`)
+      : undefined,
+    infrastructureStage: status === 'infrastructure_unavailable'
+      ? raw.stage === 'review_preparation' || raw.stage === 'lookup_surface'
+        ? raw.stage
+        : protocolError(`${context}.stage has unknown value ${JSON.stringify(raw.stage)}`)
       : undefined,
     tools,
   }

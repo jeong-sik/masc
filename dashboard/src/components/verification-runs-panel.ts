@@ -41,9 +41,8 @@ import { registerInternalAgentRefresh } from '../sse-store'
  *  `not_reviewed` / `commit_failed` / `raised`. Protocol breaks are rejected by
  *  the decoder before a row reaches this projection.
  *
- *  `contract_rejected` is `warn`: the Task was rejected without the configured
- *  LLM ever running, so repeated rows point upstream at malformed evidence
- *  rather than at judgment. */
+ *  `infrastructure_unavailable` is bad because no semantic verdict reached
+ *  the Task; the submitted obligation remains pending for retry. */
 export function verificationRunTone(status: VerificationRunStatusLabel): StatusBadgeTone {
   switch (status) {
     case 'running':
@@ -52,8 +51,8 @@ export function verificationRunTone(status: VerificationRunStatusLabel): StatusB
       return 'ok'
     case 'rejected':
       return 'info'
-    case 'contract_rejected':
-      return 'warn'
+    case 'infrastructure_unavailable':
+      return 'bad'
     case 'not_reviewed':
     case 'commit_failed':
     case 'raised':
@@ -71,8 +70,8 @@ export function verificationRunLabel(status: VerificationRunStatusLabel): string
       return '승인'
     case 'rejected':
       return '거부'
-    case 'contract_rejected':
-      return '증거 계약 무효'
+    case 'infrastructure_unavailable':
+      return '판정 기반시설 오류'
     case 'not_reviewed':
       return '판정 없음'
     case 'commit_failed':
@@ -122,6 +121,7 @@ function VerificationRunRow({ row }: { row: VerificationRunRecord }) {
       </td>
       <td class="py-2 text-[var(--color-fg-secondary)] break-words">
         ${row.gate ? html`<code class="mr-1">${row.gate}</code>` : null}
+        ${row.infrastructureStage ? html`<code class="mr-1">${row.infrastructureStage}</code>` : null}
         ${row.cause ?? ''}
       </td>
     </tr>

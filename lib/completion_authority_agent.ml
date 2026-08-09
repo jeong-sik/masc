@@ -16,6 +16,7 @@ type runtime =
   ; retry_scheduled : bool Atomic.t
   ; retry_interval_sec : float
   ; in_flight : review_key list Atomic.t
+  ; review_slots : Eio.Semaphore.t
   }
 
 and review_key =
@@ -161,9 +162,7 @@ let required_string_list_field ~context name fields =
 let completion_contract_of_request
       (request : Verification.verification_request)
   =
-  let completion_contract =
-    List.map (fun (Verification.Custom description) -> description) request.criteria
-  in
+  let completion_contract = request.criteria in
   let completion_contract =
     match completion_contract with
     | [] -> None
@@ -388,12 +387,10 @@ let observe_rejection_wakeup
 ;;
 
 (* Returns the control-flow outcome the scan loop acts on, paired with the
-   observation outcome recorded for this review (RFC-0361 D4). [on_commit] is
-   what the record should say when the durable commit succeeds — the caller
-   knows whether this verdict came from the configured LLM or from the agent's
-   own evidence-contract rejection, and a surface that cannot tell those apart
-   shows "rejected" without saying whether a judge ever ran. A failed commit is
-   its own outcome: the verdict was decided but never reached the Task. *)
+   observation outcome recorded for this review. [on_commit] is the exact
+   semantic verdict produced by the evaluator. Infrastructure failures never
+   call this function. A failed commit is its own outcome because the verdict
+   was decided but never reached the Task. *)
 let commit_verdict
       (runtime : runtime)
       (task : Masc_domain.task)
@@ -449,10 +446,8 @@ let process_task_once
   =
   let agent_run_id = Random_id.prefixed ~prefix:"system-llm-agent-" ~bytes:16 in
   let authority = Masc_domain.System_llm_agent { agent_run_id } in
-  (* RFC-0361 D4: register before any work so a review that raises or defers is
-     still visible. Every exit below records through [complete], including the
-     paths that produce no verdict — those were previously invisible, since only
-     a committed verdict emitted a durable event. *)
+  (* Register before any work. Every exit below records through [complete],
+     including paths that produce no semantic verdict. *)
   let registry = Verification_run_registry.global () in
   let started_at = Eio.Time.now runtime.clock in
   let tools = ref [] in
@@ -483,19 +478,10 @@ let process_task_once
       ();
     process_outcome
   in
-  let reject_contract ~reason ~detail =
+  let defer_unavailable ~stage ~detail =
     complete
-      (commit_verdict
-         runtime
-         task
-         ~assignee
-         ~verification_id
-         ~authority
-         ~verdict:(Masc_domain.Verdict_rejected { reason })
-         ~notes:reason
-         ~verdict_label:"rejected_contract"
-         ~on_commit:(Verification_run_registry.Contract_rejected { detail })
-         ~evaluator_runtime:None)
+      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail
+      , Verification_run_registry.Infrastructure_unavailable { stage; detail } )
   in
   try
     match
@@ -507,8 +493,9 @@ let process_task_once
         ~authority
     with
     | Error reason ->
-      let rejection_reason = "completion evidence contract invalid: " ^ reason in
-      reject_contract ~reason:rejection_reason ~detail:reason
+      defer_unavailable
+        ~stage:Verification_run_registry.Review_preparation
+        ~detail:reason
     | Ok prepared ->
       (match
          Verification_authority_tools.create
@@ -516,8 +503,9 @@ let process_task_once
            ~producer:assignee
        with
        | Error reason ->
-         let rejection_reason = "completion lookup contract invalid: " ^ reason in
-         reject_contract ~reason:rejection_reason ~detail:reason
+         defer_unavailable
+           ~stage:Verification_run_registry.Lookup_surface
+           ~detail:reason
        | Ok lookup_tools ->
          let lookup =
            Task.Anti_rationalization.Lookup_tools
@@ -637,7 +625,13 @@ let process_pending (runtime : runtime) =
          match task.task_status with
          | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
            Eio.Fiber.fork ~sw:runtime.sw (fun () ->
-             process_task runtime task ~assignee ~verification_id)
+             Eio.Semaphore.acquire runtime.review_slots;
+             (* fun-protect-finally-ok: [Eio.Semaphore.release] is
+                non-suspending and must return the bounded review slot on
+                normal completion, exception, or cancellation. *)
+             Fun.protect
+               ~finally:(fun () -> Eio.Semaphore.release runtime.review_slots)
+               (fun () -> process_task runtime task ~assignee ~verification_id))
          | Masc_domain.Todo
          | Masc_domain.Claimed _
          | Masc_domain.InProgress _
@@ -689,6 +683,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     ; retry_scheduled = Atomic.make false
     ; retry_interval_sec = Env_config.Timeouts.maintenance_pulse_interval_sec
     ; in_flight = Atomic.make []
+    ; review_slots = Eio.Semaphore.make 4
     }
   in
   let owner = Some runtime in

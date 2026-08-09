@@ -1,21 +1,21 @@
 ---- MODULE TurnEvidenceChain ----
 \* Boundary spec for the MASC turn evidence chain.
 \*
-\* AGENT_CORE remains generic: it may provide a turn checkpoint reference, but
+\* Agent Core remains generic: it may provide a turn checkpoint reference, but
 \* it does not know about keeper receipts, runtime lenses, tool-call logs,
 \* or MASC trust surfaces.  MASC owns the product/operator chain that
-\* connects those generic AGENT_CORE references to MASC evidence.
+\* connects those generic Agent Core references to MASC evidence.
 \*
 \* Concrete MASC surfaces:
 \*   - Keeper_agent_run execution receipt append
 \*   - Keeper_tool_call_log rows
 \*   - Raw_trace run refs
 \*   - Runtime lens / runtime trust snapshot visibility
-\*   - AGENT_CORE generic checkpoint refs from the pinned SDK
+\*   - Agent Core generic checkpoint refs from the embedded core
 \*
 \* Safety rule:
 \*   A terminal keeper turn may be shown as evidence-complete only after
-\*   MASC has linked the AGENT_CORE checkpoint ref, tool-call log ref, raw trace
+\*   MASC has linked the Agent Core checkpoint ref, tool-call log ref, raw trace
 \*   ref, execution receipt, and runtime lens visibility for that turn.
 \*
 \* Bug model:
@@ -71,7 +71,7 @@ StartTurn ==
     /\ UNCHANGED <<agent_core_checkpoint_ref, tool_log_ref, raw_trace_ref,
                   execution_receipt_ref, runtime_lens_visible, terminal>>
 
-ObserveAgent_coreCheckpoint ==
+ObserveAgentCoreCheckpoint ==
     /\ \E t \in started \ agent_core_checkpoint_ref :
         agent_core_checkpoint_ref' = agent_core_checkpoint_ref \cup {t}
     /\ UNCHANGED <<next_turn, started, tool_log_ref, raw_trace_ref,
@@ -122,7 +122,7 @@ StutterDone ==
 
 Next ==
     \/ StartTurn
-    \/ ObserveAgent_coreCheckpoint
+    \/ ObserveAgentCoreCheckpoint
     \/ ObserveToolLog
     \/ ObserveRawTrace
     \/ AppendExecutionReceipt
@@ -138,7 +138,7 @@ TerminalHasFullEvidence ==
 TerminalVisibleInRuntimeLens ==
     terminal \subseteq runtime_lens_visible
 
-Agent_coreBoundaryGeneric ==
+AgentCoreBoundaryGeneric ==
     agent_core_checkpoint_ref \subseteq started
 
 TerminalWithoutReceipt ==

@@ -131,7 +131,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0173 | OCaml lib/bin/test vendor purge (identifier + string literal) | Draft | - |
 | 0174 | Dashboard substring classifier to typed — TypeScript | Draft | - |
 | 0175 | Godfile decomposition Wave D — keeper core 5-file split | Draft | - |
-| 0176 | OAS vendor-purge migration — consume agent_sdk 0.198.0 | Implemented | - |
 | 0177 | Phonebook internal vendor-coupled enum purge | Draft | - |
 | 0178 | Types Sub-library Extraction with `_intf.ml` mli-only Surface (typed-SSOT) | Draft | - |
 | 0179 | ToolDescriptor Ecosystem Coverage Extension to Workspace Tools | Draft | - |

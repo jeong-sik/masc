@@ -92,6 +92,18 @@ val handle_memory_search
   -> args:Yojson.Safe.t
   -> string
 
+val handle_memory_write_with_outcome
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
+  -> args:Yojson.Safe.t
+  -> unit
+  -> Keeper_tool_execution.t
+(** Validate [args], consume the external-effect Gate for the exact Memory OS
+    mutation, and only then invoke the memory producer. *)
+
 val handle_library_search_with_outcome
   : meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 val handle_library_read_with_outcome

@@ -137,6 +137,7 @@ type replayable =
   | Replay_execute
   | Replay_network_read
   | Replay_connector_post
+  | Replay_memory_write
 
 val replayable_of_operation : string -> replayable option
 (** Which approved operations can be spent without the Keeper re-emitting the
@@ -147,8 +148,8 @@ val replayable_of_operation : string -> replayable option
 
     Covers operations whose approvals a Keeper must otherwise re-earn by
     re-emitting a byte-identical call: [filesystem_write], [tool_execute], and
-    producer-typed [network_read] (WebSearch/WebFetch), and exact
-    [connector_post] continuations. Any other operation is
+    producer-typed [network_read] (WebSearch/WebFetch), exact
+    [connector_post] continuations, and exact [memory_write] mutations. Any other operation is
     {!Not_applicable}; its existing model-issued path remains authoritative.
 
     [gate_context] is the same causal-context provider the model-issued write

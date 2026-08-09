@@ -932,6 +932,51 @@ let test_manual_gate_defers_publication_writes_before_recovery () =
          (read_file path))
 ;;
 
+let test_manual_gate_defers_memory_write_before_persistence () =
+  with_exec_fixture
+    "keeper_tool_dispatch_manual_memory_write_gate"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path
+           ~base_path:config.base_path
+       in
+       let memory_path =
+         Masc.Keeper_memory_os_current.path_for_keepers_dir
+           ~keepers_dir
+           ~keeper_id:meta.name
+       in
+       let result =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~name:"keeper_memory_write"
+           ~input:
+             (`Assoc
+                [ "title", `String "must wait for approval"
+                ; "content", `String "must not persist before Gate approval"
+                ])
+           ()
+       in
+       check string
+         "Manual Gate memory write outcome"
+         "deferred"
+         (outcome_label result.KTE.disposition);
+       check bool
+         "Manual Gate memory write created no snapshot"
+         false
+         (Sys.file_exists memory_path))
+;;
+
 let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
   with_exec_fixture
     "keeper_tool_dispatch_manual_gate_oas_bridge"
@@ -2538,6 +2583,115 @@ let test_approved_web_search_replays_without_model_resubmission () =
           "consumed WebSearch did not reuse its durable outcome: %s"
           (Masc.Keeper_gate_replay.outcome_to_string outcome))
 
+let test_approved_memory_write_replays_without_model_resubmission () =
+  with_exec_fixture "keeper_tool_dispatch_replayed_memory_write"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+       let input =
+         `Assoc
+           [ "title", `String "approved memory"
+           ; "content", `String "host replay persisted this exact claim"
+           ]
+       in
+       let deferred =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~name:"keeper_memory_write"
+           ~input
+           ()
+       in
+       (match deferred.disposition with
+        | Tool_result.Deferred () -> ()
+        | Tool_result.Completed () | Tool_result.Failed _ ->
+          fail "approval-gated memory write did not defer before replay");
+       let approval_id =
+         match
+           Masc.Keeper_approval_queue.list_pending_entries_for_workspace
+             ~base_path:config.base_path
+         with
+         | Ok [ entry ] -> entry.id
+         | Ok entries ->
+           failf
+             "expected one pending memory approval, got %d"
+             (List.length entries)
+         | Error error ->
+           fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+       in
+       (match
+          Masc.Keeper_approval_queue.resolve_with_policy
+            ~base_path:config.base_path
+            ~id:approval_id
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+            ~source:Keeper_approval_queue_rules_types.Auto_judge
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
+       let resolution : Keeper_event_queue.hitl_resolution =
+         { approval_id
+         ; decision = Keeper_event_queue.Hitl_approved
+         ; channel =
+             Keeper_continuation_channel.unrouted
+               "replayed memory write test"
+         }
+       in
+       let grant =
+         match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+         | Some grant -> grant
+         | None -> fail "approved memory resolution did not create a grant"
+       in
+       (match
+          Masc.Keeper_gate_replay.replay_approved_effect
+            ~config
+            ~meta
+            ~publication_recovery
+            ~turn_sandbox_factory:None
+            ~grant
+            ~approval_id
+            ()
+        with
+        | Masc.Keeper_gate_replay.Applied
+            { operation = "memory_write"
+            ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+            ; _
+            } ->
+          ()
+        | outcome ->
+          failf
+            "approved memory write was not host-replayed: %s"
+            (Masc.Keeper_gate_replay.outcome_to_string outcome));
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path
+           ~base_path:config.base_path
+       in
+       match
+         Masc.Keeper_memory_os_current.read_for_keepers_dir
+           ~keepers_dir
+           ~keeper_id:meta.name
+       with
+       | Ok (Some { facts = [ fact ]; _ }) ->
+         check string
+           "host replay persisted the approved exact claim"
+           "**approved memory** host replay persisted this exact claim"
+           fact.claim
+       | Ok (Some snapshot) ->
+         failf
+           "host replay persisted %d memory facts instead of one"
+           (List.length snapshot.facts)
+       | Ok None -> fail "host replay persisted no memory snapshot"
+       | Error detail -> fail detail)
+
 let approved_web_search_resolution
       ~config
       ~meta
@@ -4134,6 +4288,8 @@ let () =
         test_initializing_recovery_isolates_only_publication_writes;
       test_case "Manual Gate defers writes before recovery acquisition" `Quick
         test_manual_gate_defers_publication_writes_before_recovery;
+      test_case "Manual Gate defers memory write before persistence" `Quick
+        test_manual_gate_defers_memory_write_before_persistence;
       test_case "Manual Gate deferral stays deferred through OAS bridge" `Quick
         test_manual_gate_deferral_stays_deferred_through_oas_bridge;
       test_case "initialization crash is redacted from tool output" `Quick
@@ -4168,6 +4324,8 @@ let () =
         test_approved_web_search_grant_executes_exact_request;
       test_case "approved WebSearch replays without model resubmission" `Quick
         test_approved_web_search_replays_without_model_resubmission;
+      test_case "approved memory write replays without model resubmission" `Quick
+        test_approved_memory_write_replays_without_model_resubmission;
       test_case "blob failure repairs journal without second effect" `Quick
         test_blob_failure_repairs_journal_without_second_effect;
       test_case "journal failure retries only persistence" `Quick

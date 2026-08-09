@@ -190,10 +190,14 @@ let handle_in_process ctx descriptor args =
          ~args)
   | Tool_memory_write ->
     Some
-      (Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
+      (Keeper_tool_in_process_runtime.handle_memory_write_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
-         ~args)
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~args
+         ())
   | Tool_library_search ->
     Some
       (Keeper_tool_in_process_runtime.handle_library_search_with_outcome

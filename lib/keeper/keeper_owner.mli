@@ -13,9 +13,25 @@ type store =
   ; remove : Keeper_meta_contract.keeper_meta -> (unit, string) result
   }
 
+module Chat_operation = Keeper_chat_operation
+
+type operation_projection =
+  { queued_count : int
+  ; running_operation_id : Chat_operation.Operation_id.t option
+  ; terminal_count : int
+  }
+
+type operation_acceptance =
+  { operation : Chat_operation.t
+  ; existing : bool
+  ; queued_count : int
+  }
+
 type error =
   | Reducer_rejected of Keeper_owner_reducer.error
+  | Operation_rejected of Keeper_chat_operation_store.error
   | Store_unavailable of string
+  | Owner_stopping
   | Owner_closed
 
 type t
@@ -23,12 +39,17 @@ type t
 val start
   :  sw:Eio.Switch.t
   -> store:store
+  -> operation_store_path:string
+  -> now:(unit -> float)
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result
 
 val projection : t -> Keeper_owner_reducer.projection
 (** Lock-free immutable snapshot. *)
+
+val operation_projection : t -> operation_projection
+(** Lock-free immutable operation inventory. *)
 
 val exact_projection
   :  t
@@ -39,6 +60,56 @@ val apply_meta
   :  t
   -> Keeper_owner_reducer.meta_command
   -> (Keeper_meta_contract.keeper_meta option, error) result
+
+val exact_operation
+  :  t
+  -> Chat_operation.Operation_id.t
+  -> (Chat_operation.t option, error) result
+
+val submit_operation
+  :  t
+  -> operation_id:Chat_operation.Operation_id.t
+  -> source:Yojson.Safe.t
+  -> input:Yojson.Safe.t
+  -> (operation_acceptance, error) result
+
+val list_queued_operations
+  :  t
+  -> after_sequence:int64 option
+  -> limit:int
+  -> (Chat_operation.t list, error) result
+
+val edit_queued_operation
+  :  t
+  -> operation_id:Chat_operation.Operation_id.t
+  -> input:Yojson.Safe.t
+  -> (Chat_operation.t, error) result
+
+val move_queued_operation_to_end
+  :  t
+  -> Chat_operation.Operation_id.t
+  -> (Chat_operation.t, error) result
+
+val cancel_queued_operation
+  :  t
+  -> Chat_operation.Operation_id.t
+  -> (Chat_operation.t, error) result
+
+val claim_next_operation : t -> (Chat_operation.t option, error) result
+
+val succeed_running_operation
+  :  t
+  -> operation_id:Chat_operation.Operation_id.t
+  -> outcome_ref:string
+  -> (Chat_operation.t, error) result
+
+val fail_running_operation
+  :  t
+  -> operation_id:Chat_operation.Operation_id.t
+  -> kind:string
+  -> detail:string
+  -> outcome_ref:string option
+  -> (Chat_operation.t, error) result
 
 val begin_stopping : t -> (unit, error) result
 (** Reject future external commands. *)

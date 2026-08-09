@@ -21,6 +21,12 @@ type admission =
   | Accepted of Operation.t
   | Existing of Operation.t
 
+type inventory =
+  { queued_count : int
+  ; running_operation_id : Id.t option
+  ; terminal_count : int
+  }
+
 let database_file = "chat-operations.sqlite3"
 let database_schema = "masc.keeper_chat_operations.v1"
 let database_application_id = 0x4d4b4f50L
@@ -365,6 +371,60 @@ let get_with_db db operation_id =
 let get store operation_id =
   let* () = ensure_open store in
   get_with_db store.db operation_id
+;;
+
+let optional_text db ~operation sql =
+  with_statement db ~operation sql (fun stmt ->
+    let rc = Sqlite3.step stmt in
+    if rc = Sqlite3.Rc.DONE
+    then Ok None
+    else if rc = Sqlite3.Rc.ROW
+    then
+      let value = Sqlite3.column_text stmt 0 in
+      let rc = Sqlite3.step stmt in
+      if rc = Sqlite3.Rc.DONE
+      then Ok (Some value)
+      else Error (Store_unavailable (sqlite_error db (operation ^ " completion") rc))
+    else Error (Store_unavailable (sqlite_error db operation rc)))
+;;
+
+let inventory store =
+  let* () = ensure_open store in
+  let* queued =
+    single_int64
+      store.db
+      ~operation:"count queued operations"
+      "SELECT COUNT(*) FROM operations WHERE state = 'queued'"
+  in
+  let* running_operation_id =
+    optional_text
+      store.db
+      ~operation:"read running operation"
+      "SELECT operation_id FROM operations WHERE state = 'running'"
+  in
+  let* running_operation_id =
+    match running_operation_id with
+    | None -> Ok None
+    | Some value ->
+      Id.of_string value
+      |> Result.map Option.some
+      |> Result.map_error (fun detail -> Integrity_error detail)
+  in
+  let* terminal =
+    single_int64
+      store.db
+      ~operation:"count terminal operations"
+      "SELECT COUNT(*) FROM operations WHERE state IN ('succeeded', 'failed', 'cancelled')"
+  in
+  if Int64.compare queued (Int64.of_int max_int) > 0
+     || Int64.compare terminal (Int64.of_int max_int) > 0
+  then Error (Integrity_error "operation inventory count exceeds OCaml int")
+  else
+    Ok
+      { queued_count = Int64.to_int queued
+      ; running_operation_id
+      ; terminal_count = Int64.to_int terminal
+      }
 ;;
 
 let read_schema_objects db =
@@ -759,6 +819,7 @@ let list_queued store ~after_sequence ~limit =
 ;;
 
 let edit_queued store ~operation_id ~input =
+  let* () = ensure_open store in
   let* execution_digest =
     Operation.execution_digest input
     |> Result.map_error (fun detail -> Invalid_input detail)
@@ -788,6 +849,7 @@ let edit_queued store ~operation_id ~input =
 ;;
 
 let move_queued_to_end store ~operation_id =
+  let* () = ensure_open store in
   let expected = ref None in
   let transaction =
     with_transaction store (fun () ->
@@ -857,6 +919,7 @@ let persist_terminal store current command sql bind_terminal =
 ;;
 
 let cancel_queued store ~now ~operation_id =
+  let* () = ensure_open store in
   let* current = operation_or_unknown store.db operation_id in
   persist_terminal
     store
@@ -869,6 +932,7 @@ let cancel_queued store ~now ~operation_id =
 ;;
 
 let succeed_running store ~now ~operation_id ~outcome_ref =
+  let* () = ensure_open store in
   let* current = operation_or_unknown store.db operation_id in
   persist_terminal
     store
@@ -882,6 +946,7 @@ let succeed_running store ~now ~operation_id ~outcome_ref =
 ;;
 
 let fail_running store ~now ~operation_id ~kind ~detail ~outcome_ref =
+  let* () = ensure_open store in
   let* current = operation_or_unknown store.db operation_id in
   let failure : Operation.failure = { kind; detail; outcome_ref } in
   persist_terminal
@@ -898,6 +963,7 @@ let fail_running store ~now ~operation_id ~kind ~detail ~outcome_ref =
 ;;
 
 let settle_running_after_restart store ~now =
+  let* () = ensure_open store in
   let* () =
     Operation.validate_timestamp ~field:"completed_at" now
     |> Result.map_error (fun detail -> Invalid_input detail)

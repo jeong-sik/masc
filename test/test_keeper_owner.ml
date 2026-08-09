@@ -4,6 +4,7 @@ open Masc
 module Reducer = Keeper_owner_reducer
 module Owner = Keeper_owner
 module Owner_registry = Keeper_owner_registry
+module Chat_operation = Owner.Chat_operation
 
 let make_meta name =
   match
@@ -42,6 +43,29 @@ let owner_ok = function
   | Ok value -> value
   | Error error -> fail (Owner.error_to_string error)
 ;;
+
+let start_owner ~sw ~store ~keeper_name ~initial_meta =
+  let path = Filename.temp_file "keeper-owner-operations-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () ->
+    if Sys.file_exists path then Unix.unlink path);
+  Owner.start
+    ~sw
+    ~store
+    ~operation_store_path:path
+    ~now:(fun () -> 42.0)
+    ~keeper_name
+    ~initial_meta
+;;
+
+let operation_id value =
+  match Chat_operation.Operation_id.of_string value with
+  | Ok operation_id -> operation_id
+  | Error detail -> fail detail
+;;
+
+let operation_source = `Assoc [ "kind", `String "dashboard" ]
+let operation_input text = `Assoc [ "message", `String text ]
 
 let test_pure_reducer_adds_deltas_and_preserves_pause () =
   let state =
@@ -203,7 +227,7 @@ let test_actor_concurrent_commands_are_exact () =
   Eio.Switch.run @@ fun sw ->
   let owner =
     owner_ok
-      (Owner.start
+      (start_owner
       ~sw
       ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
       ~keeper_name:"concurrent"
@@ -251,7 +275,7 @@ let test_mailbox_backpressures_without_drop () =
   in
   let owner =
     owner_ok
-      (Owner.start
+      (start_owner
          ~sw
          ~store
          ~keeper_name:"mailbox"
@@ -303,7 +327,7 @@ let test_enqueued_request_settles_before_cancellation_unwinds () =
   let caller_unwound = Atomic.make false in
   let owner =
     owner_ok
-      (Owner.start
+      (start_owner
          ~sw
          ~store:
            { replace =
@@ -349,7 +373,7 @@ let test_store_failure_fences_mutations () =
   Eio.Switch.run @@ fun sw ->
   let owner =
     owner_ok
-      (Owner.start
+      (start_owner
       ~sw
       ~store:
         { replace = (fun _ -> Error "disk unavailable")
@@ -420,7 +444,7 @@ let test_identity_and_delete_guards () =
   Eio.Switch.run @@ fun sw ->
   let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
   let empty =
-    owner_ok (Owner.start ~sw ~store ~keeper_name:"empty" ~initial_meta:None)
+    owner_ok (start_owner ~sw ~store ~keeper_name:"empty" ~initial_meta:None)
   in
   (match Owner.apply_meta empty (Create (make_meta "other")) with
    | Error (Owner.Reducer_rejected (Reducer.Keeper_identity_mismatch _)) -> ()
@@ -458,7 +482,7 @@ let test_shutdown_releases_full_mailbox_requests () =
     Eio.Switch.run (fun owner_sw ->
       let owner =
         owner_ok
-          (Owner.start
+          (start_owner
              ~sw:owner_sw
              ~store:
                { replace =
@@ -511,7 +535,7 @@ let test_stopping_rejects_new_commands () =
   Eio.Switch.run @@ fun sw ->
   let owner =
     owner_ok
-      (Owner.start
+      (start_owner
       ~sw
       ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
       ~keeper_name:"stopping"
@@ -525,7 +549,230 @@ let test_stopping_rejects_new_commands () =
    with
    | Error (Owner.Reducer_rejected Reducer.Owner_stopping) -> ()
    | Error error -> fail ("wrong stopping error: " ^ Owner.error_to_string error)
-   | Ok _ -> fail "stopping owner accepted metadata mutation")
+   | Ok _ -> fail "stopping owner accepted metadata mutation");
+  match
+    Owner.submit_operation
+      owner
+      ~operation_id:(operation_id "kmsg-stopping")
+      ~source:operation_source
+      ~input:(operation_input "rejected")
+  with
+  | Error Owner.Owner_stopping -> ()
+  | Error error -> fail ("wrong operation stopping error: " ^ Owner.error_to_string error)
+  | Ok _ -> fail "stopping owner accepted a chat operation"
+;;
+
+let test_operation_lifecycle_is_durable_and_projected () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let owner =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name:"operation-lifecycle"
+         ~initial_meta:(Some (make_meta "operation-lifecycle")))
+  in
+  let operation_id = operation_id "kmsg-operation-lifecycle" in
+  let accepted =
+    owner_ok
+      (Owner.submit_operation
+         owner
+         ~operation_id
+         ~source:operation_source
+         ~input:(operation_input "first"))
+  in
+  check bool "first submission is new" false accepted.existing;
+  check int "acceptance includes exact queued count" 1 accepted.queued_count;
+  let queued_projection = Owner.operation_projection owner in
+  check int "queued projection publishes after commit" 1 queued_projection.queued_count;
+  check bool
+    "queued projection has no running operation"
+    true
+    (Option.is_none queued_projection.running_operation_id);
+  let exact = Option.get (owner_ok (Owner.exact_operation owner operation_id)) in
+  (match exact.state with
+   | Chat_operation.Queued -> ()
+   | state -> fail ("wrong accepted state: " ^ Chat_operation.state_to_string state));
+  let running = Option.get (owner_ok (Owner.claim_next_operation owner)) in
+  (match running.state with
+   | Chat_operation.Running _ -> ()
+   | state -> fail ("wrong claimed state: " ^ Chat_operation.state_to_string state));
+  check bool
+    "only one operation can be running"
+    true
+    (Option.is_none (owner_ok (Owner.claim_next_operation owner)));
+  let running_projection = Owner.operation_projection owner in
+  check int "claim drains queued projection" 0 running_projection.queued_count;
+  check bool
+    "claim publishes running identity"
+    true
+    (Option.fold
+       ~none:false
+       ~some:(Chat_operation.Operation_id.equal operation_id)
+       running_projection.running_operation_id);
+  let succeeded =
+    owner_ok
+      (Owner.succeed_running_operation owner ~operation_id ~outcome_ref:"turn:42")
+  in
+  (match succeeded.state with
+   | Chat_operation.Succeeded { outcome_ref; _ } ->
+     check string "outcome reference retained" "turn:42" outcome_ref
+   | state -> fail ("wrong terminal state: " ^ Chat_operation.state_to_string state));
+  check bool "terminal input is scrubbed" true (Option.is_none succeeded.input);
+  let terminal_projection = Owner.operation_projection owner in
+  check int "terminal projection is durable" 1 terminal_projection.terminal_count;
+  check bool
+    "terminal projection clears running identity"
+    true
+    (Option.is_none terminal_projection.running_operation_id);
+  let replay =
+    owner_ok
+      (Owner.submit_operation
+         owner
+         ~operation_id
+         ~source:operation_source
+         ~input:(operation_input "first"))
+  in
+  check bool "terminal idempotency replay is permanent" true replay.existing;
+  match replay.operation.state with
+  | Chat_operation.Succeeded _ -> ()
+  | state -> fail ("terminal replay changed state: " ^ Chat_operation.state_to_string state)
+;;
+
+let test_startup_interrupts_running_without_requeue () =
+  Eio_main.run @@ fun _env ->
+  let path = Filename.temp_file "keeper-owner-restart-" ".sqlite3" in
+  Unix.unlink path;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path)
+    (fun () ->
+       let operation_id = operation_id "kmsg-interrupted-restart" in
+       let seed =
+         Keeper_chat_operation_store.open_or_create ~path
+         |> Result.map_error Keeper_chat_operation_store.error_to_string
+         |> Result.get_ok
+       in
+       Keeper_chat_operation_store.submit
+         seed
+         ~now:10.0
+         ~operation_id
+         ~source:operation_source
+         ~input:(operation_input "running at crash")
+       |> Result.get_ok
+       |> ignore;
+       Keeper_chat_operation_store.claim_next seed ~now:11.0
+       |> Result.get_ok
+       |> ignore;
+       Keeper_chat_operation_store.close seed |> Result.get_ok;
+       Eio.Switch.run @@ fun sw ->
+       let owner =
+         owner_ok
+           (Owner.start
+              ~sw
+              ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+              ~operation_store_path:path
+              ~now:(fun () -> 20.0)
+              ~keeper_name:"interrupted-restart"
+              ~initial_meta:(Some (make_meta "interrupted-restart")))
+       in
+       let settled = Option.get (owner_ok (Owner.exact_operation owner operation_id)) in
+       (match settled.state with
+        | Chat_operation.Failed { failure = { kind; _ }; _ } ->
+          check string "restart failure kind" "Interrupted_by_restart" kind
+        | state -> fail ("restart did not interrupt Running: " ^ Chat_operation.state_to_string state));
+       check bool "interrupted input is scrubbed" true (Option.is_none settled.input);
+       check bool
+         "restart never requeues Running"
+         true
+         (Option.is_none (owner_ok (Owner.claim_next_operation owner))))
+;;
+
+let test_operation_store_failure_fences_owner_mutations () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let owner =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name:"operation-store-failure"
+         ~initial_meta:(Some (make_meta "operation-store-failure")))
+  in
+  let operation_id = operation_id "kmsg-operation-store-failure" in
+  Fun.protect
+    ~finally:Keeper_chat_operation_store.For_testing.clear_commit_fault
+    (fun () ->
+       Keeper_chat_operation_store.For_testing.fail_next_commit
+         Keeper_chat_operation_store.For_testing.Fail_before_commit;
+       (match
+          Owner.submit_operation
+            owner
+            ~operation_id
+            ~source:operation_source
+            ~input:(operation_input "must rollback")
+        with
+        | Error (Owner.Store_unavailable _) -> ()
+        | Error error -> fail ("wrong operation store error: " ^ Owner.error_to_string error)
+        | Ok _ -> fail "operation commit failure was acknowledged");
+       check bool
+         "pre-commit failure leaves no operation"
+         true
+         (Option.is_none (owner_ok (Owner.exact_operation owner operation_id)));
+       match
+         Owner.apply_meta
+           owner
+           (Set_autoboot { enabled = true; updated_at = "must-remain-fenced" })
+       with
+       | Error (Owner.Store_unavailable _) -> ()
+       | Error error -> fail ("wrong global fence error: " ^ Owner.error_to_string error)
+       | Ok _ -> fail "operation store failure did not fence metadata mutation")
+;;
+
+let test_keeper_owners_do_not_cross_block () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let blocked, resolve_blocked = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  let first =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:
+           { replace =
+               (fun _ ->
+                  Eio.Promise.resolve resolve_blocked ();
+                  Eio.Promise.await release;
+                  Ok ())
+           ; remove = (fun _ -> Ok ())
+           }
+         ~keeper_name:"independent-first"
+         ~initial_meta:(Some (make_meta "independent-first")))
+  in
+  let second =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name:"independent-second"
+         ~initial_meta:(Some (make_meta "independent-second")))
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    ignore
+      (Owner.apply_meta
+         first
+         (Set_autoboot { enabled = true; updated_at = "blocked" })));
+  Eio.Promise.await blocked;
+  let accepted =
+    owner_ok
+      (Owner.submit_operation
+         second
+         ~operation_id:(operation_id "kmsg-independent-second")
+         ~source:operation_source
+         ~input:(operation_input "must not cross-block"))
+  in
+  check bool "second Keeper accepts while first is blocked" false accepted.existing;
+  Eio.Promise.resolve resolve_release ()
 ;;
 
 let temp_dir () =
@@ -568,6 +815,13 @@ let test_root_inventory_loads_and_extends_exactly_once () =
          | Ok owner -> owner
          | Error error -> fail (Owner_registry.lookup_error_to_string error)
        in
+       check bool
+         "installed owner owns the v1 operation database"
+         true
+         (Sys.file_exists
+            (Filename.concat
+               (Filename.concat (Workspace.keepers_runtime_dir config) first.name)
+               Keeper_chat_operation_store.database_file));
        let second = make_meta "inventory-second" in
        (match Owner_registry.create_meta ~base_path second with
         | Ok (Some committed) -> check string "dynamic owner identity" second.name committed.name
@@ -578,6 +832,13 @@ let test_root_inventory_loads_and_extends_exactly_once () =
          | Ok owner -> owner
          | Error error -> fail (Owner_registry.lookup_error_to_string error)
        in
+       check bool
+         "dynamically created owner owns the v1 operation database"
+         true
+         (Sys.file_exists
+            (Filename.concat
+               (Filename.concat (Workspace.keepers_runtime_dir config) second.name)
+               Keeper_chat_operation_store.database_file));
        let loaded_again =
          match Owner_registry.get ~base_path ~keeper_name:first.name with
          | Ok owner -> owner
@@ -614,6 +875,17 @@ let test_root_inventory_isolates_invalid_owner_snapshots () =
        let valid = make_meta "inventory-valid" in
        Keeper_meta_store.replace_snapshot config valid |> Result.get_ok;
        let keepers_dir = Workspace.keepers_runtime_dir config in
+       let operation_corrupt = make_meta "inventory-operation-corrupt" in
+       Keeper_meta_store.replace_snapshot config operation_corrupt |> Result.get_ok;
+       let operation_corrupt_dir =
+         Filename.concat keepers_dir operation_corrupt.name
+       in
+       Unix.mkdir operation_corrupt_dir 0o755;
+       Unix.mkdir
+         (Filename.concat
+            operation_corrupt_dir
+            Keeper_chat_operation_store.database_file)
+         0o755;
        Yojson.Safe.to_file
          (Filename.concat keepers_dir "inventory-corrupt.json")
          (`Assoc []);
@@ -632,7 +904,10 @@ let test_root_inventory_isolates_invalid_owner_snapshots () =
             | Error (Owner_registry.Owner_unavailable _) -> ()
             | Error error -> fail (Owner_registry.lookup_error_to_string error)
             | Ok _ -> fail ("invalid owner started: " ^ keeper_name))
-         [ "inventory-corrupt"; "inventory-path-name" ];
+         [ "inventory-corrupt"
+         ; "inventory-path-name"
+         ; "inventory-operation-corrupt"
+         ];
        (match
           Owner_registry.get ~base_path ~keeper_name:"inventory-payload-name"
         with
@@ -856,6 +1131,22 @@ let () =
             "stopping rejects new commands"
             `Quick
             test_stopping_rejects_new_commands
+        ; test_case
+            "operation lifecycle is durable and projected"
+            `Quick
+            test_operation_lifecycle_is_durable_and_projected
+        ; test_case
+            "startup interrupts Running without requeue"
+            `Quick
+            test_startup_interrupts_running_without_requeue
+        ; test_case
+            "operation store failure fences owner mutations"
+            `Quick
+            test_operation_store_failure_fences_owner_mutations
+        ; test_case
+            "Keeper owners do not cross-block"
+            `Quick
+            test_keeper_owners_do_not_cross_block
         ; test_case
             "root inventory loads and extends exactly once"
             `Quick

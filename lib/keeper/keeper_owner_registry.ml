@@ -125,6 +125,48 @@ let store_for pool keeper_name : Keeper_owner.store =
   }
 ;;
 
+let operation_store_path pool keeper_name =
+  Filename.concat
+    (Filename.concat (Workspace.keepers_runtime_dir pool.config) keeper_name)
+    Keeper_chat_operation_store.database_file
+;;
+
+let prepare_operation_store_path pool keeper_name =
+  let path = operation_store_path pool keeper_name in
+  let keeper_dir = Filename.dirname path in
+  try
+    Eio_unix.run_in_systhread ~label:"open Keeper chat operation store" (fun () ->
+      (try Unix.mkdir keeper_dir 0o755 with
+       | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+      if not (Sys.is_directory keeper_dir)
+      then
+        Error
+          (Keeper_owner.Store_unavailable
+             (Printf.sprintf "Keeper runtime path is not a directory: %s" keeper_dir))
+      else Ok path)
+  with
+  | exn ->
+    Error
+      (Keeper_owner.Store_unavailable
+         (Printf.sprintf
+            "failed to open Keeper chat operation store %s: %s"
+            path
+            (Printexc.to_string exn)))
+;;
+
+let start_owner pool ~keeper_name ~initial_meta =
+  match prepare_operation_store_path pool keeper_name with
+  | Error _ as error -> error
+  | Ok operation_store_path ->
+    Keeper_owner.start
+      ~sw:pool.sw
+      ~store:(store_for pool keeper_name)
+      ~operation_store_path
+      ~now:Unix.gettimeofday
+      ~keeper_name
+      ~initial_meta
+;;
+
 let refresh_owner_handles pool =
   let owner_handles =
     Hashtbl.to_seq_values pool.owners
@@ -161,9 +203,8 @@ let ensure_in_pool pool meta =
       | Some owner -> Ok owner
       | None ->
         (match
-          Keeper_owner.start
-            ~sw:pool.sw
-            ~store:(store_for pool meta.name)
+          start_owner
+            pool
             ~keeper_name:meta.name
             ~initial_meta:(Some meta)
          with
@@ -187,11 +228,7 @@ let ensure_empty_in_pool pool keeper_name =
          | Some _ -> Error (Owner_unavailable keeper_name)
          | None ->
            (match
-              Keeper_owner.start
-                ~sw:pool.sw
-                ~store:(store_for pool keeper_name)
-                ~keeper_name
-                ~initial_meta:None
+              start_owner pool ~keeper_name ~initial_meta:None
             with
             | Error error -> Error (Owner_initialization_failed error)
             | Ok owner ->
@@ -238,6 +275,14 @@ let install_from_store ~sw config =
         | meta :: rest ->
           (match ensure_in_pool pool meta with
            | Ok _ -> start_all (count + 1) rest
+           | Error (Owner_initialization_failed error) ->
+             let detail = Keeper_owner.error_to_string error in
+             Log.Keeper.error
+               "keeper_owner: owner unavailable keeper=%s error=%s"
+               meta.name
+               detail;
+             Hashtbl.replace pool.unavailable meta.name detail;
+             start_all count rest
            | Error Inventory_stopping ->
              Error
                (Inventory_load_failed
@@ -245,8 +290,7 @@ let install_from_store ~sw config =
                   ; detail = "root switch stopped during owner installation"
                   })
            | Error
-               (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
-               | Owner_initialization_failed _) ->
+               (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _) ->
              Error
                (Inventory_load_failed
                   { keeper_name = Some meta.name

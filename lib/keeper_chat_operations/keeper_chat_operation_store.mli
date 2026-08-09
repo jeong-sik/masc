@@ -17,6 +17,14 @@ type admission =
   | Accepted of Operation.t
   | Existing of Operation.t
 
+type inventory =
+  { queued_count : int
+  ; running_operation_id : Operation.Operation_id.t option
+  ; terminal_count : int
+  }
+
+val database_file : string
+val database_schema : string
 val open_or_create : path:string -> (t, error) result
 val close : t -> (unit, error) result
 val path : t -> string
@@ -30,6 +38,7 @@ val submit
   -> (admission, error) result
 
 val get : t -> Operation.Operation_id.t -> (Operation.t option, error) result
+val inventory : t -> (inventory, error) result
 val claim_next : t -> now:float -> (Operation.t option, error) result
 
 val list_queued

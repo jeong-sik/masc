@@ -179,8 +179,16 @@ let test_fifo_edit_move_cancel () =
     "FIFO except explicit move"
     [ Id.to_string second_id; Id.to_string first_id ]
     (List.map (fun operation -> Id.to_string operation.Operation.operation_id) queued);
+  let inventory = store_ok (Store.inventory store) in
+  check int "queued projection" 2 inventory.queued_count;
+  check int "terminal projection" 1 inventory.terminal_count;
+  check bool "no running projection" true (Option.is_none inventory.running_operation_id);
   let running = Option.get (store_ok (Store.claim_next store ~now:5.0)) in
   check string "edited operation runs first" (Id.to_string second_id) (Id.to_string running.operation_id);
+  let inventory = store_ok (Store.inventory store) in
+  check int "queued after claim" 1 inventory.queued_count;
+  check bool "running projection" true
+    (Option.exists (Id.equal second_id) inventory.running_operation_id);
   (match Store.edit_queued store ~operation_id:second_id ~input:(input "late") with
    | Error (Store.Not_queued _) -> ()
    | Error error -> fail ("wrong edit race result: " ^ Store.error_to_string error)

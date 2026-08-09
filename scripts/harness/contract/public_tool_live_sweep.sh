@@ -336,6 +336,7 @@ else
     "masc_tasks: AwaitingVerification projection did not retain producer credit" \
     "$r_awaiting"
 fi
-CLEANUP_TASK_FINALIZED=1
+# Awaiting verification is nonterminal. EXIT cleanup must release this task even
+# after a successful sweep so later harnesses do not inherit producer ownership.
 
 echo "PASS: public MCP tool live sweep"

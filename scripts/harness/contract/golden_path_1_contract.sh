@@ -185,7 +185,8 @@ if require_ok "$r10" \
   && [[ "$r10" == *"$task_id"* ]] \
   && { [[ "$r10" == *"awaiting_verification"* ]] || [[ "$r10" == *"in_progress"* ]]; } \
   && [[ "$r10" == *"$AGENT_NAME"* ]]; then
-  CLEANUP_TASK_FINALIZED=1
+  # Submission is not terminal. Keep EXIT cleanup armed so a verifier rejection
+  # cannot leak this producer-owned task into the next contract scenario.
   step_pass
 else
   step_fail "post-submission projection did not retain producer credit"

@@ -1995,6 +1995,72 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
           (recovered.phase = recoverable_operation.phase)
       | Error detail -> fail detail)
 
+let test_terminal_shutdown_recovery_releases_admission () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "terminal-shutdown-recovery-release" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let meta = make_meta "terminal-recovery-owner" in
+      let now = Masc_domain.now_iso () in
+      let terminal =
+        { Shutdown_types.schema_version = Shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id = Shutdown_types.Operation_id.generate ()
+        ; keeper_name = meta.name
+        ; lane_ownership = Shutdown_types.Dormant_meta
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.nonce
+        ; actor = "tester"
+        ; cleanup_intent = retain_operator_cleanup
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = 0
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase =
+            Shutdown_types.Superseded
+              (Shutdown_types.Operator_metadata_update { actor = "tester" })
+        ; created_at = now
+        ; updated_at = now
+        }
+      in
+      (match
+         Masc.Keeper_turn_admission.restore_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:terminal.keeper_name
+           ~operation_id:terminal.operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_restored
+       | Masc.Keeper_turn_admission.Shutdown_restore_conflict _ ->
+         fail "terminal recovery fixture could not restore exact admission");
+      (match
+         Shutdown_runtime.recover_operation_with_corrupt_owner_fence
+           ~config
+           ~corrupt_owner_fence:None
+           terminal
+       with
+       | Ok recovered ->
+         check bool
+           "terminal shutdown remains terminal"
+           false
+           (Shutdown_types.requires_admission_fence recovered)
+       | Error detail -> fail detail);
+      check
+        (option string)
+        "terminal recovery releases exact admission"
+        None
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:terminal.keeper_name)
+             .snapshot_shutdown_operation_id))
+
 let test_unsupported_shutdown_schema_retains_exact_fence () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4170,6 +4236,8 @@ let () =
         test_keeper_up_shared_boundary_outlives_calling_turn;
       test_case "shutdown store isolates corrupt owner" `Quick
         test_keeper_shutdown_store_isolates_corrupt_owner;
+      test_case "terminal shutdown recovery releases admission" `Quick
+        test_terminal_shutdown_recovery_releases_admission;
       test_case "unsupported shutdown schema retains exact fence" `Quick
         test_unsupported_shutdown_schema_retains_exact_fence;
       test_case "dashboard purge resolution is fail closed" `Quick

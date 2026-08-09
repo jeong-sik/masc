@@ -34,13 +34,25 @@ let resume_operator_pause
          ("explicit keeper up could not resume operator pause: "
           ^ Keeper_paused_work_resume_transaction.error_to_string error)
      | Ok _ ->
-       (match Keeper_meta_store.read_meta ctx.config old.name with
-        | Error detail ->
-          Error ("resumed keeper metadata read failed: " ^ detail)
-        | Ok None -> Error "resumed keeper metadata disappeared"
-        | Ok (Some resumed) when resumed.paused ->
-          Error "explicit keeper up committed but pause remained set"
-        | Ok (Some resumed) -> Ok resumed))
+       (match
+          Keeper_owner_registry.get
+            ~base_path:ctx.config.base_path
+            ~keeper_name:old.name
+        with
+        | Error error ->
+          Error
+            ("resumed Keeper owner lookup failed: "
+             ^ Keeper_owner_registry.lookup_error_to_string error)
+        | Ok owner ->
+          (match Keeper_owner.exact_projection owner with
+           | Error error ->
+             Error
+               ("resumed Keeper owner projection failed: "
+                ^ Keeper_owner.error_to_string error)
+           | Ok { meta = None; _ } -> Error "resumed Keeper metadata disappeared"
+           | Ok { meta = Some resumed; _ } when resumed.paused ->
+             Error "explicit keeper up committed but pause remained set"
+           | Ok { meta = Some resumed; _ } -> Ok resumed)))
   | false, _
   | true, Some
       ( Keeper_latched_reason.Dead_tombstone
@@ -345,26 +357,37 @@ let update_keeper ?(preserve_prompt_defaults = false)
               in
               ()
             in
-            (* CAS-merge instead of a force write: a dashboard/turn-up edit
-               builds [updated] from a meta snapshot ([old]), so a concurrent
-               keeper turn that bumped cumulative usage counters between the
-               read and this write would otherwise be silently rewound
-               (total_turns 385->370, 2026-06-10). This operator lifecycle edit
-               preserves the observed pause disposition while taking cumulative
-               counters as [max latest caller]. *)
             (match
-               write_meta_with_merge
-                 ~merge:Keeper_meta_merge.monotonic_usage_counters
-                 ctx.config
-                 updated
+               Keeper_owner_registry.apply_meta
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:updated.name
+                 (Keeper_owner_reducer.Update_profile
+                    { instructions = updated.instructions
+                    ; sandbox_profile = updated.sandbox_profile
+                    ; network_mode = updated.network_mode
+                    ; allowed_paths = updated.allowed_paths
+                    ; mention_targets = updated.mention_targets
+                    ; proactive_enabled = updated.proactive.enabled
+                    ; max_context_override = updated.max_context_override
+                    ; active_goal_ids = updated.active_goal_ids
+                    ; autoboot_enabled = updated.autoboot_enabled
+                    ; telemetry_feedback_enabled = updated.telemetry_feedback_enabled
+                    ; telemetry_feedback_window_hours =
+                        updated.telemetry_feedback_window_hours
+                    ; always_allow = updated.always_allow
+                    ; updated_at = updated.updated_at
+                    })
              with
-             | Error e ->
+             | Error error ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string WriteMetaFailures)
                  ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
                  ();
-               tool_result_error (Keeper_meta_store.write_meta_error_to_string e)
-             | Ok () ->
+               tool_result_error
+                 (Keeper_owner_registry.command_error_to_string error)
+             | Ok None ->
+               tool_result_error "Keeper owner metadata disappeared during update"
+             | Ok (Some updated) ->
                (match
                   Keeper_shutdown_supersession.commit_after_metadata_update
                     ~config:ctx.config

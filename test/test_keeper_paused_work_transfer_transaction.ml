@@ -6,6 +6,14 @@ module Persistence = Keeper_event_queue_persistence
 module Receipt = Keeper_paused_work_disposition_receipt
 module Transaction = Keeper_paused_work_transfer_transaction
 
+let test_switch : Eio.Switch.t option ref = ref None
+
+let current_test_context () =
+  match Eio_context.get_env_opt (), !test_switch with
+  | Some env, Some sw -> env, sw
+  | _ -> Alcotest.fail "transfer test Eio context is not installed"
+;;
+
 let require_ok label = function
   | Ok value -> value
   | Error detail -> Alcotest.failf "%s: %s" label detail
@@ -17,10 +25,7 @@ let require_some label = function
 ;;
 
 let with_strict_executor f =
-  Eio_main.run
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
+  let env, sw = current_test_context () in
   let pool =
     Domain_pool.create
       ~sw
@@ -126,6 +131,11 @@ let with_transfer_lane f =
            ~generation:41
            ~paused:false
        in
+       let _, sw = current_test_context () in
+       (match Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
+        | Ok count -> Alcotest.(check int) "installed owner count" 2 count
+        | Error error ->
+          Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
        let channel =
          Keeper_continuation_channel.slack
            ~team_id:(Some "team-1")
@@ -901,7 +911,7 @@ let test_source_shutdown_fences_transfer_before_receipt () =
    | Error
        { cause =
            Transaction.Admission_busy
-             (Keeper_turn_admission.Shutdown_requested actual)
+             (Keeper_owner.Shutdown_requested actual)
        ; reservation_release = None
        }
      when Keeper_shutdown_types.Operation_id.equal actual operation_id -> ()
@@ -929,6 +939,11 @@ let test_target_shutdown_fences_transfer_before_source_ack () =
 ;;
 
 let () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_context.set_env env;
+  Eio.Switch.run @@ fun sw ->
+  test_switch := Some sw;
   Alcotest.run
     "keeper paused-work transfer transaction"
     [ ( "Transfer_owner"

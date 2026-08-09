@@ -238,7 +238,7 @@ let error_to_yojson error =
     `Assoc
       (fields
        @ [ "error_code", `String "keeper_turn_admission_busy"
-         ; "admission", Keeper_turn_admission.autonomous_block_to_yojson block
+         ; "admission", Keeper_owner.autonomous_block_to_yojson block
          ])
 ;;
 
@@ -317,8 +317,11 @@ let error_class = function
       ; _
       }
   | Cancellation_rejected (Cancellation.Admission_busy _)
+  | Cancellation_rejected (Cancellation.Owner_unavailable _)
   | Transfer_rejected { cause = Transfer.Admission_busy _; _ }
+  | Transfer_rejected { cause = Transfer.Owner_unavailable _; _ }
   | Source_terminal_rejected { cause = Source_terminal.Admission_busy _; _ }
+  | Source_terminal_rejected { cause = Source_terminal.Owner_unavailable _; _ }
   | Cancellation_rejected
       (Cancellation.Failed
         { cause =

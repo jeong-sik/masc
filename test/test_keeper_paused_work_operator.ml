@@ -5,6 +5,14 @@ module State = Keeper_event_queue_state
 module Persistence = Keeper_event_queue_persistence
 module Disposition = Keeper_paused_work_disposition_receipt
 module Operator = Keeper_paused_work_operator
+
+let test_switch : Eio.Switch.t option ref = ref None
+
+let current_switch () =
+  match !test_switch with
+  | Some sw -> sw
+  | None -> Alcotest.fail "paused-work operator Owner switch is not installed"
+;;
 module Cancellation = Keeper_paused_work_cancellation_transaction
 
 let require_ok label = function
@@ -108,6 +116,15 @@ let with_source_terminal_lane f =
          }
        in
        Keeper_meta_store.replace_snapshot config meta |> require_ok "persist source-terminal metadata";
+       (match
+          Keeper_owner_registry.install_from_store
+            ~sw:(current_switch ())
+            ~operation_executor:None
+            config
+        with
+        | Ok count -> Alcotest.(check int) "installed owner count" 1 count
+        | Error error ->
+          Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
        let source, _channel = terminal_source () in
        Persistence.update_result ~base_path ~keeper_name (fun pending ->
          Queue.enqueue pending source)
@@ -387,8 +404,8 @@ let test_admission_busy_http_json_preserves_typed_detail () =
   let open Yojson.Safe.Util in
   let holder =
     admission_error_json
-      (Keeper_turn_admission.Turn_busy
-         (Some { lane = Keeper_turn_admission.Chat; started_at = 42.5 }))
+      (Keeper_owner.Turn_busy
+         (Some { lane = Keeper_owner.Chat_operation; started_at = 42.5 }))
   in
   Alcotest.(check string)
     "holder error code"
@@ -400,7 +417,7 @@ let test_admission_busy_http_json_preserves_typed_detail () =
     (holder |> member "admission" |> member "kind" |> to_string);
   Alcotest.(check string)
     "holder lane"
-    "chat"
+    "chat_operation"
     (holder |> member "admission" |> member "holder" |> member "lane" |> to_string);
   Alcotest.(check (float 0.0))
     "holder start"
@@ -413,7 +430,7 @@ let test_admission_busy_http_json_preserves_typed_detail () =
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   let shutdown =
     admission_error_json
-      (Keeper_turn_admission.Shutdown_requested operation_id)
+      (Keeper_owner.Shutdown_requested operation_id)
   in
   Alcotest.(check string)
     "shutdown operation id"
@@ -424,6 +441,8 @@ let test_admission_busy_http_json_preserves_typed_detail () =
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  test_switch := Some sw;
   Alcotest.run
     "keeper paused-work operator"
     [ ( "codec"

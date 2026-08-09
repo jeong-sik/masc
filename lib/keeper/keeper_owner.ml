@@ -188,6 +188,26 @@ let autonomous_block_to_string = function
       (Keeper_shutdown_types.Operation_id.to_string operation_id)
 ;;
 
+let autonomous_block_to_yojson = function
+  | Turn_busy in_flight ->
+    let holder =
+      match in_flight with
+      | None -> `Null
+      | Some { lane; started_at } ->
+        `Assoc
+          [ "lane", `String (turn_lane_to_string lane)
+          ; "started_at", `Float started_at
+          ]
+    in
+    `Assoc [ "kind", `String "turn_busy"; "holder", holder ]
+  | Shutdown_requested operation_id ->
+    `Assoc
+      [ "kind", `String "shutdown_requested"
+      ; ( "operation_id"
+        , `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
+      ]
+;;
+
 let request t command =
   if Atomic.get t.closed
   then Error Owner_closed

@@ -8,7 +8,8 @@ type request =
 
 type failure =
   | Invalid_request of string
-  | Admission_busy of Keeper_turn_admission.autonomous_block
+  | Admission_busy of Keeper_owner.autonomous_block
+  | Owner_unavailable of string
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Receipt_lock_failed of string
   | Receipt_read_failed of string
@@ -54,7 +55,9 @@ let failure_to_string = function
   | Admission_busy block ->
     Printf.sprintf
       "keeper_turn_admission_busy: operation=ack_source_terminal %s"
-      (Keeper_turn_admission.autonomous_block_to_string block)
+      (Keeper_owner.autonomous_block_to_string block)
+  | Owner_unavailable detail ->
+    "Ack_source_terminal Keeper owner unavailable: " ^ detail
   | Reservation_conflict owner ->
     "Ack_source_terminal lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
@@ -337,12 +340,18 @@ let ack_pending_under_admission config ~keeper_name request =
 
 let ack_pending config ~keeper_name request =
   match
-    Keeper_turn_admission.run_if_free
+    Keeper_owner_registry.run_maintenance_if_idle
       ~base_path:config.Workspace.base_path
       ~keeper_name
       (fun () -> ack_pending_under_admission config ~keeper_name request)
   with
-  | `Ran outcome -> outcome
-  | `Busy block ->
+  | Ok (`Ran outcome) -> outcome
+  | Ok (`Busy block) ->
     Error { cause = Admission_busy block; reservation_release = None }
+  | Error error ->
+    Error
+      { cause =
+          Owner_unavailable (Keeper_owner_registry.command_error_to_string error)
+      ; reservation_release = None
+      }
 ;;

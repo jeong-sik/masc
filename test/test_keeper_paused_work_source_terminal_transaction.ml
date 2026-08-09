@@ -6,6 +6,14 @@ module Persistence = Keeper_event_queue_persistence
 module Receipt = Keeper_paused_work_disposition_receipt
 module Transaction = Keeper_paused_work_source_terminal_transaction
 
+let test_switch : Eio.Switch.t option ref = ref None
+
+let current_switch () =
+  match !test_switch with
+  | Some sw -> sw
+  | None -> Alcotest.fail "test Owner switch is not installed"
+;;
+
 let require_ok label = function
   | Ok value -> value
   | Error detail -> Alcotest.failf "%s: %s" label detail
@@ -91,6 +99,15 @@ let with_source_terminal_lane f =
          }
        in
        Keeper_meta_store.replace_snapshot config meta |> require_ok "persist Keeper metadata";
+       (match
+          Keeper_owner_registry.install_from_store
+            ~sw:(current_switch ())
+            ~operation_executor:None
+            config
+        with
+        | Ok count -> Alcotest.(check int) "installed owner count" 1 count
+        | Error error ->
+          Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
        let channel =
          Keeper_continuation_channel.dashboard ~thread_id:"thread-terminal-1"
          |> require_ok "construct terminal continuation channel"
@@ -873,6 +890,10 @@ let test_nonterminal_payload_is_rejected () =
 ;;
 
 let () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  test_switch := Some sw;
   Alcotest.run
     "keeper paused-work source-terminal transaction"
     [ ( "Ack_source_terminal"

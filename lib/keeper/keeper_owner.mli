@@ -94,6 +94,7 @@ val turn_in_flight : t -> turn_in_flight option
 (** Lock-free immutable projection of the single Owner-owned child turn. *)
 
 val autonomous_block_to_string : autonomous_block -> string
+val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
 
 val run_autonomous_if_idle
   :  t

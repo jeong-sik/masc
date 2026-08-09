@@ -1567,7 +1567,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          official_client_targets="@test/runtest-test_runtime_provider_auth_headers @test/runtest-test_runtime_codex_app_server @test/runtest-test_official_client_session_store"
+          official_client_targets="@test/runtest-test_runtime_provider_auth_headers @test/runtest-test_runtime_codex_app_server @test/runtest-test_runtime_antigravity @test/runtest-test_official_client_session_store"
           scripts/ci-run-tests.sh "opam exec -- dune build --root . ${official_client_targets}"
 
       - name: Run host FD pressure contract suite

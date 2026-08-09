@@ -576,7 +576,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
-    ~context_injector ~context ~event_bus ~enable_thinking ~config =
+    ~context_injector ~context ~event_bus ~config =
   Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
     run_without_lifecycle
       ~runtime_id
@@ -592,6 +592,5 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       ~context_injector
       ~context
       ~event_bus
-      ~enable_thinking
       ~config)
 ;;

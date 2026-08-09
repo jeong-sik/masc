@@ -126,6 +126,18 @@ let test_blob_store_kind_and_readback () =
     "exact blob payload"
     (Request.Canonical_json.to_bytes payload)
     (Request.Canonical_json.to_bytes fetched);
+  let outcome = json_exn (`Assoc [ "kind", `String "accepted" ]) in
+  let outcome_ref =
+    result_exn Blob.error_to_string (Blob.put_outcome store outcome)
+  in
+  let fetched_outcome =
+    result_exn Blob.error_to_string (Blob.fetch_outcome store outcome_ref)
+    |> Option.get
+  in
+  check string
+    "exact outcome payload"
+    (Request.Canonical_json.to_bytes outcome)
+    (Request.Canonical_json.to_bytes fetched_outcome);
   let state_ref =
     result_exn Fun.id
       (Blob.State_ref.of_string (Blob.Input_ref.to_string input_ref))

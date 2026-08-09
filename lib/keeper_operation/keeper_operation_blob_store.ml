@@ -50,20 +50,6 @@ module State_ref = struct
   let equal = String.equal
 end
 
-module Delivery_payload_ref = struct
-  type t = string
-  let of_string = validate_ref
-  let to_string value = value
-  let equal = String.equal
-end
-
-module Delivery_evidence_ref = struct
-  type t = string
-  let of_string = validate_ref
-  let to_string value = value
-  let equal = String.equal
-end
-
 type error =
   | Invalid_ref of string
   | Filesystem_error of string
@@ -255,8 +241,6 @@ let fetch_common t ~kind reference =
 let put_input t payload = put_common t ~kind:"input" payload
 let put_outcome t payload = put_common t ~kind:"outcome" payload
 let put_state t payload = put_common t ~kind:"state" payload
-let put_delivery_payload t payload = put_common t ~kind:"delivery_payload" payload
-let put_delivery_evidence t payload = put_common t ~kind:"delivery_evidence" payload
 
 let fetch_input t reference =
   fetch_common t ~kind:"input" (Input_ref.to_string reference)
@@ -268,15 +252,4 @@ let fetch_outcome t reference =
 
 let fetch_state t reference =
   fetch_common t ~kind:"state" (State_ref.to_string reference)
-;;
-
-let fetch_delivery_payload t reference =
-  fetch_common t ~kind:"delivery_payload" (Delivery_payload_ref.to_string reference)
-;;
-
-let fetch_delivery_evidence t reference =
-  fetch_common
-    t
-    ~kind:"delivery_evidence"
-    (Delivery_evidence_ref.to_string reference)
 ;;

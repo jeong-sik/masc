@@ -13,6 +13,12 @@ type dispatch =
   ; tool_called : bool
   }
 
+type message =
+  { method_name : string
+  ; request_id : Yojson.Safe.t option
+  ; params : Yojson.Safe.t
+  }
+
 let ( let* ) = Result.bind
 let error stage detail = Error { stage; detail }
 
@@ -176,9 +182,12 @@ let tools_call ~id ~params ~call_tool =
     Ok { response = Some (tool_result_json ~id result); tool_called = true }
 ;;
 
+let message_method message = message.method_name
+let message_request_id message = message.request_id
+
 (* TEL-OK: pure fail-closed protocol decoder; the runtime caller owns terminal
    error telemetry and control-response delivery. *)
-let handle_message ~server_name ~tool_specs ~call_tool raw_message =
+let decode_message raw_message =
   let stage = "MCP message" in
   let* message = parse_message stage raw_message in
   let* () = validate_message_value ~stage ~path:"$" message in
@@ -193,12 +202,16 @@ let handle_message ~server_name ~tool_specs ~call_tool raw_message =
   if jsonrpc <> "2.0"
   then error stage (Printf.sprintf "unsupported jsonrpc %S" jsonrpc)
   else
-    let* method_ = required_string stage "method" fields in
+    let* method_name = required_string stage "method" fields in
     let* params = params_object stage fields in
-    let* request = request_id_opt stage fields in
-    match method_, request with
+    let* request_id = request_id_opt stage fields in
+    Ok { method_name; request_id; params }
+;;
+
+let dispatch_message ~server_name ~tool_specs ~call_tool message =
+  match message.method_name, message.request_id with
     | "initialize", Some id ->
-      let* initialize_response = initialize ~server_name ~id ~params in
+      let* initialize_response = initialize ~server_name ~id ~params:message.params in
       Ok
         { response = Some initialize_response
         ; tool_called = false
@@ -209,13 +222,13 @@ let handle_message ~server_name ~tool_specs ~call_tool raw_message =
             Some (response ~id (`Assoc [ "tools", `List (tool_specs ()) ]))
         ; tool_called = false
         }
-    | "tools/call", Some id -> tools_call ~id ~params ~call_tool
+    | "tools/call", Some id -> tools_call ~id ~params:message.params ~call_tool
     | "notifications/initialized", None ->
       Ok { response = None; tool_called = false }
     | _, None ->
       error
-        stage
-        (Printf.sprintf "MCP notification %S is not supported" method_)
+        "MCP message"
+        (Printf.sprintf "MCP notification %S is not supported" message.method_name)
     | _, Some id ->
       Ok
         { response =
@@ -223,7 +236,12 @@ let handle_message ~server_name ~tool_specs ~call_tool raw_message =
               (error_response
                  ~id
                  ~code:(-32601)
-                 (Printf.sprintf "MCP method %S is not supported" method_))
+                 (Printf.sprintf "MCP method %S is not supported" message.method_name))
         ; tool_called = false
         }
+;;
+
+let handle_message ~server_name ~tool_specs ~call_tool raw_message =
+  let* message = decode_message raw_message in
+  dispatch_message ~server_name ~tool_specs ~call_tool message
 ;;

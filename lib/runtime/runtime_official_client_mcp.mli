@@ -20,6 +20,23 @@ type dispatch =
   ; tool_called : bool
   }
 
+type message
+
+val decode_message : string -> (message, error) result
+val message_method : message -> string
+val message_request_id : message -> Yojson.Safe.t option
+
+val dispatch_message :
+  server_name:string ->
+  tool_specs:(unit -> Yojson.Safe.t list) ->
+  call_tool:
+    (name:string ->
+     call_id:string ->
+     arguments:Yojson.Safe.t ->
+     tool_result option) ->
+  message ->
+  (dispatch, error) result
+
 val handle_message :
   server_name:string ->
   tool_specs:(unit -> Yojson.Safe.t list) ->

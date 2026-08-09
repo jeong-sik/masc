@@ -272,11 +272,19 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
     else failf "unexpected tool dispatch reached the callback: %s" name
   in
   let dispatch json =
-    Runtime_official_client_mcp.handle_message
+    let message =
+      Runtime_official_client_mcp.decode_message (Yojson.Safe.to_string json)
+      |> Result.get_ok
+    in
+    check string
+      "decoded method"
+      (json |> Yojson.Safe.Util.member "method" |> Yojson.Safe.Util.to_string)
+      (Runtime_official_client_mcp.message_method message);
+    Runtime_official_client_mcp.dispatch_message
       ~server_name:"masc"
       ~tool_specs
       ~call_tool
-      (Yojson.Safe.to_string json)
+      message
     |> Result.get_ok
   in
   let list =
@@ -289,6 +297,17 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
          ])
   in
   check bool "list has response" true (Option.is_some list.response);
+  let decoded_list =
+    Runtime_official_client_mcp.decode_message
+      {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}|}
+    |> Result.get_ok
+  in
+  check
+    (option string)
+    "decoded request id"
+    (Some "1")
+    (Runtime_official_client_mcp.message_request_id decoded_list
+     |> Option.map Yojson.Safe.to_string);
   check bool "list did not call a tool" false list.tool_called;
   let notification =
     dispatch

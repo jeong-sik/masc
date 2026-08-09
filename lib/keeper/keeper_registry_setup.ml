@@ -111,42 +111,6 @@ let validate_registry_meta ~base_path:_ name (meta : keeper_meta) =
   else Ok ()
 ;;
 
-let preserve_process_local_usage_observation
-      ~(current : keeper_meta)
-      ~(incoming : keeper_meta)
-  =
-  let same_runtime_identity =
-    Keeper_id.Trace_id.equal
-      current.runtime.trace_id
-      incoming.runtime.trace_id
-    && Int.equal current.runtime.nonce incoming.runtime.nonce
-  in
-  match
-    same_runtime_identity,
-    current.runtime.usage.last_usage_reported_at,
-    incoming.runtime.usage.last_usage_reported_at
-  with
-  | true, Some _, None ->
-    let observed_usage = current.runtime.usage in
-    {
-      incoming with
-      runtime =
-        {
-          incoming.runtime with
-          usage =
-            {
-              incoming.runtime.usage with
-              last_input_tokens = observed_usage.last_input_tokens;
-              last_output_tokens = observed_usage.last_output_tokens;
-              last_total_tokens = observed_usage.last_total_tokens;
-              last_usage_reported_at =
-                observed_usage.last_usage_reported_at;
-            };
-        };
-    }
-  | true, _, _ | false, _, _ -> incoming
-;;
-
 let record_invalid_registry_entry ~operation ~name reason =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string RegistryInvalidEntry)
@@ -948,12 +912,22 @@ let health_of_entry ~base_path name entry =
   | Error health -> health
 ;;
 
+let project_owner_meta ~base_path ~name (entry : registry_entry) =
+  match Keeper_owner_projection.lookup ~base_path ~keeper_name:name with
+  | Keeper_owner_projection.Owner_absent -> Some entry
+  | Owner_projection { meta = None; _ } -> None
+  | Owner_projection { meta = Some meta; _ } -> Some { entry with meta }
+;;
+
 let get_with_health ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None ->
       Log.Keeper.debug "registry: lookup miss name=%s base_path=%s" name base_path;
       None
-  | Some entry -> Some (entry, health_of_entry ~base_path name entry)
+  | Some entry ->
+    Option.map
+      (fun entry -> entry, health_of_entry ~base_path name entry)
+      (project_owner_meta ~base_path ~name entry)
 ;;
 
 let get ~base_path name =
@@ -980,101 +954,19 @@ let all ?base_path () =
            (match base_path with
             | Some expected when not (String.equal expected key_base_path) -> acc
             | Some _ | None -> (
-                match validate_registry_entry ~base_path:key_base_path key_name v with
-                | Ok () -> v :: acc
-                | Error reason ->
-                    record_invalid_registry_entry ~operation:"all" ~name:key_name reason;
-                    acc)))
+                match project_owner_meta ~base_path:key_base_path ~name:key_name v with
+                | None -> acc
+                | Some v ->
+                  (match validate_registry_entry ~base_path:key_base_path key_name v with
+                   | Ok () -> v :: acc
+                   | Error reason ->
+                     record_invalid_registry_entry ~operation:"all" ~name:key_name reason;
+                     acc))))
     (Atomic.get registry)
     []
 ;;
 
-let update_meta ~base_path name meta =
-  let base_path = canonical_base_path_exn base_path in
-  match validate_registry_meta ~base_path name meta with
-  | Error reason ->
-      record_invalid_registry_entry ~operation:"update_meta" ~name reason
-  | Ok () ->
-      update_entry_unit ~base_path name (fun e -> { e with base_path; name; meta })
-;;
-
-let update_meta_from_persisted ~base_path name meta =
-  let base_path = canonical_base_path_exn base_path in
-  match validate_registry_meta ~base_path name meta with
-  | Error reason ->
-    record_invalid_registry_entry
-      ~operation:"update_meta_from_persisted"
-      ~name
-      reason
-  | Ok () ->
-    update_entry_unit ~base_path name (fun entry ->
-      let meta =
-        preserve_process_local_usage_observation
-          ~current:entry.meta
-          ~incoming:meta
-      in
-      { entry with base_path; name; meta })
-;;
-
-let reload_meta_from_disk ~base_path name =
-  let base_path = canonical_base_path_exn base_path in
-  let config = Workspace.default_config base_path in
-  match read_meta config name with
-  | Error msg -> Error msg
-  | Ok None -> Ok None
-  | Ok (Some meta) -> (
-      let meta =
-        canonicalize_registry_meta ~operation:"reload_meta_from_disk" ~base_path name meta
-      in
-      (match load_keeper_profile_defaults_result_for_base_path ~base_path name with
-       | Error error -> Error (keeper_toml_load_error_to_string error)
-       | Ok defaults ->
-       match effective_meta_of_profile_defaults defaults meta with
-       | Error msg -> Error msg
-       | Ok effective_meta -> (
-          match validate_registry_meta ~base_path name effective_meta with
-          | Error reason ->
-              record_invalid_registry_entry ~operation:"reload_meta_from_disk" ~name reason;
-              Error (registry_entry_validation_error_to_string reason)
-          | Ok () ->
-              let updated =
-                update_entry_if_registered ~base_path name (fun e ->
-                  let effective_meta =
-                    preserve_process_local_usage_observation
-                      ~current:e.meta
-                      ~incoming:effective_meta
-                  in
-                  { e with base_path; name; meta = effective_meta }, true)
-              in
-              if updated then Ok (get ~base_path name) else Ok None)))
-;;
-
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
-
-let sync_meta_if_registered ~base_path name meta =
-  let base_path = canonical_base_path_exn base_path in
-  match validate_registry_meta ~base_path name meta with
-  | Error reason ->
-    record_invalid_registry_entry ~operation:"sync_meta_if_registered" ~name reason
-  | Ok () ->
-    let key = registry_key ~base_path name in
-    let rec loop () =
-      let current = Atomic.get registry in
-      match StringMap.find_opt key current with
-      | None -> ()
-      | Some entry ->
-        let updated =
-          StringMap.add key { entry with base_path; name; meta } current
-        in
-        if not (Atomic.compare_and_set registry current updated) then loop ()
-    in
-    loop ()
-;;
-
-let () =
-  register_runtime_meta_write_sync (fun config meta ->
-    sync_meta_if_registered ~base_path:config.base_path meta.name meta)
-;;
 
 let mark_dead ~base_path name ~at =
   Error_tracking.mark_dead

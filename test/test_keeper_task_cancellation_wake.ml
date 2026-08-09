@@ -52,7 +52,7 @@ let ensure_keeper config ~keeper_name ~agent_name =
              ; "agent_name", `String agent_name
              ; "autoboot_enabled", `Bool false
              ]))
-      (Keeper_meta_store.write_meta config)
+      (Keeper_meta_store.replace_snapshot config)
   with
   | Ok _ -> ()
   | Error err -> fail ("write keeper meta failed: " ^ err)

@@ -300,12 +300,7 @@ type keeper_meta = {
   (* Identity & concurrency *)
   keeper_id : Keeper_id.Uid.t option;
   oas_env : (string * string) list;
-  meta_version : int;
 }
-
-(** Stamp the current Keeper state as structurally corrupted and requiring
-    checkpoint reset. This is current-state persistence, not a migration. *)
-val mark_transcript_corruption_reset_required : keeper_meta -> keeper_meta
 
 (** Sanctioned generic unpause transform. Clears ordinary/operator/dead
     latches with the pause bit and [runtime.last_blocker]. A
@@ -321,12 +316,6 @@ val terminal_latch_pause_violation : keeper_meta -> string option
     TOML-owned fields such as [sandbox_profile] and [network_mode]. *)
 val effective_meta_result :
   base_path:string -> keeper_meta -> (keeper_meta, string) result
-
-(** Pure variant for callers that already loaded profile defaults. *)
-val effective_meta_of_profile_defaults :
-  Keeper_types_profile.keeper_profile_defaults ->
-  keeper_meta ->
-  (keeper_meta, string) result
 
 val missing_required_sandbox_profile_error :
   keeper_name:string ->

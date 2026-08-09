@@ -19,7 +19,6 @@ type meta_disposition =
 type dashboard_purge_context =
   { requested_name : string
   ; agent_name : string
-  ; meta_version : int
   }
 
 type cleanup_reason =
@@ -112,6 +111,7 @@ type join_evidence =
 type cleanup_evidence =
   { settled_task_ids : Keeper_id.Task_id.t list
   ; pending_confirms_removed : int
+  ; meta_snapshot_digest : Keeper_meta_json.Snapshot_digest.t
   }
 
 type finalization_evidence =

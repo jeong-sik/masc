@@ -130,7 +130,7 @@ let seed_keeper config =
          ])
     |> Result.get_ok
   in
-  Keeper_meta_store.write_meta config meta |> Result.get_ok
+  Keeper_meta_store.replace_snapshot config meta |> Result.get_ok
 ;;
 
 let test_busy_dashboard_enqueues () =

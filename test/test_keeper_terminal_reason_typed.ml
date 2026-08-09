@@ -51,7 +51,7 @@ let meta_fixture_exn json =
 ;;
 
 let write_meta_exn config meta =
-  match KMS.write_meta config meta with
+  match KMS.replace_snapshot config meta with
   | Ok () -> ()
   | Error err -> failwith ("write_meta failed: " ^ err)
 ;;
@@ -61,6 +61,17 @@ let read_meta_exn config keeper_name =
   | Ok (Some meta) -> meta
   | Ok None -> failwith ("missing persisted meta for " ^ keeper_name)
   | Error err -> failwith ("read_meta failed: " ^ err)
+;;
+
+let with_owner_inventory config f =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  (match Masc.Keeper_owner_registry.install_from_store ~sw config with
+   | Ok _ -> ()
+   | Error error ->
+     failwith (Masc.Keeper_owner_registry.install_error_to_string error));
+  f ()
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -344,18 +355,24 @@ let () =
           ])
     in
     write_meta_exn config meta;
-    (match
-       KMS.persist_transcript_corruption_pause
-         config
-         ~keeper_name:meta.name
-         ~trace_id:meta.runtime.trace_id
-         ~generation:meta.runtime.nonce
-     with
-     | Ok `Persisted -> ()
-     | Ok `No_durable_meta ->
-       check "transcript corruption pause found durable meta" false
-     | Error error ->
-       check ("transcript corruption pause persisted: " ^ error) false);
+    with_owner_inventory config (fun () ->
+      match
+        Masc.Keeper_owner_registry.apply_meta
+          ~base_path:config.base_path
+          ~keeper_name:meta.name
+          (Masc.Keeper_owner_reducer.Latch_transcript_corruption
+             { trace_id = meta.runtime.trace_id
+             ; generation = meta.runtime.nonce
+             ; updated_at = KMC.now_iso ()
+             })
+      with
+      | Ok (Some _) -> ()
+      | Ok None -> check "transcript corruption pause found durable meta" false
+      | Error error ->
+        check
+          ("transcript corruption pause persisted: "
+           ^ Masc.Keeper_owner_registry.command_error_to_string error)
+          false);
     let paused = read_meta_exn config meta.name in
     check "transcript corruption pauses durable keeper" paused.paused;
     check
@@ -409,18 +426,19 @@ let () =
       }
     in
     write_meta_exn config replacement;
-    (match
-       KMS.persist_transcript_corruption_pause
-         config
-         ~keeper_name:original.name
-         ~trace_id:original.runtime.trace_id
-         ~generation:original.runtime.nonce
-     with
-     | Error _ -> ()
-     | Ok _ ->
-       check
-         "replaced Keeper identity rejects old transcript pause"
-         false);
+    with_owner_inventory config (fun () ->
+      match
+        Masc.Keeper_owner_registry.apply_meta
+          ~base_path:config.base_path
+          ~keeper_name:original.name
+          (Masc.Keeper_owner_reducer.Latch_transcript_corruption
+             { trace_id = original.runtime.trace_id
+             ; generation = original.runtime.nonce
+             ; updated_at = KMC.now_iso ()
+             })
+      with
+      | Error _ -> ()
+      | Ok _ -> check "replaced Keeper identity rejects old transcript pause" false);
     let retained = read_meta_exn config original.name in
     check
       "old transcript lane cannot pause replacement"
@@ -826,11 +844,12 @@ let () =
   in
   let terminal_outcome = UTS.Terminal_checkpoint in
   let returned =
-    UTS.persist_terminal_turn_meta_for_outcome
-      ~config
-      ~original_meta
-      ~updated_meta
-      ~terminal_outcome
+    with_owner_inventory config (fun () ->
+      UTS.persist_terminal_turn_meta_for_outcome
+        ~config
+        ~original_meta
+        ~updated_meta
+        ~terminal_outcome)
   in
   let persisted = read_meta_exn config keeper_name in
   check "checkpoint returns advanced turn usage"

@@ -39,7 +39,7 @@ let make_meta ?(paused = false) name =
 ;;
 
 let write_meta_exn config meta =
-  match Keeper_meta_store.write_meta config meta with
+  match Keeper_meta_store.replace_snapshot config meta with
   | Ok () -> ()
   | Error error -> fail ("write_meta failed: " ^ error)
 ;;

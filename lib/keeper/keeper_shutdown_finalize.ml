@@ -10,6 +10,13 @@ type error =
 let error_to_string = function
   | Store_error error -> Keeper_shutdown_store.error_to_string error
   | Unsupported_phase -> "Keeper shutdown operation is not ready for finalization"
+  | Finalization_blocked
+      ({ phase = Blocked { stage; detail }; _ } as operation) ->
+    Printf.sprintf
+      "Keeper shutdown finalization blocked in operation %s at %s: %s"
+      (Operation_id.to_string operation.operation_id)
+      (failure_stage_to_string stage)
+      detail
   | Finalization_blocked operation ->
     Printf.sprintf
       "Keeper shutdown finalization blocked in operation %s"
@@ -329,76 +336,22 @@ let dead_tombstone_meta (meta : Keeper_meta_contract.keeper_meta) =
 ;;
 
 let read_operation_meta ~config operation =
-  match operation.cleanup_intent.reason with
-  | Dashboard_keeper_purge context ->
-    (match
-       Keeper_meta_store.read_meta_if_exact_identity
-         config
-         ~name:operation.keeper_name
-         ~trace_id:operation.trace_id
-         ~generation:operation.generation
-         ~meta_version:context.meta_version
-     with
-     | Ok meta -> Ok meta
-     | Error error ->
-       Error (Keeper_meta_store.exact_identity_error_to_string error))
-  | Operator_stop_retain_meta
-  | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup ->
-    (match Keeper_meta_store.read_meta_resolved config operation.keeper_name with
-     | Error detail -> Error detail
-     | Ok None -> Error "Keeper metadata is absent"
-     | Ok (Some (_, meta)) ->
+  match
+    Keeper_owner_registry.get
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:operation.keeper_name
+  with
+  | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
+  | Ok owner ->
+    (match Keeper_owner.exact_projection owner with
+     | Error error -> Error (Keeper_owner.error_to_string error)
+     | Ok { meta = None; _ } -> Error "Keeper metadata is absent"
+     | Ok { meta = Some meta; _ } ->
        if
          Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id
          && Int.equal meta.runtime.nonce operation.generation
        then Ok meta
-       else Error "Keeper metadata identity changed before finalization")
-;;
-
-let update_registry_meta_exact operation entry retained =
-  match operation.lane_ownership, entry with
-  | Dormant_meta, None
-  | Registered_lane _, None -> Ok ()
-  | Dormant_meta, Some _ ->
-    Error "dormant Keeper operation found a registered lane before meta update"
-  | Registered_lane lane_id, Some registry_entry
-    when not
-           (Keeper_lane.Id.equal
-              (Keeper_lane.id registry_entry.Keeper_registry.lane)
-              lane_id) -> Error "Keeper registry lane changed before meta update"
-  | Registered_lane _, Some registry_entry ->
-    (match
-       Keeper_registry.update_entry_exact registry_entry (fun current ->
-         { current with meta = retained })
-     with
-     | Keeper_registry.Exact_updated -> Ok ()
-     | Keeper_registry.Exact_update_missing ->
-       (* The lane this shutdown owned is gone from the in-memory registry.
-          That is the state this shutdown is driving toward, and the durable
-          meta update has already committed above — the registry projection of
-          a lane that no longer exists is a no-op, not a conflict.
-
-          Reading [None] one line earlier (the [Registered_lane _, None] arm)
-          already returns [Ok ()] for the identical end state. Treating the
-          same fact as success or as a permanent block depending on whether a
-          concurrent unregister landed before or after the read is a TOCTOU
-          verdict split, and the losing side is expensive: [block] latches the
-          operation, and a blocked operation holds keeper admission
-          ([Registration_shutdown_reserved], keeper_keepalive.ml:723-726) with
-          no runtime release — recovery only runs at boot
-          (server_bootstrap_loops.ml:1197). One racing unregister therefore
-          costs every later boot of that keeper until the process restarts.
-
-          Lane *replacement* stays an error below: a different lane means
-          someone else owns the keeper now, and this operation must not write
-          its retained meta over theirs. Disappearance is not replacement. *)
-       Ok ()
-     | Keeper_registry.Exact_update_replaced ->
-       Error "Keeper registry lane changed during meta update"
-     | Keeper_registry.Exact_update_invalid validation_error ->
-       Error
-         (Keeper_registry.registry_entry_validation_error_to_string validation_error))
+       else Error "Keeper metadata identity changed")
 ;;
 
 let validate_registry_owner_exact ~config operation =
@@ -426,36 +379,40 @@ let prepare_cleanup ~config ~entry operation settled_task_ids =
     | Dashboard_keeper_purge _ ->
       (match read_operation_meta ~config operation with
        | Error _ as error -> error
-       | Ok _ -> validate_registry_owner_exact ~config operation)
+       | Ok meta ->
+         validate_registry_owner_exact ~config operation
+         |> Result.map (fun () -> meta))
     | Operator_stop_retain_meta
     | Operator_stop_remove_meta ->
       (match
-         Keeper_meta_store.update_meta_if_identity
-           config
-           ~name:operation.keeper_name
-           ~trace_id:operation.trace_id
-           ~generation:operation.generation
-           paused_meta
+         Keeper_owner_registry.apply_meta
+           ~base_path:config.Workspace.base_path
+           ~keeper_name:operation.keeper_name
+           (Keeper_owner_reducer.Retain_shutdown_latch
+              { latch = Keeper_owner_reducer.Operator_stopped
+              ; updated_at = Masc_domain.now_iso ()
+              })
        with
-       | Error error ->
-         Error (Keeper_meta_store.identity_update_error_to_string error)
-       | Ok retained -> update_registry_meta_exact operation entry retained)
+       | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
+       | Ok None -> Error "Keeper metadata disappeared during shutdown pause"
+       | Ok (Some retained) -> Ok retained)
     | Dead_tombstone_cleanup ->
       (match
-         Keeper_meta_store.update_meta_if_identity
-           config
-           ~name:operation.keeper_name
-           ~trace_id:operation.trace_id
-           ~generation:operation.generation
-           dead_tombstone_meta
+         Keeper_owner_registry.apply_meta
+           ~base_path:config.Workspace.base_path
+           ~keeper_name:operation.keeper_name
+           (Keeper_owner_reducer.Retain_shutdown_latch
+              { latch = Keeper_owner_reducer.Dead_tombstone
+              ; updated_at = Masc_domain.now_iso ()
+              })
        with
-       | Error error ->
-         Error (Keeper_meta_store.identity_update_error_to_string error)
-       | Ok retained -> update_registry_meta_exact operation entry retained)
+       | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
+       | Ok None -> Error "Keeper metadata disappeared during dead-tombstone commit"
+       | Ok (Some retained) -> Ok retained)
   in
   match meta_prepare_result with
   | Error detail -> block ~config operation Meta_update detail
-  | Ok () ->
+  | Ok prepared_meta ->
     (match validate_registry_owner_exact ~config operation with
      | Error detail -> block ~config operation Meta_update detail
      | Ok () ->
@@ -467,7 +424,13 @@ let prepare_cleanup ~config ~entry operation settled_task_ids =
           with
           | Error detail -> block ~config operation Pending_confirm_cleanup detail
           | Ok pending_confirms_removed ->
-            let cleanup = { settled_task_ids; pending_confirms_removed } in
+            let cleanup =
+              { settled_task_ids
+              ; pending_confirms_removed
+              ; meta_snapshot_digest =
+                  Keeper_meta_json.Snapshot_digest.of_meta prepared_meta
+              }
+            in
             let ready =
               { operation with
                 phase = Cleanup_ready cleanup
@@ -513,43 +476,27 @@ let remove_tree path =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let remove_meta_file ~config operation =
-  match operation.cleanup_intent.reason with
-  | Dashboard_keeper_purge context ->
+let remove_meta_file ~config operation cleanup =
+  match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
+  | Retain_operator_pause
+  | Retain_dead_tombstone -> Ok ()
+  | Remove_meta ->
     (match
-       Keeper_meta_store.remove_meta_if_exact_identity
-         config
-         ~name:operation.keeper_name
-         ~trace_id:operation.trace_id
-         ~generation:operation.generation
-         ~meta_version:context.meta_version
+       Keeper_owner_registry.apply_meta
+         ~base_path:config.Workspace.base_path
+         ~keeper_name:operation.keeper_name
+         (Keeper_owner_reducer.Delete_if_snapshot cleanup.meta_snapshot_digest)
      with
-     | Ok () -> Ok ()
-     | Error Keeper_meta_store.Exact_identity_missing ->
-       Log.Keeper.warn
-         "%s: exact dashboard-purge metadata already absent during cleanup replay"
-         operation.keeper_name;
-       Ok ()
-     | Error error ->
-       Error (Keeper_meta_store.exact_identity_error_to_string error))
-  | Operator_stop_remove_meta ->
-    (match
-       Keeper_meta_store.remove_meta_if_identity
-         config
-         ~name:operation.keeper_name
-         ~trace_id:operation.trace_id
-         ~generation:operation.generation
-     with
-     | Ok () -> Ok ()
-     | Error Keeper_meta_store.Remove_identity_missing ->
-       Log.Keeper.warn
-         "%s: shutdown metadata already absent during cleanup replay"
-         operation.keeper_name;
-       Ok ()
-     | Error error ->
-       Error (Keeper_meta_store.identity_remove_error_to_string error))
-  | Operator_stop_retain_meta
-  | Dead_tombstone_cleanup -> Ok ()
+     | Ok None -> Ok ()
+     | Ok (Some _) -> Error "Keeper owner delete retained metadata"
+     | Error
+         (Keeper_owner_registry.Command_lookup_failed
+            (Keeper_owner_registry.Owner_not_found _)) ->
+       (match Keeper_meta_store.read_meta config operation.keeper_name with
+        | Ok None -> Ok ()
+        | Ok (Some _) -> Error "Keeper metadata exists without its Owner"
+        | Error detail -> Error detail)
+     | Error error -> Error (Keeper_owner_registry.command_error_to_string error))
 ;;
 
 let remove_session_dir ~config operation =
@@ -714,7 +661,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
                     error))))
   in
   let finish registry_unregistered =
-    match remove_meta_file ~config operation with
+    match remove_meta_file ~config operation cleanup with
     | Error detail -> block ~config operation Meta_remove detail
     | Ok () ->
       (match remove_session_dir ~config operation with
@@ -832,5 +779,4 @@ module For_testing = struct
       Error "shutdown completion handler is not registered")
   ;;
 
-  let update_registry_meta_exact = update_registry_meta_exact
 end

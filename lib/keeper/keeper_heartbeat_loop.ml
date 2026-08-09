@@ -702,11 +702,15 @@ let run_keepalive_unified_turn
       let persist_transcript_corruption_pause ~detail =
         let pause_result =
           try
-            Keeper_meta_store.persist_transcript_corruption_pause
-              ctx.config
+            Keeper_owner_registry.apply_meta
+              ~base_path:ctx.config.base_path
               ~keeper_name:meta_after_triage.name
-              ~trace_id:meta_after_triage.runtime.trace_id
-              ~generation:meta_after_triage.runtime.nonce
+              (Keeper_owner_reducer.Latch_transcript_corruption
+                 { trace_id = meta_after_triage.runtime.trace_id
+                 ; generation = meta_after_triage.runtime.nonce
+                 ; updated_at = Masc_domain.now_iso ()
+                 })
+            |> Result.map_error Keeper_owner_registry.command_error_to_string
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
@@ -715,15 +719,9 @@ let run_keepalive_unified_turn
                ^ Printexc.to_string exn)
         in
         match pause_result with
-        | Ok `Persisted -> true
-        | Ok `No_durable_meta ->
-          record_event_queue_failure
-            "transcript corruption pause has no durable Keeper metadata";
-          Log.Keeper.error
-            ~keeper_name:meta_after_triage.name
-            "transcript corruption retained its exact pending source because \
-             the Keeper has no durable metadata: %s"
-            detail;
+        | Ok (Some _) -> true
+        | Ok None ->
+          record_event_queue_failure "transcript corruption owner metadata disappeared";
           false
         | Error pause_detail ->
           record_event_queue_failure
@@ -827,14 +825,25 @@ let run_keepalive_unified_turn
                ~keeper_name:meta_after_triage.name
                outcome;
              (match
-                Keeper_meta_store.persist_compaction_commit_projection
-                  ctx.config
+                Keeper_owner_registry.apply_meta
+                  ~base_path:ctx.config.base_path
                   ~keeper_name:meta_after_triage.name
-                  ~commit_count
+                  (Keeper_owner_reducer.Record_compaction_commit
+                     { trace_id = meta_after_triage.runtime.trace_id
+                     ; generation = meta_after_triage.runtime.nonce
+                     ; commit_count
+                     ; updated_at = Masc_domain.now_iso ()
+                     })
               with
-              | Ok `Persisted -> ()
-              | Ok `No_durable_meta -> ()
-              | Error message ->
+              | Ok (Some _) -> ()
+              | Ok None ->
+                Log.Keeper.warn
+                  "compaction commit owner metadata disappeared keeper=%s"
+                  meta_after_triage.name
+              | Error error ->
+                let message =
+                  Keeper_owner_registry.command_error_to_string error
+                in
                 Log.Keeper.warn
                   "compaction commit count not persisted keeper=%s: %s"
                   meta_after_triage.name
@@ -960,7 +969,6 @@ let run_heartbeat_loop
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first
      cycle always reads. *)
-  let last_meta_mtime = ref 0.0 in
   (* Wake-source carry (thundering-herd fix). Records whether the most recent
      sleep ended via an external broadcast wakeup ([Woken]) or this keeper's own
      cadence timer ([Timeout]). Read at turn dispatch so a broadcast-driven early
@@ -977,39 +985,31 @@ let run_heartbeat_loop
       Eio_guard.fair_yield ();
       (* Phase 0: timing markers *)
       let t_presence_start = Time_compat.now () in
-      let disk_meta_opt, new_meta_mtime =
-        match read_meta_if_changed ctx.config m.name ~last_mtime:!last_meta_mtime with
-        | Some (latest, new_mtime) -> Some latest, Some new_mtime
-        | None -> None, None
+      let owner_meta =
+        match
+          Keeper_owner_registry.get
+            ~base_path:ctx.config.base_path
+            ~keeper_name:m.name
+        with
+        | Ok owner -> (Keeper_owner.projection owner).meta
+        | Error error ->
+          Log.Keeper.error
+            "%s: heartbeat owner projection unavailable: %s"
+            m.name
+            (Keeper_owner_registry.lookup_error_to_string error);
+          None
       in
-      Option.iter (fun new_mtime -> last_meta_mtime := new_mtime) new_meta_mtime;
       let meta_current =
         effective_keepalive_meta
           ~base_path:ctx.config.base_path
           ~fallback:m
-          ~disk_meta_opt
+          ~disk_meta_opt:owner_meta
       in
       let meta_current =
         match repair_identity_drift_for_keepalive ~ctx meta_current with
         | Some repaired -> repaired
         | None -> meta_current
       in
-      (* Sync disk meta to registry so dashboard reads live values.  #5364.
-         When disk meta is unchanged we still prefer the registry copy because
-         runtime writes update it via the write_meta hook. This keeps
-         continuity/runtime fields fresh even if disk mtime does not advance
-         between rapid writes inside a single loop window. *)
-      let registry_meta =
-        match Keeper_registry.get ~base_path:ctx.config.base_path meta_current.name with
-        | Some entry -> entry.meta
-        | None -> m
-      in
-      if meta_current != registry_meta
-      then
-        Keeper_registry.update_meta
-          ~base_path:ctx.config.base_path
-          meta_current.name
-          meta_current;
       (* A live lane evaluates every configured heartbeat tick. Busy/idle
          labels, observer count, and prior activity never suppress the cycle;
          an explicit wake atomically cuts the sleep for this Keeper only. *)

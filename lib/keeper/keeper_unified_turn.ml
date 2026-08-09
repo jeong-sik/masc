@@ -30,6 +30,27 @@ type turn_failure =
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   }
 
+exception Owner_meta_commit_failed of string
+
+let commit_turn_runtime_or_raise ~config ~before ~after =
+  match
+    Keeper_owner_registry.commit_turn_runtime
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:before.Keeper_meta_contract.name
+      ~before
+      ~after
+  with
+  | Ok (Some committed) -> committed
+  | Ok None ->
+    raise
+      (Owner_meta_commit_failed
+         "Keeper Owner removed metadata during failed-turn commit")
+  | Error error ->
+    raise
+      (Owner_meta_commit_failed
+         (Keeper_owner_registry.command_error_to_string error))
+;;
+
 let turn_failure_of_error
       ~runtime_id
       ~fallback_boundary
@@ -645,31 +666,20 @@ let run_keeper_cycle
          block clears the field, preventing stale state on idle keepers. *)
                Keeper_registry.mark_turn_started ~base_path:config.base_path ~wake meta.name;
                let meta =
-                 match Keeper_registry.get ~base_path:config.base_path meta.name with
-                 | Some entry ->
-                   let () =
-                     match
-                       write_meta_with_merge
-                         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                         config
-                         entry.meta
-                     with
-                     | Ok () -> ()
-                     | Error err ->
-                       Otel_metric_store.inc_counter
-                         Keeper_metrics.(to_string WriteMetaFailures)
-                         ~labels:[ "keeper", entry.meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Turn_start) ]
-                         ();
-                       Log.Keeper.warn
-                         ~keeper_name:entry.meta.name
-                         "%s: turn-start write_meta_with_merge failed: %s"
-                         entry.meta.name
-                         (Keeper_meta_store.write_meta_error_to_string err)
-                   in
-                   entry.meta
-                 | None -> meta
+                 match
+                   Keeper_owner_registry.get
+                     ~base_path:config.base_path
+                     ~keeper_name:meta.name
+                 with
+                 | Ok owner ->
+                   (match (Keeper_owner.projection owner).meta with
+                    | Some latest -> latest
+                    | None -> meta)
+                 | Error _ -> meta
                in
-               Keeper_registry.mark_turn_measurement ~base_path:config.base_path meta.name;
+               Keeper_registry.mark_turn_measurement
+                 ~base_path:config.base_path
+                 meta.name;
                (match Keeper_registry.get ~base_path:config.base_path meta.name with
                 | Some { current_turn_observation = Some { measurement = Some _; _ }; _ }
                   ->
@@ -985,48 +995,11 @@ let run_keeper_cycle
                     ~error:e_str
                     ~terminal_reason
                     ();
-                  (* #9769 root fix: heartbeat-field-merge prevents the
-             turn-failure retry from clobbering heartbeat-owned fields metadata fields, which was the
-dominant source of the observed CAS race exhaustion after
-             keeper OAS timeout. *)
-                  (match
-                     write_meta_with_merge
-                       ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                       config
-                       updated_meta
-                   with
-                   | Ok () -> ()
-                   | Error msg ->
-                     Otel_metric_store.inc_counter
-                       Keeper_metrics.(to_string WriteMetaFailures)
-                       ~labels:
-                         [ "keeper", updated_meta.name
-                         ; ( "phase"
-                           , match msg with
-                             | Keeper_meta_store.Version_conflict _ ->
-                               "turn_failure_cas_race"
-                             | Keeper_meta_store.Lifecycle_reserved _
-                             | Keeper_meta_store.Read_failed _
-                             | Keeper_meta_store.Persist_failed _
-                             | Keeper_meta_store.Invariant_violation _ ->
-                               "turn_failure" )
-                         ]
-                       ();
-                     let detail = Keeper_meta_store.write_meta_error_to_string msg in
-                     (match msg with
-                      | Keeper_meta_store.Version_conflict _ ->
-                        Log.Keeper.warn
-                          ~keeper_name:updated_meta.name
-                          "write_meta lost CAS race after retries (turn failure path): %s"
-                          detail
-                      | Keeper_meta_store.Lifecycle_reserved _
-                      | Keeper_meta_store.Read_failed _
-                      | Keeper_meta_store.Persist_failed _
-                      | Keeper_meta_store.Invariant_violation _ ->
-                        Log.Keeper.error
-                          ~keeper_name:updated_meta.name
-                          "write_meta failed after unified turn failure: %s"
-                          detail));
+                  commit_turn_runtime_or_raise
+                    ~config
+                    ~before:meta
+                    ~after:updated_meta
+                  |> ignore;
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]

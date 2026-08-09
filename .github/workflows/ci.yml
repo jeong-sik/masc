@@ -1923,7 +1923,7 @@ jobs:
 
       - name: Upload Keeper queued-stream screenshots
         if: ${{ always() && !cancelled() && steps.keeper_queued_stream_e2e.outcome != 'skipped' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: keeper-queued-stream-screenshots
           path: ${{ runner.temp }}/keeper-queued-stream/*.png
@@ -1938,7 +1938,7 @@ jobs:
 
       - name: Upload Keeper lane-timeline screenshots
         if: ${{ always() && !cancelled() && steps.keeper_lane_timeline_e2e.outcome != 'skipped' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: keeper-lane-timeline-screenshots
           path: ${{ runner.temp }}/keeper-lane-timeline/*.png

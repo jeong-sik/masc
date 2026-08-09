@@ -68,6 +68,21 @@ type recovery_resolution =
   | Retry_previous
   | Restart_fresh
 
+type recovery_resolution_application =
+  | Applied
+  | Replayed
+
+type recovery_resolution_error =
+  | Invalid_resolved_by
+  | Invalid_resolved_at
+  | Session_missing
+  | Session_changed
+  | Recovery_id_changed
+  | Recovery_not_required
+  | Retry_previous_unavailable
+  | Resolution_conflict
+  | Store_unavailable of string
+
 type recovery_resolution_record =
   { recovery_id : string
   ; failure : recovery_failure
@@ -951,36 +966,37 @@ let reconcile_process_restart ~base_path ~keeper_name ~expected
 
 let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
     ~resolved_by ~resolved_at =
-  let* () = non_empty "resolved_by" resolved_by in
-  let* recovery =
-    match expected.phase with
-    | Recovery_required recovery
-      when String.equal recovery.recovery_id recovery_id ->
-      Ok recovery
-    | Recovery_required _ ->
-      Error "official-client recovery identity changed before resolution"
-    | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
-      Error "official-client session is not awaiting recovery"
+  let ( let* ) = Result.bind in
+  let* () =
+    match non_empty "resolved_by" resolved_by with
+    | Ok () -> Ok ()
+    | Error _ -> Error Invalid_resolved_by
   in
-  let completed_turn_count = max 0 (expected.turn_count - 1) in
-  let* phase, turn_count =
-    match resolution with
-    | Retry_previous ->
-      Ok
-        ( (match recovery.previous_settlement with
-           | None -> Ready
-           | Some settlement -> Settled settlement)
-        , completed_turn_count )
-    | Restart_fresh -> Ok (Ready, completed_turn_count)
+  let* () =
+    if Float.is_finite resolved_at then Ok () else Error Invalid_resolved_at
   in
-  let* resolved =
-    transition
-      ~base_path
-      ~keeper_name
-      ~expected:(Some expected)
-      { expected with
+  let replay (current : t) =
+    match current.last_recovery_resolution with
+    | Some record when String.equal record.recovery_id recovery_id ->
+      if record.resolution = resolution
+      then Ok (current, Replayed)
+      else Error Resolution_conflict
+    | Some _ | None -> Error Recovery_not_required
+  in
+  let apply directory (current : t) (recovery : recovery_required) =
+    let completed_turn_count = current.turn_count - 1 in
+    let* phase =
+      match resolution with
+      | Retry_previous ->
+        (match recovery.previous_settlement with
+         | None -> Error Retry_previous_unavailable
+         | Some settlement -> Ok (Settled settlement))
+      | Restart_fresh -> Ok Ready
+    in
+    let resolved =
+      { current with
         phase
-      ; turn_count
+      ; turn_count = completed_turn_count
       ; last_recovery_resolution =
           Some
             { recovery_id
@@ -991,14 +1007,52 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
             }
       ; updated_at = resolved_at
       }
+    in
+    let* () =
+      match save_path ~state_dir:directory resolved with
+      | Ok () -> Ok ()
+      | Error detail -> Error (Store_unavailable detail)
+    in
+    Log.Keeper.info
+      ~keeper_name
+      "resolved official-client session recovery=%s actor=%s decision=%s"
+      recovery_id
+      resolved_by
+      (match resolution with
+       | Retry_previous -> "retry_previous"
+       | Restart_fresh -> "restart_fresh");
+    Ok (resolved, Applied)
   in
-  Log.Keeper.info
-    ~keeper_name
-    "resolved official-client session recovery=%s actor=%s decision=%s"
-    recovery_id
-    resolved_by
-    (match resolution with
-     | Retry_previous -> "retry_previous"
-     | Restart_fresh -> "restart_fresh");
-  Ok resolved
+  match prepare_state_dir ~base_path ~keeper_name with
+  | Error detail -> Error (Store_unavailable detail)
+  | Ok directory ->
+    (match
+       File_lock_eio.with_durable_lock
+         ~lock_path:(Filename.concat directory lock_filename)
+         (fun () ->
+      let* current =
+        match load_path (Filename.concat directory filename) with
+        | Ok current -> Ok current
+        | Error detail -> Error (Store_unavailable detail)
+      in
+      match current with
+      | None -> Error Session_missing
+      | Some current when not (equal current expected) ->
+        (match replay current with
+         | Ok replayed -> Ok replayed
+         | Error Recovery_not_required -> Error Session_changed
+         | Error error -> Error error)
+      | Some current ->
+        (match current.phase with
+         | Recovery_required recovery
+           when String.equal recovery.recovery_id recovery_id ->
+           apply directory current recovery
+         | Recovery_required _ -> Error Recovery_id_changed
+         | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ -> replay current))
+     with
+     | Ok result -> result
+     | Error detail ->
+       Error
+         (Store_unavailable
+            (File_lock_eio.durable_lock_error_to_string detail)))
 ;;

@@ -13,14 +13,11 @@ open Keeper_execution
 open Keeper_turn_up_args
 
 
-(* #9749: bootstrap can race a heartbeat/supervisor meta write after
-   crash recovery. Retry on CAS conflict while keeping heartbeat-owned
-   cursors from disk. *)
 let write_initial_meta config meta =
-  write_meta_with_merge
-    ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-    config meta
-  |> Result.map_error Keeper_meta_store.write_meta_error_to_string
+  match Keeper_owner_registry.create_meta ~base_path:config.Workspace.base_path meta with
+  | Ok (Some _) -> Ok ()
+  | Ok None -> Error "Keeper owner removed metadata during create"
+  | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
 
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
@@ -239,7 +236,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
 	        };
       keeper_id = Some (Keeper_id.Uid.generate ());
       oas_env = p.profile_defaults.oas_env;
-      meta_version = 0;
       } in
       let system_prompt =
         Keeper_run_context.build_base_system_prompt
@@ -334,7 +330,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       | Error e ->
         Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
-        Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
+        Log.Keeper.error
+          "create_keeper failed: owner metadata commit error for name=%s: %s"
+          p.name
+          e;
         Progress.stop_tracking task_id;
         tool_result_error e
       | Ok () ->

@@ -165,7 +165,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0233 | Typed turn observability: TurnRecord prompt-block provenance + canonical tool... | Draft | - |
 | 0235 | Stale-base revert guard: block PRs that silently revert recently-merged work (`RFC-0235-stale-base-revert-guard.md`)<br>Voice output transport: browser-addressed audio delivery with device-routed p... (`RFC-0235-voice-output-browser-transport-device-routing.md`) | Draft<br>Draft | - |
 | 0236 | Voice input transport: browser-captured speech-to-text for the dashboard comp... | Draft | - |
-| 0237 | Eliminate the write_meta ~force escape hatch (route snapshot writes through C... | Draft | - |
 | 0239 | Concurrency ownership model (per-site mutex/atomic → protection by construction) | Draft | - |
 | 0240 | Tool-pair invariant enforced at write-time (eliminate repair-on-read) | Draft | - |
 | 0243 | Memory OS confidence mutability via write-side fact upsert | Draft | - |

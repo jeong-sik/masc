@@ -4,13 +4,16 @@ import { unixSecondsToDate } from '../lib/format-time'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import {
+  applyKeeperCheckpointPurge,
   deleteKeeperHistorySnapshots,
   fetchKeeperCheckpoints,
+  previewKeeperCheckpointPurge,
   type KeeperCheckpointCurrentError,
   type KeeperCheckpointHistoryError,
   type KeeperCheckpointInventory,
+  type KeeperCheckpointPurgeResponse,
   type KeeperCheckpointSummary,
-} from '../api/keeper'
+} from '../api/keeper-lifecycle'
 import { TextInput } from './common/input'
 import { Checkbox } from './common/checkbox'
 import { showToast } from './common/toast'
@@ -30,6 +33,12 @@ function formatCheckpointTime(timestamp: number): string {
   return unixSecondsToDate(timestamp).toLocaleString('ko-KR', {
     hour12: false,
   })
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '-'
+  if (bytes < 1024) return `${bytes} B`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
 /**
@@ -167,6 +176,8 @@ export function KeeperCheckpointPanel({
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [deleting, setDeleting] = useState(false)
   const [historyQuery, setHistoryQuery] = useState('')
+  const [purgePreview, setPurgePreview] = useState<KeeperCheckpointPurgeResponse | null>(null)
+  const [purgePending, setPurgePending] = useState<'preview' | 'apply' | null>(null)
 
   const loadInventory = () => {
     void (async () => {
@@ -189,6 +200,7 @@ export function KeeperCheckpointPanel({
   useEffect(() => {
     setInventory(null)
     setSelectedIds([])
+    setPurgePreview(null)
     loadInventory()
   }, [keeperName, refreshToken])
 
@@ -227,6 +239,53 @@ export function KeeperCheckpointPanel({
         showToast(err instanceof Error ? err.message : 'snapshot 삭제 실패', 'error')
       } finally {
         setDeleting(false)
+      }
+    })()
+  }
+
+  const previewPurge = () => {
+    void (async () => {
+      setPurgePending('preview')
+      try {
+        const result = await previewKeeperCheckpointPurge(keeperName)
+        setPurgePreview(result)
+        setInventory(result.inventory)
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'checkpoint purge 미리보기 실패', 'error')
+      } finally {
+        setPurgePending(null)
+      }
+    })()
+  }
+
+  const applyPurge = () => {
+    void (async () => {
+      if (!purgePreview) return
+      const report = purgePreview.report
+      const confirmed = await requestConfirm({
+        title: '현재 checkpoint 청소',
+        message: `${keeperName}의 현재 checkpoint를 ${formatBytes(report.bytes_before)} → ${formatBytes(report.bytes_after)}로 정리합니다.\n원본은 byte-exact backup으로 먼저 저장됩니다.`,
+        tone: 'danger',
+        confirmText: '백업 후 청소',
+      })
+      if (!confirmed) return
+      setPurgePending('apply')
+      try {
+        const result = await applyKeeperCheckpointPurge(keeperName)
+        setPurgePreview(result)
+        setInventory(result.inventory)
+        if (result.applied) {
+          const warningSuffix = result.warnings.length > 0
+            ? ` · 경고 ${result.warnings.length}건`
+            : ''
+          showToast(`checkpoint 청소 완료 · ${formatBytes(result.report.bytes_removed)} 감소${warningSuffix}`, 'success')
+        } else {
+          showToast('checkpoint는 이미 정리된 상태입니다', 'success')
+        }
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'checkpoint purge 적용 실패', 'error')
+      } finally {
+        setPurgePending(null)
       }
     })()
   }
@@ -291,6 +350,63 @@ export function KeeperCheckpointPanel({
         status=${inventory.current_status}
         error=${inventory.current_error}
       />
+
+      <div
+        class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 v2-monitoring-panel"
+        data-testid="keeper-checkpoint-purge"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">현재 checkpoint 청소</div>
+            <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+              닫힌 tool 결과, unsigned reasoning, 반복 메시지만 정리합니다. 대화 구조와 최근 20개 메시지는 보존합니다.
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <${ActionButton}
+              variant="ghost"
+              size="md"
+              disabled=${purgePending !== null || inventory.current_status !== 'available'}
+              ariaBusy=${purgePending === 'preview'}
+              testId="keeper-checkpoint-purge-preview"
+              onClick=${previewPurge}
+            >${purgePending === 'preview' ? '계산 중...' : '정리 미리보기'}<//>
+            <${ActionButton}
+              variant="danger"
+              size="md"
+              disabled=${
+                purgePending !== null
+                || !purgePreview
+                || !purgePreview.apply_allowed
+                || purgePreview.report.bytes_removed <= 0
+              }
+              ariaBusy=${purgePending === 'apply'}
+              testId="keeper-checkpoint-purge-apply"
+              onClick=${applyPurge}
+            >${purgePending === 'apply' ? '청소 중...' : '백업 후 청소'}<//>
+          </div>
+        </div>
+
+        ${purgePreview
+          ? html`
+              <div class="mt-3 grid grid-cols-2 gap-2 text-2xs md:grid-cols-4" data-testid="keeper-checkpoint-purge-report">
+                <div><span class="text-[var(--color-fg-muted)]">크기</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${formatBytes(purgePreview.report.bytes_before)} → ${formatBytes(purgePreview.report.bytes_after)}</div></div>
+                <div><span class="text-[var(--color-fg-muted)]">tool 결과</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${purgePreview.report.tool_results_cleared}</div></div>
+                <div><span class="text-[var(--color-fg-muted)]">reasoning</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${purgePreview.report.reasoning_blocks_stripped}</div></div>
+                <div><span class="text-[var(--color-fg-muted)]">반복 메시지</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${purgePreview.report.duplicates_dropped}</div></div>
+              </div>
+              ${!purgePreview.apply_allowed
+                ? html`<div class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]" role="status">적용하려면 먼저 상단의 종료 버튼으로 Keeper를 완전히 종료하세요. 미리보기는 현재 상태에서도 안전합니다.</div>`
+                : null}
+              ${purgePreview.backup_path
+                ? html`<div class="mt-3 break-all font-mono text-3xs text-[var(--color-fg-muted)]" data-testid="keeper-checkpoint-purge-backup">backup: ${purgePreview.backup_path}</div>`
+                : null}
+              ${purgePreview.warnings.length > 0
+                ? html`<div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--rose-light)]" role="alert">${purgePreview.warnings.join(' · ')}</div>`
+                : null}
+            `
+          : null}
+      </div>
 
       <${CheckpointHistoryFailures} failures=${inventory.history_errors} />
 

@@ -304,6 +304,37 @@ let handle_keeper_checkpoints_post state req reqd body_str =
       let args = Yojson.Safe.from_string body_str in
       let action = Safe_ops.json_string ~default:"" "action" args in
       match action with
+      | ("preview_purge" | "apply_purge") as purge_action ->
+          let apply = String.equal purge_action "apply_purge" in
+          (match Checkpoints.purge_current config ~keeper_name:name ~apply with
+           | Error error ->
+             let status =
+               match error with
+               | Checkpoints.Purge_invalid_keeper_name _ -> `Bad_request
+               | Checkpoints.Purge_keeper_not_found _ -> `Not_found
+               | Purge_keeper_active _
+               | Purge_checkpoint_invalid _
+               | Purge_source_changed -> `Conflict
+               | Purge_checkpoint_unavailable _
+               | Purge_backup_failed _
+               | Purge_install_failed _ -> `Internal_server_error
+             in
+             respond_error
+               ~status
+               ~request:req
+               ~ok:false
+               reqd
+               (Checkpoints.purge_error_to_string error)
+           | Ok result ->
+             let (_status, inventory) =
+               keeper_checkpoint_inventory_json config name
+             in
+             let response =
+               match Checkpoints.purge_result_json ~action:purge_action result with
+               | `Assoc fields -> `Assoc (("inventory", inventory) :: fields)
+               | other -> other
+             in
+             Http.Response.json_value ~compress:true ~request:req response reqd)
       | "delete_history" ->
           let snapshot_ids =
             Safe_ops.json_string_list "snapshot_ids" args

@@ -3,6 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render } from "preact"
 import { act } from "preact/test-utils"
 import { html } from "htm/preact"
+
+const { requestConfirmMock } = vi.hoisted(() => ({
+  requestConfirmMock: vi.fn(async () => true),
+}))
+
+vi.mock("./common/confirm-dialog", () => ({
+  requestConfirm: requestConfirmMock,
+}))
+
+beforeEach(() => {
+  requestConfirmMock.mockClear()
+})
 import {
   filterCheckpointHistory,
   KeeperCheckpointPanel,
@@ -130,6 +142,112 @@ describe("KeeperCheckpointPanel diagnostics", () => {
       expect(container.textContent).toContain("history-broken.json")
       expect(container.textContent).toContain("io_error")
       expect(container.textContent).not.toContain("저장된 checkpoint 없음")
+    } finally {
+      render(null, container)
+      document.body.removeChild(container)
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it("previews then applies checkpoint purge with exact report and backup evidence", async () => {
+    const inventory = {
+      keeper: "keeper-test",
+      trace_id: "trace-test",
+      session_dir: "/tmp/trace-test",
+      current: {
+        snapshot_id: "trace-test.json",
+        source_kind: "oas_current",
+        is_current: true,
+        status: "available",
+        path: "/tmp/trace-test/trace-test.json",
+        created_at: 1700000000,
+        generation: 1,
+        message_count: 916,
+        system_prompt_present: true,
+        latest_preview: "latest",
+        file_stat: { size_bytes: 2367244, mtime: 1700000000 },
+      },
+      current_status: "available",
+      current_error: null,
+      history: [],
+      history_errors: [],
+    }
+    const purgeResponse = (action: "preview_purge" | "apply_purge") => ({
+      schema: "masc.keeper_checkpoint_purge.v1",
+      ok: true,
+      action,
+      keeper: "keeper-test",
+      trace_id: "trace-test",
+      apply_allowed: true,
+      applied: action === "apply_purge",
+      backup_path: action === "apply_purge" ? "/tmp/backups/trace-test.json" : null,
+      report: {
+        messages_before: 916,
+        messages_after: 857,
+        bytes_before: 2367244,
+        bytes_after: 1129051,
+        bytes_removed: 1238193,
+        duplicates_dropped: 59,
+        reasoning_blocks_stripped: 46,
+        reasoning_messages_dropped: 0,
+        tool_results_cleared: 437,
+      },
+      warnings: [],
+      inventory,
+    })
+    const requests: Array<{ url: string; body: unknown }> = []
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async (input, init) => {
+      const url = String(input)
+      const body = init?.body ? JSON.parse(String(init.body)) : null
+      requests.push({ url, body })
+      const payload = body?.action === "preview_purge"
+        ? purgeResponse("preview_purge")
+        : body?.action === "apply_purge"
+          ? purgeResponse("apply_purge")
+          : inventory
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    try {
+      await act(async () => {
+        render(
+          html`<${KeeperCheckpointPanel}
+            keeperName="keeper-test"
+            refreshToken=${0}
+          />`,
+          container,
+        )
+      })
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-testid="keeper-checkpoint-purge-preview"]')).toBeTruthy()
+      })
+
+      await act(async () => {
+        ;(container.querySelector('[data-testid="keeper-checkpoint-purge-preview"]') as HTMLButtonElement).click()
+      })
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-testid="keeper-checkpoint-purge-report"]')?.textContent).toContain("437")
+      })
+
+      await act(async () => {
+        ;(container.querySelector('[data-testid="keeper-checkpoint-purge-apply"]') as HTMLButtonElement).click()
+      })
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-testid="keeper-checkpoint-purge-backup"]')?.textContent).toContain("/tmp/backups/trace-test.json")
+      })
+
+      expect(requestConfirmMock).toHaveBeenCalledTimes(1)
+      expect(requests.map(request => request.body)).toEqual([
+        null,
+        { action: "preview_purge" },
+        { action: "apply_purge" },
+      ])
     } finally {
       render(null, container)
       document.body.removeChild(container)

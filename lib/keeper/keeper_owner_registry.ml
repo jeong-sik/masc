@@ -105,7 +105,11 @@ let store_for pool keeper_name : Keeper_owner.store =
                 "owner snapshot identity mismatch: expected=%s actual=%s"
                 keeper_name
                 meta.name)
-         else Keeper_meta_store.persist_meta pool.config keeper_name meta)
+         else
+           Keeper_meta_store.persist_meta
+             pool.config
+             (Keeper_types_profile.keeper_meta_path pool.config keeper_name)
+             meta)
   ; remove =
       (fun meta ->
          match

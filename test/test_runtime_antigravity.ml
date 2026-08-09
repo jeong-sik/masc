@@ -49,6 +49,19 @@ let shell_quote value =
   "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
 ;;
 
+let contains_substring value needle =
+  let value_length = String.length value in
+  let needle_length = String.length needle in
+  let rec loop offset =
+    if offset + needle_length > value_length
+    then false
+    else if String.equal (String.sub value offset needle_length) needle
+    then true
+    else loop (offset + 1)
+  in
+  needle_length = 0 || loop 0
+;;
+
 let fixture_script ?(require_resume = false) ?(sleep_s = 0.0) ?(exit_code = 0) lines =
   let path = Filename.temp_file "masc-antigravity-" ".sh" in
   let output = open_out_bin path in
@@ -327,7 +340,14 @@ let test_login_probe_preserves_process_failure () =
     (fun path ->
        match run_probe_fixture path with
        | Error (Runtime_antigravity.Process_exited detail) ->
-         check bool "command retained" true (String.starts_with ~prefix:"agy models failed:" detail)
+         check bool
+           "command retained"
+           true
+           (String.starts_with ~prefix:"agy models failed:" detail);
+         check bool
+           "stderr retained"
+           true
+           (contains_substring detail "Please sign in to view available models.")
        | Error error -> fail (Runtime_antigravity.error_to_string error)
        | Ok _ -> fail "failed login probe was admitted")
 ;;

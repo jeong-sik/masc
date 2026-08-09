@@ -549,7 +549,9 @@ let run_spawned ~mgr ~clock ~cwd config ~conversation_mode ~prompt ~on_conversat
     Eio.Flow.close stdin_w;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
-    Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
+    let stderr_drained =
+      Eio.Fiber.fork_promise ~sw (fun () -> drain_stderr stderr_r stderr_tail)
+    in
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let process_status = ref None in
     Fun.protect
@@ -587,6 +589,7 @@ let run_spawned ~mgr ~clock ~cwd config ~conversation_mode ~prompt ~on_conversat
                    { stage = "stdout read"; detail = Printexc.to_string exn })));
         let status = Eio.Process.await proc in
         process_status := Some status;
+        Eio.Promise.await stderr_drained;
         status, !state, String.trim !stderr_tail))
 ;;
 
@@ -611,7 +614,9 @@ let run_probe_process ~mgr ~clock ~cwd config arguments =
     Eio.Flow.close stdin_w;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
-    Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
+    let stderr_drained =
+      Eio.Fiber.fork_promise ~sw (fun () -> drain_stderr stderr_r stderr_tail)
+    in
     let process_status = ref None in
     Fun.protect
       ~finally:(fun () ->
@@ -633,6 +638,7 @@ let run_probe_process ~mgr ~clock ~cwd config arguments =
         in
         let status = Eio.Process.await proc in
         process_status := Some status;
+        Eio.Promise.await stderr_drained;
         status, String.trim stdout, String.trim !stderr_tail))
 ;;
 

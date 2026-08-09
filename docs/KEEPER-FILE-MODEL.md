@@ -64,6 +64,41 @@ Runtime assignment lives only in `runtime.toml` under
 supplies the current tool schemas separately for each turn, so `AGENT.md`
 should describe behavior and boundaries without copying a tool catalog.
 
+An official Codex subscription runtime declares a CLI transport and no
+credentials. The Codex CLI owns ChatGPT login; MASC removes API-key variables
+from the child environment and refuses non-subscription accounts. Model IDs
+containing dots must be quoted as TOML table keys.
+
+```toml
+[providers.codex_subscription]
+display-name = "Codex ChatGPT Subscription"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[models."gpt-5.3-codex-spark"]
+api-name = "gpt-5.3-codex-spark"
+max-context = 131072
+tools-support = true
+
+[codex_subscription."gpt-5.3-codex-spark"]
+
+# A Keeper assignment must still name a materialized runtime. To add ordered
+# failover, give the lane the same ID; runtime resolution prefers the lane.
+[runtime.lanes."codex_subscription.gpt-5.3-codex-spark"]
+strategy = "ordered"
+candidates = [
+  "codex_subscription.gpt-5.3-codex-spark",
+  "glm-coding.glm-5-turbo",
+]
+
+[runtime.assignments]
+sangsu = "codex_subscription.gpt-5.3-codex-spark"
+```
+
+The fallback candidate must already be a valid binding in the same file.
+There is intentionally no `[providers.codex_subscription.credentials]` table.
+
 ## Creation and update
 
 `masc_keeper_up` accepts `name` and, for first creation or an explicit prompt

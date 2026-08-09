@@ -1447,7 +1447,11 @@ let defer request reason =
   | Error error -> Unavailable (Queue_storage_unavailable error)
   | Ok submission ->
     let approval_id = submission.approval_id in
-    let audit_receipts = [ submission.audit_receipt ] in
+    let audit_receipts =
+      match submission.disposition with
+      | Keeper_approval_queue.Pending_created receipt -> [ receipt ]
+      | Keeper_approval_queue.Pending_deduplicated -> []
+    in
     let reason =
       match reason with
       | Judge_requested ->

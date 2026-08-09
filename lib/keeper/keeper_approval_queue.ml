@@ -97,9 +97,13 @@ type grant_consumption =
   | Consumption_already_committed
   | Consumption_not_matching
 
+type pending_submission_disposition =
+  | Pending_created of Keeper_approval.Audit.receipt
+  | Pending_deduplicated
+
 type pending_submission =
   { approval_id : string
-  ; audit_receipt : Keeper_approval.Audit.receipt
+  ; disposition : pending_submission_disposition
   }
 
 type replay_recording =
@@ -3002,7 +3006,7 @@ let submit_pending
              ~goal_ids
              ~continuation_channel
          with
-         | Some id -> Ok (id, SMap.find id map)
+         | Some id -> Ok (`Deduplicated id)
          | None ->
            let id = generate_id () in
            if sequence = max_int
@@ -3043,13 +3047,18 @@ let submit_pending
              Atomic.set
                next_sequences
                (SMap.add base_path following_sequence (Atomic.get next_sequences));
-             Ok (id, entry))))
+             Ok (`Created entry))))
   in
   match stored with
   | Error _ as error -> error
-  | Ok (approval_id, entry) ->
+  | Ok (`Deduplicated approval_id) ->
+    Ok { approval_id; disposition = Pending_deduplicated }
+  | Ok (`Created entry) ->
     let audit_receipt = record_pending entry in
-    Ok { approval_id; audit_receipt }
+    Ok
+      { approval_id = entry.id
+      ; disposition = Pending_created audit_receipt
+      }
 ;;
 
 (* ── Resolve (operator action) ────────────────────────────── *)

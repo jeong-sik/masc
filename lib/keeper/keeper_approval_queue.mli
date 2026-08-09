@@ -117,9 +117,13 @@ type grant_consumption =
   | Consumption_already_committed
   | Consumption_not_matching
 
+type pending_submission_disposition =
+  | Pending_created of Keeper_approval.Audit.receipt
+  | Pending_deduplicated
+
 type pending_submission =
   { approval_id : string
-  ; audit_receipt : Keeper_approval.Audit.receipt
+  ; disposition : pending_submission_disposition
   }
 
 type replay_recording =
@@ -281,7 +285,8 @@ end
 (** Durably enqueue an exact request without suspending the caller. Returns an
     existing id only when the same Keeper, operation identity, canonical input,
     turn/task/goal identity, and continuation channel are already pending. A
-    deduplicated request does not consume a durable queue sequence. *)
+    deduplicated request does not consume a durable queue sequence or emit a new
+    pending audit event. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->

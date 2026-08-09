@@ -111,7 +111,7 @@ let drop_resolution ~base_path ~keeper_name resolution =
 ;;
 
 
-let submit_with_context
+let submit_submission_with_context
       ?turn_id
       ?request_context
       ?task_id
@@ -137,8 +137,34 @@ let submit_with_context
       ?continuation_channel
       ()
   with
-  | Ok submission -> submission.approval_id
+  | Ok submission -> submission
   | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+;;
+
+let submit_with_context
+      ?turn_id
+      ?request_context
+      ?task_id
+      ?goal_id
+      ?(goal_ids = [])
+      ?continuation_channel
+      ~base_path
+      ~keeper_name
+      ~input
+      ()
+  =
+  (submit_submission_with_context
+     ?turn_id
+     ?request_context
+     ?task_id
+     ?goal_id
+     ~goal_ids
+     ?continuation_channel
+     ~base_path
+     ~keeper_name
+     ~input
+     ())
+    .approval_id
 ;;
 
 let submit ~base_path ~keeper_name ~input =
@@ -560,9 +586,15 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
 let test_submit_is_nonblocking_and_exactly_deduplicated () =
   let base_path = temp_dir () in
   let keeper_name = "queue-exact-submit" in
+  let audit_appends = ref 0 in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      cleanup_dir base_path)
     (fun () ->
+       Keeper_approval.Audit.For_testing.reset_store ();
+       Keeper_approval.Audit.For_testing.set_append_jsonl
+         (fun _path _json -> incr audit_appends);
        ignore (install_exn ~base_path);
        let input =
          `Assoc
@@ -582,8 +614,8 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
            ; "completed_tool_calls", `List []
            ]
        in
-       let first =
-         submit_with_context
+       let first_submission =
+         submit_submission_with_context
            ~turn_id:12
            ~request_context
            ~base_path
@@ -591,14 +623,21 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
            ~input
            ()
        in
+       let first = first_submission.approval_id in
+       (match first_submission.disposition with
+        | AQ.Pending_created { write_result = Ok (); _ } -> ()
+        | AQ.Pending_created { write_result = Error _; _ } ->
+          Alcotest.fail "new pending request did not persist its audit"
+        | AQ.Pending_deduplicated ->
+          Alcotest.fail "new pending request was reported as deduplicated");
        let reordered =
          `Assoc
            [ "payload", `Assoc [ "nonce", `Int 1; "text", `String "hello" ]
            ; "target", `String "document"
            ]
        in
-       let same =
-         submit_with_context
+       let same_submission =
+         submit_submission_with_context
            ~turn_id:12
            ~request_context
            ~base_path
@@ -606,7 +645,16 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
            ~input:reordered
            ()
        in
+       let same = same_submission.approval_id in
        Alcotest.(check string) "same exact request" first same;
+       (match same_submission.disposition with
+        | AQ.Pending_deduplicated -> ()
+        | AQ.Pending_created _ ->
+          Alcotest.fail "exact duplicate reported a second pending commit");
+       Alcotest.(check int)
+         "exact duplicate emits no second pending audit"
+         1
+         !audit_appends;
        let open Yojson.Safe.Util in
        let persisted_entry =
          read_pending_snapshot ~base_path
@@ -630,6 +678,7 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        in
        Alcotest.(check bool) "changed field is a different request" true
          (not (String.equal first changed));
+       Alcotest.(check int) "changed request emits its own pending audit" 2 !audit_appends;
        Alcotest.(check int) "first request sequence" 1 (pending_entry_exn first).sequence;
        Alcotest.(check int)
          "dedup does not consume sequence"

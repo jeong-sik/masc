@@ -101,6 +101,44 @@ let test_reducer_rejects_invalid_compaction_numbers () =
   | Ok _ -> fail "invalid compaction numbers were accepted"
 ;;
 
+let test_profile_update_preserves_owner_runtime_state () =
+  let original = make_meta "profile" in
+  let state =
+    match Reducer.create ~keeper_name:original.name (Some original) with
+    | Ok state -> reducer_ok (Reducer.apply_meta state (Add_usage (usage_delta ())))
+    | Error error -> fail (Reducer.error_to_string error)
+  in
+  let current = Option.get (Reducer.projection state).meta in
+  let update : Reducer.profile_update =
+    { instructions = "updated instructions"
+    ; sandbox_profile = current.sandbox_profile
+    ; network_mode = current.network_mode
+    ; allowed_paths = [ "/tmp/profile" ]
+    ; mention_targets = [ "profile-target" ]
+    ; proactive_enabled = true
+    ; max_context_override = Some 32_000
+    ; active_goal_ids = [ "goal-profile" ]
+    ; autoboot_enabled = true
+    ; telemetry_feedback_enabled = Some true
+    ; telemetry_feedback_window_hours = Some 24
+    ; always_allow = Some false
+    ; updated_at = "profile-updated"
+    }
+  in
+  let state = reducer_ok (Reducer.apply_meta state (Update_profile update)) in
+  let committed = Option.get (Reducer.projection state).meta in
+  check string "profile instructions updated" update.instructions committed.instructions;
+  check int
+    "profile update preserves additive turns"
+    current.runtime.usage.total_turns
+    committed.runtime.usage.total_turns;
+  check int
+    "profile update preserves generation"
+    current.runtime.nonce
+    committed.runtime.nonce;
+  check bool "profile update changes autoboot" true committed.autoboot_enabled
+;;
+
 let test_actor_concurrent_commands_are_exact () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -605,6 +643,10 @@ let () =
             "invalid compaction numbers are rejected"
             `Quick
             test_reducer_rejects_invalid_compaction_numbers
+        ; test_case
+            "profile update preserves runtime state"
+            `Quick
+            test_profile_update_preserves_owner_runtime_state
         ] )
     ; ( "actor"
       , [ test_case

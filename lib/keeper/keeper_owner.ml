@@ -291,7 +291,6 @@ let start_turn t ~operation_id ~run =
 ;;
 
 let await_turn handle = Eio.Promise.await handle.terminal
-let turn_handle_operation_id (handle : turn_handle) = handle.operation_id
 let begin_stopping t = request t Begin_stopping
 
 module For_testing = struct

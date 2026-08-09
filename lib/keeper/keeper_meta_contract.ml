@@ -436,14 +436,6 @@ type keeper_meta =
   ; oas_env : (string * string) list
   }
 
-let mark_transcript_corruption_reset_required (m : keeper_meta) : keeper_meta =
-  { m with
-    paused = true
-  ; latched_reason = Some Keeper_latched_reason.Transcript_corruption_reset_required
-  ; updated_at = now_iso ()
-  }
-;;
-
 (* Sanctioned generic unpause transform. Reset-required transcript and terminal
    dead-tombstone latches are deliberately immutable here. A dead identity is
    deleted and recreated rather than revived. *)

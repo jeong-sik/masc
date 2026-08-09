@@ -60,7 +60,6 @@ val start_turn
     running slot. *)
 
 val await_turn : turn_handle -> turn_terminal
-val turn_handle_operation_id : turn_handle -> string
 
 val begin_stopping : t -> (unit, error) result
 (** Reject future external commands.  The root switch remains the structured

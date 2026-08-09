@@ -5,10 +5,10 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
-    # ready_for_review must re-evaluate Draft-only dependency allowances on the
-    # exact same head; otherwise an ephemeral review ref could retain a green
-    # CI Gate after the PR becomes mergeable.
-    types: [opened, synchronize, reopened, ready_for_review]
+    # Readiness changes no code and no longer changes any CI allowance. The
+    # exact-head CI Gate from opened/synchronize/reopened therefore remains the
+    # merge authority without starting the same heavy graph a second time.
+    types: [opened, synchronize, reopened]
   workflow_dispatch: {}
 
 permissions:
@@ -26,9 +26,9 @@ concurrency:
     ${{ github.workflow }}-${{ github.event_name }}-${{
       github.event.pull_request.number || github.ref_name || github.run_id
     }}
-  # Pushes supersede older CI for the same branch. Code-changing and
-  # ready-for-review PR events likewise replace an outdated run for that PR.
-  cancel-in-progress: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
+  # Pushes supersede older CI for the same branch. Code-changing PR events
+  # likewise replace an outdated run for that PR.
+  cancel-in-progress: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened"]'), github.event.action)) }}
 
 jobs:
   pr-sync-check:
@@ -698,11 +698,15 @@ jobs:
           set -euo pipefail
           echo "Disk before cleanup:"
           df -h /
-          sudo rm -rf /usr/local/lib/android || true
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf /opt/ghc /usr/local/.ghcup || true
-          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
-          sudo docker image prune --all --force || true
+          cleanup_pids=()
+          sudo rm -rf /usr/local/lib/android & cleanup_pids+=("$!")
+          sudo rm -rf /usr/share/dotnet & cleanup_pids+=("$!")
+          sudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=("$!")
+          sudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=("$!")
+          sudo docker image prune --all --force & cleanup_pids+=("$!")
+          for cleanup_pid in "${cleanup_pids[@]}"; do
+            wait "${cleanup_pid}" || true
+          done
           echo "Disk after cleanup:"
           df -h /
 
@@ -747,11 +751,11 @@ jobs:
       - name: Build
         id: build_step
         env:
-          # Two workers use the hosted runner's available parallelism while
-          # bounding concurrent native links. Run 31319982424 had 110 GB free
-          # after cleanup, so the former fully-serial setting no longer bought
-          # disk safety and made the cold compile the 24-minute critical path.
-          DUNE_JOBS: "2"
+          # Public ubuntu-latest runners provide four CPUs and 16 GB RAM. Use
+          # all four for the compile-only graph; focused behavior suites below
+          # remain serial because some own fixed ports and shared fixtures.
+          # Disk pressure is handled by the cleanup step before checkout.
+          DUNE_JOBS: "4"
         # NO continue-on-error: dune build is deterministic and must hard-fail.
         # Focused test execution steps below are also required: any failing
         # suite fails the Build and Test job and blocks merge via the CI Gate.
@@ -1123,51 +1127,6 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_enum_mirror_sync
 
-      - name: Run paused-work transfer and source-ACK suites
-        id: paused_work_transfer_and_operator_suites
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ALCOTEST_QUICK_TESTS: "1"
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_turn_outcome @test/runtest-test_keeper_paused_work_transfer_transaction @test/runtest-test_keeper_paused_work_source_terminal_transaction @test/runtest-test_keeper_paused_work_operator"
-
-      - name: Run keeper autonomous chat-activity suite
-        id: keeper_autonomous_chat_activity_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_autonomous_turn_source"
-
-      - name: Run keeper autoboot ownership suite
-        id: keeper_autoboot_ownership_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_autoboot_single_owner"
-
-      - name: Run keeper meta current-schema conformance suite
-        # This suite would have caught masc#27393 (fleet-wide autoboot 0/7:
-        # the persona hard-cut's schema change made every real, durable
-        # keeper meta JSON unloadable) before it reached production -- it
-        # was compiling under @check but never executing in CI.
-        id: keeper_meta_current_schema_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_meta_current_schema"
-
       # NOTE: the "Shell IR differential-safety harness gate" step was removed
       # here. #24332 (nonhierarchical Gate refactor) retired the entire
       # shell_ir risk/typed subsystem (Shell_ir_risk, Shell_ir_typed,
@@ -1187,463 +1146,16 @@ jobs:
           chmod +x dashboard/scripts/gen-sse-types.sh
           opam exec -- dashboard/scripts/gen-sse-types.sh --check
 
-      # The former catch-all `dune test` gate mixed executable behavior tests
-      # with source-text, log-wording, and TLA text-parity assertions. Those
-      # implementation-shape checks made main permanently red after legitimate
-      # refactors without identifying a runtime regression. `@check` above
-      # still compiles every test target; the authoritative runtime, operator,
-      # transport, SSE, and contract suites below remain executable gates.
-
-      - name: Run dashboard behavior contracts
-        id: dashboard_behavior_contracts
+      # Compile-only @check above and this focused runner form one authority:
+      # every listed behavior suite executes exactly once. The runner batches
+      # aliases by environment contract so Dune loads the already-built graph
+      # five times instead of once per suite.
+      - name: Run focused OCaml behavior suites
+        id: focused_ocaml_behavior_suites
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-dashboard-http-behavior-contracts"
-
-      - name: Run agent core behavior suite
-        id: agent_core_behavior_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' && needs.changes.outputs.agent_core == 'true' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          agent_core_targets="@test/runtest-test_keeper_hooks_oas_introspection @test/runtest-test_keeper_execution_join @test/runtest-test_hitl_summary_worker"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @packages/agent_core/test/runtest ${agent_core_targets}"
-
-      - name: Run model inference metrics suite
-        id: model_inference_metrics_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_model_inference_metrics"
-
-      - name: Run channel-gate content-length knob suite
-        id: channel_gate_content_length_knob_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_channel_gate_content_length_knob"
-
-      - name: Run keeper decision-audit dated-store suite
-        id: decision_audit_dated_store_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_decision_audit_dated_store"
-
-      # Redaction is the last thing every observability payload passes through,
-      # so a defect here is not scoped to one field: a preview truncated inside
-      # a multibyte character makes the whole JSON response undecodable and the
-      # panel that reads it renders nothing. test_observability_redact carried a
-      # max-length case from the start and compiled on every run, but was never
-      # named here, so it never executed and the byte-indexed cut survived.
-      - name: Run observability redaction suite
-        id: observability_redaction_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_observability_redact"
-
-      # Approval persistence, typed terminal decisions, Keeper prompt
-      # projection, and audit vocabulary form one current Gate contract.
-      - name: Run approval Gate contract suites
-        id: approval_audit_vocabulary_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_approval_queue @test/runtest-test_keeper_hitl_resolution_prompt @test/runtest-test_keeper_approval_audit_timeline"
-
-      - name: Run verification behavior suite
-        id: verification_behavior_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_verification"
-
-      # Declared JSON-Schema bounds (minimum/maximum/exclusiveMinimum/
-      # exclusiveMaximum/minLength/maxLength/minItems/maxItems) are dropped
-      # by Tool_bridge.params_of_json_schema, so for a long time nothing
-      # read them: keeper_artifact_read answered max_bytes=565244 with a
-      # message naming sha256 (2026-08-05 20:06:36, keeper kidsnote). These
-      # suites assert the bounds are enforced pre-dispatch, that every
-      # declaration masc holds is reachable and readable by that
-      # enforcement, and that artifact-read rejections name the field that
-      # actually failed without changing which requests are served.
-      #
-      # test_tool_input_validation is the presence half of the same boundary:
-      # a missing required field is rejected, a tool with no registered schema
-      # is refused rather than dispatched, and declared types are coerced or
-      # rejected. It was declared in test/dune and named by no CI step, so
-      # those 86 assertions compiled and never ran.
-      - name: Run tool input constraint enforcement suite
-        id: tool_input_constraint_enforcement_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          constraint_targets="@test/runtest-test_tool_schema_constraint_enforcement @test/runtest-test_keeper_artifact_read_request @test/runtest-test_tool_input_validation @test/runtest-test_tool_schema_oas_boundary"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${constraint_targets}"
-
-      # The tool-call quality benchmark scores keeper runs against selectors
-      # declared in benchmarks/data/tool_call_quality_cases.json. Those
-      # selectors name descriptors in the live keeper registry, so deleting or
-      # re-tagging a descriptor turns a stale case definition into a keeper
-      # quality score instead of an error (#26811). The suite existed in
-      # test/dune but was never listed here, so nothing it asserts has been
-      # running; the registry coherence gate it now carries only counts once
-      # this step does.
-      - name: Run tool-call quality benchmark suite
-        id: tool_call_quality_benchmark_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_tool_call_quality_benchmark"
-
-      # MCP identity is session-bound behavior: compile-only coverage cannot
-      # prove that the complete handshake -> start -> status -> transition
-      # path preserves one identity through the durable Task lifecycle. The
-      # Keeper prompt target separately proves caller-owned config projection.
-      - name: Run MCP session Task lifecycle and Keeper prompt config suites
-        id: mcp_session_task_lifecycle_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          identity_targets="@test/runtest-test_client_identity @test/runtest-test_mcp_session_task_lifecycle @test/runtest-test_keeper_sandbox_docker_cwd_response"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${identity_targets}"
-
-      # Goal store durability: the suite drives a real workspace and asserts
-      # on-disk bytes, not source text — the read path stays lenient while a
-      # write over an undecodable store must be refused and must leave both
-      # goals.json and its .last-good mirror untouched. Compile-only under
-      # @check leaves that refusal ungated.
-      - name: Run goal store durability suite
-        id: goal_store_durability_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_goal_store"
-
-      # Goal phase projection: active_goal_ids records assignment and is never
-      # cleared when a goal reaches a terminal phase, so both prompt surfaces
-      # have to consult the store's phase. The suite seeds one goal per phase in
-      # a real workspace and asserts the rendered sets, which compile-only under
-      # @check does not exercise.
-      - name: Run keeper goal phase projection suite
-        id: keeper_goal_phase_projection_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_goal_phase_projection"
-
-      # Keeper tool descriptor registry: the suite pins each cluster tool's
-      # keeper_model_projection and asserts that Operator_only tools are absent
-      # from the autonomous Keeper bundle. Compile-only under @check leaves both
-      # ungated, so a projection change reaches Keepers without a failing check.
-      - name: Run keeper tool descriptor registry integrity suite
-        id: keeper_tool_descriptor_registry_integrity_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_tool_descriptor_registry_integrity"
-
-      # Schedule occurrence reclaim: an occurrence the consumer durably accepted
-      # is [Execution_dispatched] until a correlated completion path settles it,
-      # so nothing in the scheduler finishes it on its own. The suite drives a
-      # real workspace to that state and asserts the reclaim sweep settles it
-      # only on positive consumer evidence — a held occurrence and an unreadable
-      # consumer must both leave it untouched. Compile-only under @check leaves
-      # every one of those branches ungated, and no schedule suite ran here
-      # before (issue #26685).
-      - name: Run schedule runner suite
-        id: schedule_runner_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_schedule_runner @test/runtest-test_schedule_store @test/runtest-test_schedule_consumer_dispatch"
-
-      # Keeper registry hardening: identity resolution and goal-reconciliation
-      # routing are executable behavior — the suite drives a real workspace and
-      # asserts which Keeper a durable stimulus is addressed to, never source
-      # text. It is the only suite covering
-      # [Keeper_goal_reconciliation_wake], so that routing stays ungated under
-      # @check.
-      - name: Run keeper registry hardening suite
-        id: keeper_registry_hardening_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_registry_hardening"
-
-      # Keeper unified prompt surface: asserts what a Keeper is actually handed
-      # on a turn. The schedule wake row carries two ids with different
-      # meanings — occurrence_id is a one-way SHA-256 that no tool accepts, and
-      # schedule_id is the durable pointer resolved with masc_schedule_get — so
-      # a projection that drops the pointer is a silent capability loss with no
-      # compile-time signal. @check cannot see it: the wake type still compiles
-      # either way.
-      # Named for what it runs: the targets below are the unified verification
-      # surface and schedule tool wiring, not a prompt suite. The previous name
-      # ("keeper unified prompt surface suite") read as prompt coverage in the
-      # job log while no prompt assertion executed anywhere in CI.
-      - name: Run keeper unified verification surface and schedule wiring suites
-        id: keeper_unified_verification_surface_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_unified_verification_surface @test/runtest-test_schedule_tool_wiring"
-
-      # Every Keeper turn uses the assembled prompt. Pin its exact bytes,
-      # current content contract, and tool-schema projection.
-      - name: Run keeper prompt assembly suites
-        id: keeper_prompt_assembly_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          prompt_targets="@test/runtest-test_keeper_system_prompt_bytes @test/runtest-test_keeper_tool_schema_bytes @test/runtest-test_keeper_prompt_metrics @test/runtest-test_keeper_surface_presence_prompt"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${prompt_targets}"
-
-      - name: Run board attention suite
-        id: board_attention_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          board_attention_targets="@test/runtest-test_keeper_board_attention_worker @test/runtest-test_keeper_board_attention_partition @test/runtest-test_keeper_board_attention_candidate @test/runtest-test_keeper_lifecycle_global_gate"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${board_attention_targets}"
-
-      - name: Run tool blob retention suite
-        id: tool_blob_retention_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          tool_blob_targets="@test/runtest-test_tool_blob_store @test/runtest-test_keeper_tool_call_log @test/runtest-test_keeper_wire_capture"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${tool_blob_targets}"
-
-      - name: Run runtime provider agent suite
-        id: runtime_provider_agent_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          official_client_targets="@test/runtest-test_runtime_provider_auth_headers @test/runtest-test_keeper_official_client_host @test/runtest-test_runtime_codex_app_server @test/runtest-test_runtime_antigravity @test/runtest-test_official_client_session_store @test/runtest-test_runtime_claude_code @test/runtest-test_runtime_claude_code_config @test/runtest-test_keeper_claude_code_runtime"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${official_client_targets}"
-
-      - name: Run host FD pressure contract suite
-        id: host_fd_pressure_contract_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          bash test/test_monitor_system_health_paths.sh
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_host_fd_pressure_poller"
-
-      - name: Run Keeper request-cap suite
-        id: keeper_request_cap_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          request_cap_targets="@test/runtest-test_keeper_turn_driver_failover @test/runtest-test_keeper_turn_driver_accept @test/runtest-test_keeper_vision_tool @test/runtest-test_runtime_modality_reroute @test/runtest-test_runtime_model_input_tail_window @test/runtest-test_keeper_context_overflow_shrink @test/runtest-test_keeper_provider_call_deadline @test/runtest-test_keeper_runtime_resolved_observability @test/runtest-test_runtime_toml_overrides"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${request_cap_targets}"
-
-      - name: Run operator control suite
-        id: operator_control_suite
-        # Run regardless of earlier test failures, but only after a successful
-        # compile, so every suite gets a chance to report and the job fails if
-        # any suite fails.
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          ALCOTEST_QUICK_TESTS: "1"
-          CI_TEST_HEARTBEAT_SEC: 15
-          MASC_LOCAL_RUNTIMES_JSON: '[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'
-          MASC_E2E_TESTS: "true"
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          operator_targets="@test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache @test/runtest-test_model_map_of_keeper_rows"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${operator_targets}"
-
-      - name: Run SSE unit and reconnect suites
-        id: sse_reconnect_e2e
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-          MASC_E2E_TESTS: "true"
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_sse_coverage @test/runtest-test_ag_ui_coverage @test/runtest-test_sse_storm_e2e"
-
-      # Keeper prompt and tool-bundle contracts exercise rendered text and the
-      # current metadata shape accepted by the production decoder.
-      - name: Run keeper prompt and tool-bundle contract suites
-        id: keeper_prompt_contract_suites
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_wake_turn_context @test/runtest-test_warn_root_causes"
-
-      # Workspace heartbeat and transport-vocabulary guards landed without a
-      # runtest target, so the ci-test-targets ratchet counted them as
-      # compile-only. Run them. The assertion-kind mirror already runs in the
-      # invariant and SSOT guard step above.
-      - name: Run mirror guard and workspace heartbeat suites
-        id: mirror_guard_suites
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_workspace_heartbeat_outcome @test/runtest-test_agent_api_query_params @test/runtest-test_h2_mode_vocabulary @test/runtest-test_agent_transport_vocabulary @test/runtest-test_keeper_catchup_digest @test/runtest-test_workspace_root_state_parity"
-
-      # Persona name, tool-result demotion, and tool type label landed on main
-      # without a runtest target. The verification-authority suite already
-      # runs in its dedicated completion-authority step above.
-      - name: Run persona, demotion, and tool-label suites
-        id: recent_unwired_suites
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_dashboard_keeper_name @test/runtest-test_dashboard_briefing @test/runtest-test_keeper_model_input_demotion @test/runtest-test_tool_type_label @test/runtest-test_telemetry_eio_pbt"
-
-      # Subprocess capture is bounded head+tail; without a runtest target the
-      # assertions that a 9MiB child gets truncated — and that a short one does
-      # not — would only ever be compiled. Unbounded capture is what retained
-      # 590MB in a single Execute call and stalled a keeper for 115 minutes, so
-      # this is the suite that has to actually run.
-      - name: Run subprocess capture bound suite
-        id: process_capture_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_process_eio_coverage @test/runtest-test_keeper_secret_redaction"
+          RUN_AGENT_CORE: ${{ needs.changes.outputs.agent_core }}
+        run: scripts/ci-run-focused-tests.sh
 
       - name: Run transport harness suite
         id: transport_harness_suite

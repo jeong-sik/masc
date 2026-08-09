@@ -160,21 +160,17 @@ export interface KeeperResolvedApprovalItem {
   keeper_name: string
   tool_name: string
   decision: KeeperResolvedApprovalDecision
-  decision_raw?: string | null
-  decision_reason?: string | null
-  resolved_at?: string | null
-  turn_id?: number | null
-  task_id?: string | null
-  goal_id?: string | null
-  goal_ids?: string[]
-  decision_source?: GateDecisionSource | null
-  rule_match?: {
-    rule_id?: string | null
-  } | null
-  /** Judge evidence recorded on the resolved audit event at resolution time
-   *  (#26126). `null` on events written before that enrichment existed. */
-  summary_status?: HitlSummaryStatus | null
-  exact_attempt?: KeeperExactAttemptState | null
+  decision_raw: string
+  decision_reason: string | null
+  resolved_at: string
+  turn_id: number | null
+  task_id: string | null
+  goal_id: string | null
+  goal_ids: string[]
+  actor: string
+  decision_source: GateDecisionSource
+  summary_status: HitlSummaryStatus
+  exact_attempt: KeeperExactAttemptState
 }
 
 /** An approval_queue row the server sent but the client contract rejected.
@@ -198,20 +194,23 @@ export interface KeeperApprovalRule {
   id: string
   keeper_name: string
   tool_name: string
-  request_fingerprint?: string
-  created_at?: string | null
-  created_by?: string | null
-  source_approval_id?: string | null
+  request_fingerprint: string
+  created_at: number
+  created_by: string
+  source_approval_id: string
+  expires_at: number | null
 }
+
+export type KeeperApprovalRulesState =
+  | { state: 'ready' }
+  | { state: 'unavailable'; error: string }
 
 export type GateMode = 'manual' | 'auto_judge' | 'always_allow'
 
-export interface GateModeStatus {
-  mode: GateMode
-  configured?: boolean
-  state?: 'ready' | 'invalid' | string
-  read_error?: string
-}
+export type GateModeStatus =
+  | { mode: GateMode; configured: boolean; state: 'ready' }
+  | { mode: 'auto_judge'; configured: boolean; state: 'unavailable'; read_error: string }
+  | { mode: 'manual'; configured: true; state: 'invalid'; read_error: string }
 
 /**
  * Bounds that produced `recent_resolved`. Read them with the rows: `returned`
@@ -229,19 +228,25 @@ export interface KeeperResolvedApprovalPage {
   scan_exhausted: boolean
 }
 
+export type KeeperResolvedApprovalState =
+  | { state: 'ready' }
+  | { state: 'unavailable'; stage: 'list_recent_resolved'; error: string }
+
 export interface DashboardGateResponse {
   generated_at?: string
   note?: string
   approval_queue: KeeperApprovalQueueItem[] | null
   approval_queue_state: KeeperApprovalQueueState
   approval_queue_violations?: KeeperApprovalQueueRowViolation[]
-  recent_resolved?: KeeperResolvedApprovalItem[]
-  recent_resolved_page?: KeeperResolvedApprovalPage | null
-  approval_rules?: KeeperApprovalRule[]
-  hitl?: {
-    gate_mode?: GateModeStatus
-    judge_lane?: GateJudgeLane
-  }
+  recent_resolved: KeeperResolvedApprovalItem[] | null
+  recent_resolved_page: KeeperResolvedApprovalPage | null
+  recent_resolved_state: KeeperResolvedApprovalState
+  approval_rules: KeeperApprovalRule[]
+  approval_rules_state: KeeperApprovalRulesState
+  hitl: {
+    gate_mode: GateModeStatus
+    judge_lane: GateJudgeLane
+  } | null
 }
 
 export interface OperatorActionDescriptor {

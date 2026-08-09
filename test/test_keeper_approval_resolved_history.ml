@@ -9,7 +9,17 @@
 
 open Alcotest
 
-module AQ = Keeper_approval.Audit
+module Audit = Keeper_approval.Audit
+
+module AQ = struct
+  include Audit
+
+  let list_recent_resolved ~base_path ~now_ts ?limit ?window_minutes () =
+    match Audit.list_recent_resolved ~base_path ~now_ts ?limit ?window_minutes () with
+    | Ok history -> history
+    | Error error -> failwith (Audit.read_error_to_string error)
+  ;;
+end
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_resolved_history_" "" in
@@ -59,21 +69,37 @@ let append_row ~base_path ~ts (row : Yojson.Safe.t) =
     (fun () -> output_string oc (Yojson.Safe.to_string row ^ "\n"))
 ;;
 
-(* A resolved decision as the audit writer records it. [?ts_field:false] drops
-   the timestamp to exercise the undated-row boundary. *)
 let seed_resolved ~base_path ~ts ~id ?(keeper = "rondo") ?(tool = "tool_execute")
-      ?(decision = "approve") ?(source = "auto_judge") ?(ts_field = true) ()
+      ?(decision = "approve") ?(source = "auto_judge") ()
   =
+  let decision_kind, decision_reason =
+    if String.equal decision "approve"
+    then `String "approve", `Null
+    else `String "reject", `String "operator rejected"
+  in
   let fields =
-    [ "event", `String "resolved"
+    [ "ts", `Float ts
+    ; "event", `String "resolved"
     ; "id", `String id
     ; "keeper", `String keeper
     ; "tool", `String tool
     ; "decision", `String decision
+    ; "turn_id", `Null
+    ; "task_id", `Null
+    ; "goal_id", `Null
+    ; "goal_ids", `List []
+    ; "actor", `String "operator"
     ; "decision_source", `String source
+    ; "authorization_source", `Null
+    ; "rule_match", `Null
+    ; "source_approval_id", `Null
+    ; "decision_kind", decision_kind
+    ; "decision_reason", decision_reason
+    ; "summary_status", `String "not_requested"
+    ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
+    ; "summary_attempt_disposition", `Null
     ]
   in
-  let fields = if ts_field then ("ts", `Float ts) :: fields else fields in
   append_row ~base_path ~ts (`Assoc fields)
 ;;
 
@@ -207,14 +233,34 @@ let test_limit_zero_returns_empty_page base_path =
   check bool "scan not claimed exhausted" false history.resolved_scan_exhausted
 ;;
 
-(* An undated decision cannot be placed in a wall-clock window. It is excluded
-   rather than dated by guesswork, and it must not inflate [matched] either. *)
-let test_undated_decision_is_excluded base_path =
-  seed_resolved ~base_path ~ts:(now -. minutes 5) ~id:"dated" ();
-  seed_resolved ~base_path ~ts:(now -. minutes 5) ~id:"undated" ~ts_field:false ();
-  let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:1440 () in
-  check (list string) "only the dated decision" [ "dated" ] (ids history);
-  check int "matched excludes the undated row" 1 history.resolved_matched
+let test_resolved_row_missing_current_field_is_rejected base_path =
+  let row =
+    `Assoc
+      [ "ts", `Float (now -. minutes 5)
+      ; "event", `String "resolved"
+      ; "id", `String "missing-actor"
+      ]
+  in
+  append_row ~base_path ~ts:(now -. minutes 5) row;
+  match Audit.list_recent_resolved ~base_path ~now_ts:now () with
+  | Error { stage = List_recent_resolved; detail } ->
+    check bool "missing current field is named" true (String.length detail > 0)
+  | Error _ -> fail "wrong audit read stage"
+  | Ok _ -> fail "incomplete resolved row was accepted"
+;;
+
+let test_malformed_jsonl_is_unavailable base_path =
+  let path = audit_day_file ~base_path (now -. minutes 5) in
+  Out_channel.with_open_gen
+    [ Open_append; Open_creat; Open_wronly ]
+    0o644
+    path
+    (fun channel -> output_string channel "{not-json\n");
+  match Audit.list_recent_resolved ~base_path ~now_ts:now () with
+  | Error { stage = List_recent_resolved; detail } ->
+    check bool "physical parse failure is named" true (String.length detail > 0)
+  | Error _ -> fail "wrong audit read stage"
+  | Ok _ -> fail "malformed audit JSONL was reported as ready"
 ;;
 
 let test_empty_store_is_an_empty_page base_path =
@@ -226,9 +272,6 @@ let test_empty_store_is_an_empty_page base_path =
   check bool "scan not exhausted" false history.resolved_scan_exhausted
 ;;
 
-(* #26126: judge evidence recorded on the resolved audit event at resolution
-   time must survive projection verbatim; events written before the enrichment
-   project the members as [`Null] rather than being dropped or invented. *)
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
 let test_judge_evidence_passes_through base_path =
@@ -246,11 +289,21 @@ let test_judge_evidence_passes_through base_path =
         ; "keeper", `String "rondo"
         ; "tool", `String "tool_execute"
         ; "decision", `String "approve"
+        ; "turn_id", `Null
+        ; "task_id", `Null
+        ; "goal_id", `Null
+        ; "goal_ids", `List []
+        ; "actor", `String "operator"
         ; "decision_source", `String "auto_judge"
+        ; "authorization_source", `Null
+        ; "rule_match", `Null
+        ; "source_approval_id", `Null
+        ; "decision_kind", `String "approve"
+        ; "decision_reason", `Null
         ; "summary_status", summary_status
         ; "exact_attempt", exact_attempt
+        ; "summary_attempt_disposition", `Null
         ]);
-  seed_resolved ~base_path ~ts:(now -. minutes 10) ~id:"legacy" ();
   let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:60 () in
   let member name row =
     match row with
@@ -269,9 +322,7 @@ let test_judge_evidence_passes_through base_path =
     yojson
     "exact_attempt passes through"
     exact_attempt
-    (member "exact_attempt" (find "with-judge"));
-  check yojson "legacy summary_status is null" `Null (member "summary_status" (find "legacy"));
-  check yojson "legacy exact_attempt is null" `Null (member "exact_attempt" (find "legacy"))
+    (member "exact_attempt" (find "with-judge"))
 ;;
 
 let test_bounds_are_clamped base_path =
@@ -307,13 +358,15 @@ let () =
             (with_store test_bounds_are_clamped)
         ] )
     ; ( "boundaries"
-      , [ test_case "undated decision is excluded" `Quick
-            (with_store test_undated_decision_is_excluded)
+      , [ test_case "missing current resolved field is rejected" `Quick
+            (with_store test_resolved_row_missing_current_field_is_rejected)
+        ; test_case "malformed JSONL is unavailable" `Quick
+            (with_store test_malformed_jsonl_is_unavailable)
         ; test_case "empty store is an empty page" `Quick
             (with_store test_empty_store_is_an_empty_page)
         ] )
     ; ( "judge evidence"
-      , [ test_case "judge evidence passes through, legacy rows project null" `Quick
+      , [ test_case "judge evidence passes through" `Quick
             (with_store test_judge_evidence_passes_through)
         ] )
     ]

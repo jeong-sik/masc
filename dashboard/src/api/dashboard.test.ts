@@ -1626,12 +1626,56 @@ describe('fetchDashboardMemory', () => {
 })
 
 describe('fetchDashboardGate', () => {
+  const gateHitl = {
+    gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+    judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
+  } as const
+
+  const emptyResolvedHistory = {
+    recent_resolved: [],
+    recent_resolved_page: {
+      returned: 0,
+      matched: 0,
+      limit: 20,
+      window_minutes: 1440,
+      truncated: false,
+      scan_exhausted: false,
+    },
+    recent_resolved_state: { state: 'ready' },
+  } as const
+
+  function currentResolvedRow(overrides: Record<string, unknown> = {}) {
+    const decisionKind = overrides.decision_kind === 'reject' ? 'reject' : 'approve'
+    return {
+      id: 'appr-current',
+      event: 'resolved',
+      keeper_name: 'keeper-a',
+      tool_name: 'fs_write',
+      decision: decisionKind === 'approve' ? 'approve' : 'reject:operator denied',
+      decision_kind: decisionKind,
+      decision_reason: decisionKind === 'approve' ? null : 'operator denied',
+      resolved_at: 1_782_522_123,
+      turn_id: null,
+      task_id: null,
+      goal_id: null,
+      goal_ids: [],
+      actor: 'operator',
+      decision_source: 'human_operator',
+      summary_status: 'not_requested',
+      exact_attempt: { state: 'unbound' },
+      ...overrides,
+    }
+  }
+
   it('requests a forced Gate snapshot when asked', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         approval_queue: [],
         approval_queue_state: { state: 'ready' },
-        recent_resolved: [],
+        ...emptyResolvedHistory,
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1651,7 +1695,7 @@ describe('fetchDashboardGate', () => {
         approval_queue: [],
         approval_queue_state: { state: 'ready' },
         recent_resolved: [
-          {
+          currentResolvedRow({
             id: 'appr-done',
             keeper_name: 'keeper-a',
             tool_name: 'fs_write',
@@ -1659,16 +1703,28 @@ describe('fetchDashboardGate', () => {
             decision_kind: 'reject',
             decision_reason: 'operator denied',
             resolved_at: 1_782_522_123,
-          },
-          {
+          }),
+          currentResolvedRow({
             id: 'appr-approved',
             keeper_name: 'keeper-a',
             tool_name: 'shell_exec',
             decision: 'approve',
             decision_kind: 'approve',
             resolved_at: 1_782_522_183,
-          },
+          }),
         ],
+        recent_resolved_page: {
+          returned: 2,
+          matched: 2,
+          limit: 20,
+          window_minutes: 1440,
+          truncated: false,
+          scan_exhausted: false,
+        },
+        recent_resolved_state: { state: 'ready' },
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1706,14 +1762,19 @@ describe('fetchDashboardGate', () => {
       new Response(JSON.stringify({
         approval_queue: [],
         approval_queue_state: { state: 'ready' },
-        recent_resolved: [],
+        ...emptyResolvedHistory,
+        approval_rules_state: { state: 'ready' },
         approval_rules: [{
           id: 'rule-1',
           keeper_name: 'keeper-a',
           tool_name: 'fs_write',
-          request_fingerprint: 'abcdef1234567890',
+          request_fingerprint: 'a'.repeat(64),
           created_at: 1_783_123_200,
+          created_by: 'operator',
+          source_approval_id: 'appr-1',
+          expires_at: null,
         }],
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1725,16 +1786,61 @@ describe('fetchDashboardGate', () => {
 
     expect(result.approval_rules).toEqual([
       expect.objectContaining({
-        request_fingerprint: 'abcdef1234567890',
-        created_at: '2026-07-04T00:00:00.000Z',
+        request_fingerprint: 'a'.repeat(64),
+        created_at: 1_783_123_200,
+        expires_at: null,
       }),
     ])
   })
 
-  // The resolved history is capped by the server. Without the page bounds a
-  // client renders a slice as the whole history, so a page that is absent or
-  // incomplete must normalize to null ("completeness unknown") rather than to
-  // a zeroed record that reads as "this is everything".
+  it('preserves approval rule-store unavailability', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        ...emptyResolvedHistory,
+        approval_rules: [],
+        approval_rules_state: {
+          state: 'unavailable',
+          error: 'approval rules store unreadable',
+        },
+        hitl: gateHitl,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    const result = await fetchDashboardGate()
+
+    expect(result.approval_rules_state).toEqual({
+      state: 'unavailable',
+      error: 'approval rules store unreadable',
+    })
+  })
+
+  it('rejects a malformed approval rule instead of dropping it', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        ...emptyResolvedHistory,
+        approval_rules_state: { state: 'ready' },
+        approval_rules: [{
+          id: 'rule-invalid',
+          keeper_name: 'keeper-a',
+          tool_name: 'fs_write',
+          request_fingerprint: 'not-a-sha256',
+          created_at: 1_783_123_200,
+          created_by: null,
+          source_approval_id: null,
+          expires_at: null,
+        }],
+        hitl: gateHitl,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    await expect(fetchDashboardGate()).rejects.toThrow('approval_rules contains an invalid rule')
+  })
+
+  // Rows, bounds, and availability form one exact current snapshot contract.
   function gateResponseWithPage(page: unknown) {
     return vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -1742,6 +1848,10 @@ describe('fetchDashboardGate', () => {
         approval_queue_state: { state: 'ready' },
         recent_resolved: [],
         recent_resolved_page: page,
+        recent_resolved_state: { state: 'ready' },
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1751,27 +1861,27 @@ describe('fetchDashboardGate', () => {
 
   it('normalizes a complete resolved-history page', async () => {
     vi.stubGlobal('fetch', gateResponseWithPage({
-      returned: 20,
-      matched: 149,
+      returned: 0,
+      matched: 0,
       limit: 20,
       window_minutes: 1440,
-      truncated: true,
+      truncated: false,
       scan_exhausted: false,
     }))
 
     const result = await fetchDashboardGate()
 
     expect(result.recent_resolved_page).toEqual({
-      returned: 20,
-      matched: 149,
+      returned: 0,
+      matched: 0,
       limit: 20,
       window_minutes: 1440,
-      truncated: true,
+      truncated: false,
       scan_exhausted: false,
     })
   })
 
-  it('rejects a partial resolved-history page instead of defaulting it', async () => {
+  it('rejects a partial resolved-history page', async () => {
     vi.stubGlobal('fetch', gateResponseWithPage({
       returned: 20,
       matched: 149,
@@ -1779,17 +1889,13 @@ describe('fetchDashboardGate', () => {
       // window_minutes and the two flags are missing: an older server, or drift.
     }))
 
-    const result = await fetchDashboardGate()
-
-    expect(result.recent_resolved_page).toBeNull()
+    await expect(fetchDashboardGate()).rejects.toThrow('ready recent_resolved_page is invalid')
   })
 
-  it('reports an absent resolved-history page as unknown, not as a full history', async () => {
+  it('rejects an absent resolved-history page', async () => {
     vi.stubGlobal('fetch', gateResponseWithPage(undefined))
 
-    const result = await fetchDashboardGate()
-
-    expect(result.recent_resolved_page).toBeNull()
+    await expect(fetchDashboardGate()).rejects.toThrow('ready recent_resolved_page is invalid')
   })
 
   it('rejects a resolved-history page with a nonsensical window', async () => {
@@ -1802,9 +1908,35 @@ describe('fetchDashboardGate', () => {
       scan_exhausted: false,
     }))
 
+    await expect(fetchDashboardGate()).rejects.toThrow('ready recent_resolved_page is invalid')
+  })
+
+  it('preserves resolved-history storage unavailability', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        recent_resolved: null,
+        recent_resolved_page: null,
+        recent_resolved_state: {
+          state: 'unavailable',
+          stage: 'list_recent_resolved',
+          error: 'audit JSONL unreadable',
+        },
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
     const result = await fetchDashboardGate()
 
-    expect(result.recent_resolved_page).toBeNull()
+    expect(result.recent_resolved).toBeNull()
+    expect(result.recent_resolved_state).toEqual({
+      state: 'unavailable',
+      stage: 'list_recent_resolved',
+      error: 'audit JSONL unreadable',
+    })
   })
 
   it('preserves typed unavailable queue state without fabricating an empty ready queue', async () => {
@@ -1819,7 +1951,10 @@ describe('fetchDashboardGate', () => {
           severity: 'bad',
           icon: '!',
         },
-        recent_resolved: [],
+        ...emptyResolvedHistory,
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1894,7 +2029,10 @@ describe('fetchDashboardGate', () => {
           },
         ],
         approval_queue_state: { state: 'ready' },
-        recent_resolved: [],
+        ...emptyResolvedHistory,
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1910,7 +2048,7 @@ describe('fetchDashboardGate', () => {
     ])
   })
 
-  it('carries judge evidence on resolved rows and null for pre-enrichment events', async () => {
+  it('carries judge evidence on resolved rows', async () => {
     const judgeSummary = {
       summary_version: 2,
       generated_at: 1_782_522_120,
@@ -1925,7 +2063,7 @@ describe('fetchDashboardGate', () => {
         approval_queue: [],
         approval_queue_state: { state: 'ready' },
         recent_resolved: [
-          {
+          currentResolvedRow({
             id: 'appr-judged',
             keeper_name: 'keeper-a',
             tool_name: 'shell_exec',
@@ -1946,18 +2084,20 @@ describe('fetchDashboardGate', () => {
               status: 'completed',
               quarantine_cause: null,
             },
-          },
-          {
-            id: 'appr-legacy',
-            keeper_name: 'keeper-a',
-            tool_name: 'fs_write',
-            decision: 'approve',
-            decision_kind: 'approve',
-            resolved_at: 1_782_522_100,
-            summary_status: null,
-            exact_attempt: null,
-          },
+          }),
         ],
+        recent_resolved_page: {
+          returned: 1,
+          matched: 1,
+          limit: 20,
+          window_minutes: 1440,
+          truncated: false,
+          scan_exhausted: false,
+        },
+        recent_resolved_state: { state: 'ready' },
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1976,16 +2116,15 @@ describe('fetchDashboardGate', () => {
     expect(
       judged?.exact_attempt?.state === 'bound' ? judged.exact_attempt.slot_id : null,
     ).toBe('glm-coding.glm-5-turbo')
-    const legacy = result.recent_resolved?.find(item => item.id === 'appr-legacy')
-    expect(legacy?.summary_status).toBeNull()
-    expect(legacy?.exact_attempt).toBeNull()
   })
 
-  it('parses the closed judge_lane variant and drops shapes outside it', async () => {
+  it('parses the closed judge_lane variant and rejects shapes outside it', async () => {
     const snapshot = (judgeLane: unknown) => new Response(JSON.stringify({
       approval_queue: [],
       approval_queue_state: { state: 'ready' },
-      recent_resolved: [],
+      ...emptyResolvedHistory,
+      approval_rules: [],
+      approval_rules_state: { state: 'ready' },
       hitl: {
         gate_mode: { mode: 'auto_judge', configured: false, state: 'ready' },
         judge_lane: judgeLane,
@@ -2022,7 +2161,7 @@ describe('fetchDashboardGate', () => {
       lane_id: 'hitl_auto_judge',
       slots: [],
     })))
-    expect((await fetchDashboardGate()).hitl?.judge_lane).toBeUndefined()
+    await expect(fetchDashboardGate()).rejects.toThrow('hitl.judge_lane.slots is invalid')
   })
 })
 

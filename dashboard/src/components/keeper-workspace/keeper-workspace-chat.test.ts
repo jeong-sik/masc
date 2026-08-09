@@ -35,6 +35,15 @@ function gateResponse(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
     approval_queue: queue,
     approval_queue_state: { state: 'ready' },
     recent_resolved: [],
+    recent_resolved_page: {
+      returned: 0,
+      matched: 0,
+      limit: 20,
+      window_minutes: 1440,
+      truncated: false,
+      scan_exhausted: false,
+    },
+    recent_resolved_state: { state: 'ready' },
     approval_rules: [],
   } as DashboardGateResponse
 }

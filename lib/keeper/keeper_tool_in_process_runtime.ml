@@ -312,6 +312,33 @@ let handle_memory_search ~config ~(meta : keeper_meta) ~ctx_work ~args =
   Keeper_tool_memory_runtime.keeper_memory_search_json ~config ~meta ~ctx_work ~args
 ;;
 
+let handle_memory_write_with_outcome
+      ~config
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~args
+      ()
+  =
+  let authorize_external_effect ~operation ~input continue =
+    with_external_gate_execution
+      ~config
+      ~meta
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~operation
+      ~input
+      continue
+  in
+  Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
+    ~config
+    ~meta
+    ~authorize_external_effect
+    ~args
+;;
+
 let handle_library_search_with_outcome ~(meta : keeper_meta) ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_library.handle_search

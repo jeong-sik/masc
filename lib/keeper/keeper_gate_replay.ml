@@ -166,6 +166,9 @@ let network_read_operation = Keeper_tool_in_process_runtime.network_read_gate_op
 let connector_post_operation =
   Keeper_tool_in_process_runtime.connector_post_gate_operation
 ;;
+let memory_write_operation =
+  Keeper_tool_memory_runtime.memory_write_gate_operation
+;;
 
 (* The producer owns both the argument schema and the effect encoding, so it
    owns the inversion; replay only decides whether to spend the grant. *)
@@ -184,6 +187,9 @@ let network_read_of_gate_input =
 let connector_post_of_gate_input =
   Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input
 ;;
+let memory_write_args_of_gate_input =
+  Keeper_tool_memory_runtime.replay_memory_write_args_of_gate_input
+;;
 
 (* Which approved operations this module can spend without the Keeper
    re-emitting the call. Separated from the replay body so the set is
@@ -194,6 +200,7 @@ type replayable =
   | Replay_execute
   | Replay_network_read
   | Replay_connector_post
+  | Replay_memory_write
 
 let replayable_of_operation operation =
   if String.equal operation write_operation
@@ -204,6 +211,8 @@ let replayable_of_operation operation =
   then Some Replay_network_read
   else if String.equal operation connector_post_operation
   then Some Replay_connector_post
+  else if String.equal operation memory_write_operation
+  then Some Replay_memory_write
   else None
 ;;
 
@@ -914,7 +923,17 @@ let replay_approved_effect
               ?continuation_channel
               ?gate_context
               ~gate_grant:grant
-              connector_post))
+              connector_post)
+     | Some Replay_memory_write ->
+       replay memory_write_operation memory_write_args_of_gate_input (fun args ->
+         Keeper_tool_in_process_runtime.handle_memory_write_with_outcome
+           ~config
+           ~meta
+           ?continuation_channel
+           ?gate_context
+           ~gate_grant:grant
+           ~args
+           ()))
 ;;
 
 module For_testing = struct

@@ -925,9 +925,8 @@ let run_keeper_invocation_turn_admitted_inner
    ([Keeper_unified_turn.run_keeper_cycle]); this gives the chat lane that
    lifecycle instead of adding a second projection beside it.
 
-   Placed on the admitted body, which is the single point both chat entry
-   paths ([handle_keeper_invocation] and the [on_admitted] arm) funnel through,
-   and which by construction runs while the turn slot is held.
+   Placed on the admitted body, which is reached only by the Owner operation
+   child after its durable Queued-to-Running claim.
 
    [mark_turn_finished] is idempotent and runs on both the normal and the
    exceptional exit. Its own failure must not replace the turn's result or
@@ -975,118 +974,6 @@ let run_keeper_invocation_turn_admitted
     raise exn
 ;;
 
-let handle_keeper_invocation
-      ?on_text_delta
-      ?on_event
-      ?event_bus
-      ?continuation_channel
-      ?on_admission_rejected
-      ?on_admitted
-      ~surface
-      ~request
-      ?direct_message
-      ctx
-  : tool_result
-  =
-  let event_bus =
-    match event_bus with
-    | Some _ -> event_bus
-    | None -> Event_bus_slots.get_keeper ()
-  in
-  let name = Keeper_invocation_contract.target_name request in
-  match
-    Keeper_turn_admission.run_serialized
-      ~base_path:ctx.config.base_path
-      ~keeper_name:name
-      (fun () ->
-        match on_admitted with
-        | Some notify ->
-          (match notify () with
-           | Ok () ->
-             run_keeper_invocation_turn_admitted
-               ?on_text_delta
-               ?on_event
-               ?event_bus
-               ?continuation_channel
-               ~surface
-               ~request
-               ?direct_message
-               ctx
-           | Error detail ->
-             tool_result_error
-               ("keeper turn admission persistence failed: " ^ detail))
-        | None ->
-          run_keeper_invocation_turn_admitted
-            ?on_text_delta
-            ?on_event
-            ?event_bus
-            ?continuation_channel
-            ~surface
-            ~request
-            ?direct_message
-            ctx
-            )
-    with
-    | `Ran result -> result
-    | `Rejected
-        ({ Keeper_turn_admission.shutdown_operation_id = Some operation_id
-         ; _
-         } as rejection) ->
-        Option.iter (fun notify -> notify rejection) on_admission_rejected;
-        tool_result_error
-          (Printf.sprintf
-             "keeper %s is stopping under operation %s"
-             name
-             (Keeper_shutdown_types.Operation_id.to_string operation_id))
-    | `Rejected
-        ({ Keeper_turn_admission.waiting
-         ; in_flight
-         ; shutdown_operation_id = None
-         } as rejection) ->
-        Option.iter (fun notify -> notify rejection) on_admission_rejected;
-        let in_flight_text =
-          match in_flight with
-          | None -> ""
-          | Some { Keeper_turn_admission.lane; started_at } ->
-              (* NDT-OK: gettimeofday renders the in-flight turn age for the error text only *)
-              Printf.sprintf
-                "; in-flight %s turn running for %.0fs"
-                (Keeper_turn_admission.lane_to_string lane)
-                (Unix.gettimeofday () -. started_at)
-        in
-        tool_result_error
-          (Printf.sprintf
-             "keeper %s turn queue is full (%d chat requests waiting%s); retry later"
-             name
-             waiting
-             in_flight_text)
-
-let handle_keeper_msg
-      ?on_text_delta
-      ?on_event
-      ?event_bus
-      ?continuation_channel
-      ?on_admission_rejected
-      ?on_admitted
-      ctx
-      direct_message
-  =
-  let request =
-    Keeper_invocation_contract.direct_message_request direct_message
-  in
-  handle_keeper_invocation
-    ?on_text_delta
-    ?on_event
-    ?event_bus
-    ?continuation_channel
-    ?on_admission_rejected
-    ?on_admitted
-    ~surface:Direct_message
-    ~request
-    ~direct_message
-    ctx
-;;
-
 let handle_keeper_msg_admitted
       ~admission_token:_
       ?on_text_delta
@@ -1107,13 +994,5 @@ let handle_keeper_msg_admitted
     ~surface:Direct_message
     ~request
     ~direct_message
-    ctx
-;;
-
-let handle_keeper_delegate ?event_bus ctx request =
-  handle_keeper_invocation
-    ?event_bus
-    ~surface:Keeper_delegate
-    ~request
     ctx
 ;;

@@ -4516,4 +4516,53 @@ describe('official-client login probe API', () => {
       '유효하지 않은 official-client probe payload',
     )
   })
+
+  it('accepts a measured login failure without inventing login metadata', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ...readyPayload,
+        login: {
+          status: 'login_required',
+          authenticated: false,
+          detail: 'the official CLI has no active account',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await probeOfficialClientLogin('codex.codex')
+
+    expect(result.login).toEqual({
+      status: 'login_required',
+      authenticated: false,
+      auth_method: null,
+      subscription_type: null,
+      api_provider: null,
+      detail: 'the official CLI has no active account',
+    })
+    expect(result.execution.status).toBe('not_measured')
+  })
+
+  it('rejects fields outside the current probe contract', async () => {
+    for (const payload of [
+      { ...readyPayload, unexpected_status: 'ready' },
+      { ...readyPayload, login: { ...readyPayload.login, detail: 'extra field' } },
+      { ...readyPayload, client: { ...readyPayload.client, version: 'extra field' } },
+    ]) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(probeOfficialClientLogin('codex.codex')).rejects.toThrow(
+        '유효하지 않은 official-client probe payload',
+      )
+    }
+  })
 })

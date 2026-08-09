@@ -22,7 +22,6 @@ function loginTone(status: DashboardOfficialClientLoginStatus | 'not_measured'):
 }
 
 function measuredAtText(value: number): string {
-  if (!Number.isFinite(value)) return '—'
   return new Date(value * 1_000).toLocaleString()
 }
 

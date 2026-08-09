@@ -88,8 +88,56 @@ describe('InternalAgentsMonitor', () => {
     expect(screen.getByText(/Completion verdict recorded: APPROVE/)).toBeTruthy()
 
     const filters = screen.getByRole('group', { name: 'Internal agent filters' })
-    fireEvent.click(within(filters).getByRole('button', { name: 'Judge 0' }))
+    fireEvent.click(within(filters).getByRole('button', { name: 'Auto Judge 0' }))
     expect(screen.queryByText('report_review_verdict')).toBeNull()
+  })
+
+  it('keeps Auto Judge and Board Attention as separate exact execution kinds', async () => {
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchExactLaneRuns.mockResolvedValue({
+      count: 2,
+      generatedAt: 'now',
+      runs: [
+        {
+          runId: 'auto-judge-1',
+          lane: 'hitl_auto_judge',
+          subjectId: 'approval-1',
+          actor: 'keeper-a',
+          startedAt: 1786000002,
+          input: { kind: 'exact', payload: { approval_id: 'approval-1' } },
+          status: 'succeeded',
+          elapsedSeconds: 0.4,
+          output: { decision: 'allow' },
+        },
+        {
+          runId: 'board-attention-1',
+          lane: 'board_attention_exact',
+          subjectId: 'board-post-1',
+          actor: 'keeper-a',
+          startedAt: 1786000001,
+          input: { kind: 'exact', payload: { post_id: 'board-post-1' } },
+          status: 'succeeded',
+          elapsedSeconds: 0.7,
+          output: { action: 'reply' },
+        },
+      ],
+    })
+
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+    const filters = await screen.findByRole('group', { name: 'Internal agent filters' })
+
+    expect(within(filters).getByRole('button', { name: 'Auto Judge 1' })).toBeTruthy()
+    expect(within(filters).getByRole('button', { name: 'Board Attention 1' })).toBeTruthy()
+    expect(container.textContent).not.toContain('Board Judge')
+
+    fireEvent.click(within(filters).getByRole('button', { name: 'Auto Judge 1' }))
+    expect(screen.getByRole('button', { name: /Auto Judge approval-1/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Board Attention board-post-1/i })).toBeNull()
+
+    fireEvent.click(within(filters).getByRole('button', { name: 'Board Attention 1' }))
+    expect(screen.getByRole('button', { name: /Board Attention board-post-1/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Auto Judge approval-1/i })).toBeNull()
   })
 
   it('joins a librarian run to the exact memory revision and shows changed claims', async () => {

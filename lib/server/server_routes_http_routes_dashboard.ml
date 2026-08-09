@@ -828,12 +828,11 @@ let add_routes ~sw ~clock router =
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body ->
-             let base_path = (Mcp_server.workspace_config state).base_path in
              respond_official_client_session_result
                req
                reqd
                (Official_client_session.resolve_body
-                  ~base_path
+                  ~config:(Mcp_server.workspace_config state)
                   ~actor:agent_name
                   ~body)))
          request reqd)

@@ -18,7 +18,7 @@ val snapshot :
   (Yojson.Safe.t, error) result
 
 val resolve_body :
-  base_path:string ->
+  config:Workspace.config ->
   actor:string ->
   body:string ->
   (Yojson.Safe.t, error) result

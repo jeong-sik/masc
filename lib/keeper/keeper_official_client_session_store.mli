@@ -66,6 +66,21 @@ type recovery_resolution =
   | Retry_previous
   | Restart_fresh
 
+type recovery_resolution_application =
+  | Applied
+  | Replayed
+
+type recovery_resolution_error =
+  | Invalid_resolved_by
+  | Invalid_resolved_at
+  | Session_missing
+  | Session_changed
+  | Recovery_id_changed
+  | Recovery_not_required
+  | Retry_previous_unavailable
+  | Resolution_conflict
+  | Store_unavailable of string
+
 type recovery_resolution_record =
   { recovery_id : string
   ; failure : recovery_failure
@@ -209,9 +224,11 @@ val resolve_recovery :
   resolution:recovery_resolution ->
   resolved_by:string ->
   resolved_at:float ->
-  (t, string) result
+  ((t * recovery_resolution_application), recovery_resolution_error) result
 (** Resolve one exact recovery claim with compare-and-swap authority.
     [Retry_previous] restores the last settled session, [Restart_fresh] makes
-    the next claim start a new session. *)
+    the next claim start a new session. Repeating the same recovery id and
+    decision returns the already committed binding as [Replayed]; a different
+    decision for the same recovery id is a conflict. *)
 (** Every phase change is a process-safe durable compare-and-swap followed by
     exact read-back. Any incomplete phase blocks a later automatic claim. *)

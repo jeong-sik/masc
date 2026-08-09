@@ -148,6 +148,11 @@ let response_json ~keeper_name session =
     ]
 ;;
 
+let resolution_application_json = function
+  | Keeper_official_client_session_store.Applied -> `String "applied"
+  | Replayed -> `String "replayed"
+;;
+
 let validate_keeper_name keeper_name =
   let keeper_name = String.trim keeper_name in
   if keeper_name = ""
@@ -223,9 +228,86 @@ let parse_body body =
 
 let conflict code message = error Conflict code message
 
-let resolve_body ~base_path ~actor ~body =
+let audit_resolution config ~actor request ~application ~outcome =
+  try
+    Audit_log.log_action
+      config
+      ~agent_id:actor
+      ~action:(Audit_log.Custom "official_client_session_recovery_resolve")
+      ~details:
+        (`Assoc
+          [ "keeper_name", `String request.keeper_name
+          ; "recovery_id", `String request.recovery_id
+          ; "resolution", resolution_json request.resolution
+          ; ( "application"
+            , match application with
+              | None -> `Null
+              | Some application -> resolution_application_json application )
+          ])
+      ~outcome
+      ();
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let resolution_response_json ~keeper_name ~session ~application ~audit =
+  match response_json ~keeper_name (Some session) with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       @ [ "resolution_application", resolution_application_json application
+         ; "audit", Audit_log.write_result_to_json audit
+         ])
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as
+    impossible ->
+    impossible
+;;
+
+let store_resolution_error = function
+  | Keeper_official_client_session_store.Invalid_resolved_by ->
+    error Bad_request "actor_required" "actor is required"
+  | Invalid_resolved_at ->
+    error
+      Service_unavailable
+      "official_client_session_clock_invalid"
+      "official-client recovery resolution clock was invalid"
+  | Session_missing ->
+    conflict
+      "official_client_session_missing"
+      "Keeper has no durable official-client session"
+  | Session_changed ->
+    conflict
+      "official_client_session_changed"
+      "official-client session changed before recovery resolution"
+  | Recovery_id_changed ->
+    conflict
+      "recovery_id_changed"
+      "official-client recovery identity changed before resolution"
+  | Recovery_not_required ->
+    conflict
+      "recovery_not_required"
+      "official-client session is not awaiting recovery"
+  | Retry_previous_unavailable ->
+    conflict
+      "retry_previous_unavailable"
+      "official-client recovery has no exact previous settlement to retry"
+  | Resolution_conflict ->
+    conflict
+      "recovery_resolution_conflict"
+      "official-client recovery was already resolved with a different decision"
+  | Store_unavailable message ->
+    error
+      Service_unavailable
+      "official_client_session_resolution_failed"
+      message
+;;
+
+let resolve_body ~config ~actor ~body =
   let* request = parse_body body in
   let* actor = non_empty "actor" actor in
+  let base_path = config.Workspace.base_path in
   let* current = load ~base_path ~keeper_name:request.keeper_name in
   let* current =
     match current with
@@ -234,28 +316,6 @@ let resolve_body ~base_path ~actor ~body =
         "official_client_session_missing"
         "Keeper has no durable official-client session"
     | Some current -> Ok current
-  in
-  let* recovery =
-    match current.phase with
-    | Keeper_official_client_session_store.Recovery_required recovery
-      when String.equal recovery.recovery_id request.recovery_id ->
-      Ok recovery
-    | Recovery_required _ ->
-      conflict
-        "recovery_id_changed"
-        "official-client recovery identity changed before resolution"
-    | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
-      conflict
-        "recovery_not_required"
-        "official-client session is not awaiting recovery"
-  in
-  let* () =
-    match request.resolution, recovery.previous_settlement with
-    | Keeper_official_client_session_store.Retry_previous, None ->
-      conflict
-        "retry_previous_unavailable"
-        "official-client recovery has no exact previous settlement to retry"
-    | Retry_previous, Some _ | Restart_fresh, _ -> Ok ()
   in
   match
     Keeper_official_client_session_store.resolve_recovery
@@ -267,21 +327,34 @@ let resolve_body ~base_path ~actor ~body =
       ~resolved_by:actor
       ~resolved_at:(Time_compat.now ())
   with
-  | Ok resolved ->
-    Ok (response_json ~keeper_name:request.keeper_name (Some resolved))
-  | Error message ->
-    (match load ~base_path ~keeper_name:request.keeper_name with
-     | Ok (Some observed) when observed <> current ->
-       conflict
-         "official_client_session_changed"
-         "official-client session changed before recovery resolution"
-     | Ok None ->
-       conflict
-         "official_client_session_disappeared"
-         "official-client session disappeared before recovery resolution"
-     | Ok (Some _) | Error _ ->
-       error
-         Service_unavailable
-         "official_client_session_resolution_failed"
-         message)
+  | Ok (resolved, application) ->
+    let audit =
+      audit_resolution
+        config
+        ~actor
+        request
+        ~application:(Some application)
+        ~outcome:Audit_log.Success
+    in
+    Ok
+      (resolution_response_json
+         ~keeper_name:request.keeper_name
+         ~session:resolved
+         ~application
+         ~audit)
+  | Error store_error ->
+    let mapped = store_resolution_error store_error in
+    let detail =
+      match mapped with
+      | Error { code; message; _ } -> code ^ ": " ^ message
+      | Ok _ -> "official-client recovery resolution failed"
+    in
+    ignore
+      (audit_resolution
+         config
+         ~actor
+         request
+         ~application:None
+         ~outcome:(Audit_log.Failure detail));
+    mapped
 ;;

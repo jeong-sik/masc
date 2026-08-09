@@ -817,10 +817,55 @@ let test_keeper_protocol_failure_enters_recovery () =
 
 let test_dashboard_official_client_recovery_projection_and_resolution () =
   let base_path = temp_workspace "masc-official-client-dashboard-recovery-" in
+  let config = Workspace.default_config base_path in
   let keeper_name = "codex-fixture" in
+  let success_capture = Filename.temp_file "masc-codex-recovery-retry-" ".jsonl" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String keeper_name
+           ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
+           ; "trace_id", `String "trace-official-client-recovery"
+           ; "allowed_paths", `List [ `String base_path ]
+           ])
+    with
+    | Ok meta -> meta
+    | Error detail -> fail detail
+  in
+  ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
   Fun.protect
-    ~finally:(fun () -> cleanup_tree base_path)
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.unregister ~base_path keeper_name;
+      cleanup_tree base_path;
+      Sys.remove success_capture)
     (fun () ->
+       let stimulus : Keeper_event_queue.stimulus =
+         { post_id = "official-client-recovery-stimulus"
+         ; urgency = Keeper_event_queue.Normal
+         ; arrived_at = 1.0
+         ; payload = Keeper_event_queue.Bootstrap
+         }
+       in
+       (match
+          Keeper_registry_event_queue.enqueue_durable_result
+            ~base_path
+            keeper_name
+            stimulus
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       let selection =
+         match
+           Keeper_registry_event_queue.select_when_result
+             ~base_path
+             keeper_name
+             ~ready:(fun _ -> true)
+         with
+         | Ok (Some selection) -> selection
+         | Ok None -> fail "durable recovery stimulus was not selected"
+         | Error detail -> fail detail
+       in
        with_fixture
          [ init_result
          ; account_chatgpt
@@ -832,6 +877,14 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
             match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
             | Error _ -> ()
             | Ok _ -> fail "provider-rejected official-client turn completed");
+       (match
+          Keeper_registry_event_queue.validate_pending_selection_result
+            ~base_path
+            keeper_name
+            ~selection
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
        let recovery =
          match Keeper_official_client_session_store.load ~base_path ~keeper_name with
          | Error detail -> fail detail
@@ -892,7 +945,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
        in
        (match
           Server_dashboard_official_client_session.resolve_body
-            ~base_path
+            ~config
             ~actor:"dashboard-admin"
             ~body:retry_body
         with
@@ -914,7 +967,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
        in
        let resolved =
          Server_dashboard_official_client_session.resolve_body
-           ~base_path
+           ~config
            ~actor:"dashboard-admin"
            ~body
          |> Result.get_ok
@@ -929,9 +982,52 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
          (resolved
           |> member "session"
           |> member "last_recovery_resolution"
+         |> member "resolved_by"
+         |> to_string);
+       check string
+         "dashboard resolution applied"
+         "applied"
+         (resolved |> member "resolution_application" |> to_string);
+       check bool
+         "dashboard resolution audit recorded"
+         true
+         (resolved |> member "audit" |> member "recorded" |> to_bool);
+       let replayed =
+         Server_dashboard_official_client_session.resolve_body
+           ~config
+           ~actor:"dashboard-admin-retry"
+           ~body
+         |> Result.get_ok
+       in
+       check string
+         "dashboard response loss replays committed resolution"
+         "replayed"
+         (replayed |> member "resolution_application" |> to_string);
+       check string
+         "replayed resolution preserves original actor"
+         "dashboard-admin"
+         (replayed
+          |> member "session"
+          |> member "last_recovery_resolution"
           |> member "resolved_by"
           |> to_string);
+       let selected_after_resolution =
+         match
+           Keeper_registry_event_queue.select_when_result
+             ~base_path
+             keeper_name
+             ~ready:(fun _ -> true)
+         with
+         | Ok (Some selection) -> selection
+         | Ok None -> fail "resolution lost the retained durable stimulus"
+         | Error detail -> fail detail
+       in
+       check bool
+         "resolution reuses the exact durable stimulus"
+         true
+         (selected_after_resolution = selection);
        with_fixture
+         ~capture_path:success_capture
          [ init_result
          ; account_chatgpt
          ; thread_result
@@ -947,6 +1043,34 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
                 "post-resolution Keeper response"
                 "MASC_SUBSCRIPTION_OK"
                 (keeper_response_text result));
+       let success_requests =
+         In_channel.with_open_bin success_capture (fun input ->
+           In_channel.input_lines input |> List.map Yojson.Safe.from_string)
+       in
+       check int
+         "resolution admits exactly one provider turn"
+         1
+         (success_requests
+          |> List.filter (fun json ->
+            Yojson.Safe.Util.member "method" json = `String "turn/start")
+          |> List.length);
+       (match
+          Keeper_registry_event_queue.ack_pending_result
+            ~base_path
+            keeper_name
+            ~selection:selected_after_resolution
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       let queue_after_success =
+         match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+         | Ok queue -> queue
+         | Error detail -> fail detail
+       in
+       check int
+         "successful retry acknowledges the durable stimulus"
+         0
+         (Keeper_event_queue.length queue_after_success);
        let settled =
          match Keeper_official_client_session_store.load ~base_path ~keeper_name with
          | Error detail -> fail detail
@@ -968,7 +1092,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
        in
        match
          Server_dashboard_official_client_session.resolve_body
-           ~base_path
+           ~config
            ~actor:"dashboard-admin"
            ~body:duplicate_body
        with

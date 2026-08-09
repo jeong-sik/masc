@@ -317,7 +317,7 @@ let test_restart_recovery_and_transient_release () =
       | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
         fail "old process claim did not enter recovery"
     in
-    let ready =
+    let ready, application =
       resolve_recovery
         ~base_path
         ~keeper_name
@@ -328,6 +328,7 @@ let test_restart_recovery_and_transient_release () =
         ~resolved_at:4.0
       |> Result.get_ok
     in
+    check bool "recovery applied" true (application = Applied);
     let reclaimed =
       claim
         ~base_path
@@ -401,7 +402,7 @@ let test_exact_recovery_restart () =
      with
      | Error _ -> ()
      | Ok _ -> fail "wrong recovery fence was accepted");
-    let restarted =
+    let restarted, application =
       resolve_recovery
         ~base_path
         ~keeper_name
@@ -412,16 +413,169 @@ let test_exact_recovery_restart () =
         ~resolved_at:4.0
       |> Result.get_ok
     in
+    check bool "recovery applied" true (application = Applied);
     check int "restart drops incomplete turn" 0 restarted.turn_count;
     (match restarted.phase with
      | Ready -> ()
      | Settled _ | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
        fail "fresh restart did not return the binding to Ready");
+    let replayed, replay_application =
+      resolve_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:recovery
+        ~recovery_id
+        ~resolution:Restart_fresh
+        ~resolved_by:"operator-retry"
+        ~resolved_at:5.0
+      |> Result.get_ok
+    in
+    check bool "recovery replayed" true (replay_application = Replayed);
+    check bool "replay returns committed binding" true (restarted = replayed);
+    (match
+       resolve_recovery
+         ~base_path
+         ~keeper_name
+         ~expected:recovery
+         ~recovery_id
+         ~resolution:Retry_previous
+         ~resolved_by:"operator"
+         ~resolved_at:6.0
+     with
+     | Error Resolution_conflict -> ()
+     | Error _ -> fail "different replay decision returned the wrong conflict"
+     | Ok _ -> fail "different replay decision replaced committed recovery");
     match restarted.last_recovery_resolution with
     | Some record ->
       check string "durable actor" "operator" record.resolved_by;
       check string "recovery fence" recovery_id record.recovery_id
     | None -> fail "recovery resolution evidence was not persisted")
+;;
+
+let test_retry_previous_restores_exact_settlement () =
+  with_workspace "masc-official-client-store-retry-" (fun base_path ->
+    let keeper_name = "retry" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let active =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~session_id:"session-1"
+        ~updated_at:2.0
+      |> Result.get_ok
+    in
+    let starting =
+      mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~session_id:"session-1"
+        ~updated_at:3.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:starting
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~updated_at:4.0
+      |> Result.get_ok
+    in
+    let settled =
+      settle
+        ~base_path
+        ~keeper_name
+        ~expected:inflight
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let resumed_claim =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:6.0
+      |> Result.get_ok
+    in
+    let recovery =
+      require_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:resumed_claim
+        ~failure:Protocol_failed
+        ~detail:"resume transport ended before the next turn started"
+        ~required_at:7.0
+      |> Result.get_ok
+    in
+    let recovery_id =
+      match recovery.phase with
+      | Recovery_required required ->
+        check bool
+          "retry retains exact previous settlement"
+          true
+          (required.previous_settlement
+           = Some { session_id = "session-1"; turn_id = "turn-1" });
+        required.recovery_id
+      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        fail "resumed claim did not enter recovery"
+    in
+    let restored, application =
+      resolve_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:recovery
+        ~recovery_id
+        ~resolution:Retry_previous
+        ~resolved_by:"operator"
+        ~resolved_at:8.0
+      |> Result.get_ok
+    in
+    check bool "retry decision applied" true (application = Applied);
+    check int "failed retry does not count" 1 restored.turn_count;
+    (match restored.phase with
+     | Settled { session_id; turn_id } ->
+       check string "restored session" "session-1" session_id;
+       check string "restored turn" "turn-1" turn_id
+     | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+       fail "retry_previous did not restore the exact settlement");
+    let next_claim =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some restored)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:9.0
+      |> Result.get_ok
+    in
+    match next_claim.phase with
+    | Start { previous_settlement; _ } ->
+      check bool
+        "next claim resumes restored session"
+        true
+        (previous_settlement
+         = Some { session_id = "session-1"; turn_id = "turn-1" })
+    | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+      fail "restored settlement did not drive the next resume claim")
 ;;
 
 let write_file path content =
@@ -508,6 +662,10 @@ let () =
             `Quick
             test_restart_recovery_and_transient_release
         ; test_case "exact recovery restart" `Quick test_exact_recovery_restart
+        ; test_case
+            "retry previous restores exact settlement"
+            `Quick
+            test_retry_previous_restores_exact_settlement
         ; test_case "ambiguous JSON rejected" `Quick test_ambiguous_json_is_rejected
         ; test_case
             "tool surface fingerprint canonical"

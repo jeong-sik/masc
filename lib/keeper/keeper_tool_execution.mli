@@ -52,6 +52,10 @@ val failure_data
   -> Yojson.Safe.t
   -> t
 
+(** Preserve the already committed Gate authorization and its audit receipts
+    on every disposition, including a later tool failure. *)
+val with_gate_authorization : Keeper_gate.authorization -> t -> t
+
 (** Preserve the authoritative {!Tool_result.disposition} from a normal MASC
     handler. A [`String] payload stays opaque and is never interpreted as
     JSON. *)

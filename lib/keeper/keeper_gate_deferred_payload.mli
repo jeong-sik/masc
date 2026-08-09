@@ -10,6 +10,7 @@ val create
   :  operation:string
   -> approval_id:string
   -> reason:Keeper_gate.deferred_reason
+  -> audit_receipts:Keeper_approval.Audit.receipt list
   -> ?context:Yojson.Safe.t
   -> unit
   -> t

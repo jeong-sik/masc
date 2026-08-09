@@ -18,6 +18,7 @@ import {
 import type {
   BoardPost,
   DashboardExecutionResponse,
+  KeeperApprovalAuditReceipt,
   SSEEvent,
 } from './types'
 import type * as TransportHealth from './components/transport-health'
@@ -50,11 +51,13 @@ import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-n
 import { operatorError, operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
 import { compositeTick } from './composite-signals'
 import { isRecord } from './lib/type-guards'
+import { normalizeKeeperApprovalAuditReceipt } from './lib/keeper-approval-audit'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
 import { hydrateOasTelemetrySample } from './oas-telemetry-store'
 import {
+  SSE_APPROVAL_AUDIT_EVENT,
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
@@ -76,6 +79,20 @@ import {
 let _refreshGateFn: ((opts?: { force?: boolean }) => void) | null = null
 export function registerGateRefresh(fn: (opts?: { force?: boolean }) => void): void {
   _refreshGateFn = fn
+}
+
+let _observeGateAuditReceiptFn: ((
+  receipts: KeeperApprovalAuditReceipt[],
+  context: { id: string | null; transport: 'sse' },
+) => void) | null = null
+
+export function registerGateAuditReceiptObserver(
+  fn: (
+    receipts: KeeperApprovalAuditReceipt[],
+    context: { id: string | null; transport: 'sse' },
+  ) => void,
+): void {
+  _observeGateAuditReceiptFn = fn
 }
 
 let _refreshOperatorFn: (() => void) | null = null
@@ -657,6 +674,29 @@ export function routeServerPushEvent(event: SSEEvent): void {
     event.type === SSE_APPROVAL_PENDING_EVENT
     || event.type === SSE_APPROVAL_RESOLVED_EVENT
     || event.type === SSE_APPROVAL_SUMMARY_UPDATED_EVENT
+
+  if (
+    (event.type === SSE_APPROVAL_PENDING_EVENT
+      || event.type === SSE_APPROVAL_RESOLVED_EVENT
+      || event.type === SSE_APPROVAL_AUDIT_EVENT)
+    && isRecord(event.payload)
+  ) {
+    const receipt = normalizeKeeperApprovalAuditReceipt(event.payload.audit)
+    const receiptMatchesEnvelope = receipt !== null && (
+      (event.type === SSE_APPROVAL_PENDING_EVENT && receipt.event === 'pending')
+      || (event.type === SSE_APPROVAL_RESOLVED_EVENT && receipt.event === 'resolved')
+      || (
+        event.type === SSE_APPROVAL_AUDIT_EVENT
+        && (receipt.event === 'grant_consumed' || receipt.event === 'gate_allowed')
+      )
+    )
+    if (receipt !== null && receiptMatchesEnvelope) {
+      const id = typeof event.payload.id === 'string' && event.payload.id.trim() !== ''
+        ? event.payload.id
+        : null
+      _observeGateAuditReceiptFn?.([receipt], { id, transport: 'sse' })
+    }
+  }
 
   if (
     event.type.startsWith('decision_')

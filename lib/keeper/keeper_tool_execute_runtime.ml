@@ -353,11 +353,12 @@ let handle_tool_execute_typed
         (match
            gate_decision
          with
-         | Keeper_gate.Deferred { approval_id; reason } ->
+         | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
            Keeper_gate_deferred_payload.create
              ~operation:gate_operation
              ~approval_id
              ~reason
+             ~audit_receipts
              ~context:(`Assoc typed_context_fields)
              ()
            |> Keeper_gate_deferred_payload.to_execution
@@ -374,6 +375,9 @@ let handle_tool_execute_typed
             ~keeper_name:meta.name
             "external effect authorized operation=tool_execute source=%s"
             (Keeper_gate.authorization_source_to_string authorization.source);
+          let authorized result =
+            Keeper_tool_execution.with_gate_authorization authorization result
+          in
           (* NDT-OK: wall clock is used only for elapsed telemetry, never for
              dispatch branching or policy decisions. *)
           let t0 = Unix.gettimeofday () in
@@ -439,11 +443,11 @@ let handle_tool_execute_typed
               meta.name
               cmd_for_log
               (message_for_log diagnostic);
-            typed_error_json diagnostic
+            authorized (typed_error_json diagnostic)
           | Error Keeper_tooling.Execute_shell_ir.Cannot_parse ->
-            typed_error_json "Cannot parse command"
+            authorized (typed_error_json "Cannot parse command")
           | Error Keeper_tooling.Execute_shell_ir.Too_complex ->
-            typed_error_json "Command too complex"
+            authorized (typed_error_json "Command too complex")
           | Error (Keeper_tooling.Execute_shell_ir.Path_reject e) ->
             (* RFC-0208 P1: path-policy denial audit line. *)
             Log.Keeper.warn
@@ -451,9 +455,10 @@ let handle_tool_execute_typed
               meta.name
               cmd_for_log
               (message_for_log e);
-            typed_error_json
-              ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]
-              e
+            authorized
+              (typed_error_json
+                 ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]
+                 e)
           | Ok result ->
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry
@@ -528,9 +533,10 @@ let handle_tool_execute_typed
                     @ sandbox_extra_fields
                     @ dispatched_model_location_fields))
             in
-            if succeeded
-            then Keeper_tool_execution.success payload
-            else Keeper_tool_execution.failure payload
+            authorized
+              (if succeeded
+               then Keeper_tool_execution.success payload
+               else Keeper_tool_execution.failure payload)
         )))
 
 let handle_tool_execute_with_outcome

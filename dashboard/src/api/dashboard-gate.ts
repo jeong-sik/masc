@@ -10,6 +10,7 @@ import {
   normalizeKeeperExactAttempt,
 } from './board'
 import { normalizeKeeperResolvedApprovalDecision } from '../lib/keeper-approval-decision'
+import { normalizeKeeperApprovalAuditReceipt } from '../lib/keeper-approval-audit'
 import type {
   KeeperApprovalRule,
   DashboardGateResponse,
@@ -25,6 +26,7 @@ import type {
   GateJudgeLane,
   GateMode,
   GateModeStatus,
+  KeeperApprovalAuditReceipt,
 } from '../types'
 import type { AbortableRequestOptions } from './core'
 
@@ -462,23 +464,108 @@ export type GateApprovalResolution =
   | { decision: 'approve'; rememberRule: boolean; ruleExpiresAt?: number }
   | { decision: 'reject'; reason: string }
 
-export function resolveGateApproval(
-  id: string,
-  resolution: GateApprovalResolution,
-): Promise<{
-  ok: boolean
+export interface ResolveGateApprovalResponse {
+  ok: true
   id: string
   decision: 'approve' | 'reject'
   rule_id: string | null
-  rule_error: string | null
-}> {
-  return post('/api/v1/dashboard/gate/resolve', {
+  audit_receipts: KeeperApprovalAuditReceipt[]
+}
+
+export interface DeleteGateApprovalRuleResponse {
+  ok: true
+  id: string
+  audit: KeeperApprovalAuditReceipt
+}
+
+function gateMutationProtocolDrift(path: string, detail: string): never {
+  throw new ApiRequestError({
+    method: 'POST',
+    path,
+    detail: `invalid Gate mutation response: ${detail}`,
+    errorCode: 'protocol_drift',
+  })
+}
+
+function decodeResolveGateApprovalResponse(
+  raw: unknown,
+  requestedId: string,
+  requestedDecision: 'approve' | 'reject',
+): ResolveGateApprovalResponse {
+  const path = '/api/v1/dashboard/gate/resolve'
+  if (!isRecord(raw) || !hasExactKeys(raw, [
+    'ok',
+    'id',
+    'decision',
+    'rule_id',
+    'audit_receipts',
+  ])) return gateMutationProtocolDrift(path, 'fields must be exact')
+  if (raw.ok !== true || raw.id !== requestedId || raw.decision !== requestedDecision) {
+    return gateMutationProtocolDrift(path, 'committed identity does not match the request')
+  }
+  const ruleId = raw.rule_id === null
+    ? null
+    : typeof raw.rule_id === 'string' && raw.rule_id.trim() !== ''
+      ? raw.rule_id
+      : gateMutationProtocolDrift(path, 'rule_id must be null or non-blank')
+  if (!Array.isArray(raw.audit_receipts)) {
+    return gateMutationProtocolDrift(path, 'audit_receipts must be an array')
+  }
+  const auditReceipts = raw.audit_receipts.map(normalizeKeeperApprovalAuditReceipt)
+  if (auditReceipts.some(receipt => receipt === null)) {
+    return gateMutationProtocolDrift(path, 'audit_receipts contains an invalid receipt')
+  }
+  const actualEvents = (auditReceipts as KeeperApprovalAuditReceipt[])
+    .map(receipt => receipt.event)
+  const isResolutionOnly = actualEvents.length === 1 && actualEvents[0] === 'resolved'
+  const isRuleCreationAndResolution = ruleId !== null
+    && actualEvents.length === 2
+    && actualEvents[0] === 'rule_created'
+    && actualEvents[1] === 'resolved'
+  if (!isResolutionOnly && !isRuleCreationAndResolution) {
+    return gateMutationProtocolDrift(path, 'audit_receipts do not match the committed mutation')
+  }
+  return {
+    ok: true,
+    id: requestedId,
+    decision: requestedDecision,
+    rule_id: ruleId,
+    audit_receipts: auditReceipts as KeeperApprovalAuditReceipt[],
+  }
+}
+
+function decodeDeleteGateApprovalRuleResponse(
+  raw: unknown,
+  requestedId: string,
+): DeleteGateApprovalRuleResponse {
+  const path = '/api/v1/dashboard/gate/rules/delete'
+  if (!isRecord(raw) || !hasExactKeys(raw, ['ok', 'id', 'audit'])) {
+    return gateMutationProtocolDrift(path, 'fields must be exact')
+  }
+  const audit = normalizeKeeperApprovalAuditReceipt(raw.audit)
+  if (
+    raw.ok !== true
+    || raw.id !== requestedId
+    || audit === null
+    || audit.event !== 'rule_deleted'
+  ) {
+    return gateMutationProtocolDrift(path, 'committed identity or audit receipt is invalid')
+  }
+  return { ok: true, id: raw.id, audit }
+}
+
+export async function resolveGateApproval(
+  id: string,
+  resolution: GateApprovalResolution,
+): Promise<ResolveGateApprovalResponse> {
+  const raw = await post<unknown>('/api/v1/dashboard/gate/resolve', {
     id,
     decision: resolution.decision,
     remember_rule: resolution.decision === 'approve' ? resolution.rememberRule : false,
     reason: resolution.decision === 'reject' ? resolution.reason : undefined,
     rule_expires_at: resolution.decision === 'approve' ? resolution.ruleExpiresAt : undefined,
   })
+  return decodeResolveGateApprovalResponse(raw, id, resolution.decision)
 }
 
 export function retryGateAutoJudge(
@@ -488,10 +575,11 @@ export function retryGateAutoJudge(
   return post('/api/v1/dashboard/gate/retry', { id, ...expected })
 }
 
-export function deleteGateApprovalRule(
+export async function deleteGateApprovalRule(
   id: string,
-): Promise<{ ok: boolean; id: string }> {
-  return post('/api/v1/dashboard/gate/rules/delete', { id })
+): Promise<DeleteGateApprovalRuleResponse> {
+  const raw = await post<unknown>('/api/v1/dashboard/gate/rules/delete', { id })
+  return decodeDeleteGateApprovalRuleResponse(raw, id)
 }
 
 export interface SetGateModeResponse {

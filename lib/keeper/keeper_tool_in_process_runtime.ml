@@ -53,13 +53,14 @@ let external_gate_decision
       ; continuation_channel
       }
   with
-  | Keeper_gate.Deferred { approval_id; reason } ->
+  | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
     Error
       (Gate_deferred
          (Keeper_gate_deferred_payload.create
             ~operation
             ~approval_id
             ~reason
+            ~audit_receipts
             ()))
   | Keeper_gate.Unavailable reason ->
     Error
@@ -82,7 +83,15 @@ let external_gate_decision
       "external effect authorized operation=%s source=%s"
       operation
       (Keeper_gate.authorization_source_to_string authorization.source);
-    Ok ()
+    Ok authorization
+;;
+
+let attach_gate_authorization_to_tool_result authorization result =
+  Tool_result.with_metadata
+    (Keeper_gate.authorization_metadata
+       ?producer_metadata:(Tool_result.metadata result)
+       authorization)
+    result
 ;;
 
 let with_external_gate_tool_result
@@ -106,7 +115,8 @@ let with_external_gate_tool_result
       ~input
       ()
   with
-  | Ok () -> continue ()
+  | Ok authorization ->
+    continue () |> attach_gate_authorization_to_tool_result authorization
   | Error (Gate_deferred deferred) ->
     Keeper_gate_deferred_payload.to_tool_result
       ~tool_name:operation
@@ -140,7 +150,10 @@ let with_external_gate_tool_result_option
       ~input
       ()
   with
-  | Ok () -> continue ()
+  | Ok authorization ->
+    Option.map
+      (attach_gate_authorization_to_tool_result authorization)
+      (continue ())
   | Error (Gate_deferred deferred) ->
     Some
       (Keeper_gate_deferred_payload.to_tool_result
@@ -176,7 +189,8 @@ let with_external_gate_execution
       ~input
       ()
   with
-  | Ok () -> continue ()
+  | Ok authorization ->
+    continue () |> Keeper_tool_execution.with_gate_authorization authorization
   | Error (Gate_deferred deferred) ->
     Keeper_gate_deferred_payload.to_execution deferred
   | Error (Gate_unavailable blocked) ->

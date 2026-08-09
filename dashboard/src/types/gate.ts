@@ -40,6 +40,50 @@ export interface PendingConfirmEnvelope {
 export type GateDecisionSource = 'always_allowed' | 'auto_judge' | 'human_operator'
 export type GateJudgment = 'approve' | 'deny' | 'require_human'
 
+export type KeeperApprovalAuditEvent =
+  | 'pending'
+  | 'resolved'
+  | 'summary_updated'
+  | 'rule_created'
+  | 'rule_deleted'
+  | 'grant_consumed'
+  | 'gate_allowed'
+  | 'gate_exact_rule_expired'
+  | 'gate_exact_rule_store_degraded'
+  | 'gate_grant_unavailable'
+  | 'auto_judge_operator_retry_started'
+  | 'auto_judge_block_observation_superseded'
+  | 'auto_judge_restart_worker_recovered'
+  | 'auto_judge_restart_judgment_recovered'
+
+export type KeeperApprovalAuditReceipt =
+  | {
+      event: KeeperApprovalAuditEvent
+      recorded: true
+      cleanup_failure?: {
+        stage: 'append_cleanup'
+        detail: string
+      }
+    }
+  | {
+      event: KeeperApprovalAuditEvent
+      recorded: false
+      stage: 'store_create' | 'append'
+      detail: string
+    }
+
+export type KeeperApprovalAuditFailure = Extract<
+  KeeperApprovalAuditReceipt,
+  { recorded: false }
+>
+
+export interface KeeperApprovalAuditFailureNotice {
+  id: string | null
+  transport: 'http' | 'sse'
+  observed_at: string
+  receipt: KeeperApprovalAuditFailure
+}
+
 /** LLM-generated operator briefing attached to a pending approval by the HITL
  *  context-summary worker (`hitl_summary_worker.ml`). Mirrors
  *  `keeper_approval_queue_rules_types.ml:hitl_context_summary`. */

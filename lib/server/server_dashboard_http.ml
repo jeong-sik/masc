@@ -409,6 +409,11 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
                   , match result.remembered_rule with
                     | Some rule -> `String rule.id
                     | None -> `Null )
+                ; ( "audit_receipts"
+                  , `List
+                      (List.map
+                         Keeper_approval.Audit.receipt_to_yojson
+                         result.audit_receipts) )
                 ])
         | Error (Keeper_approval_queue.Delivery_failed _ as err) ->
           Error (Unavailable err)
@@ -514,11 +519,18 @@ let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
   | Some id ->
     (match Keeper_approval_queue_rules.delete_rule ~base_path ~id () with
      | Ok deleted ->
-         Keeper_approval.Audit.record_rule
-           ~base_path
-           ~event_type:Keeper_approval.Audit.Rule_deleted
-           deleted;
-         Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
+         let audit_receipt =
+           Keeper_approval.Audit.record_rule
+             ~base_path
+             ~event_type:Keeper_approval.Audit.Rule_deleted
+             deleted
+         in
+         Ok
+           (`Assoc
+               [ "ok", `Bool true
+               ; "id", `String deleted.id
+               ; "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt
+               ])
        | Error error ->
          Error (Keeper_approval_queue_rules_types.rule_store_error_to_string error))
 ;;

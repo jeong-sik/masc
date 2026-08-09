@@ -316,7 +316,7 @@ let retire_stale_grant
       ~tool_name:request.tool_name
       ~input:request.input
   with
-  | Ok Keeper_approval_queue.Consumption_committed
+  | Ok (Keeper_approval_queue.Consumption_committed _)
   | Ok Keeper_approval_queue.Consumption_already_committed ->
     Ok ()
   | Ok Keeper_approval_queue.Consumption_not_matching ->

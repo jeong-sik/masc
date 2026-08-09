@@ -216,7 +216,18 @@ let to_oas_typed_result
       (Tool_result.message tr)
       (fun content ->
          Ok { Agent_sdk.Types.content; _meta = Some metadata })
-  | Tool_result.Failed { class_; message; _ } ->
+  | Tool_result.Failed { class_; message; metadata; _ } ->
+    let message =
+      match metadata with
+      | None -> message
+      | Some metadata ->
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "message", `String message
+              ; "masc.tool_disposition", `String "failed"
+              ; "masc.payload", metadata
+              ])
+    in
     project_result
       ?base_path
       ?on_externalization_error

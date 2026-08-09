@@ -52,6 +52,7 @@ export type SSEEventType =
   | 'runtime_param_changed'
   | 'approval:pending'
   | 'approval:resolved'
+  | 'approval:audit'
   | 'approval:summary_updated'
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.

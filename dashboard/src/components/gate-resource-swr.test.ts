@@ -70,7 +70,10 @@ async function loadGate() {
     deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
     setGateMode: vi.fn().mockResolvedValue({ ok: true }),
   }))
-  vi.doMock('../sse-store', () => ({ registerGateRefresh: vi.fn() }))
+  vi.doMock('../sse-store', () => ({
+    registerGateRefresh: vi.fn(),
+    registerGateAuditReceiptObserver: vi.fn(),
+  }))
   const signals = await import('./gate-signals')
   const actions = await import('./gate-actions')
   return { fetchDashboardGate, signals, actions }

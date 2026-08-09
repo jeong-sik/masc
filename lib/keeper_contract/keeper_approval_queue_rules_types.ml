@@ -161,8 +161,6 @@ type rule_store_error =
   ; reason : string
   }
 
-type resolution_result = { remembered_rule : approval_rule option }
-
 let advisory_judgment_to_string = function
   | Approve -> "approve"
   | Deny -> "deny"

@@ -2653,7 +2653,7 @@ let install_pending_summary ~base_path ~keeper_name ~bind_exact =
         ~base_path
         ()
     with
-    | Ok id -> id
+    | Ok submission -> submission.approval_id
     | Error error -> fail (Approval_queue.storage_error_to_string error)
   in
   (match Approval_queue.mark_summary_pending ~id with

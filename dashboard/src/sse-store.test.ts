@@ -268,6 +268,83 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshGate).toHaveBeenCalledWith({ force: true })
   })
 
+  it('projects a failed approval audit receipt from SSE without changing the committed event', async () => {
+    const { sseStore } = await loadSseStore()
+    const observe = vi.fn()
+    sseStore.registerGateAuditReceiptObserver(observe)
+
+    sseStore.routeServerPushEvent({
+      type: 'approval:resolved',
+      payload: {
+        id: 'appr-sse-audit',
+        audit: {
+          event: 'resolved',
+          recorded: false,
+          stage: 'append',
+          detail: 'audit append unavailable',
+        },
+      },
+    })
+
+    expect(observe).toHaveBeenCalledWith(
+      [{
+        event: 'resolved',
+        recorded: false,
+        stage: 'append',
+        detail: 'audit append unavailable',
+      }],
+      { id: 'appr-sse-audit', transport: 'sse' },
+    )
+  })
+
+  it('projects a failed authorization audit receipt without refreshing Gate state', async () => {
+    const { sseStore } = await loadSseStore()
+    const observe = vi.fn()
+    const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
+    sseStore.registerGateAuditReceiptObserver(observe)
+    sseStore.registerGateRefresh(refreshGate)
+
+    sseStore.routeServerPushEvent({
+      type: 'approval:audit',
+      payload: {
+        id: 'appr-consumed',
+        audit: {
+          event: 'grant_consumed',
+          recorded: false,
+          stage: 'append',
+          detail: 'audit append unavailable',
+        },
+      },
+    })
+
+    expect(observe).toHaveBeenCalledWith(
+      [{
+        event: 'grant_consumed',
+        recorded: false,
+        stage: 'append',
+        detail: 'audit append unavailable',
+      }],
+      { id: 'appr-consumed', transport: 'sse' },
+    )
+    expect(refreshGate).not.toHaveBeenCalled()
+  })
+
+  it('rejects an audit receipt that does not match its SSE envelope', async () => {
+    const { sseStore } = await loadSseStore()
+    const observe = vi.fn()
+    sseStore.registerGateAuditReceiptObserver(observe)
+
+    sseStore.routeServerPushEvent({
+      type: 'approval:pending',
+      payload: {
+        id: 'appr-mismatch',
+        audit: { event: 'resolved', recorded: true },
+      },
+    })
+
+    expect(observe).not.toHaveBeenCalled()
+  })
+
   it('routes an approval:summary_updated SSE event to the Gate refresh (Auto Judge verdict contract)', async () => {
     const { sseStore } = await loadSseStore()
     const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()

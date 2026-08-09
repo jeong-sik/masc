@@ -94,7 +94,9 @@ let parsed_rows ~stage entries =
         | Some line -> Printf.sprintf "%s:%d" path line
         | None -> path
       in
-      Error { stage; detail = Printf.sprintf "%s: %s" location detail }
+      Error
+        ({ stage; detail = Printf.sprintf "%s: %s" location detail }
+          : read_error)
   in
   collect [] entries
 ;;
@@ -179,6 +181,68 @@ let event_of_string = function
   | _ -> None
 ;;
 
+type write_stage =
+  | Store_create
+  | Append
+  | Append_cleanup
+
+type write_failure =
+  { stage : write_stage
+  ; detail : string
+  }
+
+type receipt =
+  { event_type : event
+  ; write_result : (unit, write_failure) result
+  ; cleanup_failure : write_failure option
+  }
+
+let write_stage_to_string = function
+  | Store_create -> "store_create"
+  | Append -> "append"
+  | Append_cleanup -> "append_cleanup"
+;;
+
+let receipt_to_yojson receipt =
+  let fields =
+    [ "event", `String (event_to_string receipt.event_type) ]
+  in
+  let fields =
+    match receipt.cleanup_failure with
+    | None -> fields
+    | Some failure ->
+      ( "cleanup_failure"
+      , `Assoc
+          [ "stage", `String (write_stage_to_string failure.stage)
+          ; "detail", `String failure.detail
+          ] )
+      :: fields
+  in
+  match receipt.write_result with
+  | Ok () -> `Assoc (("recorded", `Bool true) :: fields)
+  | Error failure ->
+    `Assoc
+      ([ "recorded", `Bool false
+       ; "stage", `String (write_stage_to_string failure.stage)
+       ; "detail", `String failure.detail
+       ]
+       @ fields)
+;;
+
+let sanitized_write_failure_detail = function
+  | Unix.Unix_error (error, operation, _) ->
+    let operation =
+      operation
+      |> Safe_ops.sanitize_text_utf8
+      |> String_util.utf8_safe ~max_bytes:80 ~suffix:"..."
+      |> String_util.to_string
+    in
+    Printf.sprintf "%s failed: %s" operation (Unix.error_message error)
+  | Sys_error _ -> "approval audit filesystem operation failed"
+  | Eio.Io _ -> "approval audit I/O failed"
+  | _ -> "approval audit write failed"
+;;
+
 (* The [decision_kind] axis of a resolved approval record. The queue derives it
    from the decision itself, so a reader that wants to know whether an approval
    was rejected parses this back instead of scanning the rendered decision text
@@ -219,6 +283,35 @@ let audit_today_path base_dir =
   Filename.concat dir day
 ;;
 
+let store_create_probe = Atomic.make (fun ~base_path:_ -> ())
+
+type append_outcome =
+  | Append_recorded
+  | Append_recorded_with_settlement_failure of write_failure
+
+let append_jsonl_durable path json =
+  let suffix = Yojson.Safe.to_string json ^ "\n" in
+  match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
+  | Private_file_succeeded () -> Append_recorded
+  | Private_file_succeeded_with_cleanup_failure
+      { value = (); cleanup_failure } ->
+    Append_recorded_with_settlement_failure
+      { stage = Append_cleanup
+      ; detail = sanitized_write_failure_detail cleanup_failure.exception_
+      }
+  | Private_file_failed error ->
+    raise (Sys_error (Fs_compat.private_jsonl_append_error_to_string error))
+  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    raise
+      (Sys_error
+         (Printf.sprintf
+            "%s; descriptor settlement failed: %s"
+            (Fs_compat.private_jsonl_append_error_to_string error)
+            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
+;;
+
+let append_jsonl = Atomic.make append_jsonl_durable
+
 let get_audit_store ~base_path () =
   let report_failure exn =
     Keeper_fd_pressure.note_exception ~site:"approval_audit.store_create" exn;
@@ -232,12 +325,13 @@ let get_audit_store ~base_path () =
     Log.Keeper.warn
       "approval_queue: audit store creation failed: %s"
       (Printexc.to_string exn);
-    Error (Printexc.to_string exn)
+    Error (sanitized_write_failure_detail exn)
   in
   try
     match
       Stdlib.Mutex.protect audit_stores_mu (fun () ->
         try
+          (Atomic.get store_create_probe) ~base_path;
           Ok
             (match Hashtbl.find_opt audit_stores base_path with
                | Some store -> store
@@ -251,13 +345,13 @@ let get_audit_store ~base_path () =
                Hashtbl.replace audit_stores base_path store;
                store)
         with
-        | Eio.Cancel.Cancelled _ as e -> raise e
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error exn)
     with
     | Ok store -> Ok store
     | Error exn -> report_failure exn
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> report_failure exn
 ;;
 
@@ -298,7 +392,11 @@ let record
     | None -> Unix.gettimeofday ()
   in
   match get_audit_store ~base_path () with
-  | Error _ -> ()
+  | Error detail ->
+    { event_type
+    ; write_result = Error { stage = Store_create; detail }
+    ; cleanup_failure = None
+    }
   | Ok store ->
     let json =
       `Assoc
@@ -351,13 +449,46 @@ let record
          @ extra_fields
          )
     in
-    Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
+    let append_result =
       try
-        Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json
+        Ok
+          (Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
+             (Atomic.get append_jsonl)
+               (audit_today_path (Dated_jsonl.base_dir store))
+               json))
       with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn -> record_failure ~keeper_name ~site:"audit_append" ~id
-          ~event_type:(event_to_string event_type) exn)
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error exn
+    in
+    (match append_result with
+     | Ok Append_recorded ->
+       { event_type; write_result = Ok (); cleanup_failure = None }
+     | Ok (Append_recorded_with_settlement_failure failure) ->
+       record_failure
+         ~keeper_name
+         ~site:Keeper_approval_queue_failure_site.(to_label Audit_append)
+         ~id
+         ~event_type:(event_to_string event_type)
+         (Sys_error failure.detail);
+       { event_type
+       ; write_result = Ok ()
+       ; cleanup_failure = Some failure
+       }
+     | Error exn ->
+       record_failure
+         ~keeper_name
+         ~site:Keeper_approval_queue_failure_site.(to_label Audit_append)
+         ~id
+         ~event_type:(event_to_string event_type)
+         exn;
+       { event_type
+       ; write_result =
+           Error
+             { stage = Append
+             ; detail = sanitized_write_failure_detail exn
+             }
+       ; cleanup_failure = None
+       })
 ;;
 
 let record_rule ~base_path ~event_type (rule : approval_rule) =
@@ -389,7 +520,7 @@ let read_recent ~base_path ?keeper_name ?(n = 20) ()
   then Ok []
   else (
     match get_audit_store ~base_path () with
-    | Error detail -> Error { stage = Read_recent; detail }
+    | Error detail -> Error ({ stage = Read_recent; detail } : read_error)
     | Ok store ->
       (match read_recent_audit_raw store (audit_scan_window ?keeper_name n) with
        | Error _ as error -> error
@@ -600,7 +731,8 @@ let project_resolved_rows rows =
     | row :: rest ->
       (match resolved_approval_json_of_audit_event row with
        | Ok projected -> loop (projected :: acc) rest
-       | Error detail -> Error { stage = List_recent_resolved; detail })
+       | Error detail ->
+         Error ({ stage = List_recent_resolved; detail } : read_error))
   in
   loop [] rows
 ;;
@@ -625,7 +757,8 @@ let list_recent_resolved
   then Ok empty
   else (
     match get_audit_store ~base_path () with
-    | Error detail -> Error { stage = List_recent_resolved; detail }
+    | Error detail ->
+      Error ({ stage = List_recent_resolved; detail } : read_error)
     | Ok store ->
       let window_start =
         now_ts -. (float_of_int window_minutes *. Masc_time_constants.minute)
@@ -694,6 +827,25 @@ let list_recent_resolved
 
 module For_testing = struct
   let reset_store () =
-    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores)
+    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores);
+    Atomic.set store_create_probe (fun ~base_path:_ -> ());
+    Atomic.set append_jsonl append_jsonl_durable
+  ;;
+
+  let set_store_create_probe probe = Atomic.set store_create_probe probe
+  let set_append_jsonl append =
+    Atomic.set append_jsonl (fun path json ->
+      append path json;
+      Append_recorded)
+  ;;
+
+  let set_append_jsonl_cleanup_failure detail =
+    Atomic.set append_jsonl (fun _path _json ->
+      Append_recorded_with_settlement_failure
+        { stage = Append_cleanup; detail })
+  ;;
+
+  let with_audit_io_lock f =
+    Cross_context_mutex.with_durable_lock audit_io_mutex f
   ;;
 end

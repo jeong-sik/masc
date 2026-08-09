@@ -437,6 +437,7 @@ let test_failure_observation_uses_typed_failed_payload () =
       { class_ = Tool_result.Policy_rejection
       ; message = "operator denied"
       ; data = `Null
+      ; metadata = None
       ; tool_name = "restricted-tool"
       ; duration_ms = 0.0
       }

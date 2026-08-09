@@ -1194,6 +1194,7 @@ let confined_write_is_keeper_playground
 
 type file_write_attempt =
   | Write_succeeded of string
+  | Write_authorized of Keeper_gate.authorization * file_write_attempt
   | Write_deferred of Keeper_gate_deferred_payload.t
   | Write_failed of
       { payload : string
@@ -1698,8 +1699,11 @@ let observe_append_write_outcome ~keeper_name ~target outcome =
      | Fs_compat.Capability_append_target_changed ) -> ())
 ;;
 
-let file_write_attempt_to_execution = function
+let rec file_write_attempt_to_execution = function
   | Write_succeeded payload -> Keeper_tool_execution.success payload
+  | Write_authorized (authorization, attempt) ->
+    file_write_attempt_to_execution attempt
+    |> Keeper_tool_execution.with_gate_authorization authorization
   | Write_deferred deferred ->
     Keeper_gate_deferred_payload.to_execution deferred
   | Write_failed { payload; class_ } -> Keeper_tool_execution.failure ~class_ payload
@@ -2000,13 +2004,14 @@ let handle_file_write_with_outcome
           ~input
           ()
       with
-      | Keeper_gate.Deferred { approval_id; reason } ->
+      | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
         Ok
           (Write_deferred
              (Keeper_gate_deferred_payload.create
                 ~operation:gate_operation
                 ~approval_id
                 ~reason
+                ~audit_receipts
                 ~context:(`Assoc [ "path", `String target ])
                 ()))
       | Keeper_gate.Unavailable reason ->
@@ -2028,7 +2033,16 @@ let handle_file_write_with_outcome
           ~keeper_name:meta.name
           "external effect authorized operation=filesystem_write source=%s"
           (Keeper_gate.authorization_source_to_string authorization.source);
-        continue ()
+        (match continue () with
+         | Ok attempt -> Ok (Write_authorized (authorization, attempt))
+         | Error message ->
+           Ok
+             (Write_authorized
+                ( authorization
+                , Write_failed
+                    { payload = error_json ~fields:[ "path", `String target ] message
+                    ; class_ = Tool_result.Runtime_failure
+                    } )))
   in
   let protect_write ~target f =
     try f () with

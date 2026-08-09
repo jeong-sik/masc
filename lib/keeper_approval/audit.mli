@@ -32,6 +32,24 @@ type event =
 val event_to_string : event -> string
 val event_of_string : string -> event option
 
+type write_stage =
+  | Store_create
+  | Append
+  | Append_cleanup
+
+type write_failure =
+  { stage : write_stage
+  ; detail : string
+  }
+
+type receipt =
+  { event_type : event
+  ; write_result : (unit, write_failure) result
+  ; cleanup_failure : write_failure option
+  }
+
+val receipt_to_yojson : receipt -> Yojson.Safe.t
+
 type decision_kind =
   | Decision_approve
   | Decision_reject
@@ -39,6 +57,9 @@ type decision_kind =
 val decision_kind_to_string : decision_kind -> string
 val decision_kind_of_string : string -> decision_kind option
 
+(** Observation-only write boundary. Store creation, append, and cooperative
+    cancellation failures are contained in the typed receipt; none may erase
+    or invite replay of the authoritative mutation that selected this event. *)
 val record :
   base_path:string ->
   event_type:event ->
@@ -61,9 +82,9 @@ val record :
   ?timestamp:float ->
   ?extra_fields:(string * Yojson.Safe.t) list ->
   unit ->
-  unit
+  receipt
 
-val record_rule : base_path:string -> event_type:event -> approval_rule -> unit
+val record_rule : base_path:string -> event_type:event -> approval_rule -> receipt
 
 val recent_resolved_history_limit : int
 val recent_resolved_max_limit : int
@@ -98,4 +119,8 @@ val list_recent_resolved :
 
 module For_testing : sig
   val reset_store : unit -> unit
+  val set_store_create_probe : (base_path:string -> unit) -> unit
+  val set_append_jsonl : (string -> Yojson.Safe.t -> unit) -> unit
+  val set_append_jsonl_cleanup_failure : string -> unit
+  val with_audit_io_lock : (unit -> unit) -> unit
 end

@@ -175,8 +175,6 @@ type rule_store_error =
   ; reason : string
   }
 
-type resolution_result = { remembered_rule : approval_rule option }
-
 val advisory_judgment_to_string : advisory_judgment -> string
 val advisory_judgment_values : string list
 val advisory_judgment_of_string : string -> advisory_judgment option

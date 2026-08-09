@@ -852,6 +852,7 @@ let reject_validation ~name ~reason ~message =
                    (Tool_result.tool_failure_class_to_string
                       Tool_result.Policy_rejection) )
              ]
+       ; metadata = None
        ; tool_name = name
        ; duration_ms = 0.0
        })
@@ -877,6 +878,7 @@ let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
              ; "validation", `String "oas_tool_middleware"
              ; "exception", `String error_text
              ]
+       ; metadata = None
        ; tool_name = name
        ; duration_ms = 0.0
        })
@@ -1000,6 +1002,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
                        (Tool_result.tool_failure_class_to_string
                           Tool_result.Policy_rejection) )
                  ]
+           ; metadata = None
            ; tool_name = name
            ; duration_ms = 0.0
            })

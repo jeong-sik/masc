@@ -68,6 +68,7 @@ let test_pre_hook_short_circuits () =
          { Tool_result.class_ = Tool_result.Runtime_failure
          ; message = "blocked"
          ; data = `String "blocked"
+         ; metadata = None
          ; tool_name = name
          ; duration_ms = 0.0
          }));
@@ -101,6 +102,7 @@ let test_multiple_pre_hooks_first_wins () =
          { Tool_result.class_ = Tool_result.Runtime_failure
          ; message = "denied"
          ; data = `String "denied"
+         ; metadata = None
          ; tool_name = name
          ; duration_ms = 0.0
          }));

@@ -113,9 +113,18 @@ type approved_resolution_delivery =
   }
 
 type grant_consumption =
-  | Consumption_committed
+  | Consumption_committed of Keeper_approval.Audit.receipt
   | Consumption_already_committed
   | Consumption_not_matching
+
+type pending_submission_disposition =
+  | Pending_created of Keeper_approval.Audit.receipt
+  | Pending_deduplicated
+
+type pending_submission =
+  { approval_id : string
+  ; disposition : pending_submission_disposition
+  }
 
 type replay_recording =
   | Replay_recorded
@@ -276,7 +285,8 @@ end
 (** Durably enqueue an exact request without suspending the caller. Returns an
     existing id only when the same Keeper, operation identity, canonical input,
     turn/task/goal identity, and continuation channel are already pending. A
-    deduplicated request does not consume a durable queue sequence. *)
+    deduplicated request does not consume a durable queue sequence or emit a new
+    pending audit event. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->
@@ -289,7 +299,7 @@ val submit_pending :
   ?goal_ids:string list ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
-  (string, storage_error) result
+  (pending_submission, storage_error) result
 
 type resolve_error =
   | Not_found of string
@@ -304,6 +314,11 @@ type resolve_error =
       }
 
 val resolve_error_to_string : resolve_error -> string
+
+type resolution_result =
+  { remembered_rule : approval_rule option
+  ; audit_receipts : Keeper_approval.Audit.receipt list
+  }
 
 (** Commit a resolution, optionally persist an exact Always Allowed rule for
     [Decision.Approve], then wake only the Keeper captured by the pending entry.

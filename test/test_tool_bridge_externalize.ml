@@ -149,6 +149,7 @@ let test_to_oas_typed_error_ignores_json_metadata () =
       { Tool_result.class_ = Tool_result.Runtime_failure
       ; message = msg
       ; data = Yojson.Safe.from_string msg
+      ; metadata = None
       ; tool_name = "test"
       ; duration_ms = 0.0
       }
@@ -161,6 +162,38 @@ let test_to_oas_typed_error_ignores_json_metadata () =
       (match error_class with
        | Some Agent_sdk.Types.Unknown -> ()
        | _ -> Alcotest.fail "expected typed runtime failure mapping")
+
+let test_to_oas_typed_error_preserves_explicit_metadata () =
+  let metadata = `Assoc [ "gate", `Assoc [ "decision", `String "allow" ] ] in
+  let tr =
+    Tool_result.make_err
+      ~tool_name:"test"
+      ~class_:Tool_result.Runtime_failure
+      ~start_time:0.0
+      ~metadata
+      "effect failed"
+  in
+  match B.to_oas_typed_result tr with
+  | Ok _ -> Alcotest.fail "expected Error"
+  | Error { message; _ } ->
+    let open Yojson.Safe.Util in
+    let payload = Yojson.Safe.from_string message in
+    Alcotest.(check string)
+      "failure message remains exact"
+      "effect failed"
+      (payload |> member "message" |> to_string);
+    Alcotest.(check string)
+      "failed disposition is explicit"
+      "failed"
+      (payload |> member "masc.tool_disposition" |> to_string);
+    Alcotest.(check string)
+      "Gate metadata reaches the provider error"
+      "allow"
+      (payload
+       |> member "masc.payload"
+       |> member "gate"
+       |> member "decision"
+       |> to_string)
 
 let test_to_oas_typed_result_preserves_workflow_rejection () =
   let tr =
@@ -388,6 +421,8 @@ let () =
           Alcotest.test_case "error inlined" `Quick test_to_oas_typed_error_inlined;
           Alcotest.test_case "error JSON cannot override typed metadata" `Quick
             test_to_oas_typed_error_ignores_json_metadata;
+          Alcotest.test_case "error preserves explicit metadata" `Quick
+            test_to_oas_typed_error_preserves_explicit_metadata;
           Alcotest.test_case "typed workflow rejection is deterministic" `Quick
             test_to_oas_typed_result_preserves_workflow_rejection;
           Alcotest.test_case "typed transient remains recoverable" `Quick

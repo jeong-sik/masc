@@ -16,7 +16,7 @@ interface OfficialClientLoginProbeProps {
 
 function loginTone(status: DashboardOfficialClientLoginStatus | 'not_measured'):
   'ok' | 'warn' | 'bad' | 'neutral' {
-  if (status === 'ready') return 'ok'
+  if (status === 'ready') return 'warn'
   if (status === 'not_measured' || status === 'timeout') return 'warn'
   return 'bad'
 }
@@ -49,6 +49,7 @@ export function OfficialClientLoginProbe({
 
   const measured = response.value
   const loginStatus = measured?.login.status ?? 'not_measured'
+  const loginStatusLabel = loginStatus === 'ready' ? 'self_reported' : loginStatus
   const model = measured?.configured_model ?? configuredModel ?? '—'
 
   return html`
@@ -82,7 +83,7 @@ export function OfficialClientLoginProbe({
         </div>
         <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)]/70 p-2" data-testid="official-client-probe-login">
           <div class="mb-1 text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Login</div>
-          <${StatusChip} tone=${loginTone(loginStatus)} uppercase=${false}>${loginStatus}<//>
+          <${StatusChip} tone=${loginTone(loginStatus)} uppercase=${false}>${loginStatusLabel}<//>
           <div class="mt-1 text-2xs text-[var(--color-fg-secondary)]">
             ${measured ? measuredAtText(measured.measured_at) : '수동 확인 전'}
           </div>
@@ -98,6 +99,7 @@ export function OfficialClientLoginProbe({
         ? html`
           <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-2xs text-[var(--color-fg-muted)]" data-testid="official-client-probe-details">
             <span>client · <span class="mono text-[var(--color-fg-secondary)]">${measured.client_kind}</span></span>
+            <span>identity · <span class="mono text-[var(--status-warn)]">unverified</span></span>
             <span>auth · <span class="mono text-[var(--color-fg-secondary)]">${measured.login.auth_method ?? '—'}</span></span>
             <span>plan · <span class="mono text-[var(--color-fg-secondary)]">${measured.login.subscription_type ?? '—'}</span></span>
             <span>provider · <span class="mono text-[var(--color-fg-secondary)]">${measured.login.api_provider ?? '—'}</span></span>

@@ -4471,6 +4471,8 @@ describe('official-client login probe API', () => {
     login: {
       status: 'ready',
       authenticated: true,
+      evidence_source: 'configured_executable_self_report',
+      identity_verified: false,
       auth_method: 'chatgpt',
       subscription_type: 'pro',
       api_provider: null,
@@ -4496,7 +4498,12 @@ describe('official-client login probe API', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/runtime/official-client/probe')
     expect(JSON.parse(init.body as string)).toEqual({ runtime_id: 'codex.codex' })
-    expect(result.login).toMatchObject({ status: 'ready', authenticated: true })
+    expect(result.login).toMatchObject({
+      status: 'ready',
+      authenticated: true,
+      evidence_source: 'configured_executable_self_report',
+      identity_verified: false,
+    })
     expect(result.execution.status).toBe('not_measured')
   })
 
@@ -4524,6 +4531,8 @@ describe('official-client login probe API', () => {
         login: {
           status: 'login_required',
           authenticated: false,
+          evidence_source: 'configured_executable_self_report',
+          identity_verified: false,
           detail: 'the official CLI has no active account',
         },
       }), {
@@ -4538,6 +4547,8 @@ describe('official-client login probe API', () => {
     expect(result.login).toEqual({
       status: 'login_required',
       authenticated: false,
+      evidence_source: 'configured_executable_self_report',
+      identity_verified: false,
       auth_method: null,
       subscription_type: null,
       api_provider: null,
@@ -4550,6 +4561,8 @@ describe('official-client login probe API', () => {
     for (const payload of [
       { ...readyPayload, unexpected_status: 'ready' },
       { ...readyPayload, login: { ...readyPayload.login, detail: 'extra field' } },
+      { ...readyPayload, login: { ...readyPayload.login, identity_verified: true } },
+      { ...readyPayload, login: { ...readyPayload.login, evidence_source: 'official_client' } },
       { ...readyPayload, client: { ...readyPayload.client, version: 'extra field' } },
     ]) {
       const fetchMock = vi.fn().mockResolvedValue(

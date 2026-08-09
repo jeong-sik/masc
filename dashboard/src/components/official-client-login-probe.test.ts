@@ -20,6 +20,8 @@ const readyResponse = {
   login: {
     status: 'ready' as const,
     authenticated: true,
+    evidence_source: 'configured_executable_self_report' as const,
+    identity_verified: false as const,
     auth_method: 'chatgpt',
     subscription_type: 'pro',
     api_provider: null,
@@ -51,9 +53,10 @@ describe('OfficialClientLoginProbe', () => {
 
     await waitFor(() => {
       expect(apiMocks.probeOfficialClientLogin).toHaveBeenCalledWith('codex.codex')
-      expect(view.getByTestId('official-client-probe-login').textContent).toContain('ready')
+      expect(view.getByTestId('official-client-probe-login').textContent).toContain('self_reported')
     })
     expect(view.getByTestId('official-client-probe-details').textContent).toContain('pro')
+    expect(view.getByTestId('official-client-probe-details').textContent).toContain('unverified')
     expect(view.getByTestId('official-client-probe-execution').textContent).toContain('not_measured')
   })
 
@@ -63,6 +66,8 @@ describe('OfficialClientLoginProbe', () => {
       login: {
         status: 'login_required' as const,
         authenticated: false,
+        evidence_source: 'configured_executable_self_report' as const,
+        identity_verified: false as const,
         auth_method: null,
         subscription_type: null,
         api_provider: null,

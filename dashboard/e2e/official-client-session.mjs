@@ -74,6 +74,8 @@ const loginPayload = {
   login: {
     status: 'ready',
     authenticated: true,
+    evidence_source: 'configured_executable_self_report',
+    identity_verified: false,
     auth_method: 'chatgpt',
     subscription_type: 'pro',
     api_provider: null,

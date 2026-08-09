@@ -1228,6 +1228,8 @@ export interface DashboardOfficialClientProbeResponse {
   login: {
     status: DashboardOfficialClientLoginStatus
     authenticated: boolean
+    evidence_source: 'configured_executable_self_report'
+    identity_verified: false
     auth_method: string | null
     subscription_type: string | null
     api_provider: string | null
@@ -1571,17 +1573,26 @@ function decodeOfficialClientProbeResponse(raw: unknown): DashboardOfficialClien
   const measured_at = asNumber(raw.measured_at)
   const status = asString(raw.login.status)
   const authenticated = asBoolean(raw.login.authenticated)
+  const evidenceSource = asString(raw.login.evidence_source)
+  const identityVerified = asBoolean(raw.login.identity_verified)
   if (!hasExactKeys(raw.client, ['user_agent'])) return null
   if (raw.client.user_agent !== null && !asString(raw.client.user_agent)) return null
   const user_agent = asNullableString(raw.client.user_agent)
   if (!runtime_id || (client_kind !== 'codex' && client_kind !== 'claude_code')) return null
-  if (measured_at == null || measured_at < 0 || measured_at > 8_640_000_000_000 || authenticated == null) return null
+  if (
+    measured_at == null
+    || measured_at < 0
+    || measured_at > 8_640_000_000_000
+    || authenticated == null
+    || evidenceSource !== 'configured_executable_self_report'
+    || identityVerified !== false
+  ) return null
   if (!status || !OFFICIAL_CLIENT_LOGIN_STATUSES.has(status as DashboardOfficialClientLoginStatus)) return null
   if ((status === 'ready') !== authenticated) return null
   const ready = status === 'ready'
   const loginKeys = ready
-    ? ['status', 'authenticated', 'auth_method', 'subscription_type', 'api_provider']
-    : ['status', 'authenticated', 'detail']
+    ? ['status', 'authenticated', 'evidence_source', 'identity_verified', 'auth_method', 'subscription_type', 'api_provider']
+    : ['status', 'authenticated', 'evidence_source', 'identity_verified', 'detail']
   if (!hasExactKeys(raw.login, loginKeys)) return null
   const detail = ready ? null : asString(raw.login.detail) ?? null
   if (!ready && !detail) return null
@@ -1605,6 +1616,8 @@ function decodeOfficialClientProbeResponse(raw: unknown): DashboardOfficialClien
     login: {
       status: status as DashboardOfficialClientLoginStatus,
       authenticated,
+      evidence_source: 'configured_executable_self_report',
+      identity_verified: false,
       auth_method: asNullableString(raw.login.auth_method),
       subscription_type: asNullableString(raw.login.subscription_type),
       api_provider: asNullableString(raw.login.api_provider),

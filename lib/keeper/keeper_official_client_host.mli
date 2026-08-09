@@ -23,6 +23,14 @@ type dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+val resolve_reasoning_effort :
+  enable_thinking:bool option ->
+  reasoning_effort:Llm_provider.Reasoning_effort.t option ->
+  (Llm_provider.Reasoning_effort.t option, Agent_sdk.Error.sdk_error) result
+(** Reconcile provider-neutral thinking control with an explicit
+    official-client effort. An absent effort remains absent; this function
+    never fabricates a model-specific effort from the boolean toggle. *)
+
 val text_of_blocks :
   runtime_label:string ->
   field:string ->

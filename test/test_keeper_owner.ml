@@ -633,6 +633,55 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
             ^ Keeper_lifecycle_reservation.release_outcome_to_string outcome))
 ;;
 
+let test_create_waits_for_lifecycle_admission_before_installing_owner () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "owner-create-reservation-test"));
+       (match Owner_registry.install_from_store ~sw config with
+        | Ok count -> check int "empty owner inventory" 0 count
+        | Error error -> fail (Owner_registry.install_error_to_string error));
+       let meta = make_meta "create-reserved" in
+       let token =
+         match
+           Keeper_lifecycle_reservation.acquire
+             ~base_path
+             ~keeper_name:meta.name
+             ~expected_generation:0
+             ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
+         with
+         | Ok token -> token
+         | Error _ -> fail "failed to reserve create identity"
+       in
+       (match Owner_registry.create_meta ~base_path meta with
+        | Error (Owner_registry.Command_lifecycle_reserved _) -> ()
+        | Error error -> fail (Owner_registry.command_error_to_string error)
+        | Ok _ -> fail "create crossed lifecycle reservation");
+       check int
+         "rejected create installs no empty owner"
+         0
+         (Owner_registry.For_testing.installed_owner_count ~base_path);
+       (match Keeper_lifecycle_reservation.release token with
+        | Keeper_lifecycle_reservation.Released -> ()
+        | outcome ->
+          fail
+            ("failed to release create reservation: "
+             ^ Keeper_lifecycle_reservation.release_outcome_to_string outcome));
+       (match Owner_registry.create_meta ~base_path meta with
+        | Ok (Some committed) -> check string "admitted create" meta.name committed.name
+        | Ok None -> fail "admitted create removed metadata"
+        | Error error -> fail (Owner_registry.command_error_to_string error));
+       check int
+         "admitted create installs one owner"
+         1
+         (Owner_registry.For_testing.installed_owner_count ~base_path))
+;;
+
 let () =
   run
     "keeper owner"
@@ -688,6 +737,10 @@ let () =
             "lifecycle reservation gates owner commands"
             `Quick
             test_lifecycle_reservation_remains_owner_admission_authority
+        ; test_case
+            "create authorizes before owner installation"
+            `Quick
+            test_create_waits_for_lifecycle_admission_before_installing_owner
         ] )
     ]
 ;;

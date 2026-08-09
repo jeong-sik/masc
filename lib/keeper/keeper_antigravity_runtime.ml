@@ -294,6 +294,11 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
         recovery_failure := Session.State_persistence_failed;
         Error (Printf.sprintf "Antigravity session %s failed: %s" label detail)
     in
+    let update_session_sdk label transition =
+      match update_session label transition with
+      | Ok () -> Ok ()
+      | Error detail -> Error (internal_error detail)
+    in
     let require_recovery detail =
       match !session_state with
       | { Session.phase = (Ready | Settled _ | Recovery_required _); _ } -> Ok ()
@@ -392,7 +397,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
            in
            recovery_failure := Session.State_persistence_failed;
            let* () =
-             update_session "turn identity transition" (fun expected ->
+             update_session_sdk "turn identity transition" (fun expected ->
                Session.mark_turn_started
                  ~base_path
                  ~keeper_name

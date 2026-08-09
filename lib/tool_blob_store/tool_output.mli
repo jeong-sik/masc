@@ -88,6 +88,9 @@ val bounded_inline_model_projection : model_projection
     tool-output budget. This is for explicit artifact-page readers. *)
 
 val marker_prefix : string
+(** Exact wire-grammar introducer [[masc:blob sha256=]. Prose placeholders
+    such as [[masc:blob ...]] are not artifact references. *)
+
 val is_marker : string -> bool
 
 val encode_for_oas : t -> string

@@ -1,7 +1,10 @@
 import { html } from 'htm/preact'
 import { formatContextTokens } from '../lib/format-number'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
+import type {
+  DashboardRuntimeProviderSnapshot,
+  RuntimeTomlEditorProtocol,
+} from '../api/dashboard'
 import {
   findRuntimeCatalogEntry,
   loadRuntimeCatalog,
@@ -15,14 +18,11 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 import {
-  isRuntimeTomlNonMaterializableProtocol,
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
   parseRuntimeTomlEnvironment,
-  RUNTIME_TOML_CREATABLE_PROTOCOLS,
   type RuntimeTomlCredentialType,
   type RuntimeTomlEnvironment,
-  type RuntimeTomlProtocol,
   type RuntimeTomlProvider,
 } from '../lib/runtime-toml-config'
 import { keepers } from '../store'
@@ -46,19 +46,18 @@ export type RuntimeProviderTransportEditableField = 'endpoint' | 'command'
 // ...) are deliberately excluded — those are semantically coupled to real,
 // per-model verified behavior (see runtime.toml's own inline caveats), not
 // something a generic add form can default safely. They stay raw-TOML-only.
-// transportKind is fixed to 'endpoint': CLI (`command`) transport providers
-// resolve to no provider_kind on the backend today and get silently dropped
-// from the live runtime list rather than failing the save (see
-// RUNTIME_TOML_CREATABLE_PROTOCOLS in lib/runtime-toml-config.ts). Until that
-// backend limitation is lifted, this form cannot offer command transport.
+// Generic providers use endpoint transport. A typed official-client protocol
+// may require command transport; that exception is selected by protocol and
+// never exposed as a free-form transport switch.
 export interface NewRuntimeProviderInput {
   id: string
   displayName: string
-  protocol: RuntimeTomlProtocol
-  transportKind: 'endpoint'
+  protocol: string
+  transportKind: 'endpoint' | 'command'
   transportValue: string
   credentialType: RuntimeTomlCredentialType
   credentialValue: string
+  isNonInteractive: boolean
 }
 
 export interface NewRuntimeModelInput {
@@ -73,6 +72,7 @@ export interface NewRuntimeModelInput {
 
 interface RuntimeEnvironmentEditorProps {
   sourceText: string
+  providerProtocols: RuntimeTomlEditorProtocol[]
   section: RuntimeStructuredSection
   disabled?: boolean
   draftDirty?: boolean
@@ -126,21 +126,25 @@ function transportValue(provider: RuntimeTomlProvider): string {
 interface NewProviderDraft {
   id: string
   displayName: string
-  protocol: RuntimeTomlProtocol
-  transportKind: 'endpoint'
+  protocol: string
+  transportKind: 'endpoint' | 'command'
   transportValue: string
   credentialType: RuntimeTomlCredentialType
   credentialValue: string
+  isNonInteractive: boolean
 }
 
-const DEFAULT_NEW_PROVIDER: NewProviderDraft = {
-  id: '',
-  displayName: '',
-  protocol: RUNTIME_TOML_CREATABLE_PROTOCOLS[0],
-  transportKind: 'endpoint',
-  transportValue: '',
-  credentialType: 'env',
-  credentialValue: '',
+function newProviderDraft(protocol: RuntimeTomlEditorProtocol): NewProviderDraft {
+  return {
+    id: '',
+    displayName: '',
+    protocol: protocol.protocol,
+    transportKind: protocol.transport,
+    transportValue: '',
+    credentialType: protocol.credential_policy === 'forbidden' ? 'none' : 'env',
+    credentialValue: '',
+    isNonInteractive: protocol.requires_non_interactive,
+  }
 }
 
 // jsonSupport as a 3-way string enum (not boolean|null) because <select> values
@@ -273,6 +277,7 @@ function keeperDotTone(status: string): string {
 
 export function RuntimeEnvironmentEditor({
   sourceText,
+  providerProtocols,
   section,
   disabled,
   draftDirty,
@@ -287,11 +292,19 @@ export function RuntimeEnvironmentEditor({
   onProviderTransportChange,
   onProviderCredentialChange,
 }: RuntimeEnvironmentEditorProps) {
+  const defaultProviderProtocol = providerProtocols[0]
+  if (!defaultProviderProtocol) {
+    throw new Error('runtime provider protocol inventory must not be empty')
+  }
+  const defaultProviderDraft = useMemo(
+    () => newProviderDraft(defaultProviderProtocol),
+    [defaultProviderProtocol],
+  )
   const environment = useMemo(() => parseRuntimeTomlEnvironment(sourceText), [sourceText])
   const [modelQuery, setModelQuery] = useState('')
 
   const [providerFormOpen, setProviderFormOpen] = useState(false)
-  const [newProvider, setNewProvider] = useState<NewProviderDraft>(DEFAULT_NEW_PROVIDER)
+  const [newProvider, setNewProvider] = useState<NewProviderDraft>(defaultProviderDraft)
   const [providerFormError, setProviderFormError] = useState<string | null>(null)
   const [providerDeleteError, setProviderDeleteError] = useState<string | null>(null)
 
@@ -376,7 +389,20 @@ export function RuntimeEnvironmentEditor({
     }
     const transportValue = newProvider.transportValue.trim()
     if (transportValue === '') {
-      setProviderFormError('endpoint를 입력하세요')
+      setProviderFormError(`${newProvider.transportKind}를 입력하세요`)
+      return
+    }
+    const protocol = providerProtocols.find(entry => entry.protocol === newProvider.protocol)
+    if (!protocol) {
+      setProviderFormError('백엔드 runtime protocol inventory에 없는 provider입니다')
+      return
+    }
+    if (
+      newProvider.transportKind !== protocol.transport
+      || newProvider.isNonInteractive !== protocol.requires_non_interactive
+      || (protocol.credential_policy === 'forbidden' && newProvider.credentialType !== 'none')
+    ) {
+      setProviderFormError('provider 설정이 백엔드 runtime protocol 계약과 일치하지 않습니다')
       return
     }
     const trimmedCredentialValue = newProvider.credentialValue.trim()
@@ -391,7 +417,7 @@ export function RuntimeEnvironmentEditor({
       transportValue,
       credentialValue: trimmedCredentialValue,
     })
-    setNewProvider(DEFAULT_NEW_PROVIDER)
+    setNewProvider(defaultProviderDraft)
     setProviderFormError(null)
     setProviderDeleteError(null)
     setProviderFormOpen(false)
@@ -441,37 +467,19 @@ export function RuntimeEnvironmentEditor({
       setBindingFormError('provider와 model을 모두 선택하세요')
       return
     }
-    // A binding pin is written as a top-level `[providerId.modelId]` table.
-    // bindingSections() on read already excludes RESERVED_TOP_LEVEL first
-    // segments (providers/models/runtime/...), so a provider id that collides
-    // with one of those is silently unreadable after save -- or worse, if the
-    // model id also matches an existing `[models.<id>]` model definition, the
-    // binding table collides with it outright. New providers can never get a
-    // reserved id (runtimeTomlIdError), but this dropdown lists whatever is
-    // already in environment.providers, which can include a legacy/hand-edited
-    // provider that predates that check -- so guard here too.
+    // Backend validation rejects this source on save. Keep the same reason at
+    // the draft boundary so the operator sees it before attempting the write.
     if (isReservedRuntimeTomlId(bindingProviderId)) {
       setBindingFormError(`"${bindingProviderId}"는 예약된 이름이라 바인딩 provider로 쓸 수 없습니다`)
       return
     }
-    // A `command` transport provider always resolves to no provider_kind on the
-    // backend, so materialize_config's filter_map silently drops any binding
-    // pinned to it from the live runtime list. The add-provider form can no
-    // longer create one, but this dropdown lists every parsed provider,
-    // including a `command` one that already exists via raw TOML / legacy config.
     const selectedProvider = environment.providers.find(p => p.id === bindingProviderId)
-    if (selectedProvider?.transportKind === 'command') {
+    const selectedProtocol = providerProtocols.find(
+      protocol => protocol.protocol === selectedProvider?.protocol,
+    )
+    if (selectedProvider?.transportKind === 'command' && selectedProtocol?.semantics !== 'official_client') {
       setBindingFormError(
         `"${bindingProviderId}"는 command(CLI) transport라 바인딩을 생성할 수 없습니다 (백엔드가 아직 CLI provider를 라우팅하지 못합니다)`,
-      )
-      return
-    }
-    // Protocol-only non-materialization is limited to Messages_api. Other
-    // protocols, including openai-compatible-cli, are valid when the provider
-    // uses endpoint/HTTP transport.
-    if (selectedProvider && isRuntimeTomlNonMaterializableProtocol(selectedProvider.protocol)) {
-      setBindingFormError(
-        `"${bindingProviderId}"는 ${selectedProvider.protocol} protocol이라 바인딩을 생성할 수 없습니다 (백엔드가 아직 이 provider를 라우팅하지 못합니다)`,
       )
       return
     }
@@ -641,12 +649,16 @@ export function RuntimeEnvironmentEditor({
           ` : null}
           ${environment.providers.map(provider => {
             const providerTransportField = transportField(provider)
+            const officialClient = providerProtocols.find(
+              protocol => protocol.protocol === provider.protocol,
+            )?.semantics === 'official_client'
             return html`
             <div key=${provider.id} class="rt-card" data-testid=${`runtime-provider-${provider.id}`}>
               <div class="rt-card-h">
                 <span class="rt-card-id mono">${provider.id}</span>
                 <span class="rt-card-name">${provider.displayName}</span>
                 <span class="rt-proto mono">${provider.protocol || '—'}</span>
+                ${officialClient ? html`<span class="rt-assign-tag pin mono">구독 CLI</span>` : null}
                 <button
                   type="button"
                   class="rt-delete-provider"
@@ -699,6 +711,15 @@ export function RuntimeEnvironmentEditor({
                   </span>
                   `}
               </div>
+              ${officialClient ? html`
+                <div class="rt-field" data-testid=${`runtime-provider-${provider.id}-subscription-boundary`}>
+                  <span class="sub-k">execution</span>
+                  <span class="mono">official client · ${provider.isNonInteractive ? 'non-interactive' : '설정 오류: interactive'}</span>
+                </div>
+                ${provider.credentialType !== 'none' ? html`
+                  <div class="rt-warn" role="alert">공식 구독 클라이언트에는 API credential을 선언할 수 없습니다.</div>
+                ` : null}
+              ` : null}
               ${/* Provider capability chips (mcp-tools/tool-events/mcp-http-headers)
                    had no live source and rendered as if confirmed. Removed until a
                    provider-capability source exists, rather than implying support
@@ -747,29 +768,47 @@ export function RuntimeEnvironmentEditor({
                     value=${newProvider.protocol}
                     disabled=${isDisabled}
                     aria-label="새 provider protocol"
-                    onChange=${(event: Event) => setNewProvider({ ...newProvider, protocol: (event.currentTarget as HTMLSelectElement).value as RuntimeTomlProtocol })}
+                    onChange=${(event: Event) => {
+                      const protocolName = (event.currentTarget as HTMLSelectElement).value
+                      const protocol = providerProtocols.find(entry => entry.protocol === protocolName)
+                      if (protocol) {
+                        setNewProvider({
+                          ...newProviderDraft(protocol),
+                          id: newProvider.id,
+                          displayName: newProvider.displayName,
+                        })
+                      }
+                    }}
                   >
-                    ${RUNTIME_TOML_CREATABLE_PROTOCOLS.map(p => html`<option value=${p}>${p}</option>`)}
+                    ${providerProtocols.map(protocol => html`
+                      <option value=${protocol.protocol}>${protocol.protocol}</option>
+                    `)}
                   </select>
                 </div>
                 <div class="rt-field">
-                  <span class="sub-k">endpoint</span>
+                  <span class="sub-k">${newProvider.transportKind}</span>
                   <input
                     class="rt-input mono"
                     value=${newProvider.transportValue}
-                    placeholder="https://..."
+                    placeholder=${newProvider.transportKind === 'command' ? '/absolute/path/to/codex' : 'https://...'}
                     disabled=${isDisabled}
                     aria-label="새 provider transport 값"
                     onInput=${(event: Event) => setNewProvider({ ...newProvider, transportValue: (event.currentTarget as HTMLInputElement).value })}
                   />
                 </div>
-                <div class="rt-note">CLI(command) provider는 현재 백엔드에서 라우팅되지 않아 이 폼에서 생성할 수 없습니다. raw TOML 탭을 이용하세요.</div>
+                <div class="rt-note">
+                  ${providerProtocols.find(protocol => protocol.protocol === newProvider.protocol)?.semantics === 'official_client'
+                    ? '공식 클라이언트의 기존 구독 로그인을 사용합니다. API key는 저장하지 않으며 non-interactive 실행을 강제합니다.'
+                    : '일반 provider는 endpoint transport를 사용합니다.'}
+                </div>
                 <div class="rt-field">
                   <span class="sub-k">credential</span>
                   <select
                     class="rt-select rt-select-narrow"
                     value=${newProvider.credentialType}
-                    disabled=${isDisabled}
+                    disabled=${isDisabled || providerProtocols.find(
+                      protocol => protocol.protocol === newProvider.protocol,
+                    )?.credential_policy === 'forbidden'}
                     aria-label="새 provider credential 종류"
                     onChange=${(event: Event) => setNewProvider({ ...newProvider, credentialType: (event.currentTarget as HTMLSelectElement).value as RuntimeTomlCredentialType })}
                   >
@@ -803,7 +842,7 @@ export function RuntimeEnvironmentEditor({
                     type="button"
                     class="rt-add-cancel"
                     disabled=${isDisabled}
-                    onClick=${() => { setProviderFormOpen(false); setNewProvider(DEFAULT_NEW_PROVIDER); setProviderFormError(null) }}
+                    onClick=${() => { setProviderFormOpen(false); setNewProvider(defaultProviderDraft); setProviderFormError(null) }}
                   >취소</button>
                 </div>
               </div>

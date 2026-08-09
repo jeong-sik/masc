@@ -29,6 +29,15 @@ import { tweaksDensity } from './tweaks-panel'
 import { notificationDeliveryError, notifyRules } from '../notifications'
 
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
+const runtimeProviderProtocols = [
+  {
+    protocol: 'openai-compatible-http',
+    transport: 'endpoint',
+    semantics: 'http_provider',
+    credential_policy: 'optional',
+    requires_non_interactive: false,
+  },
+] as const
 import { dashboardLoading, shellAuthSummary, shellConfigResolution, shellRuntimeResolution } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
@@ -351,6 +360,7 @@ function stubEmptyApi() {
     file_name: 'runtime.toml',
     source_text: '[runtime]\ndefault = "rt-a"\n',
     reloaded: false,
+    provider_protocols: runtimeProviderProtocols,
   })
   apiMock.patchRuntimeMediaFailover.mockImplementation(async () => ({
     ok: true,
@@ -358,6 +368,7 @@ function stubEmptyApi() {
     file_name: 'runtime.toml',
     source_text: '[runtime]\ndefault = "rt-a"\n',
     reloaded: true,
+    provider_protocols: runtimeProviderProtocols,
   }))
   apiMock.patchRuntimeRouting.mockImplementation(async () => ({
     ok: true,
@@ -365,6 +376,7 @@ function stubEmptyApi() {
     file_name: 'runtime.toml',
     source_text: '[runtime]\ndefault = "rt-a"\n',
     reloaded: true,
+    provider_protocols: runtimeProviderProtocols,
   }))
   apiMock.saveRuntimeTomlConfig.mockImplementation(async (sourceText: string) => ({
     ok: true,
@@ -372,6 +384,7 @@ function stubEmptyApi() {
     file_name: 'runtime.toml',
     source_text: sourceText,
     reloaded: true,
+    provider_protocols: runtimeProviderProtocols,
   }))
 }
 
@@ -936,6 +949,7 @@ describe('SettingsSurface', () => {
           file_name: 'runtime.toml',
           source_text: '[runtime]\ndefault = "rt-a"\n',
           reloaded: false,
+          provider_protocols: runtimeProviderProtocols,
         }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -1520,6 +1534,7 @@ describe('SettingsSurface', () => {
       file_name: 'runtime.toml',
       source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\n\n[fusion.presets.trio]\nmin_answered = 2\n',
       reloaded: false,
+      provider_protocols: runtimeProviderProtocols,
     })
     render(html`<${SettingsSurface} />`, container)
 
@@ -1542,6 +1557,7 @@ describe('SettingsSurface', () => {
       file_name: 'runtime.toml',
       source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
       reloaded: false,
+      provider_protocols: runtimeProviderProtocols,
     }
     apiMock.fetchRuntimeTomlConfig.mockResolvedValueOnce(runtimeConfig)
 

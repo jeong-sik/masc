@@ -3149,6 +3149,23 @@ describe('dashboard runtime probe API', () => {
 })
 
 describe('runtime.toml raw config API', () => {
+  const providerProtocols = [
+    {
+      protocol: 'openai-compatible-http',
+      transport: 'endpoint',
+      semantics: 'http_provider',
+      credential_policy: 'optional',
+      requires_non_interactive: false,
+    },
+    {
+      protocol: 'codex-app-server',
+      transport: 'command',
+      semantics: 'official_client',
+      credential_policy: 'forbidden',
+      requires_non_interactive: true,
+    },
+  ]
+
   it('fetches and normalizes the raw runtime.toml source', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -3157,6 +3174,7 @@ describe('runtime.toml raw config API', () => {
         file_name: 'runtime.toml',
         source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
         reloaded: false,
+        provider_protocols: providerProtocols,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -3175,6 +3193,36 @@ describe('runtime.toml raw config API', () => {
     expect(result.file_name).toBe('runtime.toml')
     expect(result.source_text).toContain('[runtime]')
     expect(result.reloaded).toBe(false)
+    expect(result.provider_protocols).toEqual(providerProtocols)
+  })
+
+  it.each([
+    ['missing inventory', undefined],
+    ['empty inventory', []],
+    ['duplicate protocol', [providerProtocols[0], providerProtocols[0]]],
+    ['inconsistent official-client contract', [{
+      ...providerProtocols[1],
+      transport: 'endpoint',
+    }]],
+    ['unknown entry field', [{
+      ...providerProtocols[0],
+      client_owned: true,
+    }]],
+  ])('rejects %s from the backend protocol inventory', async (_label, inventory) => {
+    const payload: Record<string, unknown> = {
+      ok: true,
+      path: '/tmp/.masc/config/runtime.toml',
+      file_name: 'runtime.toml',
+      source_text: '[runtime]\n',
+      reloaded: false,
+    }
+    if (inventory !== undefined) payload.provider_protocols = inventory
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await expect(fetchRuntimeTomlConfig()).rejects.toThrow(/runtime provider protocol/)
   })
 
   it('posts the full raw TOML source through source_text', async () => {
@@ -3186,6 +3234,7 @@ describe('runtime.toml raw config API', () => {
         file_name: 'runtime.toml',
         source_text: sourceText,
         reloaded: true,
+        provider_protocols: providerProtocols,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -3217,6 +3266,7 @@ describe('runtime.toml raw config API', () => {
         file_name: 'runtime.toml',
         source_text: sourceText,
         reloaded: true,
+        provider_protocols: providerProtocols,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -3246,6 +3296,7 @@ describe('runtime.toml raw config API', () => {
         file_name: 'runtime.toml',
         source_text: sourceText,
         reloaded: true,
+        provider_protocols: providerProtocols,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -3275,6 +3326,7 @@ describe('runtime.toml raw config API', () => {
         file_name: 'runtime.toml',
         source_text: sourceText,
         reloaded: true,
+        provider_protocols: providerProtocols,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },

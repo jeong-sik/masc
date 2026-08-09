@@ -74,6 +74,33 @@ describe('runtime TOML dashboard editing helpers', () => {
     })
   })
 
+  it('projects the Codex official-client subscription boundary without credentials', () => {
+    const codexSource = `[runtime]
+default = "codex_subscription.spark"
+
+[providers.codex_subscription]
+display-name = "Codex Subscription"
+protocol = "codex-app-server"
+command = "/usr/local/bin/codex"
+is-non-interactive = true
+
+[models.spark]
+api-name = "gpt-5.3-codex-spark"
+max-context = 131072
+
+[codex_subscription.spark]
+`
+
+    const environment = parseRuntimeTomlEnvironment(codexSource)
+    expect(environment.providers[0]).toMatchObject({
+      protocol: 'codex-app-server',
+      transportKind: 'command',
+      command: '/usr/local/bin/codex',
+      credentialType: 'none',
+      isNonInteractive: true,
+    })
+  })
+
   it('projects runtime routing lanes and keeper assignments from runtime.toml source', () => {
     const withRouting = `${sourceText.replace(
       'default = "runpod_mtp.qwen"',

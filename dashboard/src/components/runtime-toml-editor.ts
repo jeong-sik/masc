@@ -310,6 +310,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       let next = setRuntimeTomlProviderField(current, input.id, 'display-name', input.displayName || input.id)
       next = setRuntimeTomlProviderField(next, input.id, 'protocol', input.protocol)
       next = setRuntimeTomlProviderField(next, input.id, input.transportKind, input.transportValue)
+      if (input.isNonInteractive) {
+        next = setRuntimeTomlProviderField(next, input.id, 'is-non-interactive', true)
+      }
       if (input.credentialType !== 'none' && input.credentialValue.trim() !== '') {
         next = setRuntimeTomlProviderCredential(next, input.id, input.credentialType, input.credentialValue)
       }
@@ -621,8 +624,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
             ` : null}
 
             <div class=${structuredActive ? '' : 'hidden'} data-testid="runtime-toml-structured">
-              <${RuntimeEnvironmentEditor}
+              ${config ? html`<${RuntimeEnvironmentEditor}
                 sourceText=${draft}
+                providerProtocols=${config.provider_protocols}
                 section=${structuredSection}
                 disabled=${loadState !== 'loaded'}
                 draftDirty=${dirty}
@@ -640,7 +644,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 onDeleteProvider=${handleDeleteProvider}
                 onProviderTransportChange=${handleProviderTransportChange}
                 onProviderCredentialChange=${handleProviderCredentialChange}
-              />
+              />` : null}
             </div>
 
             <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">

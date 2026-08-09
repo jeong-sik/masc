@@ -12,6 +12,7 @@ export interface RuntimeTomlProvider {
   credentialKey: string
   credentialPath: string
   credentialValue: string
+  isNonInteractive: boolean
 }
 
 export interface RuntimeTomlModel {
@@ -289,6 +290,7 @@ function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlPr
     credentialKey: asString(credentials.key),
     credentialPath: asString(credentials.path),
     credentialValue: asString(credentials.value),
+    isNonInteractive: asBoolean(values['is-non-interactive']),
   }
 }
 
@@ -639,8 +641,8 @@ export function setRuntimeTomlDefault(sourceText: string, runtimeId: string): st
 export function setRuntimeTomlProviderField(
   sourceText: string,
   providerId: string,
-  field: 'display-name' | 'protocol' | 'endpoint' | 'command',
-  value: string,
+  field: 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive',
+  value: string | boolean,
 ): string {
   const section = `providers.${providerId}`
   if (field === 'endpoint') {
@@ -709,52 +711,6 @@ export function setRuntimeTomlBindingField(
 ): string {
   if (value === null) return deleteRuntimeTomlKey(sourceText, runtimeId, field)
   return setRuntimeTomlKey(sourceText, runtimeId, field, value)
-}
-
-// Closed set mirroring lib/runtime/runtime_toml.ml's api_format_of_protocol —
-// any other string fails runtime.toml *parse* validation on save
-// (Runtime.save_config_text re-parses via materialize_config). This does not
-// mean every member here can be safely offered by the add-provider form: see
-// RUNTIME_TOML_CREATABLE_PROTOCOLS below for the materialization gate.
-export const RUNTIME_TOML_PROTOCOLS = [
-  'openai-compatible-http',
-  'ollama-http',
-  'openai-compatible-cli',
-  'messages-http',
-  'messages-cli',
-] as const
-
-export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
-
-// Subset of RUNTIME_TOML_PROTOCOLS the add-provider form is allowed to offer.
-// The add-provider form only creates endpoint-backed providers. Command
-// transport is blocked at the binding form via transportKind, while
-// `provider_kind_for_http_provider` still returns `None` for `Messages_api`.
-// Messages providers parse and save, but resolve to no provider_kind and
-// `Runtime.materialize_config`'s `List.filter_map` silently drops their bindings
-// from the live runtime list instead of failing the save
-// (lib/runtime/runtime_adapter.ml:183-203, lib/runtime/runtime.ml:239).
-// This is an allow-list of materializable endpoint protocols, so a future 6th
-// protocol defaults to non-creatable until reviewed.
-export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
-  'openai-compatible-http',
-  'ollama-http',
-  'openai-compatible-cli',
-] as const
-
-export type RuntimeTomlCreatableProtocol = (typeof RUNTIME_TOML_CREATABLE_PROTOCOLS)[number]
-
-export function isRuntimeTomlCreatableProtocol(protocol: string): protocol is RuntimeTomlCreatableProtocol {
-  return (RUNTIME_TOML_CREATABLE_PROTOCOLS as readonly string[]).includes(protocol)
-}
-
-const RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS = new Set([
-  'messages-http',
-  'messages-cli',
-])
-
-export function isRuntimeTomlNonMaterializableProtocol(protocol: string): boolean {
-  return RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS.has(protocol)
 }
 
 // runtime.toml ids become TOML table headers ([providers.<id>], [models.<id>],

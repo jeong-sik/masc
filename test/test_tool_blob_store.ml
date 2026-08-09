@@ -154,7 +154,7 @@ let test_decode_malformed_marker () =
      old silent Inline fallback, a malformed marker is now a visible, typed
      [Invalid_marker] outcome; the caller decides what to do with the raw
      text. *)
-  let bad = "[masc:blob garbage that cannot scanf]" in
+  let bad = "[masc:blob sha256=garbage that cannot scanf]" in
   match O.decode_from_oas bad with
   | O.Invalid_marker { detail } ->
       Alcotest.(check bool)
@@ -497,7 +497,7 @@ let test_maintenance_malformed_reference_fails_closed () =
           "gate/malformed.jsonl"
       in
       Fs_compat.mkdir_p (Filename.dirname source);
-      Fs_compat.save_file source "{\"output\":\"[masc:blob garbage]\"}\n";
+      Fs_compat.save_file source "{\"output\":\"[masc:blob sha256=garbage]\"}\n";
       (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
        | Error (M.Malformed_artifact_reference { path; line; _ }) ->
          Alcotest.(check string) "exact malformed source" source path;
@@ -510,6 +510,34 @@ let test_maintenance_malformed_reference_fails_closed () =
       Alcotest.(check (option string))
         "blob retained on malformed reference"
         (Some "must survive malformed source")
+        (fetch_ok store ~sha256:blob.sha256))
+
+let test_maintenance_ignores_prose_blob_placeholder () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"unreferenced output" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let source =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "gate/prompt.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname source);
+      Fs_compat.save_file
+        source
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "content", `String "documentation example: [masc:blob ...]" ]));
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "prose placeholder does not claim blob ownership"
+        1
+        observed.candidates_recorded;
+      Alcotest.(check (option string))
+        "observe-only scan retains candidate"
+        (Some "unreferenced output")
         (fetch_ok store ~sha256:blob.sha256))
 
 let test_maintenance_does_not_scan_repository_mirrors () =
@@ -1102,6 +1130,10 @@ let () =
             "maintenance malformed reference fails closed"
             `Quick
             test_maintenance_malformed_reference_fails_closed;
+          test_case
+            "maintenance ignores prose blob placeholder"
+            `Quick
+            test_maintenance_ignores_prose_blob_placeholder;
           Alcotest.test_case
             "maintenance keeps wire-capture reference within retention"
             `Quick

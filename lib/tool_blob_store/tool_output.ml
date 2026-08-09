@@ -122,7 +122,7 @@ let default_model_projection =
 let bounded_inline_model_projection =
   Inline_up_to { maximum_bytes = Common.max_tool_output_bytes }
 
-let marker_prefix = "[masc:blob "
+let marker_prefix = "[masc:blob sha256="
 
 let is_marker s = String.starts_with ~prefix:marker_prefix s
 

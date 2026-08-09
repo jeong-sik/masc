@@ -137,6 +137,8 @@ val fail_running_operation
   -> (Chat_operation.t, error) result
 
 val begin_stopping : t -> (unit, error) result
+(** Reject new mutation and submit commands, cancel an active child turn, and
+    return only after its terminal operation transition has been attempted. *)
 (** Reject future external commands. *)
 
 val error_to_string : error -> string

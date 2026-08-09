@@ -1488,21 +1488,6 @@ let cached_keeper_composite_json config name =
   | other -> `OK, other
 ;;
 
-let keeper_chat_receipt_route req_path =
-  if not (String.starts_with ~prefix:keeper_api_prefix req_path)
-  then None
-  else
-    let rest =
-      String.sub req_path (String.length keeper_api_prefix)
-        (String.length req_path - String.length keeper_api_prefix)
-    in
-    match String.split_on_char '/' rest with
-    | [ keeper_name; "chat"; "receipts"; receipt_id ]
-      when keeper_name <> "" && receipt_id <> "" ->
-      Some (keeper_name, receipt_id)
-    | _ -> None
-;;
-
 let handle_keeper_get_subroutes state req request reqd =
   let req_path = Http.Request.path req in
   let prefix = keeper_api_prefix in
@@ -1517,30 +1502,6 @@ let handle_keeper_get_subroutes state req request reqd =
     let slen = String.length suffix in
     String.trim (String.sub req_path plen (tlen - plen - slen))
   in
-  match keeper_chat_receipt_route req_path with
-  | Some (name, raw_receipt_id) ->
-    if not (Keeper_config.validate_name name)
-    then
-      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
-        (error_json (Printf.sprintf "invalid keeper name: %s" name))
-    else
-      (match Keeper_chat_queue.Receipt_id.of_string raw_receipt_id with
-       | Error message ->
-         Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
-           (error_json message)
-       | Ok receipt_id ->
-         (match Keeper_chat_queue.lookup_receipt ~keeper_name:name ~receipt_id with
-          | Error error ->
-            Server_auth.respond_json_value_with_cors ~status:`Service_unavailable
-              request reqd
-              (error_json (Keeper_chat_queue.mutation_error_to_string error))
-          | Ok { receipt = None; _ } ->
-            Server_auth.respond_json_value_with_cors ~status:`Not_found request reqd
-              (error_json "keeper chat receipt not found")
-          | Ok { revision; receipt = Some receipt } ->
-            Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-              (keeper_chat_receipt_json ~keeper_name:name ~revision receipt)))
-  | None ->
   if ends_with "/digest" then (
     (* Keeper catch-up digest (since-last-seen). The enclosing keeper GET
        router leaves this route on its public-read policy; sensitive sibling

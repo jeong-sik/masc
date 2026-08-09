@@ -40,8 +40,6 @@ export function stateTone(state: string | null | undefined): StatusChipTone {
 export function sourceTone(source: string | null | undefined): StatusChipTone {
   switch (source) {
     case 'read_error':
-    case 'chat_queue_recovery_required':
-    case 'chat_queue_persistence_blocked':
       return 'bad'
     case 'hitl_pending':
     case 'operator_pending_confirm':
@@ -97,27 +95,18 @@ function asDetailRecord(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-function WaitingRowReceiptDetail({ row }: { row: DashboardKeeperWaitingRow }) {
+function WaitingRowOperationDetail({ row }: { row: DashboardKeeperWaitingRow }) {
   const detail = asDetailRecord(row.detail)
-  const lifecycle = asDetailRecord(detail?.lifecycle)
-  const receiptId = typeof detail?.receipt_id === 'string' ? detail.receipt_id : null
-  if (!receiptId) return null
-  const queueIndex = typeof detail?.queue_index === 'number' ? detail.queue_index : null
-  const state = typeof lifecycle?.state === 'string' ? lifecycle.state : null
-  const leaseId = typeof lifecycle?.lease_id === 'string' ? lifecycle.lease_id : null
-  const startedAt = typeof lifecycle?.started_at_iso === 'string'
-    ? lifecycle.started_at_iso
-    : null
+  const operationId = typeof detail?.operation_id === 'string' ? detail.operation_id : null
+  const queuedCount = typeof detail?.queued_count === 'number' ? detail.queued_count : null
+  if (!operationId && queuedCount === null) return null
   return html`
     <div
       class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-2xs text-[var(--color-fg-muted)]"
-      data-keeper-chat-receipt=${receiptId}
+      data-keeper-chat-operation=${operationId ?? ''}
     >
-      <span class="min-w-0 break-all font-mono">receipt ${receiptId}</span>
-      ${queueIndex === null ? null : html`<span class="font-mono">queue index ${queueIndex}</span>`}
-      ${state ? html`<span class="font-mono">state ${enumLabel(state)}</span>` : null}
-      ${leaseId ? html`<span class="min-w-0 break-all font-mono">lease ${leaseId}</span>` : null}
-      ${startedAt ? html`<span>started ${timeLabel(startedAt)}</span>` : null}
+      ${operationId ? html`<span class="min-w-0 break-all font-mono">operation ${operationId}</span>` : null}
+      ${queuedCount === null ? null : html`<span class="font-mono">queued ${queuedCount}</span>`}
     </div>
   `
 }
@@ -156,7 +145,7 @@ function WaitingRow({ row }: { row: DashboardKeeperWaitingRow }) {
         <span class="font-mono">producer ${wakeProducer}</span>
         <span class="font-mono">${nextAction}</span>
       </div>
-      <${WaitingRowReceiptDetail} row=${row} />
+      <${WaitingRowOperationDetail} row=${row} />
       <${WaitingRowShutdownDetail} row=${row} />
     </div>
   `

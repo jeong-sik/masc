@@ -67,7 +67,7 @@ let with_owner_inventory config f =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
-  (match Masc.Keeper_owner_registry.install_from_store ~sw config with
+  (match Masc.Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
    | Ok _ -> ()
    | Error error ->
      failwith (Masc.Keeper_owner_registry.install_error_to_string error));

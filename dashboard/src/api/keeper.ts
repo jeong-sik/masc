@@ -1,30 +1,17 @@
-// MASC Dashboard — Keeper messaging (operator-mediated queue, SSE streaming)
+// MASC Dashboard — Keeper operation messaging and SSE streaming
 
 import { asNumber, asString, isRecord } from '../components/common/normalize'
+import type { KeeperUserInputBlock } from '../types'
 import {
-  formatKeeperVisibleReply,
-  keeperTurnOutcomeSuppressesReply,
-  normalizeKeeperConversationDetails,
-} from '../keeper-message'
-import type {
-  KeeperConversationAttachment,
-  KeeperConversationDetails,
-  KeeperQueueReceiptFailureKind,
-  KeeperUserInputBlock,
-} from '../types'
-import {
-  currentDashboardActor,
   apiRequestErrorFromResponse,
   jsonHeaders,
   post,
-  runOperatorAction,
   fetchControlPlane,
   fetchWithTimeout,
   fetchJsonWithTimeout,
   DEFAULT_GET_TIMEOUT_MS,
 } from './core'
 import { refreshDevTokenAfterAuthError } from './dev-token'
-import { isKeeperChatReceiptId, parseKeeperQueueRevision } from '../lib/keeper-chat-receipt'
 import type { KeeperChatStreamEvent } from '../lib/keeper-chat-stream-contract'
 import type {
   KeeperCompositeSnapshot,
@@ -123,130 +110,6 @@ export {
 
 // --- Types ---
 
-export interface KeeperToolReply {
-  text: string
-  details: KeeperConversationDetails | null
-}
-
-export type QueuedKeeperMessageStatus =
-  | 'queued'
-  | 'running'
-  | 'cancelling'
-  | 'done'
-  | 'error'
-  | 'lost'
-  | 'cancelled'
-  | 'persistence_failed'
-
-export interface QueuedKeeperMessageSubmission {
-  requestId: string
-  keeperName: string
-  status: QueuedKeeperMessageStatus
-  message?: string
-}
-
-export interface QueuedKeeperMessageResult {
-  requestId: string
-  keeperName: string
-  status: QueuedKeeperMessageStatus
-  submittedAt?: number
-  completedAt?: number
-  elapsedSec?: number
-  ok?: boolean
-  result?: unknown
-}
-
-export interface QueuedKeeperMessageCancelResult {
-  requestId: string
-  status: 'cancelling' | 'cancelled'
-  message?: string
-}
-
-const TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES = new Set<QueuedKeeperMessageStatus>([
-  'done',
-  'error',
-  'lost',
-  'cancelled',
-  'persistence_failed',
-])
-
-function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessageStatus {
-  switch (asString(value, '').trim()) {
-    case 'queued':
-      return 'queued'
-    case 'running':
-      return 'running'
-    case 'cancelling':
-      return 'cancelling'
-    case 'done':
-      return 'done'
-    case 'error':
-      return 'error'
-    case 'lost':
-      return 'lost'
-    case 'cancelled':
-      return 'cancelled'
-    case 'persistence_failed':
-      return 'persistence_failed'
-    default:
-      throw new Error(`unsupported keeper message status: ${JSON.stringify(value)}`)
-  }
-}
-
-function optionalNumberField(record: Record<string, unknown>, key: string): number | undefined {
-  const value = record[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function parseQueuedKeeperMessageSubmission(data: unknown): QueuedKeeperMessageSubmission {
-  const record = isRecord(data) ? data : null
-  const requestId = asString(record?.request_id, '').trim()
-  if (!requestId) {
-    throw new Error('keeper message queue response missing request_id')
-  }
-  return {
-    requestId,
-    keeperName: (asString(record?.keeper_name) ?? asString(record?.destination_id, '')).trim(),
-    status: normalizeQueuedKeeperMessageStatus(record?.status),
-    message: asString(record?.message),
-  }
-}
-
-function parseQueuedKeeperMessageResult(data: unknown): QueuedKeeperMessageResult {
-  const record = isRecord(data) ? data : null
-  const requestId = asString(record?.request_id, '').trim()
-  if (!requestId) {
-    throw new Error('keeper message result response missing request_id')
-  }
-  return {
-    requestId,
-    keeperName: (asString(record?.keeper_name) ?? asString(record?.destination_id, '')).trim(),
-    status: normalizeQueuedKeeperMessageStatus(record?.status),
-    submittedAt: record ? optionalNumberField(record, 'submitted_at') : undefined,
-    completedAt: record ? optionalNumberField(record, 'completed_at') : undefined,
-    elapsedSec: record ? optionalNumberField(record, 'elapsed_sec') : undefined,
-    ok: typeof record?.ok === 'boolean' ? record.ok : undefined,
-    result: record?.result,
-  }
-}
-
-function parseQueuedKeeperMessageCancelResult(data: unknown): QueuedKeeperMessageCancelResult {
-  const record = isRecord(data) ? data : null
-  const requestId = asString(record?.request_id, '').trim()
-  if (!requestId) {
-    throw new Error('keeper message cancel response missing request_id')
-  }
-  const status = normalizeQueuedKeeperMessageStatus(record?.status)
-  if (status !== 'cancelling' && status !== 'cancelled') {
-    throw new Error(`keeper message cancel response has non-cancellation status: ${status}`)
-  }
-  return {
-    requestId,
-    status,
-    message: asString(record?.message),
-  }
-}
-
 export interface KeeperTurnInterruptResult {
   cancelled: boolean
   turn_id?: number
@@ -278,144 +141,10 @@ export async function interruptKeeperTurn(
   }
 }
 
-export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult): boolean {
-  return TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES.has(result.status)
-}
-
-// Server no longer enforces an external timeout for keeper_msg.
-// Keeper turn/token/cost fields are observability data; lifecycle control is explicit.
-// Client-side abort via AbortSignal is the recommended cancellation path.
-
 export type {
   KeeperChatCustomEventName,
   KeeperChatStreamEvent,
 } from '../lib/keeper-chat-stream-contract'
-
-// --- Direct and operator-mediated messaging ---
-
-async function callKeeperMessageViaOperator(
-  name: string,
-  message: string,
-): Promise<KeeperToolReply> {
-  const payload: Record<string, unknown> = {
-    message,
-  }
-  const response = await runOperatorAction({
-    actor: currentDashboardActor(),
-    action_type: 'keeper_message',
-    target_type: 'keeper',
-    target_id: name,
-    payload,
-  })
-
-  const resultPayload = isRecord(response.result) ? response.result : null
-  const rawReply =
-    resultPayload && typeof resultPayload.reply === 'string'
-      ? resultPayload.reply
-      : ''
-  const detailsRaw =
-    resultPayload && isRecord(resultPayload.result)
-      ? resultPayload.result
-      : resultPayload
-  const details = normalizeKeeperConversationDetails(detailsRaw)
-  const text = formatKeeperVisibleReply(rawReply || '(empty reply)')
-  return { text, details }
-}
-
-export async function sendKeeperMessageDetailed(
-  name: string,
-  message: string,
-): Promise<KeeperToolReply> {
-  return callKeeperMessageViaOperator(name, message)
-}
-
-export async function submitQueuedKeeperMessage(
-  name: string,
-  message: string,
-): Promise<QueuedKeeperMessageSubmission> {
-  const response = await runOperatorAction({
-    actor: currentDashboardActor(),
-    action_type: 'keeper_message',
-    target_type: 'keeper',
-    target_id: name,
-    payload: {
-      message,
-    },
-  })
-  const operatorResult = isRecord(response.result) ? response.result : null
-  const queuePayload =
-    operatorResult && isRecord(operatorResult.result)
-      ? operatorResult.result
-      : operatorResult
-  return parseQueuedKeeperMessageSubmission(queuePayload)
-}
-
-export async function fetchQueuedKeeperMessageResult(
-  requestId: string,
-  opts: { signal?: AbortSignal } = {},
-): Promise<QueuedKeeperMessageResult> {
-  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}`
-  const resp = await fetchWithTimeout(
-    path,
-    { headers: jsonHeaders(), signal: opts.signal },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) {
-    throw await apiRequestErrorFromResponse('GET', path, resp)
-  }
-  return parseQueuedKeeperMessageResult(await resp.json())
-}
-
-export async function cancelQueuedKeeperMessage(
-  requestId: string,
-  opts: { signal?: AbortSignal } = {},
-): Promise<QueuedKeeperMessageCancelResult> {
-  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}/cancel`
-  const resp = await fetchControlPlane(
-    path,
-    {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: '{}',
-      signal: opts.signal,
-    },
-  )
-  if (!resp.ok) {
-    throw await apiRequestErrorFromResponse('POST', path, resp)
-  }
-  return parseQueuedKeeperMessageCancelResult(await resp.json())
-}
-
-export function queuedKeeperMessageError(result: QueuedKeeperMessageResult): string {
-  if (result.status === 'cancelled') return '요청이 취소되었습니다.'
-  const payload = isRecord(result.result) ? result.result : null
-  const message = asString(payload?.message) ?? asString(payload?.reason)
-  const error = asString(payload?.error)
-  return message ?? error ?? `Keeper message request ${result.requestId} ended with ${result.status}`
-}
-
-export function queuedKeeperMessageToReply(result: QueuedKeeperMessageResult): KeeperToolReply {
-  if (result.status === 'cancelled') {
-    return {
-      text: '요청이 취소되었습니다.',
-      details: null,
-    }
-  }
-  const payload = isRecord(result.result) ? result.result : null
-  const rawReply = asString(payload?.reply, '').trim()
-  const details = normalizeKeeperConversationDetails(payload ?? result.result)
-  if (result.status === 'done' && keeperTurnOutcomeSuppressesReply(details?.turnOutcome)) {
-    return {
-      text: '',
-      details,
-    }
-  }
-  const fallback = rawReply || queuedKeeperMessageError(result)
-  return {
-    text: formatKeeperVisibleReply(fallback || '(empty reply)'),
-    details,
-  }
-}
 
 // --- SSE streaming ---
 
@@ -451,7 +180,17 @@ function parseSseEvent(frame: string): KeeperChatStreamEvent | null {
 }
 
 function isTerminalKeeperStreamEvent(event: KeeperChatStreamEvent): boolean {
-  return event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR'
+  return event.type === 'RUN_FINISHED'
+    || event.type === 'RUN_ERROR'
+    || (
+      event.type === 'CUSTOM'
+      && event.name === 'KEEPER_CHAT_OPERATION_ACCEPTED'
+      && (
+        event.value.state === 'Succeeded'
+        || event.value.state === 'Failed'
+        || event.value.state === 'Cancelled'
+      )
+    )
 }
 
 export interface StreamAttachment {
@@ -479,7 +218,34 @@ export interface KeeperStreamOutcome {
   terminal: boolean
 }
 
+export type KeeperChatOperationState =
+  | { kind: 'queued' }
+  | { kind: 'running'; startedAt: number }
+  | { kind: 'succeeded'; completedAt: number; outcomeRef: string }
+  | {
+      kind: 'failed'
+      completedAt: number
+      failureKind: string
+      detail: string
+      outcomeRef: string | null
+    }
+  | { kind: 'cancelled'; completedAt: number }
+
+export interface KeeperChatOperationInput {
+  message: string
+  wire: Record<string, unknown>
+}
+
+export interface KeeperChatOperation {
+  operationId: string
+  sequence: string
+  createdAt: number
+  input: KeeperChatOperationInput | null
+  state: KeeperChatOperationState
+}
+
 export interface StreamKeeperMessageOptions {
+  requestId?: string
   signal?: AbortSignal
   onEvent: (event: KeeperChatStreamEvent) => void
   attachments?: StreamAttachment[]
@@ -510,6 +276,7 @@ export async function streamKeeperMessage(
   name: string,
   message: string,
   {
+    requestId,
     signal,
     onEvent,
     attachments,
@@ -520,7 +287,9 @@ export async function streamKeeperMessage(
     surfaceContext,
   }: StreamKeeperMessageOptions,
 ): Promise<KeeperStreamOutcome> {
+  const operationId = requestId?.trim() || `kmsg-${crypto.randomUUID()}`
   const body: Record<string, unknown> = {
+    request_id: operationId,
     name,
     message,
   }
@@ -623,98 +392,219 @@ export async function streamKeeperMessage(
   }
 }
 
+function parseKeeperChatOperation(value: unknown): KeeperChatOperation {
+  if (!isRecord(value) || value.schema !== 'masc.keeper_chat_operation.v1') {
+    throw new Error('Keeper chat operation response has an unsupported schema')
+  }
+  const operationId = asString(value.operation_id, '').trim()
+  const sequence = asString(value.sequence, '').trim()
+  const createdAt = value.created_at
+  const state = asString(value.state, '').trim()
+  if (
+    !operationId
+    || !/^\d+$/.test(sequence)
+    || typeof createdAt !== 'number'
+    || !Number.isFinite(createdAt)
+    || createdAt < 0
+  ) {
+    throw new Error('Keeper chat operation response is missing identity')
+  }
+  const input = (() => {
+    if (value.input === null) return null
+    if (!isRecord(value.input)) {
+      throw new Error('Keeper chat operation input must be an object or null')
+    }
+    const expected = [
+      'schema',
+      'message',
+      'user_blocks',
+      'turn_instructions',
+      'surface_context',
+      'attachments',
+    ]
+    const names = Object.keys(value.input)
+    if (
+      names.length !== expected.length
+      || names.some(name => !expected.includes(name))
+      || value.input.schema !== 'masc.keeper_chat_operation.input.v1'
+      || typeof value.input.message !== 'string'
+      || !Array.isArray(value.input.user_blocks)
+      || !Array.isArray(value.input.attachments)
+      || !(value.input.turn_instructions === null || typeof value.input.turn_instructions === 'string')
+      || !(value.input.surface_context === null || isRecord(value.input.surface_context))
+    ) {
+      throw new Error('Keeper chat operation input has an invalid contract')
+    }
+    return { message: value.input.message, wire: { ...value.input } }
+  })()
+  const completedAt = value.completed_at
+  const outcomeRef = asString(value.outcome_ref, '').trim()
+  switch (state) {
+    case 'Queued':
+      if (!input) throw new Error('Queued Keeper chat operation is missing input')
+      return { operationId, sequence, createdAt, input, state: { kind: 'queued' } }
+    case 'Running':
+      if (typeof value.started_at !== 'number') {
+        throw new Error('Running Keeper chat operation is missing started_at')
+      }
+      return {
+        operationId,
+        sequence,
+        createdAt,
+        input,
+        state: { kind: 'running', startedAt: value.started_at },
+      }
+    case 'Succeeded':
+      if (typeof completedAt !== 'number' || !outcomeRef) {
+        throw new Error('Succeeded Keeper chat operation is missing terminal outcome')
+      }
+      return {
+        operationId,
+        sequence,
+        createdAt,
+        input,
+        state: { kind: 'succeeded', completedAt, outcomeRef },
+      }
+    case 'Failed': {
+      const failureKind = asString(value.failure_kind, '').trim()
+      const detail = asString(value.failure_detail, '').trim()
+      if (typeof completedAt !== 'number' || !failureKind || !detail) {
+        throw new Error('Failed Keeper chat operation is missing typed failure')
+      }
+      return {
+        operationId,
+        sequence,
+        createdAt,
+        input,
+        state: {
+          kind: 'failed',
+          completedAt,
+          failureKind,
+          detail,
+          outcomeRef: outcomeRef || null,
+        },
+      }
+    }
+    case 'Cancelled':
+      if (typeof completedAt !== 'number') {
+        throw new Error('Cancelled Keeper chat operation is missing completed_at')
+      }
+      return { operationId, sequence, createdAt, input, state: { kind: 'cancelled', completedAt } }
+    default:
+      throw new Error(`Keeper chat operation has unknown state: ${state || '<empty>'}`)
+  }
+}
+
+export async function fetchKeeperChatOperation(
+  keeperName: string,
+  operationId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<KeeperChatOperation> {
+  const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations/${encodeURIComponent(operationId)}`
+  const response = await fetchWithTimeout(
+    path,
+    { headers: jsonHeaders(), signal: opts.signal },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
+  const operation = parseKeeperChatOperation(await response.json())
+  if (operation.operationId !== operationId) {
+    throw new Error('Keeper chat operation response identity mismatch')
+  }
+  return operation
+}
+
+export async function cancelKeeperChatOperation(
+  keeperName: string,
+  operationId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<KeeperChatOperation> {
+  const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations/${encodeURIComponent(operationId)}/cancel`
+  const response = await fetchControlPlane(path, {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: '{}',
+    signal: opts.signal,
+  })
+  if (!response.ok) throw await apiRequestErrorFromResponse('POST', path, response)
+  const operation = parseKeeperChatOperation(await response.json())
+  if (operation.operationId !== operationId || operation.state.kind !== 'cancelled') {
+    throw new Error('Keeper chat operation cancellation response is invalid')
+  }
+  return operation
+}
+
+export async function listQueuedKeeperChatOperations(
+  keeperName: string,
+  afterSequence?: string,
+): Promise<KeeperChatOperation[]> {
+  const query = new URLSearchParams({ state: 'queued' })
+  if (afterSequence !== undefined) query.set('after_sequence', afterSequence)
+  const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations?${query.toString()}`
+  const response = await fetchWithTimeout(path, { headers: jsonHeaders() }, DEFAULT_GET_TIMEOUT_MS)
+  if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
+  const value: unknown = await response.json()
+  if (
+    !isRecord(value)
+    || value.schema !== 'masc.keeper_chat_operations.list.v1'
+    || value.state !== 'Queued'
+    || !Array.isArray(value.operations)
+  ) {
+    throw new Error('Keeper chat operation list has an invalid contract')
+  }
+  const operations = value.operations.map(parseKeeperChatOperation)
+  if (operations.some(operation => operation.state.kind !== 'queued')) {
+    throw new Error('Keeper chat operation list contains a non-queued operation')
+  }
+  return operations
+}
+
+async function mutateQueuedKeeperChatOperation(
+  keeperName: string,
+  operationId: string,
+  action: 'edit' | 'move-to-end',
+  body: Record<string, unknown>,
+): Promise<KeeperChatOperation> {
+  const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations/${encodeURIComponent(operationId)}/${action}`
+  const response = await fetchControlPlane(path, {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) throw await apiRequestErrorFromResponse('POST', path, response)
+  const operation = parseKeeperChatOperation(await response.json())
+  if (operation.operationId !== operationId || operation.state.kind !== 'queued') {
+    throw new Error(`Keeper chat operation ${action} response is invalid`)
+  }
+  return operation
+}
+
+export async function editQueuedKeeperChatOperation(
+  keeperName: string,
+  operation: KeeperChatOperation,
+  message: string,
+): Promise<KeeperChatOperation> {
+  if (operation.state.kind !== 'queued' || !operation.input) {
+    throw new Error('Only a queued Keeper chat operation can be edited')
+  }
+  const trimmed = message.trim()
+  if (!trimmed) throw new Error('Keeper chat operation message must not be blank')
+  const wire: Record<string, unknown> = { ...operation.input.wire, message: trimmed }
+  const rawBlocks = wire.user_blocks
+  if (!Array.isArray(rawBlocks)) throw new Error('Keeper chat operation user_blocks are invalid')
+  const nonText = rawBlocks.filter(block => !isRecord(block) || block.type !== 'text')
+  wire.user_blocks = [...nonText, { type: 'text', text: trimmed }]
+  return mutateQueuedKeeperChatOperation(keeperName, operation.operationId, 'edit', { input: wire })
+}
+
+export async function moveQueuedKeeperChatOperationToEnd(
+  keeperName: string,
+  operationId: string,
+): Promise<KeeperChatOperation> {
+  return mutateQueuedKeeperChatOperation(keeperName, operationId, 'move-to-end', {})
+}
+
 // --- Chat history ---
-
-export type KeeperChatReceiptFailureKind = KeeperQueueReceiptFailureKind
-
-export type KeeperChatReceiptState =
-  | { kind: 'pending' }
-  | { kind: 'inflight'; leaseId: string; startedAt: number }
-  | {
-      kind: 'recovery_required'
-      leaseId: string
-      startedAt: number
-      dispatchable: false
-    }
-  | { kind: 'delivered'; completedAt: number; outcomeRef: string | null }
-  | {
-      kind: 'failed'
-      failureKind: KeeperChatReceiptFailureKind
-      detail: string
-      completedAt: number
-      outcomeRef: string | null
-    }
-
-export interface KeeperChatReceipt {
-  keeperName: string
-  receiptId: string
-  revision: string
-  state: KeeperChatReceiptState
-}
-
-export type KeeperChatRecoveryDecision =
-  | { kind: 'requeue_unconfirmed' }
-  | {
-      kind: 'cancel_unconfirmed'
-      detail: string
-      outcomeRef: string | null
-    }
-
-export interface KeeperChatRecoveryResult {
-  decision: KeeperChatRecoveryDecision['kind']
-  receipt: KeeperChatReceipt
-  audit: { recorded: true } | { recorded: false; error: string }
-}
-
-export interface KeeperChatPendingCancelResult {
-  receipt: KeeperChatReceipt
-  audit: { recorded: true } | { recorded: false; error: string }
-}
-
-export interface KeeperChatPendingAttachment {
-  id: string
-  type: KeeperConversationAttachment['type']
-  name: string
-  size: number
-  mimeType: string
-}
-
-export type KeeperChatPendingSource =
-  | { kind: 'dashboard'; threadId: string }
-  | { kind: 'discord'; channelId: string; userId: string }
-  | {
-      kind: 'slack'
-      channelId: string
-      userId: string
-      teamId: string | null
-      threadTs: string | null
-    }
-
-export interface KeeperChatPendingInput {
-  receipt: KeeperChatReceipt
-  content: string
-  source: KeeperChatPendingSource
-  attachments: KeeperChatPendingAttachment[]
-  userBlocks: KeeperUserInputBlock[]
-  submittedAt: number
-}
-
-export interface KeeperChatPendingSnapshot {
-  keeperName: string
-  revision: string
-  currentWork: { lane: string; startedAt: number } | null
-  totalPending: number
-  nextAfter: string | null
-  pending: KeeperChatPendingInput[]
-}
-
-export interface KeeperChatPendingMutationResult {
-  keeperName: string
-  receiptId: string
-  revision: string
-  pendingIndex: number
-  audit: { recorded: true } | { recorded: false; error: string }
-}
 
 export interface KeeperEventQueuePendingItem {
   queueIndex: number
@@ -746,353 +636,14 @@ export interface KeeperEventQueuePendingSnapshot {
   pending: KeeperEventQueuePendingItem[]
 }
 
-const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>([
-  'turn_failed',
-  'no_visible_reply',
-  'transcript_persist_failed',
-  'connector_unavailable',
-  'delivery_failed',
-  'cancelled',
-  'internal_error',
-  'recovery_interrupted',
-])
-
-export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
-  if (!isRecord(value) || value.schema !== 'keeper_chat_queue.receipt.v2') {
-    throw new Error('Keeper chat receipt response has an unsupported schema')
-  }
-  const keeperName = asString(value.keeper_name, '').trim()
-  const receiptId = asString(value.receipt_id, '').trim()
-  const revision = parseKeeperQueueRevision(value.revision)
-  const rawState = isRecord(value.state) ? value.state : null
-  const kind = asString(rawState?.kind, '').trim()
+function parseEventQueueRevision(value: unknown): string | undefined {
+  if (typeof value === 'string' && /^\d+$/.test(value)) return value
   if (
-    !keeperName
-    || !isKeeperChatReceiptId(receiptId)
-    || !rawState
-    || revision === undefined
-  ) {
-    throw new Error('Keeper chat receipt response is missing identity or state')
-  }
-  let state: KeeperChatReceiptState
-  const nullableString = (fieldName: string, fieldValue: unknown): string | null => {
-    if (fieldValue === null || fieldValue === undefined) return null
-    if (typeof fieldValue !== 'string') {
-      throw new Error(`Keeper chat receipt ${fieldName} must be a string or null`)
-    }
-    const trimmed = fieldValue.trim()
-    if (!trimmed) {
-      throw new Error(`Keeper chat receipt ${fieldName} must not be empty`)
-    }
-    return trimmed
-  }
-  switch (kind) {
-    case 'pending':
-      state = { kind }
-      break
-    case 'inflight': {
-      const leaseId = asString(rawState.lease_id, '').trim()
-      const startedAt = asNumber(rawState.started_at)
-      if (!leaseId || typeof startedAt !== 'number') {
-        throw new Error('Keeper chat inflight receipt is missing lease metadata')
-      }
-      state = { kind, leaseId, startedAt }
-      break
-    }
-    case 'recovery_required': {
-      const leaseId = asString(rawState.lease_id, '').trim()
-      const startedAt = asNumber(rawState.started_at)
-      if (!leaseId || typeof startedAt !== 'number' || rawState.dispatchable !== false) {
-        throw new Error('Keeper chat recovery-required receipt has invalid recovery evidence')
-      }
-      state = { kind, leaseId, startedAt, dispatchable: false }
-      break
-    }
-    case 'delivered': {
-      const completedAt = asNumber(rawState.completed_at)
-      if (typeof completedAt !== 'number') {
-        throw new Error('Keeper chat delivered receipt is missing completion time')
-      }
-      state = {
-        kind,
-        completedAt,
-        outcomeRef: nullableString('outcome_ref', rawState.outcome_ref),
-      }
-      break
-    }
-    case 'failed': {
-      const failureKind = asString(rawState.failure_kind, '') as KeeperChatReceiptFailureKind
-      const detail = asString(rawState.detail, '').trim()
-      const completedAt = asNumber(rawState.completed_at)
-      if (!KEEPER_CHAT_RECEIPT_FAILURE_KINDS.has(failureKind) || !detail || typeof completedAt !== 'number') {
-        throw new Error('Keeper chat failed receipt has invalid failure metadata')
-      }
-      state = {
-        kind,
-        failureKind,
-        detail,
-        completedAt,
-        outcomeRef: nullableString('outcome_ref', rawState.outcome_ref),
-      }
-      break
-    }
-    default:
-      throw new Error(`Keeper chat receipt has unknown state: ${kind || '<empty>'}`)
-  }
-  return { keeperName, receiptId, revision, state }
-}
-
-export async function fetchKeeperChatReceipt(
-  keeperName: string,
-  receiptId: string,
-): Promise<KeeperChatReceipt> {
-  const { response: resp, data } = await fetchJsonWithTimeout(
-    `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}`,
-    { headers: jsonHeaders() },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) {
-    throw new Error(`fetchKeeperChatReceipt: HTTP ${resp.status} ${resp.statusText}`)
-  }
-  return parseKeeperChatReceipt(data)
-}
-
-function parsePendingAttachment(value: unknown): KeeperChatPendingAttachment {
-  if (!isRecord(value)) {
-    throw new Error('Keeper pending attachment must be an object')
-  }
-  const id = asString(value.id, '').trim()
-  const type = asString(value.type, '').trim() === 'image' ? 'image' : 'file'
-  const name = asString(value.name, '').trim()
-  const size = asNumber(value.size)
-  const mimeType = asString(value.mime_type, '').trim()
-  if (
-    !id
-    || typeof size !== 'number'
-    || !Number.isSafeInteger(size)
-    || size < 0
-  ) {
-    throw new Error('Keeper pending attachment is invalid')
-  }
-  return { id, type, name, size, mimeType }
-}
-
-function parsePendingUserBlock(value: unknown): KeeperUserInputBlock {
-  if (!isRecord(value)) {
-    throw new Error('Keeper pending user block must be an object')
-  }
-  const type = asString(value.type, '').trim()
-  if (type === 'text') {
-    const text = asString(value.text, '')
-    if (!text) throw new Error('Keeper pending text block is empty')
-    return { type, text }
-  }
-  if (type !== 'image' && type !== 'document' && type !== 'audio') {
-    throw new Error('Keeper pending user block has an unknown type')
-  }
-  const attachmentId = asString(value.attachment_id, '').trim()
-  const name = asString(value.name, '').trim()
-  const mimeType = asString(value.mime_type, '').trim()
-  const size = asNumber(value.size) ?? 0
-  if (
-    !attachmentId
-    || !Number.isSafeInteger(size)
-    || size < 0
-  ) {
-    throw new Error('Keeper pending media block is invalid')
-  }
-  return { type, attachmentId, name, mimeType, size }
-}
-
-function parsePendingSource(value: unknown): KeeperChatPendingSource {
-  if (!isRecord(value)) {
-    throw new Error('Keeper pending source must be an object')
-  }
-  const kind = asString(value.kind, '').trim()
-  const requiredString = (field: string): string => {
-    const parsed = asString(value[field], '').trim()
-    if (!parsed) throw new Error(`Keeper pending source ${field} is missing`)
-    return parsed
-  }
-  const nullableString = (field: string): string | null => {
-    const raw = value[field]
-    if (raw === null) return null
-    const parsed = asString(raw, '').trim()
-    if (!parsed) throw new Error(`Keeper pending source ${field} is invalid`)
-    return parsed
-  }
-  switch (kind) {
-    case 'dashboard':
-      return { kind, threadId: requiredString('thread_id') }
-    case 'discord':
-      return {
-        kind,
-        channelId: requiredString('channel_id'),
-        userId: requiredString('user_id'),
-      }
-    case 'slack':
-      return {
-        kind,
-        channelId: requiredString('channel_id'),
-        userId: requiredString('user_id'),
-        teamId: nullableString('team_id'),
-        threadTs: nullableString('thread_ts'),
-      }
-    default:
-      throw new Error(`Keeper pending source has unknown kind: ${kind || '<empty>'}`)
-  }
-}
-
-export function parseKeeperChatPendingSnapshot(
-  value: unknown,
-): KeeperChatPendingSnapshot {
-  if (
-    !isRecord(value)
-    || value.schema !== 'keeper_chat_queue.pending.v2'
-    || value.ok !== true
-  ) {
-    throw new Error('Keeper pending response has an unsupported schema')
-  }
-  const keeperName = asString(value.keeper_name, '').trim()
-  const revision = parseKeeperQueueRevision(value.revision)
-  const totalPending = asNumber(value.total_pending)
-  const nextAfter = value.next_after === null
-    ? null
-    : parseKeeperQueueRevision(value.next_after)
-  if (
-    !keeperName
-    || revision === undefined
-    || typeof totalPending !== 'number'
-    || !Number.isSafeInteger(totalPending)
-    || totalPending < 0
-    || nextAfter === undefined
-    || !Array.isArray(value.pending)
-  ) {
-    throw new Error('Keeper pending response is missing identity or entries')
-  }
-  const currentWork = (() => {
-    if (value.current_work === null) return null
-    if (!isRecord(value.current_work)) {
-      throw new Error('Keeper pending current work must be an object or null')
-    }
-    const lane = asString(value.current_work.lane, '').trim()
-    const startedAt = asNumber(value.current_work.started_at)
-    if (
-      !lane
-      || typeof startedAt !== 'number'
-      || !Number.isFinite(startedAt)
-      || startedAt < 0
-    ) {
-      throw new Error('Keeper pending current work is invalid')
-    }
-    return { lane, startedAt }
-  })()
-  const pending = value.pending.map((raw): KeeperChatPendingInput => {
-    if (!isRecord(raw)) {
-      throw new Error('Keeper pending entry must be an object')
-    }
-    const receipt = parseKeeperChatReceipt(raw.receipt)
-    const content = asString(raw.content, '')
-    const source = parsePendingSource(raw.source)
-    const submittedAt = asNumber(raw.submitted_at)
-    if (
-      receipt.keeperName !== keeperName
-      || receipt.revision !== revision
-      || receipt.state.kind !== 'pending'
-      || typeof submittedAt !== 'number'
-      || !Number.isFinite(submittedAt)
-      || submittedAt < 0
-      || !Array.isArray(raw.attachments)
-      || !Array.isArray(raw.user_blocks)
-    ) {
-      throw new Error('Keeper pending entry has invalid identity or state')
-    }
-    const attachments = raw.attachments.map(parsePendingAttachment)
-    const userBlocks = raw.user_blocks.map(parsePendingUserBlock)
-    if (!content.trim() && attachments.length === 0) {
-      throw new Error('Keeper pending entry has no input payload')
-    }
-    return { receipt, content, source, attachments, userBlocks, submittedAt }
-  })
-  if (pending.length > totalPending) {
-    throw new Error('Keeper pending page exceeds its total count')
-  }
-  return {
-    keeperName,
-    revision,
-    currentWork,
-    totalPending,
-    nextAfter,
-    pending,
-  }
-}
-
-async function fetchKeeperChatPendingPage(
-  keeperName: string,
-  after: string | null,
-): Promise<KeeperChatPendingSnapshot> {
-  const baseUrl = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/pending`
-  const url = `${baseUrl}?limit=100${after === null ? '' : `&after=${encodeURIComponent(after)}`}`
-  const { response, data } = await fetchJsonWithTimeout(
-    url,
-    { headers: jsonHeaders() },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!response.ok) {
-    throw await apiRequestErrorFromResponse(
-      'GET',
-      url,
-      response,
-    )
-  }
-  const snapshot = parseKeeperChatPendingSnapshot(data)
-  if (snapshot.keeperName !== keeperName) {
-    throw new Error('fetchKeeperChatPending: response identity mismatch')
-  }
-  return snapshot
-}
-
-export async function fetchKeeperChatPending(
-  keeperName: string,
-): Promise<KeeperChatPendingSnapshot> {
-  const pending: KeeperChatPendingInput[] = []
-  const seenCursors = new Set<string>()
-  let expectedRevision: string | null = null
-  let currentWork: KeeperChatPendingSnapshot['currentWork'] = null
-  let totalPending = 0
-  let after: string | null = null
-  do {
-    const page = await fetchKeeperChatPendingPage(keeperName, after)
-    if (expectedRevision === null) {
-      expectedRevision = page.revision
-      currentWork = page.currentWork
-      totalPending = page.totalPending
-    } else if (
-      page.revision !== expectedRevision
-      || page.totalPending !== totalPending
-    ) {
-      throw new Error('fetchKeeperChatPending: queue changed during pagination')
-    }
-    pending.push(...page.pending)
-    after = page.nextAfter
-    if (after !== null) {
-      if (seenCursors.has(after)) {
-        throw new Error('fetchKeeperChatPending: repeated page cursor')
-      }
-      seenCursors.add(after)
-    }
-  } while (after !== null)
-  if (expectedRevision === null || pending.length !== totalPending) {
-    throw new Error('fetchKeeperChatPending: incomplete queue snapshot')
-  }
-  return {
-    keeperName,
-    revision: expectedRevision,
-    currentWork,
-    totalPending,
-    nextAfter: null,
-    pending,
-  }
+    typeof value === 'number'
+    && Number.isSafeInteger(value)
+    && value >= 0
+  ) return String(value)
+  return undefined
 }
 
 export function parseKeeperEventQueuePendingSnapshot(
@@ -1106,11 +657,11 @@ export function parseKeeperEventQueuePendingSnapshot(
     throw new Error('Keeper event pending response has an unsupported schema')
   }
   const keeperName = asString(value.keeper_name, '').trim()
-  const revision = parseKeeperQueueRevision(value.revision)
+  const revision = parseEventQueueRevision(value.revision)
   const totalPending = asNumber(value.total_pending)
   const nextAfter = value.next_after === null
     ? null
-    : parseKeeperQueueRevision(value.next_after)
+    : parseEventQueueRevision(value.next_after)
   if (
     !keeperName
     || revision === undefined
@@ -1129,7 +680,7 @@ export function parseKeeperEventQueuePendingSnapshot(
     const queueIndex = asNumber(raw.queue_index)
     const postId = asString(raw.post_id, '').trim()
     const sourceRef = asString(raw.source_ref, '').trim()
-    const sourceIncarnation = parseKeeperQueueRevision(raw.source_incarnation)
+    const sourceIncarnation = parseEventQueueRevision(raw.source_incarnation)
     const urgency = asString(raw.urgency, '').trim()
     const arrivedAt = asNumber(raw.arrived_at_unix)
     const payloadKind = asString(raw.payload_kind, '').trim()
@@ -1244,132 +795,6 @@ export async function fetchKeeperEventQueuePending(
     nextAfter: null,
     pending,
   }
-}
-
-export async function cancelKeeperChatPendingReceipt(
-  keeperName: string,
-  receiptId: string,
-): Promise<KeeperChatPendingCancelResult> {
-  let raw: unknown
-  try {
-    raw = await post<unknown>(
-      `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}/cancel`,
-      {
-        schema: 'keeper_chat_queue.pending_cancel.request.v1',
-      },
-    )
-  } catch (error) {
-    try {
-      const receipt = await fetchKeeperChatReceipt(keeperName, receiptId)
-      if (receipt.state.kind === 'failed' && receipt.state.failureKind === 'cancelled') {
-        return {
-          receipt,
-          audit: {
-            recorded: false,
-            error: '취소 응답이 유실되어 audit 기록 여부를 확인할 수 없습니다.',
-          },
-        }
-      }
-    } catch {
-      // Preserve the original mutation error when exact receipt recovery fails.
-    }
-    throw error
-  }
-  if (
-    !isRecord(raw)
-    || raw.schema !== 'keeper_chat_queue.pending_cancel.result.v1'
-    || raw.ok !== true
-    || !isRecord(raw.audit)
-    || typeof raw.audit.recorded !== 'boolean'
-  ) {
-    throw new Error('cancelKeeperChatPendingReceipt: invalid response envelope')
-  }
-  const receipt = parseKeeperChatReceipt(raw.receipt)
-  if (receipt.keeperName !== keeperName || receipt.receiptId !== receiptId) {
-    throw new Error('cancelKeeperChatPendingReceipt: response identity mismatch')
-  }
-  if (receipt.state.kind !== 'failed' || receipt.state.failureKind !== 'cancelled') {
-    throw new Error('cancelKeeperChatPendingReceipt: response is not cancelled')
-  }
-  const audit = raw.audit.recorded
-    ? { recorded: true as const }
-    : {
-        recorded: false as const,
-        error: asString(raw.audit.error, '').trim() || 'pending cancellation audit persistence failed',
-      }
-  return { receipt, audit }
-}
-
-async function mutateKeeperChatPendingReceipt(
-  keeperName: string,
-  receiptId: string,
-  action: 'edit' | 'move-to-end',
-  request: Record<string, unknown>,
-): Promise<KeeperChatPendingMutationResult> {
-  const raw = await post<unknown>(
-    `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}/${action}`,
-    request,
-  )
-  if (
-    !isRecord(raw)
-    || raw.schema !== 'keeper_chat_queue.pending_mutation.result.v1'
-    || raw.ok !== true
-    || !isRecord(raw.audit)
-    || typeof raw.audit.recorded !== 'boolean'
-  ) {
-    throw new Error(`mutateKeeperChatPendingReceipt(${action}): invalid response envelope`)
-  }
-  const responseKeeper = asString(raw.keeper_name, '').trim()
-  const responseReceipt = asString(raw.receipt_id, '').trim()
-  const revision = parseKeeperQueueRevision(raw.revision)
-  const pendingIndex = asNumber(raw.pending_index)
-  if (
-    responseKeeper !== keeperName
-    || responseReceipt !== receiptId
-    || revision === undefined
-    || typeof pendingIndex !== 'number'
-    || !Number.isSafeInteger(pendingIndex)
-    || pendingIndex < 0
-  ) {
-    throw new Error(`mutateKeeperChatPendingReceipt(${action}): response identity mismatch`)
-  }
-  const audit = raw.audit.recorded
-    ? { recorded: true as const }
-    : {
-        recorded: false as const,
-        error: asString(raw.audit.error, '').trim() || 'pending mutation audit persistence failed',
-      }
-  return {
-    keeperName: responseKeeper,
-    receiptId: responseReceipt,
-    revision,
-    pendingIndex,
-    audit,
-  }
-}
-
-export async function editKeeperChatPendingReceipt(
-  keeperName: string,
-  receiptId: string,
-  expectedRevision: string,
-  content: string,
-): Promise<KeeperChatPendingMutationResult> {
-  return mutateKeeperChatPendingReceipt(keeperName, receiptId, 'edit', {
-    content,
-    expected_revision: expectedRevision,
-    schema: 'keeper_chat_queue.pending_edit.request.v1',
-  })
-}
-
-export async function moveKeeperChatPendingReceiptToEnd(
-  keeperName: string,
-  receiptId: string,
-  expectedRevision: string,
-): Promise<KeeperChatPendingMutationResult> {
-  return mutateKeeperChatPendingReceipt(keeperName, receiptId, 'move-to-end', {
-    expected_revision: expectedRevision,
-    schema: 'keeper_chat_queue.pending_move_to_end.request.v1',
-  })
 }
 
 export type KeeperEventQueueOperatorAction =
@@ -1497,7 +922,7 @@ export async function operateKeeperEventQueue(
   }
   if (status === 'applied' || status === 'already_applied') {
     const transitionId = asString(raw.result.transition_id, '').trim()
-    const revision = parseKeeperQueueRevision(raw.result.revision)
+    const revision = parseEventQueueRevision(raw.result.revision)
     if (!transitionId && revision === undefined) {
       throw keeperEventQueueOperationError(
         'operateKeeperEventQueue: applied result lacks durable identity',
@@ -1512,52 +937,6 @@ export async function operateKeeperEventQueue(
     prepared,
     'unknown',
   )
-}
-
-export async function resolveKeeperChatRecovery(
-  keeperName: string,
-  receiptId: string,
-  expectedRevision: string,
-  leaseId: string,
-  decision: KeeperChatRecoveryDecision,
-): Promise<KeeperChatRecoveryResult> {
-  const decisionPayload = decision.kind === 'requeue_unconfirmed'
-    ? { kind: decision.kind }
-    : {
-        kind: decision.kind,
-        detail: decision.detail,
-        outcome_ref: decision.outcomeRef,
-      }
-  const raw = await post<unknown>(
-    `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}/recovery`,
-    {
-      schema: 'keeper_chat_queue.recovery.request.v1',
-      expected_revision: expectedRevision,
-      lease_id: leaseId,
-      decision: decisionPayload,
-    },
-  )
-  if (
-    !isRecord(raw)
-    || raw.schema !== 'keeper_chat_queue.recovery.result.v1'
-    || raw.ok !== true
-    || raw.decision !== decision.kind
-    || !isRecord(raw.audit)
-    || typeof raw.audit.recorded !== 'boolean'
-  ) {
-    throw new Error('resolveKeeperChatRecovery: invalid response envelope')
-  }
-  const receipt = parseKeeperChatReceipt(raw.receipt)
-  if (receipt.keeperName !== keeperName || receipt.receiptId !== receiptId) {
-    throw new Error('resolveKeeperChatRecovery: response identity mismatch')
-  }
-  const audit = raw.audit.recorded
-    ? { recorded: true as const }
-    : {
-        recorded: false as const,
-        error: asString(raw.audit.error, '').trim() || 'recovery audit persistence failed',
-      }
-  return { decision: decision.kind, receipt, audit }
 }
 
 export async function fetchKeeperChatHistory(

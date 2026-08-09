@@ -260,51 +260,28 @@ let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : str
     in
     loop candidates
 
-type chat_queue_status_observation =
-  | Chat_queue_snapshot of Keeper_chat_queue.diagnostic_snapshot
-  | Chat_queue_unavailable of string
-
-let observe_chat_queue ~keeper_name =
-  if Eio_guard.is_ready ()
-  then Chat_queue_snapshot (Keeper_chat_queue.snapshot ~keeper_name)
-  else Chat_queue_unavailable "eio_guard_not_ready"
-
-let chat_queue_load_error_to_json
-    (error : Keeper_chat_queue.snapshot_load_error) =
-  `Assoc
-    [ ( "kind"
-      , `String
-          (Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind) )
-    ; "path", Json_util.string_opt_to_json error.path
-    ; "message", `String error.message
-    ]
-
-let chat_queue_status_to_json observation =
-  let durable_replay_enabled =
-    Keeper_chat_queue.persistence_configured ()
-  in
-  match observation with
-  | Chat_queue_unavailable reason ->
+let chat_operation_status_to_json ~base_path ~keeper_name =
+  match Keeper_owner_registry.operation_projection ~base_path ~keeper_name with
+  | Error error ->
     `Assoc
-      [ "pending_messages", `Null
-      ; "inflight_messages", `Null
-      ; "revision", `Null
-      ; "load_errors", `Null
-      ; "snapshot_available", `Bool false
-      ; "read_error", `String reason
-      ; "durable_replay_enabled", `Bool durable_replay_enabled
+      [ "snapshot_available", `Bool false
+      ; "read_error",
+        `String (Keeper_owner_registry.lookup_error_to_string error)
       ]
-  | Chat_queue_snapshot snapshot ->
+  | Ok projection ->
     `Assoc
-      [ "pending_messages", `Int (List.length snapshot.pending)
-      ; "inflight_messages", `Int (List.length snapshot.inflight)
-      ; "revision", `String (Int64.to_string snapshot.revision)
-      ; ( "load_errors"
-        , `List (List.map chat_queue_load_error_to_json snapshot.load_errors) )
+      [ "queued_count", `Int projection.queued_count
+      ; ( "running_operation_id"
+        , match projection.running_operation_id with
+          | None -> `Null
+          | Some operation_id ->
+            `String
+              (Keeper_chat_operation.Operation_id.to_string operation_id) )
+      ; "terminal_count", `Int projection.terminal_count
       ; "snapshot_available", `Bool true
       ; "read_error", `Null
-      ; "durable_replay_enabled", `Bool durable_replay_enabled
       ]
+;;
 
 let json_string_opt_member = Json_util.get_string_nonempty
 let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
@@ -322,8 +299,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
       (match resolve_status_target_config ~config ~agent_name fields with
        | Error err -> tool_result_error err
        | Ok (name, m) ->
-      let chat_queue_observation = observe_chat_queue ~keeper_name:m.name in
-      let chat_queue_status = chat_queue_status_to_json chat_queue_observation in
+      let chat_operation_status =
+        chat_operation_status_to_json
+          ~base_path:config.base_path
+          ~keeper_name:m.name
+      in
       let
         { tail_turns
         ; tail_messages
@@ -633,10 +613,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                    ])
            | other -> other
          in
-         let chat_queue =
-           chat_queue_status
-         in
-
          let json = `Assoc ([
            ("name", `String name);
            ("meta", Keeper_meta_json.meta_to_json m);
@@ -739,7 +715,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("context_budget", context_budget);
            ("model_observability", model_observability);
            ("runtime_trust", runtime_trust);
-           ("chat_queue", chat_queue);
+           ("chat_operations", chat_operation_status);
            ("runtime", runtime_surface_json config m);
            ("workspace", workspace_surface_json m);
            ("sources", source_provenance_json config m);

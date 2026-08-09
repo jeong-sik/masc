@@ -42,27 +42,15 @@ val chat_appended :
 val chat_appended_with_audio :
   keeper_name:string -> source:string -> audio:audio_clip -> ?content:string -> unit -> unit
 
-(** Serialize a queued Dashboard turn event. The outer envelope carries the
-    durable queue identity; [event] is the same AG-UI payload used by the
-    direct chat stream. Exposed for unit tests. *)
-val turn_event_to_json :
+
+val operation_event_to_json :
   keeper_name:string ->
-  receipt_id:string ->
+  operation_id:string ->
   event:Ag_ui.event ->
   Yojson.Safe.t
 
-(** Broadcast an AG-UI event produced by a queued Dashboard turn to observer
-    sessions. Slice-less like {!chat_appended}, it rides the Dashboard WS
-    raw-forward catch-all. The Dashboard applies it only to the assistant
-    entry with the exact [receipt_id], so concurrent Keeper turns and browser
-    sessions cannot cross-wire their streams.
-
-    The projected event must already be redacted. Exceptions from
-    [Sse.broadcast] are counted on the [keeper_sse_broadcast_failures] counter
-    (site [chat_turn_event]) and logged at WARN. {!Eio.Cancel.Cancelled}
-    propagates. *)
-val turn_event :
+val operation_event :
   keeper_name:string ->
-  receipt_id:string ->
+  operation_id:string ->
   event:Ag_ui.event ->
   unit

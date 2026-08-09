@@ -70,6 +70,7 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
     rich-render [ChatBlock] values and from AGENT_CORE provider blocks. *)
 
 type keeper_chat_stream_request = {
+  request_id : Keeper_owner.Chat_operation.Operation_id.t;
   name : string;
   message : string;
   user_blocks : user_input_block list;
@@ -110,22 +111,6 @@ val parse_keeper_chat_stream_request :
 val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 (** [{ "error": { "message": "…" } }] envelope for
     parse / handler errors. *)
-
-(** {1 Queue request handlers} *)
-
-val handle_keeper_chat_request_result :
-  caller:string ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Drives [GET /api/v1/keepers/chat/requests/<request_id>].
-    Reads the async keeper message request state directly from
-    {!Keeper_msg_async} without requiring an MCP session. *)
-
-val handle_keeper_chat_request_cancel :
-  caller:string ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Drives [POST /api/v1/keepers/chat/requests/<request_id>/cancel].
-    Cancels a live async keeper message request when it is still
-    cancellable. *)
 
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
@@ -176,6 +161,17 @@ type queued_turn_outcome =
 
 type turn_submission =
   | Direct_request
+  | Owner_operation of
+      { operation_id : Keeper_owner.Chat_operation.Operation_id.t
+      ; admission_token : Keeper_turn_admission.token
+      ; execution_sw : Eio.Switch.t
+      ; surface : Surface_ref.t
+      ; speaker : Keeper_chat_store.speaker
+      ; conversation_id : string option
+      ; external_message_id : string option
+      ; workspace_id : string option
+      ; extra_mentions : Keeper_identity.Keeper_id.t list
+      }
   | Queued_receipt of
       { receipt_ids : Keeper_chat_delivery_identity.Receipt_ids.t
       ; claim : unit -> (unit, string) result
@@ -243,6 +239,14 @@ val process_single_turn :
     to ride along with, so true silence after that claim is terminal, not
     merely deferred. *)
 
+val operation_executor :
+  state:Mcp_server.server_state ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  Keeper_owner.operation_executor
+(** Production executor installed into every Keeper Owner. It claims the FIFO
+    head only after acquiring turn admission, streams Dashboard events by
+    operation id, and joins Discord/Slack terminal delivery before returning. *)
+
 (** {1 Testing helpers} *)
 
 type canonical_reply_payload_error =
@@ -287,21 +291,6 @@ module For_testing : sig
   val direct_message_of_request :
     keeper_chat_stream_request -> Keeper_invocation_contract.direct_message
   val keeper_chat_stream_headers : string -> Httpun.Headers.t
-  val defer_dashboard_payload_if_busy :
-    base_path:string ->
-    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-    thread_id:string ->
-    keeper_chat_stream_request ->
-    [ `Not_busy | `Queued of int | `Queue_error of string ]
-  val defer_dashboard_payload_if_busy_evidence :
-    base_path:string ->
-    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-    thread_id:string ->
-    keeper_chat_stream_request ->
-    [ `Not_busy
-    | `Queued of Yojson.Safe.t * string
-    | `Queue_error of string
-    ]
   val canonical_reply_payload_of_body :
     redact_text:(string -> string) ->
     string ->

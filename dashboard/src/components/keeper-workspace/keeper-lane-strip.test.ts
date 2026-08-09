@@ -29,15 +29,15 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         keeper_name: 'sangsu',
         state: 'deferred',
         waiting_count: 2,
-        next_action: 'keeper_drain_chat_queue',
+        next_action: 'keeper_owner_start_fifo_head',
         waiting_on: [
           {
             keeper_name: 'sangsu',
-            source: 'chat_queue_pending',
-            waiting_on: 'dashboard_chat',
-            wake_producer: 'keeper_chat_queue',
+            source: 'chat_operation_queued',
+            waiting_on: 'owner_fifo',
+            wake_producer: 'keeper_owner_actor',
             since_iso: '2026-07-07T08:59:00Z',
-            next_action: 'keeper_drain_chat_queue',
+            next_action: 'keeper_owner_start_fifo_head',
           },
           {
             keeper_name: 'sangsu',
@@ -77,12 +77,12 @@ function truncatedInventoryFixture(): DashboardKeeperWaitingInventory {
   }))
   const chatRows: DashboardKeeperWaitingRow[] = Array.from({ length: 5 }, (_, i) => ({
     keeper_name: 'sangsu',
-    source: 'chat_queue_pending',
-    waiting_on: 'dashboard_chat',
-    wake_producer: 'keeper_chat_queue',
+    source: 'chat_operation_queued',
+    waiting_on: 'owner_fifo',
+    wake_producer: 'keeper_owner_actor',
     since_iso: '2026-07-21T07:30:00Z',
-    next_action: 'keeper_drain_chat_queue',
-    detail: { receipt_id: `chatq_${i}` },
+    next_action: 'keeper_owner_start_fifo_head',
+    detail: { operation_id: `kmsg-operation-${i}` },
   }))
   return {
     schema: 'masc.dashboard.keeper_waiting_inventory.v3',
@@ -102,7 +102,7 @@ function truncatedInventoryFixture(): DashboardKeeperWaitingInventory {
         waiting_count: 69,
         waiting_count_truncated: true,
         truncated_sources: { external_attention: true },
-        sources: { external_attention: 64, chat_queue_pending: 5 },
+        sources: { external_attention: 64, chat_operation_queued: 5 },
         next_action: 'keeper_process_external_attention',
         waiting_on: [...externalRows, ...chatRows],
       },
@@ -142,7 +142,7 @@ describe('KeeperLaneStrip', () => {
     const text = el.textContent ?? ''
     expect(text).toContain('작업 대기열')
     expect(text).toContain('외부 완료 대기 중')
-    expect(text).toContain('dashboard_chat')
+    expect(text).toContain('owner_fifo')
     expect(text).toContain('chat_lane')
     expect(text).toContain('keeper finish in flight turn')
     expect(el.querySelector('[data-missing="keeper-lane"]')).toBeNull()
@@ -228,7 +228,7 @@ describe('KeeperLaneStrip', () => {
     disclosure!.open = true
     disclosure!.dispatchEvent(new Event('toggle'))
     expect(disclosure!.textContent ?? '').toContain('wake producer')
-    expect(disclosure!.textContent ?? '').toContain('keeper_chat_queue')
+    expect(disclosure!.textContent ?? '').toContain('keeper_owner_actor')
   })
 
   it('marks a server-capped count as a lower bound instead of a total', () => {
@@ -276,7 +276,7 @@ describe('KeeperLaneStrip', () => {
     `)
     const sources = el.querySelector('[data-testid="keeper-lane-sources"]')?.textContent ?? ''
     expect(sources).toContain('외부 알림 ≥64')
-    // chat_queue_pending was not capped, so it is an exact count
+    // chat_operation_queued was not capped, so it is an exact count
     expect(sources).toContain('채팅 대기 5')
     expect(sources).not.toContain('채팅 대기 ≥5')
   })

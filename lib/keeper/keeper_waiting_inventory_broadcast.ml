@@ -1,7 +1,7 @@
-type source = Chat_queue | Event_queue
+type source = Chat_operation | Event_queue
 
 let source_to_string = function
-  | Chat_queue -> "chat_queue"
+  | Chat_operation -> "chat_operation"
   | Event_queue -> "event_queue"
 ;;
 

@@ -381,11 +381,6 @@ type ChatTranscriptAction = {
   label?: string
   title?: string
   onClick?: (entry: KeeperConversationEntry) => void
-  onPendingCancel?: (entry: KeeperConversationEntry) => Promise<void>
-  onPendingEdit?: (entry: KeeperConversationEntry) => Promise<void>
-  onPendingMoveToEnd?: (entry: KeeperConversationEntry) => Promise<void>
-  onRecoveryRequeue?: (entry: KeeperConversationEntry) => Promise<void>
-  onRecoveryCancel?: (entry: KeeperConversationEntry, detail: string) => Promise<void>
 }
 
 export const THINKING_TRACE_PREVIEW_CHARS = 2400
@@ -447,162 +442,6 @@ function bubbleTone(entry: KeeperConversationEntry): string {
 function showDeliveryBadge(entry: KeeperConversationEntry, variant: ChatTranscriptVariant): boolean {
   if (variant !== 'messenger') return true
   return entry.delivery !== 'history' && entry.delivery !== 'delivered'
-}
-
-function QueueReceiptBadge({ entry, action }: {
-  entry: KeeperConversationEntry
-  action?: ChatTranscriptAction
-}) {
-  const [recoveryPending, setRecoveryPending] = useState<'requeue' | 'cancel' | null>(null)
-  const [pendingAction, setPendingAction] = useState<'edit' | 'move' | 'cancel' | null>(null)
-  const receiptId = entry.details?.queueReceiptId?.trim()
-  const shutdownOperationId = entry.details?.queueShutdownOperationId?.trim()
-  const queueState = entry.details?.queueState
-  if (!receiptId || !queueState) return null
-  const label = (() => {
-    switch (queueState) {
-      case 'pending': return '대기 중'
-      case 'inflight': return '처리 중'
-      case 'recovery_required': return '복구 확인 필요'
-      case 'delivered': return '처리 완료'
-      case 'failed': return '처리 실패'
-      default: return '상태 확인 필요'
-    }
-  })()
-  const shutdownLabel = shutdownOperationId ? ' · 종료 후 처리' : ''
-  const currentWorkLabel = (() => {
-    const lane = entry.details?.queueInFlightLane?.trim()
-    if (!lane) return null
-    const work = lane === 'autonomous'
-      ? '자율 작업 처리 중'
-      : lane === 'chat'
-        ? '다른 대화 처리 중'
-        : `${lane} 처리 중`
-    const startedAt = entry.details?.queueInFlightStartedAt
-    return typeof startedAt === 'number'
-      ? `${work} · ${formatTimeHms(startedAt)}부터`
-      : work
-  })()
-  const title = [
-    `receipt ${receiptId}`,
-    label,
-    shutdownOperationId ? `shutdown operation ${shutdownOperationId}` : null,
-  ].filter((value): value is string => value !== null).join(' · ')
-  const runRecovery = async (
-    kind: 'requeue' | 'cancel',
-    operation: () => Promise<void>,
-  ) => {
-    setRecoveryPending(kind)
-    try {
-      await operation()
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error')
-    } finally {
-      setRecoveryPending(null)
-    }
-  }
-  const cancelRecovery = () => {
-    if (!action?.onRecoveryCancel) return
-    const detail = window.prompt('미확인 배송을 취소하는 이유를 입력하세요.')
-    if (detail === null) return
-    if (!detail || detail !== detail.trim()) {
-      showToast('취소 이유는 공백 없이 정확히 입력해야 합니다.', 'error')
-      return
-    }
-    void runRecovery('cancel', () => action.onRecoveryCancel!(entry, detail))
-  }
-  const runPendingAction = async (
-    kind: 'edit' | 'move' | 'cancel',
-    operation: () => Promise<void>,
-  ) => {
-    setPendingAction(kind)
-    try {
-      await operation()
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error')
-    } finally {
-      setPendingAction(null)
-    }
-  }
-  return html`
-    <span class="inline-flex flex-wrap items-center gap-1.5">
-      <span
-        class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]"
-        title=${title}
-        data-chat-queue-state-badge=${queueState}
-        data-chat-queue-receipt=${receiptId}
-        data-chat-queue-shutdown-operation-id=${shutdownOperationId ?? undefined}
-      >
-        ${label}${shutdownLabel}
-      </span>
-      ${currentWorkLabel
-        ? html`<span class="text-2xs text-[var(--color-fg-muted)]">${currentWorkLabel}</span>`
-        : null}
-      ${queueState === 'pending' && action?.onPendingEdit
-        ? html`
-            <button
-              type="button"
-              disabled=${pendingAction !== null}
-              class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)] disabled:opacity-50"
-              data-chat-queue-pending-action="edit"
-              onClick=${() => {
-                void runPendingAction('edit', () => action.onPendingEdit!(entry))
-              }}
-            >${pendingAction === 'edit' ? '불러오는 중...' : '수정'}</button>
-          `
-        : null}
-      ${queueState === 'pending' && action?.onPendingCancel
-        ? html`
-            <button
-              type="button"
-              disabled=${pendingAction !== null}
-              class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-status-err)] disabled:opacity-50"
-              data-chat-queue-pending-action="cancel"
-              onClick=${() => {
-                void runPendingAction('cancel', () => action.onPendingCancel!(entry))
-              }}
-            >${pendingAction === 'cancel' ? '취소 중...' : '취소'}</button>
-          `
-        : null}
-      ${queueState === 'pending' && action?.onPendingMoveToEnd
-        ? html`
-            <button
-              type="button"
-              disabled=${pendingAction !== null}
-              class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)] disabled:opacity-50"
-              data-chat-queue-pending-action="move-to-end"
-              onClick=${() => {
-                void runPendingAction('move', () => action.onPendingMoveToEnd!(entry))
-              }}
-            >${pendingAction === 'move' ? '변경 중...' : '맨 뒤로'}</button>
-          `
-        : null}
-      ${queueState === 'recovery_required' && action?.onRecoveryRequeue
-        ? html`
-            <button
-              type="button"
-              disabled=${recoveryPending !== null}
-              class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--warn-bright)] disabled:opacity-50"
-              data-chat-queue-recovery-action="requeue_unconfirmed"
-              onClick=${() => {
-                void runRecovery('requeue', () => action.onRecoveryRequeue!(entry))
-              }}
-            >${recoveryPending === 'requeue' ? '반영 중...' : '미확인 배송 재큐잉'}</button>
-          `
-        : null}
-      ${queueState === 'recovery_required' && action?.onRecoveryCancel
-        ? html`
-            <button
-              type="button"
-              disabled=${recoveryPending !== null}
-              class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-status-err)] disabled:opacity-50"
-              data-chat-queue-recovery-action="cancel_unconfirmed"
-              onClick=${cancelRecovery}
-            >${recoveryPending === 'cancel' ? '반영 중...' : '미확인 배송 취소'}</button>
-          `
-        : null}
-    </span>
-  `
 }
 
 function avatarLabel(entry: KeeperConversationEntry): string {
@@ -745,16 +584,6 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     typeof details.usage?.totalTokens === 'number' ? { label: '토큰', value: `${details.usage.totalTokens}` } : null,
     formatCurrency(details.costUsd) ? { label: '비용', value: formatCurrency(details.costUsd)! } : null,
     details.traceId ? { label: '트레이스', value: details.traceId } : null,
-    details.queueReceiptId ? { label: '큐 receipt', value: details.queueReceiptId } : null,
-    details.queueShutdownOperationId ? { label: '종료 작업 ID', value: details.queueShutdownOperationId } : null,
-    details.queueState ? { label: '큐 상태', value: details.queueState } : null,
-    details.queueFailureKind ? { label: '큐 실패', value: details.queueFailureKind } : null,
-    typeof details.queueRevision === 'string' ? { label: '큐 revision', value: details.queueRevision } : null,
-    typeof details.queuePendingCount === 'number' ? { label: '접수 시 pending', value: `${details.queuePendingCount}` } : null,
-    typeof details.queueInflightCount === 'number' ? { label: '접수 시 inflight', value: `${details.queueInflightCount}` } : null,
-    typeof details.queueRecoveryRequiredCount === 'number'
-      ? { label: '접수 시 recovery required', value: `${details.queueRecoveryRequiredCount}` }
-      : null,
     typeof details.generation === 'number' ? { label: '세대', value: `${details.generation}` } : null,
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
@@ -2882,8 +2711,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
       data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
       data-chat-stream-contract-badge-state=${streamContractBadge?.state ?? undefined}
-      data-chat-queue-seq=${entry.queueSeq ?? undefined}
-      data-chat-queue-client-action-id=${entry.queueClientActionId ?? undefined}
       data-chat-surface-kind=${entry.surface?.kind ?? undefined}
       data-chat-surface-address=${entry.surface?.address ? JSON.stringify(entry.surface.address) : undefined}
       data-chat-conversation-id=${entry.conversationId ?? undefined}
@@ -2892,13 +2719,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-speaker-name=${entry.speakerName ?? undefined}
       data-chat-speaker-authority=${entry.speakerAuthority ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
-      data-chat-queue-receipt-id=${entry.details?.queueReceiptId ?? undefined}
-      data-chat-queue-shutdown-operation-id=${entry.details?.queueShutdownOperationId ?? undefined}
-      data-chat-queue-state=${entry.details?.queueState ?? undefined}
-      data-chat-queue-revision=${entry.details?.queueRevision ?? undefined}
-      data-chat-queue-pending-count=${entry.details?.queuePendingCount ?? undefined}
-      data-chat-queue-inflight-count=${entry.details?.queueInflightCount ?? undefined}
-      data-chat-queue-recovery-required-count=${entry.details?.queueRecoveryRequiredCount ?? undefined}
       data-chat-attachment-count=${attachments.length}
       data-chat-server-attach-block-count=${attachBlocks.length}
       data-chat-multimodal-sources=${multimodalSources.length > 0 ? multimodalSources.join(',') : undefined}
@@ -2936,7 +2756,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
-                    <${QueueReceiptBadge} entry=${entry} action=${action} />
                     <${StreamContractBadge} badge=${streamContractBadge} compact=${true} />
                     <${ChatMetaChip} info=${surfaceInfo} compact=${true} />
                     <${ChatMetaChip} info=${speakerInfo} compact=${true} />
@@ -2960,7 +2779,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
-                    <${QueueReceiptBadge} entry=${entry} action=${action} />
                     ${timestamp
                       ? html`
                           <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">
@@ -4375,8 +4193,7 @@ export function ChatComposer({
   streaming,
   streamStartedAt,
   lastEventAt,
-  queueEnabled = false,
-  queueCount = 0,
+  allowSendWhileStreaming = false,
   commands = [],
   onDraftChange,
   onSend,
@@ -4393,10 +4210,9 @@ export function ChatComposer({
   streamStartedAt?: number | null
   /** Wall-clock ms of the most recent stream event; drives the stall hint. */
   lastEventAt?: number | null
-  /** When true, sending stays enabled during streaming — the host panel
-   *  enqueues the message instead of dispatching it immediately. */
-  queueEnabled?: boolean
-  queueCount?: number
+  /** When true, a new durable operation may be submitted while another
+   *  operation is streaming. */
+  allowSendWhileStreaming?: boolean
   commands?: ChatComposerCommand[]
   /** Optional controlled draft handler. When omitted the composer keeps its
    *  own draft state, which prevents the host from re-rendering on every
@@ -4527,15 +4343,14 @@ export function ChatComposer({
       : null
   const isStalled = sinceLastEvent !== null && sinceLastEvent >= STREAM_STALL_THRESHOLD_S
 
-  const canQueue = queueEnabled && streaming
   const streamLabel = streaming
-    ? canQueue
-      ? '대기열 추가'
+    ? allowSendWhileStreaming
+      ? '새 작업 접수'
       : `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
     : '전송'
   const isStreamWarning = streaming && elapsed > 60
   const hasContent = draft.trim() !== '' || attachments.length > 0 || voiceDraft !== null
-  const sendDisabled = disabled || !hasContent || (streaming && !queueEnabled)
+  const sendDisabled = disabled || !hasContent || (streaming && !allowSendWhileStreaming)
   const slashMatch = /^\/([^\s]*)$/.exec(draft)
   const slashQuery = slashMatch?.[1]?.toLowerCase() ?? null
   const slashMatches = useMemo(
@@ -4862,7 +4677,7 @@ export function ChatComposer({
                   ` : null}
                   <button
                     type="button"
-                    class="send ${isStreamWarning && !canQueue ? 'warn' : ''}"
+                    class="send ${isStreamWarning && !allowSendWhileStreaming ? 'warn' : ''}"
                     disabled=${sendDisabled}
                     onClick=${handleSend}
                   >
@@ -4884,7 +4699,7 @@ export function ChatComposer({
                 </div>
               `}
         </div>
-        ${footerMode === 'always' || (footerMode === 'activity' && (isStalled || queueCount > 0))
+        ${footerMode === 'always' || (footerMode === 'activity' && isStalled)
           ? html`
               <div class="composer-foot">
                 <span class="hint">
@@ -4893,9 +4708,6 @@ export function ChatComposer({
                     ? html`<span class="ml-2 text-[var(--color-status-warn)]" data-chat-stall-hint>마지막 수신 ${sinceLastEvent}초 전 — 스트림 지연</span>`
                     : null}
                 </span>
-                ${queueCount > 0
-                  ? html`<span class="queue-badge" data-chat-queue-count>대기 ${queueCount}</span>`
-                  : null}
               </div>
             `
           : null}

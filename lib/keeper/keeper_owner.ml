@@ -101,8 +101,11 @@ type _ command =
 type packed_command =
   | Command : 'response command * 'response Eio.Promise.u -> packed_command
 
+exception Stop_active_child
+
 type t =
-  { mailbox : packed_command Eio.Stream.t
+  { keeper_name : string
+  ; mailbox : packed_command Eio.Stream.t
   ; projection : Keeper_owner_reducer.projection Atomic.t
   ; operation_projection : operation_projection Atomic.t
   ; operation_store : Chat_operation_store.t
@@ -111,6 +114,8 @@ type t =
   ; closed_p : unit Eio.Promise.t
   ; store_error : string option ref
   ; child_active : bool ref
+  ; child_cancel : (unit -> unit) option Atomic.t
+  ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
   }
 
 let error_to_string = function
@@ -233,6 +238,9 @@ let run_operation_command t ~label f =
         | Ok inventory ->
           let projection = operation_projection_of_inventory inventory in
           Atomic.set t.operation_projection projection;
+          Keeper_waiting_inventory_broadcast.changed
+            ~keeper_name:t.keeper_name
+            ~source:Keeper_waiting_inventory_broadcast.Chat_operation;
           Ok (value, projection)))
 ;;
 
@@ -288,7 +296,8 @@ let start
    | Ok initial_operation_inventory ->
   let closed_p, resolve_closed = Eio.Promise.create () in
   let t =
-    { mailbox = Eio.Stream.create mailbox_capacity
+    { keeper_name
+    ; mailbox = Eio.Stream.create mailbox_capacity
     ; projection = Atomic.make (Keeper_owner_reducer.projection initial_state)
     ; operation_projection =
         Atomic.make (operation_projection_of_inventory initial_operation_inventory)
@@ -298,6 +307,8 @@ let start
     ; closed_p
     ; store_error = ref None
     ; child_active = ref false
+    ; child_cancel = Atomic.make None
+    ; stopping_waiters = ref []
     }
   in
   Eio.Switch.on_release sw (fun () ->
@@ -315,27 +326,25 @@ let start
   Eio.Fiber.fork_daemon ~sw (fun () ->
     let finish_child completion =
       match completion.claimed_operation_id, completion.execution with
-      | None, _ -> ()
+      | None, _ -> Ok ()
       | Some operation_id, Operation_succeeded { outcome_ref } ->
-        ignore
-          (run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
-             Chat_operation_store.succeed_running
-               t.operation_store
-               ~now:(t.now ())
-               ~operation_id
-               ~outcome_ref)
-           : ((Chat_operation.t * operation_projection), error) result)
+        run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
+          Chat_operation_store.succeed_running
+            t.operation_store
+            ~now:(t.now ())
+            ~operation_id
+            ~outcome_ref)
+        |> Result.map (fun _ -> ())
       | Some operation_id, Operation_failed { kind; detail; outcome_ref } ->
-        ignore
-          (run_operation_command t ~label:"fail running Keeper chat operation" (fun () ->
-             Chat_operation_store.fail_running
-               t.operation_store
-               ~now:(t.now ())
-               ~operation_id
-               ~kind
-               ~detail
-               ~outcome_ref)
-           : ((Chat_operation.t * operation_projection), error) result)
+        run_operation_command t ~label:"fail running Keeper chat operation" (fun () ->
+          Chat_operation_store.fail_running
+            t.operation_store
+            ~now:(t.now ())
+            ~operation_id
+            ~kind
+            ~detail
+            ~outcome_ref)
+        |> Result.map (fun _ -> ())
     in
     let rec start_child_if_needed state =
       match operation_executor with
@@ -360,8 +369,24 @@ let start
             let execution =
               try
                 Eio.Switch.run (fun child_sw ->
-                  executor ~sw:child_sw ~keeper_name ~claim)
+                  Atomic.set
+                    t.child_cancel
+                    (Some (fun () -> Eio.Switch.fail child_sw Stop_active_child));
+                  if (Atomic.get t.projection).Keeper_owner_reducer.stopping
+                  then
+                    Operation_failed
+                      { kind = "Turn_cancelled"
+                      ; detail = "Keeper owner is stopping"
+                      ; outcome_ref = None
+                      }
+                  else executor ~sw:child_sw ~keeper_name ~claim)
               with
+              | Stop_active_child ->
+                Operation_failed
+                  { kind = "Turn_cancelled"
+                  ; detail = "Keeper owner stopped the active turn"
+                  ; outcome_ref = None
+                  }
               | Eio.Cancel.Cancelled cause ->
                 Operation_failed
                   { kind = "Turn_cancelled"
@@ -375,6 +400,7 @@ let start
                   ; outcome_ref = None
                   }
             in
+            Atomic.set t.child_cancel None;
             ignore
               (request
                  t
@@ -524,9 +550,12 @@ let start
           Eio.Promise.resolve resolve response;
           loop state
         | Command (Child_finished completion, resolve) ->
-          finish_child completion;
+          let result = finish_child completion in
           t.child_active := false;
-          Eio.Promise.resolve resolve (Ok ());
+          Eio.Promise.resolve resolve result;
+          let stopping_waiters = List.rev !(t.stopping_waiters) in
+          t.stopping_waiters := [];
+          List.iter (fun waiter -> Eio.Promise.resolve waiter result) stopping_waiters;
           start_child_if_needed state;
           loop state
         | Command (Begin_stopping, resolve) ->
@@ -536,7 +565,15 @@ let start
              Eio.Promise.resolve resolve (Error error);
              loop state
            | Ok state ->
-             Eio.Promise.resolve resolve (Ok ());
+             if !(t.child_active)
+             then (
+               t.stopping_waiters := resolve :: !(t.stopping_waiters);
+               Option.iter
+                 (fun cancel ->
+                    try cancel () with
+                    | Invalid_argument _ -> ())
+                 (Atomic.get t.child_cancel))
+             else Eio.Promise.resolve resolve (Ok ());
              loop state)
     in
     start_child_if_needed initial_state;

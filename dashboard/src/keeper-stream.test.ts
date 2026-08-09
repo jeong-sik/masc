@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  _resetActiveKeeperStreamsForTests,
   _resetLiveSendRequestOwnersForTests,
   activeStreamRequestId,
   appendThreadEntry,
@@ -8,17 +9,13 @@ import {
 } from './keeper-state'
 import { keeperThreads } from './keeper-state'
 import {
-  KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS,
   _flushPendingKeeperStreamDeltasForTests,
   _resetKeeperStreamBuffersForTests,
   abortKeeperThreadMessage,
-  applyKeeperQueuedTurnEvent,
+  applyKeeperOperationTurnEvent,
   applyKeeperStreamEvent,
 } from './keeper-stream'
-import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
-import type { KeeperChatStreamEvent } from './api'
 import { parseSSEMessage } from './schemas/sse'
-import { isRecord } from './lib/type-guards'
 
 function assistantEntry(): void {
   appendThreadEntry('sangsu', {
@@ -35,14 +32,15 @@ function assistantEntry(): void {
   })
 }
 
-describe('applyKeeperStreamEvent', () => {
+describe('Keeper operation stream projection', () => {
   beforeEach(() => {
     _resetKeeperStreamBuffersForTests()
-    keeperThreads.value = {}
     _resetLiveSendRequestOwnersForTests()
+    _resetActiveKeeperStreamsForTests()
+    keeperThreads.value = {}
   })
 
-  it('appends content for TEXT_MESSAGE_CONTENT', () => {
+  it('streams text into the selected assistant entry', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_MESSAGE_CONTENT',
@@ -52,985 +50,91 @@ describe('applyKeeperStreamEvent', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.text).toBe('안녕')
     expect(entry?.delivery).toBe('streaming')
-    expect(entry?.streamState).toBe('streaming')
-    expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
   })
 
-  it('ignores empty delta text events', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'TEXT_MESSAGE_CONTENT',
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('')
-  })
-
-  it('marks the assistant entry queued when the server accepts a request', () => {
+  it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
-      name: 'KEEPER_QUEUE_REQUEST',
+      name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
       value: {
-        request_id: 'kmsg_sangsu_1',
-        status: 'queued',
-        modalities: ['text'],
+        operation_id: 'kmsg-operation-1',
+        state: 'Queued',
+        queued_count: 1,
       },
     })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('queued')
-    expect(entry?.streamState).toBe('opening')
-    expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
+    expect(entry?.requestId).toBe('kmsg-operation-1')
   })
 
-  it('retains the durable receipt when a busy chat message enters the server queue', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_CHAT_QUEUED',
-      value: {
-        keeper_name: 'sangsu',
-        status: 'queued',
-        receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
-        queue_revision: '12',
-        pending_count: 3,
-        inflight_count: 1,
-        recovery_required_count: 1,
-        shutdown_operation_id: ' shutdown-op-7 ',
-        in_flight_lane: 'autonomous',
-        in_flight_started_at: 42,
-      },
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.delivery).toBe('queued')
-    expect(entry?.streamState).toBeNull()
-    expect(entry?.details).toMatchObject({
-      queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000007',
-      queueShutdownOperationId: 'shutdown-op-7',
-      queueRevision: '12',
-      queuePendingCount: 3,
-      queueInflightCount: 1,
-      queueRecoveryRequiredCount: 1,
-      queueInFlightLane: 'autonomous',
-      queueInFlightStartedAt: 42,
-    })
-    expect(entry?.text).toBe(
-      'sangsu의 이전 메시지 상태를 확인해야 해요. 새 메시지는 안전하게 대기 중입니다.',
-    )
-    expect(entry?.streamContract).toMatchObject({
-      source: 'queue_event',
-      eventName: 'KEEPER_CHAT_QUEUED',
-      deliveryReceipt: 'client_observed_sse_event',
-    })
-  })
-
-  it('rejects a busy queue acceptance event without a durable receipt', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_CHAT_QUEUED',
-      value: {
-        status: 'queued',
-        pending_count: 1,
-        inflight_count: 0,
-        recovery_required_count: 0,
-        shutdown_operation_id: null,
-      },
-    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
-  })
-
-  it('rejects malformed or partial durable queue acceptance metadata', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_CHAT_QUEUED',
-      value: {
-        receipt_id: 'not-a-chat-receipt',
-        queue_revision: '1',
-        pending_count: 1,
-        inflight_count: 0,
-        recovery_required_count: 0,
-        shutdown_operation_id: null,
-      },
-    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
-
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_CHAT_QUEUED',
-      value: {
-        receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
-        pending_count: 1,
-        inflight_count: 0,
-        recovery_required_count: 0,
-        shutdown_operation_id: null,
-      },
-    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
-  })
-
-  it('rejects queue acceptance that omits recovery-required depth', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_CHAT_QUEUED',
-      value: {
-        receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
-        queue_revision: '1',
-        pending_count: 1,
-        inflight_count: 0,
-        shutdown_operation_id: null,
-      },
-    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
-  })
-
-  it('rejects missing, blank, or wrongly typed shutdown operation metadata', () => {
-    assistantEntry()
-    const baseValue = {
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
-      queue_revision: '1',
-      pending_count: 1,
-      inflight_count: 0,
-      recovery_required_count: 0,
+  it('routes server-pushed events by exact operation id', () => {
+    for (const operationId of ['kmsg-operation-1', 'kmsg-operation-2']) {
+      appendThreadEntry('sangsu', {
+        id: `reply-${operationId}`,
+        role: 'assistant',
+        source: 'direct_assistant',
+        label: 'sangsu',
+        text: '',
+        rawText: '',
+        timestamp: null,
+        requestId: operationId,
+        delivery: 'queued',
+        streamState: null,
+        details: null,
+      })
     }
 
-    for (const shutdownOperationId of [undefined, '   ', 7]) {
-      const value = shutdownOperationId === undefined
-        ? baseValue
-        : { ...baseValue, shutdown_operation_id: shutdownOperationId }
-      expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-        type: 'CUSTOM',
-        name: 'KEEPER_CHAT_QUEUED',
-        value,
-      } as unknown as KeeperChatStreamEvent)).toBe('Keeper queue acceptance has invalid shutdown operation metadata.')
-    }
-  })
-
-  it('surfaces failed request terminal events before stream error close', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_sangsu_1',
-        status: 'error',
-        ok: false,
-        message: 'Timeout after 630.0s',
-      },
-    })).toBe('Timeout after 630.0s')
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.delivery).toBe('error')
-    expect(entry?.streamState).toBeNull()
-    expect(entry?.error).toBe('Timeout after 630.0s')
-    expect(entry?.text).toBe('Keeper request failed: Timeout after 630.0s')
-    expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
-  })
-
-  it('renders cancelled request terminal events without an error bubble', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_sangsu_1',
-        status: 'cancelled',
-        ok: false,
-        message: 'keeper chat stream cancelled by client',
-      },
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.delivery).toBe('cancelled')
-    expect(entry?.streamState).toBeNull()
-    expect(entry?.error).toBeNull()
-    expect(entry?.text).toBe('요청이 취소되었습니다.')
-    expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
-  })
-
-  it('finalizes successful request terminal events after streamed thinking', () => {
-    assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_THINKING_DELTA',
-      value: { delta: 'checking state' },
-    })
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REPLY_DETAILS',
-      value: {
-        reply: '완료했습니다.',
-        turn_outcome: 'visible_reply',
-        turn_ref: 'trace-current#1',
-      },
+    applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'kmsg-operation-2',
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'second' },
     })
 
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'done',
-        ok: true,
-      },
-    })).toBeNull()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'TEXT_MESSAGE_END',
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('완료했습니다.')
-    expect(entry?.delivery).toBe('delivered')
-    expect(entry?.streamState).toBeNull()
-    expect(entry?.error).toBeNull()
-    expect(entry?.streamContract?.deliveryReceipt).toBe('client_observed_sse_event')
-    expect(activeStreamRequestId('sangsu')).toBeNull()
+    const entries = keeperThreads.value.sangsu ?? []
+    expect(entries.find(entry => entry.requestId === 'kmsg-operation-1')?.text).toBe('')
+    expect(entries.find(entry => entry.requestId === 'kmsg-operation-2')?.text).toBe('second')
   })
 
-  it('finalizes queued visible replies when a successful terminal follows reply details', () => {
-    assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_QUEUE_REQUEST',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'queued',
-      },
-    })
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REPLY_DETAILS',
-      value: {
-        reply: '큐에서 완료했습니다.',
-        turn_outcome: 'visible_reply',
-        turn_ref: 'trace-current#2',
-      },
-    })
-
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'done',
-        ok: true,
-      },
-    })).toBeNull()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'TEXT_MESSAGE_END',
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('큐에서 완료했습니다.')
-    expect(entry?.delivery).toBe('delivered')
-    expect(entry?.streamState).toBeNull()
-    expect(entry?.error).toBeNull()
-    expect(activeStreamRequestId('sangsu')).toBeNull()
-  })
-
-  it('projects explicit continuation checkpoints as a durable status', () => {
-    assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_CONTINUATION_CHECKPOINT',
-      value: {
-        message: 'Continuation checkpoint saved; keeper remains scheduled.',
-      },
-    })
-
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'done',
-        ok: true,
-      },
-    })).toBeNull()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'TEXT_MESSAGE_END',
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('')
-    expect(entry?.delivery).toBe('delivered')
-    expect(entry?.streamState).toBeNull()
-    expect(entry?.details?.turnOutcome).toBe('continuation_checkpoint')
-    expect(entry?.blocks).toEqual([
-      { t: 'status', kind: 'continuation_checkpoint' },
-    ])
-    expect(activeStreamRequestId('sangsu')).toBeNull()
-  })
-
-  it('finalizes a connector-delivered turn as a terminal status, not a hang', () => {
-    assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REPLY_DETAILS',
-      value: {
-        reply: 'posted the answer to #ops on Slack',
-        turn_outcome: 'external_effect_completed',
-        turn_ref: 'trace-current#3',
-      },
-    })
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
-      value: null,
-    })).toBeNull()
-
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'done',
-        ok: true,
-      },
-    })).toBeNull()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'TEXT_MESSAGE_END',
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('')
-    expect(entry?.rawText).toBe('posted the answer to #ops on Slack')
-    expect(entry?.delivery).toBe('delivered')
-    expect(entry?.streamState).toBeNull()
-    expect(entry?.details?.turnOutcome).toBe('external_effect_completed')
-    expect(activeStreamRequestId('sangsu')).toBeNull()
-  })
-
-  it('does not leave successful terminal events in a live thinking state without reply details', () => {
-    assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_THINKING_DELTA',
-      value: { delta: 'checking state' },
-    })
-
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'done',
-        ok: true,
-      },
-    })).toBeNull()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'TEXT_MESSAGE_END',
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.delivery).toBe('delivered')
-    expect(entry?.streamState).toBeNull()
-    expect(entry?.traceSteps).toEqual([
-      { kind: 'think', text: 'checking state', ts: expect.any(String) },
-    ])
-    expect(activeStreamRequestId('sangsu')).toBeNull()
-  })
-
-  it('ignores terminal events for a different active request id', () => {
-    assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
-
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_stale',
-        status: 'cancelled',
-        ok: false,
-        message: 'stale terminal',
-      },
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.delivery).toBe('sending')
-    expect(entry?.streamState).toBe('opening')
-  })
-
-  it('ignores no-id terminal events while a request id is active', () => {
-    assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
-
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        status: 'cancelled',
-        ok: false,
-        message: 'legacy terminal without request id',
-      },
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.delivery).toBe('sending')
-    expect(entry?.streamState).toBe('opening')
-    expect(activeStreamRequestId('sangsu')).toBe('kmsg_current')
-  })
-
-  it('surfaces an invalid request terminal status', () => {
-    assistantEntry()
-    setActiveStreamRequestId('sangsu', 'kmsg_current')
-
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REQUEST_TERMINAL',
-      value: {
-        request_id: 'kmsg_current',
-        status: 'running',
-        ok: false,
-        message: 'not terminal yet',
-      },
-    } as unknown as KeeperChatStreamEvent)).toBe('Keeper request terminal event has invalid status.')
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.delivery).toBe('sending')
-    expect(entry?.streamState).toBe('opening')
-  })
-
-  // RFC-0232 P2: the checkpoint distinction rides the producer-typed
-  // `turn_outcome` field, not the reply text.
-  it('does not render a declared continuation checkpoint as a chat reply', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REPLY_DETAILS',
-      value: {
-        reply: 'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
-        turn_outcome: 'continuation_checkpoint',
-        turn_ref: 'trace-checkpoint#1',
-      },
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('')
-    expect(entry?.rawText).toBe('Continuation checkpoint saved; keeper remains scheduled for the next cycle.')
-    expect(entry?.delivery).toBe('queued')
-    expect(entry?.streamState).toBeNull()
-  })
-
-  it('renders checkpoint-shaped text as a reply when not declared a checkpoint', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REPLY_DETAILS',
-      value: {
-        reply: 'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
-        turn_outcome: 'visible_reply',
-        turn_ref: 'trace-visible#1',
-      },
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('Continuation checkpoint saved; keeper remains scheduled for the next cycle.')
-    expect(entry?.delivery).toBe('sending')
-  })
-
-  it('keeps the producer turnRef from reply details for history rehydrate joins', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REPLY_DETAILS',
-      value: {
-        reply: 'done',
-        turn_outcome: 'visible_reply',
-        turn_ref: 'trace-live#42',
-      },
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.turnRef).toBe('trace-live#42')
-    expect(entry?.details?.turnRef).toBe('trace-live#42')
-  })
-
-  it('keeps Agent Core stream message metadata through reply details', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_STREAM_MESSAGE_START',
-      value: {
-        provider_message_id: 'msg-agent-core-1',
-        model: 'gpt-5.5',
-        usage: {
-          input_tokens: 10,
-          output_tokens: 1,
-          total_tokens: 11,
-        },
-      },
-    })).toBeNull()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_STREAM_MESSAGE_DELTA',
-      value: {
-        stop_reason: 'end_turn',
-        usage: {
-          input_tokens: 10,
-          output_tokens: 2,
-          total_tokens: 12,
-          cache_creation_input_tokens: 3,
-          cache_read_input_tokens: 4,
-          cost_usd: 0.125,
-        },
-      },
-    })).toBeNull()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REPLY_DETAILS',
-      value: {
-        reply: 'done',
-        turn_outcome: 'visible_reply',
-        turn_ref: 'trace-live#43',
-      },
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('done')
-    expect(entry?.turnRef).toBe('trace-live#43')
-    expect(entry?.details?.providerMessageId).toBe('msg-agent-core-1')
-    expect(entry?.details?.modelUsed).toBe('gpt-5.5')
-    expect(entry?.details?.stopReason).toBe('end_turn')
-    expect(entry?.details?.costUsd).toBe(0.125)
-    expect(entry?.details?.usage).toEqual({
-      inputTokens: 10,
-      outputTokens: 2,
-      totalTokens: 12,
-      cacheCreationInputTokens: 3,
-      cacheReadInputTokens: 4,
-      costUsd: 0.125,
-    })
-  })
-
-  it('suppresses a declared checkpoint regardless of reply text', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REPLY_DETAILS',
-      value: {
-        reply: '작업을 완료했습니다.',
-        turn_outcome: 'continuation_checkpoint',
-        turn_ref: 'trace-checkpoint#2',
-      },
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('')
-    expect(entry?.delivery).toBe('queued')
-  })
-
-  it('suppresses a declared no-visible reply without marking it queued', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_REPLY_DETAILS',
-      value: {
-        reply: 'hidden runtime-only observation',
-        turn_outcome: 'no_visible_reply',
-        turn_ref: 'trace-no-visible#1',
-      },
-    })).toBeNull()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('')
-    expect(entry?.rawText).toBe('hidden runtime-only observation')
-    expect(entry?.delivery).toBe('no_reply')
-    expect(entry?.streamState).toBeNull()
-  })
-
-  it('extracts error messages from events', () => {
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'RUN_ERROR',
-      message: 'boom',
-    })).toBe('boom')
-  })
-
-  it('sets thinking state on KEEPER_THINKING_DELTA', () => {
-    assistantEntry()
-    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_THINKING_DELTA',
-      value: { delta: 'reasoning about the problem...' },
-    })).toBeNull()
-
-    _flushPendingKeeperStreamDeltasForTests()
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.streamState).toBe('thinking')
-    expect(entry?.delivery).toBe('streaming')
-    expect(entry?.traceSteps).toEqual([
-      { kind: 'think', text: 'reasoning about the problem...', ts: expect.any(String) },
-    ])
-  })
-
-  it('appends multiple thinking deltas to one trace step', () => {
-    assistantEntry()
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_THINKING_DELTA',
-      value: { delta: 'checking ' },
-    })
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_THINKING_DELTA',
-      value: { delta: 'tools' },
-    })
-
-    expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')?.traceSteps).toBeUndefined()
-    _flushPendingKeeperStreamDeltasForTests()
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.traceSteps).toEqual([
-      { kind: 'think', text: 'checking tools', ts: expect.any(String) },
-    ])
-  })
-
-  it('coalesces live thinking deltas until the thinking flush interval expires', async () => {
-    vi.useFakeTimers()
-    try {
-      assistantEntry()
-      applyKeeperStreamEvent('sangsu', 'reply-1', {
-        type: 'CUSTOM',
-        name: 'KEEPER_THINKING_DELTA',
-        value: { delta: 'checking ' },
-      })
-      applyKeeperStreamEvent('sangsu', 'reply-1', {
-        type: 'CUSTOM',
-        name: 'KEEPER_THINKING_DELTA',
-        value: { delta: 'tool evidence' },
-      })
-
-      expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')?.traceSteps).toBeUndefined()
-
-      await vi.advanceTimersByTimeAsync(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS - 1)
-      expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')?.traceSteps).toBeUndefined()
-
-      await vi.advanceTimersByTimeAsync(1)
-      const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-      expect(entry?.traceSteps).toEqual([
-        { kind: 'think', text: 'checking tool evidence', ts: expect.any(String) },
-      ])
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('keeps live thinking state bounded until a phase boundary commits the full text', async () => {
-    vi.useFakeTimers()
-    try {
-      const hiddenHead = 'hidden-head-marker'
-      const visibleTail = 'visible-tail-marker'
-      assistantEntry()
-
-      applyKeeperStreamEvent('sangsu', 'reply-1', {
-        type: 'CUSTOM',
-        name: 'KEEPER_THINKING_DELTA',
-        value: { delta: `${hiddenHead} ${'x'.repeat(STREAMING_THINKING_PREVIEW_CHARS + 200)} ` },
-      })
-      applyKeeperStreamEvent('sangsu', 'reply-1', {
-        type: 'CUSTOM',
-        name: 'KEEPER_THINKING_DELTA',
-        value: { delta: visibleTail },
-      })
-
-      await vi.advanceTimersByTimeAsync(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
-
-      const liveEntry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-      const liveThinking = liveEntry?.traceSteps?.[0]
-      if (!liveThinking || liveThinking.kind !== 'think') {
-        throw new Error('expected live thinking trace step')
-      }
-      expect(liveThinking.text).toContain(visibleTail)
-      expect(liveThinking.text).not.toContain(hiddenHead)
-      expect(liveThinking.text.length).toBeLessThanOrEqual(STREAMING_THINKING_PREVIEW_CHARS)
-
-      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START' })
-
-      const committedEntry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-      const committedThinking = committedEntry?.traceSteps?.[0]
-      if (!committedThinking || committedThinking.kind !== 'think') {
-        throw new Error('expected committed thinking trace step')
-      }
-      expect(committedThinking.text).toContain(hiddenHead)
-      expect(committedThinking.text).toContain(visibleTail)
-      expect(committedThinking.text.length).toBeGreaterThan(STREAMING_THINKING_PREVIEW_CHARS)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('flushes pending thinking deltas at TEXT_MESSAGE_START without reverting stream state', () => {
-    assistantEntry()
-    // Thinking delta schedules a pending flush.
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_THINKING_DELTA',
-      value: { delta: 'thinking before text' },
-    })
-    // Text phase begins before the scheduled flush runs.
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START' })
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'TEXT_MESSAGE_CONTENT',
-      delta: 'hello',
-    })
-    // A still-scheduled flush must be a no-op: START already flushed it, so it
-    // cannot revert streamState to 'thinking' after text streaming began.
-    _flushPendingKeeperStreamDeltasForTests()
-
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.streamState).toBe('streaming')
-    expect(entry?.text).toBe('hello')
-    expect(entry?.traceSteps).toEqual([
-      { kind: 'think', text: 'thinking before text', ts: expect.any(String) },
-    ])
-  })
-
-  it('preserves received thinking deltas when aborting a live stream', () => {
-    assistantEntry()
-    setActiveStream('sangsu', 'reply-1', new AbortController())
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_THINKING_DELTA',
-      value: { delta: 'half-written reasoning' },
-    })
+  it('keeps concurrent operation controllers independent', () => {
+    const first = new AbortController()
+    const second = new AbortController()
+    setActiveStream('sangsu', 'kmsg-operation-1', 'reply-1', first)
+    setActiveStream('sangsu', 'kmsg-operation-2', 'reply-2', second)
+    setActiveStreamRequestId('sangsu', 'kmsg-operation-1')
+    setActiveStreamRequestId('sangsu', 'kmsg-operation-2')
 
     abortKeeperThreadMessage('sangsu')
-    _flushPendingKeeperStreamDeltasForTests()
 
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.delivery).toBe('cancelled')
-    expect(entry?.streamState).toBeNull()
-    expect(entry?.text).toBe('요청이 취소되었습니다.')
-    expect(entry?.traceSteps).toEqual([
-      { kind: 'think', text: 'half-written reasoning', ts: expect.any(String) },
-    ])
+    expect(first.signal.aborted).toBe(true)
+    expect(second.signal.aborted).toBe(false)
+    expect(activeStreamRequestId('sangsu')).toBe('kmsg-operation-2')
   })
 
-  it('splits thinking trace steps by Agent Core content block index', () => {
-    assistantEntry()
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_THINKING_DELTA',
-      value: { index: 1, delta: 'checking ' },
-    })
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_THINKING_DELTA',
-      value: { index: 1, delta: 'tools' },
-    })
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_THINKING_DELTA',
-      value: { index: 2, delta: 'next block' },
-    })
-
-    _flushPendingKeeperStreamDeltasForTests()
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.traceSteps).toEqual([
-      { kind: 'think', text: 'checking tools', ts: expect.any(String), agentCoreBlockIndex: 1 },
-      { kind: 'think', text: 'next block', ts: expect.any(String), agentCoreBlockIndex: 2 },
-    ])
-  })
-})
-
-describe('applyKeeperQueuedTurnEvent', () => {
-  const firstReceipt = 'chatq_00000000-0000-4000-8000-000000000001'
-  const secondReceipt = 'chatq_00000000-0000-4000-8000-000000000002'
-
-  beforeEach(() => {
-    keeperThreads.value = {}
-    _resetKeeperStreamBuffersForTests()
-  })
-
-  function queuedEntry(id: string, receiptId: string, text: string): void {
-    appendThreadEntry('sangsu', {
-      id,
-      role: 'assistant',
-      source: 'direct_assistant',
-      label: 'sangsu',
-      text,
-      rawText: text,
-      timestamp: null,
-      delivery: 'queued',
-      streamState: null,
-      queueReceiptIds: [receiptId],
-      details: { queueReceiptId: receiptId, queueState: 'pending' },
-    })
-  }
-
-  it('streams thinking, tool args, and reply text into the exact queued bubble', () => {
-    queuedEntry('first', firstReceipt, 'queued first')
-    queuedEntry('second', secondReceipt, 'queued second')
-
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: { type: 'RUN_STARTED', runId: 'run-1' },
-    })
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: {
-        type: 'CUSTOM',
-        name: 'KEEPER_THINKING_DELTA',
-        value: { index: 0, delta: '검토 중' },
+  it('accepts the singular operation SSE envelope and rejects receipt identity', () => {
+    expect(parseSSEMessage({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ts_unix: 1,
+      ag_ui_event: {
+        type: 'TEXT_MESSAGE_CONTENT',
+        threadId: 'keeper:sangsu',
+        timestamp: 1,
+        delta: 'hello',
       },
-    })
-    _flushPendingKeeperStreamDeltasForTests()
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'Grep' },
-    })
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: { type: 'TOOL_CALL_ARGS', toolCallId: 'tc-1', delta: '{"pattern":"x"}' },
-    })
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: { type: 'TOOL_CALL_END', toolCallId: 'tc-1' },
-    })
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: { type: 'TEXT_MESSAGE_START', messageId: 'message-1' },
-    })
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: { type: 'TEXT_MESSAGE_CONTENT', messageId: 'message-1', delta: '완료했습니다.' },
-    })
+    })?.type).toBe('keeper_chat_operation_event')
 
-    const first = keeperThreads.value.sangsu?.find(entry => entry.id === 'first')
-    const second = keeperThreads.value.sangsu?.find(entry => entry.id === 'second')
-    expect(first?.text).toBe('완료했습니다.')
-    expect(first?.details?.queueState).toBe('inflight')
-    expect(first?.traceSteps).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'think', text: '검토 중' }),
-      expect.objectContaining({
-        kind: 'tool',
-        toolCallId: 'tc-1',
-        name: 'Grep',
-        args: '{"pattern":"x"}',
-        status: 'ok',
-      }),
-    ]))
-    expect(second?.text).toBe('queued second')
-    expect(second?.delivery).toBe('queued')
-  })
-
-  it('terminalizes the exact queued bubble when RUN_FINISHED is the only terminal event', () => {
-    queuedEntry('first', firstReceipt, 'queued first')
-
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: {
-        type: 'CUSTOM',
-        name: 'KEEPER_CHAT_QUEUED',
-        value: {
-          keeper_name: 'sangsu',
-          status: 'queued',
-          queue: 'keeper_chat_queue',
-          pending_count: 1,
-          inflight_count: 0,
-          recovery_required_count: 0,
-          chat_waiting: true,
-          receipt_id: firstReceipt,
-          queue_revision: '1',
-          shutdown_operation_id: null,
-        },
-      },
-    })
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: { type: 'TEXT_MESSAGE_CONTENT', delta: '완료했습니다.' },
-    })
-
-    const streaming = keeperThreads.value.sangsu?.find(entry => entry.id === 'first')
-    expect(streaming?.delivery).toBe('streaming')
-    expect(streaming?.details?.queueState).toBe('inflight')
-
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: { type: 'RUN_FINISHED', runId: 'run-1' },
-    })
-
-    const finished = keeperThreads.value.sangsu?.find(entry => entry.id === 'first')
-    expect(finished?.delivery).toBe('delivered')
-    expect(finished?.streamState).toBeNull()
-    expect(finished?.details?.queueState).toBe('delivered')
-    expect(finished?.streamContract).toMatchObject({
-      source: 'queue_event',
-      status: 'backend_terminal_event',
-      eventName: 'RUN_FINISHED',
-    })
-  })
-
-  it('creates a receipt-keyed bubble for a browser that joins mid-turn', () => {
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: { type: 'TEXT_MESSAGE_CONTENT', delta: '중간부터 표시' },
-    })
-
-    const entry = keeperThreads.value.sangsu?.[0]
-    expect(entry?.id).toBe(`queued-turn-${firstReceipt}`)
-    expect(entry?.queueReceiptIds).toEqual([firstReceipt])
-    expect(entry?.text).toBe('중간부터 표시')
-  })
-
-  it.each([
-    ['terminal', { name: 'KEEPER_REQUEST_TERMINAL', value: { status: 'done', ok: true } }],
-    ['reply', { name: 'KEEPER_REPLY_DETAILS', value: { reply: 'done', turn_outcome: 'visible_reply' } }],
-    ['queue', { name: 'KEEPER_CHAT_QUEUED', value: { status: 'queued' } }],
-  ])('terminalizes malformed %s payloads after schema projection', (_label, custom) => {
-    queuedEntry('first', firstReceipt, 'queued first')
-    const parsed = parseSSEMessage({
+    expect(parseSSEMessage({
       type: 'keeper_chat_turn_event',
       name: 'sangsu',
-      receipt_id: firstReceipt,
-      ts_unix: 1_712_000_000,
-      ag_ui_event: {
-        type: 'CUSTOM',
-        threadId: 'keeper-consumer:sangsu',
-        timestamp: 1_712_000_000,
-        ...custom,
-      },
-    })
-    const projected = parsed && isRecord(parsed.ag_ui_event)
-      ? parsed.ag_ui_event
-      : null
-    expect(projected?.type).toBe('RUN_ERROR')
-
-    const error = applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: projected as unknown as KeeperChatStreamEvent,
-    })
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'first')
-    expect(error).toContain('Keeper stream protocol error')
-    expect(entry?.delivery).toBe('error')
-    expect(entry?.streamState).toBeNull()
-  })
-
-  it('does not reopen a terminal history row when a delayed event arrives', () => {
-    queuedEntry('terminal', firstReceipt, '완료된 답변')
-    const entries = keeperThreads.value.sangsu ?? []
-    keeperThreads.value = {
-      sangsu: entries.map(entry => ({
-        ...entry,
-        delivery: 'history' as const,
-        streamState: null,
-        details: { ...(entry.details ?? {}), queueState: 'delivered' as const },
-      })),
-    }
-
-    applyKeeperQueuedTurnEvent('sangsu', {
-      receiptId: firstReceipt,
-      event: { type: 'TEXT_MESSAGE_CONTENT', delta: '늦은 델타' },
-    })
-
-    expect(keeperThreads.value.sangsu?.[0]?.text).toBe('완료된 답변')
-    expect(keeperThreads.value.sangsu?.[0]?.delivery).toBe('history')
+      receipt_id: 'chatq_legacy',
+      ts_unix: 1,
+      ag_ui_event: {},
+    })).toBeNull()
   })
 })
+
 
 describe('applyKeeperStreamEvent tool calls', () => {
   beforeEach(() => {

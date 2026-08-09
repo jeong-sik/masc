@@ -762,12 +762,12 @@ describe('setupServerPushReaction reconnect hydration', () => {
     sseStore.routeServerPushEvent({
       type: 'keeper_waiting_inventory_changed',
       keeper_name: 'echo',
-      queue_kind: 'chat_queue',
+      queue_kind: 'chat_operation',
     })
     sseStore.routeServerPushEvent({
       type: 'keeper_waiting_inventory_changed',
       keeper_name: 'echo',
-      queue_kind: 'chat_queue',
+      queue_kind: 'chat_operation',
     })
     expect(refreshQueue).toHaveBeenCalledTimes(2)
     expect(refreshQueue).toHaveBeenNthCalledWith(1, 'echo')

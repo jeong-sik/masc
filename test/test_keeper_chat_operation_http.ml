@@ -40,8 +40,19 @@ let test_legacy_routes_do_not_match () =
 ;;
 
 let test_mutation_bodies_are_closed () =
-  (match Api.For_testing.parse_mutation_body Api.Edit {|{"input":{"message":"edited"}}|} with
-   | Ok (Some (`Assoc [ "message", `String "edited" ])) -> ()
+  let input =
+    `Assoc
+      [ "schema", `String "masc.keeper_chat_operation.input.v1"
+      ; "message", `String "edited"
+      ; "user_blocks", `List []
+      ; "turn_instructions", `Null
+      ; "surface_context", `Null
+      ; "attachments", `List []
+      ]
+  in
+  let body = `Assoc [ "input", input ] |> Yojson.Safe.to_string in
+  (match Api.For_testing.parse_mutation_body Api.Edit body with
+   | Ok (Some observed) when Yojson.Safe.equal input observed -> ()
    | Ok _ -> fail "edit input projection changed"
    | Error code -> fail ("valid edit rejected: " ^ code));
   List.iter
@@ -51,6 +62,7 @@ let test_mutation_bodies_are_closed () =
        | Error code -> fail ("wrong edit error: " ^ code)
        | Ok _ -> fail ("legacy edit body accepted: " ^ body))
     [ {|{"input":{"message":"edited"},"expected_revision":"7"}|}
+    ; {|{"input":{"message":"edited"}}|}
     ; {|{"input":{},"input":{}}|}
     ; {|{"message":"flattened legacy body"}|}
     ];

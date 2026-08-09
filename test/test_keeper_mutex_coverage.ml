@@ -1959,7 +1959,6 @@ let test_keeper_persistence_preparation_configures_queue_before_request_recovery
       rm_rf base_path)
     (fun () ->
        Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-       Keeper_chat_queue.For_testing.reset ();
        let request_id = "kmsg_prepare_running_0_0" in
        write_request_record
          ~base_path
@@ -1980,8 +1979,6 @@ let test_keeper_persistence_preparation_configures_queue_before_request_recovery
              (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
                 error)
        in
-       Alcotest.(check bool) "queue is configured by preparation" true
-         (Keeper_chat_queue.persistence_configured ());
        let report =
          Server_bootstrap_loops.keeper_persistence_report prepared
        in

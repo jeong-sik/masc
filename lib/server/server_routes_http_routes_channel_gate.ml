@@ -70,7 +70,6 @@ module Http = Http_server_eio
 *)
 (** Map typed gate_error to HTTP status code. *)
 let http_status_of_gate_error : Channel_gate.gate_error -> Httpun.Status.t = function
-  | Validation (Duplicate_message _) -> `Conflict
   | Validation _ -> `Bad_request
   | Keeper_error _ -> `Bad_gateway
   | Dispatch_unavailable -> `Service_unavailable
@@ -508,20 +507,6 @@ let add_routes ~sw ~clock router =
        with_tool_actor_auth ~tool_name:"channel_gate" (fun state submitted_by _req reqd ->
          handle_gate_message ~sw ~clock ~submitted_by state request reqd
        ) request reqd)
-
-  |> Http.Router.prefix_get "/api/v1/gate/message/requests/" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_keeper_delegate_status"
-         (fun state caller _req reqd ->
-           Server_routes_http_keeper_stream.handle_keeper_chat_request_result
-             ~caller state request reqd)
-         request reqd)
-
-  |> Http.Router.prefix_post "/api/v1/gate/message/requests/" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_keeper_delegate_cancel"
-         (fun state caller _req reqd ->
-           Server_routes_http_keeper_stream.handle_keeper_chat_request_cancel
-             ~caller state request reqd)
-         request reqd)
 
   |> Http.Router.get "/api/v1/gate/health" (fun request reqd ->
        with_public_read (fun state _req reqd ->

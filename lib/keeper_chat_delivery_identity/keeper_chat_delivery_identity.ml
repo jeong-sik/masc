@@ -87,6 +87,7 @@ module Receipt_ids = struct
 end
 
 type delivery_key =
+  | Operation of Request_id.t
   | Direct_request of Request_id.t
   | Async_request of Request_id.t
   | Queue_receipts of Receipt_ids.t
@@ -131,6 +132,11 @@ let string_field name fields =
 ;;
 
 let delivery_key_to_yojson = function
+  | Operation operation_id ->
+    `Assoc
+      [ "kind", `String "operation"
+      ; "operation_id", `String (Request_id.to_string operation_id)
+      ]
   | Direct_request request_id ->
     `Assoc
       [ "kind", `String "direct_request"
@@ -156,6 +162,16 @@ let delivery_key_of_yojson = function
   | `Assoc fields ->
     let* kind = string_field "kind" fields in
     (match kind with
+     | "operation" ->
+       let* () =
+         validate_fields
+           ~context:"operation delivery identity"
+           ~expected:[ "kind"; "operation_id" ]
+           fields
+       in
+       let* operation_id = string_field "operation_id" fields in
+       let* operation_id = Request_id.of_string operation_id in
+       Ok (Operation operation_id)
      | "direct_request" ->
        let* () =
          validate_fields
@@ -211,6 +227,7 @@ let delivery_key_of_yojson = function
 
 let delivery_key_equal left right =
   match left, right with
+  | Operation left, Operation right -> Request_id.equal left right
   | Direct_request left, Direct_request right -> Request_id.equal left right
   | Async_request left, Async_request right -> Request_id.equal left right
   | Queue_receipts left, Queue_receipts right ->
@@ -222,9 +239,10 @@ let delivery_key_equal left right =
       | [], _ :: _ | _ :: _, [] -> false
     in
     equal_lists (Receipt_ids.to_list left) (Receipt_ids.to_list right)
-  | Direct_request _, (Async_request _ | Queue_receipts _)
-  | Async_request _, (Direct_request _ | Queue_receipts _)
-  | Queue_receipts _, (Direct_request _ | Async_request _) -> false
+  | Operation _, (Direct_request _ | Async_request _ | Queue_receipts _)
+  | Direct_request _, (Operation _ | Async_request _ | Queue_receipts _)
+  | Async_request _, (Operation _ | Direct_request _ | Queue_receipts _)
+  | Queue_receipts _, (Operation _ | Direct_request _ | Async_request _) -> false
 ;;
 
 let delivery_key_file_stem key =
@@ -236,6 +254,7 @@ let delivery_key_file_stem key =
     |> Digestif.SHA256.to_hex
   in
   match key with
+  | Operation _ -> "operation-" ^ digest
   | Direct_request _ -> "direct-" ^ digest
   | Async_request _ -> "async-" ^ digest
   | Queue_receipts _ -> "queue-" ^ digest

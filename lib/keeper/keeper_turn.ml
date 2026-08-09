@@ -1088,6 +1088,29 @@ let handle_keeper_msg
     ctx
 ;;
 
+let handle_keeper_msg_admitted
+      ~admission_token:_
+      ?on_text_delta
+      ?on_event
+      ?event_bus
+      ?continuation_channel
+      ctx
+      direct_message
+  =
+  let request =
+    Keeper_invocation_contract.direct_message_request direct_message
+  in
+  run_keeper_invocation_turn_admitted
+    ?on_text_delta
+    ?on_event
+    ?event_bus
+    ?continuation_channel
+    ~surface:Direct_message
+    ~request
+    ~direct_message
+    ctx
+;;
+
 let handle_keeper_delegate ?event_bus ctx request =
   handle_keeper_invocation
     ?event_bus

@@ -26,6 +26,7 @@ exception Install_failed of install_error
 
 val install_from_store
   :  sw:Eio.Switch.t
+  -> operation_executor:Keeper_owner.operation_executor option
   -> Workspace.config
   -> (int, install_error) result
 (** Load each valid persisted Keeper independently and start exactly one owner
@@ -40,6 +41,12 @@ val get
   :  base_path:string
   -> keeper_name:string
   -> (Keeper_owner.t, lookup_error) result
+
+val operation_projection
+  :  base_path:string
+  -> keeper_name:string
+  -> (Keeper_owner.operation_projection, lookup_error) result
+(** Lock-free immutable operation inventory for routine read models. *)
 
 val apply_meta
   :  ?lifecycle_token:Keeper_lifecycle_reservation.token
@@ -112,6 +119,12 @@ val all_projections
   :  base_path:string
   -> (Keeper_owner_reducer.projection list, lookup_error) result
 (** Lock-free fleet projection. *)
+
+val begin_stopping_all
+  :  base_path:string
+  -> ((unit, Keeper_owner.error) result list, lookup_error) result
+(** Fence the BasePath inventory, concurrently stop every Owner, and return
+    after each active child has joined its terminal persistence attempt. *)
 
 val install_error_to_string : install_error -> string
 val lookup_error_to_string : lookup_error -> string

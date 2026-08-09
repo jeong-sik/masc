@@ -27,6 +27,7 @@ type pool =
   ; owners_mu : Eio.Mutex.t
   ; owner_handles : Keeper_owner.t list Atomic.t
   ; stopping : bool Atomic.t
+  ; operation_executor : Keeper_owner.operation_executor option
   }
 
 let pools : (string, pool) Hashtbl.t = Hashtbl.create 4
@@ -163,7 +164,7 @@ let start_owner pool ~keeper_name ~initial_meta =
       ~store:(store_for pool keeper_name)
       ~operation_store_path
       ~now:Unix.gettimeofday
-      ~operation_executor:None
+      ~operation_executor:pool.operation_executor
       ~keeper_name
       ~initial_meta
 ;;
@@ -239,7 +240,7 @@ let ensure_empty_in_pool pool keeper_name =
               Ok owner)))
 ;;
 
-let install_from_store ~sw config =
+let install_from_store ~sw ~operation_executor config =
   let base_path = pool_key config.Workspace.base_path in
   match load_all config with
   | Error _ as error -> error
@@ -252,6 +253,7 @@ let install_from_store ~sw config =
       ; owners_mu = Eio.Mutex.create ()
       ; owner_handles = Atomic.make []
       ; stopping = Atomic.make false
+      ; operation_executor
       }
     in
     let installed =
@@ -321,6 +323,12 @@ let get ~base_path ~keeper_name =
         (match Hashtbl.find_opt pool.unavailable keeper_name with
          | Some _ -> Error (Owner_unavailable keeper_name)
          | None -> Error (Owner_not_found keeper_name)))
+;;
+
+let operation_projection ~base_path ~keeper_name =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error error
+  | Ok owner -> Ok (Keeper_owner.operation_projection owner)
 ;;
 
 let refresh_registry_projection ?lifecycle_token entry meta =
@@ -452,6 +460,23 @@ let all_projections ~base_path =
   | Error _ as error -> error
   | Ok pool ->
     Ok (List.map Keeper_owner.projection (Atomic.get pool.owner_handles))
+;;
+
+let begin_stopping_all ~base_path =
+  let base_path = pool_key base_path in
+  match
+    Stdlib.Mutex.protect pools_mu (fun () -> Hashtbl.find_opt pools base_path)
+  with
+  | None -> Error (Inventory_not_installed base_path)
+  | Some pool ->
+    Atomic.set pool.stopping true;
+    let owners = Atomic.get pool.owner_handles in
+    let results =
+      Eio.Fiber.List.map
+        (fun owner -> Keeper_owner.begin_stopping owner)
+        owners
+    in
+    Ok results
 ;;
 
 module For_testing = struct

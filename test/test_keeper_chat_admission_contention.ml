@@ -309,6 +309,13 @@ let test_queued_server_turn_has_no_second_durable_request () =
          let payload :
              Server_routes_http_keeper_stream.keeper_chat_stream_request =
            { name = keeper_name
+           ; request_id =
+               (match
+                  Keeper_owner.Chat_operation.Operation_id.of_string
+                    "kmsg-admission-test"
+                with
+                | Ok operation_id -> operation_id
+                | Error detail -> failwith detail)
            ; message = "queued inline boundary"
            ; user_blocks = []
            ; turn_instructions = None

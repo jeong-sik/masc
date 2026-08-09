@@ -13,7 +13,7 @@
 (** {1 Connector delivery} *)
 
 type connector_delivery =
-  { source : Keeper_chat_queue.message_source
+  { continuation_channel : Keeper_continuation_channel.t
   ; surface : Surface_ref.t
   ; conversation_id : string option
   ; external_message_id : string option

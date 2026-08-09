@@ -145,6 +145,19 @@ val handle_keeper_msg :
     body; the queue consumer uses it as the exact Pending-to-Inflight claim
     boundary. *)
 
+val handle_keeper_msg_admitted :
+  admission_token:Keeper_turn_admission.token ->
+  ?on_text_delta:(string -> unit) ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?event_bus:Agent_sdk.Event_bus.t ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  _ Keeper_types_profile.context ->
+  Keeper_invocation_contract.direct_message ->
+  tool_result
+(** Execute a direct message under an already-held chat admission token. Only
+    the Owner operation child uses this path, after atomically claiming the
+    latest durable operation body. *)
+
 val handle_keeper_delegate :
   ?event_bus:Agent_core.Event_bus.t ->
   _ Keeper_types_profile.context ->

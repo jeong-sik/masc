@@ -20,7 +20,7 @@ let with_owner_inventory config f =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
-  (match Masc.Keeper_owner_registry.install_from_store ~sw config with
+  (match Masc.Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
    | Ok _ -> ()
    | Error error ->
      Alcotest.fail (Masc.Keeper_owner_registry.install_error_to_string error));
@@ -1090,60 +1090,65 @@ let test_status_reads_live_registry_each_call () =
         (Some "second live error")
         (json_string_field "sandbox_last_error" (status ())))
 
-let test_status_surfaces_chat_queue_runtime () =
+let test_status_surfaces_chat_operation_runtime () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
-  let name = "chatqueue-status" in
+  let name = "chat-operation-status" in
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
-    ~instructions:"chat queue status";
+    ~instructions:"chat operation status";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Eio_main.run @@ fun _env ->
-  (* Mirror production: the status handler runs under [Eio_main.run] with the
-     guard enabled (bin/main_eio.ml), so the durable queue snapshot is read.
-     Disable on exit so other (non-Eio) cases keep reporting [`Null]. *)
   Eio_guard.enable ();
-  Masc.Keeper_chat_queue.For_testing.reset ();
   Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_chat_queue.For_testing.reset ();
-      Eio_guard.disable ())
+    ~finally:Eio_guard.disable
     (fun () ->
-      let report =
-        Masc.Keeper_chat_queue.configure_persistence ~base_path:config.base_path
-      in
-      Alcotest.(check int)
-        "queue persistence config has no load errors"
-        0
-        (List.length report.load_errors);
+      Eio.Switch.run @@ fun sw ->
       (match
-         Masc.Keeper_chat_queue.enqueue
-           ~keeper_name:name
-           {
-             Masc.Keeper_chat_queue.content = "queued status probe";
-             user_blocks = [];
-             attachments = [];
-             timestamp = 1.0;
-             source =
-               Masc.Keeper_chat_queue.Dashboard
-                 { thread_id = "keeper:meta-overlay" };
-             user_row_origin = Masc.Keeper_chat_store.Needs_append;
-           }
+         Masc.Keeper_owner_registry.install_from_store
+           ~sw
+           ~operation_executor:None
+           config
        with
-       | Ok _receipt -> ()
-       | Error err ->
-           Alcotest.failf "queue enqueue failed: %s"
-             (Masc.Keeper_chat_queue.mutation_error_to_string err));
+       | Ok 1 -> ()
+       | Ok count -> Alcotest.failf "expected one owner, got %d" count
+       | Error error ->
+         Alcotest.fail
+           (Masc.Keeper_owner_registry.install_error_to_string error));
+      let operation_id =
+        match
+          Masc.Keeper_owner.Chat_operation.Operation_id.of_string
+            "kmsg-status-probe"
+        with
+        | Ok operation_id -> operation_id
+        | Error detail -> Alcotest.fail detail
+      in
+      (match
+         Masc.Keeper_owner_registry.submit_operation
+           ~base_path:config.base_path
+           ~keeper_name:name
+           ~operation_id
+           ~source:(`Assoc [ "kind", `String "dashboard" ])
+           ~input:(`Assoc [ "message", `String "queued status probe" ])
+       with
+       | Ok acceptance ->
+         Alcotest.(check string)
+           "operation remains queued without an executor"
+           "queued"
+           (Masc.Keeper_owner.Chat_operation.state_to_string
+              acceptance.operation.state)
+       | Error error ->
+         Alcotest.fail
+           (Masc.Keeper_owner_registry.command_error_to_string error));
       let status_json = status_json_with ~name config in
-      let chat_queue = json_assoc_field "chat_queue" status_json in
+      let chat_operations = json_assoc_field "chat_operations" status_json in
       Alcotest.(check (option int))
-        "status exposes pending chat queue depth"
+        "status exposes queued operation depth"
         (Some 1)
-        (json_int_field "pending_messages" chat_queue);
+        (json_int_field "queued_count" chat_operations);
       Alcotest.(check (option bool))
-        "status exposes durable chat queue replay flag"
+        "status exposes owner projection availability"
         (Some true)
-        (json_bool_field "durable_replay_enabled" chat_queue))
-
+        (json_bool_field "snapshot_available" chat_operations))
 let test_keeper_list_row_surfaces_effective_meta_errors () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "badprofile" in
@@ -1244,8 +1249,8 @@ let () =
             `Quick test_status_tracks_persisted_meta_without_updated_at;
           Alcotest.test_case "status reads live registry each call" `Quick
             test_status_reads_live_registry_each_call;
-          Alcotest.test_case "status surfaces chat queue runtime" `Quick
-            test_status_surfaces_chat_queue_runtime;
+          Alcotest.test_case "status surfaces chat operation runtime" `Quick
+            test_status_surfaces_chat_operation_runtime;
           Alcotest.test_case "keeper list surfaces effective meta errors"
             `Quick test_keeper_list_row_surfaces_effective_meta_errors;
           Alcotest.test_case

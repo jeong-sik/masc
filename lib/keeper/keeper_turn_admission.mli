@@ -197,6 +197,15 @@ val run_serialized
     only by the caller's turn budget — do not call this from within an
     admitted turn of the same keeper. *)
 
+val run_serialized_with_token
+  :  base_path:string
+  -> keeper_name:string
+  -> (token -> 'a)
+  -> [ `Ran of 'a | `Rejected of rejection ]
+(** Token-bearing form used by the Keeper Owner operation child. The callback
+    runs at the same FIFO admission boundary as [run_serialized]; claiming the
+    durable operation and reading its latest input must happen inside it. *)
+
 val run_chat_if_free
   :  base_path:string
   -> keeper_name:string

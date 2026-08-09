@@ -320,7 +320,7 @@ let run_if_free ~base_path ~keeper_name f =
     (fun _token -> f ())
 ;;
 
-let run_serialized ~base_path ~keeper_name f =
+let run_serialized_with_token ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
   let waiter_id =
     Stdlib.Mutex.protect slot.state_mu (fun () ->
@@ -352,10 +352,14 @@ let run_serialized ~base_path ~keeper_name f =
                (fun (entry_waiter_id, _since) -> entry_waiter_id <> waiter_id)
                slot.waiting_entries))
       (fun () -> Eio.Mutex.lock slot.turn_mu);
-    (match run_locked slot ~lane:Chat f with
+    (match run_locked_with_token slot ~lane:Chat f with
      | `Ran value -> `Ran value
      | `Shutdown_requested operation_id ->
        `Rejected (shutdown_rejection_snapshot slot operation_id))
+;;
+
+let run_serialized ~base_path ~keeper_name f =
+  run_serialized_with_token ~base_path ~keeper_name (fun _token -> f ())
 ;;
 
 let run_chat_if_free ~base_path ~keeper_name f =

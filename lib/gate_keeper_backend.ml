@@ -2,7 +2,7 @@
     See [gate_keeper_backend.mli] for the full contract. *)
 
 type connector_delivery =
-  { source : Keeper_chat_queue.message_source
+  { continuation_channel : Keeper_continuation_channel.t
   ; surface : Surface_ref.t
   ; conversation_id : string option
   ; external_message_id : string option
@@ -154,82 +154,6 @@ let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
     status
     request.request_id
     in_flight_text
-
-(* ACK text for the RFC-connector-deferred-reply-via-chat-queue chat-queue deferral path. The
-   message was durably enqueued onto [Keeper_chat_queue], so its receipt id is
-   the correlation handle instead of a [Keeper_msg_async] poll request id. The
-   reply is delivered later by the serial consumer through the connector's
-   outbound adapter. *)
-let busy_ack_reply_text_queued
-    ~(admission_rejection : Keeper_turn_admission.rejection)
-    ~keeper_name ~receipt_id ~recovery_required_count =
-  let in_flight_text =
-    match admission_rejection.in_flight with
-    | None -> ""
-    | Some { Keeper_turn_admission.lane; started_at = _ } ->
-        Printf.sprintf
-          " (현재 턴: %s)"
-          (Keeper_turn_admission.lane_to_string lane)
-  in
-  match admission_rejection.shutdown_operation_id, recovery_required_count with
-  | Some operation_id, 0 ->
-      Printf.sprintf
-        "⏳ [%s] 님이 종료 절차 진행 중입니다 (%s). 메시지는 안전하게 대기 \
-         중입니다 (receipt_id=%s).%s"
-        keeper_name
-        (Keeper_shutdown_types.Operation_id.to_string operation_id)
-        receipt_id in_flight_text
-  | Some operation_id, recovery_required_count ->
-      Printf.sprintf
-        "⏳ [%s] 님이 종료 절차 진행 중입니다 (%s). 대기 메시지 %d건이 \
-         존재합니다 (receipt_id=%s).%s"
-        keeper_name
-        (Keeper_shutdown_types.Operation_id.to_string operation_id)
-        recovery_required_count receipt_id in_flight_text
-  | None, 0 ->
-      Printf.sprintf
-        "⏳ [%s] 님이 현재 답변을 작성 중입니다. 턴이 마무리되면 \
-         답변드리겠습니다 (receipt_id=%s).%s"
-        keeper_name receipt_id in_flight_text
-  | None, recovery_required_count ->
-      Printf.sprintf
-        "⏳ [%s] 님이 메시지를 접수했습니다. 복구 대기 턴 %d건 처리 후 \
-         응대됩니다 (receipt_id=%s).%s"
-        keeper_name recovery_required_count receipt_id in_flight_text
-
-let chat_queue_message_request ~channel ~channel_user_id ~keeper_name
-    ~(admission_rejection : Keeper_turn_admission.rejection) ~metadata
-    (receipt : Keeper_chat_queue.enqueue_receipt) =
-  let receipt_id =
-    Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id
-  in
-  let shutdown_metadata =
-    match admission_rejection.shutdown_operation_id with
-    | None -> []
-    | Some operation_id ->
-        [ ( "shutdown_operation_id"
-          , Keeper_shutdown_types.Operation_id.to_string operation_id ) ]
-  in
-  { Gate_protocol.request_id = receipt_id
-  ; destination_type = "keeper"
-  ; destination_id = keeper_name
-  ; channel
-  ; actor_id = non_empty_opt channel_user_id
-  ; status = Gate_protocol.Queued
-  ; modalities = [ "text" ]
-  ; transport = non_empty_opt channel
-  ; metadata =
-      [ "status_source", "keeper_chat_queue"
-      ; "receipt_id", receipt_id
-      ; "queue_revision", Int64.to_string receipt.revision
-      ; "pending_count", string_of_int receipt.pending_count
-      ; "inflight_count", string_of_int receipt.inflight_count
-      ; ( "recovery_required_count"
-        , string_of_int receipt.recovery_required_count )
-      ]
-      @ shutdown_metadata
-      @ metadata
-  }
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
@@ -421,71 +345,21 @@ let reconcile_gate_workspace_id ~channel_workspace_id ~workspace_id =
          typed)
 ;;
 
-let delivery_key_of_receipt receipt_id =
-  match Keeper_chat_delivery_identity.Receipt_ids.of_list [ receipt_id ] with
-  | Ok receipt_ids ->
-    Ok (Keeper_chat_delivery_identity.Queue_receipts receipt_ids)
-  | Error error ->
-    Error (Keeper_chat_delivery_identity.Receipt_ids.error_to_string error)
-
-let rejection_snapshot ~base_path ~keeper_name =
-  let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
-  { Keeper_turn_admission.waiting = snapshot.snapshot_waiting
-  ; in_flight = snapshot.snapshot_in_flight
-  ; shutdown_operation_id = snapshot.snapshot_shutdown_operation_id
-  }
-
-let terminal_request_status = function
-  | Keeper_chat_queue.Delivered _ -> Gate_protocol.Done
-  | Keeper_chat_queue.Failed { kind = Keeper_chat_queue.Cancelled; _ } ->
-    Gate_protocol.Cancelled
-  | Keeper_chat_queue.Failed _ -> Gate_protocol.Failed
-  | Keeper_chat_queue.Pending -> Gate_protocol.Queued
-  | Keeper_chat_queue.Inflight _ -> Gate_protocol.Running
-  | Keeper_chat_queue.Recovery_required _ ->
-    Gate_protocol.Acceptance_uncertain
-
 let extra_mentions_for_metadata ~keeper_name metadata =
   match metadata_value "mentions_bound_keeper" metadata with
   | Some "true" ->
     Option.to_list (Keeper_identity.Keeper_id.of_string keeper_name)
   | Some _ | None -> []
 
-let terminal_connector_reply ~redact_text ~channel ~channel_user_id
-    ~keeper_name ~metadata ~receipt_id ~revision state =
-  let request_id = Keeper_chat_queue.Receipt_id.to_string receipt_id in
-  let status = terminal_request_status state in
-  let status_text = Gate_protocol.message_request_status_to_string status in
-  let message_request : Gate_protocol.message_request =
-    { request_id
-    ; destination_type = "keeper"
-    ; destination_id = keeper_name
-    ; channel
-    ; actor_id = non_empty_opt channel_user_id
-    ; status
-    ; modalities = [ "text" ]
-    ; transport = non_empty_opt channel
-    ; metadata =
-        [ "status_source", "keeper_chat_queue"
-        ; "receipt_id", request_id
-        ; "queue_revision", Int64.to_string revision
-        ; "source_event_replayed", "true"
-        ]
-        @ metadata
-    }
-  in
-  Gate_protocol.Reply
-    { content =
-        redact_text
-          (Printf.sprintf
-             "%s already settled this exact source event (receipt_id=%s, status=%s)."
-             keeper_name request_id status_text)
-    ; structured = None
-    ; stats = None
-    ; message_request = Some message_request
-    }
+let operation_request_status = function
+  | Keeper_chat_operation.Queued -> Gate_protocol.Queued
+  | Running _ -> Gate_protocol.Running
+  | Succeeded _ -> Gate_protocol.Done
+  | Failed _ -> Gate_protocol.Failed
+  | Cancelled _ -> Gate_protocol.Cancelled
+;;
 
-let accept_connector ~delivery ~clock ~config ~channel ~channel_user_id
+let accept_connector ~delivery ~clock:_ ~config ~channel ~channel_user_id
     ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
     ~metadata ~content =
   let keeper_name = String.trim keeper_name in
@@ -522,101 +396,94 @@ let accept_connector ~delivery ~clock ~config ~channel ~channel_user_id
   match metadata with
   | Error detail -> Gate_protocol.Keeper_error_result (redact_text detail)
   | Ok metadata ->
-    let surface = delivery.surface in
-    let extra_mentions = extra_mentions_for_metadata ~keeper_name metadata in
     (match
-       Keeper_chat_delivery_identity.Request_id.of_string idempotency_key
+       Keeper_chat_operation.Operation_id.of_string idempotency_key
      with
      | Error detail ->
        Gate_protocol.Keeper_error_result (redact_text detail)
-     | Ok request_id ->
-       let receipt_id = Keeper_chat_queue.Receipt_id.of_request_id request_id in
-       (match delivery_key_of_receipt receipt_id with
-        | Error detail ->
-          Gate_protocol.Keeper_error_result (redact_text detail)
-        | Ok delivery_key ->
-          let opt value =
-            match String.trim value with
-            | "" -> None
-            | value -> Some value
+     | Ok operation_id ->
+       let extra_mentions = extra_mentions_for_metadata ~keeper_name metadata in
+       let submitted_by =
+         agent_name_for_channel_actor
+           ~channel
+           ~channel_workspace_id
+           ~channel_user_id
+       in
+       let source =
+         Keeper_chat_operation_payload.source_to_json
+           ~submitted_by
+           ~thread_id:("keeper:" ^ keeper_name)
+           ~continuation_channel:delivery.continuation_channel
+           ~surface:delivery.surface
+           ~channel
+           ~channel_user_id
+           ~channel_user_name
+           ~channel_workspace_id
+           ~conversation_id:delivery.conversation_id
+           ~external_message_id:delivery.external_message_id
+           ~workspace_id:delivery.workspace_id
+           ~extra_mentions
+           ~user_row_origin:Keeper_chat_store.Needs_append
+       in
+       (match source with
+        | Error detail -> Gate_protocol.Keeper_error_result (redact_text detail)
+        | Ok source ->
+          let input =
+            Keeper_chat_operation_payload.input_to_json
+              ~message:(String.trim content)
+              ~user_blocks:[]
+              ~turn_instructions:None
+              ~surface_context:None
+              ~attachments:[]
           in
           (match
-             Keeper_chat_store.append_user_message_once
-               ~base_dir:config.Workspace.base_path ~keeper_name ~delivery_key
-               ~content:(String.trim content) ~surface ?conversation_id
-               ?external_message_id ?workspace_id
-               ~speaker:
-                 { Keeper_chat_store.speaker_id = opt channel_user_id
-                 ; speaker_name = opt channel_user_name
-                 ; speaker_authority = Keeper_chat_store.External
-                 }
-               ~extra_mentions ()
+             Keeper_owner_registry.submit_operation
+               ~base_path:config.Workspace.base_path
+               ~keeper_name
+               ~operation_id
+               ~source
+               ~input
            with
-           | Error detail ->
-             Gate_protocol.Keeper_error_result (redact_text detail)
-           | Ok append_result ->
-             let row_id, appended =
-               match append_result with
-               | Keeper_chat_store.Appended { row_id } -> row_id, true
-               | Already_present { row_id } -> row_id, false
+           | Error (Keeper_owner_registry.Command_lookup_failed _) ->
+             Gate_protocol.Unavailable_result
+           | Error error ->
+             Gate_protocol.Keeper_error_result
+               (redact_text (Keeper_owner_registry.command_error_to_string error))
+           | Ok acceptance ->
+             let operation = acceptance.Keeper_owner.operation in
+             let operation_id =
+               Keeper_chat_operation.Operation_id.to_string operation.operation_id
              in
-             if appended then
-               Keeper_chat_broadcast.chat_appended
-                 ~keeper_name ~source:(String.trim channel) ();
-             (match
-                Keeper_chat_queue.enqueue_with_receipt ~keeper_name ~receipt_id
-                  { Keeper_chat_queue.content = String.trim content
-                  ; user_blocks = []
-                  ; attachments = []
-                  ; timestamp = Eio.Time.now clock
-                  ; source = delivery.source
-                  ; user_row_origin =
-                      Keeper_chat_store.Already_persisted { row_id }
-                  }
-              with
-              | Ok receipt ->
-                let admission_rejection =
-                  rejection_snapshot
-                    ~base_path:config.Workspace.base_path
-                    ~keeper_name
-                in
-                let message_request =
-                  chat_queue_message_request ~channel ~channel_user_id
-                    ~keeper_name ~admission_rejection ~metadata receipt
-                in
-                Gate_protocol.Reply
-                  { content =
-                      redact_text
-                        (busy_ack_reply_text_queued ~admission_rejection
-                           ~keeper_name ~receipt_id:message_request.request_id
-                           ~recovery_required_count:
-                             receipt.recovery_required_count)
-                  ; structured = None
-                  ; stats = None
-                  ; message_request = Some message_request
-                  }
-              | Error
-                  (Keeper_chat_queue.Receipt_already_terminal
-                     { receipt_id; state }) ->
-                (match
-                   Keeper_chat_queue.lookup_receipt ~keeper_name ~receipt_id
-                 with
-                 | Ok { revision; receipt = Some _ } ->
-                   terminal_connector_reply ~redact_text ~channel
-                     ~channel_user_id ~keeper_name ~metadata ~receipt_id
-                     ~revision state
-                 | Ok { receipt = None; _ } ->
-                   Gate_protocol.Keeper_error_result
-                     (redact_text
-                        "terminal connector receipt disappeared during lookup")
-                 | Error error ->
-                   Gate_protocol.Keeper_error_result
-                     (redact_text
-                        (Keeper_chat_queue.mutation_error_to_string error)))
-              | Error error ->
-                Gate_protocol.Keeper_error_result
-                  (redact_text
-                     (Keeper_chat_queue.mutation_error_to_string error))))))
+             let status = operation_request_status operation.state in
+             let message_request : Gate_protocol.message_request =
+               { request_id = operation_id
+               ; destination_type = "keeper"
+               ; destination_id = keeper_name
+               ; channel
+               ; actor_id = non_empty_opt channel_user_id
+               ; status
+               ; modalities = [ "text" ]
+               ; transport = non_empty_opt channel
+               ; metadata =
+                   [ "status_source", "keeper_chat_operation"
+                   ; "operation_id", operation_id
+                   ; "queued_count", string_of_int acceptance.queued_count
+                   ]
+                   @ metadata
+               }
+             in
+             Gate_protocol.Reply
+               { content =
+                   redact_text
+                     (Printf.sprintf
+                        "%s accepted operation %s (%s)"
+                        keeper_name
+                        operation_id
+                        (Keeper_chat_operation.state_to_string operation.state))
+               ; structured = None
+               ; stats = None
+               ; message_request = Some message_request
+               })))
 
 let persist_connector_assistant_reply ~base_dir ~keeper_name ~surface
     ?conversation_id ?turn_ref ?blocks ~reply () =

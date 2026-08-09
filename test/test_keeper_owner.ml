@@ -85,6 +85,77 @@ let operation_id value =
 let operation_source = `Assoc [ "kind", `String "dashboard" ]
 let operation_input text = `Assoc [ "message", `String text ]
 
+let test_operation_payload_preserves_connector_route () =
+  let continuation =
+    match
+      Keeper_continuation_channel.discord
+        ~guild_id:(Some "guild-1")
+        ~channel_id:"thread-7"
+        ~parent_channel_id:(Some "channel-3")
+        ~thread_id:(Some "thread-7")
+        ~user_id:"user-9"
+    with
+    | Ok continuation -> continuation
+    | Error detail -> fail detail
+  in
+  let surface =
+    Surface_ref.Discord
+      { guild_id = Some "guild-1"
+      ; channel_id = "thread-7"
+      ; parent_channel_id = Some "channel-3"
+      ; thread_id = Some "thread-7"
+      }
+  in
+  let encoded =
+    match
+      Keeper_chat_operation_payload.source_to_json
+        ~submitted_by:"gate:discord:guild-1:user-9"
+        ~thread_id:"keeper:route"
+        ~continuation_channel:continuation
+        ~surface
+        ~channel:"discord"
+        ~channel_user_id:"user-9"
+        ~channel_user_name:"User"
+        ~channel_workspace_id:"guild-1"
+        ~conversation_id:(Some "discord:guild-1:channel:thread-7")
+        ~external_message_id:(Some "message-1")
+        ~workspace_id:(Some "guild-1")
+        ~extra_mentions:[]
+        ~user_row_origin:Keeper_chat_store.Needs_append
+    with
+    | Ok encoded -> encoded
+    | Error detail -> fail detail
+  in
+  let decoded =
+    match Keeper_chat_operation_payload.source_of_json encoded with
+    | Ok decoded -> decoded
+    | Error detail -> fail detail
+  in
+  check bool "surface round-trips exactly" true (Surface_ref.equal surface decoded.surface);
+  check string "speaker round-trips" "user-9" decoded.channel_user_id;
+  let mismatched =
+    match encoded with
+    | `Assoc fields ->
+      `Assoc
+        (("channel_workspace_id", `String "wrong-guild")
+         :: List.remove_assoc "channel_workspace_id" fields)
+    | _ -> fail "source encoder returned a non-object"
+  in
+  check bool
+    "mismatched route is rejected"
+    true
+    (Result.is_error (Keeper_chat_operation_payload.source_of_json mismatched));
+  let unknown =
+    match encoded with
+    | `Assoc fields -> `Assoc (("legacy_receipt_id", `String "chatq-old") :: fields)
+    | _ -> fail "source encoder returned a non-object"
+  in
+  check bool
+    "unknown legacy field is rejected"
+    true
+    (Result.is_error (Keeper_chat_operation_payload.source_of_json unknown))
+;;
+
 let rec await_terminal owner operation_id remaining =
   if remaining = 0
   then fail "operation did not become terminal"
@@ -591,6 +662,53 @@ let test_stopping_rejects_new_commands () =
   | Ok _ -> fail "stopping owner accepted a chat operation"
 ;;
 
+let test_stopping_cancels_and_joins_active_child () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let child_started, resolve_child_started = Eio.Promise.create () in
+  let child_released, resolve_child_released = Eio.Promise.create () in
+  let never, _resolve_never = Eio.Promise.create () in
+  let operation_executor ~sw:child_sw ~keeper_name:_ ~claim =
+    match claim () with
+    | Error error -> fail (Owner.error_to_string error)
+    | Ok None -> fail "active-child test did not claim its operation"
+    | Ok (Some _) ->
+      Eio.Switch.on_release child_sw (fun () ->
+        Eio.Promise.resolve resolve_child_released ());
+      Eio.Promise.resolve resolve_child_started ();
+      Eio.Promise.await never;
+      fail "stopped child resumed after its cancellation point"
+  in
+  let owner =
+    owner_ok
+      (start_owner_with_executor
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_executor:(Some operation_executor)
+         ~keeper_name:"stopping-active-child"
+         ~initial_meta:(Some (make_meta "stopping-active-child")))
+  in
+  let operation_id = operation_id "kmsg-stopping-active-child" in
+  ignore
+    (owner_ok
+       (Owner.submit_operation
+          owner
+          ~operation_id
+          ~source:operation_source
+          ~input:(operation_input "cancel me")));
+  Eio.Promise.await child_started;
+  ignore (owner_ok (Owner.begin_stopping owner));
+  Eio.Promise.await child_released;
+  let operation = Option.get (owner_ok (Owner.exact_operation owner operation_id)) in
+  match operation.state with
+  | Chat_operation.Failed { failure = { kind; _ }; _ } ->
+    check string "stopped active child is terminal" "Turn_cancelled" kind
+  | state ->
+    fail
+      ("stopping returned before terminal persistence: "
+       ^ Chat_operation.state_to_string state)
+;;
+
 let test_operation_lifecycle_is_durable_and_projected () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -974,7 +1092,7 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        (match Keeper_meta_store.replace_snapshot config first with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed owner meta: " ^ detail));
-       (match Owner_registry.install_from_store ~sw config with
+       (match Owner_registry.install_from_store ~sw ~operation_executor:None config with
         | Ok count -> check int "strict startup owner count" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let loaded =
@@ -1029,6 +1147,91 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        | Error error -> fail (Owner_registry.lookup_error_to_string error)))
 ;;
 
+let test_connector_submit_uses_owner_operation_idempotency () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let clock = Eio.Stdenv.clock env in
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "connector-owner-test"));
+       let meta = make_meta "connector-owner" in
+       (match Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       (match Owner_registry.install_from_store ~sw ~operation_executor:None config with
+        | Ok 1 -> ()
+        | Ok count -> failf "unexpected owner count %d" count
+        | Error error -> fail (Owner_registry.install_error_to_string error));
+       let continuation =
+         match
+           Keeper_continuation_channel.discord
+             ~guild_id:(Some "guild-1")
+             ~channel_id:"channel-1"
+             ~parent_channel_id:None
+             ~thread_id:None
+             ~user_id:"user-1"
+         with
+         | Ok continuation -> continuation
+         | Error detail -> fail detail
+       in
+       let delivery : Gate_keeper_backend.connector_delivery =
+         { continuation_channel = continuation
+         ; surface =
+             Surface_ref.Discord
+               { guild_id = Some "guild-1"
+               ; channel_id = "channel-1"
+               ; parent_channel_id = None
+               ; thread_id = None
+               }
+         ; conversation_id = Some "discord:guild-1:channel:channel-1"
+         ; external_message_id = Some "message-1"
+         ; workspace_id = Some "guild-1"
+         }
+       in
+       let submit content =
+         Gate_keeper_backend.accept_connector
+           ~delivery
+           ~clock
+           ~config
+           ~channel:"discord"
+           ~channel_user_id:"user-1"
+           ~channel_user_name:"User One"
+           ~channel_workspace_id:"guild-1"
+           ~keeper_name:meta.name
+           ~idempotency_key:"discord-msg-message-1"
+           ~metadata:[]
+           ~content
+       in
+       let accepted_request_id = function
+         | Gate_protocol.Reply { message_request = Some request; _ } -> request.request_id
+         | Gate_protocol.Reply { message_request = None; _ } -> fail "missing operation ACK"
+         | Keeper_error_result detail -> fail detail
+         | Unavailable_result -> fail "owner unexpectedly unavailable"
+       in
+       check string
+         "connector request id is operation id"
+         "discord-msg-message-1"
+         (accepted_request_id (submit "hello"));
+       check string
+         "same connector retry deduplicates"
+         "discord-msg-message-1"
+         (accepted_request_id (submit "hello"));
+       (match submit "different" with
+        | Gate_protocol.Keeper_error_result _ -> ()
+        | Reply _ | Unavailable_result -> fail "different payload reused operation id");
+       let id = operation_id "discord-msg-message-1" in
+       match Owner_registry.exact_operation ~base_path ~keeper_name:meta.name id with
+       | Ok (Some operation) ->
+         check bool "connector operation remains queued" true
+           (match operation.state with Chat_operation.Queued -> true | _ -> false)
+       | Ok None -> fail "connector operation disappeared"
+       | Error error -> fail (Owner_registry.command_error_to_string error))
+;;
+
 let test_root_inventory_isolates_invalid_owner_snapshots () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1059,7 +1262,7 @@ let test_root_inventory_isolates_invalid_owner_snapshots () =
        Yojson.Safe.to_file
          (Filename.concat keepers_dir "inventory-path-name.json")
          (Keeper_meta_json.meta_to_json (make_meta "inventory-payload-name"));
-       (match Owner_registry.install_from_store ~sw config with
+       (match Owner_registry.install_from_store ~sw ~operation_executor:None config with
         | Ok count -> check int "only valid owner starts" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        (match Owner_registry.get ~base_path ~keeper_name:valid.name with
@@ -1112,7 +1315,9 @@ let test_registry_reads_owner_atomic_projection () =
        ignore (Workspace.init config ~agent_name:(Some "owner-projection-test"));
        let initial = make_meta "atomic-projection" in
        Keeper_meta_store.replace_snapshot config initial |> Result.get_ok;
-       Owner_registry.install_from_store ~sw config |> Result.get_ok |> ignore;
+       Owner_registry.install_from_store ~sw ~operation_executor:None config
+       |> Result.get_ok
+       |> ignore;
        let stale_entry =
          Keeper_registry.For_testing.register ~base_path initial.name initial
        in
@@ -1153,7 +1358,7 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
        (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed reserved owner meta: " ^ detail));
-       (match Owner_registry.install_from_store ~sw config with
+       (match Owner_registry.install_from_store ~sw ~operation_executor:None config with
         | Ok count -> check int "reserved owner count" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let token =
@@ -1205,7 +1410,7 @@ let test_create_waits_for_lifecycle_admission_before_installing_owner () =
        Eio.Switch.run @@ fun sw ->
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "owner-create-reservation-test"));
-       (match Owner_registry.install_from_store ~sw config with
+       (match Owner_registry.install_from_store ~sw ~operation_executor:None config with
         | Ok count -> check int "empty owner inventory" 0 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let meta = make_meta "create-reserved" in
@@ -1265,6 +1470,12 @@ let () =
               `Quick
               test_turn_delta_preserves_concurrent_compaction_observation
         ] )
+    ; ( "payload"
+      , [ test_case
+            "connector route is exact and strict"
+            `Quick
+            test_operation_payload_preserves_connector_route
+        ] )
     ; ( "actor"
       , [ test_case
             "concurrent commands are exact"
@@ -1299,6 +1510,10 @@ let () =
             `Quick
             test_stopping_rejects_new_commands
         ; test_case
+            "stopping cancels and joins active child"
+            `Quick
+            test_stopping_cancels_and_joins_active_child
+        ; test_case
             "operation lifecycle is durable and projected"
             `Quick
             test_operation_lifecycle_is_durable_and_projected
@@ -1326,6 +1541,10 @@ let () =
             "root inventory loads and extends exactly once"
             `Quick
             test_root_inventory_loads_and_extends_exactly_once
+        ; test_case
+            "connector submit is owner-idempotent"
+            `Quick
+            test_connector_submit_uses_owner_operation_idempotency
         ; test_case
             "root inventory isolates invalid owner snapshots"
             `Quick

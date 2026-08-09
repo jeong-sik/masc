@@ -195,7 +195,7 @@ let parse_edit body =
   match strict_object body with
   | Error _ as error -> error
   | Ok [ "input", input ] ->
-    (match Operation.canonical_json_string input with
+    (match Keeper_chat_operation_payload.input_of_json input with
      | Ok _ -> Ok input
      | Error detail -> Error (invalid_input ("input: " ^ detail)))
   | Ok _ -> Error (invalid_input "edit body must contain exactly the input field")

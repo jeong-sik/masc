@@ -869,6 +869,34 @@ let handle_keeper_msg_stream
     ignore err;
     run raw_name
 
+let handle_keeper_msg_stream_admitted
+      ~admission_token
+      ?on_text_delta
+      ?on_event
+      ?continuation_channel
+      ctx
+      message
+  =
+  let raw_name =
+    Keeper_invocation_contract.direct_message_target_name message
+  in
+  match
+    Keeper_invocation_contract.direct_message_with_keeper_name message raw_name
+  with
+  | Error error ->
+    tool_result_error (Keeper_invocation_contract.request_error_to_string error)
+  | Ok message ->
+    let event_bus = Event_bus_slots.get_keeper () in
+    Turn.handle_keeper_msg_admitted
+      ~admission_token
+      ?on_text_delta
+      ?on_event
+      ?event_bus
+      ?continuation_channel
+      ctx
+      message
+    |> complete_keeper_msg_stream_result
+
 let handle_keeper_msg_stream_if_free
       ?on_text_delta
       ?on_event

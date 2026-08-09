@@ -16,52 +16,30 @@ let fields_without_ts_unix json =
       List.remove_assoc "ts_unix" fields
   | _ -> Alcotest.fail "expected assoc payload"
 
-let test_text_delta_payload () =
+let test_operation_event_has_singular_identity () =
   let event =
-    Ag_ui.make_event ~timestamp:10.0 ~thread_id:"keeper-consumer:taskmaster"
-      ~run_id:(Some "run-1") ~message_id:(Some "message-1")
-      ~delta:(Some "안녕하세요") Ag_ui.Text_message_content
+    Ag_ui.make_event
+      ~timestamp:13.0
+      ~thread_id:"keeper:taskmaster"
+      ~delta:(Some "live")
+      Ag_ui.Text_message_content
   in
-  let json =
-    B.turn_event_to_json ~keeper_name:"taskmaster"
-      ~receipt_id:"chatq_00000000-0000-4000-8000-000000000001" ~event
+  let fields =
+    B.operation_event_to_json
+      ~keeper_name:"taskmaster"
+      ~operation_id:"kmsg-operation-1"
+      ~event
+    |> fields_without_ts_unix
   in
-  Alcotest.(check (list (pair string yojson_testable)))
-    "queued turn event payload"
-    [ ("type", `String "keeper_chat_turn_event")
-    ; ("name", `String "taskmaster")
-    ; ("receipt_id", `String "chatq_00000000-0000-4000-8000-000000000001")
-    ; ( "ag_ui_event"
-      , `Assoc
-          [ ("type", `String "TEXT_MESSAGE_CONTENT")
-          ; ("threadId", `String "keeper-consumer:taskmaster")
-          ; ("timestamp", `Float 10.0)
-          ; ("runId", `String "run-1")
-          ; ("messageId", `String "message-1")
-          ; ("delta", `String "안녕하세요")
-          ] )
-    ]
-    (fields_without_ts_unix json)
-
-let test_thinking_payload () =
-  let event =
-    Ag_ui.make_event ~timestamp:11.0 ~thread_id:"keeper-consumer:taskmaster"
-      ~run_id:(Some "run-1") ~custom_name:(Some "KEEPER_THINKING_DELTA")
-      ~custom_value:(Some (`Assoc [ "index", `Int 0; "delta", `String "검토 중" ]))
-      Ag_ui.Custom
-  in
-  let json =
-    B.turn_event_to_json ~keeper_name:"taskmaster"
-      ~receipt_id:"chatq_00000000-0000-4000-8000-000000000002" ~event
-  in
-  match List.assoc_opt "ag_ui_event" (fields_without_ts_unix json) with
-  | Some (`Assoc fields) ->
-      Alcotest.(check (option string)) "custom name"
-        (Some "KEEPER_THINKING_DELTA")
-        (match List.assoc_opt "name" fields with
-         | Some (`String value) -> Some value
-         | _ -> None)
-  | _ -> Alcotest.fail "missing AG-UI event"
+  Alcotest.(check (option yojson_testable))
+    "operation id"
+    (Some (`String "kmsg-operation-1"))
+    (List.assoc_opt "operation_id" fields);
+  Alcotest.(check (option yojson_testable))
+    "receipt identity absent"
+    None
+    (List.assoc_opt "receipt_id" fields)
+;;
 
 let project state event =
   P.project ~timestamp:12.0 ~redact_text:Fun.id ~redact_json:Fun.id state event
@@ -119,39 +97,14 @@ let test_projection_covers_thinking_and_tool_args () =
     (Some "TOOL_CALL_ARGS")
     (Yojson.Safe.Util.member "type" tool_args |> Yojson.Safe.Util.to_string_option)
 
-let test_projection_encodes_typed_terminal_event () =
-  let _, projected =
-    project P.initial
-      (E.Request_terminal
-         { request_id = Some "kmsg-request-1"
-         ; keeper_name = "taskmaster"
-         ; status = E.Error
-         ; message = Some "typed failure"
-         })
-  in
-  let projected = Ag_ui.event_to_json (projected_exn (P.initial, projected)) in
-  Alcotest.(check (option string)) "typed event name"
-    (Some "KEEPER_REQUEST_TERMINAL")
-    (Yojson.Safe.Util.member "name" projected |> Yojson.Safe.Util.to_string_option);
-  let value = Yojson.Safe.Util.member "value" projected in
-  Alcotest.(check (option string)) "typed terminal status"
-    (Some "error")
-    (Yojson.Safe.Util.member "status" value |> Yojson.Safe.Util.to_string_option);
-  Alcotest.(check bool) "typed terminal success" false
-    (Yojson.Safe.Util.member "ok" value |> Yojson.Safe.Util.to_bool)
-
 let () =
   Alcotest.run "keeper_chat_broadcast"
     [ ( "turn_event"
-      , [ Alcotest.test_case "text delta payload" `Quick
-            test_text_delta_payload
-        ; Alcotest.test_case "thinking payload" `Quick
-            test_thinking_payload
+      , [ Alcotest.test_case "operation event uses singular identity" `Quick
+            test_operation_event_has_singular_identity
         ; Alcotest.test_case "projection preserves stream identity" `Quick
             test_projection_preserves_stream_identity
         ; Alcotest.test_case "projection covers thinking and tool args" `Quick
             test_projection_covers_thinking_and_tool_args
-        ; Alcotest.test_case "projection encodes typed terminal event" `Quick
-            test_projection_encodes_typed_terminal_event
         ] )
     ]

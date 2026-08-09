@@ -25,12 +25,6 @@ val keeper_suffix_paused_work : string
 val keeper_suffix_catchup_judge : string
 val keeper_suffix_operator_note : string
 
-val keeper_chat_receipt_json :
-  keeper_name:string ->
-  revision:int64 ->
-  Keeper_chat_queue.receipt_view ->
-  Yojson.Safe.t
-
 (** {1 Dashboard cache keys} *)
 
 val cache_key_string_segment : string -> string
@@ -58,11 +52,6 @@ val keeper_runtime_trace_cache_key :
 (** Cache key for [/api/v1/keepers/<name>/runtime-trace]. Optional query
     fields are tagged so absent values cannot collide with literal payloads. *)
 
-type keeper_chat_recovery_route =
-  { keeper_name : string
-  ; receipt_id : string
-  }
-
 type keeper_board_attention_quarantine_route =
   { keeper_name : string
   ; partition_id : string
@@ -80,7 +69,6 @@ type keeper_post_route_kind =
   | Keeper_post_paused_work
   | Keeper_post_catchup_judge
   | Keeper_post_operator_note
-  | Keeper_post_chat_recovery of keeper_chat_recovery_route
   | Keeper_post_board_attention_quarantine_recovery of
       keeper_board_attention_quarantine_route
   | Keeper_post_unknown

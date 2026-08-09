@@ -874,99 +874,6 @@ describe('ChatTranscript', () => {
     expect(onClick.mock.calls[0]?.[0].id).toBe('a1')
   })
 
-  it('renders only exact single-receipt recovery decisions', async () => {
-    const onRecoveryRequeue = vi.fn().mockResolvedValue(undefined)
-    const onRecoveryCancel = vi.fn().mockResolvedValue(undefined)
-    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('operator verified no delivery')
-    const target = entry({
-      id: 'recovery-receipt',
-      role: 'assistant',
-      source: 'direct_assistant',
-      label: 'sangsu',
-      text: 'queued',
-      delivery: 'queued',
-      details: {
-        queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-        queueRevision: '8',
-        queueState: 'recovery_required',
-      },
-    })
-
-    render(
-      html`<${ChatTranscript}
-        entries=${[target]}
-        emptyText="empty"
-        variant="messenger"
-        action=${{ onRecoveryRequeue, onRecoveryCancel }}
-      />`,
-      container,
-    )
-
-    const requeue = container.querySelector(
-      '[data-chat-queue-recovery-action="requeue_unconfirmed"]',
-    ) as HTMLButtonElement
-    const cancel = container.querySelector(
-      '[data-chat-queue-recovery-action="cancel_unconfirmed"]',
-    ) as HTMLButtonElement
-    expect(requeue).not.toBeNull()
-    expect(cancel).not.toBeNull()
-
-    fireEvent.click(requeue)
-    await waitFor(() => expect(onRecoveryRequeue).toHaveBeenCalledWith(target))
-    fireEvent.click(cancel)
-    await waitFor(() => {
-      expect(onRecoveryCancel).toHaveBeenCalledWith(
-        target,
-        'operator verified no delivery',
-      )
-    })
-    expect(prompt).toHaveBeenCalledTimes(1)
-  })
-
-  it('offers edit and cancel only while a durable receipt is pending', async () => {
-    const onPendingEdit = vi.fn().mockResolvedValue(undefined)
-    const onPendingCancel = vi.fn().mockResolvedValue(undefined)
-    const target = entry({
-      id: 'pending-receipt',
-      role: 'assistant',
-      source: 'direct_assistant',
-      label: 'sangsu',
-      text: '메시지는 대기 중입니다.',
-      delivery: 'queued',
-      details: {
-        queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000002',
-        queueRevision: '9',
-        queueState: 'pending',
-        queueInFlightLane: 'autonomous',
-        queueInFlightStartedAt: 42,
-      },
-    })
-
-    render(
-      html`<${ChatTranscript}
-        entries=${[target]}
-        emptyText="empty"
-        variant="messenger"
-        action=${{ onPendingEdit, onPendingCancel }}
-      />`,
-      container,
-    )
-
-    expect(container.textContent).toContain('자율 작업 처리 중')
-    const edit = container.querySelector(
-      '[data-chat-queue-pending-action="edit"]',
-    ) as HTMLButtonElement
-    const cancel = container.querySelector(
-      '[data-chat-queue-pending-action="cancel"]',
-    ) as HTMLButtonElement
-    expect(edit).not.toBeNull()
-    expect(cancel).not.toBeNull()
-    fireEvent.click(edit)
-    await waitFor(() => expect(onPendingEdit).toHaveBeenCalledWith(target))
-    fireEvent.click(cancel)
-    await waitFor(() => expect(onPendingCancel).toHaveBeenCalledWith(target))
-  })
-
   it('copies the message text from an assistant message copy button', () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(globalThis.navigator, { clipboard: { writeText } })
@@ -1071,44 +978,6 @@ describe('ChatTranscript', () => {
 
     const cursor = container.querySelector('.animate-pulse')
     expect(cursor).toBeNull()
-  })
-
-  it('shows the shutdown fence that caused a durable queued receipt', () => {
-    render(
-      html`<${ChatTranscript}
-        entries=${[
-          entry({
-            id: 'queued-after-shutdown',
-            role: 'assistant',
-            source: 'direct_assistant',
-            label: 'sangsu',
-            text: '메시지가 다음 active lane에 접수되었습니다.',
-            delivery: 'queued',
-            details: {
-              queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000007',
-              queueShutdownOperationId: 'shutdown-op-7',
-              queueState: 'pending',
-            },
-          }),
-        ]}
-        emptyText="empty"
-        variant="messenger"
-      />`,
-      container,
-    )
-
-    const bubble = container.querySelector('[data-chat-entry-id="queued-after-shutdown"]')
-    expect(bubble?.getAttribute('data-chat-queue-shutdown-operation-id')).toBe('shutdown-op-7')
-    const badge = container.querySelector('[data-chat-queue-state-badge="pending"]')
-    expect(badge?.textContent).toContain('종료 후 처리')
-    expect(badge?.getAttribute('data-chat-queue-shutdown-operation-id')).toBe('shutdown-op-7')
-
-    const detailButton = [...container.querySelectorAll('button')]
-      .find(button => button.textContent?.trim() === '상세 보기')
-    expect(detailButton).toBeDefined()
-    fireEvent.click(detailButton!)
-    expect(container.textContent).toContain('종료 작업 ID')
-    expect(container.textContent).toContain('shutdown-op-7')
   })
 
   it('uses a parent-bounded flexible transcript in primary mode', () => {
@@ -1331,7 +1200,7 @@ describe('ChatTranscript', () => {
   })
 })
 
-describe('ChatComposer queue & stall', () => {
+describe('ChatComposer concurrent submit & stall', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
@@ -1344,15 +1213,14 @@ describe('ChatComposer queue & stall', () => {
     container.remove()
   })
 
-  it('keeps send enabled during streaming when queueing is on', () => {
+  it('keeps durable operation submit enabled during streaming', () => {
     render(
       html`<${ChatComposer}
         draft="다음 질문"
         placeholder="메시지 입력..."
         disabled=${false}
         streaming=${true}
-        queueEnabled=${true}
-        queueCount=${2}
+        allowSendWhileStreaming=${true}
         onDraftChange=${() => {}}
         onSend=${() => {}}
       />`,
@@ -1360,20 +1228,19 @@ describe('ChatComposer queue & stall', () => {
     )
 
     const buttons = [...container.querySelectorAll('button')]
-    const queueButton = buttons.find(button => button.textContent?.includes('대기열 추가'))
-    expect(queueButton).not.toBeUndefined()
-    expect(queueButton?.hasAttribute('disabled')).toBe(false)
-    expect(container.querySelector('[data-chat-queue-count]')?.textContent).toContain('대기 2')
+    const submitButton = buttons.find(button => button.textContent?.includes('새 작업 접수'))
+    expect(submitButton).not.toBeUndefined()
+    expect(submitButton?.hasAttribute('disabled')).toBe(false)
   })
 
-  it('blocks send during streaming when queueing is off', () => {
+  it('blocks send during streaming when concurrent submit is off', () => {
     render(
       html`<${ChatComposer}
         draft="다음 질문"
         placeholder="메시지 입력..."
         disabled=${false}
         streaming=${true}
-        queueEnabled=${false}
+        allowSendWhileStreaming=${false}
         onDraftChange=${() => {}}
         onSend=${() => {}}
       />`,
@@ -3860,24 +3727,6 @@ describe('ChatComposer v2 prototype surface', () => {
     )
     expect((container.querySelector('.composer-textarea') as HTMLTextAreaElement).rows).toBe(1)
     expect(container.querySelector('.composer-foot')).toBeNull()
-  })
-
-  it('restores the compact footer when queue evidence exists in activity mode', () => {
-    render(
-      html`<${ChatComposer}
-        draft=""
-        placeholder="메시지 입력..."
-        disabled=${false}
-        streaming=${false}
-        queueCount=${2}
-        layout="primary"
-        footerMode="activity"
-        onDraftChange=${() => {}}
-        onSend=${() => {}}
-      />`,
-      container,
-    )
-    expect(container.querySelector('[data-chat-queue-count]')?.textContent).toContain('대기 2')
   })
 
   it('keeps send and attach controls operational', () => {

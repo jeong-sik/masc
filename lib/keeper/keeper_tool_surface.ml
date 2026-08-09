@@ -543,6 +543,27 @@ let dispatch_keeper_msg_stream
           ctx
           message))
 
+let dispatch_keeper_msg_stream_admitted
+      ~admission_token
+      ?on_text_delta
+      ?on_event
+      ?continuation_channel
+      ctx
+      ~message
+  =
+  let name = "masc_keeper_msg" in
+  let ctx = resolve_ctx ctx ~name in
+  Some
+    (tool_result_with_tool_name
+       ~tool_name:name
+       (handle_keeper_msg_stream_admitted
+          ~admission_token
+          ?on_text_delta
+          ?on_event
+          ?continuation_channel
+          ctx
+          message))
+
 let dispatch_keeper_msg_stream_if_free
       ?on_text_delta
       ?on_event

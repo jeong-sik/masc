@@ -35,6 +35,10 @@ let stream_payload_exn
       fail (Keeper_invocation_contract.request_error_to_string error)
   in
   { Server_routes_http_keeper_stream.name = name
+  ; request_id =
+      (match Keeper_owner.Chat_operation.Operation_id.of_string "kmsg-gate-test" with
+       | Ok operation_id -> operation_id
+       | Error detail -> fail detail)
   ; message
   ; user_blocks
   ; turn_instructions
@@ -307,7 +311,7 @@ hello from a thread|}
 
 let test_parse_keeper_chat_stream_request_accepts_connector_context () =
   let body =
-    {|{"name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
+    {|{"request_id":"kmsg-connector","name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload ->
@@ -318,15 +322,22 @@ let test_parse_keeper_chat_stream_request_accepts_connector_context () =
   | Error err -> fail ("expected connector context to parse: " ^ err)
 
 let test_parse_keeper_chat_stream_request_rejects_unknown_field () =
-  let body = {|{"name":"luna","message":"hello","unexpected":true}|} in
+  let body = {|{"request_id":"kmsg-unknown","name":"luna","message":"hello","unexpected":true}|} in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok _ -> fail "expected an undeclared field to be rejected"
   | Error err ->
     check bool "unknown field is named" true (string_contains err "unexpected")
 ;;
 
+let test_parse_keeper_chat_stream_request_requires_request_id () =
+  let body = {|{"name":"luna","message":"hello"}|} in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected request_id to be required"
+  | Error err -> check string "missing id error" "request_id is required" err
+;;
+
 let test_parse_keeper_chat_stream_request_rejects_duplicate_field () =
-  let body = {|{"name":"luna","name":"other","message":"hello"}|} in
+  let body = {|{"request_id":"kmsg-duplicate","name":"luna","name":"other","message":"hello"}|} in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok _ -> fail "expected duplicate fields to be rejected"
   | Error err ->
@@ -335,7 +346,7 @@ let test_parse_keeper_chat_stream_request_rejects_duplicate_field () =
 ;;
 
 let test_parse_keeper_chat_stream_request_rejects_wrong_field_type () =
-  let body = {|{"name":"luna","message":"hello","channel":42}|} in
+  let body = {|{"request_id":"kmsg-type","name":"luna","message":"hello","channel":42}|} in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok _ -> fail "expected wrong field type to be rejected"
   | Error err -> check string "wrong type error" "channel must be a string" err
@@ -343,7 +354,7 @@ let test_parse_keeper_chat_stream_request_rejects_wrong_field_type () =
 
 let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
   let body =
-    {|{"name":"luna","message":"hello","channel":"discord"}|}
+    {|{"request_id":"kmsg-partial","name":"luna","message":"hello","channel":"discord"}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok _ -> fail "expected partial connector context to be rejected"
@@ -354,7 +365,7 @@ let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
 
 let test_parse_keeper_chat_stream_request_accepts_copilot_context () =
   let body =
-    {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
+    {|{"request_id":"kmsg-copilot","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload ->
@@ -367,7 +378,7 @@ let test_parse_keeper_chat_stream_request_accepts_copilot_context () =
 
 let test_parse_keeper_chat_stream_request_formats_surface_context () =
   let body =
-    {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","surface_context":{"label":"Overview","route":"/overview","scene":"fleet view","fields":[{"k":"run","v":"2/5"},{"k":"alert","v":"1"}]}}|}
+    {|{"request_id":"kmsg-surface","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","surface_context":{"label":"Overview","route":"/overview","scene":"fleet view","fields":[{"k":"run","v":"2/5"},{"k":"alert","v":"1"}]}}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload ->
@@ -378,7 +389,7 @@ let test_parse_keeper_chat_stream_request_formats_surface_context () =
 
 let test_parse_keeper_chat_stream_request_accepts_attachment_only_user_blocks () =
   let body =
-    {|{"name":"luna","message":"","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024}]}|}
+    {|{"request_id":"kmsg-attachment","name":"luna","message":"","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024}]}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload -> (
@@ -394,7 +405,7 @@ let test_parse_keeper_chat_stream_request_accepts_attachment_only_user_blocks ()
 
 let test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type () =
   let body =
-    {|{"name":"luna","message":"hello","user_blocks":[{"type":"tool_result","text":"nope"}]}|}
+    {|{"request_id":"kmsg-block","name":"luna","message":"hello","user_blocks":[{"type":"tool_result","text":"nope"}]}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok _ -> fail "expected unknown user block type to be rejected"
@@ -2921,6 +2932,8 @@ let () =
             test_parse_keeper_chat_stream_request_accepts_connector_context;
           test_case "stream request rejects unknown fields" `Quick
             test_parse_keeper_chat_stream_request_rejects_unknown_field;
+          test_case "stream request requires request id" `Quick
+            test_parse_keeper_chat_stream_request_requires_request_id;
           test_case "stream request rejects duplicate fields" `Quick
             test_parse_keeper_chat_stream_request_rejects_duplicate_field;
           test_case "stream request rejects wrong field types" `Quick

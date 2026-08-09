@@ -20,7 +20,7 @@ import { appendLiveToolCall } from './components/session-trace/session-trace-liv
 import { scheduleSessionTraceReload } from './components/session-trace/session-trace-state'
 import { recordSseCompaction } from './components/keeper-workspace/compaction-snapshots'
 import { appendAuditEntry } from './live-store'
-import { applyKeeperQueuedTurnEvent } from './keeper-stream'
+import { applyKeeperOperationTurnEvent } from './keeper-stream'
 import type { KeeperChatStreamEvent } from './api'
 import { isCrashedPhase } from './lib/keeper-predicates'
 import {
@@ -599,14 +599,12 @@ function handleEvent(event: SSEEvent): void {
       }
       break
     }
-    case 'keeper_chat_turn_event': {
-      // The queue consumer uses the same AG-UI event contract as a direct
-      // chat stream. The durable receipt is the sole routing identity.
+    case 'keeper_chat_operation_event': {
       const keeperName = event.name ?? agent
-      const receiptId = event.receipt_id?.trim()
-      if (!keeperName || !receiptId || !isRecord(event.ag_ui_event)) break
-      applyKeeperQueuedTurnEvent(keeperName, {
-        receiptId,
+      const operationId = event.operation_id?.trim()
+      if (!keeperName || !operationId || !isRecord(event.ag_ui_event)) break
+      applyKeeperOperationTurnEvent(keeperName, {
+        operationId,
         event: event.ag_ui_event as unknown as KeeperChatStreamEvent,
       })
       if (event.ag_ui_event.type === 'TOOL_CALL_END') {

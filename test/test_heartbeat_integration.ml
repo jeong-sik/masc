@@ -65,7 +65,7 @@ let write_file path content =
 ;;
 
 let install_owner_inventory_exn ~sw config =
-  match Keeper_owner_registry.install_from_store ~sw config with
+  match Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
   | Ok _ -> ()
   | Error error -> fail (Keeper_owner_registry.install_error_to_string error)
 ;;

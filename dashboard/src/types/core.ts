@@ -683,23 +683,6 @@ export type KeeperTurnOutcome =
   | 'external_effect_pending'
   | 'no_visible_reply'
 
-export type KeeperQueueReceiptLifecycle =
-  | 'pending'
-  | 'inflight'
-  | 'recovery_required'
-  | 'delivered'
-  | 'failed'
-
-export type KeeperQueueReceiptFailureKind =
-  | 'turn_failed'
-  | 'no_visible_reply'
-  | 'transcript_persist_failed'
-  | 'connector_unavailable'
-  | 'delivery_failed'
-  | 'cancelled'
-  | 'internal_error'
-  | 'recovery_interrupted'
-
 export interface KeeperConversationDetails {
   traceId?: string | null
   turnRef?: string | null
@@ -712,20 +695,6 @@ export interface KeeperConversationDetails {
   usage?: KeeperConversationUsage | null
   replyText?: string | null
   turnOutcome?: KeeperTurnOutcome | null
-  /** Durable server receipt for a busy chat message accepted into the Keeper
-   * queue. This is distinct from the browser-local draft queue. */
-  queueReceiptId?: string | null
-  /** Shutdown fence that caused this message to be deferred, when present. */
-  queueShutdownOperationId?: string | null
-  queueRevision?: string | null
-  queuePendingCount?: number | null
-  queueInflightCount?: number | null
-  queueRecoveryRequiredCount?: number | null
-  queueInFlightLane?: string | null
-  queueInFlightStartedAt?: number | null
-  queueState?: KeeperQueueReceiptLifecycle | null
-  queueFailureKind?: KeeperQueueReceiptFailureKind | null
-  queueCorrelationError?: 'missing_outcome_ref' | null
   rawPayload?: unknown
 }
 
@@ -968,14 +937,9 @@ export interface KeeperConversationEntry {
   // Direct/async delivery identity for history reconciliation. Local
   // placeholders carry the backend-minted request id once it is observed.
   requestId?: string | null
-  // Queue-lane delivery identity. Persisted history can reference one or more
-  // durable queue receipts instead of a request id.
-  queueReceiptIds?: string[]
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   streamContract?: KeeperConversationStreamContract | null
-  queueSeq?: number | null
-  queueClientActionId?: string | null
   attachments?: KeeperConversationAttachment[]
   /** Exact ordered multimodal input sent to the Keeper. Kept on optimistic and
    * pending rows so editing never reconstructs model input from display text. */

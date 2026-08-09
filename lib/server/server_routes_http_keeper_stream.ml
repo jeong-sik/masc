@@ -12,6 +12,51 @@ let keeper_reply_chunk_hard_wrap_chars = 180
    blocks (backpressure) when the consumer lags. *)
 let worker_events_buffer_size = 512
 
+type operation_live_sink = Ag_ui.event -> unit
+
+let operation_live_sinks :
+  (string, (int * operation_live_sink) list) Hashtbl.t =
+  Hashtbl.create 16
+;;
+
+let operation_live_sinks_mu = Stdlib.Mutex.create ()
+let next_operation_live_sink_id = Atomic.make 0
+
+let register_operation_live_sink ~operation_id sink =
+  let sink_id = Atomic.fetch_and_add next_operation_live_sink_id 1 in
+  Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
+    let current =
+      Option.value ~default:[] (Hashtbl.find_opt operation_live_sinks operation_id)
+    in
+    Hashtbl.replace operation_live_sinks operation_id ((sink_id, sink) :: current));
+  fun () ->
+    Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
+      match Hashtbl.find_opt operation_live_sinks operation_id with
+      | None -> ()
+      | Some sinks ->
+        let remaining = List.filter (fun (id, _) -> id <> sink_id) sinks in
+        if remaining = []
+        then Hashtbl.remove operation_live_sinks operation_id
+        else Hashtbl.replace operation_live_sinks operation_id remaining)
+;;
+
+let publish_operation_live_event ~operation_id event =
+  let sinks =
+    Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
+      Option.value ~default:[] (Hashtbl.find_opt operation_live_sinks operation_id))
+  in
+  List.iter
+    (fun (_, sink) ->
+       try sink event with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "keeper_stream: operation live sink failed operation_id=%s error=%s"
+           operation_id
+           (Printexc.to_string exn))
+    sinks
+;;
+
 (* SSE reconnect backoff (ms) primed on the dashboard keeper-chat streams. Shared
    with {!Server_routes_http_routes_dashboard} (via [open]) so the two dashboard
    priming sites cannot silently diverge. Intentionally distinct from
@@ -32,6 +77,7 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
   | User_audio of user_media_block
 
 type keeper_chat_stream_request = {
+  request_id : Keeper_owner.Chat_operation.Operation_id.t;
   name : string;
   message : string;
   user_blocks : user_input_block list;
@@ -134,315 +180,6 @@ let modalities_for_request payload =
   | [] -> [ "text" ]
   | labels -> labels
 
-type dashboard_deferred_chat =
-  { in_flight : Keeper_turn_admission.in_flight_info option
-  ; chat_waiting : bool
-  ; pending_count : int
-  ; inflight_count : int
-  ; recovery_required_count : int
-  ; receipt_id : string
-  ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
-  ; queue_revision : int64
-  }
-
-let chat_event_lane = function
-  | Keeper_turn_admission.Autonomous -> Keeper_chat_events.Autonomous_lane
-  | Keeper_turn_admission.Chat -> Keeper_chat_events.Chat_lane
-
-let chat_queued_event ~keeper_name
-    ({ in_flight
-     ; chat_waiting
-     ; pending_count
-     ; inflight_count
-     ; recovery_required_count
-     ; receipt_id
-     ; shutdown_operation_id
-     ; queue_revision
-     } : dashboard_deferred_chat) =
-  let in_flight =
-    match in_flight with
-    | None -> None
-    | Some { Keeper_turn_admission.lane; started_at } ->
-        Some { Keeper_chat_events.lane = chat_event_lane lane; started_at }
-  in
-  Keeper_chat_events.Chat_queued
-    { keeper_name
-    ; pending_count
-    ; inflight_count
-    ; recovery_required_count
-    ; chat_waiting
-    ; receipt_id
-    ; queue_revision
-    ; shutdown_operation_id =
-        Option.map Keeper_shutdown_types.Operation_id.to_string
-          shutdown_operation_id
-    ; in_flight
-    }
-
-let dashboard_busy_queue_state ~base_path ~keeper_name =
-  let admission = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
-  let in_flight = admission.snapshot_in_flight in
-  let chat_waiting = admission.snapshot_waiting > 0 in
-  let shutdown_operation_id = admission.snapshot_shutdown_operation_id in
-  let queue_waiting =
-    if not (Keeper_chat_queue.persistence_configured ())
-    then true
-    else
-      match Keeper_chat_queue.lane_status ~keeper_name with
-      | Error _ -> true
-      | Ok { has_active; health = Keeper_chat_queue.Ready; _ } -> has_active
-      | Ok
-          { health =
-              ( Keeper_chat_queue.Persistence_reconciliation_required
-              | Keeper_chat_queue.Delivery_recovery_required _
-              | Keeper_chat_queue.Unavailable _ )
-          ; _
-          } ->
-        true
-  in
-  match in_flight, chat_waiting, queue_waiting, shutdown_operation_id with
-  | None, false, false, None -> None
-  | _ -> Some (in_flight, chat_waiting, shutdown_operation_id)
-
-let dashboard_deferred_ack_text ~keeper_name deferred =
-  if deferred.recovery_required_count < 0
-  then invalid_arg "dashboard deferred recovery count must be non-negative"
-  else if deferred.recovery_required_count > 0
-  then
-    Printf.sprintf
-      "%s의 이전 메시지 상태를 확인해야 해요. 새 메시지는 안전하게 대기 중입니다."
-      keeper_name
-  else
-    match deferred.shutdown_operation_id with
-    | Some _ ->
-      Printf.sprintf
-        "%s가 종료 중이에요. 다시 활동을 시작하면 이 메시지를 처리합니다."
-        keeper_name
-    | None ->
-      Printf.sprintf
-        "%s가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다."
-        keeper_name
-
-let dashboard_deferred_chat_to_json ~keeper_name
-    ({ in_flight
-     ; chat_waiting
-     ; pending_count
-     ; inflight_count
-     ; recovery_required_count
-     ; receipt_id
-     ; shutdown_operation_id
-     ; queue_revision
-     } : dashboard_deferred_chat) =
-  let in_flight_fields =
-    match in_flight with
-    | None -> []
-    | Some { Keeper_turn_admission.lane; started_at } ->
-        [ ( "in_flight_lane"
-          , `String (Keeper_turn_admission.lane_to_string lane) )
-        ; ( "in_flight_started_at"
-          , `Float started_at )
-        ]
-  in
-  `Assoc
-    ([ ("keeper_name", `String keeper_name)
-     ; ("status", `String "queued")
-     ; ("queue", `String "keeper_chat_queue")
-     ; ("pending_count", `Int pending_count)
-     ; ("inflight_count", `Int inflight_count)
-     ; ("recovery_required_count", `Int recovery_required_count)
-     ; ("chat_waiting", `Bool chat_waiting)
-     ; ("receipt_id", `String receipt_id)
-     ; ("queue_revision", `String (Int64.to_string queue_revision))
-     ; ( "shutdown_operation_id"
-       , match shutdown_operation_id with
-         | None -> `Null
-         | Some operation_id ->
-           `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
-     ]
-     @ in_flight_fields)
-
-let enqueue_dashboard_payload
-      ~clock
-      ~thread_id
-      ~user_row_origin
-      payload
-      ~in_flight
-      ~chat_waiting
-      ~shutdown_operation_id
-  =
-  match
-    Keeper_chat_queue.enqueue ~keeper_name:payload.name
-      { Keeper_chat_queue.content = payload.message
-      ; user_blocks = payload.user_blocks
-      ; attachments = payload.attachments
-      ; timestamp = Eio.Time.now clock
-      ; source = Keeper_chat_queue.Dashboard { thread_id }
-      ; user_row_origin
-      }
-  with
-  | Error error -> Error (Keeper_chat_queue.mutation_error_to_string error)
-  | Ok receipt ->
-      Ok
-        { in_flight
-        ; chat_waiting
-        ; pending_count = receipt.pending_count
-        ; inflight_count = receipt.inflight_count
-        ; recovery_required_count = receipt.recovery_required_count
-        ; receipt_id = Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id
-        ; queue_revision = receipt.revision
-        ; shutdown_operation_id
-        }
-
-let dashboard_deferred_chat_of_rejection
-      ~clock
-      ~thread_id
-      ~user_row_origin
-      payload
-     ({ Keeper_turn_admission.waiting
-     ; in_flight
-     ; shutdown_operation_id
-     } : Keeper_turn_admission.rejection) =
-  (* Dashboard messages remain durable while a shutdown fence is active;
-     the queue is the continuation boundary for a later resume/replacement
-     lane, rather than starting a turn behind the fence. *)
-  enqueue_dashboard_payload
-    ~clock
-    ~thread_id
-    ~user_row_origin
-    payload
-    ~in_flight
-    ~chat_waiting:(waiting > 0)
-    ~shutdown_operation_id
-
-let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload =
-  match dashboard_busy_queue_state ~base_path ~keeper_name:payload.name with
-  | None -> `Not_busy
-  | Some (in_flight, chat_waiting, shutdown_operation_id) ->
-      (match
-         enqueue_dashboard_payload
-           ~clock
-           ~thread_id
-           ~user_row_origin:Keeper_chat_store.Needs_append
-           payload
-           ~in_flight
-           ~chat_waiting
-           ~shutdown_operation_id
-       with
-       | Ok queued -> `Queued queued
-       | Error message -> `Queue_error message)
-
-let keeper_chat_request_prefixes =
-  [
-    "/api/v1/gate/message/requests/";
-    "/api/v1/keepers/chat/requests/";
-  ]
-
-let has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
-
-let keeper_chat_request_suffix request =
-  let path = Http.Request.path request in
-  let rec loop = function
-    | [] -> None
-    | prefix :: rest ->
-        if has_prefix ~prefix path then
-          Some
-            (String.sub path (String.length prefix)
-               (String.length path - String.length prefix))
-        else loop rest
-  in
-  loop keeper_chat_request_prefixes
-
-let parse_keeper_chat_request_result_path request =
-  match keeper_chat_request_suffix request with
-  | Some suffix -> (
-      match String.split_on_char '/' suffix with
-      | [ request_id ] when String.trim request_id <> "" -> Ok request_id
-      | _ -> Error "expected /api/v1/gate/message/requests/<request_id>" )
-  | None -> Error "invalid keeper chat request path"
-
-let parse_keeper_chat_request_cancel_path request =
-  match keeper_chat_request_suffix request with
-  | Some suffix -> (
-      match String.split_on_char '/' suffix with
-      | [ request_id; "cancel" ] when String.trim request_id <> "" ->
-          Ok request_id
-      | _ -> Error "expected /api/v1/gate/message/requests/<request_id>/cancel" )
-  | None -> Error "invalid keeper chat request path"
-
-let http_status_of_access_rejection = function
-  | Keeper_msg_async.Invalid_base_path _
-  | Keeper_msg_async.Invalid_caller
-  | Keeper_msg_async.Invalid_request_id -> `Bad_request
-  | Keeper_msg_async.Caller_mismatch -> `Forbidden
-;;
-
-let handle_keeper_chat_request_result ~caller state request reqd =
-  match parse_keeper_chat_request_result_path request with
-  | Error message ->
-      respond_json_value_with_cors ~status:`Bad_request request reqd
-        (keeper_chat_stream_error_json message)
-  | Ok request_id -> (
-      match
-        Keeper_msg_async.poll
-          ~base_path:(Mcp_server.workspace_config state).base_path
-          ~caller
-          request_id
-      with
-      | Keeper_msg_async.Absent ->
-          respond_json_value_with_cors ~status:`Not_found request reqd
-            (keeper_chat_stream_error_json "request_id not found")
-      | Keeper_msg_async.Unreadable reason ->
-          respond_json_value_with_cors ~status:`Internal_server_error request
-            reqd
-            (keeper_chat_stream_error_json
-               (Printf.sprintf
-                  "request record unreadable: %s — request was accepted but \
-                   its result is lost"
-                  reason))
-      | Keeper_msg_async.Rejected rejection ->
-          respond_json_value_with_cors
-            ~status:(http_status_of_access_rejection rejection)
-            request
-            reqd
-            (Keeper_msg_async.access_rejection_to_json rejection)
-      | Keeper_msg_async.Found entry ->
-          respond_json_value_with_cors ~status:`OK request reqd
-            (Keeper_msg_async.entry_to_json entry) )
-
-let handle_keeper_chat_request_cancel ~caller state request reqd =
-  match parse_keeper_chat_request_cancel_path request with
-  | Error message ->
-      respond_json_value_with_cors ~status:`Bad_request request reqd
-        (keeper_chat_stream_error_json message)
-  | Ok request_id ->
-      let result =
-        Keeper_msg_async.cancel
-          ~base_path:(Mcp_server.workspace_config state).base_path
-          ~caller
-          request_id
-      in
-      let status =
-        match result with
-        | Keeper_msg_async.Cancellation_requested _ ->
-            `Accepted
-        | Keeper_msg_async.Cancel_not_found -> `Not_found
-        | Keeper_msg_async.Cancel_rejected rejection ->
-            http_status_of_access_rejection rejection
-        | Keeper_msg_async.Cancel_already_terminal _
-        | Keeper_msg_async.Cancel_worker_ownership_unknown _ ->
-            `Conflict
-        | Keeper_msg_async.Cancel_unreadable _
-        | Keeper_msg_async.Cancel_persistence_failed _
-        | Keeper_msg_async.Cancel_worker_signal_failed _
-        | Keeper_msg_async.Cancel_state_invariant_failed _ ->
-            `Internal_server_error
-      in
-      respond_json_value_with_cors ~status request reqd
-        (Keeper_msg_async.cancel_result_to_json ~request_id result)
-
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -540,7 +277,8 @@ let parse_keeper_chat_stream_request body_str =
       match json with
       | `Assoc fields ->
         let allowed =
-          [ "name"
+          [ "request_id"
+          ; "name"
           ; "message"
           ; "user_blocks"
           ; "turn_instructions"
@@ -578,6 +316,8 @@ let parse_keeper_chat_stream_request body_str =
       | Some (`String value) -> Ok value
       | Some _ -> Error (key ^ " must be a string")
     in
+    let* request_id = required_string "request_id" in
+    let* request_id = Keeper_owner.Chat_operation.Operation_id.of_string request_id in
     let* name = required_string "name" |> Result.map String.trim in
     let* raw_message = optional_string "message" |> Result.map String.trim in
     let* channel = optional_string "channel" |> Result.map String.trim in
@@ -648,7 +388,8 @@ let parse_keeper_chat_stream_request body_str =
         |> Result.map_error Keeper_invocation_contract.request_error_to_string
       in
       Ok
-        { name
+        { request_id
+        ; name
         ; message
         ; user_blocks
         ; turn_instructions
@@ -662,6 +403,108 @@ let parse_keeper_chat_stream_request body_str =
         }
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
+
+type operation_payload =
+  { payload : keeper_chat_stream_request
+  ; source : Keeper_chat_operation_payload.decoded_source
+  }
+
+let operation_input_of_payload payload =
+  Keeper_chat_operation_payload.input_to_json
+    ~message:payload.message
+    ~user_blocks:payload.user_blocks
+    ~turn_instructions:payload.turn_instructions
+    ~surface_context:payload.surface_context
+    ~attachments:payload.attachments
+;;
+
+let operation_source_of_payload
+      ~thread_id
+      ~submitted_by
+      ~user_row_origin
+      payload
+  =
+  let ( let* ) = Result.bind in
+  let* continuation_channel =
+    if has_external_speaker payload
+    then Error "connector operations must enter through the typed connector ingress"
+    else Keeper_continuation_channel.dashboard ~thread_id
+  in
+  Keeper_chat_operation_payload.source_to_json
+    ~submitted_by
+    ~thread_id
+    ~continuation_channel
+    ~surface:(chat_surface_of_request payload)
+    ~channel:payload.channel
+    ~channel_user_id:payload.channel_user_id
+    ~channel_user_name:payload.channel_user_name
+    ~channel_workspace_id:payload.channel_workspace_id
+    ~conversation_id:None
+    ~external_message_id:None
+    ~workspace_id:None
+    ~extra_mentions:[]
+    ~user_row_origin
+;;
+
+let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
+  let ( let* ) = Result.bind in
+  let* source = Keeper_chat_operation_payload.source_of_json source in
+  let* input = Keeper_chat_operation_payload.input_of_json input in
+  let raw_message = String.trim input.message in
+  let message =
+    if String.equal raw_message ""
+    then
+      Keeper_multimodal_input.fallback_message
+        ~attachments:input.attachments
+        input.user_blocks
+    else raw_message
+  in
+  let invocation_prompt =
+    if String.trim source.channel_user_id = ""
+    then message
+    else
+      Gate_keeper_backend.contextualize_message
+        ~channel:source.channel
+        ~channel_user_id:source.channel_user_id
+        ~channel_user_name:source.channel_user_name
+        ~channel_workspace_id:source.channel_workspace_id
+        ~metadata:[]
+        ~content:message
+  in
+  let turn_instructions =
+    combined_turn_instructions
+      ~turn_instructions:input.turn_instructions
+      ~surface_context:input.surface_context
+  in
+  let* direct_message =
+    Keeper_invocation_contract.direct_message
+      ~keeper_name
+      ~prompt:invocation_prompt
+      ~direct_reply:true
+      ?turn_instructions
+      ~channel:source.channel
+      ~user_blocks:input.user_blocks
+      ~attachments:input.attachments
+      ()
+    |> Result.map_error Keeper_invocation_contract.request_error_to_string
+  in
+  let payload =
+    { request_id = operation_id
+    ; name = keeper_name
+    ; message
+    ; user_blocks = input.user_blocks
+    ; turn_instructions = input.turn_instructions
+    ; surface_context = input.surface_context
+    ; channel = source.channel
+    ; channel_user_id = source.channel_user_id
+    ; channel_user_name = source.channel_user_name
+    ; channel_workspace_id = source.channel_workspace_id
+    ; attachments = input.attachments
+    ; direct_message
+    }
+  in
+  Ok { payload; source }
+;;
 
 let strip_keeper_visible_reply (reply : string) =
   String.trim reply
@@ -755,6 +598,7 @@ let execute_keeper_stream_tool_streaming
       ?auth_token:_
       ?on_event
       ?on_admitted
+      ?admission_token
       state
       ~agent_name
       ~message
@@ -779,15 +623,28 @@ let execute_keeper_stream_tool_streaming
             Mcp_server.publication_recovery_availability_provider state;
         }
       in
-      match
-        Keeper_tool_surface.dispatch_keeper_msg_stream ~on_text_delta ?on_event
-          ~on_admission_rejected:(fun rejection ->
-            admission_rejection := Some rejection)
-          ?on_admitted
-          keeper_ctx
-          ~continuation_channel
-          ~message
-      with
+      let dispatched =
+        match admission_token with
+        | None ->
+          Keeper_tool_surface.dispatch_keeper_msg_stream
+            ~on_text_delta
+            ?on_event
+            ~on_admission_rejected:(fun rejection ->
+              admission_rejection := Some rejection)
+            ?on_admitted
+            keeper_ctx
+            ~continuation_channel
+            ~message
+        | Some admission_token ->
+          Keeper_tool_surface.dispatch_keeper_msg_stream_admitted
+            ~admission_token
+            ~on_text_delta
+            ?on_event
+            keeper_ctx
+            ~continuation_channel
+            ~message
+      in
+      match dispatched with
       | Some result ->
           let body = Tool_result.message result in
           body, keeper_stream_disposition_of_result result
@@ -846,114 +703,6 @@ let execute_keeper_stream_tool_streaming
                  ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
                  ~duration_ms
                  ~source:(Tool_registry.string_of_source Agent_internal)
-                 ?failure_class:telemetry_failure_class
-                 ?error_kind:telemetry_error_kind ?error_message:error_detail ()
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Misc.error "telemetry tracking failed: %s"
-                 (Printexc.to_string exn))
-        | None -> ());
-      Tool_registry.record_call_if_known ~source:Agent_internal
-        ~tool_name:"masc_keeper_msg"
-        ~disposition
-        ~duration_ms
-        ();
-      `Ran (success, body)
-
-let execute_keeper_stream_tool_streaming_if_free
-      ~sw
-      ~clock
-      ?auth_token:_
-      ?on_event
-      state
-      ~agent_name
-      ~message
-      ~continuation_channel
-      ~on_text_delta
-  =
-  let workspace_scope = Mcp_server.workspace_scope state in
-  let config = workspace_scope.config in
-  let start_time = Eio.Time.now clock in
-  let outcome =
-    try
-      let keeper_ctx : _ Keeper_tool_surface.context =
-        {
-          config;
-          agent_name;
-          sw;
-          clock;
-          proc_mgr = state.Mcp_server.proc_mgr;
-          net = state.Mcp_server.net;
-          publication_recovery_provider =
-            Mcp_server.publication_recovery_availability_provider state;
-        }
-      in
-      match
-        Keeper_turn.handle_keeper_msg_if_free
-          ~on_text_delta
-          ?on_event
-          ~continuation_channel
-          keeper_ctx
-          message
-      with
-      | `Busy rejection -> `Busy rejection
-      | `Ran result ->
-          let body = Tool_result.message result in
-          `Ran (body, keeper_stream_disposition_of_result result)
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Workspace.Not_initialized ->
-        `Ran
-          ( Masc_domain.masc_error_to_string
-              (Masc_domain.System Masc_domain.System_error.NotInitialized)
-          , Tool_result.Failed Tool_result.Runtime_failure )
-    | exn ->
-        let err = Printexc.to_string exn in
-        Log.Mcp.error "tools/call crashed (stream if-free): %s" err;
-        `Ran
-          ( Printf.sprintf "Internal error: %s" err
-          , Tool_result.Failed Tool_result.Runtime_failure )
-  in
-  match outcome with
-  | `Busy rejection -> `Busy rejection
-  | `Ran (body, disposition) ->
-      let success = keeper_stream_success disposition in
-      let end_time = Eio.Time.now clock in
-      let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
-      let error_detail =
-        if success then None
-        else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
-      in
-      Audit_log.log_tool_call config
-        ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success
-        ~error_msg:error_detail ();
-      (match disposition with
-       | Tool_result.Failed failure_class ->
-         Log.Keeper.emit Log.Error
-           ~details:
-             (keeper_tool_failure_log_details ~tool_name:"masc_keeper_msg"
-                ~agent_name ~duration_ms ~streaming:true ~error_body:body
-                ~failure_class)
-           "keeper tool call failed: masc_keeper_msg"
-       | Tool_result.Completed () | Tool_result.Deferred () -> ());
-      let telemetry_enabled = Env_config_core.telemetry_enabled () in
-      if telemetry_enabled then (
-        match state.Mcp_server.fs with
-        | Some fs ->
-            (try
-               let telemetry_error_kind =
-                 if success then None
-                 else Some (Telemetry_eio.error_kind_of_string "tool_failure")
-               in
-               let telemetry_failure_class =
-                 match disposition with
-                 | Tool_result.Failed failure_class -> Some failure_class
-                 | Tool_result.Completed () | Tool_result.Deferred () -> None
-               in
-               Telemetry_eio.track_tool_called ~fs config
-                 ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
-                 ~duration_ms ~source:(Tool_registry.string_of_source Agent_internal)
                  ?failure_class:telemetry_failure_class
                  ?error_kind:telemetry_error_kind ?error_message:error_detail ()
              with
@@ -1168,7 +917,6 @@ let chat_request_terminal_status = function
 type keeper_stream_worker_event =
   | Stream_event of Agent_core.Types.sse_event
   | Stream_client_disconnected
-  | Stream_dashboard_queued of dashboard_deferred_chat
   | Stream_queued_turn_deferred of Keeper_turn_admission.rejection
   | Stream_terminal of
       { status : keeper_stream_terminal_status
@@ -1177,7 +925,6 @@ type keeper_stream_worker_event =
       }
 
 and keeper_stream_completion =
-  | Completion_dashboard_queued of dashboard_deferred_chat
   | Completion_queued_turn_deferred of Keeper_turn_admission.rejection
   | Completion_terminal of
       { status : keeper_stream_terminal_status
@@ -1203,6 +950,17 @@ and queued_turn_outcome =
 
 type turn_submission =
   | Direct_request
+  | Owner_operation of
+      { operation_id : Keeper_owner.Chat_operation.Operation_id.t
+      ; admission_token : Keeper_turn_admission.token
+      ; execution_sw : Eio.Switch.t
+      ; surface : Surface_ref.t
+      ; speaker : Keeper_chat_store.speaker
+      ; conversation_id : string option
+      ; external_message_id : string option
+      ; workspace_id : string option
+      ; extra_mentions : Keeper_identity.Keeper_id.t list
+      }
   | Queued_receipt of
       { receipt_ids : Keeper_chat_delivery_identity.Receipt_ids.t
       ; claim : unit -> (unit, string) result
@@ -1360,7 +1118,12 @@ let queued_turn_deferred_event
     match in_flight with
     | None -> None
     | Some { Keeper_turn_admission.lane; started_at } ->
-        Some { Keeper_chat_events.lane = chat_event_lane lane; started_at }
+        let lane =
+          match lane with
+          | Keeper_turn_admission.Autonomous -> Keeper_chat_events.Autonomous_lane
+          | Keeper_turn_admission.Chat -> Keeper_chat_events.Chat_lane
+        in
+        Some { Keeper_chat_events.lane; started_at }
   in
   Keeper_chat_events.Queued_turn_deferred
     { waiting
@@ -1428,14 +1191,19 @@ let process_single_turn ~user_row_origin ~submission
   let queued_turn =
     match submission with
     | Direct_request -> false
-    | Queued_receipt _ -> true
+    | Owner_operation _ | Queued_receipt _ -> true
   in
   let base_path = (Mcp_server.workspace_config state).base_path in
   let direct_delivery_checkpoint : Keeper_chat_direct_delivery.t option ref =
     ref None
   in
   let queue_claim_failure = ref None in
-  let queue_claim_committed = ref false in
+  let queue_claim_committed =
+    ref
+      (match submission with
+       | Owner_operation _ -> true
+       | Direct_request | Queued_receipt _ -> false)
+  in
   let queued_turn_not_started () =
     queued_turn && not !queue_claim_committed
   in
@@ -1591,8 +1359,6 @@ let process_single_turn ~user_row_origin ~submission
   in
   let push_worker_event event =
     match event with
-    | Stream_dashboard_queued queued ->
-        stage_completion (Completion_dashboard_queued queued)
     | Stream_queued_turn_deferred rejection ->
         stage_completion (Completion_queued_turn_deferred rejection)
     | Stream_terminal { status; body; queued_outcome } ->
@@ -1629,14 +1395,33 @@ let process_single_turn ~user_row_origin ~submission
   in
   (* RFC-0232 P5: the typed surface is the write-side truth; the label
      [chat_source] is its derivation, used for broadcast metadata. *)
-  let chat_surface = chat_surface_of_request payload in
+  let chat_surface =
+    match submission with
+    | Owner_operation { surface; _ } -> surface
+    | Direct_request | Queued_receipt _ -> chat_surface_of_request payload
+  in
   let chat_source = Surface_ref.lane_label chat_surface in
   (* RFC-0223 P1: authority derives from the arrival route. A non-empty
      [channel_user_id] means an arbitrary external person on that channel;
      a channel label without a user id (e.g. dashboard Copilot Dock) is
      still an authenticated dashboard operator, so it keeps Owner authority
      while recording the Gate surface label. *)
-  let chat_speaker : Keeper_chat_store.speaker = chat_speaker_of_request payload in
+  let chat_speaker : Keeper_chat_store.speaker =
+    match submission with
+    | Owner_operation { speaker; _ } -> speaker
+    | Direct_request | Queued_receipt _ -> chat_speaker_of_request payload
+  in
+  let operation_delivery_coordinates =
+    match submission with
+    | Owner_operation { conversation_id; external_message_id; workspace_id; _ } ->
+      conversation_id, external_message_id, workspace_id
+    | Direct_request | Queued_receipt _ -> None, None, None
+  in
+  let operation_extra_mentions =
+    match submission with
+    | Owner_operation { extra_mentions; _ } -> extra_mentions
+    | Direct_request | Queued_receipt _ -> []
+  in
   let dashboard_direct_stream =
     (not queued_turn)
     && (match user_row_origin with
@@ -1653,6 +1438,11 @@ let process_single_turn ~user_row_origin ~submission
   in
   let queue_delivery_key () =
     match submission with
+    | Owner_operation { operation_id; _ } ->
+      Keeper_chat_delivery_identity.Request_id.of_string
+        (Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
+      |> Result.map (fun operation_id ->
+        Keeper_chat_delivery_identity.Operation operation_id)
     | Queued_receipt { receipt_ids; _ } ->
       Ok (Keeper_chat_delivery_identity.Queue_receipts receipt_ids)
     | Direct_request ->
@@ -1661,6 +1451,9 @@ let process_single_turn ~user_row_origin ~submission
   let append_queued_user_row_once () =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
+    let conversation_id, external_message_id, workspace_id =
+      operation_delivery_coordinates
+    in
     match user_row_origin with
     | Keeper_chat_store.Needs_append ->
       Keeper_chat_store.append_user_message_once
@@ -1671,6 +1464,10 @@ let process_single_turn ~user_row_origin ~submission
         ~attachments:payload.attachments
         ~surface:chat_surface
         ~speaker:chat_speaker
+        ?conversation_id
+        ?external_message_id
+        ?workspace_id
+        ~extra_mentions:operation_extra_mentions
         ()
       |> Result.map (fun _ -> ())
     | Keeper_chat_store.Already_persisted _
@@ -1680,6 +1477,7 @@ let process_single_turn ~user_row_origin ~submission
   let append_queued_assistant_once ~content ?(tool_calls = []) ?blocks ?turn_ref () =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
+    let conversation_id, _, _ = operation_delivery_coordinates in
     Keeper_chat_store.append_assistant_message_once
       ~base_dir:base_path
       ~keeper_name:payload.name
@@ -1687,6 +1485,7 @@ let process_single_turn ~user_row_origin ~submission
       ~content
       ~tool_calls
       ~surface:chat_surface
+      ?conversation_id
       ?blocks
       ?turn_ref
       ~stream_lifecycle:completed_stream_lifecycle
@@ -1696,6 +1495,7 @@ let process_single_turn ~user_row_origin ~submission
   let append_queued_transport_failure_once ?(tool_calls = []) ?blocks ?turn_ref content =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
+    let conversation_id, _, _ = operation_delivery_coordinates in
     Keeper_chat_store.append_assistant_message_once
       ~base_dir:base_path
       ~keeper_name:payload.name
@@ -1703,6 +1503,7 @@ let process_single_turn ~user_row_origin ~submission
       ~content
       ~tool_calls
       ~surface:chat_surface
+      ?conversation_id
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
       ?blocks
       ?turn_ref
@@ -1713,12 +1514,14 @@ let process_single_turn ~user_row_origin ~submission
   let append_queued_tool_calls_once ?turn_ref tool_calls =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
+    let conversation_id, _, _ = operation_delivery_coordinates in
     Keeper_chat_store.append_tool_calls_once
       ~base_dir:base_path
       ~keeper_name:payload.name
       ~delivery_key
       ~tool_calls
       ~surface:chat_surface
+      ?conversation_id
       ?turn_ref
       ()
     |> Result.map (fun _ -> ())
@@ -1766,22 +1569,6 @@ let process_single_turn ~user_row_origin ~submission
     set_direct_delivery_checkpoint running;
     Ok ()
   in
-  let direct_user_row_origin () =
-    match !direct_delivery_checkpoint with
-    | Some
-        { Keeper_chat_direct_delivery.phase =
-            Keeper_chat_direct_delivery.Running { user_row_id }
-        ; _
-        } ->
-      Ok (Keeper_chat_store.Already_persisted { row_id = user_row_id })
-    | Some checkpoint ->
-      Error
-        (Printf.sprintf
-           "direct Keeper delivery cannot hand off to the queue from phase=%s"
-           (Keeper_chat_direct_delivery.phase_kind_to_string
-              (Keeper_chat_direct_delivery.phase_kind checkpoint.phase)))
-    | None -> Error "direct Keeper delivery checkpoint is unavailable"
-  in
   let on_queue_turn_admitted () =
     let ( let* ) = Result.bind in
     let* () =
@@ -1794,7 +1581,7 @@ let process_single_turn ~user_row_origin ~submission
          | Error detail ->
            queue_claim_failure := Some detail;
            Error detail)
-      | Direct_request ->
+      | Owner_operation _ | Direct_request ->
         let detail =
           "direct Keeper turn reached the queued receipt claim boundary"
         in
@@ -2010,45 +1797,46 @@ let process_single_turn ~user_row_origin ~submission
             detail
         in
         let on_admitted =
-          if queued_turn then Some on_queue_turn_admitted else None
+          match submission with
+          | Queued_receipt _ -> Some on_queue_turn_admitted
+          | Direct_request | Owner_operation _ -> None
+        in
+        let admission_token =
+          match submission with
+          | Owner_operation { admission_token; _ } -> Some admission_token
+          | Direct_request | Queued_receipt _ -> None
+        in
+        let payload_identity =
+          let direct_target =
+            Keeper_invocation_contract.direct_message_target_name direct_message
+          in
+          if String.equal payload.name direct_target && String.trim payload.name <> ""
+          then Ok ()
+          else Error "Keeper chat payload identity does not match its direct message"
+        in
+        let operation_prepare =
+          match payload_identity, submission with
+          | Error _ as error, _ -> error
+          | Ok (), Owner_operation _ -> append_queued_user_row_once ()
+          | Ok (), (Direct_request | Queued_receipt _) -> Ok ()
         in
         let dispatch_result =
-          try
-            if dashboard_direct_stream then
-              match
-                execute_keeper_stream_tool_streaming_if_free ~sw:request_sw ~clock
-                  ?auth_token
-                  state ~agent_name ~message:direct_message ~on_event
-                  ~continuation_channel
-                  ~on_text_delta:(fun _ -> ())
-              with
-              | `Ran result -> Ok (`Ran result)
-              | `Busy rejection ->
-                  (match direct_user_row_origin () with
-                   | Error message -> Error message
-                   | Ok user_row_origin ->
-                     (match
-                        dashboard_deferred_chat_of_rejection
-                          ~clock
-                          ~thread_id
-                          ~user_row_origin
-                          payload
-                          rejection
-                      with
-                      | Ok queued -> Ok (`Queued queued)
-                      | Error message -> Error message))
-            else
-              (match
-                 execute_keeper_stream_tool_streaming
-                   ~sw:request_sw
-                   ~clock
-                   ?auth_token
-                   state ~agent_name ~message:direct_message ~on_event
-                   ~continuation_channel ~on_text_delta:(fun _ -> ())
-                   ?on_admitted
-               with
-               | `Ran result -> Ok (`Ran result)
-               | `Deferred rejection -> Ok (`Deferred rejection))
+          match operation_prepare with
+          | Error _ as error -> error
+          | Ok () ->
+           (try
+            match
+              execute_keeper_stream_tool_streaming
+                ~sw:request_sw
+                ~clock
+                ?auth_token
+                state ~agent_name ~message:direct_message ~on_event
+                ~continuation_channel ~on_text_delta:(fun _ -> ())
+                ?admission_token
+                ?on_admitted
+            with
+            | `Ran result -> Ok (`Ran result)
+            | `Deferred rejection -> Ok (`Deferred rejection)
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
@@ -2062,7 +1850,7 @@ let process_single_turn ~user_row_origin ~submission
                  accumulator. Terminalize the original streaming attempt;
                  [persist_failure_reply] retains the calls and media it
                  actually emitted. *)
-              Error (Printexc.to_string exn)
+              Error (Printexc.to_string exn))
         in
         match !queue_claim_failure, dispatch_result with
         | Some detail, _ ->
@@ -2094,38 +1882,6 @@ let process_single_turn ~user_row_origin ~submission
                    ; ("admission", admission_rejection_to_json rejection)
                    ])
               ()
-        | None, Ok (`Queued queued) ->
-            let data =
-              dashboard_deferred_chat_to_json ~keeper_name:payload.name queued
-            in
-            let body = Yojson.Safe.to_string data in
-            let committed =
-              commit_direct_terminal
-                ~ok:true
-                ~body
-                ~data:(Some data)
-                Keeper_chat_direct_delivery.No_assistant_reply
-            in
-            (match committed with
-             | Ok () ->
-               push_worker_event (Stream_dashboard_queued queued);
-               Tool_result.make_ok
-                 ~tool_name:"masc_keeper_msg"
-                 ~start_time
-                 ~data
-                 ()
-             | Error detail ->
-               push_worker_event
-                 (Stream_terminal
-                    { status = Stream_error
-                    ; body = detail
-                    ; queued_outcome = None
-                    });
-               Tool_result.error
-                 ~failure_class:Tool_result.Runtime_failure
-                 ~tool_name:"masc_keeper_msg"
-                 ~start_time
-                 detail)
         | None, Ok (`Ran (true, body)) ->
           (match canonical_reply_payload_of_body ~redact_text body with
            | Error error ->
@@ -2518,7 +2274,7 @@ let process_single_turn ~user_row_origin ~submission
   in
   let submit_result =
     match submission with
-    | Queued_receipt { execution_sw; _ } ->
+    | Owner_operation { execution_sw; _ } | Queued_receipt { execution_sw; _ } ->
       (try
          Eio.Fiber.fork ~sw:execution_sw (fun () ->
            (match Eio.Switch.run (fun request_sw -> run_turn request_sw) with
@@ -2690,13 +2446,16 @@ let process_single_turn ~user_row_origin ~submission
          Log.Keeper.warn
            "keeper_stream: request rejected before acceptance keeper=%s status=%s message=%s"
            payload.name status_label message);
-      Keeper_chat_events.publish events
-        (Request_terminal
-           { request_id
-           ; keeper_name = payload.name
-           ; status = chat_request_terminal_status status
-           ; message = String_util.trim_to_option message
-           })
+      (match submission with
+       | Owner_operation _ -> ()
+       | Direct_request | Queued_receipt _ ->
+         Keeper_chat_events.publish events
+           (Request_terminal
+              { request_id
+              ; keeper_name = payload.name
+              ; status = chat_request_terminal_status status
+              ; message = String_util.trim_to_option message
+              }))
   in
   let next_worker_projection () =
     if Atomic.get client_disconnected
@@ -2771,17 +2530,6 @@ let process_single_turn ~user_row_origin ~submission
           ~status:(Request_stream Stream_cancelled)
           ~message
           ();
-        Keeper_chat_events.publish events Text_message_end;
-        Keeper_chat_events.publish events (Run_finished { run_id });
-        None
-    | `Completion (Completion_dashboard_queued queued) ->
-        let message =
-          dashboard_deferred_ack_text ~keeper_name:payload.name queued
-        in
-        publish_terminal ~status:Request_queued ~message ();
-        Keeper_chat_events.publish events (Text_delta message);
-        Keeper_chat_events.publish events
-          (chat_queued_event ~keeper_name:payload.name queued);
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         None
@@ -2911,6 +2659,206 @@ let process_single_turn ~user_row_origin ~submission
       signal_stream_projection_done ();
       raise exn
 
+let operation_executor ~state ~clock : Keeper_owner.operation_executor =
+  fun ~sw ~keeper_name ~claim ->
+  let failed ?outcome_ref kind detail =
+    Keeper_owner.Operation_failed { kind; detail; outcome_ref }
+  in
+  let execute_admitted admission_token =
+    match claim () with
+    | Error error ->
+      failed "Store_unavailable" (Keeper_owner.error_to_string error)
+    | Ok None ->
+      failed "No_queued_operation" "Owner FIFO head disappeared before claim"
+    | Ok (Some operation) ->
+      (match operation.input with
+       | None ->
+         failed "Invalid_input" "Running Keeper chat operation has no execution input"
+       | Some input ->
+         (match
+            operation_payload_of_json
+              ~keeper_name
+              ~operation_id:operation.operation_id
+              ~source:operation.source
+              ~input
+          with
+          | Error detail -> failed "Invalid_input" detail
+          | Ok operation_payload ->
+            let payload = operation_payload.payload in
+            let operation_id =
+              Keeper_owner.Chat_operation.Operation_id.to_string operation.operation_id
+            in
+            let events = Keeper_chat_events.create () in
+            let closed = ref false in
+            let delivery, resolve_delivery = Eio.Promise.create () in
+            let settle_delivery result =
+              ignore (Eio.Promise.try_resolve resolve_delivery result : bool)
+            in
+            let drain_events () =
+              let rec loop () =
+                match Keeper_chat_events.subscribe events with
+                | Keeper_chat_events.Run_finished _
+                | Keeper_chat_events.Event_error _ -> ()
+                | _ -> loop ()
+              in
+              loop ()
+            in
+            let fork_adapter run =
+              Eio.Fiber.fork ~sw (fun () ->
+                match run () with
+                | () -> ()
+                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                | exception exn ->
+                  settle_delivery (Error (Printexc.to_string exn));
+                  drain_events ())
+            in
+            (match operation_payload.source.continuation_channel with
+             | Keeper_continuation_channel.Dashboard _ ->
+               fork_adapter (fun () ->
+                 let redaction =
+                   Keeper_secret_redaction.snapshot
+                     ~base_path:(Mcp_server.workspace_config state).base_path
+                     ~keeper_name
+                 in
+                 let redact_text = Keeper_secret_redaction.redact_text redaction in
+                 let redact_json = Keeper_secret_redaction.redact_json redaction in
+                 let rec loop projection =
+                   let event = Keeper_chat_events.subscribe events in
+                   let projection, projected =
+                     Server_keeper_chat_agui_projection.project
+                       ~timestamp:(Time_compat.now ())
+                       ~redact_text
+                       ~redact_json
+                       projection
+                       event
+                   in
+                   Option.iter
+                     (fun event ->
+                        Keeper_chat_broadcast.operation_event
+                          ~keeper_name
+                          ~operation_id
+                          ~event;
+                        publish_operation_live_event ~operation_id event)
+                     projected;
+                   if Server_keeper_chat_agui_projection.is_terminal event
+                   then settle_delivery (Ok ())
+                   else loop projection
+                 in
+                 loop Server_keeper_chat_agui_projection.initial)
+             | Keeper_continuation_channel.Discord { channel_id; _ } ->
+               (match Sys.getenv_opt "DISCORD_BOT_TOKEN" with
+                | Some token when String.trim token <> "" ->
+                  fork_adapter (fun () ->
+                    Keeper_chat_discord.adapter_loop
+                      ~clock
+                      ~token:(String.trim token)
+                      ~channel_id
+                      ~events
+                      ~on_send_result:(fun result ->
+                        settle_delivery
+                          (Result.map_error
+                             (fun error ->
+                                Format.asprintf "%a" Keeper_chat_discord.pp_error error)
+                             result))
+                      ())
+                | Some _ | None ->
+                  settle_delivery (Error "DISCORD_BOT_TOKEN is not configured");
+                  fork_adapter drain_events)
+             | Keeper_continuation_channel.Slack { channel_id; thread_ts; _ } ->
+               (match Env_config_slack.bot_token_opt () with
+                | Some token ->
+                  fork_adapter (fun () ->
+                    Keeper_chat_slack.adapter_loop
+                      ~clock
+                      ~token
+                      ~channel:channel_id
+                      ?thread_ts
+                      ~events
+                      ~on_send_result:(fun result ->
+                        settle_delivery
+                          (Result.map_error
+                             (fun error ->
+                                Format.asprintf "%a" Keeper_chat_slack.pp_error error)
+                             result))
+                      ())
+                | None ->
+                  settle_delivery (Error "SLACK_BOT_TOKEN is not configured");
+                  fork_adapter drain_events)
+             | Keeper_continuation_channel.Unrouted { reason } ->
+               settle_delivery (Error ("unrouted Keeper chat operation: " ^ reason));
+               fork_adapter drain_events);
+            let agent_name =
+              if has_external_speaker payload
+              then
+                Gate_keeper_backend.agent_name_for_channel_actor
+                  ~channel:payload.channel
+                  ~channel_workspace_id:payload.channel_workspace_id
+                  ~channel_user_id:payload.channel_user_id
+              else operation_payload.source.submitted_by
+            in
+            let outcome =
+              process_single_turn
+                ~user_row_origin:operation_payload.source.user_row_origin
+                ~submission:
+                  (Owner_operation
+                     { operation_id = operation.operation_id
+                     ; admission_token
+                     ; execution_sw = sw
+                     ; surface = operation_payload.source.surface
+                     ; speaker = chat_speaker_of_request payload
+                     ; conversation_id = operation_payload.source.conversation_id
+                     ; external_message_id = operation_payload.source.external_message_id
+                     ; workspace_id = operation_payload.source.workspace_id
+                     ; extra_mentions = operation_payload.source.extra_mentions
+                     })
+                ~state
+                ~clock
+                ~auth_token:None
+                ~thread_id:operation_payload.source.thread_id
+                ~continuation_channel:operation_payload.source.continuation_channel
+                ~closed
+                ~client_disconnects:None
+                ~payload
+                ~run_id:("keeper-operation-run-" ^ operation_id)
+                ~message_id:("keeper-operation-message-" ^ operation_id)
+                ~agent_name
+                ~submitted_by:operation_payload.source.submitted_by
+                ~events
+            in
+            let delivery = Eio.Promise.await delivery in
+            (match outcome, delivery with
+             | Some (Delivered { outcome_ref }), Ok () ->
+               Keeper_owner.Operation_succeeded { outcome_ref }
+             | Some (Delivered { outcome_ref }), Error detail ->
+               failed ~outcome_ref "Delivery_failed" detail
+             | Some (Failed { kind; detail }), _ ->
+               failed (queued_turn_failure_kind_to_string kind) detail
+             | Some (Deferred _), _ ->
+               failed
+                 "Admission_invariant"
+                 "Owner operation deferred after holding its admission token"
+             | None, _ ->
+               failed "Turn_invariant" "Owner operation returned no terminal turn outcome")))
+  in
+  let rec await_admission () =
+    match
+      Keeper_turn_admission.run_serialized_with_token
+        ~base_path:(Mcp_server.workspace_config state).base_path
+        ~keeper_name
+        execute_admitted
+    with
+    | `Ran execution -> execution
+    | `Rejected { shutdown_operation_id = Some _; _ } ->
+      Eio.Time.sleep clock 0.1;
+      await_admission ()
+    | `Rejected { shutdown_operation_id = None; _ } ->
+      failed
+        "Admission_invariant"
+        "Keeper chat admission rejected without a shutdown owner"
+  in
+  await_admission ()
+;;
+
 let keeper_chat_stream_headers origin =
   Httpun.Headers.of_list
     ([
@@ -2925,34 +2873,37 @@ let keeper_chat_stream_headers origin =
      ]
     @ cors_headers origin)
 
+let operation_submit_error_code = function
+  | Keeper_owner_registry.Command_lifecycle_reserved _ -> "owner_stopping"
+  | Command_lookup_failed Inventory_stopping -> "owner_stopping"
+  | Command_lookup_failed
+      (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
+      | Owner_initialization_failed _) ->
+    "store_unavailable"
+  | Command_rejected (Keeper_owner.Owner_stopping | Owner_closed) -> "owner_stopping"
+  | Command_rejected (Keeper_owner.Operation_rejected error) ->
+    (match Keeper_owner.operation_error_kind error with
+     | Invalid_operation_input -> "invalid_input"
+     | Unknown_operation -> "unknown_operation"
+     | Operation_not_queued -> "not_queued"
+     | Operation_idempotency_conflict -> "idempotency_conflict"
+     | Operation_store_unavailable -> "store_unavailable")
+  | Command_rejected
+      (Keeper_owner.Store_unavailable _ | Reducer_rejected _) ->
+    "store_unavailable"
+;;
+
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
-  let redaction =
-    Keeper_secret_redaction.snapshot
-      ~base_path:(Mcp_server.workspace_config state).base_path
-      ~keeper_name:payload.name
-  in
-  let redact_text = Keeper_secret_redaction.redact_text redaction in
-  let redact_json = Keeper_secret_redaction.redact_json redaction in
   let origin = get_origin request in
   let headers = keeper_chat_stream_headers origin in
   let response = Httpun.Response.create ~headers `OK in
   let writer = Httpun.Reqd.respond_with_streaming reqd response in
   let mutex = Eio.Mutex.create () in
   let closed = ref false in
-  let client_disconnects = Eio.Stream.create 1 in
-  let disconnect_notified = ref false in
-  let notify_disconnect () =
-    if not !disconnect_notified then begin
-      disconnect_notified := true;
-      Eio.Stream.add client_disconnects ()
-    end
-  in
   let close_stream () =
-    if not !closed then begin
+    if not !closed
+    then begin
       closed := true;
-      (* An ordinary close failure is logged and absorbed so it cannot mask the
-         exception that triggered [Switch.on_release]. Cancellation remains a
-         control-flow signal and must propagate. *)
       (try Httpun.Body.Writer.close writer
        with
        | Eio.Cancel.Cancelled _ as e ->
@@ -2962,137 +2913,121 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
            (Printexc.to_string exn))
     end
   in
-  let now_id () = int_of_float (Time_compat.now () *. 1000.0) in
   let thread_id = "keeper:" ^ payload.name in
-  let continuation_channel =
-    match Keeper_continuation_channel.dashboard ~thread_id with
-    | Ok channel -> channel
-    | Error message -> invalid_arg message
+  let operation_id =
+    Keeper_owner.Chat_operation.Operation_id.to_string payload.request_id
   in
-
-  let sse_adapter_loop ~events ~writer ~mutex ~closed ~on_closed ~on_finished =
-    let rec loop projection =
-      if not !closed then begin
-        let event = Keeper_chat_events.subscribe events in
-        let projection, projected =
-          Server_keeper_chat_agui_projection.project
-            ~timestamp:(Time_compat.now ())
-            ~redact_text ~redact_json projection event
-        in
-        let sent =
-          match projected with
-          | None -> true
-          | Some event ->
-              keeper_stream_send_event ~on_closed writer mutex closed event
-        in
-        if sent && not (Server_keeper_chat_agui_projection.is_terminal event)
-        then loop projection
-      end
-    in
-    match loop Server_keeper_chat_agui_projection.initial with
-    | () -> on_finished ()
-    | exception exn ->
-        on_finished ();
-        raise exn
+  let finished, resolve_finished = Eio.Promise.create () in
+  let finish () =
+    ignore (Eio.Promise.try_resolve resolve_finished () : bool)
   in
-
-
   ignore
-    (keeper_stream_send_raw ~on_closed:notify_disconnect writer mutex closed
+    (keeper_stream_send_raw writer mutex closed
        (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms));
   Eio.Fiber.fork ~sw (fun () ->
-      ignore
-        (Eio.Switch.run @@ fun stream_sw ->
-           Eio.Switch.on_release stream_sw close_stream;
-           let has_external_actor = has_external_speaker payload in
-           let agent_name =
-             if has_external_actor then
-               Gate_keeper_backend.agent_name_for_channel_actor
-                 ~channel:payload.channel
-                 ~channel_workspace_id:payload.channel_workspace_id
-                 ~channel_user_id:payload.channel_user_id
-             else submitted_by
-           in
-           let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
-           let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
-           let events = Keeper_chat_events.create () in
-           let adapter_finished, adapter_finished_resolver =
-             Eio.Promise.create ()
-           in
-           let signal_adapter_finished () =
-             (* fire-and-forget: the adapter-finished signal is idempotent. *)
-             ignore (Eio.Promise.try_resolve adapter_finished_resolver () : bool)
-           in
-           Eio.Fiber.fork ~sw:stream_sw (fun () ->
-             sse_adapter_loop ~events ~writer ~mutex ~closed
-               ~on_closed:notify_disconnect ~on_finished:signal_adapter_finished);
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           let wait_for_adapter_finished () =
-             Eio.Promise.await adapter_finished
-           in
-           let run_now () =
-             (* Dashboard stream route: no gate inbound boundary recorded this
-                user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
-             ignore
-               (process_single_turn
-                  ~user_row_origin:Keeper_chat_store.Needs_append
-                  ~submission:Direct_request ~state ~clock
-                  ~auth_token:(auth_token_from_request request)
-                  ~thread_id ~continuation_channel ~closed
-                  ~client_disconnects:(Some (stream_sw, client_disconnects))
-                  ~payload ~run_id ~message_id ~agent_name ~submitted_by ~events
-                : queued_turn_outcome option);
-             wait_for_adapter_finished ()
-           in
-           if has_external_speaker payload then run_now ()
-           else
-             match
-               try
-                 defer_dashboard_payload_if_busy
-                   ~base_path
-                   ~clock
-                   ~thread_id
-                   payload
-               with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn -> `Queue_error (Printexc.to_string exn)
-             with
-             | `Not_busy -> run_now ()
-             | `Queued queued ->
-                 Log.Keeper.info
-                   "keeper_stream: deferred busy dashboard message keeper=%s pending_count=%d inflight_count=%d"
-                   payload.name queued.pending_count queued.inflight_count;
-                 Keeper_chat_events.publish events
-                   (Run_started { run_id; thread_id });
-                 Keeper_chat_events.publish events
-                   (Text_message_start
-                      { message_id; role = Keeper_chat_events.Assistant });
-                 Keeper_chat_events.publish events
-                   (Text_delta
-                      (dashboard_deferred_ack_text
-                         ~keeper_name:payload.name
-                         queued));
-                 Keeper_chat_events.publish events
-                   (chat_queued_event ~keeper_name:payload.name queued);
-                 Keeper_chat_events.publish events Text_message_end;
-                 Keeper_chat_events.publish events (Run_finished { run_id });
-                 wait_for_adapter_finished ()
-             | `Queue_error message ->
-                 Log.Keeper.error
-                   "keeper_stream: failed to defer busy dashboard message keeper=%s: %s"
-                   payload.name message;
-                 Keeper_chat_events.publish events
-                   (Run_started { run_id; thread_id });
-                 Keeper_chat_events.publish events
-                   (Event_error
-                      { message =
-                          "keeper chat queue persistence failed: " ^ message
-                      });
-                 Keeper_chat_events.publish events (Run_finished { run_id });
-                 wait_for_adapter_finished ();
-           (* Queue drain is handled by Keeper_chat_consumer
-              (started in server_bootstrap_loops). *)
-           ))
+    Eio.Switch.run (fun stream_sw ->
+      Eio.Switch.on_release stream_sw close_stream;
+      let accepted = ref false in
+      let buffered = ref [] in
+      let buffered_mu = Stdlib.Mutex.create () in
+      let send_event event =
+        let sent = keeper_stream_send_event writer mutex closed event in
+        if
+          (not sent)
+          || match event.Ag_ui.event_type with
+             | Ag_ui.Run_finished | Ag_ui.Run_error -> true
+             | Run_started | Step_started | Step_finished | Text_message_start
+             | Text_message_content | Text_message_end | Tool_call_start
+             | Tool_call_args | Tool_call_end | State_snapshot | State_delta
+             | Custom -> false
+        then finish ()
+      in
+      let sink event =
+        let send_now =
+          Stdlib.Mutex.protect buffered_mu (fun () ->
+            if !accepted
+            then true
+            else (
+              buffered := event :: !buffered;
+              false))
+        in
+        if send_now then send_event event
+      in
+      let unregister = register_operation_live_sink ~operation_id sink in
+      Eio.Switch.on_release stream_sw unregister;
+      let publish_acceptance acceptance =
+        let operation = acceptance.Keeper_owner.operation in
+        let state =
+          match operation.state with
+          | Keeper_owner.Chat_operation.Queued -> "Queued"
+          | Running _ -> "Running"
+          | Succeeded _ -> "Succeeded"
+          | Failed _ -> "Failed"
+          | Cancelled _ -> "Cancelled"
+        in
+        let event =
+          Ag_ui.of_custom
+            ~name:"KEEPER_CHAT_OPERATION_ACCEPTED"
+            (`Assoc
+               [ "operation_id", `String operation_id
+               ; "state", `String state
+               ; "queued_count", `Int acceptance.queued_count
+               ])
+        in
+        ignore (keeper_stream_send_event writer mutex closed event);
+        let pending =
+          Stdlib.Mutex.protect buffered_mu (fun () ->
+            accepted := true;
+            let pending = List.rev !buffered in
+            buffered := [];
+            pending)
+        in
+        List.iter send_event pending;
+        if Keeper_owner.Chat_operation.is_terminal operation.state then finish ()
+      in
+      let submit_result =
+        let ( let* ) = Result.bind in
+        let* source =
+          operation_source_of_payload
+            ~thread_id
+            ~submitted_by
+            ~user_row_origin:Keeper_chat_store.Needs_append
+            payload
+          |> Result.map_error (fun detail -> `Input detail)
+        in
+        Keeper_owner_registry.submit_operation
+          ~base_path:(Mcp_server.workspace_config state).base_path
+          ~keeper_name:payload.name
+          ~operation_id:payload.request_id
+          ~source
+          ~input:(operation_input_of_payload payload)
+        |> Result.map_error (fun error -> `Owner error)
+      in
+      (match submit_result with
+       | Ok acceptance -> publish_acceptance acceptance
+       | Error (`Input detail) ->
+         ignore
+           (keeper_stream_send_event
+              writer
+              mutex
+              closed
+              (Ag_ui.run_error ~thread_id ~message:detail ~code:"invalid_input" ()));
+         finish ()
+       | Error (`Owner error) ->
+         let detail = Keeper_owner_registry.command_error_to_string error in
+         let code = operation_submit_error_code error in
+         ignore
+           (keeper_stream_send_event
+              writer
+              mutex
+              closed
+              (Ag_ui.run_error
+                 ~thread_id
+                 ~message:detail
+                 ~code
+                 ()));
+         finish ());
+      Eio.Promise.await finished))
 
 (** Build routes for MCP server *)
 
@@ -3105,30 +3040,6 @@ module For_testing = struct
   let chat_speaker_of_request = chat_speaker_of_request
   let turn_instructions_for_request = turn_instructions_for_request
   let direct_message_of_request = direct_message_of_request
-  let defer_dashboard_payload_if_busy_evidence
-        ~base_path
-        ~clock
-        ~thread_id
-        payload
-    =
-    match
-      defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload
-    with
-    | `Not_busy -> `Not_busy
-    | `Queued queued ->
-        `Queued
-          ( dashboard_deferred_chat_to_json ~keeper_name:payload.name queued
-          , dashboard_deferred_ack_text ~keeper_name:payload.name queued )
-    | `Queue_error message -> `Queue_error message
-
-  let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload =
-    match
-      defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload
-    with
-    | `Not_busy -> `Not_busy
-    | `Queued queued -> `Queued queued.pending_count
-    | `Queue_error message -> `Queue_error message
-
   let canonical_reply_payload_of_body = canonical_reply_payload_of_body
   let direct_reply_terminal_error = direct_reply_terminal_error
   let persisted_reply_blocks = persisted_reply_blocks
@@ -3154,7 +3065,7 @@ module For_testing = struct
         settlement
     with
     | Some (Completion_terminal { body; _ }) -> Some body
-    | Some (Completion_dashboard_queued _ | Completion_queued_turn_deferred _)
+    | Some (Completion_queued_turn_deferred _)
     | None ->
       None
   ;;

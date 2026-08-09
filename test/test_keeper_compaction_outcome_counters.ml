@@ -24,7 +24,7 @@ let with_workspace f =
        Eio.Switch.run @@ fun sw ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       (match Masc.Keeper_owner_registry.install_from_store ~sw config with
+       (match Masc.Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
         | Ok 0 -> ()
         | Ok count -> failf "unexpected initial owner count: %d" count
         | Error error ->

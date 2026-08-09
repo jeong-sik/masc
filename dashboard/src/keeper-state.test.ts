@@ -307,7 +307,7 @@ describe('thread history merge & persistence', () => {
     // placeholder keeps text='' with only the accumulated tool trace and
     // never received REPLY_DETAILS (turnRef stays null). The real reply
     // arrives later as a REST history row. The backend stamps
-    // delivery_key.request_id ('kmsg-...') on user/assistant rows, so
+    // delivery_key.operation ('kmsg-...') on user/assistant rows, so
     // history convergence must fold the placeholder into the history row
     // instead of leaving a second "턴 타임라인" behind.
     const R = 'kmsg_turn_1'
@@ -356,10 +356,10 @@ describe('thread history merge & persistence', () => {
     }))
 
     const history = chatHistoryEntriesFromRest('echo', [
-      { role: 'user', content: '질문', ts: 1_780_000_001, delivery_key: { kind: 'direct_request', request_id: R } },
+      { role: 'user', content: '질문', ts: 1_780_000_001, delivery_key: { kind: 'operation', request_id: R } },
       { role: 'tool', content: '{"path":"a"}', ts: 1_780_000_002, tool_call_id: 'call-1', tool_call_name: 'read_file' },
       { role: 'tool', content: '{"path":"b"}', ts: 1_780_000_003, tool_call_id: 'call-2', tool_call_name: 'write_file' },
-      { role: 'assistant', content: '답변', ts: 1_780_000_004, turn_ref: 'trace-x#1', delivery_key: { kind: 'direct_request', request_id: R } },
+      { role: 'assistant', content: '답변', ts: 1_780_000_004, turn_ref: 'trace-x#1', delivery_key: { kind: 'operation', request_id: R } },
     ])
     mergeServerHistoryEntries('echo', history)
 
@@ -400,115 +400,6 @@ describe('thread history merge & persistence', () => {
 
     const thread = keeperThreads.value.echo ?? []
     expect(thread.map(e => e.id)).toEqual(['local-legacy', 'hist-legacy'])
-  })
-
-  // Live 2026-07-28: a keeper that was busy answered through the queue lane,
-  // so the stream carried KEEPER_CHAT_QUEUED (receipt_id, no request_id) and
-  // died before REPLY_DETAILS. The assistant placeholder therefore holds the
-  // tool trace with a queue receipt and no turnRef, and the REST row carries
-  // the same receipt. Both rendered as separate "턴 타임라인" blocks, and only
-  // the placeholder had per-tool durations.
-  it('converges a queue-lane assistant placeholder that holds the tool trace', () => {
-    const receiptId = 'chatq_00000000-0000-4000-8000-000000000002'
-    const traceSteps: ChatTraceStep[] = [
-      { kind: 'tool', name: 'WebSearch', toolCallId: 'call-q1', status: 'ok' },
-      { kind: 'tool', name: 'WebFetch', toolCallId: 'call-q2', status: 'ok' },
-    ]
-    appendThreadEntry('echo', entry({
-      id: 'local-queued-assistant',
-      role: 'assistant',
-      text: '',
-      rawText: '',
-      delivery: 'sending',
-      timestamp: null,
-      turnRef: null,
-      traceSteps,
-      details: { queueReceiptId: receiptId },
-    }))
-
-    const history = chatHistoryEntriesFromRest('echo', [{
-      id: 'history-queued-assistant',
-      role: 'assistant',
-      content: '검색 결과 요약',
-      ts: 1_780_000_002,
-      delivery_key: {
-        kind: 'queue_receipts',
-        receipt_ids: [receiptId],
-      },
-    }])
-
-    mergeServerHistoryEntries('echo', history)
-
-    const assistants = (keeperThreads.value.echo ?? []).filter(candidate => candidate.role === 'assistant')
-    expect(assistants).toHaveLength(1)
-    expect(
-      (assistants[0]?.traceSteps ?? [])
-        .filter((step): step is Extract<ChatTraceStep, { kind: 'tool' }> => step.kind === 'tool')
-        .map(step => step.toolCallId),
-    ).toEqual(['call-q1', 'call-q2'])
-  })
-
-  it('converges queue-lane user rows through an exact durable receipt', () => {
-    const receiptId = 'chatq_00000000-0000-4000-8000-000000000001'
-    appendThreadEntry('echo', entry({
-      id: 'local-queued-user',
-      role: 'user',
-      text: 'same queued message',
-      rawText: 'same queued message',
-      delivery: 'delivered',
-      details: { queueReceiptId: receiptId },
-    }))
-
-    const history = chatHistoryEntriesFromRest('echo', [{
-      id: 'history-queued-user',
-      role: 'user',
-      content: 'same queued message',
-      ts: 1_780_000_001,
-      delivery_key: {
-        kind: 'queue_receipts',
-        receipt_ids: [receiptId],
-      },
-    }])
-    expect(history[0]?.requestId).toBeNull()
-    expect(history[0]?.queueReceiptIds).toEqual([receiptId])
-
-    mergeServerHistoryEntries('echo', history)
-
-    const users = (keeperThreads.value.echo ?? []).filter(candidate => candidate.role === 'user')
-    expect(users).toHaveLength(1)
-    expect(users[0]?.id).toBe('history-queued-user')
-    expect(users[0]?.delivery).toBe('history')
-  })
-
-  it('rejects a malformed queue receipt list instead of falling back to role/text', () => {
-    const receiptId = 'chatq_00000000-0000-4000-8000-000000000001'
-    appendThreadEntry('echo', entry({
-      id: 'local-malformed-receipt',
-      role: 'user',
-      text: 'same queued message',
-      rawText: 'same queued message',
-      delivery: 'delivered',
-      details: { queueReceiptId: receiptId },
-    }))
-
-    const history = chatHistoryEntriesFromRest('echo', [{
-      id: 'history-malformed-receipt',
-      role: 'user',
-      content: 'same queued message',
-      ts: 1_780_000_001,
-      delivery_key: {
-        kind: 'queue_receipts',
-        receipt_ids: [receiptId, 7],
-      },
-    }])
-    expect(history[0]?.queueReceiptIds).toEqual([])
-
-    mergeServerHistoryEntries('echo', history)
-
-    expect((keeperThreads.value.echo ?? []).map(candidate => candidate.id).sort()).toEqual([
-      'history-malformed-receipt',
-      'local-malformed-receipt',
-    ])
   })
 
   it('converges rows through exact turnRef only when delivery keys are absent', () => {

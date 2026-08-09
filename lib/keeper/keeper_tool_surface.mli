@@ -56,6 +56,15 @@ val dispatch_keeper_msg_stream :
   message:Keeper_invocation_contract.direct_message ->
   tool_result option
 
+val dispatch_keeper_msg_stream_admitted :
+  admission_token:Keeper_turn_admission.token ->
+  ?on_text_delta:(string -> unit) ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  _ context ->
+  message:Keeper_invocation_contract.direct_message ->
+  tool_result option
+
 (** Non-blocking streaming dispatch for direct chat admission. The Keeper turn
     slot performs the authoritative post-lock durable-queue recheck; [`Busy]
     callers must route the accepted message to their deferred transport. *)

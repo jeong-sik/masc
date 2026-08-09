@@ -490,7 +490,10 @@ let codex_app_server_execution (provider : Runtime_schema.provider)
      | None ->
        Ok
          (Runtime_execution.Codex_app_server
-            { cli_path = command; model = Some spec.api_name; timeout_s = 300.0 }))
+            { cli_path = command
+            ; model = Some spec.api_name
+            ; timeout_s = Runtime_codex_app_server.default_timeout_s
+            }))
 ;;
 
 let runtime_antigravity_effort = function
@@ -585,7 +588,7 @@ let claude_code_execution (provider : Runtime_schema.provider)
          (Runtime_execution.Claude_code
             { cli_path = command
             ; model = Some spec.api_name
-            ; timeout_s = 300.0
+            ; timeout_s = Runtime_claude_code.default_timeout_s
             }))
 ;;
 

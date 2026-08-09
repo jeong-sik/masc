@@ -136,6 +136,31 @@ let invoke_turn_hook ~keeper_name ~turn_count ~hook_name hook event =
     event
 ;;
 
+let lifecycle_outcome = function
+  | Error error -> Agent_sdk.Agent_lifecycle_events.Failed error
+  | Ok ({ response; stop_reason; _ } : Runtime_agent.run_result) ->
+    (match stop_reason with
+     | Runtime_agent.Completed ->
+       Agent_sdk.Agent_lifecycle_events.Completed response
+     | Runtime_agent.InputRequired { request; _ } ->
+       Agent_sdk.Agent_lifecycle_events.Input_required request
+     | Runtime_agent.Yielded_to_chat_waiting { turns_used }
+     | Runtime_agent.Yielded_to_durable_stimulus { turns_used }
+     | Runtime_agent.Awaiting_external_effect { turns_used }
+     | Runtime_agent.Yielded_after_repeated_tool_call { turns_used; _ } ->
+       Agent_sdk.Agent_lifecycle_events.Yielded { turn = turns_used })
+;;
+
+let with_run_lifecycle_events ~event_bus ~keeper_name run =
+  Agent_sdk.Agent_lifecycle_events.with_run_lifecycle_events
+    ~event_bus
+    ~agent_name:keeper_name
+    ~raw_trace:None
+    ~current_run_id:(fun () -> None)
+    ~classify:lifecycle_outcome
+    run
+;;
+
 type prepared_turn =
   { messages : Agent_sdk.Types.message list
   ; system_prompt : string

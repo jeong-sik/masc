@@ -116,3 +116,12 @@ val dynamic_tools :
   terminal_error:string option ref ->
   raw_trace_run:Agent_sdk.Raw_trace.active_run option ->
   (dynamic_tool list, Agent_sdk.Error.sdk_error) result
+
+val with_run_lifecycle_events :
+  event_bus:Agent_sdk.Event_bus.t option ->
+  keeper_name:string ->
+  (unit -> (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result) ->
+  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+(** Publish the same typed start and terminal lifecycle owned by Agent Core.
+    Official clients own their internal model loop, so this host boundary is
+    the single MASC owner for those events. *)

@@ -284,6 +284,10 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
       init_runtime_default_for_snapshot base_dir;
       ignore (Workspace.init config ~agent_name:(Some "owner"));
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (match Keeper_owner_registry.install_from_store ~sw config with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
@@ -336,9 +340,16 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
             };
         }
       in
-      (match Keeper_meta_store.replace_snapshot config updated_meta with
-      | Ok () -> ()
-      | Error err -> Alcotest.fail err);
+      (match
+         Keeper_owner_registry.commit_turn_runtime
+           ~base_path:config.base_path
+           ~keeper_name
+           ~before:meta
+           ~after:updated_meta
+       with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.fail (Keeper_owner_registry.command_error_to_string error));
       Operator_control.invalidate_snapshot_cache ();
       let json =
         Operator_control.snapshot_json ~view:"summary"

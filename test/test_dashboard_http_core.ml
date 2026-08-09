@@ -3146,7 +3146,7 @@ let test_context_shrink_detection () =
     (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
 ;;
 
-let prepare_config_sync_keeper config name =
+let prepare_config_sync_keeper ~sw config name =
   let runtime_path = Filename.concat config.Workspace.base_path "runtime.toml" in
   write_file runtime_path config_sync_runtime_toml;
   (match Runtime.init_default ~config_path:runtime_path with
@@ -3176,9 +3176,13 @@ let prepare_config_sync_keeper config name =
       ; instructions = name ^ " config-sync fixture instructions"
       }
   in
-  match Masc.Keeper_meta_store.replace_snapshot config meta with
-  | Ok () -> ()
-  | Error error -> fail ("write meta: " ^ error)
+  (match Masc.Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error error -> fail ("write meta: " ^ error));
+  match Masc.Keeper_owner_registry.install_from_store ~sw config with
+  | Ok _ -> ()
+  | Error error ->
+    fail (Masc.Keeper_owner_registry.install_error_to_string error)
 
 let write_config_sync_toml config name =
   let dir =
@@ -3298,7 +3302,7 @@ let test_catchup_judge_prompt_failure_is_server_error () =
 let test_config_post_restarts_from_atomic_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-success" in
-  prepare_config_sync_keeper config name;
+  prepare_config_sync_keeper ~sw config name;
   let path = write_config_sync_toml config name in
   ignore
     (post_config ~sw ~clock:(Eio.Stdenv.clock env)
@@ -3321,7 +3325,7 @@ let test_config_post_restarts_from_atomic_toml () =
 let test_config_post_materializes_missing_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-no-toml" in
-  prepare_config_sync_keeper config name;
+  prepare_config_sync_keeper ~sw config name;
   Fun.protect
     ~finally:(fun () ->
       ignore
@@ -3358,7 +3362,7 @@ let test_config_post_materializes_missing_toml () =
 let test_config_post_reports_runtime_sync_failure () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-partial" in
-  prepare_config_sync_keeper config name;
+  prepare_config_sync_keeper ~sw config name;
   let toml_path = write_config_sync_toml config name in
   Sys.remove (Filename.concat config.base_path "runtime.toml");
   let raw, json =
@@ -3386,7 +3390,7 @@ let test_config_post_reports_runtime_sync_failure () =
 let test_config_post_prevalidates_mixed_request () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-invalid-mixed" in
-  prepare_config_sync_keeper config name;
+  prepare_config_sync_keeper ~sw config name;
   let toml_path = write_config_sync_toml config name in
   let raw, _ =
     post_config ~sw ~clock:(Eio.Stdenv.clock env)

@@ -1953,6 +1953,7 @@
 (include stanzas/test_runtime_antigravity.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
 (include stanzas/test_keeper_claude_code_runtime.inc)
+(include stanzas/test_server_dashboard_official_client_probe.inc)
 (include stanzas/test_official_client_session_store.inc)
 
 (include stanzas/test_runtime_provider_projection_boundary.inc)

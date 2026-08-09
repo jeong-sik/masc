@@ -775,11 +775,11 @@ jobs:
       - name: Build
         id: build_step
         env:
-          # Group 1 links hundreds of native test executables against the full
-          # masc_test_deps graph. Serializing this build bounds concurrent
-          # native-link disk pressure without changing the test backend or
-          # dropping native Domain/C-stub coverage.
-          DUNE_JOBS: "1"
+          # Two workers use the hosted runner's available parallelism while
+          # bounding concurrent native links. Run 31319982424 had 110 GB free
+          # after cleanup, so the former fully-serial setting no longer bought
+          # disk safety and made the cold compile the 24-minute critical path.
+          DUNE_JOBS: "2"
         # NO continue-on-error: dune build is deterministic and must hard-fail.
         # Focused test execution steps below are also required: any failing
         # suite fails the Build and Test job and blocks merge via the CI Gate.
@@ -1752,6 +1752,14 @@ jobs:
         with:
           name: release-evidence-main
           path: .release-evidence/
+
+      - name: Trim Dune cache for main publication
+        if: ${{ always() && steps.build_step.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          echo "Dune cache before trim: $(du -sh "${HOME}/.cache/dune" | cut -f1)"
+          opam exec -- dune cache trim --size=6GiB
+          echo "Dune cache after trim: $(du -sh "${HOME}/.cache/dune" | cut -f1)"
 
       - name: Config diagnostic drift report
         if: ${{ always() && steps.build_step.outcome == 'success' }}

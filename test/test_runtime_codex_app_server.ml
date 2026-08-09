@@ -1379,6 +1379,27 @@ let test_live_production_keeper_subscription () =
          | Ok result -> assert_production_keeper_result result)
 ;;
 
+let test_official_client_host_text_projection_is_hard_cut () =
+  (match
+     Keeper_official_client_host.text_of_blocks
+       ~runtime_label:"fixture"
+       ~field:"messages"
+       [ Agent_sdk.Types.Text "first"; Text "second" ]
+   with
+   | Ok text -> check string "text blocks preserve order" "first\nsecond" text
+   | Error error -> fail (Agent_sdk.Error.to_string error));
+  match
+    Keeper_official_client_host.text_of_blocks
+      ~runtime_label:"fixture"
+      ~field:"messages"
+      [ Agent_sdk.Types.Thinking { content = "private"; signature = None } ]
+  with
+  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; _ })) ->
+    check string "rejected field" "messages" field
+  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Ok _ -> fail "non-text official-client projection was silently admitted"
+;;
+
 let () =
   run "runtime codex app-server"
     [ ( "subscription boundary"
@@ -1462,6 +1483,10 @@ let () =
             "Keeper rejects unprojected turn parameters"
             `Quick
             test_keeper_rejects_unprojected_turn_parameters
+        ; test_case
+            "shared host text projection is hard-cut"
+            `Quick
+            test_official_client_host_text_projection_is_hard_cut
         ] )
     ; ( "live subscription"
       , [ test_case

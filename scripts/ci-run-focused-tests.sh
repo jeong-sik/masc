@@ -50,7 +50,7 @@ normal_targets=(
   @test/runtest-test_tool_schema_constraint_enforcement
   @test/runtest-test_keeper_artifact_read_request
   @test/runtest-test_tool_input_validation
-  @test/runtest-test_tool_schema_oas_boundary
+  @test/runtest-test_tool_schema_agent_core_boundary
   @test/runtest-test_tool_call_quality_benchmark
   @test/runtest-test_client_identity
   @test/runtest-test_mcp_session_task_lifecycle
@@ -113,7 +113,7 @@ normal_targets=(
 
 agent_core_targets=(
   @packages/agent_core/test/runtest
-  @test/runtest-test_keeper_hooks_oas_introspection
+  @test/runtest-test_keeper_hooks_agent_core_introspection
   @test/runtest-test_keeper_execution_join
   @test/runtest-test_hitl_summary_worker
 )

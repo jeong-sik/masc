@@ -367,7 +367,7 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
     ~subject_id:prepared.candidate.candidate_id
     ~actor:prepared.candidate.keeper_name
     ~started_at
-    ~input:prepared.candidate.judgment_request;
+    ~input:(Exact_lane_run_registry.Exact_input prepared.candidate.judgment_request);
   let complete outcome output =
     Exact_lane_run_registry.mark_completed
       registry

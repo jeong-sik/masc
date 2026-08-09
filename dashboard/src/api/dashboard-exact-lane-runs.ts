@@ -9,13 +9,17 @@ export type ExactLane =
 
 export type ExactLaneRunStatus = 'running' | 'succeeded' | 'cancelled' | 'failed'
 
+export type ExactLaneRunInput =
+  | { kind: 'exact'; payload: unknown }
+  | { kind: 'research'; rawTracePath: string | null; payload: unknown }
+
 export interface ExactLaneRunRecord {
   runId: string
   lane: ExactLane
   subjectId: string
   actor: string
   startedAt: number
-  input: unknown
+  input: ExactLaneRunInput
   status: ExactLaneRunStatus
   elapsedSeconds?: number
   output?: unknown
@@ -67,6 +71,23 @@ function exactFields(
   }
 }
 
+function parseInput(raw: unknown, context: string): ExactLaneRunInput {
+  if (!isRecord(raw)) fail(`${context} must be an object`)
+  const kind = string(raw.kind, `${context}.kind`)
+  if (kind === 'exact') {
+    exactFields(raw, ['kind', 'payload'], [], context)
+    return { kind, payload: raw.payload }
+  }
+  if (kind === 'research') {
+    exactFields(raw, ['kind', 'raw_trace_path', 'payload'], [], context)
+    const rawTracePath = raw.raw_trace_path === null
+      ? null
+      : string(raw.raw_trace_path, `${context}.raw_trace_path`)
+    return { kind, rawTracePath, payload: raw.payload }
+  }
+  return fail(`${context}.kind has unknown value ${JSON.stringify(kind)}`)
+}
+
 function parseRun(raw: unknown, index: number): ExactLaneRunRecord {
   const context = `runs[${index}]`
   if (!isRecord(raw)) fail(`${context} must be an object`)
@@ -87,7 +108,7 @@ function parseRun(raw: unknown, index: number): ExactLaneRunRecord {
     subjectId: string(raw.subject_id, `${context}.subject_id`),
     actor: string(raw.actor, `${context}.actor`),
     startedAt: number(raw.started_at, `${context}.started_at`),
-    input: raw.input,
+    input: parseInput(raw.input, `${context}.input`),
     status: status as ExactLaneRunStatus,
     elapsedSeconds: status === 'running' ? undefined : number(raw.elapsed_s, `${context}.elapsed_s`),
     output: status === 'running' ? undefined : raw.output,

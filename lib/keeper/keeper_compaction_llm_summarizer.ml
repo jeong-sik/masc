@@ -902,11 +902,12 @@ let execute_prepared_lane_current
     ~actor:keeper_name
     ~started_at
     ~input:
-      (`Assoc
+      (Exact_lane_run_registry.Exact_input
+         (`Assoc
          [ "registry_generation", `Intlit (Int64.to_string prepared_lane.registry_generation)
          ; "slot_ids", `List (List.map (fun id -> `String id) prepared_lane.ordered_slot_ids)
          ; "source_unit_count", `Int (List.length prepared_lane.window.source_units)
-         ]);
+         ]));
   let complete outcome output =
     Exact_lane_run_registry.mark_completed
       registry

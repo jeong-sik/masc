@@ -75,6 +75,19 @@ val submit
     counted rather than escaping. Outcomes and per-keeper state are exported as
     metrics. *)
 
+type librarian_join_outcome =
+  | No_librarian_work
+  | Librarian_joined of Keeper_lane.outcome
+  | Librarian_join_failed of string
+
+val cancel_and_join_librarian
+  :  base_path:string
+  -> keeper_name:string
+  -> librarian_join_outcome
+(** Cancel the exact detached Librarian drain owned by [keeper_name] and wait
+    until its provider/tool scope and cleanup have joined. A Keeper lifecycle
+    boundary must call this before publishing its own terminal state. *)
+
 module For_testing : sig
   val reset : unit -> unit
   (** Clear the lane registry and the executor switch. *)

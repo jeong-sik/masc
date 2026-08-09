@@ -242,7 +242,7 @@ let test_raw_trace_read_permission_requires_a_token () =
     let authorize request =
       Server_auth.authorize_token_bound_permission_request
         ~base_path:config.base_path
-        ~permission:Masc_domain.CanReadState
+        ~permission:Masc_domain.CanAdmin
         request
     in
     let anonymous = Httpun.Request.create `GET "/api/v1/keepers/test-keeper/raw-traces" in
@@ -251,10 +251,11 @@ let test_raw_trace_read_permission_requires_a_token () =
        Alcotest.(check bool) "anonymous is unauthorized" true
          (Server_auth.http_status_of_auth_error error = `Unauthorized)
      | Ok actor -> Alcotest.failf "anonymous resolved actor %s" actor);
-    Alcotest.(check (result string string)) "Worker can read"
-      (Ok "worker")
-      (authorize (bearer_request worker)
-       |> Result.map_error Masc_domain.masc_error_to_string);
+    (match authorize (bearer_request worker) with
+     | Error error ->
+       Alcotest.(check bool) "Worker is forbidden" true
+         (Server_auth.http_status_of_auth_error error = `Forbidden)
+     | Ok actor -> Alcotest.failf "Worker unexpectedly resolved actor %s" actor);
     Alcotest.(check (result string string)) "Admin can read"
       (Ok "admin")
       (authorize (bearer_request admin)
@@ -377,7 +378,7 @@ let () =
             test_invalid_keeper_name_is_refused
         ; Alcotest.test_case "symlink traces are rejected" `Quick
             test_symlink_trace_is_rejected_for_listing_and_read
-        ; Alcotest.test_case "raw trace read requires Worker or Admin token" `Quick
+        ; Alcotest.test_case "raw trace read requires Admin token" `Quick
             test_raw_trace_read_permission_requires_a_token
         ] )
     ; ( "listing"

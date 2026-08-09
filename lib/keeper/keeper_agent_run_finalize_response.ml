@@ -12,6 +12,8 @@ open Keeper_agent_result
 let finalize
     ~config
     ~meta
+    ~publication_recovery
+    ~ctx_snapshot
     ~generation
     ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
     ~manifest_keeper_turn_id
@@ -35,6 +37,7 @@ let finalize
     ~raw_response_text
     ~turn_outcome
     ~capture_replay_response
+    ?continuation_channel
     ?continuation_delivery_channel
     () =
   let completion_contract_result = acc.receipt_completion_contract_result in
@@ -237,6 +240,10 @@ let finalize
     Keeper_agent_run_post_turn_memory.run
       ~config
       ~meta
+      ~publication_recovery
+      ~ctx_snapshot
+      ~runtime_id:runtime_id_string
+      ?continuation_channel
       ~generation
       ~turn:manifest_keeper_turn_id
       ~oas_turn_count:result.turns

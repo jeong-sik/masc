@@ -39,7 +39,7 @@ let terminal_externalization_failure
     None
 ;;
 
-let make_tool_bundle
+let make_tool_bundle_for_descriptors
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
@@ -49,6 +49,7 @@ let make_tool_bundle
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ~(descriptors : Keeper_tool_descriptor.t list)
       ()
   : tool_bundle
   =
@@ -136,9 +137,10 @@ let make_tool_bundle
            result)
       gate_context
   in
-  (* Every descriptor-declared model tool is materialized. The turn hook sends
-     this exact list to OAS without per-Keeper or per-turn reduction. *)
-  let model_visible_descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
+  (* Every descriptor authorized by this caller is materialized through the
+     canonical Keeper handler. [make_tool_bundle] supplies the full
+     model-visible set; bounded internal roles supply their own closed typed
+     subset. *)
   (* The bundle lives for exactly one Agent run. Its typed tool-boundary
      state is request-scoped and observed by the OAS tool-boundary probe only
      after the whole tool batch and checkpoint sink have completed. A generic
@@ -277,7 +279,7 @@ let make_tool_bundle
                    ?oas_invocation:
                      (Agent_sdk.Tool.Execution_env.invocation execution_env)
                    input)))
-      model_visible_descriptors
+      descriptors
   in
   { tools = descriptor_tools
   ; cleanup =
@@ -286,6 +288,31 @@ let make_tool_bundle
   ; terminal_effect_state = (fun () -> Atomic.get terminal_effect_state)
   ; gate_replay_delivery
   }
+;;
+
+let make_tool_bundle
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
+      ~(ctx_snapshot : Keeper_types.working_context)
+      ?clock
+      ?continuation_channel
+      ?gate_context
+      ?hitl_resolution
+      ()
+  =
+  make_tool_bundle_for_descriptors
+    ~config
+    ~meta
+    ~publication_recovery
+    ~ctx_snapshot
+    ?clock
+    ?continuation_channel
+    ?gate_context
+    ?hitl_resolution
+    ~descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
+    ()
 ;;
 
 let make_tools

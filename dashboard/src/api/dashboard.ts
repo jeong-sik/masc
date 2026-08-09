@@ -66,6 +66,7 @@ export {
   type DashboardExactLaneRunsResponse,
   type ExactLane,
   type ExactLaneRunRecord,
+  type ExactLaneRunInput,
   type ExactLaneRunStatus,
 } from './dashboard-exact-lane-runs'
 

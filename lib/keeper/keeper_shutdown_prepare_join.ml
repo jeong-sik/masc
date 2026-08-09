@@ -406,11 +406,50 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
            | Keeper_lane.Shutdown_cancel_failed _
            | Keeper_lane.Cancelled_by_parent _
            | Keeper_lane.Failed _ -> ());
+          let memory_join_error =
+            match
+              Keeper_memory_lane.cancel_and_join_librarian
+                ~base_path:config.Workspace.base_path
+                ~keeper_name:current.name
+            with
+            | Keeper_memory_lane.No_librarian_work
+            | Keeper_memory_lane.Librarian_joined _ -> None
+            | Keeper_memory_lane.Librarian_join_failed detail -> Some detail
+          in
+          let cleanup_error =
+            match lane_exit.cleanup_error, memory_join_error with
+            | None, None -> None
+            | Some detail, None | None, Some detail -> Some detail
+            | Some lane_detail, Some memory_detail ->
+              Some
+                (Printf.sprintf
+                   "lane cleanup failed: %s; Librarian join failed: %s"
+                   lane_detail
+                   memory_detail)
+          in
+          (match cleanup_error with
+           | Some detail ->
+             let blocked =
+               { operation with
+                 revision = operation.revision + 1
+               ; phase = Blocked { stage = Lane_join; detail }
+               ; updated_at = Masc_domain.now_iso ()
+               }
+             in
+             (match
+                Keeper_shutdown_store.replace
+                  ~config
+                  ~expected_revision:operation.revision
+                  blocked
+              with
+              | Ok () -> Error (Join_failed blocked)
+              | Error error -> Error (Join_record_update_failed error))
+           | None ->
           let terminal_result = Eio.Promise.await current.done_p in
           let evidence =
             { lane_outcome = lane_outcome lane_exit.outcome
             ; terminal = terminal terminal_result
-            ; cleanup_error = lane_exit.cleanup_error
+            ; cleanup_error = None
             }
           in
           (* [operation.turn_disposition] is an admission-time snapshot: it
@@ -446,31 +485,14 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
             ; updated_at = Masc_domain.now_iso ()
             }
           in
-          (match lane_exit.cleanup_error with
-           | Some detail ->
-             let blocked =
-               { joined with
-                 phase = Blocked { stage = Lane_join; detail }
-               ; updated_at = Masc_domain.now_iso ()
-               }
-             in
-             (match
-                Keeper_shutdown_store.replace
-                  ~config
-                  ~expected_revision:operation.revision
-                  blocked
-              with
-              | Ok () -> Error (Join_failed blocked)
-              | Error error -> Error (Join_record_update_failed error))
-           | None ->
-             (match
-                Keeper_shutdown_store.replace
-                  ~config
-                  ~expected_revision:operation.revision
-                  joined
-              with
-              | Ok () -> Ok joined
-              | Error error -> Error (Join_record_update_failed error)))))
+          (match
+             Keeper_shutdown_store.replace
+               ~config
+               ~expected_revision:operation.revision
+               joined
+           with
+           | Ok () -> Ok joined
+           | Error error -> Error (Join_record_update_failed error)))))
 ;;
 
 let run ~config ~entry ~request =

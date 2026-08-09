@@ -50,6 +50,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_shared_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_task_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_task_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_terminal_boundary.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_terminal_boundary.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_voice_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_voice_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_dispatch_runtime.ml` - execution-dispatch

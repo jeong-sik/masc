@@ -1074,6 +1074,7 @@ let test_lifecycle_surfaces_share_exact_tool_invocation () =
   let pre_invocations = ref [] in
   let post_invocations = ref [] in
   let failure_invocations = ref [] in
+  let failure_stages = ref [] in
   let handler_invocations = ref [] in
   let started_invocations = ref [] in
   let finished_invocations = ref [] in
@@ -1097,8 +1098,9 @@ let test_lifecycle_surfaces_share_exact_tool_invocation () =
     ; post_tool_use_failure =
         Some
           (function
-            | Hooks.PostToolUseFailure { invocation; _ } ->
+            | Hooks.PostToolUseFailure { invocation; stage; duration_ms; _ } ->
               capture failure_invocations invocation;
+              failure_stages := (stage, duration_ms) :: !failure_stages;
               Hooks.Continue
             | _ -> fail "expected PostToolUseFailure")
     }
@@ -1172,6 +1174,10 @@ let test_lifecycle_surfaces_share_exact_tool_invocation () =
     "PostToolUseFailure exact occurrences"
     expected_failure
     !failure_invocations;
+  (match !failure_stages with
+   | [ Hooks.Execution, duration_ms ] ->
+     check bool "execution failure duration is measured" true (duration_ms >= 0.0)
+   | _ -> fail "handler failure did not carry the exact execution stage");
   check_occurrences "ToolCalled exact occurrences" expected_all called_invocations;
   check_occurrences "ToolCompleted exact occurrences" expected_all completed_invocations;
   check_occurrences "handler exact occurrences" expected_all !handler_invocations;
@@ -1409,6 +1415,18 @@ let test_invalid_terminal_input_remains_correction_capable () =
   Eio_main.run
   @@ fun env ->
   let handler_count = ref 0 in
+  let failure_observation = ref None in
+  let hooks =
+    { Hooks.empty with
+      post_tool_use_failure =
+        Some
+          (function
+            | Hooks.PostToolUseFailure { stage; duration_ms; _ } ->
+              failure_observation := Some (stage, duration_ms);
+              Hooks.Continue
+            | _ -> fail "expected PostToolUseFailure")
+    }
+  in
   let tool =
     Tool.create
       ~descriptor:(Tool.terminal_descriptor Tool_contract.Effect_outcome_unknown)
@@ -1429,7 +1447,7 @@ let test_invalid_terminal_input_remains_correction_capable () =
     execute_result_with_tools_in_env
       env
       ~tools:[ tool ]
-      ~hooks:Hooks.empty
+      ~hooks
       [ ToolUse
           { id = "terminal-invalid"
           ; name = "finish"
@@ -1440,6 +1458,10 @@ let test_invalid_terminal_input_remains_correction_capable () =
   | Error _ -> fail "invalid terminal input must remain a model-visible result"
   | Ok report ->
     check int "terminal handler did not run" 0 !handler_count;
+    (match !failure_observation with
+     | Some (Hooks.Validation_before_execution, duration_ms) ->
+       check bool "validation duration is measured" true (duration_ms >= 0.0)
+     | _ -> fail "validation failure did not carry the pre-execution stage");
     (match report.completed_results with
      | [ { outcome = Tool_failed { failure_kind = Validation_error; _ }; _ } ] -> ()
      | _ -> fail "invalid terminal input was not a typed Validation_error");

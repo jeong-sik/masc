@@ -25,6 +25,7 @@ module Keeper_lifecycle_admission = Masc.Keeper_lifecycle_admission
 module WO = Masc.Keeper_world_observation
 module Health = Masc.Health
 module Lane = Masc.Keeper_lane
+module Memory_lane = Masc.Keeper_memory_lane
 module Shutdown_types = Masc.Keeper_shutdown_types
 module Shutdown_store = Masc.Keeper_shutdown_store
 module Shutdown_prepare_join = Masc.Keeper_shutdown_prepare_join
@@ -2246,6 +2247,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
     ~finally:(fun () ->
       Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
+      Memory_lane.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -2259,6 +2261,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
        | Ok () -> ()
        | Error detail -> fail detail);
       let entry = R.For_testing.register ~base_path:config.base_path name meta in
+      Memory_lane.init ~sw:parent_sw;
       let never_p, _never_r = Eio.Promise.create () in
       (match
          Lane.fork
@@ -2280,6 +2283,26 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
        | Ok () -> ()
        | Error error -> fail (Lane.start_error_to_string error));
       Eio.Fiber.yield ();
+      let librarian_started, resolve_librarian_started = Eio.Promise.create () in
+      let librarian_never, _resolve_librarian_never = Eio.Promise.create () in
+      let librarian_cancelled = ref false in
+      (match
+         Memory_lane.submit
+           ~base_path:config.base_path
+           ~keeper_name:name
+           ~lane:Memory_lane.Librarian
+           (fun () ->
+              Eio.Promise.resolve resolve_librarian_started ();
+              try Eio.Promise.await librarian_never with
+              | Eio.Cancel.Cancelled _ as exn ->
+                librarian_cancelled := true;
+                raise exn)
+       with
+       | Memory_lane.Submitted -> ()
+       | Memory_lane.Coalesced
+       | Memory_lane.Ran_inline
+       | Memory_lane.Dropped -> fail "shutdown Librarian was not submitted");
+      Eio.Promise.await librarian_started;
       let operation =
         match
           Shutdown_prepare_join.run
@@ -2306,6 +2329,18 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
         "shutdown operation records lane join evidence"
         true
         (Option.is_some operation.join_evidence);
+      check bool
+        "shutdown cancelled the detached Librarian before returning"
+        true
+        !librarian_cancelled;
+      check
+        (option int)
+        "shutdown joined the detached Librarian"
+        (Some 0)
+        (Memory_lane.For_testing.pending
+           ~base_path:config.base_path
+           ~keeper_name:name
+           ~lane:Memory_lane.Librarian);
       (match
          Masc.Keeper_turn_admission.run_if_free
            ~base_path:config.base_path

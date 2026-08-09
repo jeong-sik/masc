@@ -19,6 +19,7 @@ let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
 let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
+let exact_lane_run_permission = Masc_domain.CanAdmin
 
 let dashboard_actor_cache_segment state req =
   dashboard_actor_for_request
@@ -418,6 +419,7 @@ module For_testing = struct
     | Recovery_not_requested
 
   let gate_mode_change_json = gate_mode_change_json
+  let exact_lane_run_permission = exact_lane_run_permission
 end
 
 let handle_gate_mode_body state operator_name request reqd body_str =
@@ -685,7 +687,8 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/exact-lane-runs" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_token_permission_auth ~permission:exact_lane_run_permission
+         (fun _state _agent_name req reqd ->
          let runs =
            Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
          in

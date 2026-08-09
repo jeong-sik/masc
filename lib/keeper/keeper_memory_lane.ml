@@ -29,6 +29,7 @@ type librarian_drain =
   { mutable latest : (unit -> unit) option
   ; mutable in_flight : bool
   ; mutable switch_hook : Eio.Switch.hook option
+  ; owner_lane : Keeper_lane.t
   }
 
 type entry =
@@ -80,10 +81,12 @@ let init ~sw =
 
 let current_sw () = Stdlib.Mutex.protect registry_mu (fun () -> !executor_sw)
 
+let entry_key ~base_path ~keeper_name ~lane =
+  Keeper_registry_types.registry_key ~base_path keeper_name ^ "#" ^ lane_label lane
+;;
+
 let entry_for ~base_path ~keeper_name ~lane =
-  let key =
-    Keeper_registry_types.registry_key ~base_path keeper_name ^ "#" ^ lane_label lane
-  in
+  let key = entry_key ~base_path ~keeper_name ~lane in
   Stdlib.Mutex.protect registry_mu (fun () ->
     match Hashtbl.find_opt entries key with
     | Some e -> e
@@ -280,7 +283,13 @@ let librarian_reserve entry f =
   Stdlib.Mutex.protect entry.state_mu (fun () ->
     match entry.librarian_drain with
     | None ->
-      let drain = { latest = None; in_flight = false; switch_hook = None } in
+      let drain =
+        { latest = None
+        ; in_flight = false
+        ; switch_hook = None
+        ; owner_lane = Keeper_lane.create ()
+        }
+      in
       entry.librarian_drain <- Some drain;
       entry.pending <- 1;
       Start_drain drain
@@ -413,28 +422,19 @@ let librarian_finish_current ~keeper_name entry drain =
 let rec run_librarian_drain ~keeper_name entry drain sw current =
   if librarian_begin_current ~keeper_name entry drain
   then (
-    let cancelled =
-      try
-        Eio_context.with_turn_switch sw current;
-        false
-      with
-      | Eio.Cancel.Cancelled _ -> true
-      | exn ->
-        record_counter ~keeper_name ~lane:Librarian MemoryLaneUnitFailures;
-        Log.Keeper.warn ~keeper_name
-          "memory lane unit failed: %s"
-          (Printexc.to_string exn);
-        false
-    in
-    if cancelled
-    then cleanup_librarian_drain ~keeper_name ~remove_hook:true entry drain
-    else (
-      match librarian_finish_current ~keeper_name entry drain with
-      | Drain_stopped -> ()
-      | Drain_done hook ->
-        Option.iter (fun h -> ignore (Eio.Switch.try_remove_hook h)) hook
-      | Drain_next latest ->
-        run_librarian_drain ~keeper_name entry drain sw latest))
+    (try Eio_context.with_turn_switch sw current with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       record_counter ~keeper_name ~lane:Librarian MemoryLaneUnitFailures;
+       Log.Keeper.warn ~keeper_name
+         "memory lane unit failed: %s"
+         (Printexc.to_string exn));
+    match librarian_finish_current ~keeper_name entry drain with
+    | Drain_stopped -> ()
+    | Drain_done hook ->
+      Option.iter (fun h -> ignore (Eio.Switch.try_remove_hook h)) hook
+    | Drain_next latest ->
+      run_librarian_drain ~keeper_name entry drain sw latest)
 ;;
 
 let submit_librarian ~keeper_name entry sw f =
@@ -463,9 +463,28 @@ let submit_librarian ~keeper_name entry sw f =
       Dropped)
     else (
       try
-        Eio.Fiber.fork ~sw (fun () ->
-          run_librarian_drain ~keeper_name entry drain sw f);
-        Submitted
+        (match
+           Keeper_lane.fork
+             ~sw
+             drain.owner_lane
+             ~run:(fun lane_sw ->
+               run_librarian_drain ~keeper_name entry drain lane_sw f)
+             ~cleanup:(fun _outcome ->
+               cleanup_librarian_drain
+                 ~keeper_name
+                 ~remove_hook:true
+                 entry
+                 drain;
+               Ok ())
+         with
+         | Ok () -> Submitted
+         | Error error ->
+           cleanup_librarian_drain ~keeper_name ~remove_hook:true entry drain;
+           record_counter ~keeper_name ~lane:Librarian MemoryLaneUnitFailures;
+           Log.Keeper.warn ~keeper_name
+             "memory lane fork failed: %s"
+             (Keeper_lane.start_error_to_string error);
+           Dropped)
       with
       | Eio.Cancel.Cancelled _ as e ->
         cleanup_librarian_drain ~keeper_name ~remove_hook:true entry drain;
@@ -549,6 +568,43 @@ let submit ~base_path ~keeper_name ~lane f =
      | Deterministic -> submit_bounded ~keeper_name ~lane entry sw f)
 ;;
 
+type librarian_join_outcome =
+  | No_librarian_work
+  | Librarian_joined of Keeper_lane.outcome
+  | Librarian_join_failed of string
+
+let cancel_and_join_librarian ~base_path ~keeper_name =
+  let entry =
+    let key = entry_key ~base_path ~keeper_name ~lane:Librarian in
+    Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key)
+  in
+  match entry with
+  | None -> No_librarian_work
+  | Some entry ->
+    let owner_lane =
+      Stdlib.Mutex.protect entry.state_mu (fun () ->
+        Option.map (fun drain -> drain.owner_lane) entry.librarian_drain)
+    in
+    (match owner_lane with
+     | None -> No_librarian_work
+     | Some owner_lane ->
+    (match Keeper_lane.request_cancel owner_lane with
+     | Keeper_lane.Cancel_wrong_domain ->
+       Librarian_join_failed
+         "librarian cancellation requested from a non-owning domain"
+     | Keeper_lane.Cancel_not_committed exn ->
+       Librarian_join_failed
+         ("librarian cancellation was not committed: " ^ Printexc.to_string exn)
+     | Keeper_lane.Cancel_committed_with_failure _
+     | Keeper_lane.Cancel_requested
+     | Keeper_lane.Cancel_already_requested
+     | Keeper_lane.Cancel_already_exiting ->
+       let exit = Keeper_lane.await_exit owner_lane in
+       (match exit.cleanup_error with
+        | Some detail -> Librarian_join_failed detail
+        | None -> Librarian_joined exit.outcome)))
+;;
+
 module For_testing = struct
   let reset () =
     Stdlib.Mutex.protect registry_mu (fun () ->
@@ -557,9 +613,7 @@ module For_testing = struct
   ;;
 
   let pending ~base_path ~keeper_name ~lane =
-    let key =
-      Keeper_registry_types.registry_key ~base_path keeper_name ^ "#" ^ lane_label lane
-    in
+    let key = entry_key ~base_path ~keeper_name ~lane in
     Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key)
     |> Option.map (fun e -> Stdlib.Mutex.protect e.state_mu (fun () -> e.pending))
   ;;

@@ -30,6 +30,11 @@ type reasoning_summary =
 val empty_reasoning_summary : reasoning_summary
 val extract_reasoning : Types.message list -> reasoning_summary
 
+(** Exact stage owned by the tool dispatcher when a failure hook is emitted. *)
+type tool_failure_stage =
+  | Validation_before_execution
+  | Execution
+
 (** Events emitted during agent execution *)
 type hook_event =
   | BeforeTurn of
@@ -70,6 +75,8 @@ type hook_event =
             @since 0.216.0 *)
       ; tool_name : string
       ; input : Yojson.Safe.t
+      ; stage : tool_failure_stage
+      ; duration_ms : float
       ; error : string
       }
   | OnStop of

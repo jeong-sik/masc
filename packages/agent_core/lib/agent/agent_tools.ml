@@ -309,7 +309,7 @@ let find_and_execute_tool_with_index
               { failure_kind = Validation_error; error_class = Some Types.Deterministic }
         }
       in
-      let emit_post_tool_use_failure ~input message =
+      let emit_post_tool_use_failure ~input ~stage ~duration_ms message =
         invoke_post_hook
           ?on_hook_invoked
           ~tracer
@@ -319,11 +319,18 @@ let find_and_execute_tool_with_index
           ~tool_name:name
           hooks.post_tool_use_failure
           (Hooks.PostToolUseFailure
-             { invocation; tool_name = name; input; error = message })
+             { invocation
+             ; tool_name = name
+             ; input
+             ; stage
+             ; duration_ms
+             ; error = message
+             })
       in
       (* Tool inputs cross this boundary unchanged. The schema either accepts
            the exact JSON value or produces a typed validation failure for the
            model to correct in a later native ToolUse block. *)
+      let validation_started_at = Unix.gettimeofday () in
       let validated_input =
         match Tool_input_validation.validate tool.schema input with
         | Tool_input_validation.Valid exact_input -> Ok exact_input
@@ -331,8 +338,15 @@ let find_and_execute_tool_with_index
           let message =
             Tool_input_validation.format_errors_inline ~tool_name:name ~args:input errors
           in
+          let duration_ms =
+            max 0.0 ((Unix.gettimeofday () -. validation_started_at) *. 1000.0)
+          in
           defer_observer (fun () ->
-            emit_post_tool_use_failure ~input message
+            emit_post_tool_use_failure
+              ~input
+              ~stage:Hooks.Validation_before_execution
+              ~duration_ms
+              message
             |> Option.iter record_deferred_failure);
           Error message
       in
@@ -382,7 +396,13 @@ let find_and_execute_tool_with_index
                 ~tool_name:name
                 hooks.post_tool_use_failure
                 (Hooks.PostToolUseFailure
-                   { invocation; tool_name = name; input = exact_input; error = message })
+                   { invocation
+                   ; tool_name = name
+                   ; input = exact_input
+                   ; stage = Hooks.Execution
+                   ; duration_ms
+                   ; error = message
+                   })
               |> Option.iter record_deferred_failure);
             (* [OnToolError] is the compact error projection. The exact
                invocation remains shared with the richer failure hook. *)

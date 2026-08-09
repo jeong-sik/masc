@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { html } from 'htm/preact'
 
 const api = vi.hoisted(() => ({
@@ -8,15 +8,21 @@ const api = vi.hoisted(() => ({
   fetchFusionRuns: vi.fn(),
 }))
 const memoryApi = vi.hoisted(() => ({ fetchKeeperMemoryJournal: vi.fn() }))
+const rawApi = vi.hoisted(() => ({
+  fetchKeeperRawTrace: vi.fn(),
+  fetchKeeperRawTraces: vi.fn(),
+}))
 
 vi.mock('../api/dashboard', () => api)
 vi.mock('../api/dashboard-memory-journal', () => memoryApi)
+vi.mock('../api/dashboard-keeper-prompt', () => rawApi)
 vi.mock('../sse-store', () => ({
   registerInternalAgentRefresh: vi.fn(() => vi.fn()),
 }))
 
 import { InternalAgentsMonitor } from './internal-agents-monitor'
 import { keepers, shellRuntimeResolution } from '../store'
+import { ApiRequestError } from '../api/core'
 
 afterEach(() => {
   cleanup()
@@ -26,6 +32,10 @@ afterEach(() => {
 })
 
 describe('InternalAgentsMonitor', () => {
+  beforeEach(() => {
+    rawApi.fetchKeeperRawTraces.mockResolvedValue([])
+  })
+
   it('keeps paused keepers with zero observed runs in the owner matrix', async () => {
     api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
     api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
@@ -78,8 +88,56 @@ describe('InternalAgentsMonitor', () => {
     expect(screen.getByText(/Completion verdict recorded: APPROVE/)).toBeTruthy()
 
     const filters = screen.getByRole('group', { name: 'Internal agent filters' })
-    fireEvent.click(within(filters).getByRole('button', { name: 'Judge 0' }))
+    fireEvent.click(within(filters).getByRole('button', { name: 'Auto Judge 0' }))
     expect(screen.queryByText('report_review_verdict')).toBeNull()
+  })
+
+  it('keeps Auto Judge and Board Attention as separate exact execution kinds', async () => {
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchExactLaneRuns.mockResolvedValue({
+      count: 2,
+      generatedAt: 'now',
+      runs: [
+        {
+          runId: 'auto-judge-1',
+          lane: 'hitl_auto_judge',
+          subjectId: 'approval-1',
+          actor: 'keeper-a',
+          startedAt: 1786000002,
+          input: { kind: 'exact', payload: { approval_id: 'approval-1' } },
+          status: 'succeeded',
+          elapsedSeconds: 0.4,
+          output: { decision: 'allow' },
+        },
+        {
+          runId: 'board-attention-1',
+          lane: 'board_attention_exact',
+          subjectId: 'board-post-1',
+          actor: 'keeper-a',
+          startedAt: 1786000001,
+          input: { kind: 'exact', payload: { post_id: 'board-post-1' } },
+          status: 'succeeded',
+          elapsedSeconds: 0.7,
+          output: { action: 'reply' },
+        },
+      ],
+    })
+
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+    const filters = await screen.findByRole('group', { name: 'Internal agent filters' })
+
+    expect(within(filters).getByRole('button', { name: 'Auto Judge 1' })).toBeTruthy()
+    expect(within(filters).getByRole('button', { name: 'Board Attention 1' })).toBeTruthy()
+    expect(container.textContent).not.toContain('Board Judge')
+
+    fireEvent.click(within(filters).getByRole('button', { name: 'Auto Judge 1' }))
+    expect(screen.getByRole('button', { name: /Auto Judge approval-1/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Board Attention board-post-1/i })).toBeNull()
+
+    fireEvent.click(within(filters).getByRole('button', { name: 'Board Attention 1' }))
+    expect(screen.getByRole('button', { name: /Board Attention board-post-1/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Auto Judge approval-1/i })).toBeNull()
   })
 
   it('joins a librarian run to the exact memory revision and shows changed claims', async () => {
@@ -94,11 +152,28 @@ describe('InternalAgentsMonitor', () => {
         subjectId: 'trace-1',
         actor: 'kidsnote',
         startedAt: 1786000000,
-        input: { current_fact_count: 1, message_count: 5 },
+        input: {
+          kind: 'research',
+          rawTracePath: '/tmp/raw-traces/librarian-research-1.jsonl',
+          payload: { current_fact_count: 1, message_count: 5 },
+        },
         status: 'succeeded',
         elapsedSeconds: 2,
-        output: { revision: 42, fact_count: 1, added_count: 1, removed_count: 1 },
+        output: {
+          before: { present: true, fact_count: 1 },
+          after: {
+            revision: 42,
+            fact_count: 1,
+            change: { added_count: 1, removed_count: 1, retained: 0 },
+          },
+        },
       }],
+    })
+    rawApi.fetchKeeperRawTrace.mockResolvedValue({
+      file: 'librarian-research-1.jsonl',
+      totalRecords: 1,
+      offset: 0,
+      records: [{ ok: true, raw: '{"type":"tool_result","value":"실제 RAW 값"}', record: { type: 'tool_result', value: '실제 RAW 값' } }],
     })
     memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
       keeper: 'kidsnote',
@@ -127,9 +202,15 @@ describe('InternalAgentsMonitor', () => {
     expect(container.textContent).toContain('새 기억')
     expect(container.textContent).toContain('낡은 기억')
     expect(container.textContent).toContain('새 근거로 대체됨')
-    expect(container.textContent).toContain('TRACE JOIN UNAVAILABLE')
-    expect(container.textContent).toContain('subject 문자열로 실행 레코드를 추정 연결하지 않습니다')
-    expect(screen.queryByRole('button', { name: /RAW 열기/ })).toBeNull()
+    expect(await screen.findByText('Retained RAW JSONL')).toBeTruthy()
+    expect(container.textContent).toContain('실제 RAW 값')
+    expect(container.textContent).toContain('Execution join')
+    expect(container.textContent).not.toContain('TRACE JOIN UNAVAILABLE')
+    expect(rawApi.fetchKeeperRawTrace).toHaveBeenCalledWith(
+      'kidsnote',
+      'librarian-research-1.jsonl',
+      expect.objectContaining({ signal: expect.any(AbortSignal), offset: 0, limit: 20 }),
+    )
     expect(memoryApi.fetchKeeperMemoryJournal).toHaveBeenCalledWith(
       'kidsnote',
       500,
@@ -149,7 +230,7 @@ describe('InternalAgentsMonitor', () => {
         subjectId: 'trace-shared',
         actor: 'full-cycle-probe',
         startedAt: 1786200000,
-        input: { current_fact_count: 2 },
+        input: { kind: 'research', rawTracePath: null, payload: { current_fact_count: 2 } },
         status: 'running',
       }],
     })
@@ -179,5 +260,62 @@ describe('InternalAgentsMonitor', () => {
     expect(container.textContent).toContain('explicit_write')
     expect(container.textContent).toContain('revision 617')
     expect(container.textContent).toContain('실제 도구 체인 성공')
+  })
+
+  it('does not fetch a pre-registered trace candidate when sink creation failed', async () => {
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchExactLaneRuns.mockResolvedValue({
+      count: 1,
+      generatedAt: 'now',
+      runs: [{
+        runId: 'librarian-research-unavailable',
+        lane: 'librarian_exact',
+        subjectId: 'trace-unavailable',
+        actor: 'rondo',
+        startedAt: 1786200000,
+        input: {
+          kind: 'research',
+          rawTracePath: '/tmp/raw-traces/candidate.jsonl',
+          payload: { message_count: 1 },
+        },
+        status: 'failed',
+        elapsedSeconds: 0.1,
+        output: {
+          research: {
+            outcome: { kind: 'not_dispatched' },
+            raw_trace: { kind: 'unavailable', category: 'internal', retryable: false },
+          },
+        },
+        code: 'librarian_failed',
+        detail: 'Librarian pass failed; inspect the operator raw trace and Memory journal',
+      }],
+    })
+    memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
+      keeper: 'rondo', returned: 0, undecodableLines: 0, entries: [],
+    })
+
+    render(html`<${InternalAgentsMonitor} />`)
+    fireEvent.click(await screen.findByRole('button', { name: /Librarian trace-unavailable/i }))
+
+    expect(await screen.findByText('RAW trace unavailable')).toBeTruthy()
+    expect(rawApi.fetchKeeperRawTrace).not.toHaveBeenCalled()
+  })
+
+  it('states that exact lanes and RAW require an Admin bearer', async () => {
+    api.fetchExactLaneRuns.mockRejectedValue(new ApiRequestError({
+      method: 'GET',
+      path: '/api/v1/dashboard/exact-lane-runs',
+      status: 403,
+      statusText: 'Forbidden',
+    }))
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Exact lanes + RAW: Admin 권한 필요')
+    })
   })
 })

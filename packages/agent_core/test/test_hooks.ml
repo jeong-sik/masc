@@ -108,6 +108,8 @@ let test_post_tool_use_failure_event () =
          { invocation = invocation ~tool_use_id:"tu-echo" ()
          ; tool_name = "echo"
          ; input = `Null
+         ; stage = Hooks.Execution
+         ; duration_ms = 4.0
          ; error = "boom"
          })
   in
@@ -182,6 +184,8 @@ let dummy_post_tool_use_failure =
     { invocation = invocation ~tool_use_id:"tu-1" ~turn:1 ()
     ; tool_name = "t"
     ; input = `Null
+    ; stage = Hooks.Validation_before_execution
+    ; duration_ms = 2.0
     ; error = "err"
     }
 ;;

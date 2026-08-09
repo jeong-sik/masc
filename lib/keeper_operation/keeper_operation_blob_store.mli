@@ -21,20 +21,6 @@ module State_ref : sig
   val equal : t -> t -> bool
 end
 
-module Delivery_payload_ref : sig
-  type t
-  val of_string : string -> (t, string) result
-  val to_string : t -> string
-  val equal : t -> t -> bool
-end
-
-module Delivery_evidence_ref : sig
-  type t
-  val of_string : string -> (t, string) result
-  val to_string : t -> string
-  val equal : t -> t -> bool
-end
-
 type error =
   | Invalid_ref of string
   | Filesystem_error of string
@@ -65,16 +51,6 @@ val put_state
   -> Keeper_operation_request.Canonical_json.t
   -> (State_ref.t, error) result
 
-val put_delivery_payload
-  :  t
-  -> Keeper_operation_request.Canonical_json.t
-  -> (Delivery_payload_ref.t, error) result
-
-val put_delivery_evidence
-  :  t
-  -> Keeper_operation_request.Canonical_json.t
-  -> (Delivery_evidence_ref.t, error) result
-
 val fetch_input
   :  t
   -> Input_ref.t
@@ -88,14 +64,4 @@ val fetch_outcome
 val fetch_state
   :  t
   -> State_ref.t
-  -> (Keeper_operation_request.Canonical_json.t option, error) result
-
-val fetch_delivery_payload
-  :  t
-  -> Delivery_payload_ref.t
-  -> (Keeper_operation_request.Canonical_json.t option, error) result
-
-val fetch_delivery_evidence
-  :  t
-  -> Delivery_evidence_ref.t
   -> (Keeper_operation_request.Canonical_json.t option, error) result

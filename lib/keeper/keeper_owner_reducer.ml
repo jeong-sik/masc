@@ -154,13 +154,11 @@ type meta_command =
 type state =
   { keeper_name : string
   ; meta : Keeper_meta_contract.keeper_meta option
-  ; running_operation_id : string option
   ; stopping : bool
   }
 
 type projection =
   { meta : Keeper_meta_contract.keeper_meta option
-  ; running_operation_id : string option
   ; stopping : bool
   }
 
@@ -169,60 +167,47 @@ type persistence_intent =
   | Replace_snapshot of Keeper_meta_contract.keeper_meta
   | Remove_snapshot of Keeper_meta_contract.keeper_meta
 
-type post_commit_effect =
-  | Publish_projection of projection
-  | Start_turn_child of { operation_id : string }
-
 type transition =
   { state : state
   ; persistence : persistence_intent
-  ; effects : post_commit_effect list
+  ; projection : projection
   }
 
 type error =
   | Meta_missing
   | Meta_already_exists
   | Owner_stopping
-  | Turn_already_running of string
-  | Turn_not_running
-  | Turn_identity_mismatch of
-      { expected : string
-      ; actual : string
-      }
   | Invalid_delta of string
   | Keeper_identity_mismatch of
       { expected : string
       ; actual : string
       }
   | Identity_generation_mismatch
-  | Delete_while_running of string
 
 let create ~keeper_name meta =
   match meta with
   | Some meta when not (String.equal keeper_name meta.Keeper_meta_contract.name) ->
     Error (Keeper_identity_mismatch { expected = keeper_name; actual = meta.name })
-  | Some _ | None ->
-    Ok { keeper_name; meta; running_operation_id = None; stopping = false }
+  | Some _ | None -> Ok { keeper_name; meta; stopping = false }
 ;;
 
 let projection (state : state) : projection =
   { meta = state.meta
-  ; running_operation_id = state.running_operation_id
   ; stopping = state.stopping
   }
 ;;
 
-let publish_transition (state : state) persistence extra_effects =
+let publish_transition (state : state) persistence =
   let projection = projection state in
   { state
   ; persistence
-  ; effects = Publish_projection projection :: extra_effects
+  ; projection
   }
 ;;
 
 let with_meta (state : state) meta =
   let state = { state with meta = Some meta } in
-  publish_transition state (Replace_snapshot meta) []
+  publish_transition state (Replace_snapshot meta)
 ;;
 
 let validate_delta delta =
@@ -587,11 +572,8 @@ let apply_existing (state : state) meta command =
   match command with
   | Create _ -> Error Meta_already_exists
   | Delete ->
-    (match state.running_operation_id with
-     | Some operation_id -> Error (Delete_while_running operation_id)
-     | None ->
-       let state = { state with meta = None } in
-       Ok (publish_transition state (Remove_snapshot meta) []))
+    let state = { state with meta = None } in
+    Ok (publish_transition state (Remove_snapshot meta))
   | Pause { reason; updated_at } ->
     Ok (with_meta state { meta with paused = true; latched_reason = Some reason; updated_at })
   | Resume { updated_at } ->
@@ -636,7 +618,7 @@ let apply_existing (state : state) meta command =
          ~latched_reason:meta.latched_reason
      with
      | Keeper_lifecycle_admission.Dead_tombstone ->
-       Ok (publish_transition state No_persistence [])
+       Ok (publish_transition state No_persistence)
      | Keeper_lifecycle_admission.Active
      | Keeper_lifecycle_admission.Paused _ ->
        Ok
@@ -786,50 +768,17 @@ let apply_meta (state : state) command =
     | Some meta, command -> apply_existing state meta command
 ;;
 
-let begin_turn (state : state) ~operation_id =
-  if state.stopping
-  then Error Owner_stopping
-  else
-    match state.meta, state.running_operation_id with
-    | None, _ -> Error Meta_missing
-    | Some _, Some running -> Error (Turn_already_running running)
-    | Some _, None ->
-      let state = { state with running_operation_id = Some operation_id } in
-      Ok
-        (publish_transition
-           state
-           No_persistence
-           [ Start_turn_child { operation_id } ])
-;;
-
-let finish_turn (state : state) ~operation_id =
-  match state.running_operation_id with
-  | None -> Error Turn_not_running
-  | Some actual when String.equal actual operation_id ->
-    let state = { state with running_operation_id = None } in
-    Ok (publish_transition state No_persistence [])
-  | Some actual ->
-    Error (Turn_identity_mismatch { expected = operation_id; actual })
-;;
-
 let begin_stopping (state : state) =
   let state = { state with stopping = true } in
-  publish_transition state No_persistence []
+  publish_transition state No_persistence
 ;;
 
 let error_to_string = function
   | Meta_missing -> "keeper metadata does not exist"
   | Meta_already_exists -> "keeper metadata already exists"
   | Owner_stopping -> "keeper owner is stopping"
-  | Turn_already_running operation_id ->
-    Printf.sprintf "keeper turn %s is already running" operation_id
-  | Turn_not_running -> "keeper has no running turn"
-  | Turn_identity_mismatch { expected; actual } ->
-    Printf.sprintf "turn identity mismatch: expected=%s actual=%s" expected actual
   | Invalid_delta detail -> "invalid additive delta: " ^ detail
   | Keeper_identity_mismatch { expected; actual } ->
     Printf.sprintf "Keeper identity mismatch: expected=%s actual=%s" expected actual
   | Identity_generation_mismatch -> "Keeper trace/generation identity changed"
-  | Delete_while_running operation_id ->
-    Printf.sprintf "cannot delete Keeper while turn %s is running" operation_id
 ;;

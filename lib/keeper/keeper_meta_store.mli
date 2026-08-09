@@ -79,10 +79,12 @@ val read_meta_if_changed :
   last_mtime:float ->
   (Keeper_meta_contract.keeper_meta * float) option
 
-(** Atomically replace the complete current snapshot. The per-Keeper Owner is
-    the only production caller and therefore the only write authority. *)
+(** Durably replace the complete current snapshot. The per-Keeper Owner is the
+    only production caller and therefore the only write authority. A failure
+    after rename is accepted only when exact byte read-back confirms the
+    intended snapshot. *)
 val replace_snapshot :
   Workspace.config -> Keeper_meta_contract.keeper_meta -> (unit, string) result
 
-(** Remove the current snapshot for a Keeper deleted by its Owner. *)
+(** Durably remove the current snapshot for a Keeper deleted by its Owner. *)
 val remove_snapshot : Workspace.config -> name:string -> (unit, string) result

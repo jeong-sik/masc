@@ -111,20 +111,6 @@ let test_no_latched_reason_serializes_as_null () =
   check (option string) "unset latched_reason round-trips to None" None
     (latched_reason_wire reparsed)
 
-let test_unknown_field_is_rejected () =
-  let json =
-    match Keeper_meta_json.meta_to_json (make_meta "retired-auto-resume-field") with
-    | `Assoc fields ->
-      `Assoc
-        (("paused", `Bool true)
-         :: ("auto_resume_after_sec", `Null)
-         :: fields)
-    | _ -> fail "base_json must be an object"
-  in
-  match Keeper_meta_json_parse.meta_of_json json with
-  | Error _ -> ()
-  | Ok _ -> fail "unknown retired metadata field was accepted"
-
 (* ── Status bridge surfacing ────────────────────────────────── *)
 
 let test_status_bridge_surfaces_latched_reason () =
@@ -272,8 +258,6 @@ let () =
             test_latched_reason_survives_serialization
         ; test_case "unset reason serializes as null and round-trips to None" `Quick
             test_no_latched_reason_serializes_as_null
-        ; test_case "unknown retired field is rejected" `Quick
-            test_unknown_field_is_rejected
         ] )
     ; ( "status bridge"
       , [ test_case "attention fields surface the typed pause reason wire" `Quick

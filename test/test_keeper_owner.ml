@@ -5,8 +5,6 @@ module Reducer = Keeper_owner_reducer
 module Owner = Keeper_owner
 module Owner_registry = Keeper_owner_registry
 
-exception Synthetic_child_cancel
-
 let make_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -295,89 +293,7 @@ let test_mailbox_backpressures_without_drop () =
   check int "mailbox drained" 0 (Owner.For_testing.mailbox_depth owner)
 ;;
 
-let rec await_idle clock owner remaining =
-  if remaining = 0
-  then fail "owner did not return to idle"
-  else
-    match (Owner.projection owner).running_operation_id with
-    | None -> ()
-    | Some _ ->
-      Eio.Time.sleep clock 0.001;
-      await_idle clock owner (remaining - 1)
-;;
-
-let test_child_isolation_and_per_keeper_parallelism () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
-  let owner_a =
-    owner_ok
-      (Owner.start ~sw ~store ~keeper_name:"a" ~initial_meta:(Some (make_meta "a")))
-  in
-  let owner_b =
-    owner_ok
-      (Owner.start ~sw ~store ~keeper_name:"b" ~initial_meta:(Some (make_meta "b")))
-  in
-  let child_a_started, resolve_child_a_started = Eio.Promise.create () in
-  let release_child_a, resolve_release_child_a = Eio.Promise.create () in
-  (match
-     owner_ok
-       (Owner.start_turn owner_a ~operation_id:"op-a" ~run:(fun _turn_sw ->
-          Eio.Promise.resolve resolve_child_a_started ();
-          Eio.Promise.await release_child_a))
-   with
-   | Owner.Started _ -> ()
-   | Busy _ -> fail "owner a unexpectedly busy");
-  Eio.Promise.await child_a_started;
-  (match
-     owner_ok
-       (Owner.start_turn owner_a ~operation_id:"op-a-2" ~run:(fun _ -> ()))
-   with
-   | Busy { running_operation_id } ->
-     check string "busy identifies current operation" "op-a" running_operation_id
-   | Started _ -> fail "second turn started concurrently on owner a");
-  let child_b_ran = Atomic.make false in
-  (match
-     owner_ok
-       (Owner.start_turn owner_b ~operation_id:"op-b" ~run:(fun _ ->
-          Atomic.set child_b_ran true))
-   with
-   | Started _ -> ()
-   | Busy _ -> fail "independent owner b was blocked by owner a");
-  await_idle (Eio.Stdenv.clock env) owner_b 1_000;
-  check bool "independent keeper ran concurrently" true (Atomic.get child_b_ran);
-  ignore
-    (owner_ok
-       (Owner.apply_meta
-          owner_a
-          (Set_autoboot { enabled = true; updated_at = "while-running" })));
-  check bool
-    "actor processed metadata while child was running"
-    true
-    (Option.get (Owner.projection owner_a).meta).autoboot_enabled;
-  Eio.Promise.resolve resolve_release_child_a ();
-  await_idle (Eio.Stdenv.clock env) owner_a 1_000;
-  let failed_handle =
-    match
-     owner_ok
-       (Owner.start_turn owner_a ~operation_id:"op-exn" ~run:(fun _ ->
-          raise (Failure "synthetic child failure")))
-    with
-    | Started handle -> handle
-    | Busy _ -> fail "owner remained busy after first child"
-  in
-  (match Owner.await_turn failed_handle with
-   | Owner.Turn_failed detail ->
-     check bool
-       "typed terminal includes child failure"
-       true
-       (String.length detail > 0)
-   | Turn_succeeded | Turn_cancelled -> fail "child exception lost typed failure");
-  await_idle (Eio.Stdenv.clock env) owner_a 1_000;
-  ignore (owner_ok (Owner.exact_projection owner_a))
-;;
-
-let test_store_failure_is_precommit () =
+let test_store_failure_fences_mutations () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let owner =
@@ -402,83 +318,38 @@ let test_store_failure_is_precommit () =
   check bool
     "failed persistence leaves projection unchanged"
     false
-    (Option.get (Owner.projection owner).meta).autoboot_enabled
+    (Option.get (Owner.projection owner).meta).autoboot_enabled;
+  (match
+     Owner.apply_meta
+       owner
+       (Set_autoboot { enabled = true; updated_at = "must-remain-fenced" })
+   with
+   | Error (Owner.Store_unavailable "disk unavailable") -> ()
+   | Error error -> fail ("wrong fenced store error: " ^ Owner.error_to_string error)
+   | Ok _ -> fail "store-fenced owner accepted another mutation");
+  match Owner.exact_projection owner with
+  | Ok projection ->
+    check bool
+      "store fence keeps exact projection readable"
+      false
+      (Option.get projection.meta).autoboot_enabled
+  | Error error -> fail ("store fence blocked exact projection: " ^ Owner.error_to_string error)
 ;;
 
-let test_identity_and_running_lifecycle_guards () =
+let test_identity_and_delete_guards () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
   let empty =
     owner_ok (Owner.start ~sw ~store ~keeper_name:"empty" ~initial_meta:None)
   in
-  (match Owner.start_turn empty ~operation_id:"missing" ~run:(fun _ -> ()) with
-   | Error (Owner.Reducer_rejected Reducer.Meta_missing) -> ()
-   | Error error -> fail ("wrong missing-meta error: " ^ Owner.error_to_string error)
-   | Ok _ -> fail "metadata-free owner admitted a turn");
   (match Owner.apply_meta empty (Create (make_meta "other")) with
    | Error (Owner.Reducer_rejected (Reducer.Keeper_identity_mismatch _)) -> ()
    | Error error -> fail ("wrong identity error: " ^ Owner.error_to_string error)
    | Ok _ -> fail "owner accepted metadata for another Keeper");
   ignore (owner_ok (Owner.apply_meta empty (Create (make_meta "empty"))));
-  let started, resolve_started = Eio.Promise.create () in
-  let release, resolve_release = Eio.Promise.create () in
-  let handle =
-    match
-      owner_ok
-        (Owner.start_turn empty ~operation_id:"running" ~run:(fun _ ->
-           Eio.Promise.resolve resolve_started ();
-           Eio.Promise.await release))
-    with
-    | Started handle -> handle
-    | Busy _ -> fail "newly created owner was busy"
-  in
-  Eio.Promise.await started;
-  (match Owner.apply_meta empty Delete with
-   | Error (Owner.Reducer_rejected (Reducer.Delete_while_running "running")) -> ()
-   | Error error -> fail ("wrong delete guard error: " ^ Owner.error_to_string error)
-   | Ok _ -> fail "running owner allowed metadata deletion");
-  Eio.Promise.resolve resolve_release ();
-  (match Owner.await_turn handle with
-   | Owner.Turn_succeeded -> ()
-   | Turn_failed _ | Turn_cancelled -> fail "successful child did not settle successfully");
   ignore (owner_ok (Owner.apply_meta empty Delete));
   check bool "delete clears metadata" true (Option.is_none (Owner.projection empty).meta)
-;;
-
-let test_child_exception_releases_slot () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let owner =
-    owner_ok
-      (Owner.start
-         ~sw
-         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~keeper_name:"cancel"
-         ~initial_meta:(Some (make_meta "cancel")))
-  in
-  let handle =
-    match
-      owner_ok
-        (Owner.start_turn owner ~operation_id:"cancelled" ~run:(fun turn_sw ->
-           Eio.Switch.fail turn_sw Synthetic_child_cancel))
-    with
-    | Started handle -> handle
-    | Busy _ -> fail "cancellation test owner was busy"
-  in
-  (match Owner.await_turn handle with
-   | Owner.Turn_failed _ -> ()
-   | Turn_succeeded | Turn_cancelled -> fail "child exception lost typed terminal");
-  await_idle (Eio.Stdenv.clock env) owner 1_000;
-  match
-    owner_ok
-      (Owner.start_turn owner ~operation_id:"after-cancel" ~run:(fun _ -> ()))
-  with
-  | Started handle ->
-    (match Owner.await_turn handle with
-     | Turn_succeeded -> ()
-     | Turn_failed _ | Turn_cancelled -> fail "owner did not recover after cancellation")
-  | Busy _ -> fail "child exception leaked the running slot"
 ;;
 
 let test_shutdown_releases_full_mailbox_requests () =
@@ -809,22 +680,17 @@ let () =
             `Quick
             test_actor_concurrent_commands_are_exact
         ; test_case
-            "child isolation and per-keeper parallelism"
-            `Quick
-            test_child_isolation_and_per_keeper_parallelism
-        ; test_case
             "mailbox backpressures without drop"
             `Quick
             test_mailbox_backpressures_without_drop
-        ; test_case "store failure is precommit" `Quick test_store_failure_is_precommit
         ; test_case
-            "identity and running lifecycle guards"
+            "store failure fences mutations"
             `Quick
-            test_identity_and_running_lifecycle_guards
-          ; test_case
-            "child exception releases slot"
+            test_store_failure_fences_mutations
+        ; test_case
+            "identity and delete guards"
             `Quick
-            test_child_exception_releases_slot
+            test_identity_and_delete_guards
         ; test_case
             "shutdown releases full mailbox requests"
             `Quick

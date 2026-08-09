@@ -1,9 +1,9 @@
-(** Single-fiber owner for one Keeper.
+(** Single-fiber metadata owner for one Keeper.
 
     Producers communicate through a bounded mailbox.  [apply_meta],
-    [exact_projection], and [start_turn] apply backpressure when the mailbox is
-    full; commands are never dropped or coalesced.  Routine reads use
-    {!projection} and do not enter the mailbox. *)
+    and [exact_projection] apply backpressure when the mailbox is full;
+    commands are never dropped or coalesced. Routine reads use {!projection}
+    and do not enter the mailbox. *)
 
 val mailbox_capacity : int
 
@@ -16,17 +16,6 @@ type error =
   | Reducer_rejected of Keeper_owner_reducer.error
   | Store_unavailable of string
   | Owner_closed
-
-type turn_start =
-  | Started of turn_handle
-  | Busy of { running_operation_id : string }
-
-and turn_terminal =
-  | Turn_succeeded
-  | Turn_failed of string
-  | Turn_cancelled
-
-and turn_handle
 
 type t
 
@@ -50,20 +39,8 @@ val apply_meta
   -> Keeper_owner_reducer.meta_command
   -> (Keeper_meta_contract.keeper_meta option, error) result
 
-val start_turn
-  :  t
-  -> operation_id:string
-  -> run:(Eio.Switch.t -> unit)
-  -> (turn_start, error) result
-(** Admit one child turn and return after actor admission, without waiting for
-    the child.  A child exception is contained by the owner and releases the
-    running slot. *)
-
-val await_turn : turn_handle -> turn_terminal
-
 val begin_stopping : t -> (unit, error) result
-(** Reject future external commands.  The root switch remains the structured
-    cancellation and join authority for the actor and its current child. *)
+(** Reject future external commands. *)
 
 val error_to_string : error -> string
 

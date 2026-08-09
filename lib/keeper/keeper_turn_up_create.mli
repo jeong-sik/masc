@@ -8,9 +8,7 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-(** Persist a freshly-built keeper_meta with field-merging CAS
-    retry — preserves heartbeat-owned cursors when bootstrap races
-    a supervisor write (#9749). *)
+(** Commit a freshly-built Keeper metadata snapshot through its Owner. *)
 val write_initial_meta :
   Workspace.config -> keeper_meta -> (unit, string) result
 

@@ -2,9 +2,6 @@
 
 open Masc
 
-(* [shared_memory_scope] removed in commit e3f4d82c60 ("refactor: remove
-   shared_memory_scope and all related logic"). Drop from the drift gate so
-   it does not pin a key the JSON serialisation no longer emits. *)
 let target_keys =
   [ "trace_history"
   ; "instructions"
@@ -51,12 +48,6 @@ let check_rejected label json =
   | Ok _ -> Alcotest.fail (label ^ " was accepted")
 ;;
 
-let test_old_version_field_is_rejected () =
-  valid_json ()
-  |> add_field ("meta_" ^ "version") (`Int 7)
-  |> check_rejected "old metadata version field"
-;;
-
 let test_unknown_field_is_rejected () =
   valid_json ()
   |> add_field "future_field" (`String "unsupported")
@@ -66,7 +57,7 @@ let test_unknown_field_is_rejected () =
 let test_wrong_schema_is_rejected () =
   match valid_json () with
   | `Assoc fields ->
-    `Assoc (("schema", `String "masc.keeper_meta.v0") :: List.remove_assoc "schema" fields)
+    `Assoc (("schema", `String "unsupported") :: List.remove_assoc "schema" fields)
     |> check_rejected "wrong metadata schema"
   | _ -> Alcotest.fail "metadata encoder did not return an object"
 ;;
@@ -79,10 +70,6 @@ let () =
             "runtime keys present"
             `Quick
             test_canonical_includes_runtime_keys
-        ; Alcotest.test_case
-            "old metadata version field is rejected"
-            `Quick
-            test_old_version_field_is_rejected
         ; Alcotest.test_case
             "unknown field is rejected"
             `Quick

@@ -161,7 +161,6 @@ type state
 
 type projection =
   { meta : Keeper_meta_contract.keeper_meta option
-  ; running_operation_id : string option
   ; stopping : bool
   }
 
@@ -170,33 +169,22 @@ type persistence_intent =
   | Replace_snapshot of Keeper_meta_contract.keeper_meta
   | Remove_snapshot of Keeper_meta_contract.keeper_meta
 
-type post_commit_effect =
-  | Publish_projection of projection
-  | Start_turn_child of { operation_id : string }
-
 type transition =
   { state : state
   ; persistence : persistence_intent
-  ; effects : post_commit_effect list
+  ; projection : projection
   }
 
 type error =
   | Meta_missing
   | Meta_already_exists
   | Owner_stopping
-  | Turn_already_running of string
-  | Turn_not_running
-  | Turn_identity_mismatch of
-      { expected : string
-      ; actual : string
-      }
   | Invalid_delta of string
   | Keeper_identity_mismatch of
       { expected : string
       ; actual : string
       }
   | Identity_generation_mismatch
-  | Delete_while_running of string
 
 val turn_runtime_delta_of_snapshots
   :  before:Keeper_meta_contract.keeper_meta
@@ -209,16 +197,6 @@ val create
   -> (state, error) result
 val projection : state -> projection
 val apply_meta : state -> meta_command -> (transition, error) result
-
-val begin_turn
-  :  state
-  -> operation_id:string
-  -> (transition, error) result
-
-val finish_turn
-  :  state
-  -> operation_id:string
-  -> (transition, error) result
 
 val begin_stopping : state -> transition
 val error_to_string : error -> string

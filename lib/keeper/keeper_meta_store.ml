@@ -1,8 +1,7 @@
-(** Keeper meta store I/O and CAS write helpers.
+(** Keeper metadata snapshot I/O.
 
     Included by [Keeper_types] so existing [Keeper_types.*] callers keep
-    their public API while durable meta storage is separated from the
-    compatibility facade. *)
+    their public read API while durable metadata storage remains separate. *)
 
 
 open Keeper_types_profile
@@ -106,8 +105,7 @@ let keeper_names config =
      JSON files are scoped to the server's base_path, so test isolation works.
      Overlay keepers (from .masc/config/keepers/*.toml) are materialized to
      JSON at boot by load_or_materialize_boot_meta, so they appear here too.
-     Every canonical root [.json] is metadata authority; retired dataset
-     exports no longer compete for the same basename. *)
+     Every canonical root [.json] is metadata authority. *)
   match keeper_names_result config with
   | Ok names -> names
   | Error msg ->
@@ -284,23 +282,61 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
   read_candidate requested_name
 ;;
 
+let exact_payload_read_back path expected =
+  try
+    match Fs_compat.load_file_opt path with
+    | Some actual when String.equal actual expected -> Ok ()
+    | Some _ -> Error "persisted bytes differ from the intended snapshot"
+    | None -> Error "persisted snapshot is absent"
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error ("snapshot read-back failed: " ^ Printexc.to_string exn)
+;;
+
 let replace_snapshot config (persisted : Keeper_meta_contract.keeper_meta) =
   let path = keeper_meta_path config persisted.name in
   match Keeper_meta_contract.terminal_latch_pause_violation persisted with
   | Some detail -> Error ("Keeper metadata invariant violation: " ^ detail)
   | None ->
-  let json = meta_to_json persisted in
-  match Keeper_fs.save_json_atomic path json with
-  | Ok () -> Ok ()
-  | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)
+    let payload = persisted |> meta_to_json |> Yojson.Safe.pretty_to_string in
+    (match
+       Keeper_fs.save_bytes_durable_atomic
+         ~ownership_root:config.Workspace.base_path
+         path
+         payload
+     with
+     | Ok () -> Ok ()
+     | Error error when error.Keeper_fs.renamed ->
+       (match exact_payload_read_back path payload with
+        | Ok () -> Ok ()
+        | Error read_back_error ->
+          Error
+            (Printf.sprintf
+               "failed to confirm metadata commit %s: %s; %s"
+               path
+               (Keeper_fs.durable_write_error_to_string error)
+               read_back_error))
+     | Error error ->
+       Error
+         (Printf.sprintf
+            "failed to write metadata %s: %s"
+            path
+            (Keeper_fs.durable_write_error_to_string error)))
 ;;
 
 let remove_snapshot config ~name =
   let path = keeper_meta_path config name in
-  try
-    Unix.unlink path;
-    Ok ()
+  match
+    Keeper_fs.remove_file_durable
+      ~ownership_root:config.Workspace.base_path
+      path
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printf.sprintf "failed to remove meta %s: %s" path (Printexc.to_string exn))
+  | Ok () -> Ok ()
+  | Error error when error.Keeper_fs.removed && not (Fs_compat.file_exists path) -> Ok ()
+  | Error error ->
+    Error
+      (Printf.sprintf
+         "failed to remove metadata %s: %s"
+         path
+         (Keeper_fs.durable_remove_error_to_string error))
 ;;

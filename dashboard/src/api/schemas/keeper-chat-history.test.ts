@@ -140,7 +140,6 @@ describe('safeParseKeeperChatHistoryMessage', () => {
           status: 'backend_trace_join',
           turn_ref: 'trace-1780648779957-00000#4071',
           trace_event_count: 2,
-          delivery_receipt: 'no_delivery_receipt',
           reason: 'turn_ref joined to retained trajectory/internal-history events',
         },
       }),
@@ -150,7 +149,6 @@ describe('safeParseKeeperChatHistoryMessage', () => {
       status: 'backend_trace_join',
       turn_ref: 'trace-1780648779957-00000#4071',
       trace_event_count: 2,
-      delivery_receipt: 'no_delivery_receipt',
       reason: 'turn_ref joined to retained trajectory/internal-history events',
     })
   })
@@ -169,7 +167,6 @@ describe('safeParseKeeperChatHistoryMessage', () => {
             'TEXT_MESSAGE_END',
             'RUN_FINISHED',
           ],
-          delivery_receipt: 'server_lifecycle_replay_only',
           reason: 'history row records durable server stream lifecycle replay',
         },
       }),
@@ -185,7 +182,6 @@ describe('safeParseKeeperChatHistoryMessage', () => {
         'TEXT_MESSAGE_END',
         'RUN_FINISHED',
       ],
-      delivery_receipt: 'server_lifecycle_replay_only',
       reason: 'history row records durable server stream lifecycle replay',
     })
   })
@@ -194,6 +190,20 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(
       safeParseKeeperChatHistoryMessage(
         validMessage({ stream_contract: { source: 'backend_turn_trace' } }),
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects the removed delivery receipt wire field', () => {
+    expect(
+      safeParseKeeperChatHistoryMessage(
+        validMessage({
+          stream_contract: {
+            source: 'backend_turn_trace',
+            status: 'backend_trace_join',
+            delivery_receipt: 'no_delivery_receipt',
+          },
+        }),
       ),
     ).toBeNull()
   })

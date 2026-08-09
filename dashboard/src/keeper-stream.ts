@@ -37,7 +37,7 @@ import {
   toolEntryIdFromCallId,
 } from './tool-call-output-store'
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
-import { updatePendingKeeperChatAssistantDraft } from './keeper-chat-pending'
+import { updateTrackedKeeperChatAssistantDraft } from './keeper-chat-operations-local'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
@@ -87,7 +87,7 @@ function persistActiveAssistantDraft(keeperName: string, assistantEntryId: strin
   const entry = (keeperThreads.value[keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return
-  updatePendingKeeperChatAssistantDraft(requestId, entry)
+  updateTrackedKeeperChatAssistantDraft(requestId, entry)
 }
 
 function flushPendingThinkingDeltas(
@@ -788,7 +788,7 @@ export function applyKeeperStreamEvent(
           rawText: rawText || entry.rawText,
           delivery: 'delivered',
           streamState: null,
-          streamContract: keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', {
+          streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
             eventName: 'KEEPER_CONTINUATION_CHECKPOINT',
           }),
         }))
@@ -808,7 +808,7 @@ export function applyKeeperStreamEvent(
           text: '',
           delivery: 'delivered',
           streamState: null,
-          streamContract: keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', {
+          streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
             eventName: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
           }),
         }))

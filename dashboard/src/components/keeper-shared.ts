@@ -24,7 +24,7 @@ import {
   isKeeperThreadMessageSendInFlight,
   probeKeeperRuntime,
   recoverKeeperRuntime,
-  resumePendingKeeperChatRequests,
+  hydrateTrackedKeeperChatOperations,
   sendKeeperThreadMessage,
 } from '../keeper-actions'
 import {
@@ -787,7 +787,7 @@ export function KeeperConversationPanel({
       const newest = newestConversationEntryUnix(keeperThreads.value[keeperName] ?? [])
       if (newest !== null) advanceKeeperLastSeen(keeperName, newest)
     })()
-    void resumePendingKeeperChatRequests(keeperName)
+    void hydrateTrackedKeeperChatOperations(keeperName)
   }, [keeperName])
 
   const rawThread = keeperThreads.value[keeperName] ?? []

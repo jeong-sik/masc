@@ -14,7 +14,6 @@ import type {
   KeeperConversationRole,
   KeeperConversationSource,
   KeeperConversationStreamContract,
-  KeeperConversationStreamDeliveryReceipt,
   KeeperConversationStreamContractSource,
   KeeperConversationStreamContractStatus,
   KeeperConversationStreamState,
@@ -272,7 +271,6 @@ export function keeperStreamContract(
     turnRef?: string | null
     traceEventCount?: number | null
     lifecycleEvents?: string[] | null
-    deliveryReceipt?: KeeperConversationStreamDeliveryReceipt | null
     reason?: string | null
   } = {},
 ): KeeperConversationStreamContract {
@@ -284,7 +282,6 @@ export function keeperStreamContract(
     turnRef: opts.turnRef ?? undefined,
     traceEventCount: opts.traceEventCount ?? undefined,
     lifecycleEvents: opts.lifecycleEvents ?? undefined,
-    deliveryReceipt: opts.deliveryReceipt ?? undefined,
     reason: opts.reason ?? undefined,
   })
 }
@@ -301,10 +298,7 @@ export function keeperClientObservedSseStreamContract(
     reason?: string | null
   } = {},
 ): KeeperConversationStreamContract {
-  return keeperStreamContract(source, status, {
-    ...opts,
-    deliveryReceipt: 'client_observed_sse_event',
-  })
+  return keeperStreamContract(source, status, opts)
 }
 
 function normalizeStreamContractSource(value: unknown): KeeperConversationStreamContractSource | null {
@@ -319,16 +313,14 @@ function normalizeStreamContractSource(value: unknown): KeeperConversationStream
       return 'rest_history'
     case 'sse_event':
       return 'sse_event'
-    case 'queue_event':
-      return 'queue_event'
-    case 'queue_poll':
-      return 'queue_poll'
-    case 'pending_request_store':
-      return 'pending_request_store'
+    case 'client_operation_store':
+      return 'client_operation_store'
+    case 'client_operation_lookup':
+      return 'client_operation_lookup'
     case 'client_local_send':
       return 'client_local_send'
-    case 'client_reconciliation':
-      return 'client_reconciliation'
+    case 'client_stream_failure':
+      return 'client_stream_failure'
     default:
       return null
   }
@@ -348,29 +340,14 @@ function normalizeStreamContractStatus(value: unknown): KeeperConversationStream
       return 'history_without_turn_ref'
     case 'history_without_stream_events':
       return 'history_without_stream_events'
-    case 'queue_request_event':
-      return 'queue_request_event'
-    case 'queue_poll_result':
-      return 'queue_poll_result'
+    case 'client_operation_terminal':
+      return 'client_operation_terminal'
     case 'client_placeholder':
       return 'client_placeholder'
     case 'client_reconciled_history':
       return 'client_reconciled_history'
     case 'contract_gap':
       return 'contract_gap'
-    default:
-      return null
-  }
-}
-
-function normalizeStreamDeliveryReceipt(value: unknown): KeeperConversationStreamDeliveryReceipt | null {
-  switch (asString(value)?.trim()) {
-    case 'client_observed_sse_event':
-      return 'client_observed_sse_event'
-    case 'server_lifecycle_replay_only':
-      return 'server_lifecycle_replay_only'
-    case 'no_delivery_receipt':
-      return 'no_delivery_receipt'
     default:
       return null
   }
@@ -387,7 +364,6 @@ function normalizeStreamContract(raw: unknown): KeeperConversationStreamContract
     turnRef: asString(raw.turn_ref) ?? asString(raw.turnRef) ?? null,
     traceEventCount: asNumber(raw.trace_event_count) ?? asNumber(raw.traceEventCount) ?? null,
     lifecycleEvents: normalizeStringArray(raw.lifecycle_events) ?? normalizeStringArray(raw.lifecycleEvents) ?? null,
-    deliveryReceipt: normalizeStreamDeliveryReceipt(raw.delivery_receipt) ?? normalizeStreamDeliveryReceipt(raw.deliveryReceipt) ?? null,
     reason: asString(raw.reason) ?? null,
   })
 }
@@ -1110,7 +1086,6 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
     delivery: 'streaming',
     streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
       eventName: 'TEXT_MESSAGE_CONTENT',
-      deliveryReceipt: 'client_observed_sse_event',
     }),
   }))
 }
@@ -1197,7 +1172,6 @@ function writeAssistantThinkingText(
       delivery: 'streaming',
       streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
         eventName: 'KEEPER_THINKING_DELTA',
-        deliveryReceipt: 'client_observed_sse_event',
       }),
     }
   })

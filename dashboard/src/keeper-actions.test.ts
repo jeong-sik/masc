@@ -62,8 +62,8 @@ import {
   sendKeeperThreadMessage,
 } from './keeper-actions'
 import {
-  _clearPendingKeeperChatRequestsForTests,
-} from './keeper-chat-pending'
+  _clearTrackedKeeperChatOperationsForTests,
+} from './keeper-chat-operations-local'
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
 import {
   resetToolCallOutputs,
@@ -206,7 +206,6 @@ describe('hydrateKeeperChatHistory', () => {
           status: 'backend_trace_join',
           turn_ref: 'trace-hydrate#2',
           trace_event_count: 2,
-          delivery_receipt: 'no_delivery_receipt',
           reason: 'turn_ref joined to retained trajectory/internal-history events',
         },
       },
@@ -220,7 +219,6 @@ describe('hydrateKeeperChatHistory', () => {
       status: 'backend_trace_join',
       turnRef: 'trace-hydrate#2',
       traceEventCount: 2,
-      deliveryReceipt: 'no_delivery_receipt',
       reason: 'turn_ref joined to retained trajectory/internal-history events',
     })
   })
@@ -356,7 +354,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
     keeperStreamLastEventAt.value = {}
-    _clearPendingKeeperChatRequestsForTests()
+    _clearTrackedKeeperChatOperationsForTests()
     _resetKeeperThreadMessageSendGuardsForTests()
     _resetLiveSendRequestOwnersForTests()
     _resetActiveKeeperStreamsForTests()

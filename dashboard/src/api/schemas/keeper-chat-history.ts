@@ -26,6 +26,7 @@ import {
   optional,
   record,
   safeParse,
+  strictObject,
   string,
   union,
   unknown,
@@ -225,7 +226,7 @@ export const KeeperChatBlockSchema = union([
 
 export type KeeperChatBlock = InferOutput<typeof KeeperChatBlockSchema>
 
-export const KeeperChatHistoryStreamContractSchema = object({
+export const KeeperChatHistoryStreamContractSchema = strictObject({
   source: string(),
   status: string(),
   event_name: optional(string()),
@@ -238,8 +239,6 @@ export const KeeperChatHistoryStreamContractSchema = object({
   traceEventCount: optional(number()),
   lifecycle_events: optional(array(string())),
   lifecycleEvents: optional(array(string())),
-  delivery_receipt: optional(string()),
-  deliveryReceipt: optional(string()),
   reason: optional(string()),
 })
 

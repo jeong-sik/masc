@@ -366,7 +366,6 @@ describe('ChatTranscript', () => {
                 'TEXT_MESSAGE_END',
                 'RUN_FINISHED',
               ],
-              deliveryReceipt: 'server_lifecycle_replay_only',
               reason: 'history row records durable server stream lifecycle replay',
             },
             surface: {
@@ -396,9 +395,6 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-stream-contract-event')).toBe('RUN_FINISHED')
     expect(bubble.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe(
       'RUN_STARTED,TEXT_MESSAGE_START,TEXT_MESSAGE_END,RUN_FINISHED',
-    )
-    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe(
-      'server_lifecycle_replay_only',
     )
     expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
       'history row records durable server stream lifecycle replay',
@@ -467,9 +463,8 @@ describe('ChatTranscript', () => {
             streamState: null,
             error: '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
             streamContract: {
-              source: 'client_reconciliation',
+              source: 'client_stream_failure',
               status: 'contract_gap',
-              deliveryReceipt: 'no_delivery_receipt',
               reason: '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
             },
           }),
@@ -484,9 +479,8 @@ describe('ChatTranscript', () => {
     expect(bubble).not.toBeNull()
     expect(bubble.getAttribute('data-chat-delivery-state')).toBe('interrupted')
     expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
-    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('client_reconciliation')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('client_stream_failure')
     expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('contract_gap')
-    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
     expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
       '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
     )
@@ -509,7 +503,6 @@ describe('ChatTranscript', () => {
         stream_contract: {
           source: 'keeper_chat_store',
           status: 'history_without_turn_ref',
-          delivery_receipt: 'no_delivery_receipt',
           reason: 'history row has no durable turn_ref; cannot join stream events',
         },
       },
@@ -524,7 +517,6 @@ describe('ChatTranscript', () => {
         stream_contract: {
           source: 'keeper_chat_store',
           status: 'history_without_turn_ref',
-          delivery_receipt: 'no_delivery_receipt',
           reason: 'history row has no durable turn_ref; cannot join stream events',
         },
       },
@@ -544,7 +536,6 @@ describe('ChatTranscript', () => {
             'RUN_STARTED',
             'RUN_ERROR',
           ],
-          delivery_receipt: 'server_lifecycle_replay_only',
           reason: 'history row records durable server stream lifecycle replay',
         },
       },
@@ -563,7 +554,6 @@ describe('ChatTranscript', () => {
     expect(legacy).not.toBeNull()
     expect(legacy.getAttribute('data-chat-stream-contract-source')).toBe('keeper_chat_store')
     expect(legacy.getAttribute('data-chat-stream-contract-status')).toBe('history_without_turn_ref')
-    expect(legacy.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
     // A missing turn_ref is the normal state of every user row (persisted at
     // request-accept time, before the turn exists), so the badge is
     // suppressed there — the contract attributes still render for debugging.
@@ -588,7 +578,6 @@ describe('ChatTranscript', () => {
     expect(failure.getAttribute('data-chat-stream-contract-status')).toBe('backend_lifecycle_replay')
     expect(failure.getAttribute('data-chat-stream-contract-event')).toBe('RUN_ERROR')
     expect(failure.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe('RUN_STARTED,RUN_ERROR')
-    expect(failure.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('server_lifecycle_replay_only')
     expect(failure.getAttribute('data-chat-stream-contract-badge-state')).toBe('server-replay')
     expect(failure.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('서버 replay')
     // transport_failure renders the typed card, so the raw diagnostic is
@@ -601,10 +590,6 @@ describe('ChatTranscript', () => {
     errToggle.click()
     await flushUi()
     expect(failure.querySelector('[data-chat-failure-detail]')?.textContent).toContain('Timeout after 630.0s')
-    expect(
-      [...container.querySelectorAll('[data-chat-stream-contract-delivery-receipt]')]
-        .map(node => node.getAttribute('data-chat-stream-contract-delivery-receipt')),
-    ).not.toContain('client_observed_sse_event')
   })
 
   it('exposes tool-call transcript provenance as rendered attributes', () => {
@@ -619,7 +604,6 @@ describe('ChatTranscript', () => {
             streamContract: {
               source: 'rest_history',
               status: 'history_without_stream_events',
-              deliveryReceipt: 'no_delivery_receipt',
               reason: 'tool history rows carry arguments, not live stream lifecycle',
             },
           }),
@@ -639,7 +623,6 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
     expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('rest_history')
     expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('history_without_stream_events')
-    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
     expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
       'tool history rows carry arguments, not live stream lifecycle',
     )

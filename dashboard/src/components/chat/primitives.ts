@@ -491,28 +491,17 @@ function streamContractBadgeInfo(entry: KeeperConversationEntry): StreamContract
     `source=${contract.source}`,
     `status=${contract.status}`,
     contract.eventName ? `event=${contract.eventName}` : null,
-    contract.deliveryReceipt ? `receipt=${contract.deliveryReceipt}` : null,
     contract.reason ?? null,
     sourceContext || null,
   ].filter((value): value is string => Boolean(value)).join(' · ')
-  switch (contract.deliveryReceipt) {
-    case 'server_lifecycle_replay_only':
+  switch (contract.status) {
+    case 'backend_lifecycle_replay':
       return { label: '서버 replay', title, state: 'server-replay' }
-    case 'no_delivery_receipt':
-      switch (contract.status) {
-        case 'history_without_turn_ref':
-          // User rows are persisted at request-accept time, before the turn
-          // (and its turn_ref) exists, and nothing back-stamps them — a
-          // missing turn_ref is the normal state of every user row, so the
-          // badge would be pure noise there. On assistant rows it still
-          // marks a real turn-join gap worth surfacing.
-          if (entry.role === 'user') return null
-          return { label: '턴 연결 없음', title, state: 'no-turn-ref' }
-        case 'contract_gap':
-          return { label: '수신 gap', title, state: 'contract-gap' }
-        default:
-          return null
-      }
+    case 'history_without_turn_ref':
+      if (entry.role === 'user') return null
+      return { label: '턴 연결 없음', title, state: 'no-turn-ref' }
+    case 'contract_gap':
+      return { label: '수신 gap', title, state: 'contract-gap' }
     default:
       return null
   }
@@ -2708,7 +2697,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
       data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
-      data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
       data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
       data-chat-stream-contract-badge-state=${streamContractBadge?.state ?? undefined}
       data-chat-surface-kind=${entry.surface?.kind ?? undefined}
@@ -3061,7 +3049,6 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
       data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
-      data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
       data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-tool-call-id=${toolCallId ?? undefined}
@@ -3415,7 +3402,6 @@ function ChatResponseTraceStep({
       data-chat-trace-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
       data-chat-trace-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-trace-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
-      data-chat-trace-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
     >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
@@ -3525,7 +3511,6 @@ function ToolTraceCard({
       data-chat-turn-stream-contract-turn-ref=${assistant?.streamContract?.turnRef ?? undefined}
       data-chat-turn-stream-contract-trace-events=${assistant?.streamContract?.traceEventCount ?? undefined}
       data-chat-turn-stream-contract-lifecycle-events=${assistant?.streamContract?.lifecycleEvents?.join(',') ?? undefined}
-      data-chat-turn-stream-contract-delivery-receipt=${assistant?.streamContract?.deliveryReceipt ?? undefined}
       data-chat-tool-output-hydration-source=${toolOutputHydrationContract?.source ?? undefined}
       data-chat-tool-output-hydration-status=${toolOutputHydrationContract?.status ?? 'not-requested'}
       data-chat-tool-output-hydration-failure=${toolOutputHydrationContract?.failureReason ?? undefined}

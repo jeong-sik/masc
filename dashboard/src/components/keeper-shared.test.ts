@@ -73,7 +73,7 @@ vi.mock('../keeper-actions', () => ({
   probeKeeperRuntime: vi.fn(),
   reconcileKeeperChatReceipts: vi.fn(async () => undefined),
   recoverKeeperRuntime: vi.fn(),
-  resumePendingKeeperChatRequests: vi.fn(async () => undefined),
+  hydrateTrackedKeeperChatOperations: vi.fn(async () => undefined),
   sendKeeperThreadMessage: vi.fn(async () => null),
   interruptKeeperTurn: vi.fn(async () => true),
   isKeeperThreadMessageSendInFlight: vi.fn(() => false),
@@ -102,7 +102,6 @@ vi.mock('../keeper-state', async () => {
       turnRef: opts.turnRef ?? undefined,
       traceEventCount: opts.traceEventCount ?? undefined,
       lifecycleEvents: opts.lifecycleEvents ?? undefined,
-      deliveryReceipt: opts.deliveryReceipt ?? undefined,
       reason: opts.reason ?? undefined,
     }),
     setRecordValue: (state: { value: Record<string, unknown> }, key: string, value: unknown) => {

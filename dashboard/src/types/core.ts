@@ -870,11 +870,10 @@ export type KeeperConversationStreamContractSource =
   | 'backend_turn_trace'
   | 'rest_history'
   | 'sse_event'
-  | 'queue_event'
-  | 'queue_poll'
-  | 'pending_request_store'
+  | 'client_operation_store'
+  | 'client_operation_lookup'
   | 'client_local_send'
-  | 'client_reconciliation'
+  | 'client_stream_failure'
 
 export type KeeperConversationStreamContractStatus =
   | 'backend_stream_event'
@@ -883,17 +882,10 @@ export type KeeperConversationStreamContractStatus =
   | 'backend_trace_join'
   | 'history_without_turn_ref'
   | 'history_without_stream_events'
-  | 'queue_request_event'
-  | 'queue_poll_result'
+  | 'client_operation_terminal'
   | 'client_placeholder'
   | 'client_reconciled_history'
   | 'contract_gap'
-
-export type KeeperConversationStreamDeliveryReceipt =
-  | 'client_observed_sse_event'
-  | 'server_durable_receipt'
-  | 'server_lifecycle_replay_only'
-  | 'no_delivery_receipt'
 
 export interface KeeperConversationStreamContract {
   source: KeeperConversationStreamContractSource
@@ -903,7 +895,6 @@ export interface KeeperConversationStreamContract {
   turnRef?: string | null
   traceEventCount?: number | null
   lifecycleEvents?: string[] | null
-  deliveryReceipt?: KeeperConversationStreamDeliveryReceipt | null
   reason?: string | null
 }
 

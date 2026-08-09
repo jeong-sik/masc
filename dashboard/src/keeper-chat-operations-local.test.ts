@@ -1,48 +1,48 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
-  _clearPendingKeeperChatRequestsForTests,
-  pendingKeeperChatRequestsForKeeper,
-  removePendingKeeperChatRequest,
-  upsertPendingKeeperChatRequest,
-} from './keeper-chat-pending'
+  _clearTrackedKeeperChatOperationsForTests,
+  trackedKeeperChatOperationsForKeeper,
+  removeTrackedKeeperChatOperation,
+  upsertTrackedKeeperChatOperation,
+} from './keeper-chat-operations-local'
 
-describe('keeper chat pending request storage', () => {
+describe('keeper chat operation tracking', () => {
   beforeEach(() => {
     window.localStorage.clear()
-    _clearPendingKeeperChatRequestsForTests()
+    _clearTrackedKeeperChatOperationsForTests()
   })
 
   afterEach(() => {
-    _clearPendingKeeperChatRequestsForTests()
+    _clearTrackedKeeperChatOperationsForTests()
     window.localStorage.clear()
   })
 
-  it('preserves distinct request ids for repeated same-message sends', () => {
+  it('preserves distinct operation ids for repeated same-message sends', () => {
     const base = {
       keeperName: 'echo',
       message: 'status?',
       submittedAt: 1_780_000_000,
     }
 
-    upsertPendingKeeperChatRequest({ ...base, requestId: 'kmsg_echo_1' })
-    upsertPendingKeeperChatRequest({ ...base, requestId: 'kmsg_echo_2' })
+    upsertTrackedKeeperChatOperation({ ...base, operationId: 'kmsg_echo_1' })
+    upsertTrackedKeeperChatOperation({ ...base, operationId: 'kmsg_echo_2' })
 
-    expect(pendingKeeperChatRequestsForKeeper('echo').map(request => request.requestId)).toEqual([
+    expect(trackedKeeperChatOperationsForKeeper('echo').map(request => request.operationId)).toEqual([
       'kmsg_echo_1',
       'kmsg_echo_2',
     ])
 
-    removePendingKeeperChatRequest('kmsg_echo_1')
+    removeTrackedKeeperChatOperation('kmsg_echo_1')
 
-    expect(pendingKeeperChatRequestsForKeeper('echo').map(request => request.requestId)).toEqual([
+    expect(trackedKeeperChatOperationsForKeeper('echo').map(request => request.operationId)).toEqual([
       'kmsg_echo_2',
     ])
   })
 
   it('preserves the in-flight assistant draft for page reload recovery', () => {
-    upsertPendingKeeperChatRequest({
-      requestId: 'kmsg_echo_1',
+    upsertTrackedKeeperChatOperation({
+      operationId: 'kmsg_echo_1',
       keeperName: 'echo',
       message: 'status?',
       submittedAt: 1_780_000_000,
@@ -64,9 +64,9 @@ describe('keeper chat pending request storage', () => {
       },
     })
 
-    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toEqual([
       expect.objectContaining({
-        requestId: 'kmsg_echo_1',
+        operationId: 'kmsg_echo_1',
         assistantDraft: expect.objectContaining({
           text: '부분 응답',
           rawText: '부분 응답',

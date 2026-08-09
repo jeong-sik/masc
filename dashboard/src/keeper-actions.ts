@@ -70,14 +70,14 @@ import {
   KEEPER_HISTORY_TAIL_MESSAGES,
 } from './config/constants'
 import {
-  hasPendingKeeperChatRequest,
-  pendingKeeperChatRequestsForKeeper,
-  pendingKeeperChatAssistantDraftFromEntry,
-  removePendingKeeperChatRequest,
-  type PendingKeeperChatRequest,
-  updatePendingKeeperChatAssistantDraft,
-  upsertPendingKeeperChatRequest,
-} from './keeper-chat-pending'
+  hasTrackedKeeperChatOperation,
+  trackedKeeperChatOperationsForKeeper,
+  trackedKeeperChatAssistantDraftFromEntry,
+  removeTrackedKeeperChatOperation,
+  type TrackedKeeperChatOperation,
+  updateTrackedKeeperChatAssistantDraft,
+  upsertTrackedKeeperChatOperation,
+} from './keeper-chat-operations-local'
 
 type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
@@ -164,7 +164,7 @@ export function cancelKeeperThreadRequest(
     : cancelKeeperChatOperation(name, id))
     .then(result => {
       if (result.state.kind === 'cancelled') {
-        removePendingKeeperChatRequest(id)
+        removeTrackedKeeperChatOperation(id)
         releaseActiveStreamRequestId(id)
       }
       setRecordValue(keeperActionErrors, name, null)
@@ -432,11 +432,11 @@ async function reconcileStreamFailureFromServerHistory(
   return true
 }
 
-function pendingUserEntryId(requestId: string): string {
+function operationUserEntryId(requestId: string): string {
   return `pending-user-${requestId}`
 }
 
-function pendingAssistantEntryId(requestId: string): string {
+function operationAssistantEntryId(requestId: string): string {
   return `pending-assistant-${requestId}`
 }
 
@@ -460,10 +460,10 @@ function isUnknownKeeperChatOperationError(err: unknown): boolean {
   return message.includes('/chat/operations/') && message.includes('unknown_operation')
 }
 
-function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
+function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation): string {
   const existing = keeperThreads.value[request.keeperName] ?? []
-  const userId = pendingUserEntryId(request.requestId)
-  const assistantId = pendingAssistantEntryId(request.requestId)
+  const userId = operationUserEntryId(request.operationId)
+  const assistantId = operationAssistantEntryId(request.operationId)
   const assistantDraft = request.assistantDraft
   if (!existing.some(entry => entry.id === userId)) {
     appendThreadEntry(request.keeperName, {
@@ -475,11 +475,10 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       timestamp: new Date(request.submittedAt).toISOString(),
       delivery: 'delivered',
       streamState: null,
-      requestId: request.requestId,
-      streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
-        requestId: request.requestId,
-        deliveryReceipt: 'no_delivery_receipt',
-        reason: 'restored pending queued request from browser storage',
+      requestId: request.operationId,
+      streamContract: keeperStreamContract('client_operation_store', 'client_placeholder', {
+        requestId: request.operationId,
+        reason: 'restored accepted operation from browser storage',
       }),
       attachments: request.attachments,
       details: null,
@@ -496,11 +495,10 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       timestamp: assistantDraft?.timestamp ?? null,
       delivery: assistantDraft?.delivery ?? 'queued',
       streamState: assistantDraft ? assistantDraft.streamState : 'opening',
-      requestId: request.requestId,
-      streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
-        requestId: request.requestId,
-        deliveryReceipt: 'no_delivery_receipt',
-        reason: 'awaiting queued request poll result',
+      requestId: request.operationId,
+      streamContract: keeperStreamContract('client_operation_store', 'client_placeholder', {
+        requestId: request.operationId,
+        reason: 'awaiting durable operation terminal state',
       }),
       traceSteps: assistantDraft?.traceSteps,
       error: assistantDraft?.error ?? null,
@@ -510,7 +508,7 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
   return assistantId
 }
 
-function persistPendingAssistantDraft(
+function persistTrackedOperationAssistantDraft(
   keeperName: string,
   requestId: string | null,
   assistantEntryId: string,
@@ -519,23 +517,23 @@ function persistPendingAssistantDraft(
   const entry = (keeperThreads.value[keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return
-  updatePendingKeeperChatAssistantDraft(requestId, entry)
+  updateTrackedKeeperChatAssistantDraft(requestId, entry)
 }
 
-function withCurrentPendingAssistantDraft(
-  request: PendingKeeperChatRequest,
+function withCurrentTrackedOperationAssistantDraft(
+  request: TrackedKeeperChatOperation,
   assistantEntryId: string,
-): PendingKeeperChatRequest {
+): TrackedKeeperChatOperation {
   const entry = (keeperThreads.value[request.keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return request
-  const assistantDraft = pendingKeeperChatAssistantDraftFromEntry(entry)
+  const assistantDraft = trackedKeeperChatAssistantDraftFromEntry(entry)
   return assistantDraft ? { ...request, assistantDraft } : request
 }
 
 let localIdCounter = 0
 
-const resumingKeeperChatRequests = new Set<string>()
+const hydratingKeeperChatOperations = new Set<string>()
 const sendingKeeperThreadMessages = new Set<string>()
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 
@@ -571,16 +569,16 @@ export function isKeeperThreadMessageSendInFlight(
   return sendKey ? sendingKeeperThreadMessages.has(sendKey) : false
 }
 
-async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
+async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOperation): Promise<void> {
   // A live in-session send stream still owns this request (e.g. the panel
   // remounted on an SPA route change while the reply was pending). Defer to
   // it rather than minting a duplicate pending entry + a second poll loop.
   // After a full page reload this map is empty, so cold-start resume runs.
-  if (liveSendOwnsRequest(request.requestId)) return
-  const key = `${request.keeperName}:${request.requestId}`
-  if (resumingKeeperChatRequests.has(key)) return
-  resumingKeeperChatRequests.add(key)
-  const assistantId = ensurePendingThreadEntries(request)
+  if (liveSendOwnsRequest(request.operationId)) return
+  const key = `${request.keeperName}:${request.operationId}`
+  if (hydratingKeeperChatOperations.has(key)) return
+  hydratingKeeperChatOperations.add(key)
+  const assistantId = ensureTrackedOperationThreadEntries(request)
   setRecordValue(keeperSending, request.keeperName, true)
   setRecordValue(keeperActionErrors, request.keeperName, null)
   setRecordValue(keeperStreamStartedAt, request.keeperName, request.submittedAt)
@@ -589,7 +587,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
     for (;;) {
       const operation = await fetchKeeperChatOperation(
         request.keeperName,
-        request.requestId,
+        request.operationId,
       )
       markKeeperStreamSignal(request.keeperName)
       if (operation.state.kind === 'queued' || operation.state.kind === 'running') {
@@ -610,12 +608,11 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         ? 'cancelled'
         : failure ? 'error' : 'delivered'
       const assistantDelivery: KeeperConversationDelivery = userDelivery
-      finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+      finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
         delivery: userDelivery,
         error: errorMessage,
-        streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
-          requestId: request.requestId,
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_operation_lookup', 'client_operation_terminal', {
+          requestId: request.operationId,
           reason: errorMessage,
         }),
       })
@@ -630,26 +627,24 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
           streamState: null,
           timestamp: new Date().toISOString(),
           error: errorMessage,
-          streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
-            requestId: request.requestId,
-            deliveryReceipt: 'no_delivery_receipt',
+          streamContract: keeperStreamContract('client_operation_lookup', 'client_operation_terminal', {
+            requestId: request.operationId,
             reason: errorMessage,
           }),
         })
       }
       if (errorMessage) setRecordValue(keeperActionErrors, request.keeperName, errorMessage)
-      removePendingKeeperChatRequest(request.requestId)
+      removeTrackedKeeperChatOperation(request.operationId)
       return
     }
   } catch (err) {
     if (isUnknownKeeperChatOperationError(err)) {
-      removePendingKeeperChatRequest(request.requestId)
-      finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+      removeTrackedKeeperChatOperation(request.operationId)
+      finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
         delivery: 'error',
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
-        streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-          requestId: request.requestId,
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
+          requestId: request.operationId,
           reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         }),
       })
@@ -660,9 +655,8 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         streamState: null,
         timestamp: new Date().toISOString(),
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
-        streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-          requestId: request.requestId,
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
+          requestId: request.operationId,
           reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         }),
       })
@@ -672,13 +666,12 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
     }
     const detail = err instanceof Error ? err.message : `Failed to resume ${request.keeperName} chat request`
     const message = `${PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE} (${detail})`
-    removePendingKeeperChatRequest(request.requestId)
-    finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+    removeTrackedKeeperChatOperation(request.operationId)
+    finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
       delivery: 'error',
       error: message,
-      streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-        requestId: request.requestId,
-        deliveryReceipt: 'no_delivery_receipt',
+      streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
+        requestId: request.operationId,
         reason: message,
       }),
     })
@@ -689,17 +682,16 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       streamState: null,
       timestamp: new Date().toISOString(),
       error: message,
-      streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-        requestId: request.requestId,
-        deliveryReceipt: 'no_delivery_receipt',
+      streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
+        requestId: request.operationId,
         reason: message,
       }),
     })
     setRecordValue(keeperActionErrors, request.keeperName, message)
     await hydrateKeeperChatHistory(request.keeperName, { force: true })
   } finally {
-    resumingKeeperChatRequests.delete(key)
-    if (!hasPendingKeeperChatRequest(request.keeperName)) {
+    hydratingKeeperChatOperations.delete(key)
+    if (!hasTrackedKeeperChatOperation(request.keeperName)) {
       setRecordValue(keeperSending, request.keeperName, false)
       setRecordValue(keeperStreamStartedAt, request.keeperName, null)
       clearKeeperStreamSignal(request.keeperName)
@@ -707,20 +699,20 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
   }
 }
 
-export async function resumePendingKeeperChatRequests(name: string): Promise<void> {
+export async function hydrateTrackedKeeperChatOperations(name: string): Promise<void> {
   const keeperName = name.trim()
   if (!keeperName) return
-  await Promise.all(pendingKeeperChatRequestsForKeeper(keeperName).map(resumePendingKeeperChatRequest))
+  await Promise.all(trackedKeeperChatOperationsForKeeper(keeperName).map(hydrateTrackedKeeperChatOperation))
 }
 
-async function handoffCancelledStreamToRequestPoll(
-  request: PendingKeeperChatRequest,
+async function handoffCancelledStreamToOperationHydration(
+  request: TrackedKeeperChatOperation,
   localEntryIds: readonly string[],
 ): Promise<void> {
   removeThreadEntries(request.keeperName, localEntryIds)
-  releaseLiveSendRequest(request.requestId)
-  releaseActiveStreamRequestId(request.requestId)
-  await resumePendingKeeperChatRequest(request)
+  releaseLiveSendRequest(request.operationId)
+  releaseActiveStreamRequestId(request.operationId)
+  await hydrateTrackedKeeperChatOperation(request)
 }
 
 /** React to a server `keeper_chat_appended` push: re-merge the
@@ -981,8 +973,8 @@ export async function sendKeeperThreadMessage(
             acceptedOperationId,
           )
           setActiveStreamRequestId(keeperName, acceptedOperationId)
-          upsertPendingKeeperChatRequest({
-            requestId: acceptedOperationId,
+          upsertTrackedKeeperChatOperation({
+            operationId: acceptedOperationId,
             keeperName,
             message,
             submittedAt: Date.now(),
@@ -993,7 +985,7 @@ export async function sendKeeperThreadMessage(
         if (error) {
           throw new Error(error)
         }
-        persistPendingAssistantDraft(keeperName, requestId, assistantId)
+        persistTrackedOperationAssistantDraft(keeperName, requestId, assistantId)
         if (event.type === 'TOOL_CALL_END') {
           toolCallEnded = true
           void hydrateKeeperToolOutputs(keeperName)
@@ -1013,8 +1005,8 @@ export async function sendKeeperThreadMessage(
         // call below is not blocked by the guard we just set.
         releaseLiveSendRequest(requestId)
         releaseActiveStreamRequestId(requestId)
-        await resumePendingKeeperChatRequest({
-          requestId,
+        await hydrateTrackedKeeperChatOperation({
+          operationId: requestId,
           keeperName,
           message,
           submittedAt: Date.now(),
@@ -1032,8 +1024,7 @@ export async function sendKeeperThreadMessage(
         streamState: null,
         timestamp: new Date().toISOString(),
         error: cutMessage,
-        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
           reason: cutMessage,
         }),
       })
@@ -1062,14 +1053,13 @@ export async function sendKeeperThreadMessage(
         streamState: null,
         timestamp: new Date().toISOString(),
         error: EMPTY_VISIBLE_REPLY_TEXT,
-        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
           reason: EMPTY_VISIBLE_REPLY_TEXT,
         }),
       })
       setRecordValue(keeperActionErrors, keeperName, EMPTY_VISIBLE_REPLY_TEXT)
       if (requestId) {
-        removePendingKeeperChatRequest(requestId)
+        removeTrackedKeeperChatOperation(requestId)
         releaseActiveStreamRequestId(requestId)
       }
       return
@@ -1091,15 +1081,15 @@ export async function sendKeeperThreadMessage(
     })
     if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
     if (requestId) {
-      removePendingKeeperChatRequest(requestId)
+      removeTrackedKeeperChatOperation(requestId)
       releaseActiveStreamRequestId(requestId)
     }
   } catch (err) {
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
     if (isAbortError(err)) {
       const durablePendingRequest = requestId
-        ? pendingKeeperChatRequestsForKeeper(keeperName)
-          .find(candidate => candidate.requestId === requestId) ?? null
+        ? trackedKeeperChatOperationsForKeeper(keeperName)
+          .find(candidate => candidate.operationId === requestId) ?? null
         : null
       const hasDurablePendingRequest = durablePendingRequest !== null
       const shouldAttemptServerCancel = Boolean(
@@ -1111,17 +1101,17 @@ export async function sendKeeperThreadMessage(
         && !hasDurablePendingRequest,
       )
       if (shouldAttemptServerCancel && requestId) {
-        const pendingRequest = withCurrentPendingAssistantDraft(durablePendingRequest ?? {
-          requestId,
+        const pendingRequest = withCurrentTrackedOperationAssistantDraft(durablePendingRequest ?? {
+          operationId: requestId,
           keeperName,
           message,
           submittedAt: Date.now(),
           ...(attachments ? { attachments } : {}),
         }, assistantId)
-        upsertPendingKeeperChatRequest(pendingRequest)
+        upsertTrackedKeeperChatOperation(pendingRequest)
         void cancelKeeperThreadRequest(keeperName, requestId).then(outcome => {
           if (outcome === 'cancelling') {
-            return handoffCancelledStreamToRequestPoll(
+            return handoffCancelledStreamToOperationHydration(
               pendingRequest,
               [localId, assistantId],
             )
@@ -1132,8 +1122,7 @@ export async function sendKeeperThreadMessage(
       finalizeAssistantEntry(keeperName, localId, {
         delivery: 'cancelled',
         error: null,
-        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
           requestId: requestId ?? undefined,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
@@ -1145,8 +1134,7 @@ export async function sendKeeperThreadMessage(
         streamState: null,
         error: null,
         timestamp: new Date().toISOString(),
-        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
           requestId: requestId ?? undefined,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
@@ -1162,8 +1150,7 @@ export async function sendKeeperThreadMessage(
       streamState: null,
       error: errorMessage,
       timestamp: new Date().toISOString(),
-      streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-        deliveryReceipt: 'no_delivery_receipt',
+      streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
         requestId: requestId ?? undefined,
         reason: errorMessage,
       }),
@@ -1171,8 +1158,7 @@ export async function sendKeeperThreadMessage(
     finalizeAssistantEntry(keeperName, localId, {
       delivery: 'error' as KeeperConversationDelivery,
       error: errorMessage,
-      streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-        deliveryReceipt: 'no_delivery_receipt',
+      streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
         requestId: requestId ?? undefined,
         reason: errorMessage,
       }),

@@ -836,16 +836,25 @@ let run_named
                         "provider config transforms cannot target a claude-code runtime"
                     }))
           | None, Some _ ->
+            (* The durable official-client session store owns start-or-resume
+               (Keeper_claude_code_runtime reads [previous_settlement]), so a
+               present OAS checkpoint only means its payload is not replayed —
+               it does not make the turn a fresh session. Same vocabulary as
+               the codex-app-server arm (#27938, masc#27812). *)
             Log.Keeper.info
-              "%s: starting official-client runtime %s without OAS resume while importing canonical history"
+              "%s: official-client runtime %s resolves start-or-resume from \
+               its durable session store; the OAS checkpoint payload is not \
+               replayed"
               keeper_name
               attempt_runtime_id;
             emit_runtime_manifest
-              ~status:"fresh_session"
+              ~status:"checkpoint_not_replayed"
               ~decision:
                 (`Assoc
-                  [ ("routing_action", `String "official_client_fresh_session")
-                  ; ("routing_reason", `String "official_client_owns_session_state")
+                  [ ( "routing_action"
+                    , `String "official_client_checkpoint_not_replayed" )
+                  ; ( "routing_reason"
+                    , `String "official_client_session_store_owns_resume" )
                   ])
               Keeper_runtime_manifest.Runtime_routed;
             run_claude ~initial_messages ()

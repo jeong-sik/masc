@@ -172,7 +172,8 @@ let content_of_wire_message raw =
 ;;
 
 let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
-    ?event_capture ?oas_checkpoint ~base_path ~cli_path ~goal () =
+    ?event_capture ?oas_checkpoint ?runtime_manifest_context
+    ?runtime_manifest_append ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -206,6 +207,8 @@ let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
                         ?context
                         ?event_bus
                         ?oas_checkpoint
+                        ?runtime_manifest_context
+                        ?runtime_manifest_append
                         ~sw
                         ~net:(Eio.Stdenv.net env)
                         ()
@@ -266,6 +269,7 @@ let checkpoint_with_messages
 let test_oas_checkpoint_starts_official_client_turn () =
   let base_path = temp_workspace () in
   let prompt_marker = Filename.concat base_path "checkpoint-prompt.json" in
+  let manifests = ref [] in
   let checkpoint_history : Agent_sdk.Types.message list =
     [ { role = Assistant
       ; content =
@@ -298,6 +302,16 @@ let test_oas_checkpoint_starts_official_client_turn () =
               run_keeper_turn
                 ~initial_messages:checkpoint_history
                 ~oas_checkpoint:(checkpoint_with_messages checkpoint_history)
+                ~runtime_manifest_context:
+                  { Keeper_runtime_manifest.manifest_keeper_name =
+                      "claude-fixture"
+                  ; manifest_agent_name = Some "claude-fixture-agent"
+                  ; manifest_trace_id = "claude-fixture-trace"
+                  ; manifest_generation = Some 1
+                  ; manifest_keeper_turn_id = Some 1
+                  }
+                ~runtime_manifest_append:(fun manifest ->
+                  manifests := manifest :: !manifests)
                 ~base_path
                 ~cli_path
                 ~goal:"CHECKPOINT_GOAL"
@@ -328,7 +342,34 @@ let test_oas_checkpoint_starts_official_client_turn () =
        check int
          "canonical history length"
          2
-         (projected |> member "history" |> to_list |> List.length))
+         (projected |> member "history" |> to_list |> List.length);
+       let routed_rows_with_status status =
+         List.filter
+           (fun (manifest : Keeper_runtime_manifest.t) ->
+             manifest.event = Keeper_runtime_manifest.Runtime_routed
+             && String.equal manifest.status status)
+           !manifests
+       in
+       (match routed_rows_with_status "fresh_session" with
+        | [] -> ()
+        | _ :: _ ->
+          fail "the retired fresh_session manifest row must not reappear");
+       match routed_rows_with_status "checkpoint_not_replayed" with
+       | [ manifest ] ->
+         let decision =
+           Keeper_runtime_manifest.public_projection_of_decision
+             manifest.decision
+         in
+         check string
+           "checkpoint routing action"
+           "official_client_checkpoint_not_replayed"
+           (decision |> member "routing_action" |> to_string);
+         check string
+           "checkpoint routing reason"
+           "official_client_session_store_owns_resume"
+           (decision |> member "routing_reason" |> to_string)
+       | [] -> fail "checkpoint_not_replayed manifest row was not observable"
+       | _ :: _ :: _ -> fail "expected exactly one checkpoint_not_replayed row")
 ;;
 
 let test_keeper_projects_typed_tool_history_and_lifecycle () =

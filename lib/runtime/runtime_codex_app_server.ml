@@ -481,6 +481,17 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params =
 let max_retry_notifications = 3
 let max_unknown_notifications = 128
 
+let validate_item_delta_notification ~method_ ~thread_id ~turn_id params =
+  let* fields = assoc_at method_ params in
+  let* notification_thread_id = required_string method_ "threadId" fields in
+  let* notification_turn_id = required_string method_ "turnId" fields in
+  let* _item_id = required_string method_ "itemId" fields in
+  let* _delta = required_string method_ "delta" fields in
+  if notification_thread_id <> thread_id || notification_turn_id <> turn_id
+  then protocol_error method_ "item delta identity does not match the active turn"
+  else Ok ()
+;;
+
 let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
     ~seen_fallback ~retry_notifications ~unknown_notifications =
   let* message = io.receive () in
@@ -511,6 +522,27 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
+  | Notification
+      { method_ =
+          (( "item/agentMessage/delta"
+           | "item/commandExecution/outputDelta"
+           | "item/fileChange/outputDelta"
+           | "item/plan/delta" ) as method_)
+      ; params
+      } ->
+    let* () =
+      validate_item_delta_notification ~method_ ~thread_id ~turn_id params
+    in
+    await_turn_terminal
+      io
+      ~tools
+      ~tool_call_count
+      ~thread_id
+      ~turn_id
+      ~seen_final
+      ~seen_fallback
+      ~retry_notifications
+      ~unknown_notifications
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
     let* fields = assoc_at stage params in

@@ -408,7 +408,34 @@ let test_unknown_notifications_are_bounded () =
     match run_fixture path with
     | Error (Runtime_codex_app_server.Protocol_error _) -> ()
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-    | Ok _ -> fail "unknown notifications were unbounded")
+      | Ok _ -> fail "unknown notifications were unbounded")
+;;
+
+let test_item_output_deltas_are_typed_and_unbounded () =
+  let delta index =
+    Printf.sprintf
+      {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"command-1","delta":"chunk-%d"}}|}
+      index
+  in
+  with_fixture
+    ([ init_result; account_chatgpt; thread_result; turn_result ]
+     @ List.init 129 delta
+     @ [ item_completed; turn_completed ])
+    (fun path ->
+      match run_fixture path with
+      | Ok result ->
+        check string "terminal text" "MASC_SUBSCRIPTION_OK" result.text
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error));
+  let wrong_identity =
+    {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-other","turnId":"turn-1","itemId":"command-1","delta":"chunk"}}|}
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; wrong_identity ]
+    (fun path ->
+      match run_fixture path with
+      | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "item output delta with the wrong identity was admitted")
 ;;
 
 let codex_runtime_toml ~model cli_path =
@@ -1719,10 +1746,14 @@ let () =
             "retry notifications are bounded"
             `Quick
             test_retry_notifications_are_bounded
-        ; test_case
-            "unknown notifications are bounded"
-            `Quick
-            test_unknown_notifications_are_bounded
+         ; test_case
+             "unknown notifications are bounded"
+             `Quick
+             test_unknown_notifications_are_bounded
+         ; test_case
+             "item output deltas are typed and unbounded"
+             `Quick
+             test_item_output_deltas_are_typed_and_unbounded
         ; test_case
             "turn admission validation is process-free"
             `Quick

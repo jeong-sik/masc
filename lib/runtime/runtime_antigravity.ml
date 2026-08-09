@@ -483,8 +483,8 @@ let terminate_spawned_process ~clock proc stdin_w =
 ;;
 
 type protocol_state =
-  { init : (string * string * string) option
-  ; result : (string * string * string option * int * usage) option
+  { init : (string * string * permission_mode) option
+  ; result : (result_status * string * string option * int * usage) option
   ; tool_steps : int
   ; tool_errors : int
   }

@@ -256,7 +256,7 @@ let handle_post t ~tool_specs ~call_tool request body =
          respond `Bad_request detail
        | Ok (Some length) when length > max_body_bytes ->
          reject t;
-         respond `Payload_too_large "MCP request body exceeds 1048576 bytes"
+         respond `Request_entity_too_large "MCP request body exceeds 1048576 bytes"
        | Ok _ ->
          (try
             let body =
@@ -267,7 +267,7 @@ let handle_post t ~tool_specs ~call_tool request body =
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Eio.Buf_read.Buffer_limit_exceeded ->
             reject t;
-            respond `Payload_too_large "MCP request body exceeds 1048576 bytes"
+            respond `Request_entity_too_large "MCP request body exceeds 1048576 bytes"
           | _ ->
             reject t;
             respond `Bad_request "failed to read MCP request body"))

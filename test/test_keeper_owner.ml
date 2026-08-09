@@ -525,6 +525,62 @@ let test_root_inventory_loads_and_extends_exactly_once () =
         | Error error -> fail (Owner_registry.lookup_error_to_string error)))
 ;;
 
+let test_lifecycle_reservation_remains_owner_admission_authority () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "owner-reservation-test"));
+       let meta = make_meta "inventory-reserved" in
+       (match Keeper_meta_store.persist_meta config meta.name meta with
+        | Ok () -> ()
+        | Error detail -> fail ("failed to seed reserved owner meta: " ^ detail));
+       (match Owner_registry.install_from_store ~sw config with
+        | Ok count -> check int "reserved owner count" 1 count
+        | Error error -> fail (Owner_registry.install_error_to_string error));
+       let token =
+         match
+           Keeper_lifecycle_reservation.acquire
+             ~base_path
+             ~keeper_name:meta.name
+             ~expected_generation:meta.runtime.nonce
+             ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
+         with
+         | Ok token -> token
+         | Error _ -> fail "failed to acquire lifecycle reservation"
+       in
+       let command =
+         Reducer.Set_autoboot { enabled = true; updated_at = "reserved-command" }
+       in
+       (match Owner_registry.apply_meta ~base_path ~keeper_name:meta.name command with
+        | Error (Owner_registry.Command_lifecycle_reserved _) -> ()
+        | Error error ->
+          fail
+            ("wrong reservation rejection: "
+             ^ Owner_registry.command_error_to_string error)
+        | Ok _ -> fail "unowned command crossed lifecycle reservation");
+       (match
+          Owner_registry.apply_meta
+            ~lifecycle_token:token
+            ~base_path
+            ~keeper_name:meta.name
+            command
+        with
+        | Ok (Some updated) -> check bool "reservation owner committed" true updated.autoboot_enabled
+        | Ok None -> fail "reservation owner removed metadata"
+        | Error error -> fail (Owner_registry.command_error_to_string error));
+       match Keeper_lifecycle_reservation.release token with
+       | Keeper_lifecycle_reservation.Released -> ()
+       | outcome ->
+         fail
+           ("failed to release lifecycle reservation: "
+            ^ Keeper_lifecycle_reservation.release_outcome_to_string outcome))
+;;
+
 let () =
   run
     "keeper owner"
@@ -572,6 +628,10 @@ let () =
             "root inventory loads and extends exactly once"
             `Quick
             test_root_inventory_loads_and_extends_exactly_once
+        ; test_case
+            "lifecycle reservation gates owner commands"
+            `Quick
+            test_lifecycle_reservation_remains_owner_admission_authority
         ] )
     ]
 ;;

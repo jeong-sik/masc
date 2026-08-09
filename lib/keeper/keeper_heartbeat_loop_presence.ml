@@ -8,7 +8,6 @@
 
 open Keeper_types
 open Keeper_meta_contract
-open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
@@ -106,55 +105,51 @@ let repair_identity_drift_for_keepalive ?lifecycle_token ~(ctx : _ context) (met
         ();
       None
     | Ok new_trace_id ->
-      let base_dir = session_base_dir ctx.config in
-      let _session =
-        Keeper_context_runtime.create_session ~session_id:new_trace_id_raw ~base_dir
-      in
-      let repaired =
-        { meta with
-          agent_name = expected_agent_name
-        ; updated_at = now_iso ()
-        ; runtime =
-            { meta.runtime with
-              trace_id = new_trace_id
-            ; trace_history =
-                Json_util.dedupe_keep_order
-                  (previous_trace_id :: meta.runtime.trace_history)
-            ; nonce = meta.runtime.nonce + 1
-            }
-        }
-      in
       (match
-         match lifecycle_token with
-         | None ->
-           write_meta_with_merge
-             ~merge:Keeper_meta_merge.monotonic_usage_counters
-             ctx.config
-             repaired
-           |> Result.map_error Keeper_meta_store.write_meta_error_to_string
-         | Some token ->
-           write_meta_with_merge_for_lifecycle
-             token
-             ~merge:Keeper_meta_merge.monotonic_usage_counters
-             ctx.config
-             repaired
+         Keeper_owner_registry.apply_meta
+           ~base_path:ctx.config.base_path
+           ~keeper_name:meta.name
+           (Keeper_owner_reducer.Handoff_identity
+              { keeper_id = meta.keeper_id
+              ; agent_name = expected_agent_name
+              ; trace_id = new_trace_id
+              ; trace_history =
+                  Json_util.dedupe_keep_order
+                    (previous_trace_id :: meta.runtime.trace_history)
+              ; generation = meta.runtime.nonce + 1
+              ; updated_at = now_iso ()
+              })
        with
-       | Ok () ->
+       | Ok (Some repaired) ->
+         let base_dir = session_base_dir ctx.config in
+         ignore
+           (Keeper_context_runtime.create_session
+              ~session_id:new_trace_id_raw
+              ~base_dir);
          Log.Keeper.warn
            "keepalive repaired identity drift for %s: %s -> %s"
            meta.name
            meta.agent_name
            expected_agent_name;
          Some repaired
-       | Error err ->
+       | Ok None ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string WriteMetaFailures)
            ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
            ();
          Log.Keeper.error
-           "keepalive identity repair failed for %s: write_meta failed: %s"
+           "keepalive identity repair failed for %s: owner removed metadata"
+           meta.name;
+         None
+       | Error error ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string WriteMetaFailures)
+           ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
+           ();
+         Log.Keeper.error
+           "keepalive identity repair failed for %s: owner command failed: %s"
            meta.name
-           err;
+           (Keeper_owner_registry.command_error_to_string error);
          None))
 ;;
 

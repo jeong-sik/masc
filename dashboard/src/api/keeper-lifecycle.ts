@@ -260,6 +260,32 @@ interface KeeperCheckpointDeleteResponse {
   inventory: KeeperCheckpointInventory
 }
 
+export interface KeeperCheckpointPurgeReport {
+  messages_before: number
+  messages_after: number
+  bytes_before: number
+  bytes_after: number
+  bytes_removed: number
+  duplicates_dropped: number
+  reasoning_blocks_stripped: number
+  reasoning_messages_dropped: number
+  tool_results_cleared: number
+}
+
+export interface KeeperCheckpointPurgeResponse {
+  schema: 'masc.keeper_checkpoint_purge.v1'
+  ok: true
+  action: 'preview_purge' | 'apply_purge'
+  keeper: string
+  trace_id: string
+  apply_allowed: boolean
+  applied: boolean
+  backup_path: string | null
+  report: KeeperCheckpointPurgeReport
+  warnings: string[]
+  inventory: KeeperCheckpointInventory
+}
+
 export async function fetchKeeperCheckpoints(
   name: string,
 ): Promise<KeeperCheckpointInventory> {
@@ -298,6 +324,42 @@ export async function deleteKeeperHistorySnapshots(
     throw new Error(`${name} 의 checkpoint history 삭제 실패 (${resp.status}): ${text}`)
   }
   return resp.json() as Promise<KeeperCheckpointDeleteResponse>
+}
+
+async function requestKeeperCheckpointPurge(
+  name: string,
+  action: 'preview_purge' | 'apply_purge',
+): Promise<KeeperCheckpointPurgeResponse> {
+  const path = `/api/v1/keepers/${encodeURIComponent(name)}/checkpoints`
+  const resp = await fetchControlPlane(path, {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: JSON.stringify({ action }),
+  })
+  if (!resp.ok) {
+    const payload = await safeJsonResponse<{ error?: string }>(
+      resp,
+      `${name} checkpoint purge 실패`,
+    )
+    throw new Error(
+      typeof payload.error === 'string' && payload.error.trim() !== ''
+        ? payload.error
+        : `${name} checkpoint purge 실패 (HTTP ${resp.status})`,
+    )
+  }
+  return resp.json() as Promise<KeeperCheckpointPurgeResponse>
+}
+
+export function previewKeeperCheckpointPurge(
+  name: string,
+): Promise<KeeperCheckpointPurgeResponse> {
+  return requestKeeperCheckpointPurge(name, 'preview_purge')
+}
+
+export function applyKeeperCheckpointPurge(
+  name: string,
+): Promise<KeeperCheckpointPurgeResponse> {
+  return requestKeeperCheckpointPurge(name, 'apply_purge')
 }
 
 export function pauseKeeper(

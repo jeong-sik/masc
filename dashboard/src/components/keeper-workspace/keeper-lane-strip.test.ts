@@ -200,6 +200,12 @@ describe('KeeperLaneStrip', () => {
       'discord-old',
     ])
     expect(el.querySelector('[data-testid="keeper-lane-graph"]')).not.toBeNull()
+    const renderedTimes = Array.from(el.querySelectorAll('[data-testid="keeper-lane-waiting-time"] time'))
+    expect(renderedTimes.map(time => time.getAttribute('datetime'))).toEqual([
+      '2026-08-08T10:12:03Z',
+      '2026-08-08T06:39:09Z',
+      '2026-08-06T03:59:42Z',
+    ])
     expect(el.textContent ?? '').toContain('최신 관측 → 오래된 관측')
     expect(el.textContent ?? '').toContain('처리 우선순위를 뜻하지 않습니다')
     expect(el.textContent ?? '').toContain('실행 예정')

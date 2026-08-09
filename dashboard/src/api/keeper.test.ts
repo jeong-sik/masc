@@ -50,12 +50,14 @@ import {
   wakeKeeper,
 } from './keeper'
 import {
+  applyKeeperCheckpointPurge as applyKeeperCheckpointPurgeFromLifecycle,
   bootKeeper as bootKeeperFromLifecycle,
   bulkKeeperDirective as bulkKeeperDirectiveFromLifecycle,
   clearKeeper as clearKeeperFromLifecycle,
   deleteKeeperHistorySnapshots as deleteKeeperHistorySnapshotsFromLifecycle,
   fetchKeeperCheckpoints as fetchKeeperCheckpointsFromLifecycle,
   pauseKeeper as pauseKeeperFromLifecycle,
+  previewKeeperCheckpointPurge as previewKeeperCheckpointPurgeFromLifecycle,
   resetKeeper as resetKeeperFromLifecycle,
   resumeKeeper as resumeKeeperFromLifecycle,
   shutdownKeeper as shutdownKeeperFromLifecycle,
@@ -1803,6 +1805,65 @@ describe('keeper lifecycle', () => {
       snapshot_ids: ['oas-snapshot-1.json'],
     })
     expect(result.deleted_snapshot_ids).toEqual(['oas-snapshot-1.json'])
+  })
+
+  it('previews and applies current checkpoint purge through the same admin route', async () => {
+    const responseFor = (action: 'preview_purge' | 'apply_purge') => ({
+      schema: 'masc.keeper_checkpoint_purge.v1',
+      ok: true,
+      action,
+      keeper: 'keeper-test',
+      trace_id: 'trace-keeper-test',
+      apply_allowed: true,
+      applied: action === 'apply_purge',
+      backup_path: action === 'apply_purge' ? '/tmp/backup.json' : null,
+      report: {
+        messages_before: 10,
+        messages_after: 8,
+        bytes_before: 2048,
+        bytes_after: 1024,
+        bytes_removed: 1024,
+        duplicates_dropped: 2,
+        reasoning_blocks_stripped: 1,
+        reasoning_messages_dropped: 0,
+        tool_results_cleared: 3,
+      },
+      warnings: [],
+      inventory: {
+        keeper: 'keeper-test',
+        trace_id: 'trace-keeper-test',
+        session_dir: '/tmp/trace-keeper-test',
+        current: null,
+        current_status: 'missing',
+        current_error: null,
+        history: [],
+        history_errors: [],
+      },
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(responseFor('preview_purge')), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(responseFor('apply_purge')), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const preview = await previewKeeperCheckpointPurgeFromLifecycle('keeper-test')
+    const applied = await applyKeeperCheckpointPurgeFromLifecycle('keeper-test')
+
+    expect(preview.applied).toBe(false)
+    expect(applied.applied).toBe(true)
+    expect(applied.backup_path).toBe('/tmp/backup.json')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    for (const [index, action] of ['preview_purge', 'apply_purge'].entries()) {
+      const [url, init] = fetchMock.mock.calls[index]! as [string, RequestInit]
+      expect(url).toBe('/api/v1/keepers/keeper-test/checkpoints')
+      expect(init.method).toBe('POST')
+      expect(JSON.parse(String(init.body))).toEqual({ action })
+    }
   })
 
   it('sends POST with action=pause via directive endpoint', async () => {

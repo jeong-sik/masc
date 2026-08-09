@@ -148,7 +148,7 @@ val state_diagram_runtime_fsm_mermaid :
 val handle_keeper_checkpoints_post :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-(** Handle [POST /checkpoints] (rollback / pin actions). *)
+(** Handle admin [POST /checkpoints] history deletion and checkpoint purge. *)
 
 (** {1 Keeper name validation} *)
 

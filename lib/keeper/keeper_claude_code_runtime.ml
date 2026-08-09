@@ -514,7 +514,10 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
              @
              match turn.rate_limit with
              | None -> []
-             | Some rate_limit -> [ "rate_limit_status=" ^ rate_limit.status ]
+             | Some rate_limit ->
+               [ "rate_limit_status="
+                 ^ Runtime_claude_code.rate_limit_status_to_string rate_limit.status
+               ]
            in
            let runtime_observation =
              Runtime_observation.runtime_observation_with_metrics

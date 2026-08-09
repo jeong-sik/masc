@@ -775,9 +775,8 @@ let dashboard_runtime_append_probe_path base ~suffix =
 let dashboard_runtime_probe_url ~(api_format : Runtime_schema.api_format) base_url =
   match api_format with
   | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Claude_code_runtime
   | Runtime_schema.Antigravity_cli_runtime -> None
-  | Runtime_schema.Codex_app_server_runtime
-  | Runtime_schema.Claude_code_runtime -> None
   | Runtime_schema.Ollama_api ->
     let base = dashboard_runtime_trim_trailing_slashes base_url in
     Some
@@ -888,9 +887,8 @@ let dashboard_runtime_model_count_of_body ~(api_format : Runtime_schema.api_form
     let json = Yojson.Safe.from_string body in
     match api_format with
     | Runtime_schema.Codex_app_server_runtime
+    | Runtime_schema.Claude_code_runtime
     | Runtime_schema.Antigravity_cli_runtime -> None
-    | Runtime_schema.Codex_app_server_runtime
-    | Runtime_schema.Claude_code_runtime -> None
     | Runtime_schema.Ollama_api -> dashboard_runtime_list_member_len "models" json
     | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
       (match dashboard_runtime_list_member_len "data" json with
@@ -1876,9 +1874,8 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
   let is_official_client_runtime =
     match rt.execution with
     | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Claude_code _
     | Runtime_execution.Antigravity_cli _ -> true
-    | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _ -> true
     | Runtime_execution.Agent_core _ -> false
   in
   let runtime_status =

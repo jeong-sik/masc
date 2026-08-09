@@ -107,9 +107,7 @@ let partition_results
 let canonical_protocol_of_protocol = function
   | "messages-cli" | "messages-http" | "openai-compatible-cli"
   | "openai-compatible-http" | "ollama-http" | "codex-app-server"
-  | "antigravity-cli" as protocol ->
-  | "openai-compatible-http" | "ollama-http" | "codex-app-server"
-  | "claude-code" as protocol ->
+  | "claude-code" | "antigravity-cli" as protocol ->
     Some protocol
   | _ -> None
 ;;
@@ -118,8 +116,7 @@ let unknown_protocol_error s =
   Printf.sprintf
     "unknown protocol %S: expected one of messages-cli, messages-http, \
      openai-compatible-cli, openai-compatible-http, ollama-http, \
-     codex-app-server, antigravity-cli"
-     codex-app-server, claude-code"
+     codex-app-server, claude-code, antigravity-cli"
     s
 ;;
 

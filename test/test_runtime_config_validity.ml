@@ -14,9 +14,8 @@ let agent_core_provider_config (runtime : Runtime.t) =
   match runtime.execution with
   | Runtime_execution.Agent_core provider_config -> provider_config
   | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
   | Runtime_execution.Antigravity_cli _ ->
-  | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Claude_code _ ->
     failf "runtime %s is not an agent_core provider" runtime.id
 ;;
 
@@ -3254,7 +3253,9 @@ let test_antigravity_cli_materializes_typed_process_options () =
             check bool "sandbox" true config.sandbox;
             check bool "slash commands" false config.disable_slash_commands;
             check (float 0.0) "timeout" 45.0 config.timeout_s
-          | Runtime_execution.Agent_core _ | Runtime_execution.Codex_app_server _ ->
+          | Runtime_execution.Agent_core _
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Claude_code _ ->
             fail "antigravity-cli was materialized through the wrong execution owner"))
 ;;
 
@@ -3271,7 +3272,9 @@ let test_antigravity_cli_defaults_are_explicit () =
          check bool "sandbox opt-in" false config.sandbox;
          check bool "slash expansion disabled" true config.disable_slash_commands;
          check (float 0.0) "timeout" 300.0 config.timeout_s
-       | Runtime_execution.Agent_core _ | Runtime_execution.Codex_app_server _ ->
+       | Runtime_execution.Agent_core _
+       | Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _ ->
          fail "antigravity-cli was materialized through the wrong execution owner"))
 ;;
 

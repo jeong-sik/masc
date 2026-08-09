@@ -203,8 +203,7 @@ let messages_api_compatible_provider_kind = function
 let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.provider)
     : (Llm_provider.Provider_config.provider_kind, string) result =
   match provider.api_format with
-  | Codex_app_server_runtime | Antigravity_cli_runtime ->
-  | Codex_app_server_runtime | Claude_code_runtime ->
+  | Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime ->
     Error
       (Printf.sprintf
          "provider %S uses official CLI protocol %s and cannot be materialized as an \

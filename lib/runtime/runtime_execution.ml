@@ -33,8 +33,7 @@ type checkpoint_owner =
 
 let agent_core_provider_config = function
   | Agent_core config -> Some config
-  | Codex_app_server _ | Antigravity_cli _ -> None
-  | Codex_app_server _ | Claude_code _ -> None
+  | Codex_app_server _ | Claude_code _ | Antigravity_cli _ -> None
 ;;
 
 let model_id = function
@@ -53,6 +52,5 @@ let label = function
 
 let checkpoint_owner = function
   | Agent_core _ -> Masc_oas
-  | Codex_app_server _ | Antigravity_cli _ -> Official_client
-  | Codex_app_server _ | Claude_code _ -> Official_client
+  | Codex_app_server _ | Claude_code _ | Antigravity_cli _ -> Official_client
 ;;

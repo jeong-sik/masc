@@ -284,7 +284,8 @@ let resolve_runtime_candidate id =
   | Some runtime ->
     (match runtime.Runtime.execution with
      | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Claude_code _ -> Ok runtime
+     | Runtime_execution.Claude_code _
+     | Runtime_execution.Antigravity_cli _ -> Ok runtime
      | Runtime_execution.Agent_core provider_config ->
        let* _request_body_cap =
          validate_provider_request_cap

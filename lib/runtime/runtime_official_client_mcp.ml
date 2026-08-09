@@ -59,6 +59,8 @@ let reject_unknown_fields ~stage ~allowed fields =
 let parse_message stage raw_message =
   try Ok (Yojson.Safe.from_string raw_message) with
   | Yojson.Json_error detail -> error stage ("invalid JSON: " ^ detail)
+  | Stack_overflow -> error stage "JSON nesting exceeds parser limits"
+  | Failure detail -> error stage ("invalid JSON: " ^ detail)
 ;;
 
 let assoc_at stage = function
@@ -106,18 +108,32 @@ let params_object stage fields =
   | Some _ -> error stage "field \"params\" must be an object"
 ;;
 
-let initialize ~server_name ~id =
-  response
-    ~id
-    (`Assoc
-       [ "protocolVersion", `String "2024-11-05"
-       ; "capabilities", `Assoc [ "tools", `Assoc [] ]
-       ; ( "serverInfo"
-         , `Assoc
-             [ "name", `String server_name
-             ; "version", `String "1.0.0"
-             ] )
-       ])
+let protocol_version params =
+  let supported = [ "2025-11-25"; "2025-06-18"; "2025-03-26"; "2024-11-05" ] in
+  match params with
+  | `Assoc fields ->
+    (match List.assoc_opt "protocolVersion" fields with
+     | Some (`String requested) when List.mem requested supported -> Ok requested
+     | Some (`String _) -> Ok "2025-11-25"
+     | None -> Ok "2024-11-05"
+     | Some _ -> error "MCP initialize" "field \"protocolVersion\" must be a string")
+  | _ -> error "MCP initialize" "params must be an object"
+;;
+
+let initialize ~server_name ~id ~params =
+  let* protocol_version = protocol_version params in
+  Ok
+    (response
+       ~id
+       (`Assoc
+          [ "protocolVersion", `String protocol_version
+          ; "capabilities", `Assoc [ "tools", `Assoc [] ]
+          ; ( "serverInfo"
+            , `Assoc
+                [ "name", `String server_name
+                ; "version", `String "1.0.0"
+                ] )
+          ]))
 ;;
 
 let tool_result_json ~id (result : tool_result) =
@@ -182,8 +198,9 @@ let handle_message ~server_name ~tool_specs ~call_tool raw_message =
     let* request = request_id_opt stage fields in
     match method_, request with
     | "initialize", Some id ->
+      let* initialize_response = initialize ~server_name ~id ~params in
       Ok
-        { response = Some (initialize ~server_name ~id)
+        { response = Some initialize_response
         ; tool_called = false
         }
     | "tools/list", Some id ->

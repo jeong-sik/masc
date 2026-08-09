@@ -379,6 +379,32 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
   rejects_raw "malformed JSON" {|{"jsonrpc":"2.0","id":7|}
 ;;
 
+let test_shared_mcp_protocol_is_negotiated () =
+  let tool_specs () = [] in
+  let call_tool ~name:_ ~call_id:_ ~arguments:_ = None in
+  let initialize =
+    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}|}
+  in
+  let open Yojson.Safe.Util in
+  match
+    Runtime_official_client_mcp.handle_message
+      ~server_name:"masc"
+      ~tool_specs
+      ~call_tool
+      initialize
+  with
+  | Error error -> fail (error.stage ^ ": " ^ error.detail)
+  | Ok dispatch ->
+    check string
+      "measured Antigravity protocol"
+      "2025-11-25"
+      (dispatch.response
+       |> Option.get
+       |> member "result"
+       |> member "protocolVersion"
+       |> to_string)
+;;
+
 let test_malformed_json_fails_closed () =
   with_fixture [ Emit "not-json" ] (fun path ->
     match run_fixture path with
@@ -503,6 +529,10 @@ let () =
             "shared bridge owns exact dispatch"
             `Quick
             test_shared_mcp_bridge_owns_exact_dispatch
+        ; test_case
+            "shared protocol is negotiated"
+            `Quick
+            test_shared_mcp_protocol_is_negotiated
         ; test_case
             "notification has no response"
             `Quick

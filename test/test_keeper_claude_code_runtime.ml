@@ -194,7 +194,10 @@ let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
                       ())))))
 ;;
 
-let checkpoint_with_messages messages : Agent_sdk.Checkpoint.t =
+let checkpoint_with_messages
+      (messages : Agent_sdk.Types.message list)
+  : Agent_sdk.Checkpoint.t
+  =
   { version = Agent_sdk.Checkpoint.checkpoint_version
   ; session_id = "oas-session"
   ; agent_name = "oas-agent"

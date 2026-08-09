@@ -112,6 +112,7 @@ let test_profile_update_preserves_owner_runtime_state () =
   let update : Reducer.profile_update =
     { instructions = "updated instructions"
     ; sandbox_profile = current.sandbox_profile
+    ; sandbox_image = current.sandbox_image
     ; network_mode = current.network_mode
     ; allowed_paths = [ "/tmp/profile" ]
     ; mention_targets = [ "profile-target" ]
@@ -122,6 +123,7 @@ let test_profile_update_preserves_owner_runtime_state () =
     ; telemetry_feedback_enabled = Some true
     ; telemetry_feedback_window_hours = Some 24
     ; always_allow = Some false
+    ; oas_env = [ "PROFILE_TEST", "1" ]
     ; updated_at = "profile-updated"
     }
   in

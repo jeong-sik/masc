@@ -430,15 +430,46 @@ let ensure_keeper_meta_with_cause config name =
              | None -> target_active_goal_ids)
         }
       in
-      match write_meta_deferred_runtime_sync config persisted_updated with
-      | Ok () -> Ok { effective_updated with meta_version = effective_updated.meta_version + 1 }
-      | Error e ->
+      match
+        Keeper_owner_registry.apply_meta
+          ~base_path:config.base_path
+          ~keeper_name:persisted_updated.name
+          (Keeper_owner_reducer.Update_profile
+             { instructions = persisted_updated.instructions
+             ; sandbox_profile = persisted_updated.sandbox_profile
+             ; sandbox_image = persisted_updated.sandbox_image
+             ; network_mode = persisted_updated.network_mode
+             ; allowed_paths = persisted_updated.allowed_paths
+             ; mention_targets = persisted_updated.mention_targets
+             ; proactive_enabled = persisted_updated.proactive.enabled
+             ; max_context_override = persisted_updated.max_context_override
+             ; active_goal_ids = persisted_updated.active_goal_ids
+             ; autoboot_enabled = persisted_updated.autoboot_enabled
+             ; telemetry_feedback_enabled = persisted_updated.telemetry_feedback_enabled
+             ; telemetry_feedback_window_hours =
+                 persisted_updated.telemetry_feedback_window_hours
+             ; always_allow = persisted_updated.always_allow
+             ; oas_env = persisted_updated.oas_env
+             ; updated_at = persisted_updated.updated_at
+             })
+      with
+      | Ok (Some committed) ->
+        Ok { committed with active_goal_ids = target_active_goal_ids }
+      | Ok None ->
+        Error
+          (boot_meta_error
+             Meta_read_error
+             (Printf.sprintf
+                "ensure_keeper_meta: owner metadata disappeared for %s"
+                effective_updated.name))
+      | Error error ->
+        let detail = Keeper_owner_registry.command_error_to_string error in
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", effective_updated.name); ("phase", "ensure_meta_resync")]
           ();
-        Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
-        Ok overlayed
+        Log.Keeper.warn "ensure_keeper_meta: owner re-sync failed: %s" detail;
+        Error (boot_meta_error Meta_read_error detail)
     end
     else Ok overlayed))
   | Ok None ->

@@ -8,10 +8,7 @@ type install_error =
 type lookup_error =
   | Inventory_not_installed of string
   | Owner_not_found of string
-  | Owner_unavailable of
-      { keeper_name : string
-      ; detail : string
-      }
+  | Owner_unavailable of string
   | Owner_initialization_failed of Keeper_owner.error
   | Inventory_stopping
 
@@ -56,8 +53,8 @@ let lookup_error_to_string = function
     Printf.sprintf "Keeper owner inventory is not installed for BasePath %s" base_path
   | Owner_not_found keeper_name ->
     Printf.sprintf "Keeper owner not found: %s" keeper_name
-  | Owner_unavailable { keeper_name; detail } ->
-    Printf.sprintf "Keeper owner unavailable: %s: %s" keeper_name detail
+  | Owner_unavailable keeper_name ->
+    Printf.sprintf "Keeper owner unavailable: %s" keeper_name
   | Owner_initialization_failed error ->
     "Keeper owner initialization failed: " ^ Keeper_owner.error_to_string error
   | Inventory_stopping -> "Keeper owner inventory is stopping"
@@ -187,7 +184,7 @@ let ensure_empty_in_pool pool keeper_name =
       | Some owner -> Ok owner
       | None ->
         (match Hashtbl.find_opt pool.unavailable keeper_name with
-         | Some detail -> Error (Owner_unavailable { keeper_name; detail })
+         | Some _ -> Error (Owner_unavailable keeper_name)
          | None ->
            (match
               Keeper_owner.start
@@ -277,7 +274,7 @@ let get ~base_path ~keeper_name =
       | Some owner -> Ok owner
       | None ->
         (match Hashtbl.find_opt pool.unavailable keeper_name with
-         | Some detail -> Error (Owner_unavailable { keeper_name; detail })
+         | Some _ -> Error (Owner_unavailable keeper_name)
          | None -> Error (Owner_not_found keeper_name)))
 ;;
 

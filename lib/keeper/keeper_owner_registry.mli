@@ -13,10 +13,7 @@ type install_error =
 type lookup_error =
   | Inventory_not_installed of string
   | Owner_not_found of string
-  | Owner_unavailable of
-      { keeper_name : string
-      ; detail : string
-      }
+  | Owner_unavailable of string
   | Owner_initialization_failed of Keeper_owner.error
   | Inventory_stopping
 

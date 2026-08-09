@@ -106,7 +106,8 @@ let partition_results
 
 let canonical_protocol_of_protocol = function
   | "messages-cli" | "messages-http" | "openai-compatible-cli"
-  | "openai-compatible-http" | "ollama-http" | "codex-app-server" as protocol ->
+  | "openai-compatible-http" | "ollama-http" | "codex-app-server"
+  | "antigravity-cli" as protocol ->
     Some protocol
   | _ -> None
 ;;
@@ -115,7 +116,7 @@ let unknown_protocol_error s =
   Printf.sprintf
     "unknown protocol %S: expected one of messages-cli, messages-http, \
      openai-compatible-cli, openai-compatible-http, ollama-http, \
-     codex-app-server"
+     codex-app-server, antigravity-cli"
     s
 ;;
 
@@ -128,6 +129,7 @@ let api_format_of_protocol (s : string)
     Ok Runtime_schema.Chat_completions_api
   | "ollama-http" -> Ok Runtime_schema.Ollama_api
   | "codex-app-server" -> Ok Runtime_schema.Codex_app_server_runtime
+  | "antigravity-cli" -> Ok Runtime_schema.Antigravity_cli_runtime
   | _ -> Error (unknown_protocol_error s)
 ;;
 
@@ -267,6 +269,124 @@ let parse_headers (tbl : Otoml.t) (path : string) : (string * string) list =
     List.sort (fun (a, _) (b, _) -> String.compare a b) pairs
 ;;
 
+let antigravity_cli_option_keys =
+  [ "agent"
+  ; "effort"
+  ; "execution-mode"
+  ; "sandbox"
+  ; "disable-slash-commands"
+  ; "timeout-s"
+  ]
+;;
+
+let antigravity_optional_string ~(path : string) (tbl : Otoml.t) key =
+  match typed_find "a string" path tbl key Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when String.trim value = "" ->
+    Error (error (path ^ "." ^ key) (key ^ " must be non-empty when present"))
+  | Ok (Some value) when not (String.equal value (String.trim value)) ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (key ^ " must not have leading or trailing whitespace"))
+  | Ok (Some value) -> Ok (Some value)
+;;
+
+let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
+    (api_format : Runtime_schema.api_format)
+  : (Runtime_schema.antigravity_cli_options option, parse_error list) result
+  =
+  match api_format with
+  | Antigravity_cli_runtime ->
+    let agent_result = antigravity_optional_string ~path tbl "agent" in
+    let effort_result = antigravity_optional_string ~path tbl "effort" in
+    let execution_mode_result =
+      antigravity_optional_string ~path tbl "execution-mode"
+    in
+    let sandbox_result = typed_find "a boolean" path tbl "sandbox" Otoml.get_boolean in
+    let disable_slash_commands_result =
+      typed_find "a boolean" path tbl "disable-slash-commands" Otoml.get_boolean
+    in
+    let timeout_result =
+      strict_float_find path tbl "timeout-s"
+      |> positive_finite_float_opt_field ~path ~key:"timeout-s"
+    in
+    (match
+       agent_result,
+       effort_result,
+       execution_mode_result,
+       sandbox_result,
+       disable_slash_commands_result,
+       timeout_result
+     with
+     | Error errors, _, _, _, _, _
+     | _, Error errors, _, _, _, _
+     | _, _, Error errors, _, _, _
+     | _, _, _, Error errors, _, _
+     | _, _, _, _, Error errors, _
+     | _, _, _, _, _, Error errors -> Error errors
+     | ( Ok agent
+       , Ok effort
+       , Ok execution_mode
+       , Ok sandbox
+       , Ok disable_slash_commands
+       , Ok timeout_s ) ->
+       let effort_result =
+         match effort with
+         | None -> Ok None
+         | Some "low" -> Ok (Some Runtime_schema.Antigravity_low)
+         | Some "medium" -> Ok (Some Runtime_schema.Antigravity_medium)
+         | Some "high" -> Ok (Some Runtime_schema.Antigravity_high)
+         | Some value ->
+           Error
+             (error
+                (path ^ ".effort")
+                (Printf.sprintf "effort must be low, medium, or high; got %S" value))
+       in
+       let execution_mode_result =
+         match execution_mode with
+         | None | Some "plan" -> Ok Runtime_schema.Antigravity_plan
+         | Some "accept-edits" -> Ok Runtime_schema.Antigravity_accept_edits
+         | Some value ->
+           Error
+             (error
+                (path ^ ".execution-mode")
+                (Printf.sprintf
+                   "execution-mode must be plan or accept-edits; got %S"
+                   value))
+       in
+       (match effort_result, execution_mode_result with
+        | Error errors, _ | _, Error errors -> Error errors
+        | Ok effort, Ok execution_mode ->
+          let sandbox = match sandbox with Some value -> value | None -> false in
+          let disable_slash_commands =
+            match disable_slash_commands with Some value -> value | None -> true
+          in
+          let timeout_s = match timeout_s with Some value -> value | None -> 300.0 in
+          Ok
+            (Some
+               { Runtime_schema.agent
+               ; effort
+               ; execution_mode
+               ; sandbox
+               ; disable_slash_commands
+               ; timeout_s
+               })))
+  | Messages_api | Chat_completions_api | Ollama_api | Codex_app_server_runtime ->
+    (match
+       List.find_opt
+         (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
+         antigravity_cli_option_keys
+     with
+     | None -> Ok None
+     | Some key ->
+       Error
+         (error
+            (path ^ "." ^ key)
+            (Printf.sprintf "%s is valid only for protocol antigravity-cli" key)))
+;;
+
 let parse_provider (id : string) (tbl : Otoml.t)
   : (Runtime_schema.provider, parse_error list) result
   =
@@ -304,9 +424,10 @@ let parse_provider (id : string) (tbl : Otoml.t)
         Result.map Option.some (parse_credential cred_tbl (path ^ ".credentials"))
       | None -> Ok None
     in
-    (match credentials_result with
-     | Error errs -> Error errs
-     | Ok credentials ->
+    let antigravity_cli_result = antigravity_cli_options ~path tbl api_format in
+    (match credentials_result, antigravity_cli_result with
+     | Error errs, _ | _, Error errs -> Error errs
+     | Ok credentials, Ok antigravity_cli ->
        let capabilities =
          Otoml.find_opt tbl Fun.id [ "capabilities" ]
          |> Option.map (parse_capabilities ~path)
@@ -358,6 +479,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; healthcheck_path
             ; headers
             ; connect_timeout_s
+            ; antigravity_cli
             }))
 ;;
 

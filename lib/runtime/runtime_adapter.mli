@@ -37,4 +37,5 @@ val binding_to_execution
 (** Materialize the owner of a complete turn. HTTP model APIs become
     {!Runtime_execution.Agent_core}. The exact [codex-app-server] protocol over
     a credential-free CLI transport becomes
-    {!Runtime_execution.Codex_app_server}. Other CLI protocols remain rejected. *)
+    {!Runtime_execution.Codex_app_server}; [antigravity-cli] becomes a typed
+    {!Runtime_execution.Antigravity_cli}. Other CLI protocols remain rejected. *)

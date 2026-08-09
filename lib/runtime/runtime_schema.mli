@@ -12,6 +12,7 @@ type api_format =
   | Chat_completions_api
   | Ollama_api
   | Codex_app_server_runtime
+  | Antigravity_cli_runtime
 [@@deriving show, eq]
 
 type transport =
@@ -36,6 +37,27 @@ type capabilities =
 
 val connect_timeout_s_key : string
 
+type antigravity_effort =
+  | Antigravity_low
+  | Antigravity_medium
+  | Antigravity_high
+[@@deriving show, eq]
+
+type antigravity_execution_mode =
+  | Antigravity_plan
+  | Antigravity_accept_edits
+[@@deriving show, eq]
+
+type antigravity_cli_options =
+  { agent : string option
+  ; effort : antigravity_effort option
+  ; execution_mode : antigravity_execution_mode
+  ; sandbox : bool
+  ; disable_slash_commands : bool
+  ; timeout_s : float
+  }
+[@@deriving show, eq]
+
 type provider =
   { id : string
   ; display_name : string
@@ -54,6 +76,8 @@ type provider =
       on the provider, not the model, because it is a transport property.
       oas#2163, RFC-OAS-026 I2: MASC declares the budget; OAS owns enforcement
       and phase=Http_operation attribution. *)
+  ; antigravity_cli : antigravity_cli_options option
+    (** Present exactly when [protocol = "antigravity-cli"]. *)
   }
 [@@deriving show, eq]
 

@@ -89,6 +89,7 @@ val dashboard_gate_resolve_http_json :
   (Yojson.Safe.t, approval_resolve_http_error) result
 
 val dashboard_gate_retry_http_json :
+  research_runner:Hitl_summary_worker.research_runner ->
   base_path:string ->
   requested_by:string ->
   args:Yojson.Safe.t ->

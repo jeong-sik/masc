@@ -16,6 +16,12 @@ val snapshot_topology_readiness : unit -> (unit, string) result
 
 exception Exact_terminalization_persistence_failed of string
 
+val frozen_research_input :
+  entry:Keeper_approval_queue.pending_approval -> Yojson.Safe.t
+
+val research_system_prompt : string
+val research_prompt : Yojson.Safe.t -> string
+
 type execution_boundary =
   | Executed
   | Identity_unbound_blocked
@@ -30,21 +36,40 @@ type finish_outcome =
 type spawn_outcome =
   | Worker_forked
 
+type research_result =
+  { run_id : string
+  ; receipt : Yojson.Safe.t
+  ; finalizer_evidence : Yojson.Safe.t
+  }
+
+type research_runner =
+  register:(run_id:string -> raw_trace_path:string option -> unit) ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  net:Eio_context.eio_net ->
+  entry:Keeper_approval_queue.pending_approval ->
+  (research_result, string) result
+
 val spawn
   :  sw:Eio.Switch.t
+  -> research_runner:research_runner
   -> entry:Keeper_approval_queue.pending_approval
   -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
   -> on_finish:(finish_outcome -> unit)
   -> unit
   -> (spawn_outcome, string) result
-(** Freeze and admit the whole ordered flow before forking. The production OAS
-    callbacks bind/release the real candidate receipt in the durable approval
-    queue. A summary reaches [on_summary] only after domain validation, exact
-    receipt/provenance verification, and [Fsync_completed] completion.
+(** Verify finalizer topology and runtime resources before forking. The worker
+    then runs the tool-capable research phase, freezes its bounded evidence into
+    a separate tool-free exact-output flow, and preserves the research receipt
+    under the same run identity. The production OAS callbacks bind/release the
+    real candidate receipt in the durable approval queue. A summary reaches
+    [on_summary] only after domain validation, exact receipt/provenance
+    verification, and [Fsync_completed] completion.
     [on_finish] always permits active-owner cleanup, but only
     [Conclusive_terminalization] permits the caller to drain later owner work. *)
 
 module For_testing : sig
+  val passthrough_research_runner : research_runner
+
   val run_outcome_of_observed_summary
     :  Keeper_approval_queue.hitl_context_summary option
     -> Exact_lane_run_registry.outcome * Yojson.Safe.t
@@ -137,6 +162,7 @@ module For_testing : sig
   val spawn_with_queue_ops
     :  queue_ops:exact_queue_ops
     -> sw:Eio.Switch.t
+    -> research_runner:research_runner
     -> entry:Keeper_approval_queue.pending_approval
     -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
     -> on_finish:(finish_outcome -> unit)

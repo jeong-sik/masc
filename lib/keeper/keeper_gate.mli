@@ -130,9 +130,12 @@ val decide :
     merely because a process restarted. Every recovery candidate id has an
     explicit started, finalized, skipped, or failed outcome. *)
 val resume_persisted_auto_judges :
-  base_path:string -> auto_judge_resume_report
+  research_runner:Hitl_summary_worker.research_runner ->
+  base_path:string ->
+  auto_judge_resume_report
 
 val retry_blocked_auto_judge :
+  research_runner:Hitl_summary_worker.research_runner ->
   base_path:string ->
   requested_by:string ->
   expected_input_hash:string ->
@@ -167,7 +170,9 @@ type operator_recovery_report =
     Exact-bound entries remain operator-visible but are never reconstructed or
     reopened. *)
 val request_operator_auto_judge_recovery :
-  base_path:string -> (operator_recovery_report, string) result
+  research_runner:Hitl_summary_worker.research_runner ->
+  base_path:string ->
+  (operator_recovery_report, string) result
 
 val authorization_source_to_string : authorization_source -> string
 val deferred_reason_to_string : deferred_reason -> string
@@ -217,6 +222,7 @@ module For_testing : sig
 
   type hitl_worker_spawner =
     sw:Eio.Switch.t ->
+    research_runner:Hitl_summary_worker.research_runner ->
     entry:Keeper_approval_queue.pending_approval ->
     on_summary:(Keeper_approval_queue.hitl_context_summary -> unit) ->
     on_finish:(Hitl_summary_worker.finish_outcome -> unit) ->
@@ -225,6 +231,7 @@ module For_testing : sig
 
   val spawn_auto_judge_entry_with_worker
     :  spawn_worker:hitl_worker_spawner
+    -> research_runner:Hitl_summary_worker.research_runner
     -> Keeper_approval_queue.pending_approval
     -> (bool, string) result
   (** Run the production atomic claim, active-owner lifecycle, cleanup, and
@@ -232,6 +239,7 @@ module For_testing : sig
 
   val resume_persisted_auto_judges_with_exact_completion :
     complete_summary_exact_attempt:exact_completion ->
+    research_runner:Hitl_summary_worker.research_runner ->
     base_path:string ->
     auto_judge_resume_report
 end

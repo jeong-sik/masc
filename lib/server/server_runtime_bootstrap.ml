@@ -1208,7 +1208,15 @@ let start_post_ready_owner_lanes
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
 
 let install_keeper_gate_persistence state =
-  let base_path = (Mcp_server.workspace_config state).base_path in
+  let config = Mcp_server.workspace_config state in
+  let base_path = config.base_path in
+  let research_runner =
+    Keeper_hitl_research_runtime.make_runner
+      ~config
+      ~publication_recovery_provider:
+        (Mcp_server.publication_recovery_availability_provider state)
+  in
+  Hitl_research_registry.install ~base_path research_runner;
   match Keeper_approval_queue.install_persistence ~base_path with
   | Error error ->
     (* Gate persistence is lane-local. Keep unrelated server subsystems
@@ -1239,7 +1247,11 @@ let install_keeper_gate_persistence state =
            failure.approval_id
            failure.reason)
       report.delivery_replay_failures;
-    let resume_report = Keeper_gate.resume_persisted_auto_judges ~base_path in
+    let resume_report =
+      Keeper_gate.resume_persisted_auto_judges
+        ~research_runner
+        ~base_path
+    in
     (match resume_report.queue_error with
      | Some error ->
        Log.Server.error

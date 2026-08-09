@@ -3,6 +3,11 @@ open Alcotest
 module AQ = Masc.Keeper_approval_queue
 module Gate = Masc.Keeper_gate
 module Gate_mode = Masc.Keeper_gate_mode
+module Hitl_worker = Masc.Hitl_summary_worker
+
+let test_research_runner =
+  Hitl_worker.For_testing.passthrough_research_runner
+;;
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_rules_" "" in
@@ -609,7 +614,11 @@ let test_completed_exact_judgment_finalizes_without_worker () =
    | _ -> fail "completed available judgment did not survive restart");
   check bool "completed available judgment is finalize-only" false
     (Gate.For_testing.auto_judge_entry_ready completed);
-  let report = Gate.resume_persisted_auto_judges ~base_path in
+  let report =
+    Gate.resume_persisted_auto_judges
+      ~research_runner:test_research_runner
+      ~base_path
+  in
   let expected_ids = [ completed.id ] in
   check int "one completed exact judgment considered" 1 report.requested;
   check (list string) "completed exact judgment finalized" expected_ids

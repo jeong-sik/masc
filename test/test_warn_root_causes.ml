@@ -238,44 +238,52 @@ let test_internal_research_bundle_exactly_matches_model_visible_descriptors () =
            ~registry:publication_recovery_registry
            ~keeper_name:meta.name
        in
-       let request : Keeper_internal_research.request =
-         { owner = Librarian
-         ; execution_id = Keeper_internal_research.Execution_id.generate ()
-         ; runtime_id = "test-runtime"
-         ; frozen_system_prompt = "test"
-         ; frozen_prompt = "test"
-         ; frozen_input = `Assoc [ "test", `Bool true ]
-         ; evidence_budget_bytes = 1024
-         ; config
-         ; meta
-         ; publication_recovery
-         ; ctx_snapshot
-         ; clock = Eio.Stdenv.clock env
-         ; net = Eio.Stdenv.net env
-         ; continuation_channel = None
-         ; raw_trace = None
-         }
-       in
-       let actual_names, cleanup =
-         Keeper_internal_research.For_testing.tool_names_for_request request
-       in
        let expected_names =
          Keeper_tool_descriptor.model_visible_descriptors ()
          |> List.concat_map Keeper_tool_descriptor.keeper_model_names
          |> List.sort_uniq String.compare
        in
-       check
-         (list string)
-         "research runner receives the complete descriptor projection"
-         expected_names
-         (List.sort_uniq String.compare actual_names);
-       check int
-         "research runner bundle contains no duplicates"
-         (List.length expected_names)
-         (List.length actual_names);
-       match cleanup with
-       | Keeper_internal_research.Cleanup_succeeded -> ()
-       | Cleanup_failed detail -> failf "research bundle cleanup failed: %s" detail)
+       [ "librarian", Keeper_internal_research.Librarian
+       ; "hitl_auto_judge", Keeper_internal_research.Hitl_auto_judge
+       ; "board_attention", Keeper_internal_research.Board_attention
+       ; "compaction", Keeper_internal_research.Compaction
+       ; "completion_authority", Keeper_internal_research.Completion_authority
+       ]
+       |> List.iter (fun (owner_label, owner) ->
+         let request : Keeper_internal_research.request =
+           { owner
+           ; execution_id = Keeper_internal_research.Execution_id.generate ()
+           ; runtime_id = "test-runtime"
+           ; frozen_system_prompt = "test"
+           ; frozen_prompt = "test"
+           ; frozen_input = `Assoc [ "test", `Bool true ]
+           ; evidence_budget_bytes = 1024
+           ; config
+           ; meta
+           ; publication_recovery
+           ; ctx_snapshot
+           ; clock = Eio.Stdenv.clock env
+           ; net = Eio.Stdenv.net env
+           ; continuation_channel = None
+           ; raw_trace = None
+           }
+         in
+         let actual_names, cleanup =
+           Keeper_internal_research.For_testing.tool_names_for_request request
+         in
+         check
+           (list string)
+           (owner_label ^ " receives the complete descriptor projection")
+           expected_names
+           (List.sort_uniq String.compare actual_names);
+         check int
+           (owner_label ^ " research bundle contains no duplicates")
+           (List.length expected_names)
+           (List.length actual_names);
+         match cleanup with
+         | Keeper_internal_research.Cleanup_succeeded -> ()
+         | Cleanup_failed detail ->
+           failf "%s research bundle cleanup failed: %s" owner_label detail))
 ;;
 
 let test_internal_research_cleanup_contract () =

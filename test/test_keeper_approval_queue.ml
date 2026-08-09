@@ -1,5 +1,10 @@
 module AQ = Masc.Keeper_approval_queue
 module Rule_contract = Keeper_approval_queue_rules_types
+module Hitl_worker = Masc.Hitl_summary_worker
+
+let test_research_runner =
+  Hitl_worker.For_testing.passthrough_research_runner
+;;
 
 let test_rule_contract_types_are_shared_by_identity () =
   let through_queue : AQ.rule_match = { rule_id = "rule-shared" } in
@@ -2403,6 +2408,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
        in
        let deterministic_report =
          Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
+           ~research_runner:test_research_runner
            ~complete_summary_exact_attempt:
              (fun
                ~id:_
@@ -2436,6 +2442,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
             "deterministic completion rejection changed durable disposition");
        let visible_report =
          Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
+           ~research_runner:test_research_runner
            ~complete_summary_exact_attempt:
              (injected_completion
                 (AQ.Visible_sync_unconfirmed
@@ -2455,6 +2462,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
          (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id));
        let error_report =
          Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
+           ~research_runner:test_research_runner
            ~complete_summary_exact_attempt:
              (fun
                ~id:_
@@ -2480,7 +2488,11 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
          (List.length error_report.failures);
        Alcotest.(check bool) "error recovery keeps pending" true
          (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id));
-       let durable_report = Gate.resume_persisted_auto_judges ~base_path in
+       let durable_report =
+         Gate.resume_persisted_auto_judges
+           ~research_runner:test_research_runner
+           ~base_path
+       in
        Alcotest.(check (list string))
          "fsync-confirmed recovery finalizes once"
          [ id ]

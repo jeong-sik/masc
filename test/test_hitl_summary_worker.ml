@@ -6,6 +6,29 @@ module Gate = Masc.Keeper_gate
 module Q = Masc.Keeper_approval_queue
 module Schema = Masc.Keeper_structured_output_schema
 module Worker = Masc.Hitl_summary_worker
+module Research_registry = Masc.Hitl_research_registry
+
+let test_research_runner = Worker.For_testing.passthrough_research_runner
+
+let test_research_registry_is_exact_workspace_scoped () =
+  Research_registry.For_testing.reset ();
+  check bool
+    "uninstalled workspace fails closed"
+    true
+    (Result.is_error (Research_registry.resolve ~base_path:"/workspace/a"));
+  Research_registry.install
+    ~base_path:"/workspace/a"
+    test_research_runner;
+  check bool
+    "installed workspace resolves"
+    true
+    (Result.is_ok (Research_registry.resolve ~base_path:"/workspace/a"));
+  check bool
+    "different workspace does not inherit authority"
+    true
+    (Result.is_error (Research_registry.resolve ~base_path:"/workspace/b"));
+  Research_registry.For_testing.reset ()
+;;
 
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
@@ -887,7 +910,11 @@ let test_visible_completion_blocks_gate_delivery () =
          ()
        | _ -> fail "visible completion did not retain recoverable completed state");
        install_queue base_path;
-       let recovery = Gate.resume_persisted_auto_judges ~base_path in
+       let recovery =
+         Gate.resume_persisted_auto_judges
+           ~research_runner:test_research_runner
+           ~base_path
+       in
        check
          (list string)
          "restart finalizes only the uncertain oldest entry"
@@ -1087,7 +1114,11 @@ let test_flow_execution_failure_quarantines_and_allows_successor () =
               ; base_url = successor_server.base_url
               }
             ]);
-       let resumed = Gate.resume_persisted_auto_judges ~base_path in
+       let resumed =
+         Gate.resume_persisted_auto_judges
+           ~research_runner:test_research_runner
+           ~base_path
+       in
        check
          (list string)
          "quarantined entry does not stall a later owner entry"
@@ -1143,6 +1174,7 @@ let test_manual_resolution_race_is_conclusive () =
        let finish_outcome = ref None in
        (match
           Worker.For_testing.spawn_with_queue_ops
+            ~research_runner:test_research_runner
             ~queue_ops:(exact_queue_ops ())
             ~sw
             ~entry
@@ -1265,6 +1297,7 @@ let test_spawn_preserves_cancellation_origin_backtrace () =
                 @@ fun worker_sw ->
                 match
                   Worker.For_testing.spawn_with_queue_ops
+                    ~research_runner:test_research_runner
                     ~queue_ops:(exact_queue_ops ~bind_writer ())
                     ~sw:worker_sw
                     ~entry
@@ -1356,9 +1389,11 @@ let test_prebind_cancellation_withholds_production_gate_drain () =
                 Eio_context.set_switch worker_sw;
                 match
                   Gate.For_testing.spawn_auto_judge_entry_with_worker
+                    ~research_runner:test_research_runner
                     ~spawn_worker:
-                      (fun ~sw ~entry ~on_summary ~on_finish () ->
+                      (fun ~sw ~research_runner ~entry ~on_summary ~on_finish () ->
                          Worker.For_testing.spawn_with_queue_ops
+                           ~research_runner
                            ~queue_ops:
                              (exact_queue_ops
                                 ~bind_writer:(fun _path _body ->
@@ -1462,6 +1497,7 @@ let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
                 @@ fun worker_sw ->
                 match
                   Worker.For_testing.spawn_with_queue_ops
+                    ~research_runner:test_research_runner
                     ~queue_ops:
                       (exact_queue_ops
                          ~quarantine_writer:unknown_writer
@@ -1533,8 +1569,9 @@ let test_pre_worker_start_failure_preserves_unbound_pending () =
        let entry = pending_entry ~base_path () in
        (match
           Gate.For_testing.spawn_auto_judge_entry_with_worker
+            ~research_runner:test_research_runner
             ~spawn_worker:
-              (fun ~sw:_ ~entry:_ ~on_summary:_ ~on_finish:_ () ->
+              (fun ~sw:_ ~research_runner:_ ~entry:_ ~on_summary:_ ~on_finish:_ () ->
                  Error "no usable exact-output lane slots")
             entry
         with
@@ -1604,9 +1641,11 @@ let test_visible_uncertainty_withholds_production_drain () =
            @@ fun () ->
            (match
               Gate.For_testing.spawn_auto_judge_entry_with_worker
+                ~research_runner:test_research_runner
                 ~spawn_worker:
-            (fun ~sw ~entry ~on_summary ~on_finish () ->
+            (fun ~sw ~research_runner ~entry ~on_summary ~on_finish () ->
                      Worker.For_testing.spawn_with_queue_ops
+                       ~research_runner
                        ~queue_ops:
                          (exact_queue_ops ~complete_writer:visible_writer ())
                        ~sw
@@ -1696,14 +1735,22 @@ let test_owner_fifo_atomic_drain_is_nonsharing () =
          "FIFO head reproduces absent causal context"
          None
          first.request_context;
-       let initial = Gate.resume_persisted_auto_judges ~base_path in
+       let initial =
+         Gate.resume_persisted_auto_judges
+           ~research_runner:test_research_runner
+           ~base_path
+       in
        check
          (list string)
          "production recovery claims the oldest owner entry"
          [ first.id ]
          initial.started_ids;
        F.await_first_request server;
-       let concurrent = Gate.resume_persisted_auto_judges ~base_path in
+       let concurrent =
+         Gate.resume_persisted_auto_judges
+           ~research_runner:test_research_runner
+           ~base_path
+       in
        check
          (list string)
          "concurrent drain cannot claim the same owner"
@@ -1781,7 +1828,11 @@ let test_require_human_head_does_not_stop_owner_drain () =
        select_auto_judge_mode base_path;
        let head = pending_entry ~input_tag:"require-human-head" ~base_path () in
        let successor = pending_entry ~input_tag:"successor" ~base_path () in
-       let recovery = Gate.resume_persisted_auto_judges ~base_path in
+       let recovery =
+         Gate.resume_persisted_auto_judges
+           ~research_runner:test_research_runner
+           ~base_path
+       in
        check
          (list string)
          "recovery starts the oldest owner entry"
@@ -1820,6 +1871,93 @@ let test_judge_effect_prompt_comes_from_registry () =
   match Worker.For_testing.system_prompt () with
   | Error detail -> fail ("Gate judgment prompt unavailable: " ^ detail)
   | Ok prompt -> check bool "prompt is non-empty" true (String.trim prompt <> "")
+;;
+
+let test_production_spawn_links_research_raw_and_exact_judgment () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-research-exact-link" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let server =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-research-exact-link" ]
+         (F.resolver_snapshot
+            ~source:"hitl-research-exact-link"
+            [ { id = "hitl-research-exact-link"; base_url = server.base_url } ]);
+       let entry = pending_entry ~base_path () in
+       let research_run_id = "test-hitl-linked-research" in
+       let raw_trace_path = Filename.concat base_path "linked-raw.jsonl" in
+       let research_runner ~register ~clock:_ ~net:_ ~entry:_ =
+         register ~run_id:research_run_id ~raw_trace_path:(Some raw_trace_path);
+         Ok
+           { Worker.run_id = research_run_id
+           ; receipt = `Assoc [ "research_marker", `String "full-tool-receipt" ]
+           ; finalizer_evidence =
+               `Assoc [ "evidence_marker", `String "bounded-tool-evidence" ]
+           }
+       in
+       let delivered = ref None in
+       let finish_outcome = ref None in
+       (match
+          Worker.spawn
+            ~sw
+            ~research_runner
+            ~entry
+            ~on_summary:(fun summary -> delivered := Some summary)
+            ~on_finish:(fun outcome -> finish_outcome := Some outcome)
+            ()
+        with
+        | Ok Worker.Worker_forked -> ()
+        | Error detail -> fail detail);
+       await_condition
+         ~clock
+         ~remaining:100
+         ~failure:"research followed by exact judgment did not finish"
+         (fun () -> Option.is_some !finish_outcome);
+       check bool "validated exact judgment delivered" true (Option.is_some !delivered);
+       check bool
+         "research evidence reaches the exact finalizer request"
+         true
+         (F.request_bodies server
+          |> List.exists (Astring.String.is_infix ~affix:"bounded-tool-evidence"));
+       match
+         Masc.Exact_lane_run_registry.get
+           (Masc.Exact_lane_run_registry.global ())
+           ~run_id:research_run_id
+       with
+       | None -> fail "linked HITL research run was not registered"
+       | Some run ->
+         let open Yojson.Safe.Util in
+         check string
+           "raw trace remains linked from frozen input"
+           raw_trace_path
+           (run.input |> member "research_raw_trace_path" |> to_string);
+         (match run.status with
+          | Masc.Exact_lane_run_registry.Running ->
+            fail "linked HITL research run did not complete"
+          | Completed { outcome = Succeeded; output; _ } ->
+            check string
+              "full research receipt remains visible"
+              "full-tool-receipt"
+              (output |> member "research" |> member "research_marker" |> to_string);
+            check string
+              "exact judgment remains visible beside research"
+              "approve"
+              (output |> member "judgment" |> member "judgment" |> to_string)
+          | Completed { outcome = Cancelled; _ } ->
+            fail "linked HITL research run was cancelled"
+          | Completed { outcome = Failed { code; detail }; _ } ->
+            failf "linked HITL research run failed: %s: %s" code detail))
 ;;
 
 
@@ -1896,6 +2034,14 @@ let () =
             "prompt is registry-owned"
             `Quick
             test_judge_effect_prompt_comes_from_registry
+        ; test_case
+            "research authority is exact-workspace scoped"
+            `Quick
+            test_research_registry_is_exact_workspace_scoped
+        ; test_case
+            "production spawn links research raw and exact judgment"
+            `Quick
+            test_production_spawn_links_research_raw_and_exact_judgment
         ] )
     ; ( "production exact flow"
       , [ test_case

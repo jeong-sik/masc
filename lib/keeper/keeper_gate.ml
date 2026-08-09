@@ -628,6 +628,7 @@ let drain_auto_judge_owners_with ~drain_owner owners =
 
 type hitl_worker_spawner =
   sw:Eio.Switch.t ->
+  research_runner:Hitl_summary_worker.research_runner ->
   entry:Keeper_approval_queue.pending_approval ->
   on_summary:(Keeper_approval_queue.hitl_context_summary -> unit) ->
   on_finish:(Hitl_summary_worker.finish_outcome -> unit) ->
@@ -679,6 +680,7 @@ let reserve_pre_worker_start
 
 let rec spawn_claimed_auto_judge_entry_with
       ~(spawn_worker : hitl_worker_spawner)
+      ~research_runner
       (entry : Keeper_approval_queue.pending_approval)
   =
   let approval_id = entry.id in
@@ -710,6 +712,7 @@ let rec spawn_claimed_auto_judge_entry_with
        match
          spawn_worker
            ~sw
+           ~research_runner
            ~entry
            ~on_summary
            ~on_finish:(fun finish_outcome ->
@@ -718,6 +721,7 @@ let rec spawn_claimed_auto_judge_entry_with
              | Hitl_summary_worker.Conclusive_terminalization ->
                ignore
                  (drain_auto_judge_owner
+                    ~research_runner
                     ~base_path:entry.audit_base_path
                     ~keeper_name:entry.keeper_name
                     ())
@@ -767,25 +771,36 @@ let rec spawn_claimed_auto_judge_entry_with
     release_auto_judge entry;
     Error reason
 
-and spawn_claimed_auto_judge_entry entry =
+and spawn_claimed_auto_judge_entry
+      ~research_runner
+      entry
+  =
   spawn_claimed_auto_judge_entry_with
     ~spawn_worker:Hitl_summary_worker.spawn
+    ~research_runner
     entry
 
 and spawn_auto_judge_entry_with
       ~(spawn_worker : hitl_worker_spawner)
+      ~research_runner
       (entry : Keeper_approval_queue.pending_approval)
   =
   if claim_auto_judge entry
-  then spawn_claimed_auto_judge_entry_with ~spawn_worker entry
+  then
+    spawn_claimed_auto_judge_entry_with
+      ~spawn_worker
+      ~research_runner
+      entry
   else Ok Skipped
 
-and spawn_auto_judge_entry entry =
+and spawn_auto_judge_entry ~research_runner entry =
   spawn_auto_judge_entry_with
     ~spawn_worker:Hitl_summary_worker.spawn
+    ~research_runner
     entry
 
 and retry_auto_judge_entry
+      ~research_runner
       ~requested_by
       ~expected_input_hash
       ~expected_sequence
@@ -818,6 +833,7 @@ and retry_auto_judge_entry
     (try
        match
          drain_auto_judge_owner
+           ~research_runner
            ~reserved_id:entry.id
            ~base_path:entry.audit_base_path
            ~keeper_name:entry.keeper_name
@@ -863,7 +879,10 @@ and retry_auto_judge_entry
        in
        Error (reblock reason))
 
-and start_auto_judge (entry : Keeper_approval_queue.pending_approval) =
+and start_auto_judge
+      ~research_runner
+      (entry : Keeper_approval_queue.pending_approval)
+  =
   if not (claim_auto_judge entry)
   then Ok Skipped
   else
@@ -874,9 +893,15 @@ and start_auto_judge (entry : Keeper_approval_queue.pending_approval) =
     | Ok false ->
       release_auto_judge entry;
       Ok Skipped
-    | Ok true -> spawn_claimed_auto_judge_entry entry
+    | Ok true ->
+      spawn_claimed_auto_judge_entry
+        ~research_runner
+        entry
 
-and start_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
+and start_auto_judge_entry
+      ~research_runner
+      (entry : Keeper_approval_queue.pending_approval)
+  =
   match
     Keeper_approval_queue.get_pending_entry_for_workspace
       ~base_path:entry.audit_base_path
@@ -887,13 +912,16 @@ and start_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
   | Ok None -> Ok Skipped
   | Ok (Some current) ->
     (match classify_auto_judge_entry current with
-     | Auto_judge_not_requested -> start_auto_judge current
-     | Auto_judge_pending_unbound -> spawn_auto_judge_entry current
+     | Auto_judge_not_requested ->
+       start_auto_judge ~research_runner current
+     | Auto_judge_pending_unbound ->
+       spawn_auto_judge_entry ~research_runner current
      | Auto_judge_finalizable _
      | Auto_judge_ineligible ->
        Ok Skipped)
 
 and drain_auto_judge_owner_queue
+      ~research_runner
       ?reserved_id
       ~base_path
       ~keeper_name
@@ -910,8 +938,9 @@ and drain_auto_judge_owner_queue
         match reserved_id with
         | Some reserved_id
           when auto_judge_entry_has_start_reservation reserved_id entry ->
-          spawn_auto_judge_entry entry
-        | Some _ | None -> start_auto_judge_entry entry
+          spawn_auto_judge_entry ~research_runner entry
+        | Some _ | None ->
+          start_auto_judge_entry ~research_runner entry
       in
       (match start_result with
        | Ok Started ->
@@ -970,6 +999,7 @@ and drain_auto_judge_owner_queue
     loop [] blocker selected)
 
 and drain_auto_judge_owner
+      ~research_runner
       ?reserved_id
       ~base_path
       ~keeper_name
@@ -978,6 +1008,7 @@ and drain_auto_judge_owner
   match Keeper_gate_mode.read ~base_path with
   | Ok Keeper_gate_mode.Auto_judge ->
     drain_auto_judge_owner_queue
+      ~research_runner
       ?reserved_id
       ~base_path
       ~keeper_name
@@ -1003,7 +1034,7 @@ and drain_auto_judge_owner
       detail;
     Error detail
 
-and drain_auto_judges ~base_path =
+and drain_auto_judges ~research_runner ~base_path =
   match Keeper_gate_mode.read ~base_path with
   | Error detail ->
     Log.Keeper.error
@@ -1030,7 +1061,11 @@ and drain_auto_judges ~base_path =
        Ok
          (drain_auto_judge_owners_with
             ~drain_owner:(fun ~base_path ~keeper_name ->
-              drain_auto_judge_owner_queue ~base_path ~keeper_name ()
+              drain_auto_judge_owner_queue
+                ~research_runner
+                ~base_path
+                ~keeper_name
+                ()
               |> Result.map
                    (fun (outcome : auto_judge_drain_outcome) ->
                       outcome.started_id, outcome.failures)
@@ -1141,6 +1176,7 @@ let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval)
 ;;
 
 let retry_blocked_auto_judge
+      ~research_runner
       ~base_path
       ~requested_by
       ~expected_input_hash
@@ -1165,6 +1201,7 @@ let retry_blocked_auto_judge
      | Ok (Some entry) ->
        (match
           retry_auto_judge_entry
+            ~research_runner
             ~requested_by
             ~expected_input_hash
             ~expected_sequence
@@ -1271,6 +1308,7 @@ let finalize_recovered_judgment
 
 let resume_persisted_auto_judges_with
       ~complete_summary_exact_attempt
+      ~research_runner
       ~base_path
   =
   match recovered_work_for_base_path ~base_path with
@@ -1291,7 +1329,11 @@ let resume_persisted_auto_judges_with
            match work with
            | Activate_worker entry ->
              observe_recovered_work `Activate_worker entry;
-             entry, `Start (start_auto_judge_entry entry)
+             ( entry
+             , `Start
+                 (start_auto_judge_entry
+                    ~research_runner
+                    entry) )
              | Finalize_judgment (entry, summary) ->
                observe_recovered_work `Finalize_judgment entry;
                ( entry
@@ -1334,10 +1376,11 @@ let resume_persisted_auto_judges_with
     }
 ;;
 
-let resume_persisted_auto_judges =
+let resume_persisted_auto_judges ~research_runner =
   resume_persisted_auto_judges_with
     ~complete_summary_exact_attempt:
       Keeper_approval_queue.complete_summary_exact_attempt
+    ~research_runner
 ;;
 
 type operator_recovery_report =
@@ -1346,7 +1389,10 @@ type operator_recovery_report =
   ; failures : auto_judge_owner_failure list
   }
 
-let request_operator_auto_judge_recovery ~base_path =
+let request_operator_auto_judge_recovery
+      ~research_runner
+      ~base_path
+  =
   match Keeper_gate_mode.read ~base_path with
   | Error detail -> Error detail
   | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
@@ -1355,7 +1401,11 @@ let request_operator_auto_judge_recovery ~base_path =
     (match Hitl_summary_worker.snapshot_topology_readiness () with
      | Error detail -> Error detail
      | Ok () ->
-       (match drain_auto_judges ~base_path with
+       (match
+          drain_auto_judges
+            ~research_runner
+            ~base_path
+        with
        | Error detail -> Error detail
        | Ok drain_report ->
           (match
@@ -1386,17 +1436,32 @@ let defer request reason =
       match reason with
       | Judge_requested ->
         let drained =
-          try
-            drain_auto_judge_owner
-              ~base_path:request.base_path
-              ~keeper_name:request.keeper_name
-              ()
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-            Error
-              ("Auto Judge start failed before worker launch: "
-               ^ Printexc.to_string exn)
+          match Hitl_research_registry.resolve ~base_path:request.base_path with
+          | Error detail ->
+            let detail =
+              match Keeper_approval_queue.mark_summary_pending ~id:approval_id with
+              | Ok true -> detail
+              | Ok false ->
+                detail ^ "; summary pending transition was not applied"
+              | Error error ->
+                detail
+                ^ "; summary pending transition failed: "
+                ^ Keeper_approval_queue.summary_transition_error_to_string error
+            in
+            Error detail
+          | Ok research_runner ->
+            (try
+               drain_auto_judge_owner
+                 ~research_runner
+                 ~base_path:request.base_path
+                 ~keeper_name:request.keeper_name
+                 ()
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+               Error
+                 ("Auto Judge start failed before worker launch: "
+                  ^ Printexc.to_string exn))
         in
         (match drained with
          | Error detail -> Auto_judge_unavailable detail
@@ -1515,9 +1580,12 @@ let observe_exact_rule_expired
 ;;
 
 let decide_from_selected_mode request = function
-  | Error detail -> defer request (Mode_state_invalid detail)
-  | Ok Keeper_gate_mode.Manual -> defer request Human_requested
-  | Ok Keeper_gate_mode.Auto_judge -> defer request Judge_requested
+  | Error detail ->
+    defer request (Mode_state_invalid detail)
+  | Ok Keeper_gate_mode.Manual ->
+    defer request Human_requested
+  | Ok Keeper_gate_mode.Auto_judge ->
+    defer request Judge_requested
   | Ok Keeper_gate_mode.Always_allow ->
     let source = Workspace_always_allow in
     audit_allow
@@ -1527,7 +1595,10 @@ let decide_from_selected_mode request = function
     Allow { source }
 ;;
 
-let decide_without_cycle_grant ~keeper_always_allow request =
+let decide_without_cycle_grant
+      ~keeper_always_allow
+      request
+  =
   if keeper_always_allow
   then (
     let source = Keeper_always_allow in
@@ -1575,7 +1646,11 @@ let decide_without_cycle_grant ~keeper_always_allow request =
           decide_from_selected_mode request mode))
 ;;
 
-let decide ?cycle_grant ~keeper_always_allow request =
+let decide
+      ?cycle_grant
+      ~keeper_always_allow
+      request
+  =
   let grant_result =
     match cycle_grant with
     | None -> Cycle_grant_not_applicable
@@ -1587,7 +1662,9 @@ let decide ?cycle_grant ~keeper_always_allow request =
     audit_allow request ~source_approval_id:approval_id source;
     Allow { source }
   | Cycle_grant_not_applicable ->
-    decide_without_cycle_grant ~keeper_always_allow request
+    decide_without_cycle_grant
+      ~keeper_always_allow
+      request
   | Cycle_grant_temporarily_unavailable (approval_id, reason) ->
     Log.Keeper.warn
       ~keeper_name:request.keeper_name
@@ -1651,8 +1728,17 @@ module For_testing = struct
 
   type nonrec hitl_worker_spawner = hitl_worker_spawner
 
-  let spawn_auto_judge_entry_with_worker ~spawn_worker entry =
-    match spawn_auto_judge_entry_with ~spawn_worker entry with
+  let spawn_auto_judge_entry_with_worker
+        ~spawn_worker
+        ~research_runner
+        entry
+    =
+    match
+      spawn_auto_judge_entry_with
+        ~spawn_worker
+        ~research_runner
+        entry
+    with
     | Ok Started -> Ok true
     | Ok Skipped -> Ok false
     | Error reason -> Error reason

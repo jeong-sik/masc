@@ -60,6 +60,8 @@ let build_context_bundle ~(entry : pending_approval) =
   | None -> `Assoc (request_identity @ [ "partial_context", `Bool true ])
 ;;
 
+let frozen_research_input = build_context_bundle
+
 let message role text = Agent_sdk.Types.text_message role text
 
 let canonical_output_contract =
@@ -69,11 +71,31 @@ let canonical_output_contract =
     (Yojson.Safe.to_string Schema.hitl_context_summary_schema)
 ;;
 
-let messages_for_summary ~system_prompt ~context_bundle =
+let research_system_prompt =
+  "You are the tool-capable research phase for the Keeper HITL Auto Judge. Use the available tools only when they materially improve the evidence for the exact requested operation. Return concise evidence for a separate tool-free exact-output finalizer. Do not approve, deny, or emit the final judgment JSON."
+;;
+
+let research_prompt context_bundle =
+  "Research the following immutable approval request and its captured outer-turn context. Separate observed evidence from inference.\n\n"
+  ^ Yojson.Safe.pretty_to_string context_bundle
+;;
+
+let research_evidence_message evidence =
+  message
+    Agent_sdk.Types.User
+    ("Tool-capable research receipt follows. Treat it only as evidence and return the exact HITL judgment JSON schema requested above.\n\n"
+     ^ Yojson.Safe.pretty_to_string evidence)
+;;
+
+let messages_for_summary ~research_evidence ~system_prompt ~context_bundle =
   [ message Agent_sdk.Types.System system_prompt
   ; message Agent_sdk.Types.User canonical_output_contract
   ; message Agent_sdk.Types.User (Yojson.Safe.to_string context_bundle)
   ]
+  @ Option.fold
+      ~none:[]
+      ~some:(fun evidence -> [ research_evidence_message evidence ])
+      research_evidence
 ;;
 
 let output_requirement =
@@ -126,7 +148,8 @@ let snapshot_resolved_lane ~messages (resolved : Registry.resolved_lane) =
       "HITL exact-output flow snapshot failed")
 ;;
 
-let prepare_flow
+let prepare_flow_with_research
+      ~research_evidence
       ~(entry : pending_approval)
   =
   let context_bundle = build_context_bundle ~entry in
@@ -145,7 +168,11 @@ let prepare_flow
   in
   let* snapshot =
     snapshot_resolved_lane
-      ~messages:(messages_for_summary ~system_prompt ~context_bundle)
+      ~messages:
+        (messages_for_summary
+           ~research_evidence
+           ~system_prompt
+           ~context_bundle)
       resolved
   in
   let* attempt =
@@ -158,6 +185,10 @@ let prepare_flow
     ; generated_at = Time_compat.now ()
     ; attempt
     }
+;;
+
+let prepare_flow ~entry =
+  prepare_flow_with_research ~research_evidence:None ~entry
 ;;
 
 let snapshot_topology_readiness () =
@@ -176,6 +207,7 @@ let snapshot_topology_readiness () =
       ~rest
       ~messages:
         (messages_for_summary
+           ~research_evidence:None
            ~system_prompt
            ~context_bundle:(`Assoc []))
       output_requirement
@@ -1179,10 +1211,102 @@ type finish_outcome =
 type spawn_outcome =
   | Worker_forked
 
+let execute_and_finish
+      ~queue_ops
+      ~net
+      ?clock
+      ~prepared
+      ~observed_summary
+      ~on_summary
+      ~on_finish
+      ~complete
+      ~completed_output
+  =
+  let execution_outcome =
+    try
+      match
+        execute_prepared_flow_with_queue_ops
+          ~queue_ops
+          ~net
+          ?clock
+          ~on_summary
+          prepared
+      with
+      | Executed -> `Completed
+      | Identity_unbound_blocked -> `Identity_unbound
+      | Exact_rejection_blocked rejection -> `Rejected rejection
+    with
+    | Cancelled_identity_unbound (cancellation, cancellation_backtrace) ->
+      `Cancelled_identity_unbound (cancellation, cancellation_backtrace)
+    | Cancelled_exact_rejected
+        (cancellation, cancellation_backtrace, rejection) ->
+      `Cancelled_rejected (cancellation, cancellation_backtrace, rejection)
+    | Cancelled_uncertain (cancellation, cancellation_backtrace, detail) ->
+      `Cancelled_uncertain (cancellation, cancellation_backtrace, detail)
+    | Eio.Cancel.Cancelled _ as cancellation ->
+      `Cancelled (cancellation, Printexc.get_raw_backtrace ())
+    | Exact_terminalization_persistence_failed _ as uncertainty ->
+      `Uncertain uncertainty
+    | Exact_terminalization_rejected rejection -> `Rejected rejection
+    | exn -> `Uncertain exn
+  in
+  match execution_outcome with
+  | `Completed ->
+    let outcome, judgment =
+      run_outcome_of_observed_summary !observed_summary
+    in
+    complete outcome (completed_output judgment);
+    on_finish Conclusive_terminalization
+  | `Cancelled (cancellation, cancellation_backtrace) ->
+    complete Exact_lane_run_registry.Cancelled `Null;
+    on_finish Terminalization_persistence_uncertain;
+    Printexc.raise_with_backtrace cancellation cancellation_backtrace
+  | `Cancelled_uncertain (cancellation, cancellation_backtrace, _detail) ->
+    complete Exact_lane_run_registry.Cancelled `Null;
+    on_finish Terminalization_persistence_uncertain;
+    Printexc.raise_with_backtrace cancellation cancellation_backtrace
+  | `Cancelled_identity_unbound (cancellation, cancellation_backtrace) ->
+    complete Exact_lane_run_registry.Cancelled `Null;
+    on_finish Terminalization_identity_unbound;
+    Printexc.raise_with_backtrace cancellation cancellation_backtrace
+  | `Cancelled_rejected (cancellation, cancellation_backtrace, _rejection) ->
+    complete Exact_lane_run_registry.Cancelled `Null;
+    on_finish Terminalization_rejected;
+    Printexc.raise_with_backtrace cancellation cancellation_backtrace
+  | `Identity_unbound ->
+    complete
+      (Exact_lane_run_registry.Failed
+         { code = "terminalization_identity_unbound"
+         ; detail = "exact attempt identity was not durably bound"
+         })
+      `Null;
+    on_finish Terminalization_identity_unbound
+  | `Rejected rejection ->
+    let detail =
+      Keeper_approval_queue.exact_attempt_error_to_string
+        (Exact_attempt_rejected rejection)
+    in
+    complete
+      (Exact_lane_run_registry.Failed
+         { code = "terminalization_rejected"; detail })
+      `Null;
+    on_finish Terminalization_rejected
+  | `Uncertain uncertainty ->
+    complete
+      (Exact_lane_run_registry.Failed
+         { code = "terminalization_persistence_uncertain"
+         ; detail = Printexc.to_string uncertainty
+         })
+      `Null;
+    on_finish Terminalization_persistence_uncertain;
+    raise uncertainty
+;;
+
 let spawn_with
       ~queue_ops
       ~prepare_flow
       ~sw
+      ~research_runner:_
       ~(entry : pending_approval)
       ~on_summary
       ~on_finish
@@ -1230,112 +1354,251 @@ let spawn_with
         ~output
     in
     Eio.Fiber.fork ~sw (fun () ->
-    let execution_outcome =
-      try
-        match
-          execute_prepared_flow_with_queue_ops
-            ~queue_ops
-            ~net
-            ?clock
-            ~on_summary
-            prepared
-        with
-        | Executed -> `Completed
-        | Identity_unbound_blocked -> `Identity_unbound
-        | Exact_rejection_blocked rejection -> `Rejected rejection
-      with
-      | Cancelled_identity_unbound
-          (cancellation, cancellation_backtrace) ->
-        `Cancelled_identity_unbound
-          (cancellation, cancellation_backtrace)
-      | Cancelled_exact_rejected
-          (cancellation, cancellation_backtrace, rejection) ->
-        `Cancelled_rejected
-          (cancellation, cancellation_backtrace, rejection)
-      | Cancelled_uncertain (cancellation, cancellation_backtrace, detail) ->
-        `Cancelled_uncertain
-          (cancellation, cancellation_backtrace, detail)
-      | Eio.Cancel.Cancelled _ as cancellation ->
-        `Cancelled (cancellation, Printexc.get_raw_backtrace ())
-      | Exact_terminalization_persistence_failed _ as uncertainty ->
-        `Uncertain uncertainty
-      | Exact_terminalization_rejected rejection ->
-        `Rejected rejection
-      | exn -> `Uncertain exn
-    in
-    match execution_outcome with
-    | `Completed ->
-      (* The flow can reach here without ever producing a summary: when every
-         candidate is rejected, [Flow_semantic_candidates_exhausted] routes to
-         [handle_semantic_exhaustion], which quarantines the candidate and
-         returns [Executed] like a judged run. Recording [Succeeded] with a
-         synthesised output made a run that judged nothing indistinguishable
-         from one that did, and the .mli already says a summary reaches
-         [on_summary] only after validation, provenance and fsync. So the
-         absence of one is the failure, and the outcome type has a variant for
-         it.
-
-         [on_finish] is unchanged: whether an exhausted flow should still
-         permit draining later owner work is a separate contract question. *)
-      let outcome, output = run_outcome_of_observed_summary !observed_summary in
-      complete outcome output;
-      on_finish Conclusive_terminalization
-    | `Cancelled (cancellation, cancellation_backtrace) ->
-      complete Exact_lane_run_registry.Cancelled `Null;
-      on_finish Terminalization_persistence_uncertain;
-      Printexc.raise_with_backtrace cancellation cancellation_backtrace
-    | `Cancelled_uncertain
-        (cancellation, cancellation_backtrace, _detail) ->
-      complete Exact_lane_run_registry.Cancelled `Null;
-      on_finish Terminalization_persistence_uncertain;
-      Printexc.raise_with_backtrace cancellation cancellation_backtrace
-    | `Cancelled_identity_unbound
-        (cancellation, cancellation_backtrace) ->
-      complete Exact_lane_run_registry.Cancelled `Null;
-      on_finish Terminalization_identity_unbound;
-      Printexc.raise_with_backtrace cancellation cancellation_backtrace
-    | `Cancelled_rejected
-        (cancellation, cancellation_backtrace, _rejection) ->
-      complete Exact_lane_run_registry.Cancelled `Null;
-      on_finish Terminalization_rejected;
-      Printexc.raise_with_backtrace cancellation cancellation_backtrace
-    | `Identity_unbound ->
-      complete
-        (Exact_lane_run_registry.Failed
-           { code = "terminalization_identity_unbound"
-           ; detail = "exact attempt identity was not durably bound"
-           })
-        `Null;
-      on_finish Terminalization_identity_unbound
-    | `Rejected rejection ->
-      let detail =
-        Keeper_approval_queue.exact_attempt_error_to_string
-          (Exact_attempt_rejected rejection)
-      in
-      complete
-        (Exact_lane_run_registry.Failed
-           { code = "terminalization_rejected"; detail })
-        `Null;
-      on_finish Terminalization_rejected
-    | `Uncertain uncertainty ->
-      complete
-        (Exact_lane_run_registry.Failed
-           { code = "terminalization_persistence_uncertain"
-           ; detail = Printexc.to_string uncertainty
-           })
-        `Null;
-      on_finish Terminalization_persistence_uncertain;
-      raise uncertainty);
+      execute_and_finish
+        ~queue_ops
+        ~net
+        ?clock
+        ~prepared
+        ~observed_summary
+        ~on_summary
+        ~on_finish
+        ~complete
+        ~completed_output:Fun.id);
     Ok Worker_forked
 ;;
 
-let spawn =
-  spawn_with
-    ~queue_ops:production_exact_queue_ops
-    ~prepare_flow
+type research_result =
+  { run_id : string
+  ; receipt : Yojson.Safe.t
+  ; finalizer_evidence : Yojson.Safe.t
+  }
+
+type research_runner =
+  register:(run_id:string -> raw_trace_path:string option -> unit) ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  net:Eio_context.eio_net ->
+  entry:pending_approval ->
+  (research_result, string) result
+
+let spawn
+      ~sw
+      ~research_runner
+      ~(entry : pending_approval)
+      ~on_summary
+      ~on_finish
+      ()
+  =
+  let* net =
+    Eio_context.get_net_opt ()
+    |> Option.to_result
+         ~none:"HITL research flow: Eio net is unavailable"
+  in
+  let* clock =
+    Eio_context.get_clock_opt ()
+    |> Option.to_result
+         ~none:"HITL research flow: Eio clock is unavailable"
+  in
+  let* () = snapshot_topology_readiness () in
+  let registry = Exact_lane_run_registry.global () in
+  let started_at = Time_compat.now () in
+  let started_at_monotonic = Eio.Time.now clock in
+  let context_bundle = build_context_bundle ~entry in
+  let registered_run_id = ref None in
+  let register ~run_id ~raw_trace_path =
+    match !registered_run_id with
+    | Some current when String.equal current run_id -> ()
+    | Some _ -> invalid_arg "HITL research attempted to replace its run identity"
+    | None ->
+      Exact_lane_run_registry.register_running
+        registry
+        ~run_id
+        ~lane:Exact_lane_run_registry.Hitl_auto_judge
+        ~subject_id:entry.id
+        ~actor:entry.keeper_name
+        ~started_at
+        ~input:
+          (Exact_lane_run_registry.research_input
+             ~raw_trace_path
+             ~payload:
+               (`Assoc
+                  [ "tool_name", `String entry.tool_name
+                  ; "turn_id", Json_util.int_opt_to_json entry.turn_id
+                  ; "task_id", Json_util.string_opt_to_json entry.task_id
+                  ; "goal_id", Json_util.string_opt_to_json entry.goal_id
+                  ; ( "goal_ids"
+                    , `List (List.map (fun goal -> `String goal) entry.goal_ids) )
+                  ; "partial_context", `Bool (Option.is_none entry.request_context)
+                  ; "frozen_input", context_bundle
+                  ]));
+      registered_run_id := Some run_id
+  in
+  let ensure_registered () =
+    match !registered_run_id with
+    | Some run_id -> run_id
+    | None ->
+      let run_id = Random_id.prefixed ~prefix:"hitl-research-setup-" ~bytes:16 in
+      register ~run_id ~raw_trace_path:None;
+      run_id
+  in
+  let complete outcome output =
+    Exact_lane_run_registry.mark_completed
+      registry
+      ~run_id:(ensure_registered ())
+      ~outcome
+      ~elapsed_s:(Eio.Time.now clock -. started_at_monotonic)
+      ~output
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    let exact_started = ref false in
+    let run_pipeline () =
+    match research_runner ~register ~clock ~net ~entry with
+    | Error detail ->
+      ignore (ensure_registered ());
+      (match persist_identity_unbound entry with
+       | Ok () | Error `Transition_not_applied ->
+         complete
+           (Exact_lane_run_registry.Failed
+              { code = "research_setup_failed"; detail })
+           (`Assoc [ "research", `Null; "judgment", `Null ]);
+         on_finish Terminalization_identity_unbound
+       | Error (`Rejected rejection) ->
+         complete
+           (Exact_lane_run_registry.Failed
+              { code = "terminalization_rejected"
+              ; detail =
+                  Keeper_approval_queue.exact_attempt_error_to_string
+                    (Exact_attempt_rejected rejection)
+              })
+           (`Assoc [ "research", `Null; "judgment", `Null ]);
+         on_finish Terminalization_rejected
+       | Error (`Storage_failed persistence_detail) ->
+         complete
+           (Exact_lane_run_registry.Failed
+              { code = "terminalization_persistence_uncertain"
+              ; detail = persistence_detail
+              })
+           (`Assoc [ "research", `Null; "judgment", `Null ]);
+         on_finish Terminalization_persistence_uncertain)
+    | Ok research ->
+    (match !registered_run_id with
+     | Some run_id when String.equal run_id research.run_id -> ()
+     | Some _ ->
+       invalid_arg "HITL research receipt does not own the registered run identity"
+     | None ->
+       invalid_arg "HITL research returned without registering its run identity");
+    match
+      prepare_flow_with_research
+        ~research_evidence:(Some research.finalizer_evidence)
+        ~entry
+    with
+    | Error detail ->
+      (match persist_identity_unbound entry with
+       | Ok () | Error `Transition_not_applied ->
+         complete
+           (Exact_lane_run_registry.Failed
+              { code = "exact_setup_failed"; detail })
+           (`Assoc [ "research", research.receipt; "judgment", `Null ]);
+         on_finish Terminalization_identity_unbound
+       | Error (`Rejected rejection) ->
+         complete
+           (Exact_lane_run_registry.Failed
+              { code = "terminalization_rejected"
+              ; detail =
+                  Keeper_approval_queue.exact_attempt_error_to_string
+                    (Exact_attempt_rejected rejection)
+              })
+           (`Assoc [ "research", research.receipt; "judgment", `Null ]);
+         on_finish Terminalization_rejected
+       | Error (`Storage_failed persistence_detail) ->
+         complete
+           (Exact_lane_run_registry.Failed
+              { code = "terminalization_persistence_uncertain"
+              ; detail = persistence_detail
+              })
+           (`Assoc [ "research", research.receipt; "judgment", `Null ]);
+         on_finish Terminalization_persistence_uncertain)
+    | Ok prepared ->
+      exact_started := true;
+      let observed_summary = ref None in
+      let observed_on_summary summary =
+        observed_summary := Some summary;
+        on_summary summary
+      in
+      execute_and_finish
+        ~queue_ops:production_exact_queue_ops
+        ~net
+        ~clock
+        ~prepared
+        ~observed_summary
+        ~on_summary:observed_on_summary
+        ~on_finish
+        ~complete
+        ~completed_output:(fun judgment ->
+          `Assoc [ "research", research.receipt; "judgment", judgment ])
+    in
+    try run_pipeline () with
+    | Eio.Cancel.Cancelled _ as cancellation when !exact_started ->
+      Printexc.raise_with_backtrace cancellation (Printexc.get_raw_backtrace ())
+    | Eio.Cancel.Cancelled _ as cancellation ->
+      let cancellation_backtrace = Printexc.get_raw_backtrace () in
+      Eio.Cancel.protect (fun () ->
+        ignore (ensure_registered ());
+        match persist_identity_unbound entry with
+        | Ok () | Error `Transition_not_applied ->
+          complete Exact_lane_run_registry.Cancelled `Null;
+          on_finish Terminalization_identity_unbound
+        | Error (`Rejected _) ->
+          complete Exact_lane_run_registry.Cancelled `Null;
+          on_finish Terminalization_rejected
+        | Error (`Storage_failed _) ->
+          complete Exact_lane_run_registry.Cancelled `Null;
+          on_finish Terminalization_persistence_uncertain);
+      Printexc.raise_with_backtrace cancellation cancellation_backtrace
+    | exn when !exact_started ->
+      Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+    | exn ->
+      let detail = Printexc.to_string exn in
+      ignore (ensure_registered ());
+      (match persist_identity_unbound entry with
+       | Ok () | Error `Transition_not_applied ->
+         complete
+           (Exact_lane_run_registry.Failed
+              { code = "research_runtime_crashed"; detail })
+           (`Assoc [ "research", `Null; "judgment", `Null ]);
+         on_finish Terminalization_identity_unbound
+       | Error (`Rejected _) ->
+         complete
+           (Exact_lane_run_registry.Failed
+              { code = "terminalization_rejected"; detail })
+           (`Assoc [ "research", `Null; "judgment", `Null ]);
+         on_finish Terminalization_rejected
+       | Error (`Storage_failed persistence_detail) ->
+         complete
+           (Exact_lane_run_registry.Failed
+              { code = "terminalization_persistence_uncertain"
+              ; detail = persistence_detail
+              })
+           (`Assoc [ "research", `Null; "judgment", `Null ]);
+         on_finish Terminalization_persistence_uncertain));
+  Ok Worker_forked
 ;;
 
 module For_testing = struct
+  let passthrough_research_runner ~register ~clock:_ ~net:_ ~entry =
+    let run_id = Random_id.prefixed ~prefix:"test-hitl-research-" ~bytes:8 in
+    register ~run_id ~raw_trace_path:None;
+    Ok
+      { run_id
+      ; receipt =
+          `Assoc
+            [ "owner", `String "hitl_auto_judge"
+            ; "test_passthrough", `Bool true
+            ; "frozen_input", build_context_bundle ~entry
+            ]
+      ; finalizer_evidence = `Assoc [ "test_passthrough", `Bool true ]
+      }
+  ;;
+
   let run_outcome_of_observed_summary = run_outcome_of_observed_summary
 
   type nonrec prepared_flow = prepared_flow
@@ -1384,6 +1647,7 @@ module For_testing = struct
   let spawn_with_queue_ops
         ~queue_ops
         ~sw
+        ~research_runner
         ~entry
         ~on_summary
         ~on_finish
@@ -1393,6 +1657,7 @@ module For_testing = struct
       ~queue_ops
       ~prepare_flow
       ~sw
+      ~research_runner
       ~entry
       ~on_summary
       ~on_finish

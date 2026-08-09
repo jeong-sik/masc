@@ -420,7 +420,12 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
           Error (Gone err)))
 ;;
 
-let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe.t) =
+let dashboard_gate_retry_http_json
+      ~research_runner
+      ~base_path
+      ~requested_by
+      ~(args : Yojson.Safe.t)
+  =
   let ( let* ) = Result.bind in
   let* fields =
     match args with
@@ -494,6 +499,7 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
   in
   match
     Keeper_gate.retry_blocked_auto_judge
+      ~research_runner
       ~base_path
       ~requested_by
       ~expected_input_hash

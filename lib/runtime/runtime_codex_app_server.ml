@@ -25,6 +25,12 @@ let approval_policy = "never"
 let permissions_profile = ":read-only"
 let thread_is_ephemeral = false
 
+let client_version =
+  match Build_info.V1.version () with
+  | None -> "dev"
+  | Some version -> Build_info.V1.Version.to_string version
+;;
+
 let default_config () =
   { cli_path = "codex"
   ; model = None
@@ -609,7 +615,7 @@ let invoke_state_callback ~stage callback =
   | exn -> protocol_error stage (Printexc.to_string exn)
 ;;
 
-let run_protocol io config ~protocol_cwd ~dynamic_tools ~reasoning_effort ~thread_mode
+let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_effort ~thread_mode
     ~history ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_started =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
@@ -618,7 +624,7 @@ let run_protocol io config ~protocol_cwd ~dynamic_tools ~reasoning_effort ~threa
            , `Assoc
                [ "name", `String "masc"
                ; "title", `String "MASC"
-               ; "version", `String Version.version
+               ; "version", `String client_version
                ] )
          ; "capabilities", `Assoc [ "experimentalApi", `Bool true ]
          ]);

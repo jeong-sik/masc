@@ -686,7 +686,7 @@ let run_named
       in
       match runtime.Runtime.execution with
       | Runtime_execution.Codex_app_server config ->
-        let run_codex () =
+        let run_codex ~initial_messages () =
           Keeper_codex_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -727,8 +727,8 @@ let run_named
                   ; ("routing_reason", `String "official_client_owns_session_state")
                   ])
               Keeper_runtime_manifest.Runtime_routed;
-            run_codex ()
-          | None, None -> run_codex ()
+            run_codex ~initial_messages:[] ()
+          | None, None -> run_codex ~initial_messages ()
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let codex_result =

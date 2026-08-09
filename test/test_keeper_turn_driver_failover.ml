@@ -119,7 +119,7 @@ max-request-body-bytes = 65536
 let runtime_toml_checkpoint_lane =
   {|
 [runtime]
-default = "checkpoint_lane"
+default = "codex.codex"
 
 [runtime.lanes.checkpoint_lane]
 strategy = "ordered"
@@ -765,13 +765,34 @@ let test_oas_checkpoint_starts_fresh_official_client_session () =
       ; manifest_keeper_turn_id = Some 1
       }
     in
-    let checkpoint = checkpoint_with_session_id "oas-session" in
+    let history_messages =
+      [ message
+          [ Agent_sdk.Types.Thinking
+              { content = "prior provider reasoning"; signature = None }
+          ; Agent_sdk.Types.ToolUse
+              { id = "prior-tool-call"
+              ; name = "prior_tool"
+              ; input = `Assoc []
+              }
+          ]
+      ; Agent_sdk.Types.tool_result_msg
+          ~tool_use_id:"prior-tool-call"
+          ~content:"prior tool result"
+          ()
+      ]
+    in
+    let checkpoint =
+      { (checkpoint_with_session_id "oas-session") with
+        messages = history_messages
+      }
+    in
     match
       Driver.run_named
         ~runtime_id:"checkpoint_lane"
         ~keeper_name:"checkpoint-runtime-compat-keeper"
         ~base_path:(Filename.get_temp_dir_name ())
         ~goal:"continue the OAS turn"
+        ~initial_messages:history_messages
         ~oas_checkpoint:checkpoint
         ~runtime_manifest_context:context
         ~runtime_manifest_append:(fun manifest -> manifests := manifest :: !manifests)
@@ -785,6 +806,11 @@ let test_oas_checkpoint_starts_fresh_official_client_session () =
         (Agent_sdk.Error.Config
            (Agent_sdk.Error.InvalidConfig { field = "oas_checkpoint"; _ })) ->
       Alcotest.fail "the official-client runtime must start without OAS resume"
+    | Error
+        (Agent_sdk.Error.Config
+           (Agent_sdk.Error.InvalidConfig { field = "initial_messages"; _ })) ->
+      Alcotest.fail
+        "a fresh official-client session must not import OAS history"
     | Error _ ->
       let fresh_session =
         List.find_opt

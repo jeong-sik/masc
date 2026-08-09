@@ -29,6 +29,51 @@ type t =
   }
 
 let max_body_bytes = 1024 * 1024
+let ( let* ) = Result.bind
+
+let protocol_error stage detail =
+  Error ({ Runtime_official_client_mcp.stage; detail } : Runtime_official_client_mcp.error)
+;;
+
+let rec validate_unique_object_keys ~path = function
+  | `Assoc fields ->
+    let seen = Hashtbl.create (min 64 (List.length fields)) in
+    let rec loop = function
+      | [] -> Ok ()
+      | (name, value) :: rest ->
+        if Hashtbl.mem seen name
+        then protocol_error "MCP message" (Printf.sprintf "duplicate object key %S at %s" name path)
+        else
+          let () = Hashtbl.add seen name () in
+          let* () = validate_unique_object_keys ~path:(path ^ "." ^ name) value in
+          loop rest
+    in
+    loop fields
+  | `List values ->
+    let rec loop index = function
+      | [] -> Ok ()
+      | value :: rest ->
+        let* () =
+          validate_unique_object_keys ~path:(Printf.sprintf "%s[%d]" path index) value
+        in
+        loop (index + 1) rest
+    in
+    loop 0 values
+  | `Float value when not (Float.is_finite value) ->
+    protocol_error "MCP message" (Printf.sprintf "non-finite number at %s" path)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Ok ()
+;;
+
+let parse_message text =
+  let* message =
+    try Ok (Yojson.Safe.from_string text) with
+    | Yojson.Json_error detail -> protocol_error "MCP message" ("invalid JSON: " ^ detail)
+    | Stack_overflow -> protocol_error "MCP message" "JSON nesting exceeds parser limits"
+    | Failure detail -> protocol_error "MCP message" ("invalid JSON: " ^ detail)
+  in
+  let* () = validate_unique_object_keys ~path:"$" message in
+  Ok message
+;;
 
 let hex_of_bytes bytes =
   let alphabet = "0123456789abcdef" in
@@ -117,7 +162,12 @@ let request_method_and_id = function
       | Some (`String value) -> Some value
       | _ -> None
     in
-    method_, Option.value (List.assoc_opt "id" fields) ~default:`Null
+    let id =
+      match List.assoc_opt "id" fields with
+      | Some id -> id
+      | None -> `Null
+    in
+    method_, id
   | _ -> None, `Null
 ;;
 
@@ -158,7 +208,11 @@ let dispatch t ~tool_specs ~call_tool message =
     let phase = Eio.Mutex.use_ro t.state_mutex (fun () -> t.state.phase) in
     if not (phase_admits phase method_ id)
     then
-      let method_ = Option.value method_ ~default:"<missing>" in
+      let method_ =
+        match method_ with
+        | Some method_ -> method_
+        | None -> "<missing>"
+      in
       Error (`Protocol (id, phase_error phase method_))
     else
       match
@@ -226,7 +280,7 @@ let content_length request =
 ;;
 
 let handle_message t ~tool_specs ~call_tool body =
-  match Runtime_official_client_mcp.parse_message body with
+  match parse_message body with
   | Error { stage; detail } ->
     reject t;
     respond_json

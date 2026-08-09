@@ -30,13 +30,6 @@ val install_from_store
 (** Strictly load every persisted Keeper and start exactly one owner actor for
     each under [sw].  Returns the installed owner count. *)
 
-val ensure
-  :  base_path:string
-  -> Keeper_meta_contract.keeper_meta
-  -> (Keeper_owner.t, lookup_error) result
-(** Start the owner for a newly created Keeper, or return the existing owner.
-    Name collisions never replace an existing actor. *)
-
 val get
   :  base_path:string
   -> keeper_name:string
@@ -51,6 +44,14 @@ val apply_meta
 (** Mailbox-linearized metadata mutation.  Registry metadata is refreshed only
     from the committed owner projection.  The existing lifecycle reservation
     remains the admission authority through the owner commit. *)
+
+val create_meta
+  :  base_path:string
+  -> Keeper_meta_contract.keeper_meta
+  -> (Keeper_meta_contract.keeper_meta option, command_error) result
+(** Install an empty actor for a new Keeper, then commit its first snapshot via
+    the closed [Create] command.  A failed commit leaves the empty actor in
+    place so same-name retries remain mailbox-linearized. *)
 
 val all_projections
   :  base_path:string

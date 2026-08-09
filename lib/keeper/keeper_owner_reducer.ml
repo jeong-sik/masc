@@ -31,6 +31,22 @@ type compaction_result =
   ; updated_at : string
   }
 
+type profile_update =
+  { instructions : string
+  ; sandbox_profile : Keeper_types_profile.sandbox_profile
+  ; network_mode : Keeper_types_profile.network_mode
+  ; allowed_paths : string list
+  ; mention_targets : string list
+  ; proactive_enabled : bool
+  ; max_context_override : int option
+  ; active_goal_ids : string list
+  ; autoboot_enabled : bool
+  ; telemetry_feedback_enabled : bool option
+  ; telemetry_feedback_window_hours : int option
+  ; always_allow : bool option
+  ; updated_at : string
+  }
+
 type meta_command =
   | Create of Keeper_meta_contract.keeper_meta
   | Pause of
@@ -43,6 +59,7 @@ type meta_command =
       { enabled : bool
       ; updated_at : string
       }
+  | Update_profile of profile_update
   | Handoff_identity of identity_handoff
   | Repair_trace_generation of
       { trace_id : Keeper_id.Trace_id.t
@@ -248,6 +265,25 @@ let apply_existing (state : state) meta command =
          { meta with paused = false; latched_reason = None; runtime; updated_at })
   | Set_autoboot { enabled; updated_at } ->
     Ok (with_meta state { meta with autoboot_enabled = enabled; updated_at })
+  | Update_profile update ->
+    Ok
+      (with_meta
+         state
+         { meta with
+           instructions = update.instructions
+         ; sandbox_profile = update.sandbox_profile
+         ; network_mode = update.network_mode
+         ; allowed_paths = update.allowed_paths
+         ; mention_targets = update.mention_targets
+         ; proactive = { enabled = update.proactive_enabled }
+         ; max_context_override = update.max_context_override
+         ; active_goal_ids = update.active_goal_ids
+         ; autoboot_enabled = update.autoboot_enabled
+         ; telemetry_feedback_enabled = update.telemetry_feedback_enabled
+         ; telemetry_feedback_window_hours = update.telemetry_feedback_window_hours
+         ; always_allow = update.always_allow
+         ; updated_at = update.updated_at
+         })
   | Handoff_identity handoff ->
     let runtime =
       { meta.runtime with

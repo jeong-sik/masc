@@ -84,7 +84,11 @@ export function OfficialClientSessionPanel() {
     resolving.value = true
     error.value = null
     try {
-      response.value = await resolveOfficialClientSession(keeperName, recoveryId, decision)
+      const resolved = await resolveOfficialClientSession(keeperName, recoveryId, decision)
+      response.value = resolved
+      if (!resolved.audit.recorded) {
+        error.value = `복구는 ${resolved.resolution_application} 상태로 반영됐지만 audit 기록에 실패했습니다: ${resolved.audit.error}`
+      }
     } catch (cause) {
       error.value = errorToString(cause)
       await load(keeperName)

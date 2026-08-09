@@ -40,6 +40,8 @@ const recoveryResponse = {
 
 const resolvedResponse = {
   ...recoveryResponse,
+  resolution_application: 'applied' as const,
+  audit: { recorded: true as const },
   session: {
     ...recoveryResponse.session,
     phase: {

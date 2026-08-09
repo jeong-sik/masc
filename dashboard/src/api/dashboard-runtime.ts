@@ -1193,6 +1193,18 @@ export interface DashboardOfficialClientSessionResponse {
   session: DashboardOfficialClientSession | null
 }
 
+export type DashboardOfficialClientRecoveryApplication = 'applied' | 'replayed'
+
+export type DashboardOfficialClientAuditReceipt =
+  | { recorded: true }
+  | { recorded: false; error: string }
+
+export interface DashboardOfficialClientRecoveryResponse
+  extends DashboardOfficialClientSessionResponse {
+  resolution_application: DashboardOfficialClientRecoveryApplication
+  audit: DashboardOfficialClientAuditReceipt
+}
+
 export type DashboardOfficialClientRecoveryDecision =
   | { resolution: 'retry_previous' }
   | { resolution: 'restart_fresh' }
@@ -1448,6 +1460,44 @@ function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialCli
   }
 }
 
+function decodeOfficialClientAuditReceipt(raw: unknown): DashboardOfficialClientAuditReceipt | null {
+  if (!isRecord(raw) || typeof raw.recorded !== 'boolean') return null
+  if (raw.recorded) {
+    return hasExactKeys(raw, ['recorded']) ? { recorded: true } : null
+  }
+  if (!hasExactKeys(raw, ['recorded', 'error'])) return null
+  const error = decodeOfficialClientNonEmptyString(raw.error)
+  return error ? { recorded: false, error } : null
+}
+
+function decodeOfficialClientRecoveryResponse(raw: unknown): DashboardOfficialClientRecoveryResponse | null {
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, [
+      'schema',
+      'ok',
+      'keeper_name',
+      'session',
+      'resolution_application',
+      'audit',
+    ])
+  ) return null
+  const session = decodeOfficialClientSessionResponse({
+    schema: raw.schema,
+    ok: raw.ok,
+    keeper_name: raw.keeper_name,
+    session: raw.session,
+  })
+  const resolution_application = raw.resolution_application === 'applied'
+    || raw.resolution_application === 'replayed'
+    ? raw.resolution_application
+    : null
+  const audit = decodeOfficialClientAuditReceipt(raw.audit)
+  return session && resolution_application && audit
+    ? { ...session, resolution_application, audit }
+    : null
+}
+
 function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
   const record = isRecord(raw) ? raw : {}
   return {
@@ -1484,14 +1534,14 @@ export async function resolveOfficialClientSession(
   keeperName: string,
   recoveryId: string,
   decision: DashboardOfficialClientRecoveryDecision,
-): Promise<DashboardOfficialClientSessionResponse> {
+): Promise<DashboardOfficialClientRecoveryResponse> {
   await ensureDevToken()
   const raw = await post<unknown>('/api/v1/runtime/sessions/official-client/resolve', {
     keeper_name: keeperName,
     recovery_id: recoveryId,
     ...decision,
   })
-  const decoded = decodeOfficialClientSessionResponse(raw)
+  const decoded = decodeOfficialClientRecoveryResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 official-client recovery payload')
   return decoded
 }

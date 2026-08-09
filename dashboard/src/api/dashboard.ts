@@ -188,6 +188,9 @@ export type {
   DashboardOfficialClientTransientReleaseRecord,
   DashboardOfficialClientSession,
   DashboardOfficialClientSessionResponse,
+  DashboardOfficialClientRecoveryApplication,
+  DashboardOfficialClientAuditReceipt,
+  DashboardOfficialClientRecoveryResponse,
   DashboardOfficialClientRecoveryDecision,
 } from './dashboard-runtime'
 export {

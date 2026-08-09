@@ -43,6 +43,8 @@ const recoveryPayload = {
 
 const resolvedPayload = {
   ...recoveryPayload,
+  resolution_application: 'applied',
+  audit: { recorded: true },
   session: {
     ...recoveryPayload.session,
     phase: {

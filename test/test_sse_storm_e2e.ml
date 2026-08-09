@@ -1,5 +1,8 @@
 open Alcotest
 
+module Official_client_session_store =
+  Masc.Keeper_official_client_session_store
+
 type http_result = {
   status: int option;
   headers: (string * string) list;
@@ -685,35 +688,39 @@ let test_official_client_recovery_uses_real_admin_route () =
   with_server @@ fun ~port ~auth_token ~base_path ->
   let keeper_name = "official-client-http-fixture" in
   let claim =
-    Keeper_official_client_session_store.claim
+    Official_client_session_store.claim
       ~base_path
       ~keeper_name
       ~expected:None
-      ~client_kind:Keeper_official_client_session_store.Codex
+      ~client_kind:Official_client_session_store.Codex
       ~owner_epoch:"11111111-1111-4111-8111-111111111111"
       ~runtime_id:"codex.codex"
       ~tool_surface_sha256:
-        (Keeper_official_client_session_store.tool_surface_sha256 [])
+        (Official_client_session_store.tool_surface_sha256 [])
       ~updated_at:1.0
     |> Result.get_ok
   in
   let recovery =
-    Keeper_official_client_session_store.require_recovery
+    Official_client_session_store.require_recovery
       ~base_path
       ~keeper_name
       ~expected:claim
-      ~failure:Keeper_official_client_session_store.Protocol_failed
+      ~failure:Official_client_session_store.Protocol_failed
       ~detail:"real HTTP recovery fixture"
       ~required_at:2.0
     |> Result.get_ok
   in
   let recovery_id =
     match recovery.phase with
-    | Recovery_required required -> required.recovery_id
-    | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+    | Official_client_session_store.Recovery_required required -> required.recovery_id
+    | Official_client_session_store.Ready
+    | Official_client_session_store.Start _
+    | Official_client_session_store.Active _
+    | Official_client_session_store.Turn_inflight _
+    | Official_client_session_store.Settled _ ->
       fail "HTTP fixture did not enter recovery-required"
   in
-  let path =
+  let session_path =
     "/api/v1/runtime/sessions/official-client?keeper_name=" ^ keeper_name
   in
   let worker =
@@ -721,7 +728,7 @@ let test_official_client_recovery_uses_real_admin_route () =
       ~headers:[ "Authorization", "Bearer " ^ auth_token ]
       ~max_time:2.0
       ~port
-      ~path
+      ~path:session_path
       ()
   in
   check_status "Worker cannot read official-client recovery" 403 worker;
@@ -731,7 +738,9 @@ let test_official_client_recovery_uses_real_admin_route () =
     ; "Content-Type", "application/json"
     ]
   in
-  let before = run_curl ~headers:admin_headers ~max_time:2.0 ~port ~path () in
+  let before =
+    run_curl ~headers:admin_headers ~max_time:2.0 ~port ~path:session_path ()
+  in
   check_status "Admin reads official-client recovery" 200 before;
   let open Yojson.Safe.Util in
   check string
@@ -761,7 +770,9 @@ let test_official_client_recovery_uses_real_admin_route () =
       ()
   in
   check_status "Admin resolves official-client recovery" 200 resolved;
-  let refreshed = run_curl ~headers:admin_headers ~max_time:2.0 ~port ~path () in
+  let refreshed =
+    run_curl ~headers:admin_headers ~max_time:2.0 ~port ~path:session_path ()
+  in
   check_status "Admin refreshes official-client session" 200 refreshed;
   let refreshed_json = Yojson.Safe.from_string refreshed.body in
   check string

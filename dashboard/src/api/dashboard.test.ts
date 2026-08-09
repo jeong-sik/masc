@@ -4377,6 +4377,8 @@ describe('official-client session API', () => {
   it('posts the exact recovery fence and selected resolution', async () => {
     const resolvedPayload = {
       ...recoveryPayload,
+      resolution_application: 'applied',
+      audit: { recorded: true },
       session: {
         ...recoveryPayload.session,
         phase: { kind: 'ready' },
@@ -4412,5 +4414,47 @@ describe('official-client session API', () => {
     })
     expect(result.session?.phase.kind).toBe('ready')
     expect(result.session?.last_recovery_resolution?.resolved_by).toBe('dashboard')
+    expect(result.resolution_application).toBe('applied')
+    expect(result.audit).toEqual({ recorded: true })
+  })
+
+  it.each([
+    {
+      name: 'missing application',
+      payload: {
+        ...recoveryPayload,
+        audit: { recorded: true },
+      },
+    },
+    {
+      name: 'unknown application',
+      payload: {
+        ...recoveryPayload,
+        resolution_application: 'guessed',
+        audit: { recorded: true },
+      },
+    },
+    {
+      name: 'malformed audit receipt',
+      payload: {
+        ...recoveryPayload,
+        resolution_application: 'replayed',
+        audit: { recorded: false },
+      },
+    },
+  ])('rejects recovery operation drift: $name', async ({ payload }) => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(resolveOfficialClientSession(
+      'sangsu',
+      recoveryPayload.session.phase.recovery_id,
+      { resolution: 'restart_fresh' },
+    )).rejects.toThrow('유효하지 않은 official-client recovery payload')
   })
 })

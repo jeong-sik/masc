@@ -1,8 +1,9 @@
 (** Exact JSON-RPC/MCP bridge shared by official subscription clients.
 
-    Client adapters own their transport and tool representation. This module
-    owns the protocol state: initialize, tools/list, tools/call, notification
-    no-response semantics, and typed protocol failures. *)
+    Client adapters own their transport and tool representation. This module's
+    raw-text entrypoint owns JSON parsing and the protocol state: initialize,
+    tools/list, tools/call, notification no-response semantics, and typed
+    protocol failures. *)
 
 type error =
   { stage : string
@@ -27,5 +28,5 @@ val handle_message :
      call_id:string ->
      arguments:Yojson.Safe.t ->
      tool_result option) ->
-  Yojson.Safe.t ->
+  string ->
   (dispatch, error) result

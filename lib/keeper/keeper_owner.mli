@@ -41,6 +41,23 @@ type error =
   | Owner_stopping
   | Owner_closed
 
+type operation_execution =
+  | Operation_succeeded of { outcome_ref : string }
+  | Operation_failed of
+      { kind : string
+      ; detail : string
+      ; outcome_ref : string option
+      }
+
+type operation_executor =
+  sw:Eio.Switch.t ->
+  keeper_name:string ->
+  claim:(unit -> (Chat_operation.t option, error) result) ->
+  operation_execution
+(** One Owner-owned child execution. The executor must not cache an operation
+    body before [claim]: [claim] is the mailbox-linearized Queued-to-Running
+    boundary and returns the latest edited input. *)
+
 type t
 
 val start
@@ -48,6 +65,7 @@ val start
   -> store:store
   -> operation_store_path:string
   -> now:(unit -> float)
+  -> operation_executor:operation_executor option
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result

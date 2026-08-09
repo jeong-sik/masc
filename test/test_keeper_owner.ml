@@ -6,6 +6,8 @@ module Owner = Keeper_owner
 module Owner_registry = Keeper_owner_registry
 module Chat_operation = Owner.Chat_operation
 
+let json = testable Yojson.Safe.pretty_print Yojson.Safe.equal
+
 let make_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -44,7 +46,13 @@ let owner_ok = function
   | Error error -> fail (Owner.error_to_string error)
 ;;
 
-let start_owner ~sw ~store ~keeper_name ~initial_meta =
+let start_owner_with_executor
+      ~sw
+      ~store
+      ~operation_executor
+      ~keeper_name
+      ~initial_meta
+  =
   let path = Filename.temp_file "keeper-owner-operations-" ".sqlite3" in
   Unix.unlink path;
   Eio.Switch.on_release sw (fun () ->
@@ -54,6 +62,16 @@ let start_owner ~sw ~store ~keeper_name ~initial_meta =
     ~store
     ~operation_store_path:path
     ~now:(fun () -> 42.0)
+    ~operation_executor
+    ~keeper_name
+    ~initial_meta
+;;
+
+let start_owner ~sw ~store ~keeper_name ~initial_meta =
+  start_owner_with_executor
+    ~sw
+    ~store
+    ~operation_executor:None
     ~keeper_name
     ~initial_meta
 ;;
@@ -66,6 +84,17 @@ let operation_id value =
 
 let operation_source = `Assoc [ "kind", `String "dashboard" ]
 let operation_input text = `Assoc [ "message", `String text ]
+
+let rec await_terminal owner operation_id remaining =
+  if remaining = 0
+  then fail "operation did not become terminal"
+  else
+    match owner_ok (Owner.exact_operation owner operation_id) with
+    | Some operation when Chat_operation.is_terminal operation.state -> operation
+    | Some _ | None ->
+      Eio.Fiber.yield ();
+      await_terminal owner operation_id (remaining - 1)
+;;
 
 let test_pure_reducer_adds_deltas_and_preserves_pause () =
   let state =
@@ -640,6 +669,143 @@ let test_operation_lifecycle_is_durable_and_projected () =
   | state -> fail ("terminal replay changed state: " ^ Chat_operation.state_to_string state)
 ;;
 
+let test_operation_executor_claims_latest_input_and_drains_fifo () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let executor_started, resolve_executor_started = Eio.Promise.create () in
+  let allow_first_claim, resolve_first_claim = Eio.Promise.create () in
+  let seen_inputs = ref [] in
+  let execution_count = ref 0 in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    incr execution_count;
+    if !execution_count = 1
+    then (
+      Eio.Promise.resolve resolve_executor_started ();
+      Eio.Promise.await allow_first_claim);
+    match claim () with
+    | Error error ->
+      Owner.Operation_failed
+        { kind = "Claim_failed"
+        ; detail = Owner.error_to_string error
+        ; outcome_ref = None
+        }
+    | Ok None ->
+      Owner.Operation_failed
+        { kind = "No_operation"; detail = "missing FIFO head"; outcome_ref = None }
+    | Ok (Some (operation : Chat_operation.t)) ->
+      seen_inputs := operation.input :: !seen_inputs;
+      Owner.Operation_succeeded
+        { outcome_ref =
+            "turn:" ^ Chat_operation.Operation_id.to_string operation.operation_id
+        }
+  in
+  let owner =
+    owner_ok
+      (start_owner_with_executor
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_executor:(Some operation_executor)
+         ~keeper_name:"operation-executor"
+         ~initial_meta:(Some (make_meta "operation-executor")))
+  in
+  let first_id = operation_id "kmsg-operation-executor-first" in
+  let second_id = operation_id "kmsg-operation-executor-second" in
+  ignore
+    (owner_ok
+       (Owner.submit_operation
+          owner
+          ~operation_id:first_id
+          ~source:operation_source
+          ~input:(operation_input "stale")));
+  Eio.Promise.await executor_started;
+  ignore
+    (owner_ok
+       (Owner.edit_queued_operation
+          owner
+          ~operation_id:first_id
+          ~input:(operation_input "latest")));
+  ignore
+    (owner_ok
+       (Owner.submit_operation
+          owner
+          ~operation_id:second_id
+          ~source:operation_source
+          ~input:(operation_input "second")));
+  Eio.Promise.resolve resolve_first_claim ();
+  let first = await_terminal owner first_id 1_000 in
+  let second = await_terminal owner second_id 1_000 in
+  (match first.state, second.state with
+   | Chat_operation.Succeeded _, Chat_operation.Succeeded _ -> ()
+   | _ -> fail "Owner executor did not terminalize both FIFO operations");
+  check
+    (list (option json))
+    "claim observes edited input and then the next FIFO body"
+    [ Some (operation_input "latest"); Some (operation_input "second") ]
+    (List.rev !seen_inputs);
+  check int "one child drains one operation at a time" 2 !execution_count
+;;
+
+let test_operation_executor_exception_is_terminal_and_next_runs () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let execution_count = ref 0 in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    incr execution_count;
+    match claim () with
+    | Error error ->
+      Owner.Operation_failed
+        { kind = "Claim_failed"
+        ; detail = Owner.error_to_string error
+        ; outcome_ref = None
+        }
+    | Ok None -> failwith "missing FIFO head"
+    | Ok (Some (operation : Chat_operation.t)) ->
+      if !execution_count = 1
+      then failwith "synthetic child exception"
+      else
+        Owner.Operation_succeeded
+          { outcome_ref =
+              "turn:" ^ Chat_operation.Operation_id.to_string operation.operation_id
+          }
+  in
+  let owner =
+    owner_ok
+      (start_owner_with_executor
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_executor:(Some operation_executor)
+         ~keeper_name:"operation-exception"
+         ~initial_meta:(Some (make_meta "operation-exception")))
+  in
+  let first_id = operation_id "kmsg-operation-exception-first" in
+  let second_id = operation_id "kmsg-operation-exception-second" in
+  ignore
+    (owner_ok
+       (Owner.submit_operation
+          owner
+          ~operation_id:first_id
+          ~source:operation_source
+          ~input:(operation_input "first")));
+  ignore
+    (owner_ok
+       (Owner.submit_operation
+          owner
+          ~operation_id:second_id
+          ~source:operation_source
+          ~input:(operation_input "second")));
+  let first = await_terminal owner first_id 1_000 in
+  let second = await_terminal owner second_id 1_000 in
+  (match first.state with
+   | Chat_operation.Failed { failure = { kind; detail; _ }; _ } ->
+     check string "exception failure kind" "Turn_exception" kind;
+     check bool "exception detail is retained" true (String.length detail > 0)
+   | _ -> fail "child exception did not fail the first operation");
+  (match second.state with
+   | Chat_operation.Succeeded _ -> ()
+   | _ -> fail "child exception stopped the Owner FIFO drain");
+  check int "child exception does not stop the actor" 2 !execution_count
+;;
+
 let test_startup_interrupts_running_without_requeue () =
   Eio_main.run @@ fun _env ->
   let path = Filename.temp_file "keeper-owner-restart-" ".sqlite3" in
@@ -673,6 +839,7 @@ let test_startup_interrupts_running_without_requeue () =
               ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
               ~operation_store_path:path
               ~now:(fun () -> 20.0)
+              ~operation_executor:None
               ~keeper_name:"interrupted-restart"
               ~initial_meta:(Some (make_meta "interrupted-restart")))
        in
@@ -1135,6 +1302,14 @@ let () =
             "operation lifecycle is durable and projected"
             `Quick
             test_operation_lifecycle_is_durable_and_projected
+        ; test_case
+            "operation executor claims latest input and drains FIFO"
+            `Quick
+            test_operation_executor_claims_latest_input_and_drains_fifo
+        ; test_case
+            "operation executor exception is terminal and next runs"
+            `Quick
+            test_operation_executor_exception_is_terminal_and_next_runs
         ; test_case
             "startup interrupts Running without requeue"
             `Quick

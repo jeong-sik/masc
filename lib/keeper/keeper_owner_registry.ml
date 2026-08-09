@@ -163,6 +163,7 @@ let start_owner pool ~keeper_name ~initial_meta =
       ~store:(store_for pool keeper_name)
       ~operation_store_path
       ~now:Unix.gettimeofday
+      ~operation_executor:None
       ~keeper_name
       ~initial_meta
 ;;

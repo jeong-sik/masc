@@ -35,6 +35,25 @@ type error =
   | Owner_stopping
   | Owner_closed
 
+type operation_execution =
+  | Operation_succeeded of { outcome_ref : string }
+  | Operation_failed of
+      { kind : string
+      ; detail : string
+      ; outcome_ref : string option
+      }
+
+type operation_executor =
+  sw:Eio.Switch.t ->
+  keeper_name:string ->
+  claim:(unit -> (Chat_operation.t option, error) result) ->
+  operation_execution
+
+type child_completion =
+  { claimed_operation_id : Operation_id.t option
+  ; execution : operation_execution
+  }
+
 type _ command =
   | Exact_projection :
       (Keeper_owner_reducer.projection, error) result command
@@ -76,6 +95,7 @@ type _ command =
       ; outcome_ref : string option
       }
       -> (Chat_operation.t, error) result command
+  | Child_finished : child_completion -> (unit, error) result command
   | Begin_stopping : (unit, error) result command
 
 type packed_command =
@@ -90,6 +110,7 @@ type t =
   ; closed : bool Atomic.t
   ; closed_p : unit Eio.Promise.t
   ; store_error : string option ref
+  ; child_active : bool ref
   }
 
 let error_to_string = function
@@ -230,7 +251,15 @@ let reject_if_stopping state f =
   if (Keeper_owner_reducer.projection state).stopping then Error Owner_stopping else f ()
 ;;
 
-let start ~sw ~store ~operation_store_path ~now ~keeper_name ~initial_meta =
+let start
+      ~sw
+      ~store
+      ~operation_store_path
+      ~now
+      ~operation_executor
+      ~keeper_name
+      ~initial_meta
+  =
   match Keeper_owner_reducer.create ~keeper_name initial_meta with
   | Error error -> Error (Reducer_rejected error)
   | Ok initial_state ->
@@ -268,6 +297,7 @@ let start ~sw ~store ~operation_store_path ~now ~keeper_name ~initial_meta =
     ; closed = Atomic.make false
     ; closed_p
     ; store_error = ref None
+    ; child_active = ref false
     }
   in
   Eio.Switch.on_release sw (fun () ->
@@ -283,7 +313,75 @@ let start ~sw ~store ~operation_store_path ~now ~keeper_name ~initial_meta =
         keeper_name
         (Chat_operation_store.error_to_string error));
   Eio.Fiber.fork_daemon ~sw (fun () ->
-    let rec loop state =
+    let finish_child completion =
+      match completion.claimed_operation_id, completion.execution with
+      | None, _ -> ()
+      | Some operation_id, Operation_succeeded { outcome_ref } ->
+        ignore
+          (run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
+             Chat_operation_store.succeed_running
+               t.operation_store
+               ~now:(t.now ())
+               ~operation_id
+               ~outcome_ref)
+           : ((Chat_operation.t * operation_projection), error) result)
+      | Some operation_id, Operation_failed { kind; detail; outcome_ref } ->
+        ignore
+          (run_operation_command t ~label:"fail running Keeper chat operation" (fun () ->
+             Chat_operation_store.fail_running
+               t.operation_store
+               ~now:(t.now ())
+               ~operation_id
+               ~kind
+               ~detail
+               ~outcome_ref)
+           : ((Chat_operation.t * operation_projection), error) result)
+    in
+    let rec start_child_if_needed state =
+      match operation_executor with
+      | None -> ()
+      | Some _ when !(t.child_active) -> ()
+      | Some _ when (Keeper_owner_reducer.projection state).stopping -> ()
+      | Some _ when Option.is_some !(t.store_error) -> ()
+      | Some executor ->
+        let inventory = Atomic.get t.operation_projection in
+        if inventory.queued_count > 0 && Option.is_none inventory.running_operation_id
+        then (
+          t.child_active := true;
+          Eio.Fiber.fork ~sw (fun () ->
+            let claimed_operation_id = ref None in
+            let claim () =
+              match request t Claim_next_operation with
+              | Ok (Some operation) as result ->
+                claimed_operation_id := Some operation.Chat_operation.operation_id;
+                result
+              | (Ok None | Error _) as result -> result
+            in
+            let execution =
+              try
+                Eio.Switch.run (fun child_sw ->
+                  executor ~sw:child_sw ~keeper_name ~claim)
+              with
+              | Eio.Cancel.Cancelled cause ->
+                Operation_failed
+                  { kind = "Turn_cancelled"
+                  ; detail = Printexc.to_string cause
+                  ; outcome_ref = None
+                  }
+              | exn ->
+                Operation_failed
+                  { kind = "Turn_exception"
+                  ; detail = Printexc.to_string exn
+                  ; outcome_ref = None
+                  }
+            in
+            ignore
+              (request
+                 t
+                 (Child_finished
+                    { claimed_operation_id = !claimed_operation_id; execution }))
+          ))
+    and loop state =
         match Eio.Stream.take t.mailbox with
         | Command (Exact_projection, resolve) ->
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
@@ -337,6 +435,7 @@ let start ~sw ~store ~operation_store_path ~now ~keeper_name ~initial_meta =
                 Ok { operation; existing; queued_count = projection.queued_count })
           in
           Eio.Promise.resolve resolve response;
+          start_child_if_needed state;
           loop state
         | Command (List_queued_operations { after_sequence; limit }, resolve) ->
           let response =
@@ -424,6 +523,12 @@ let start ~sw ~store ~operation_store_path ~now ~keeper_name ~initial_meta =
           in
           Eio.Promise.resolve resolve response;
           loop state
+        | Command (Child_finished completion, resolve) ->
+          finish_child completion;
+          t.child_active := false;
+          Eio.Promise.resolve resolve (Ok ());
+          start_child_if_needed state;
+          loop state
         | Command (Begin_stopping, resolve) ->
           let transition = Keeper_owner_reducer.begin_stopping state in
           (match apply_transition t store state transition with
@@ -434,6 +539,7 @@ let start ~sw ~store ~operation_store_path ~now ~keeper_name ~initial_meta =
              Eio.Promise.resolve resolve (Ok ());
              loop state)
     in
+    start_child_if_needed initial_state;
     loop initial_state);
   Ok t))
 ;;

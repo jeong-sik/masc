@@ -13,6 +13,15 @@ type dispatch =
   ; tool_called : bool
   }
 
+type phase =
+  | Awaiting_initialize
+  | Awaiting_initialized
+  | Ready
+
+type session =
+  { phase : phase Atomic.t
+  }
+
 type message =
   { method_name : string
   ; request_id : Mcp_transport_protocol.request_id option
@@ -21,6 +30,40 @@ type message =
 
 let ( let* ) = Result.bind
 let error stage detail = Error { stage; detail }
+
+let create_session () = { phase = Atomic.make Awaiting_initialize }
+
+let phase_to_string = function
+  | Awaiting_initialize -> "awaiting_initialize"
+  | Awaiting_initialized -> "awaiting_initialized"
+  | Ready -> "ready"
+;;
+
+let require_phase session ~stage expected =
+  let actual = Atomic.get session.phase in
+  if actual = expected
+  then Ok ()
+  else
+    error
+      stage
+      (Printf.sprintf
+         "MCP session phase is %s; expected %s"
+         (phase_to_string actual)
+         (phase_to_string expected))
+;;
+
+let transition_phase session ~stage ~expected ~next =
+  if Atomic.compare_and_set session.phase expected next
+  then Ok ()
+  else
+    let actual = Atomic.get session.phase in
+    error
+      stage
+      (Printf.sprintf
+         "MCP session phase changed to %s; expected %s"
+         (phase_to_string actual)
+         (phase_to_string expected))
+;;
 
 let rec validate_message_value ~stage ~path = function
   | `Assoc fields ->
@@ -197,16 +240,25 @@ let decode_message message =
     Ok { method_name; request_id; params }
 ;;
 
-let dispatch_message ~server_name ~tool_specs ~call_tool message =
+let dispatch_message ~session ~server_name ~tool_specs ~call_tool message =
   match message.method_name, message.request_id with
     | "initialize", Some request_id ->
+      let* () = require_phase session ~stage:"MCP initialize" Awaiting_initialize in
       let id = Mcp_transport_protocol.request_id_to_yojson request_id in
       let* initialize_response = initialize ~server_name ~id ~params:message.params in
+      let* () =
+        transition_phase
+          session
+          ~stage:"MCP initialize"
+          ~expected:Awaiting_initialize
+          ~next:Awaiting_initialized
+      in
       Ok
         { response = Some initialize_response
         ; tool_called = false
         }
     | "tools/list", Some request_id ->
+      let* () = require_phase session ~stage:"MCP tools/list" Ready in
       let id = Mcp_transport_protocol.request_id_to_yojson request_id in
       Ok
         { response =
@@ -217,11 +269,19 @@ let dispatch_message ~server_name ~tool_specs ~call_tool message =
         ; tool_called = false
         }
     | "tools/call", Some request_id ->
+      let* () = require_phase session ~stage:"MCP tools/call" Ready in
       tools_call
         ~id:(Mcp_transport_protocol.request_id_to_yojson request_id)
         ~params:message.params
         ~call_tool
     | "notifications/initialized", None ->
+      let* () =
+        transition_phase
+          session
+          ~stage:"MCP notifications/initialized"
+          ~expected:Awaiting_initialized
+          ~next:Ready
+      in
       Ok { response = None; tool_called = false }
     | _, None ->
       error
@@ -240,7 +300,7 @@ let dispatch_message ~server_name ~tool_specs ~call_tool message =
         }
 ;;
 
-let handle_message ~server_name ~tool_specs ~call_tool message_json =
+let handle_message ~session ~server_name ~tool_specs ~call_tool message_json =
   let* message = decode_message message_json in
-  dispatch_message ~server_name ~tool_specs ~call_tool message
+  dispatch_message ~session ~server_name ~tool_specs ~call_tool message
 ;;

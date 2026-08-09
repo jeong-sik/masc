@@ -331,7 +331,7 @@ let send_control_error io ~request_id detail =
        ])
 ;;
 
-let handle_control_request io ~tools ~tool_call_count fields =
+let handle_control_request io ~mcp_session ~tools ~tool_call_count fields =
   let stage = "control request" in
   let* request_id = required_string stage "request_id" fields in
   let* request = required_member stage "request" fields in
@@ -369,6 +369,7 @@ let handle_control_request io ~tools ~tool_call_count fields =
       in
       let* dispatch =
         Runtime_official_client_mcp.handle_message
+          ~session:mcp_session
           ~server_name:mcp_server_name
           ~tool_specs
           ~call_tool
@@ -435,17 +436,25 @@ let parse_control_response ~expected_request_id fields =
       protocol_error stage (Printf.sprintf "unknown response subtype %S" other)
 ;;
 
-let rec await_initialize io ~tools ~tool_call_count ~request_id ~ignored =
+let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id ~ignored =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
   | "control_response" ->
     parse_control_response ~expected_request_id:request_id fields
   | "control_request" ->
-    let* () = handle_control_request io ~tools ~tool_call_count fields in
-    await_initialize io ~tools ~tool_call_count ~request_id ~ignored
+    let* () =
+      handle_control_request io ~mcp_session ~tools ~tool_call_count fields
+    in
+    await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id ~ignored
   | ("system" | "rate_limit_event") when ignored < 32 ->
-    await_initialize io ~tools ~tool_call_count ~request_id ~ignored:(ignored + 1)
+    await_initialize
+      io
+      ~mcp_session
+      ~tools
+      ~tool_call_count
+      ~request_id
+      ~ignored:(ignored + 1)
   | other ->
     protocol_error
       "initialize"
@@ -585,30 +594,32 @@ let parse_result ~expected_session_id ~rate_limit fields =
 
 let max_ignored_messages = 256
 
-let rec await_terminal io ~tools ~tool_call_count ~expected_session_id
+let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
     ~on_turn_started ~ignored =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
   | "control_request" ->
-    let* () = handle_control_request io ~tools ~tool_call_count fields in
+    let* () =
+      handle_control_request io ~mcp_session ~tools ~tool_call_count fields
+    in
     await_terminal
-      io ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
+      io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started ~ignored
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "assistant" ->
     let* _uuid, model, texts = parse_assistant ~expected_session_id fields in
     await_terminal
-      io ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
+      io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model:(Some model)
       ~assistant_texts:(assistant_texts @ texts)
       ~on_turn_started ~ignored
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     await_terminal
-      io ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
+      io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~on_turn_started ~ignored
   | "result" ->
@@ -650,7 +661,7 @@ let rec await_terminal io ~tools ~tool_call_count ~expected_session_id
       }
   | ("system" | "user") when ignored < max_ignored_messages ->
     await_terminal
-      io ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
+      io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~ignored:(ignored + 1)
   | other ->
@@ -788,11 +799,13 @@ let terminate_spawned_process ~clock proc stdin_w =
 let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~prompt ~on_session_ready ~on_turn_starting ~on_turn_started =
   let tool_call_count = ref 0 in
+  let mcp_session = Runtime_official_client_mcp.create_session () in
   let initialize_id = Random_id.prefixed ~prefix:"masc-init-" ~bytes:12 in
   io.send (initialize_request initialize_id);
   let* () =
     await_initialize
       io
+      ~mcp_session
       ~tools:dynamic_tools
       ~tool_call_count
       ~request_id:initialize_id
@@ -809,6 +822,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
   io.send (user_message prompt);
   await_terminal
     io
+    ~mcp_session
     ~tools:dynamic_tools
     ~tool_call_count
     ~expected_session_id:session_id

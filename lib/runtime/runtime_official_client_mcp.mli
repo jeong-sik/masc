@@ -20,7 +20,13 @@ type dispatch =
   ; tool_called : bool
   }
 
+type session
+
+val create_session : unit -> session
+(** Fresh closed lifecycle: initialize, initialized notification, then Ready. *)
+
 val handle_message :
+  session:session ->
   server_name:string ->
   tool_specs:(unit -> Yojson.Safe.t list) ->
   call_tool:

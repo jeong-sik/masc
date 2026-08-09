@@ -15,6 +15,7 @@ module Keeper_chat_pending = Server_dashboard_http_keeper_chat_pending
 module Keeper_event_queue_operator =
   Server_dashboard_http_keeper_event_queue_operator
 module Official_client_session = Server_dashboard_official_client_session
+module Official_client_probe = Server_dashboard_official_client_probe
 
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
@@ -63,6 +64,27 @@ let respond_official_client_session_result request reqd = function
       ~request
       (`Assoc
         [ "schema", `String "masc.dashboard.official-client-session.error.v1"
+        ; "ok", `Bool false
+        ; "error_code", `String code
+        ; "error", `String message
+        ])
+      reqd
+
+let respond_official_client_probe_result request reqd = function
+  | Ok json -> Http.Response.json_value ~compress:true ~request json reqd
+  | Error
+      ({ Official_client_probe.kind; code; message } : Official_client_probe.error) ->
+    let status =
+      match kind with
+      | Bad_request -> `Bad_request
+      | Not_found -> `Not_found
+      | Service_unavailable -> `Service_unavailable
+    in
+    Http.Response.json_value
+      ~status
+      ~request
+      (`Assoc
+        [ "schema", `String "masc.dashboard.official-client-probe.error.v1"
         ; "ok", `Bool false
         ; "error_code", `String code
         ; "error", `String message
@@ -850,6 +872,16 @@ let add_routes ~sw ~clock router =
              req
              reqd
              (Official_client_session.snapshot ~base_path ~keeper_name))
+         request reqd)
+  |> Http.Router.post "/api/v1/runtime/official-client/probe" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let base_path = (Mcp_server.workspace_config state).base_path in
+             respond_official_client_probe_result
+               req
+               reqd
+               (Official_client_probe.probe_body ~base_path ~body)))
          request reqd)
   |> Http.Router.post "/api/v1/runtime/sessions/official-client/resolve" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

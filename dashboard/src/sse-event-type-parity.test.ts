@@ -56,7 +56,7 @@ const BACKEND_EMITTED: Record<string, string> = {
   ide_cursor_changed: '../lib/server/server_ide_http.ml',
   keeper_composite_changed: '../lib/keeper/keeper_registry_broadcast.ml',
   keeper_heartbeat: '../lib/keeper/keeper_heartbeat_snapshot.ml',
-  keeper_turn_complete: '../lib/keeper/keeper_hooks_agentCore.ml',
+  keeper_turn_complete: '../lib/keeper/keeper_hooks_agent_core.ml',
   agent_core_telemetry_sample: '../lib/runtime/dashboard_agent_core_bridge.ml',
   namespace_truth_snapshot: '../lib/server/server_dashboard_http_namespace_truth.ml',
   operator_digest: '../lib/server/server_dashboard_http_core_digest_refresh.ml',
@@ -71,9 +71,9 @@ const BACKEND_EMITTED: Record<string, string> = {
 // justified; every entry is an event the FE routes but masc lib/ does not emit.
 const FE_ONLY_OR_EXTERNAL: Record<string, string> = {
   'agent_core:agent_failed':
-    'Agent Core-subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (agent_core: prefix).',
+    'Agent Core subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (agent_core: prefix).',
   'agent_core:context_compacted':
-    'Agent Core-subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (agent_core: prefix).',
+    'Agent Core subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (agent_core: prefix).',
 }
 
 function parseExportedStringConstants(source: string): Map<string, string> {

@@ -385,6 +385,8 @@ let decision_public_allowlist =
     ; "routing_action"; "routing_reason"; "degraded_runtime_id"
     ; "runtime_execution_built"
     ; "media_dropped_total"; "media_dropped_counts"
+    ; "history_kept_messages"; "history_dropped_tool_messages"
+    ; "history_dropped_messages"; "history_dropped_blocks"
     ; "payload_role"; "trigger"; "trigger_detail"
     ; "ratio"; "threshold"; "count"
     ; "source_requeued"; compaction_outcome_key

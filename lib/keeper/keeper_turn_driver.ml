@@ -715,20 +715,70 @@ let run_named
                         "provider config transforms cannot target a \
                          codex-app-server runtime"
                     }))
-          | None, Some _ ->
-            Log.Keeper.info
-              "%s: starting official-client runtime %s as a fresh session; OAS checkpoint is not resumed"
-              keeper_name attempt_runtime_id;
-            emit_runtime_manifest
-              ~status:"fresh_session"
-              ~decision:
-                (`Assoc
-                  [ ("routing_action", `String "official_client_fresh_session")
-                  ; ("routing_reason", `String "official_client_owns_session_state")
-                  ])
-              Keeper_runtime_manifest.Runtime_routed;
-            run_codex ~initial_messages:[] ()
-          | None, None -> run_codex ~initial_messages ()
+          | None, checkpoint ->
+            (* The official-client session store is the start-or-resume
+               authority ([Keeper_codex_runtime] reads the durable
+               [previous_settlement]); the OAS checkpoint payload is never
+               replayed on this lane, but the representable canonical history
+               is preserved instead of being erased with it (masc#27812). *)
+            (match checkpoint with
+             | Some _ ->
+               Log.Keeper.info
+                 "%s: official-client runtime %s resolves start-or-resume from \
+                  its durable session store; the OAS checkpoint payload is not \
+                  replayed"
+                 keeper_name attempt_runtime_id;
+               emit_runtime_manifest
+                 ~status:"checkpoint_not_replayed"
+                 ~decision:
+                   (`Assoc
+                     [ ( "routing_action"
+                       , `String "official_client_checkpoint_not_replayed" )
+                     ; ( "routing_reason"
+                       , `String "official_client_session_store_owns_resume" )
+                     ])
+                 Keeper_runtime_manifest.Runtime_routed
+             | None -> ());
+            let ({ Keeper_official_client_host.messages = projected_history
+                 ; dropped_tool_messages
+                 ; dropped_messages
+                 ; dropped_blocks
+                 } as projection)
+              =
+              Keeper_official_client_host.project_official_history
+                initial_messages
+            in
+            if
+              not
+                (Keeper_official_client_host.history_projection_lossless
+                   projection)
+            then (
+              Log.Keeper.warn
+                "%s: official-client runtime %s history projection dropped %d \
+                 tool message(s), %d unrepresentable message(s), %d non-text \
+                 block(s); the text-only remainder is preserved"
+                keeper_name
+                attempt_runtime_id
+                dropped_tool_messages
+                dropped_messages
+                dropped_blocks;
+              emit_runtime_manifest
+                ~status:"degraded"
+                ~decision:
+                  (`Assoc
+                    [ ( "routing_action"
+                      , `String "official_client_history_projected" )
+                    ; ( "routing_reason"
+                      , `String "official_client_wire_admits_text_only_history"
+                      )
+                    ; ( "history_kept_messages"
+                      , `Int (List.length projected_history) )
+                    ; ("history_dropped_tool_messages", `Int dropped_tool_messages)
+                    ; ("history_dropped_messages", `Int dropped_messages)
+                    ; ("history_dropped_blocks", `Int dropped_blocks)
+                    ])
+                Keeper_runtime_manifest.Runtime_routed);
+            run_codex ~initial_messages:projected_history ()
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let codex_result =

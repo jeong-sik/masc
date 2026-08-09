@@ -749,7 +749,30 @@ let test_run_named_media_degrade_emits_typed_manifest () =
         "primary.test_model"
         (string_member "degraded_runtime_id" decision))
 
-let test_oas_checkpoint_starts_fresh_official_client_session () =
+let int_member key json =
+  match assoc_member key json with
+  | Some (`Int value) -> value
+  | _ ->
+    Alcotest.failf "expected int member %S in %s" key (Yojson.Safe.to_string json)
+
+let routed_rows_with_status status manifests =
+  List.filter
+    (fun (manifest : Runtime_manifest.t) ->
+       manifest.event = Runtime_manifest.Runtime_routed
+       && String.equal manifest.status status)
+    manifests
+
+let history_projection_rows manifests =
+  routed_rows_with_status "degraded" manifests
+  |> List.filter (fun (manifest : Runtime_manifest.t) ->
+    let decision =
+      Runtime_manifest.public_projection_of_decision manifest.decision
+    in
+    match assoc_member "routing_action" decision with
+    | Some (`String "official_client_history_projected") -> true
+    | _ -> false)
+
+let run_checkpoint_lane_turn ~history_messages ~on_manifests =
   with_runtime_config runtime_toml_checkpoint_lane (fun () ->
     Eio_main.run
     @@ fun env ->
@@ -764,22 +787,6 @@ let test_oas_checkpoint_starts_fresh_official_client_session () =
       ; manifest_generation = Some 1
       ; manifest_keeper_turn_id = Some 1
       }
-    in
-    let history_messages =
-      [ message
-          [ Agent_sdk.Types.Thinking
-              { content = "prior provider reasoning"; signature = None }
-          ; Agent_sdk.Types.ToolUse
-              { id = "prior-tool-call"
-              ; name = "prior_tool"
-              ; input = `Assoc []
-              }
-          ]
-      ; Agent_sdk.Types.tool_result_msg
-          ~tool_use_id:"prior-tool-call"
-          ~content:"prior tool result"
-          ()
-      ]
     in
     let checkpoint =
       { (checkpoint_with_session_id "oas-session") with
@@ -810,29 +817,102 @@ let test_oas_checkpoint_starts_fresh_official_client_session () =
         (Agent_sdk.Error.Config
            (Agent_sdk.Error.InvalidConfig { field = "initial_messages"; _ })) ->
       Alcotest.fail
-        "a fresh official-client session must not import OAS history"
-    | Error _ ->
-      let fresh_session =
-        List.find_opt
-          (fun (manifest : Runtime_manifest.t) ->
-             manifest.event = Runtime_manifest.Runtime_routed
-             && String.equal manifest.status "fresh_session")
-          !manifests
+        "projected official-client history must stay representable"
+    | Error _ -> on_manifests !manifests)
+
+let test_oas_checkpoint_preserves_official_client_history () =
+  let history_messages =
+    [ message
+        ~role:Agent_sdk.Types.User
+        [ Agent_sdk.Types.Text "prior user turn" ]
+    ; message
+        [ Agent_sdk.Types.Thinking
+            { content = "prior provider reasoning"; signature = None }
+        ; Agent_sdk.Types.ToolUse
+            { id = "prior-tool-call"
+            ; name = "prior_tool"
+            ; input = `Assoc []
+            }
+        ]
+    ; Agent_sdk.Types.tool_result_msg
+        ~tool_use_id:"prior-tool-call"
+        ~content:"prior tool result"
+        ()
+    ]
+  in
+  run_checkpoint_lane_turn ~history_messages ~on_manifests:(fun manifests ->
+    (match routed_rows_with_status "fresh_session" manifests with
+     | [] -> ()
+     | _ :: _ ->
+       Alcotest.fail "the retired fresh_session manifest row must not reappear");
+    (match routed_rows_with_status "checkpoint_not_replayed" manifests with
+     | [ manifest ] ->
+       let decision =
+         Runtime_manifest.public_projection_of_decision manifest.decision
+       in
+       Alcotest.(check string)
+         "checkpoint routing action"
+         "official_client_checkpoint_not_replayed"
+         (string_member "routing_action" decision);
+       Alcotest.(check string)
+         "checkpoint routing reason"
+         "official_client_session_store_owns_resume"
+         (string_member "routing_reason" decision)
+     | [] ->
+       Alcotest.fail "checkpoint_not_replayed manifest row was not observable"
+     | _ :: _ :: _ ->
+       Alcotest.fail "expected exactly one checkpoint_not_replayed row");
+    match history_projection_rows manifests with
+    | [ manifest ] ->
+      let decision =
+        Runtime_manifest.public_projection_of_decision manifest.decision
       in
-      (match fresh_session with
-       | None -> Alcotest.fail "fresh official-client session was not observable"
-       | Some manifest ->
-         let decision =
-           Runtime_manifest.public_projection_of_decision manifest.decision
-         in
-         Alcotest.(check string)
-           "fresh-session routing action"
-           "official_client_fresh_session"
-           (string_member "routing_action" decision);
-         Alcotest.(check string)
-           "fresh-session routing reason"
-           "official_client_owns_session_state"
-           (string_member "routing_reason" decision)))
+      Alcotest.(check string)
+        "projection routing reason"
+        "official_client_wire_admits_text_only_history"
+        (string_member "routing_reason" decision);
+      Alcotest.(check int)
+        "kept messages"
+        1
+        (int_member "history_kept_messages" decision);
+      Alcotest.(check int)
+        "dropped tool messages"
+        1
+        (int_member "history_dropped_tool_messages" decision);
+      Alcotest.(check int)
+        "dropped messages"
+        1
+        (int_member "history_dropped_messages" decision);
+      Alcotest.(check int)
+        "dropped blocks"
+        2
+        (int_member "history_dropped_blocks" decision)
+    | [] ->
+      Alcotest.fail "official-client history projection row was not observable"
+    | _ :: _ :: _ -> Alcotest.fail "expected exactly one history projection row")
+
+let test_lossless_official_client_history_emits_no_projection_row () =
+  let history_messages =
+    [ message
+        ~role:Agent_sdk.Types.User
+        [ Agent_sdk.Types.Text "prior user turn" ]
+    ; message [ Agent_sdk.Types.Text "prior assistant reply" ]
+    ]
+  in
+  run_checkpoint_lane_turn ~history_messages ~on_manifests:(fun manifests ->
+    (match routed_rows_with_status "fresh_session" manifests with
+     | [] -> ()
+     | _ :: _ ->
+       Alcotest.fail "the retired fresh_session manifest row must not reappear");
+    (match routed_rows_with_status "checkpoint_not_replayed" manifests with
+     | [ _ ] -> ()
+     | [] ->
+       Alcotest.fail "checkpoint_not_replayed manifest row was not observable"
+     | _ :: _ :: _ ->
+       Alcotest.fail "expected exactly one checkpoint_not_replayed row");
+    match history_projection_rows manifests with
+    | [] -> ()
+    | _ :: _ -> Alcotest.fail "lossless history must not emit a projection row")
 
 let test_lane_media_reroute_stays_within_lane () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
@@ -1644,9 +1724,13 @@ let () =
             `Quick
             test_run_named_media_degrade_emits_typed_manifest;
           Alcotest.test_case
-            "OAS checkpoint starts fresh official-client session"
+            "OAS checkpoint preserves official-client history"
             `Quick
-            test_oas_checkpoint_starts_fresh_official_client_session;
+            test_oas_checkpoint_preserves_official_client_history;
+          Alcotest.test_case
+            "lossless official-client history emits no projection row"
+            `Quick
+            test_lossless_official_client_history_emits_no_projection_row;
           Alcotest.test_case
             "lane media reroute stays within lane"
             `Quick

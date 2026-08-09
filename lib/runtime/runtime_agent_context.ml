@@ -382,7 +382,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_core.Checkpoint.t)
   in
   let options : Agent_core.Agent.options =
     { Agent_core.Agent.default_options with
-      hooks = Option.value ~default:Agent_core.Hooks.empty config.hooks
+      hooks = (match config.hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty)
     ; provider_config = Some config.provider_cfg
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; body_timeout_s = config.body_timeout_s

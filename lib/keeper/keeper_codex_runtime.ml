@@ -140,7 +140,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          ~field:"eio_clock"
          "Codex app-server runtime requires the initialized Eio clock")
   | Some env, Some clock ->
-    let hooks = Option.value hooks ~default:Agent_core.Hooks.empty in
+    let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
     let owner_epoch = Keeper_official_client_session_store.process_epoch () in
     let* stored_session =
       match Keeper_official_client_session_store.load ~base_path ~keeper_name with

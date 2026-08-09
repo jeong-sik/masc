@@ -180,7 +180,7 @@ let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
 
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     ~initial_messages ~model_input_projection ~hooks =
-  let hooks = Option.value hooks ~default:Agent_core.Hooks.empty in
+  let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
   let before_turn =
     invoke_turn_hook
       ~keeper_name

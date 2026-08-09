@@ -99,6 +99,22 @@ endpoint = "http://localhost:11434"
 [providers.ollama.healthcheck]
 path = "/api/tags"
 
+# Official Claude Code subscription runtime example. This stays commented so
+# a fresh install does not claim the local CLI is installed or logged in.
+# There is deliberately no credentials table: Claude Code owns its stored
+# claude.ai login, and MASC removes API/token environment fallbacks.
+# [providers.claude_code]
+# display-name = "Claude Code Subscription"
+# protocol = "claude-code"
+# command = "claude"
+# is-non-interactive = true
+#
+# [models.claude-code-sonnet]
+# api-name = "claude-sonnet-4-5"
+# max-context = 200000
+#
+# [claude_code.claude-code-sonnet]
+
 [models.deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
 max-context = 1000000

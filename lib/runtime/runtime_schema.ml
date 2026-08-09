@@ -15,6 +15,7 @@ type api_format =
   | Ollama_api
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
+  | Claude_code_runtime
 [@@deriving show, eq]
 
 type transport =

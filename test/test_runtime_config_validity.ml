@@ -15,6 +15,8 @@ let agent_core_provider_config (runtime : Runtime.t) =
   | Runtime_execution.Agent_core provider_config -> provider_config
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _ ->
     failf "runtime %s is not an agent_core provider" runtime.id
 ;;
 
@@ -3188,7 +3190,8 @@ let test_codex_app_server_materializes_as_turn_runtime () =
       check int "one runtime" 1 (List.length runtimes);
       check string "default id" "codex.codex" default.id;
       (match default.execution with
-       | Runtime_execution.Agent_core _ ->
+       | Runtime_execution.Agent_core _
+       | Runtime_execution.Claude_code _ ->
          fail "codex-app-server was incorrectly materialized as agent_core"
        | Runtime_execution.Codex_app_server config ->
          check string "cli path" "codex" config.cli_path;

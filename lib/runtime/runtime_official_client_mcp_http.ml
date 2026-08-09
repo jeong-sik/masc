@@ -29,51 +29,6 @@ type t =
   }
 
 let max_body_bytes = 1024 * 1024
-let ( let* ) = Result.bind
-
-let protocol_error stage detail =
-  Error ({ Runtime_official_client_mcp.stage; detail } : Runtime_official_client_mcp.error)
-;;
-
-let rec validate_unique_object_keys ~path = function
-  | `Assoc fields ->
-    let seen = Hashtbl.create (min 64 (List.length fields)) in
-    let rec loop = function
-      | [] -> Ok ()
-      | (name, value) :: rest ->
-        if Hashtbl.mem seen name
-        then protocol_error "MCP message" (Printf.sprintf "duplicate object key %S at %s" name path)
-        else
-          let () = Hashtbl.add seen name () in
-          let* () = validate_unique_object_keys ~path:(path ^ "." ^ name) value in
-          loop rest
-    in
-    loop fields
-  | `List values ->
-    let rec loop index = function
-      | [] -> Ok ()
-      | value :: rest ->
-        let* () =
-          validate_unique_object_keys ~path:(Printf.sprintf "%s[%d]" path index) value
-        in
-        loop (index + 1) rest
-    in
-    loop 0 values
-  | `Float value when not (Float.is_finite value) ->
-    protocol_error "MCP message" (Printf.sprintf "non-finite number at %s" path)
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Ok ()
-;;
-
-let parse_message text =
-  let* message =
-    try Ok (Yojson.Safe.from_string text) with
-    | Yojson.Json_error detail -> protocol_error "MCP message" ("invalid JSON: " ^ detail)
-    | Stack_overflow -> protocol_error "MCP message" "JSON nesting exceeds parser limits"
-    | Failure detail -> protocol_error "MCP message" ("invalid JSON: " ^ detail)
-  in
-  let* () = validate_unique_object_keys ~path:"$" message in
-  Ok message
-;;
 
 let hex_of_bytes bytes =
   let alphabet = "0123456789abcdef" in
@@ -155,22 +110,6 @@ let protocol_error_response id code message =
     ]
 ;;
 
-let request_method_and_id = function
-  | `Assoc fields ->
-    let method_ =
-      match List.assoc_opt "method" fields with
-      | Some (`String value) -> Some value
-      | _ -> None
-    in
-    let id =
-      match List.assoc_opt "id" fields with
-      | Some id -> id
-      | None -> `Null
-    in
-    method_, id
-  | _ -> None, `Null
-;;
-
 let initialize_protocol_version = function
   | Some (`Assoc fields) ->
     (match List.assoc_opt "result" fields with
@@ -192,50 +131,56 @@ let phase_error phase method_ =
   Printf.sprintf "MCP method %S is not valid before %s" method_ expected
 ;;
 
-let phase_admits phase method_ id =
+let phase_admits phase method_ request_id =
   match method_ with
-  | Some ("server/discover" | "initialize") ->
-    phase = Awaiting_initialize && id <> `Null
-  | Some "notifications/initialized" ->
-    phase = Awaiting_initialized && id = `Null
-  | Some ("tools/list" | "tools/call") -> phase = Ready && id <> `Null
-  | None | Some _ -> true
+  | "server/discover" | "initialize" ->
+    phase = Awaiting_initialize && Option.is_some request_id
+  | "notifications/initialized" ->
+    phase = Awaiting_initialized && Option.is_none request_id
+  | "tools/list" | "tools/call" -> phase = Ready && Option.is_some request_id
+  | _ -> true
 ;;
 
-let dispatch t ~tool_specs ~call_tool message =
+let request_id_json = function
+  | Some id -> id
+  | None -> `Null
+;;
+
+let dispatch t ~tool_specs ~call_tool raw_message =
   Eio.Mutex.use_rw ~protect:true t.dispatch_mutex (fun () ->
-    let method_, id = request_method_and_id message in
-    let phase = Eio.Mutex.use_ro t.state_mutex (fun () -> t.state.phase) in
-    if not (phase_admits phase method_ id)
-    then
-      let method_ =
-        match method_ with
-        | Some method_ -> method_
-        | None -> "<missing>"
-      in
-      Error (`Protocol (id, phase_error phase method_))
-    else
-      match
-        Runtime_official_client_mcp.handle_message
-          ~server_name:t.server_name
-          ~tool_specs
-          ~call_tool
-          message
-      with
-      | Error error -> Error (`Dispatch error)
-      | Ok result ->
-        Eio.Mutex.use_rw ~protect:true t.state_mutex (fun () ->
-          (match t.state.phase, method_, result.response with
-           | Awaiting_initialize, Some "initialize", Some _ ->
-             t.state.phase <- Awaiting_initialized;
-             t.state.negotiated_protocol_version <-
-               initialize_protocol_version result.response
-           | Awaiting_initialized, Some "notifications/initialized", None ->
-             t.state.phase <- Ready
-           | _ -> ());
-          if result.tool_called
-          then t.state.tool_calls <- t.state.tool_calls + 1);
-        Ok result)
+    match Runtime_official_client_mcp.decode_message raw_message with
+    | Error error -> Error (`Dispatch error)
+    | Ok message ->
+      let method_ = Runtime_official_client_mcp.message_method message in
+      let request_id = Runtime_official_client_mcp.message_request_id message in
+      let phase = Eio.Mutex.use_ro t.state_mutex (fun () -> t.state.phase) in
+      if not (phase_admits phase method_ request_id)
+      then
+        Error
+          (`Protocol
+            (request_id_json request_id, phase_error phase method_))
+      else
+        (match
+           Runtime_official_client_mcp.dispatch_message
+             ~server_name:t.server_name
+             ~tool_specs
+             ~call_tool
+             message
+         with
+         | Error error -> Error (`Dispatch error)
+         | Ok result ->
+           Eio.Mutex.use_rw ~protect:true t.state_mutex (fun () ->
+             (match t.state.phase, method_, result.response with
+              | Awaiting_initialize, "initialize", Some _ ->
+                t.state.phase <- Awaiting_initialized;
+                t.state.negotiated_protocol_version <-
+                  initialize_protocol_version result.response
+              | Awaiting_initialized, "notifications/initialized", None ->
+                t.state.phase <- Ready
+              | _ -> ());
+             if result.tool_called
+             then t.state.tool_calls <- t.state.tool_calls + 1);
+           Ok result))
 ;;
 
 let update_state t f =
@@ -280,26 +225,24 @@ let content_length request =
 ;;
 
 let handle_message t ~tool_specs ~call_tool body =
-  match parse_message body with
-  | Error { stage; detail } ->
+  match dispatch t ~tool_specs ~call_tool body with
+  | Error (`Protocol (id, detail)) ->
     reject t;
+    respond_json `Conflict (protocol_error_response id (-32002) detail)
+  | Error (`Dispatch { kind; stage; detail }) ->
+    reject t;
+    let code =
+      match kind with
+      | Runtime_official_client_mcp.Json_parse -> -32700
+      | Runtime_official_client_mcp.Protocol -> -32600
+    in
     respond_json
       `Bad_request
-      (protocol_error_response `Null (-32700) (stage ^ ": " ^ detail))
-  | Ok message ->
-    (match dispatch t ~tool_specs ~call_tool message with
-     | Error (`Protocol (id, detail)) ->
-       reject t;
-       respond_json `Conflict (protocol_error_response id (-32002) detail)
-     | Error (`Dispatch { stage; detail }) ->
-       reject t;
-       respond_json
-         `Bad_request
-         (protocol_error_response `Null (-32600) (stage ^ ": " ^ detail))
-     | Ok { response = None; _ } -> respond `Accepted ""
-     | Ok { response = Some response; _ } ->
-       let protocol_version = (snapshot t).negotiated_protocol_version in
-       respond_json ?protocol_version `OK response)
+      (protocol_error_response `Null code (stage ^ ": " ^ detail))
+  | Ok { response = None; _ } -> respond `Accepted ""
+  | Ok { response = Some response; _ } ->
+    let protocol_version = (snapshot t).negotiated_protocol_version in
+    respond_json ?protocol_version `OK response
 ;;
 
 let handle_post t ~tool_specs ~call_tool request body =

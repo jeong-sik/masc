@@ -1942,6 +1942,7 @@
 (include stanzas/test_runtime_claude_code.inc)
 (include stanzas/test_runtime_antigravity.inc)
 (include stanzas/test_runtime_official_client_mcp_http.inc)
+(include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_official_client_session_store.inc)
 
 (include stanzas/test_runtime_provider_projection_boundary.inc)

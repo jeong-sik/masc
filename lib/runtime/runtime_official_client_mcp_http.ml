@@ -30,12 +30,12 @@ type t =
 
 let max_body_bytes = 1024 * 1024
 
-let hex_of_bytes bytes =
+let hex_of_cstruct bytes =
   let alphabet = "0123456789abcdef" in
-  let length = Bytes.length bytes in
+  let length = Cstruct.length bytes in
   let result = Bytes.create (length * 2) in
   for index = 0 to length - 1 do
-    let value = Char.code (Bytes.get bytes index) in
+    let value = Cstruct.get_uint8 bytes index in
     Bytes.set result (index * 2) alphabet.[value lsr 4];
     Bytes.set result ((index * 2) + 1) alphabet.[value land 0x0f]
   done;
@@ -43,10 +43,10 @@ let hex_of_bytes bytes =
 ;;
 
 let fresh_capabilities secure_random =
-  let entropy = Bytes.create 48 in
+  let entropy = Cstruct.create 48 in
   Eio.Flow.read_exact secure_random entropy;
-  let path_id = Bytes.sub entropy 0 16 |> hex_of_bytes in
-  let token = Bytes.sub entropy 16 32 |> hex_of_bytes in
+  let path_id = Cstruct.sub entropy 0 16 |> hex_of_cstruct in
+  let token = Cstruct.sub entropy 16 32 |> hex_of_cstruct in
   path_id, token
 ;;
 

@@ -192,16 +192,27 @@ let keeper_reset_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
   | Error err -> tool_result_error err
   | Ok meta ->
-    let reset_meta = Keeper_meta_contract.reset_runtime_state meta in
-    (match Keeper_meta_store.write_meta config reset_meta with
-     | Ok () ->
+    (match
+       Keeper_owner_registry.apply_meta
+         ~base_path:config.base_path
+         ~keeper_name:meta.name
+         (Keeper_owner_reducer.Reset_latch
+            { updated_at = Keeper_meta_contract.now_iso () })
+     with
+     | Ok (Some _) ->
        tool_result_ok
          (Printf.sprintf
-            "Reset runtime state for %s: usage counters zeroed, last_model_used cleared."
+            "Reset lifecycle latch for %s: pause and blocker state cleared."
             meta.name)
-     | Error err ->
+     | Ok None ->
        tool_result_error
-         (Printf.sprintf "Failed to write reset meta for %s: %s" meta.name err))
+         (Printf.sprintf "Failed to reset %s: owner metadata missing" meta.name)
+     | Error error ->
+       tool_result_error
+         (Printf.sprintf
+            "Failed to reset %s: %s"
+            meta.name
+            (Keeper_owner_registry.command_error_to_string error)))
 
 let handle_keeper_reset ctx args : tool_result =
   keeper_reset_body ~config:ctx.config args

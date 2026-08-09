@@ -46,7 +46,6 @@ type receipt =
   ; write_result : (unit, write_failure) result
   }
 
-val write_stage_to_string : write_stage -> string
 val receipt_to_yojson : receipt -> Yojson.Safe.t
 
 type decision_kind =

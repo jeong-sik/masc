@@ -12,9 +12,8 @@ on:
   # restore caches created on its own ref or on the default branch. Without a
   # main-scoped entry every PR cold-misses, rebuilds the opam switch, and saves
   # a duplicate into its own PR scope — on 2026-07-16 that was 42 duplicate
-  # v3-setup-ocaml entries (5.48 GB of the repo's 10 GB quota) whose LRU
-  # pressure evicted the Build and Test dune cache (dune-linux-oas-otel-02
-  # had zero live entries), forcing every build cold.
+  # v3-setup-ocaml entries (5.48 GB of the repo's 10 GB quota). Seed one
+  # reusable formatter toolchain on main instead of spending quota per PR.
   push:
     branches: [main]
     paths:

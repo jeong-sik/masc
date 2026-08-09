@@ -1942,6 +1942,7 @@
 (include stanzas/test_runtime_agent_close_cancel_source.inc)
 
 (include stanzas/test_runtime_codex_app_server.inc)
+(include stanzas/test_runtime_antigravity.inc)
 (include stanzas/test_official_client_session_store.inc)
 
 (include stanzas/test_runtime_provider_projection_boundary.inc)

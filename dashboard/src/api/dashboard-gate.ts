@@ -272,7 +272,11 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
     && raw.goal_ids.every(value => typeof value === 'string' && value.trim() !== '')
     ? raw.goal_ids as string[]
     : null
-  const actor = typeof raw.actor === 'string' ? raw.actor.trim() : ''
+  const actor = raw.actor === null
+    ? null
+    : typeof raw.actor === 'string' && raw.actor.trim() !== ''
+      ? raw.actor.trim()
+      : undefined
   const decisionSource = normalizeGateDecisionSource(raw.decision_source)
   const summaryStatus = normalizeHitlSummaryStatus(raw.summary_status)
   const exactAttempt = normalizeKeeperExactAttempt(raw.exact_attempt)
@@ -291,7 +295,7 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
     || (taskId !== null && !taskId)
     || (goalId !== null && !goalId)
     || goalIds === null
-    || !actor
+    || actor === undefined
     || !decisionSource
     || summaryStatus === null
     || exactAttempt === null

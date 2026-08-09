@@ -514,21 +514,25 @@ let resolved_approval_json_of_audit_event json =
     in
     let* decision_reason = required_nullable_string ~surface "decision_reason" fields in
     let* () =
-      match decision_kind, decision_reason with
-      | Decision_approve, `Null -> Ok ()
-      | Decision_reject, `String _ -> Ok ()
-      | Decision_approve, `String _ ->
-        Error (Printf.sprintf "%s.approve decision cannot carry a reason" surface)
-      | Decision_reject, `Null ->
-        Error (Printf.sprintf "%s.reject decision requires a reason" surface)
-      | _, _ -> assert false
+      match decision_kind with
+      | Decision_approve ->
+        (match decision_reason with
+         | `Null -> Ok ()
+         | `String _ ->
+           Error (Printf.sprintf "%s.approve decision cannot carry a reason" surface)
+         | _ -> assert false)
+      | Decision_reject ->
+        (match decision_reason with
+         | `String _ -> Ok ()
+         | `Null -> Error (Printf.sprintf "%s.reject decision requires a reason" surface)
+         | _ -> assert false)
     in
     let* resolved_at = required_finite_timestamp ~surface "ts" fields in
     let* turn_id = required_nullable_nonnegative_int ~surface "turn_id" fields in
     let* task_id = required_nullable_string ~surface "task_id" fields in
     let* goal_id = required_nullable_string ~surface "goal_id" fields in
     let* goal_ids = required_string_list_json ~surface "goal_ids" fields in
-    let* actor = required_nonblank_string ~surface "actor" fields in
+    let* actor = required_nullable_string ~surface "actor" fields in
     let* decision_source_raw = required_nonblank_string ~surface "decision_source" fields in
     let* () =
       match decision_source_of_string decision_source_raw with
@@ -564,7 +568,7 @@ let resolved_approval_json_of_audit_event json =
           ; "task_id", task_id
           ; "goal_id", goal_id
           ; "goal_ids", goal_ids
-          ; "actor", `String actor
+          ; "actor", actor
           ; "decision_source", `String decision_source_raw
           ; "summary_status", summary_status
           ; "exact_attempt", exact_attempt

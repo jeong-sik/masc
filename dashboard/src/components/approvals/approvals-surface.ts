@@ -131,7 +131,7 @@ function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
       <span class="ap-history-tool mono">${item.tool_name}</span>
       <span class="ap-history-keeper">${item.keeper_name}</span>
       <span class="ap-history-source">${decisionSourceLabel(item.decision_source)}</span>
-      <span class="ap-history-actor">${item.actor}</span>
+      <span class="ap-history-actor">${item.actor ?? 'unattributed'}</span>
       <span class="ap-history-id mono">${item.id}</span>
       ${judgeSlot
         ? html`<span class="ap-history-slot mono" data-testid="approval-history-slot">${judgeSlot}</span>`

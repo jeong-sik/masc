@@ -765,6 +765,7 @@ describe('ApprovalsSurface', () => {
           decision_source: 'human_operator',
           decision_raw: 'reject:operator denied',
           decision_reason: 'operator denied',
+          actor: null,
           resolved_at: '2026-06-27T01:02:03Z',
         }),
       ],
@@ -783,6 +784,7 @@ describe('ApprovalsSurface', () => {
     expect(history?.textContent).toContain('fs_write')
     expect(history?.textContent).toContain('masc-improver')
     expect(history?.textContent).toContain('Human')
+    expect(history?.textContent).toContain('unattributed')
     expect(history?.textContent).toContain('appr-done')
     expect(history?.querySelector('.ap-history-decision')?.className).toContain('decision-reject')
     expect(history?.querySelector('.ap-history-decision')?.className).not.toContain('operator denied')

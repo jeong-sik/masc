@@ -167,7 +167,7 @@ export interface KeeperResolvedApprovalItem {
   task_id: string | null
   goal_id: string | null
   goal_ids: string[]
-  actor: string
+  actor: string | null
   decision_source: GateDecisionSource
   summary_status: HitlSummaryStatus
   exact_attempt: KeeperExactAttemptState

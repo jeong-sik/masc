@@ -1710,6 +1710,7 @@ describe('fetchDashboardGate', () => {
             tool_name: 'shell_exec',
             decision: 'approve',
             decision_kind: 'approve',
+            actor: null,
             resolved_at: 1_782_522_183,
           }),
         ],
@@ -1751,6 +1752,7 @@ describe('fetchDashboardGate', () => {
         decision: 'approve',
         decision_raw: 'approve',
         decision_reason: null,
+        actor: null,
         resolved_at: '2026-06-27T01:03:03.000Z',
       }),
     ])

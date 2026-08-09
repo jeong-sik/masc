@@ -331,6 +331,14 @@ let operation_projection ~base_path ~keeper_name =
   | Ok owner -> Ok (Keeper_owner.operation_projection owner)
 ;;
 
+let run_autonomous_if_idle ~base_path ~keeper_name run =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Keeper_owner.run_autonomous_if_idle owner run
+    |> Result.map_error (fun error -> Command_rejected error)
+;;
+
 let refresh_registry_projection ?lifecycle_token entry meta =
   let result =
     match lifecycle_token with

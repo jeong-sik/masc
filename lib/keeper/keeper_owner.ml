@@ -15,6 +15,17 @@ type operation_projection =
   ; terminal_count : int
   }
 
+type turn_lane =
+  | Autonomous
+  | Chat_operation
+
+type turn_in_flight =
+  { lane : turn_lane
+  ; started_at : float
+  }
+
+type autonomous_block = Turn_busy of turn_in_flight
+
 type operation_acceptance =
   { operation : Chat_operation.t
   ; existing : bool
@@ -49,10 +60,21 @@ type operation_executor =
   claim:(unit -> (Chat_operation.t option, error) result) ->
   operation_execution
 
+type 'a autonomous_response =
+  | Autonomous_ran of 'a
+  | Autonomous_busy of autonomous_block
+  | Autonomous_raised of exn * Printexc.raw_backtrace
+
 type child_completion =
-  { claimed_operation_id : Operation_id.t option
-  ; execution : operation_execution
-  }
+  | Operation_child_finished of
+      { claimed_operation_id : Operation_id.t option
+      ; execution : operation_execution
+      }
+  | Autonomous_child_finished :
+      { outcome : ('a, exn * Printexc.raw_backtrace) result
+      ; resolve : ('a autonomous_response, error) result Eio.Promise.u
+      }
+      -> child_completion
 
 type _ command =
   | Exact_projection :
@@ -95,6 +117,8 @@ type _ command =
       ; outcome_ref : string option
       }
       -> (Chat_operation.t, error) result command
+  | Run_autonomous_if_idle :
+      (unit -> 'a) -> ('a autonomous_response, error) result command
   | Child_finished : child_completion -> (unit, error) result command
   | Begin_stopping : (unit, error) result command
 
@@ -108,6 +132,7 @@ type t =
   ; mailbox : packed_command Eio.Stream.t
   ; projection : Keeper_owner_reducer.projection Atomic.t
   ; operation_projection : operation_projection Atomic.t
+  ; turn_in_flight : turn_in_flight option Atomic.t
   ; operation_store : Chat_operation_store.t
   ; now : unit -> float
   ; closed : bool Atomic.t
@@ -136,6 +161,20 @@ let operation_error_kind = function
 
 let projection t = Atomic.get t.projection
 let operation_projection t = Atomic.get t.operation_projection
+let turn_in_flight t = Atomic.get t.turn_in_flight
+
+let turn_lane_to_string = function
+  | Autonomous -> "autonomous"
+  | Chat_operation -> "chat_operation"
+;;
+
+let autonomous_block_to_string = function
+  | Turn_busy { lane; started_at } ->
+    Printf.sprintf
+      "reason=turn_busy holder_lane=%s holder_started_at=%.17g"
+      (turn_lane_to_string lane)
+      started_at
+;;
 
 let request t command =
   if Atomic.get t.closed
@@ -301,6 +340,7 @@ let start
     ; projection = Atomic.make (Keeper_owner_reducer.projection initial_state)
     ; operation_projection =
         Atomic.make (operation_projection_of_inventory initial_operation_inventory)
+    ; turn_in_flight = Atomic.make None
     ; operation_store
     ; now
     ; closed = Atomic.make false
@@ -324,8 +364,8 @@ let start
         keeper_name
         (Chat_operation_store.error_to_string error));
   Eio.Fiber.fork_daemon ~sw (fun () ->
-    let finish_child completion =
-      match completion.claimed_operation_id, completion.execution with
+    let finish_operation_child claimed_operation_id execution =
+      match claimed_operation_id, execution with
       | None, _ -> Ok ()
       | Some operation_id, Operation_succeeded { outcome_ref } ->
         run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
@@ -357,6 +397,9 @@ let start
         if inventory.queued_count > 0 && Option.is_none inventory.running_operation_id
         then (
           t.child_active := true;
+          Atomic.set
+            t.turn_in_flight
+            (Some { lane = Chat_operation; started_at = t.now () });
           Eio.Fiber.fork ~sw (fun () ->
             let claimed_operation_id = ref None in
             let claim () =
@@ -405,7 +448,8 @@ let start
               (request
                  t
                  (Child_finished
-                    { claimed_operation_id = !claimed_operation_id; execution }))
+                    (Operation_child_finished
+                       { claimed_operation_id = !claimed_operation_id; execution })))
           ))
     and loop state =
         match Eio.Stream.take t.mailbox with
@@ -549,9 +593,53 @@ let start
           in
           Eio.Promise.resolve resolve response;
           loop state
+        | Command (Run_autonomous_if_idle run, resolve) ->
+          (match reject_if_stopping state (fun () -> Ok ()) with
+           | Error error -> Eio.Promise.resolve resolve (Error error)
+           | Ok () ->
+             (match Atomic.get t.turn_in_flight with
+              | Some in_flight ->
+                Eio.Promise.resolve resolve (Ok (Autonomous_busy (Turn_busy in_flight)))
+              | None ->
+                t.child_active := true;
+                Atomic.set
+                  t.turn_in_flight
+                  (Some { lane = Autonomous; started_at = t.now () });
+                Eio.Fiber.fork ~sw (fun () ->
+                  let outcome =
+                    try
+                      Ok
+                        (Eio.Switch.run (fun child_sw ->
+                           Atomic.set
+                             t.child_cancel
+                             (Some (fun () -> Eio.Switch.fail child_sw Stop_active_child));
+                           run ()))
+                    with
+                    | exn -> Error (exn, Printexc.get_raw_backtrace ())
+                  in
+                  Atomic.set t.child_cancel None;
+                  ignore
+                    (request
+                       t
+                       (Child_finished
+                          (Autonomous_child_finished { outcome; resolve }))))));
+          loop state
         | Command (Child_finished completion, resolve) ->
-          let result = finish_child completion in
+          let result =
+            match completion with
+            | Operation_child_finished { claimed_operation_id; execution } ->
+              finish_operation_child claimed_operation_id execution
+            | Autonomous_child_finished { outcome; resolve = autonomous_resolve } ->
+              let response =
+                match outcome with
+                | Ok value -> Ok (Autonomous_ran value)
+                | Error (exn, backtrace) -> Ok (Autonomous_raised (exn, backtrace))
+              in
+              Eio.Promise.resolve autonomous_resolve response;
+              Ok ()
+          in
           t.child_active := false;
+          Atomic.set t.turn_in_flight None;
           Eio.Promise.resolve resolve result;
           let stopping_waiters = List.rev !(t.stopping_waiters) in
           t.stopping_waiters := [];
@@ -610,6 +698,15 @@ let succeed_running_operation t ~operation_id ~outcome_ref =
 
 let fail_running_operation t ~operation_id ~kind ~detail ~outcome_ref =
   request t (Fail_running_operation { operation_id; kind; detail; outcome_ref })
+;;
+
+let run_autonomous_if_idle t run =
+  match request t (Run_autonomous_if_idle run) with
+  | Error _ as error -> error
+  | Ok (Autonomous_ran value) -> Ok (`Ran value)
+  | Ok (Autonomous_busy block) -> Ok (`Busy block)
+  | Ok (Autonomous_raised (exn, backtrace)) ->
+    Printexc.raise_with_backtrace exn backtrace
 ;;
 
 let begin_stopping t = request t Begin_stopping

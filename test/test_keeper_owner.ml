@@ -742,6 +742,38 @@ let test_stopping_cancels_and_joins_active_child () =
        ^ Chat_operation.state_to_string state)
 ;;
 
+let test_stopping_cancels_and_joins_autonomous_child () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let child_started, resolve_child_started = Eio.Promise.create () in
+  let caller_done, resolve_caller_done = Eio.Promise.create () in
+  let never, _resolve_never = Eio.Promise.create () in
+  let owner =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name:"stopping-autonomous-child"
+         ~initial_meta:(Some (make_meta "stopping-autonomous-child")))
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    (try
+       ignore
+         (Owner.run_autonomous_if_idle owner (fun () ->
+            Eio.Promise.resolve resolve_child_started ();
+            Eio.Promise.await never))
+     with
+     | _ -> ());
+    Eio.Promise.resolve resolve_caller_done ());
+  Eio.Promise.await child_started;
+  ignore (owner_ok (Owner.begin_stopping owner));
+  Eio.Promise.await caller_done;
+  check bool
+    "stopping clears autonomous projection"
+    true
+    (Option.is_none (Owner.turn_in_flight owner))
+;;
+
 let test_operation_lifecycle_is_durable_and_projected () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -1091,6 +1123,112 @@ let test_keeper_owners_do_not_cross_block () =
   in
   check bool "second Keeper accepts while first is blocked" false accepted.existing;
   Eio.Promise.resolve resolve_release ()
+;;
+
+let test_owner_linearizes_autonomous_and_chat_children () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let autonomous_started, resolve_autonomous_started = Eio.Promise.create () in
+  let release_autonomous, resolve_release_autonomous = Eio.Promise.create () in
+  let operation_started, resolve_operation_started = Eio.Promise.create () in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    match claim () with
+    | Error error -> fail (Owner.error_to_string error)
+    | Ok None -> fail "chat operation disappeared before Owner claim"
+    | Ok (Some (operation : Chat_operation.t)) ->
+      Eio.Promise.resolve resolve_operation_started ();
+      Owner.Operation_succeeded
+        { outcome_ref =
+            "turn:" ^ Chat_operation.Operation_id.to_string operation.operation_id
+        }
+  in
+  let owner =
+    owner_ok
+      (start_owner_with_executor
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_executor:(Some operation_executor)
+         ~keeper_name:"single-turn-owner"
+         ~initial_meta:(Some (make_meta "single-turn-owner")))
+  in
+  let autonomous_result = Eio.Stream.create 1 in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      Owner.run_autonomous_if_idle owner (fun () ->
+        Eio.Promise.resolve resolve_autonomous_started ();
+        Eio.Promise.await release_autonomous;
+        42)
+    in
+    Eio.Stream.add autonomous_result result);
+  Eio.Promise.await autonomous_started;
+  (match Owner.turn_in_flight owner with
+   | Some { lane = Owner.Autonomous; _ } -> ()
+   | Some _ -> fail "Owner projected the wrong active turn lane"
+   | None -> fail "Owner did not project the autonomous child");
+  let operation_id = operation_id "kmsg-single-turn-owner" in
+  let accepted =
+    owner_ok
+      (Owner.submit_operation
+         owner
+         ~operation_id
+         ~source:operation_source
+         ~input:(operation_input "wait behind autonomous"))
+  in
+  (match accepted.operation.state with
+   | Chat_operation.Queued -> ()
+   | state ->
+     fail
+       ("chat operation started beside autonomous child: "
+        ^ Chat_operation.state_to_string state));
+  (match Owner.run_autonomous_if_idle owner (fun () -> fail "busy child ran") with
+   | Ok (`Busy (Owner.Turn_busy { lane = Owner.Autonomous; _ })) -> ()
+   | Ok (`Busy _) -> fail "busy result projected the wrong lane"
+   | Ok (`Ran _) -> fail "Owner admitted two autonomous children"
+   | Error error -> fail (Owner.error_to_string error));
+  Eio.Promise.resolve resolve_release_autonomous ();
+  (match Eio.Stream.take autonomous_result with
+   | Ok (`Ran 42) -> ()
+   | Ok (`Ran value) -> failf "wrong autonomous result: %d" value
+   | Ok (`Busy _) -> fail "first autonomous child was reported busy"
+   | Error error -> fail (Owner.error_to_string error));
+  Eio.Promise.await operation_started;
+  let terminal = await_terminal owner operation_id 1_000 in
+  (match terminal.state with
+   | Chat_operation.Succeeded _ -> ()
+   | state ->
+     fail
+       ("queued operation did not run after autonomous release: "
+        ^ Chat_operation.state_to_string state));
+  check bool "Owner clears active turn projection" true (Option.is_none (Owner.turn_in_flight owner))
+;;
+
+let test_autonomous_children_of_distinct_owners_do_not_cross_block () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let first_started, resolve_first_started = Eio.Promise.create () in
+  let release_first, resolve_release_first = Eio.Promise.create () in
+  let start keeper_name =
+    owner_ok
+      (start_owner
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~keeper_name
+         ~initial_meta:(Some (make_meta keeper_name)))
+  in
+  let first = start "turn-owner-first" in
+  let second = start "turn-owner-second" in
+  Eio.Fiber.fork ~sw (fun () ->
+    ignore
+      (Owner.run_autonomous_if_idle first (fun () ->
+         Eio.Promise.resolve resolve_first_started ();
+         Eio.Promise.await release_first)));
+  Eio.Promise.await first_started;
+  (match Owner.run_autonomous_if_idle second (fun () -> 7) with
+   | Ok (`Ran 7) -> ()
+   | Ok (`Ran value) -> failf "wrong second Owner result: %d" value
+   | Ok (`Busy _) -> fail "one Keeper blocked another Keeper's autonomous child"
+   | Error error -> fail (Owner.error_to_string error));
+  Eio.Promise.resolve resolve_release_first ()
 ;;
 
 let temp_dir () =
@@ -1702,6 +1840,10 @@ let () =
             `Quick
             test_stopping_cancels_and_joins_active_child
         ; test_case
+            "stopping cancels and joins autonomous child"
+            `Quick
+            test_stopping_cancels_and_joins_autonomous_child
+        ; test_case
             "operation lifecycle is durable and projected"
             `Quick
             test_operation_lifecycle_is_durable_and_projected
@@ -1725,6 +1867,14 @@ let () =
             "Keeper owners do not cross-block"
             `Quick
             test_keeper_owners_do_not_cross_block
+        ; test_case
+            "Owner linearizes autonomous and chat children"
+            `Quick
+            test_owner_linearizes_autonomous_and_chat_children
+        ; test_case
+            "distinct Owner autonomous children do not cross-block"
+            `Quick
+            test_autonomous_children_of_distinct_owners_do_not_cross_block
         ; test_case
             "root inventory loads and extends exactly once"
             `Quick

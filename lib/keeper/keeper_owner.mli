@@ -21,6 +21,17 @@ type operation_projection =
   ; terminal_count : int
   }
 
+type turn_lane =
+  | Autonomous
+  | Chat_operation
+
+type turn_in_flight =
+  { lane : turn_lane
+  ; started_at : float
+  }
+
+type autonomous_block = Turn_busy of turn_in_flight
+
 type operation_acceptance =
   { operation : Chat_operation.t
   ; existing : bool
@@ -75,6 +86,19 @@ val projection : t -> Keeper_owner_reducer.projection
 
 val operation_projection : t -> operation_projection
 (** Lock-free immutable operation inventory. *)
+
+val turn_in_flight : t -> turn_in_flight option
+(** Lock-free immutable projection of the single Owner-owned child turn. *)
+
+val autonomous_block_to_string : autonomous_block -> string
+
+val run_autonomous_if_idle
+  :  t
+  -> (unit -> 'a)
+  -> ([ `Ran of 'a | `Busy of autonomous_block ], error) result
+(** Mailbox-linearized autonomous admission. The callback runs in the Owner's
+    child switch, while the actor remains responsive. A queued/running chat or
+    another autonomous child returns [`Busy] without consuming turn input. *)
 
 val exact_projection
   :  t

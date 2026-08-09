@@ -336,10 +336,14 @@ let run_keepalive_unified_turn
   then { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
   else
     match
-      Keeper_turn_admission.run_if_free_with_token
+      Keeper_owner_registry.run_autonomous_if_idle
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
-        (fun admission_token ->
+        (fun () ->
+           Keeper_turn_admission.run_if_free_with_token
+             ~base_path:ctx.config.base_path
+             ~keeper_name:meta_after_triage.name
+             (fun admission_token ->
     let consumed_stimuli = ref [] in
     let pending_selection
       : Keeper_event_queue_state.pending_selection option ref
@@ -868,15 +872,39 @@ let run_keepalive_unified_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         exn;
-      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed })
-  with
-  | `Ran outcome -> outcome
-  | `Busy block ->
+      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed }))
+    with
+  | Ok (`Ran (`Ran outcome)) -> outcome
+  | Ok (`Ran (`Busy block)) ->
     Log.Keeper.info
       ~keeper_name:meta_after_triage.name
       "keeper turn admission busy before stimulus intake: %s"
       (Keeper_turn_admission.autonomous_block_to_string block);
     { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
+  | Ok (`Busy (Keeper_owner.Turn_busy in_flight)) ->
+    let lane =
+      match in_flight.Keeper_owner.lane with
+      | Keeper_owner.Autonomous -> Keeper_turn_admission.Autonomous
+      | Keeper_owner.Chat_operation -> Keeper_turn_admission.Chat
+    in
+    let block =
+      Keeper_turn_admission.Turn_busy
+        (Some
+           { Keeper_turn_admission.lane = lane
+           ; started_at = in_flight.started_at
+           })
+    in
+    Log.Keeper.info
+      ~keeper_name:meta_after_triage.name
+      "keeper owner busy before stimulus intake: %s"
+      (Keeper_owner.autonomous_block_to_string (Keeper_owner.Turn_busy in_flight));
+    { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
+  | Error error ->
+    Log.Keeper.error
+      ~keeper_name:meta_after_triage.name
+      "keeper owner rejected autonomous turn: %s"
+      (Keeper_owner_registry.command_error_to_string error);
+    { meta = meta_after_triage; cycle_status = Turn_cycle_crashed }
 ;;
 
 let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat

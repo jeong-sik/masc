@@ -1296,6 +1296,21 @@ jobs:
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_decision_audit_dated_store"
 
+      # The operation ledger is a new durability boundary. @check compiles its
+      # executable but does not run the blob, FIFO, replay, terminal
+      # immutability, startup-audit, symlink-containment, and mailbox cases.
+      - name: Run Keeper operation ledger suite
+        id: keeper_operation_ledger_suite
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        env:
+          ME_ROOT: /tmp/me
+          CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_operation_ledger"
+
       # Redaction is the last thing every observability payload passes through,
       # so a defect here is not scoped to one field: a preview truncated inside
       # a multibyte character makes the whole JSON response undecodable and the

@@ -5,10 +5,28 @@ type scheduled_stat = {
   failure_count : int;
 }
 
+(* Where [first_ts] came from. The 24h persistence gate asks for the EARLIEST
+   turn row in durable history, and a bounded tail read can never witness a
+   minimum: the tail is by construction the newest slice. The origin is
+   therefore recorded rather than assumed, so a reader can tell "no turn rows
+   exist" apart from "turn rows exist but were not reached". *)
+type first_ts_origin =
+  | History_head of int option
+      (** Earliest turn row located in the head of the oldest surviving
+          decision-log segment. Carries that segment's rotation index;
+          [None] denotes the unrotated current segment. *)
+  | No_turn_row_in_history
+      (** No turn-exchange row inside the scanned head of any segment. *)
+
 type turn_span_stat = {
-  interaction_count : int;
+  recent_interaction_count : int;
+      (** Turn rows inside the recent tail window only. This is a liveness
+          signal, not a history total; [first_ts] deliberately comes from a
+          different (oldest) segment. *)
   first_ts : float option;
   latest_ts : float option;
+  first_ts_origin : first_ts_origin;
+  segments_observed : int;
 }
 
 let seconds_per_hour = Masc_time_constants.hour
@@ -17,11 +35,21 @@ let recent_turn_max_age_hours = 24.0
 let decision_tail_max_bytes = 512 * 1024
 let decision_tail_max_lines = 5000
 
+(* Head budget for locating the earliest turn row in one segment. Measured
+   2026-08-09 over the 8-keeper fleet: the first turn row sat within 7.6 KB of
+   every segment head (worst case [sangsu], row 4), so this clears the observed
+   worst case by ~67x while keeping the read O(1) in file size. *)
+let decision_head_max_bytes = 512 * 1024
+
 let empty_scheduled_stat =
   { decision_count = 0; latest_ts = None; latest_ts_unix = None; failure_count = 0 }
 
-let empty_turn_span_stat =
-  { interaction_count = 0; first_ts = None; latest_ts = None }
+(* Tail-window accumulator. Kept separate from [turn_span_stat] because the
+   tail can only answer "how recent" — "how far back" is answered by the head
+   scan below. *)
+type tail_scan = { count : int; latest : float option }
+
+let empty_tail_scan = { count = 0; latest = None }
 
 let fold_keeper_decision_log ~config keeper_name ~init ~f =
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
@@ -101,29 +129,94 @@ let is_turn_exchange_channel = function
   | Some s -> Option.is_some (Keeper_world_observation.channel_of_string s)
   | None -> false
 
-let update_turn_span stat ts =
+let update_tail_scan scan ts =
   {
-    interaction_count = stat.interaction_count + 1;
-    first_ts =
+    count = scan.count + 1;
+    latest =
       Some
-        (match stat.first_ts with
-         | Some first -> min first ts
-         | None -> ts);
-    latest_ts =
-      Some
-        (match stat.latest_ts with
+        (match scan.latest with
          | Some latest -> max latest ts
          | None -> ts);
   }
 
+(** Every decision-log segment for [keeper_name], oldest first. Rotation is a
+    typed concept owned by {!Keeper_runtime_root_entry}; enumerating through
+    that catalog keeps this reader in step with the writer instead of
+    re-deriving a filename convention that only the writer knows. *)
+let decision_log_segments ~config keeper_name =
+  let current = Keeper_types_support.keeper_decision_log_path config keeper_name in
+  let dir = Filename.dirname current in
+  if not (Fs_compat.file_exists dir) then []
+  else
+    Fs_compat.read_dir dir
+    |> List.filter_map (fun base ->
+      Keeper_runtime_root_entry.classify_basename base
+      |> List.find_map (function
+        | Keeper_runtime_root_entry.Keeper
+            { keeper_name = name
+            ; artifact = Keeper_runtime_root_entry.Decision_log
+            ; rotation
+            }
+          when String.equal name keeper_name ->
+          Some (rotation, Filename.concat dir base)
+        | _ -> None))
+    |> List.sort (fun (left, _) (right, _) ->
+      (* Oldest first: a higher rotation index is an older segment, and the
+         unrotated current segment is the newest of all. *)
+      match left, right with
+      | Some left, Some right -> Int.compare right left
+      | Some _, None -> -1
+      | None, Some _ -> 1
+      | None, None -> 0)
+
+(** Earliest turn row inside the head budget of one segment. A head slice can
+    end mid-row; unparseable lines are skipped exactly as on the tail path, so
+    a truncated final line cannot fabricate a timestamp. *)
+let earliest_turn_ts_in_segment path =
+  let slice = Fs_compat.read_slice ~path ~from:0 ~len:decision_head_max_bytes in
+  if String.equal slice "" then None
+  else
+    String.split_on_char '\n' slice
+    |> List.find_map (fun line ->
+      let line = String.trim line in
+      if String.equal line "" then None
+      else
+        match Yojson.Safe.from_string line with
+        | exception Yojson.Json_error _ -> None
+        | json ->
+          if is_turn_exchange_channel (Safe_ops.json_string_opt "channel" json)
+          then decision_ts_unix json
+          else None)
+
+let earliest_turn_ts segments =
+  let rec scan = function
+    | [] -> None, No_turn_row_in_history
+    | (rotation, path) :: rest ->
+      (match earliest_turn_ts_in_segment path with
+       | Some ts -> Some ts, History_head rotation
+       | None -> scan rest)
+  in
+  scan segments
+
 let turn_span_stats ~config keeper_name =
-  fold_keeper_decision_log ~config keeper_name ~init:empty_turn_span_stat
-    ~f:(fun stat json ->
-      if is_turn_exchange_channel (Safe_ops.json_string_opt "channel" json) then
-        match decision_ts_unix json with
-        | Some ts -> update_turn_span stat ts
-        | None -> stat
-      else stat)
+  let tail =
+    fold_keeper_decision_log ~config keeper_name ~init:empty_tail_scan
+      ~f:(fun scan json ->
+        if is_turn_exchange_channel (Safe_ops.json_string_opt "channel" json) then
+          match decision_ts_unix json with
+          | Some ts -> update_tail_scan scan ts
+          | None -> scan
+        else scan)
+  in
+  let segments = decision_log_segments ~config keeper_name in
+  let first_ts, first_ts_origin = earliest_turn_ts segments in
+  {
+    recent_interaction_count = tail.count;
+    first_ts;
+    latest_ts = tail.latest;
+    first_ts_origin;
+    segments_observed = List.length segments;
+  }
 
 let hours_between first latest =
   max 0.0 (latest -. first) /. seconds_per_hour
@@ -145,13 +238,21 @@ let turn_span_hours_json stat =
   | Some first, Some latest -> `Float (hours_between first latest)
   | _ -> `Null
 
+let first_ts_origin_json = function
+  | History_head None ->
+    `Assoc [ ("segment", `String "current"); ("rotation", `Null) ]
+  | History_head (Some rotation) ->
+    `Assoc [ ("segment", `String "rotated"); ("rotation", `Int rotation) ]
+  | No_turn_row_in_history ->
+    `Assoc [ ("segment", `String "none"); ("rotation", `Null) ]
+
 let latest_age_hours_json ~now stat =
   match stat.latest_ts with
   | Some latest -> `Float (latest_age_hours ~now latest)
   | None -> `Null
 
 let has_persistent_turn_span ~now stat =
-  stat.interaction_count >= 2
+  stat.recent_interaction_count >= 2
   &&
   match stat.first_ts, stat.latest_ts with
   | Some first, Some latest ->
@@ -162,7 +263,9 @@ let has_persistent_turn_span ~now stat =
 let turn_span_evidence_json ~now keeper_name stat =
   `Assoc [
     ("keeper", `String keeper_name);
-    ("interaction_count", `Int stat.interaction_count);
+    ("recent_interaction_count", `Int stat.recent_interaction_count);
+    ("first_ts_origin", first_ts_origin_json stat.first_ts_origin);
+    ("segments_observed", `Int stat.segments_observed);
     ("first_ts_unix", unix_opt_to_json stat.first_ts);
     ("first_ts_iso", unix_opt_to_iso_json stat.first_ts);
     ("latest_ts_unix", unix_opt_to_json stat.latest_ts);

@@ -218,6 +218,108 @@ let test_cancellation_records_terminal_raw_observation () =
     check int "one tool finish" 1 (count Agent_sdk.Raw_trace.Tool_execution_finished))
 ;;
 
+let msg role content : Agent_sdk.Types.message =
+  { role; content; name = None; tool_call_id = None; metadata = [] }
+;;
+
+let text value = Agent_sdk.Types.Text value
+
+let projection_counts
+    { Host.messages = _; dropped_tool_messages; dropped_messages; dropped_blocks } =
+  dropped_tool_messages, dropped_messages, dropped_blocks
+;;
+
+(* Feeding the projected output back through the strict [text_of_blocks] both
+   extracts the kept text and proves the projection satisfies the runtime's
+   admission invariant. Expected values below stay literal. *)
+let projected_texts (projection : Host.history_projection) =
+  List.map
+    (fun (message : Agent_sdk.Types.message) ->
+      match
+        Host.text_of_blocks
+          ~runtime_label:"Test"
+          ~field:"projection"
+          message.content
+      with
+      | Ok value -> value
+      | Error _ -> fail "projected message still holds non-text blocks")
+    projection.Host.messages
+;;
+
+let test_lossless_history_is_preserved_verbatim () =
+  let projection =
+    Host.project_official_history
+      [ msg Agent_sdk.Types.User [ text "prior user turn" ]
+      ; msg Agent_sdk.Types.Assistant [ text "prior assistant reply" ]
+      ]
+  in
+  check
+    (list string)
+    "kept texts"
+    [ "prior user turn"; "prior assistant reply" ]
+    (projected_texts projection);
+  check (triple int int int) "no drops" (0, 0, 0) (projection_counts projection);
+  check bool "lossless" true (Host.history_projection_lossless projection)
+;;
+
+let test_tool_messages_are_dropped_and_counted () =
+  let projection =
+    Host.project_official_history
+      [ msg Agent_sdk.Types.User [ text "prior user turn" ]
+      ; Agent_sdk.Types.tool_result_msg
+          ~tool_use_id:"call-1"
+          ~content:"tool output"
+          ()
+      ]
+  in
+  check (list string) "kept texts" [ "prior user turn" ] (projected_texts projection);
+  check
+    (triple int int int)
+    "tool message dropped"
+    (1, 0, 0)
+    (projection_counts projection);
+  check bool "lossy" false (Host.history_projection_lossless projection)
+;;
+
+let test_non_text_blocks_are_stripped_from_kept_messages () =
+  let projection =
+    Host.project_official_history
+      [ msg
+          Agent_sdk.Types.Assistant
+          [ Agent_sdk.Types.Thinking
+              { content = "hidden reasoning"; signature = None }
+          ; text "visible reply"
+          ; Agent_sdk.Types.ToolUse
+              { id = "call-1"; name = "prior_tool"; input = `Assoc [] }
+          ]
+      ]
+  in
+  check (list string) "kept texts" [ "visible reply" ] (projected_texts projection);
+  check
+    (triple int int int)
+    "blocks stripped"
+    (0, 0, 2)
+    (projection_counts projection)
+;;
+
+let test_fully_unrepresentable_message_is_dropped () =
+  let projection =
+    Host.project_official_history
+      [ msg
+          Agent_sdk.Types.Assistant
+          [ Agent_sdk.Types.ToolUse
+              { id = "call-1"; name = "prior_tool"; input = `Assoc [] }
+          ]
+      ]
+  in
+  check (list string) "no kept texts" [] (projected_texts projection);
+  check
+    (triple int int int)
+    "message dropped"
+    (0, 1, 1)
+    (projection_counts projection)
+;;
+
 let () =
   run
     "keeper official-client host"
@@ -250,6 +352,24 @@ let () =
             "cancellation records terminal RAW observation"
             `Quick
             test_cancellation_records_terminal_raw_observation
+        ] )
+    ; ( "history projection"
+      , [ test_case
+            "lossless history is preserved verbatim"
+            `Quick
+            test_lossless_history_is_preserved_verbatim
+        ; test_case
+            "tool messages are dropped and counted"
+            `Quick
+            test_tool_messages_are_dropped_and_counted
+        ; test_case
+            "non-text blocks are stripped from kept messages"
+            `Quick
+            test_non_text_blocks_are_stripped_from_kept_messages
+        ; test_case
+            "fully unrepresentable message is dropped"
+            `Quick
+            test_fully_unrepresentable_message_is_dropped
         ] )
     ]
 ;;

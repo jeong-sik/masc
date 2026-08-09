@@ -11,13 +11,12 @@ type subscription =
 
 type config =
   { cli_path : string
-  ; cwd : string
   ; model : string option
   ; developer_instructions : string option
   ; timeout_s : float
   }
 
-val default_config : cwd:string -> config
+val default_config : unit -> config
 
 type thread_mode =
   | Start
@@ -79,6 +78,7 @@ val error_to_string : error -> string
 val validate_turn :
   ?dynamic_tools:dynamic_tool list ->
   ?thread_mode:thread_mode ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
   config ->
   prompt:string ->
   (unit, error) result

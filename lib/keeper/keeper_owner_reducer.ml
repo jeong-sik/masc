@@ -249,11 +249,12 @@ let update_usage meta usage =
 let apply_existing (state : state) meta command =
   match command with
   | Create _ -> Error Meta_already_exists
-  | Delete when Option.is_some state.running_operation_id ->
-    Error (Delete_while_running (Option.get state.running_operation_id))
   | Delete ->
-    let state = { state with meta = None } in
-    Ok (publish_transition state (Remove_snapshot meta) [])
+    (match state.running_operation_id with
+     | Some operation_id -> Error (Delete_while_running operation_id)
+     | None ->
+       let state = { state with meta = None } in
+       Ok (publish_transition state (Remove_snapshot meta) []))
   | Pause { reason; updated_at } ->
     Ok (with_meta state { meta with paused = true; latched_reason = Some reason; updated_at })
   | Resume { updated_at } ->

@@ -1932,6 +1932,21 @@ jobs:
           path: ${{ runner.temp }}/keeper-queued-stream/*.png
           if-no-files-found: warn
 
+      - name: Run Keeper lane-timeline Playwright E2E
+        id: keeper_lane_timeline_e2e
+        working-directory: dashboard
+        env:
+          KEEPER_LANE_TIMELINE_ARTIFACT_DIR: ${{ runner.temp }}/keeper-lane-timeline
+        run: pnpm test:e2e:keeper-lane
+
+      - name: Upload Keeper lane-timeline screenshots
+        if: ${{ always() && !cancelled() && steps.keeper_lane_timeline_e2e.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: keeper-lane-timeline-screenshots
+          path: ${{ runner.temp }}/keeper-lane-timeline/*.png
+          if-no-files-found: warn
+
   structure-ratchet:
     name: OCaml Structure Ratchet
     runs-on: ubuntu-latest

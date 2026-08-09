@@ -24,7 +24,7 @@ module Event_id_set = Set.Make (String)
 
 (* The storage namespace and row schema advance together. Readers inspect
    exactly this namespace, keeping exact evidence under one authority. *)
-let storage_generation = "v5"
+let storage_generation = "v6"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
 let stimulus_kind_to_string = function

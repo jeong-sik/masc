@@ -299,11 +299,12 @@ let test_librarian_research_bundle_is_closed_and_read_only () =
          ; "keeper_memory_write"
          ; "keeper_surface_post"
          ; "masc_fusion"
+         ; "AnalyzeImage"
          ];
        check int
-         "each research callback traverses the standard Gate/result boundary once"
+         "each rejected research call records one causal result"
          (List.length actual_names)
-         (Keeper_librarian_research.For_testing.invalid_request_gate_callback_count
+         (Keeper_librarian_research.For_testing.invalid_request_result_callback_count
             request);
        match cleanup with
        | Keeper_librarian_research.Cleanup_succeeded -> ()
@@ -374,13 +375,58 @@ let test_librarian_research_cleanup_contract () =
       (fun () -> 7)
   in
   check int "cleanup failure does not replace body result" 7 value;
-  match !cleanup_failure with
-  | Some (Keeper_librarian_research.Cleanup_failed detail) ->
-    check bool
-      "cleanup failure detail retained"
-      true
-      (string_contains detail "cleanup failed")
-  | _ -> fail "cleanup failure outcome was not recorded"
+  (match !cleanup_failure with
+   | Some (Keeper_librarian_research.Cleanup_failed detail) ->
+     check bool
+       "cleanup failure detail retained"
+       true
+       (string_contains detail "cleanup failed")
+   | _ -> fail "cleanup failure outcome was not recorded");
+  let cleanup_reserved_propagated =
+    try
+      ignore
+        (Keeper_librarian_research.For_testing.protect_with_cleanup
+           ~cleanup:(fun () -> raise Stack_overflow)
+           ~on_cleanup:(fun _ -> fail "reserved cleanup became an outcome")
+           (fun () -> 9));
+      false
+    with
+    | Stack_overflow -> true
+    | _ -> false
+  in
+  check bool
+    "reserved cleanup failure propagates"
+    true
+    cleanup_reserved_propagated
+;;
+
+let test_librarian_research_reserved_exceptions_propagate () =
+  let assert_reserved name exception_ matches =
+    let propagated =
+      try
+        ignore
+          (Keeper_librarian_research.For_testing.internal_error_of_exception
+             exception_);
+        false
+      with
+      | caught -> matches caught
+    in
+    check bool name true propagated
+  in
+  assert_reserved "out of memory propagates" Out_of_memory
+    (function Out_of_memory -> true | _ -> false);
+  assert_reserved "stack overflow propagates" Stack_overflow
+    (function Stack_overflow -> true | _ -> false);
+  assert_reserved "break propagates" Sys.Break
+    (function Sys.Break -> true | _ -> false);
+  match
+    Keeper_librarian_research.For_testing.internal_error_of_exception
+      (Failure "ordinary research failure")
+  with
+  | Agent_sdk.Error.Internal detail ->
+    check bool "ordinary failure is translated" true
+      (string_contains detail "ordinary research failure")
+  | _ -> fail "ordinary research failure used the wrong SDK error"
 ;;
 
 let test_librarian_registry_receipt_excludes_raw_payloads () =
@@ -665,6 +711,8 @@ let () =
             test_librarian_research_bundle_is_closed_and_read_only;
           test_case "librarian research cleanup covers success error cancellation" `Quick
             test_librarian_research_cleanup_contract;
+          test_case "librarian research preserves reserved exceptions" `Quick
+            test_librarian_research_reserved_exceptions_propagate;
           test_case "librarian registry receipt excludes raw payloads" `Quick
             test_librarian_registry_receipt_excludes_raw_payloads;
           test_case "missing current task reconciles before transition hint" `Quick

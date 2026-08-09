@@ -30,9 +30,9 @@ type research_tool =
   | Web_search
   | Web_fetch
   | Fusion_status
-  | Analyze_image
 (** Closed, read/observation-only authority granted to the detached Librarian
-    research phase. Operational/mutating Keeper tools are not representable. *)
+    research phase. Operational/mutating tools and ungated provider subcalls
+    are not representable. *)
 
 (** Create a fresh retained-trace candidate for one Librarian research phase.
     The caller registers [Agent_sdk.Raw_trace.file_path] as a durable reachability
@@ -142,8 +142,12 @@ module For_testing : sig
 
   val research_descriptor_contract : unit -> (string * bool option * string) list
 
-  val invalid_request_gate_callback_count : request -> int
+  val invalid_request_result_callback_count : request -> int
   (** Dispatch one schema-invalid occurrence through every research tool. No
-      handler executes; each standard Keeper handler must still record exactly
-      one Gate/result callback. *)
+      handler or authorization Gate executes; each standard Keeper handler must
+      still record exactly one causal result callback. *)
+
+  val internal_error_of_exception : exn -> Agent_sdk.Error.sdk_error
+  (** Re-raise reserved runtime exceptions and translate only ordinary failures
+      to the research degradation error. *)
 end

@@ -315,14 +315,7 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
   }
 }
 
-/**
- * Page bounds for the resolved history. Returns null when the server did not
- * send them or sent them incompletely — an older server during a rolling
- * deploy, for instance. Null must render as "completeness unknown", never as
- * "this is everything": presenting a slice as the whole history is the defect
- * this field exists to remove, so a partial page is rejected outright rather
- * than filled in with defaults.
- */
+/** Decode the exact page bounds that make resolved-history completeness explicit. */
 function normalizeKeeperResolvedApprovalPage(
   raw: unknown,
 ): KeeperResolvedApprovalPage | null {
@@ -389,11 +382,8 @@ export function fetchDashboardGate(
       if (!Array.isArray(raw.approval_queue)) {
         return gateSnapshotProtocolDrift('ready approval_queue must be an array')
       }
-      // A contract-violating row is quarantined as a visible placeholder
-      // instead of failing the whole snapshot (#26094): one drifted row used
-      // to blank the entire queue — the surface an operator needs precisely
-      // when rows are drifting. Identity fields are best-effort salvage so
-      // the placeholder still names the pending request.
+      // Preserve the exact valid rows and expose every invalid row as a typed
+      // violation with the identity fields that can be decoded safely.
       const accepted: KeeperApprovalQueueItem[] = []
       raw.approval_queue.forEach((item, index) => {
         const normalized = normalizeKeeperApprovalQueueItem(item)

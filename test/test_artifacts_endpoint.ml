@@ -48,10 +48,10 @@ let test_valid_sha256 () =
        "ghi1234567890123456789012345678901234567890123456789012345678901");
   Alcotest.(check bool) "empty" false (A.is_valid_sha256 "")
 
-let test_strict_auth_requires_read_auth () =
+let test_artifact_bytes_require_operator_auth () =
   let sha256 = String.make 64 'a' in
   Alcotest.(check bool)
-    "artifact route is not public in strict auth mode"
+    "artifact route is not public"
     false
     (Server_auth.is_public_read_path
        ("/api/v1/artifacts/" ^ sha256));
@@ -59,7 +59,19 @@ let test_strict_auth_requires_read_auth () =
     "prefix-confusable route is not public"
     false
     (Server_auth.is_public_read_path
-       ("/api/v1/artifacts-evil/" ^ sha256))
+       ("/api/v1/artifacts-evil/" ^ sha256));
+  Alcotest.(check bool)
+    "route authority is CanAdmin"
+    true
+    (A.artifact_read_permission = Masc_domain.CanAdmin);
+  Alcotest.(check bool)
+    "worker cannot dereference exact bytes"
+    false
+    (Masc_domain.has_permission Masc_domain.Worker A.artifact_read_permission);
+  Alcotest.(check bool)
+    "admin can dereference exact bytes"
+    true
+    (Masc_domain.has_permission Masc_domain.Admin A.artifact_read_permission)
 
 (* --- blob_response shape --- *)
 
@@ -100,8 +112,8 @@ let () =
     [
       ( "sha256 validation",
         [ Alcotest.test_case "valid + invalid forms" `Quick test_valid_sha256
-        ; Alcotest.test_case "strict auth requires read auth" `Quick
-            test_strict_auth_requires_read_auth
+        ; Alcotest.test_case "exact bytes require operator auth" `Quick
+            test_artifact_bytes_require_operator_auth
         ] );
       ( "blob_response",
         [

@@ -23,7 +23,6 @@ type research_tool =
   | Web_search
   | Web_fetch
   | Fusion_status
-  | Analyze_image
 
 let research_tools =
   [ Search_files
@@ -38,7 +37,6 @@ let research_tools =
   ; Web_search
   ; Web_fetch
   ; Fusion_status
-  ; Analyze_image
   ]
 ;;
 
@@ -55,9 +53,13 @@ let descriptor_owns_research_tool tool (descriptor : Keeper_tool_descriptor.t) =
   | Surface_read, Tool_surface_read
   | Web_search, Tool_web_search
   | Web_fetch, Tool_web_fetch
-  | Fusion_status, Tool_masc_fusion_status
-  | Analyze_image, Tool_analyze_image -> true
+  | Fusion_status, Tool_masc_fusion_status -> true
   | _ -> false
+;;
+
+let internal_error_of_exception exn =
+  Llm_provider.Reserved_exn.reraise_if_reserved exn;
+  Agent_sdk.Error.Internal (Printexc.to_string exn)
 ;;
 
 let research_descriptors () =
@@ -80,8 +82,7 @@ let create_raw_trace_sink
   =
   let path_result =
     try Ok (Keeper_types_support.keeper_raw_trace_turn_path config meta.name) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Agent_sdk.Error.Internal (Printexc.to_string exn))
+    | exn -> Error (internal_error_of_exception exn)
   in
   match path_result with
   | Error error -> Raw_trace_degraded error
@@ -608,15 +609,39 @@ let make_bundle request = make_bundle_with_gate_context request |> fst
 ;;
 
 let protect_with_cleanup ~cleanup ~on_cleanup body =
+  let body_outcome = ref None in
+  let cleanup_reserved = ref None in
   Eio_guard.protect
     ~finally:(fun () ->
       match cleanup () with
       | () -> on_cleanup Cleanup_succeeded
       | exception (Eio.Cancel.Cancelled _ as exn) ->
+        let backtrace = Printexc.get_raw_backtrace () in
         on_cleanup Cleanup_cancelled;
-        raise exn
-      | exception exn -> on_cleanup (Cleanup_failed (Printexc.to_string exn)))
-    body
+        cleanup_reserved := Some (exn, backtrace)
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        let reserved =
+          try
+            Llm_provider.Reserved_exn.reraise_if_reserved exn;
+            None
+          with
+          | reserved -> Some reserved
+        in
+        (match reserved with
+         | Some reserved -> cleanup_reserved := Some (reserved, backtrace)
+         | None -> on_cleanup (Cleanup_failed (Printexc.to_string exn))))
+    (fun () ->
+      body_outcome :=
+        Some
+          (try Ok (body ()) with
+           | exn -> Error (exn, Printexc.get_raw_backtrace ())));
+  match !cleanup_reserved, !body_outcome with
+  | Some (exn, backtrace), _
+  | None, Some (Error (exn, backtrace)) ->
+    Printexc.raise_with_backtrace exn backtrace
+  | None, Some (Ok value) -> value
+  | None, None -> failwith "librarian research body outcome missing"
 ;;
 
 let bounded_evidence ~max_bytes text =
@@ -663,8 +688,7 @@ let run ~on_receipt (request : request) =
                   ~net:request.net
                   ()
               with
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn -> Error (Agent_sdk.Error.Internal (Printexc.to_string exn))))
+              | exn -> Error (internal_error_of_exception exn)))
     with
     | Eio.Cancel.Cancelled _ as exn ->
       `Cancelled (exn, Printexc.get_raw_backtrace ())
@@ -742,7 +766,7 @@ module For_testing = struct
           descriptor.runtime_handler ))
   ;;
 
-  let invalid_request_gate_callback_count request =
+  let invalid_request_result_callback_count request =
     let bundle, gate_context = make_bundle_with_gate_context request in
     protect_with_cleanup
       ~cleanup:bundle.cleanup
@@ -760,7 +784,9 @@ module For_testing = struct
          | `Assoc fields ->
            (match List.assoc_opt "completed_tool_calls" fields with
             | Some (`List calls) -> List.length calls
-            | Some _ | None -> failwith "missing completed Gate callback list")
-         | _ -> failwith "invalid Librarian Gate causal snapshot")
+            | Some _ | None -> failwith "missing causal result callback list")
+         | _ -> failwith "invalid Librarian causal snapshot")
   ;;
+
+  let internal_error_of_exception = internal_error_of_exception
 end

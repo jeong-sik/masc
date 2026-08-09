@@ -36,11 +36,13 @@ val blob_response :
     Store inspection, read, and integrity failures return
     [`Service_unavailable]. Cancellation propagates. *)
 
+val artifact_read_permission : Masc_domain.permission
+(** Operator-only authority required to dereference exact tool-output bytes. *)
+
 val add_routes :
   Http_server_eio.Router.t ->
   Http_server_eio.Router.t
 (** Register the [GET /api/v1/artifacts/<sha256>] route on
-    [router] using {!Server_auth.with_public_read}. Non-strict deployments keep
-    the dashboard read surface public; strict HTTP auth routes it through the
-    ordinary read authorization boundary because a content digest is not an
-    authorization capability. Returns the augmented router. *)
+    [router]. Exact bytes require a token-bound operator credential even when
+    general HTTP auth is non-strict; a content digest is not an authorization
+    capability. Returns the augmented router. *)

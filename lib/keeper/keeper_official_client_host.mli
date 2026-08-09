@@ -28,8 +28,8 @@ val resolve_reasoning_effort :
   reasoning_effort:Llm_provider.Reasoning_effort.t option ->
   (Llm_provider.Reasoning_effort.t option, Agent_sdk.Error.sdk_error) result
 (** Reconcile provider-neutral thinking control with an explicit
-    official-client effort. An absent effort remains absent; this function
-    never fabricates a model-specific effort from the boolean toggle. *)
+    official-client effort. An absent effort remains absent. A generic
+    [enable_thinking] value is rejected rather than translated. *)
 
 val text_of_blocks :
   runtime_label:string ->
@@ -67,7 +67,6 @@ val prepare_turn :
   initial_messages:Agent_sdk.Types.message list ->
   model_input_projection:Agent_sdk.Agent.model_input_projection option ->
   hooks:Agent_sdk.Hooks.hooks option ->
-  enable_thinking:bool option ->
   (prepared_turn, Agent_sdk.Error.sdk_error) result
 
 val dynamic_tools :

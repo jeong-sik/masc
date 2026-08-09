@@ -80,7 +80,7 @@ let recovery_failure_of_client_error = function
 
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
-    ~context_injector ~context ~event_bus ~enable_thinking
+    ~context_injector ~context ~event_bus
     ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -154,7 +154,6 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~initial_messages
         ~model_input_projection
         ~hooks:(Some hooks)
-        ~enable_thinking
     in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256 prepared.tools

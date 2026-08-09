@@ -93,30 +93,17 @@ type prepared_turn =
   }
 
 let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
-  match enable_thinking, reasoning_effort with
-  | Some false, None ->
-    (* A provider-neutral boolean is not an official-client effort value.
-       Omitting the field lets the client select a value admitted by the
-       chosen model; synthesizing [None_] sent an unsupported "none" to
-       Codex models whose minimum effort is [Low]. *)
-    Ok None
-  | Some false, Some Llm_provider.Reasoning_effort.None_ ->
-    Ok (Some Llm_provider.Reasoning_effort.None_)
-  | Some false, Some _ ->
+  match enable_thinking with
+  | Some _ ->
     Error
       (config_error
-         ~field:"reasoning_effort"
-         "enable_thinking=false conflicts with a non-none reasoning effort")
-  | Some true, Some Llm_provider.Reasoning_effort.None_ ->
-    Error
-      (config_error
-         ~field:"reasoning_effort"
-         "enable_thinking=true conflicts with reasoning effort none")
-  | (Some true | None), reasoning_effort -> Ok reasoning_effort
+         ~field:"enable_thinking"
+         "official-client runtimes require an explicit reasoning_effort; +          enable_thinking is not projected")
+  | None -> Ok reasoning_effort
 ;;
 
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
-    ~initial_messages ~model_input_projection ~hooks ~enable_thinking =
+    ~initial_messages ~model_input_projection ~hooks =
   let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
   let before_turn =
     invoke_turn_hook
@@ -135,9 +122,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     | decision ->
       Error (illegal_hook_decision ~runtime_label ~hook_name:"before_turn" decision)
   in
-  let current_params =
-    { Agent_sdk.Hooks.default_turn_params with enable_thinking }
-  in
+  let current_params = Agent_sdk.Hooks.default_turn_params in
   let before_turn_params =
     invoke_turn_hook
       ~keeper_name

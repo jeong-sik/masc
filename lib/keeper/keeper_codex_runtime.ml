@@ -6,24 +6,20 @@ let config_error ~field detail =
 
 let internal_error detail = Agent_sdk.Error.Internal detail
 
-let text_of_blocks ~field blocks =
-  let rec loop texts = function
-    | [] -> Ok (String.concat "\n" (List.rev texts))
-    | Agent_sdk.Types.Text text :: rest -> loop (text :: texts) rest
-    | _ :: _ ->
-      Error
-        (config_error
-           ~field
-           "codex-app-server Keeper projection currently admits text blocks only")
-  in
-  loop [] blocks
-;;
+module Host = Keeper_official_client_host
+
+let runtime_label = "Codex"
 
 let project_messages messages =
   let rec loop developer history = function
     | [] -> Ok (List.rev developer, List.rev history)
     | (message : Agent_sdk.Types.message) :: rest ->
-      let* text = text_of_blocks ~field:"initial_messages" message.content in
+      let* text =
+        Host.text_of_blocks
+          ~runtime_label
+          ~field:"initial_messages"
+          message.content
+      in
       (match message.role with
        | Agent_sdk.Types.System -> loop (text :: developer) history rest
        | Agent_sdk.Types.User ->
@@ -43,354 +39,18 @@ let project_messages messages =
   loop [] [] messages
 ;;
 
-let user_message text : Agent_sdk.Types.message =
-  { role = User
-  ; content = [ Text text ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-;;
-
-let system_message text : Agent_sdk.Types.message =
-  { role = System
-  ; content = [ Text text ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-;;
-
-let last_tool_results messages =
-  messages
-  |> List.rev
-  |> List.find_map (fun (message : Agent_sdk.Types.message) ->
-    match message.role with
-    | Tool ->
-      Some
-        (List.filter_map
-           (function
-             | Agent_sdk.Types.ToolResult { content; outcome; _ } ->
-               Some (Agent_sdk.Types.tool_result_of_outcome ~content outcome)
-             | _ -> None)
-           message.content)
-    | System | User | Assistant -> None)
-  |> Option.value ~default:[]
-;;
-
-let hook_error ~hook_name ~stage detail =
-  internal_error
-    (Printf.sprintf
-       "Codex runtime %s hook failed at %s: %s"
-       hook_name
-       (Agent_sdk.Hooks.hook_stage_to_string stage)
-       detail)
-;;
-
-let illegal_hook_decision ~hook_name decision =
-  config_error
-    ~field:"hooks"
-    (Printf.sprintf
-       "Codex runtime %s hook returned unsupported decision %s"
-       hook_name
-       (Agent_sdk.Hooks.decision_kind_to_string
-          (Agent_sdk.Hooks.classify_decision decision)))
-;;
-
-let invoke_turn_hook ~keeper_name ~turn_count ~hook_name hook event =
-  Agent_sdk.Agent_tools.invoke_hook
-    ~tracer:Agent_sdk.Tracing.null
-    ~agent_name:keeper_name
-    ~turn_count
-    ~hook_name
-    hook
-    event
-;;
-
-type prepared_turn =
-  { messages : Agent_sdk.Types.message list
-  ; system_prompt : string
-  ; tools : Agent_sdk.Tool.t list
-  ; reasoning_effort : Llm_provider.Reasoning_effort.t option
-  }
-
-let prepare_turn ~keeper_name ~turn_count ~system_prompt ~tools ~initial_messages
-    ~model_input_projection ~hooks ~enable_thinking =
-  let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
-  let before_turn =
-    invoke_turn_hook
-      ~keeper_name
-      ~turn_count
-      ~hook_name:"before_turn"
-      hooks.before_turn
-      (Agent_sdk.Hooks.BeforeTurn { turn = turn_count; messages = initial_messages })
-  in
-  let* messages =
-    match before_turn with
-    | Continue -> Ok initial_messages
-    | Nudge text -> Ok (initial_messages @ [ user_message text ])
-    | HookFailed { stage; detail } -> Error (hook_error ~hook_name:"before_turn" ~stage detail)
-    | decision -> Error (illegal_hook_decision ~hook_name:"before_turn" decision)
-  in
-  let current_params =
-    { Agent_sdk.Hooks.default_turn_params with enable_thinking }
-  in
-  let before_turn_params =
-    invoke_turn_hook
-      ~keeper_name
-      ~turn_count
-      ~hook_name:"before_turn_params"
-      hooks.before_turn_params
-      (Agent_sdk.Hooks.BeforeTurnParams
-         { turn = turn_count
-         ; messages
-         ; last_tool_results = last_tool_results messages
-         ; current_params
-         ; reasoning = Agent_sdk.Hooks.empty_reasoning_summary
-         })
-  in
-  let* turn_params =
-    match before_turn_params with
-    | Continue -> Ok current_params
-    | AdjustParams params -> Ok params
-    | HookFailed { stage; detail } ->
-      Error (hook_error ~hook_name:"before_turn_params" ~stage detail)
-    | decision -> Error (illegal_hook_decision ~hook_name:"before_turn_params" decision)
-  in
-  let messages =
-    match turn_params.extra_system_context with
-    | None -> messages
-    | Some text -> messages @ [ system_message text ]
-  in
-  let* messages =
-    match model_input_projection with
-    | None -> Ok messages
-    | Some project ->
-      (try
-         match project messages with
-         | Ok projected -> Ok projected
-         | Error detail -> Error (config_error ~field:"model_input_projection" detail)
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         Error
-           (internal_error
-              ("Codex runtime model input projection raised: "
-               ^ Printexc.to_string exn)))
-  in
-  let system_prompt =
-    Option.value turn_params.system_prompt_override ~default:system_prompt
-  in
-  let unsupported_parameter field value =
-    match value with
-    | None -> Ok ()
-    | Some _ ->
-      Error
-        (config_error
-           ~field
-           "codex-app-server does not yet project this turn parameter; refusing to ignore it")
-  in
-  let* () = unsupported_parameter "temperature" turn_params.temperature in
-  let* () = unsupported_parameter "thinking_budget" turn_params.thinking_budget in
-  let* () = unsupported_parameter "preserve_thinking" turn_params.preserve_thinking in
-  let* reasoning_effort =
-    match turn_params.enable_thinking, turn_params.reasoning_effort with
-    | Some false, Some Llm_provider.Reasoning_effort.None_
-    | Some false, None -> Ok (Some Llm_provider.Reasoning_effort.None_)
-    | Some false, Some _ ->
-      Error
-        (config_error
-           ~field:"reasoning_effort"
-           "enable_thinking=false conflicts with a non-none reasoning effort")
-    | Some true, Some Llm_provider.Reasoning_effort.None_ ->
-      Error
-        (config_error
-           ~field:"reasoning_effort"
-           "enable_thinking=true conflicts with reasoning effort none")
-    | (Some true | None), reasoning_effort -> Ok reasoning_effort
-  in
-  let* tools =
-    match turn_params.tool_choice with
-    | None | Some Auto -> Ok tools
-    | Some None_ -> Ok []
-    | Some (Any | Tool _) as choice ->
-      Error
-        (config_error
-           ~field:"tool_choice"
-           (Printf.sprintf
-              "Codex dynamic tools do not support forced tool choice %s"
-              (Yojson.Safe.to_string
-                 (Agent_sdk.Types.tool_choice_to_json (Option.get choice)))))
-  in
-  Ok { messages; system_prompt; tools; reasoning_effort }
-;;
-
-let tool_hook_error_to_string = function
-  | Agent_sdk.Agent_tools.Hook_execution_failed
-      { hook_name; stage; tool_name; detail; _ } ->
-    Printf.sprintf
-      "%s hook failed at %s for tool %s: %s"
-      hook_name
-      (Agent_sdk.Hooks.hook_stage_to_string stage)
-      tool_name
-      detail
-;;
-
-let record_terminal_error terminal_error detail =
-  if Option.is_none !terminal_error then terminal_error := Some detail
-;;
-
-let apply_context_injection ~terminal_error ~context ~context_injector ~tool_name
-    ~input ~content ~outcome =
-  match context_injector with
-  | None -> ()
-  | Some inject ->
-    let output = Agent_sdk.Types.tool_result_of_outcome ~content outcome in
-    (try
-       match inject ~tool_name ~input ~output with
-       | None -> ()
-       | Some (injection : Agent_sdk.Hooks.injection) ->
-         List.iter (fun (key, value) -> Agent_sdk.Context.set context key value)
-           injection.context_updates;
-         if injection.extra_messages <> []
-         then
-           record_terminal_error
-             terminal_error
-             "Codex dynamic tool context injection produced extra_messages, which cannot be projected into an active app-server turn"
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       record_terminal_error
-         terminal_error
-         ("Codex dynamic tool context injection raised after execution: "
-          ^ Printexc.to_string exn))
-;;
-
-let dynamic_tool_of_oas ~keeper_name ~turn_count ~context ~tools
-    ~(hooks : Agent_sdk.Hooks.hooks) ~event_bus ~context_injector ~terminal_error
-    (tool : Agent_sdk.Tool.t) =
-  { Runtime_codex_app_server.name = tool.schema.name
-  ; description = tool.schema.description
-  ; input_schema = Agent_sdk.Types.params_to_input_schema tool.schema.parameters
+let codex_dynamic_tool (tool : Host.dynamic_tool) :
+    Runtime_codex_app_server.dynamic_tool =
+  { name = tool.name
+  ; description = tool.description
+  ; input_schema = tool.input_schema
   ; call =
       (fun ~call_id input ->
-        let schedule : Agent_sdk.Tool_contract.schedule =
-          { planned_index = 0
-          ; batch_index = 0
-          ; batch_size = 1
-          ; execution_mode = Agent_sdk.Tool.execution_mode tool
-          }
-        in
-        let invocation =
-          Agent_sdk.Tool_contract.Invocation.create
-            ~tool_use_id:call_id
-            ~turn:turn_count
-            ~schedule
-            ~completion:(Agent_sdk.Tool.completion tool)
-        in
-        let pre_tool_use =
-          invoke_turn_hook
-            ~keeper_name
-            ~turn_count
-            ~hook_name:"pre_tool_use"
-            hooks.pre_tool_use
-            (Agent_sdk.Hooks.PreToolUse
-               { invocation
-               ; tool_name = tool.schema.name
-               ; input
-               ; accumulated_cost_usd = 0.0
-               })
-        in
-        match pre_tool_use with
-        | Block detail -> { Runtime_codex_app_server.success = false; content = detail }
-        | HookFailed { stage; detail } ->
-          let detail =
-            Printf.sprintf
-              "pre_tool_use hook failed at %s: %s"
-              (Agent_sdk.Hooks.hook_stage_to_string stage)
-              detail
-          in
-          { Runtime_codex_app_server.success = false; content = detail }
-        | (ElicitToolApproval _ | ElicitInput _) as decision ->
-          let detail =
-            Printf.sprintf
-              "Codex dynamic tool cannot settle hook decision %s without a host approval callback"
-              (Agent_sdk.Hooks.decision_kind_to_string
-                 (Agent_sdk.Hooks.classify_decision decision))
-          in
-          record_terminal_error terminal_error detail;
-          { Runtime_codex_app_server.success = false; content = detail }
-        | (AdjustParams _ | Nudge _) as decision ->
-          let detail =
-            Printf.sprintf
-              "Codex dynamic tool received illegal pre_tool_use decision %s"
-              (Agent_sdk.Hooks.decision_kind_to_string
-                 (Agent_sdk.Hooks.classify_decision decision))
-          in
-          record_terminal_error terminal_error detail;
-          { Runtime_codex_app_server.success = false; content = detail }
-        | Continue ->
-          (match
-             Agent_sdk.Agent_tools.find_and_execute_tool
-               ~context
-               ~tools
-               ~hooks
-               ~event_bus
-               ~tracer:Agent_sdk.Tracing.null
-               ~agent_name:keeper_name
-               ~invocation
-               tool.schema.name
-               input
-           with
-           | Ok result ->
-             apply_context_injection
-               ~terminal_error
-               ~context
-               ~context_injector
-               ~tool_name:result.tool_name
-               ~input:result.input
-               ~content:result.content
-               ~outcome:result.outcome;
-             { Runtime_codex_app_server.success =
-                 not (Agent_sdk.Types.tool_result_outcome_is_error result.outcome)
-             ; content = result.content
-             }
-           | Error error ->
-             let detail = tool_hook_error_to_string error in
-             (match error with
-              | Agent_sdk.Agent_tools.Hook_execution_failed
-                  { stage = (Post_tool_use | Post_tool_use_failure); _ } ->
-                record_terminal_error terminal_error detail;
-                { Runtime_codex_app_server.success = true
-                ; content = "Tool completed, but its post-execution hook failed; do not retry"
-                }
-              | Agent_sdk.Agent_tools.Hook_execution_failed _ ->
-                { Runtime_codex_app_server.success = false; content = detail })))
+        let result = tool.call ~call_id input in
+        { Runtime_codex_app_server.success = result.success
+        ; content = result.content
+        })
   }
-;;
-
-let dynamic_tools ~keeper_name ~turn_count ~tools ~hooks ~event_bus ~context_injector
-    ~context ~terminal_error =
-  match tools, context with
-  | [], _ -> Ok []
-  | _ :: _, None ->
-    Error
-      (config_error
-         ~field:"context"
-         "Codex dynamic tools require the Keeper shared context")
-  | tools, Some context ->
-    Ok
-      (List.map
-         (dynamic_tool_of_oas
-            ~keeper_name
-            ~turn_count
-            ~context
-            ~tools
-            ~hooks
-            ~event_bus
-            ~context_injector
-            ~terminal_error)
-         tools)
 ;;
 
 let codex_error_to_sdk_error = function
@@ -485,7 +145,8 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     in
     let turn_count = claim_plan.turn_count in
     let* prepared =
-      prepare_turn
+      Host.prepare_turn
+        ~runtime_label
         ~keeper_name
         ~turn_count
         ~system_prompt
@@ -517,7 +178,8 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     let* prompt =
       match goal_blocks with
       | None -> Ok goal
-      | Some blocks -> text_of_blocks ~field:"goal_blocks" blocks
+      | Some blocks ->
+        Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
     in
     let developer_instructions =
       prepared.system_prompt :: developer_messages
@@ -534,8 +196,9 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       }
     in
     let terminal_error = ref None in
-    let* dynamic_tools =
-      dynamic_tools
+    let* host_dynamic_tools =
+      Host.dynamic_tools
+        ~runtime_label
         ~keeper_name
         ~turn_count
         ~tools:prepared.tools
@@ -545,6 +208,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~context
         ~terminal_error
     in
+    let dynamic_tools = List.map codex_dynamic_tool host_dynamic_tools in
     let* () =
       match
         Runtime_codex_app_server.validate_turn
@@ -710,7 +374,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          }
        in
        let after_turn =
-         invoke_turn_hook
+         Host.invoke_turn_hook
            ~keeper_name
            ~turn_count
            ~hook_name:"after_turn"
@@ -721,11 +385,11 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          match after_turn with
          | Continue -> Ok ()
          | HookFailed { stage; detail } ->
-           Error (hook_error ~hook_name:"after_turn" ~stage detail)
-         | decision -> Error (illegal_hook_decision ~hook_name:"after_turn" decision)
+           Error (Host.hook_error ~runtime_label ~hook_name:"after_turn" ~stage detail)
+         | decision -> Error (Host.illegal_hook_decision ~runtime_label ~hook_name:"after_turn" decision)
        in
        let on_stop =
-         invoke_turn_hook
+         Host.invoke_turn_hook
            ~keeper_name
            ~turn_count
            ~hook_name:"on_stop"
@@ -736,8 +400,8 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          match on_stop with
          | Continue -> Ok ()
          | HookFailed { stage; detail } ->
-           Error (hook_error ~hook_name:"on_stop" ~stage detail)
-         | decision -> Error (illegal_hook_decision ~hook_name:"on_stop" decision)
+           Error (Host.hook_error ~runtime_label ~hook_name:"on_stop" ~stage detail)
+         | decision -> Error (Host.illegal_hook_decision ~runtime_label ~hook_name:"on_stop" decision)
        in
        recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
        let* () =

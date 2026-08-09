@@ -21,10 +21,31 @@ type fixture_step =
   | Emit of string
   | Emit_and_read of string
   | Emit_and_expect_request_id of string * string
+  | Emit_after_closing_input of string
 
-let fixture_script ?(auth_json = auth_subscription) steps =
+let fixture_script
+      ?(auth_json = auth_subscription)
+      ?(before_initialize_response = [])
+      steps
+  =
   let path = Filename.temp_file "masc-claude-code-" ".sh" in
   let output = open_out_bin path in
+  let write_step = function
+    | Emit line -> output_string output ("emit " ^ shell_quote line ^ "\n")
+    | Emit_and_read line ->
+      output_string output ("emit " ^ shell_quote line ^ "\n");
+      output_string output "IFS= read -r ignored_response\n"
+    | Emit_and_expect_request_id (line, request_id) ->
+      output_string output ("emit " ^ shell_quote line ^ "\n");
+      output_string output "IFS= read -r control_response\n";
+      output_string output
+        (Printf.sprintf
+           "printf '%%s' \"$control_response\" | grep -F '\"request_id\":\"%s\"' >/dev/null || exit 96\n"
+           request_id)
+    | Emit_after_closing_input line ->
+      output_string output "exec 0<&-\n";
+      output_string output ("emit " ^ shell_quote line ^ "\n")
+  in
   output_string output "#!/bin/sh\n";
   output_string output "set -eu\n";
   List.iter
@@ -69,32 +90,19 @@ let fixture_script ?(auth_json = auth_subscription) steps =
   output_string output
     "request_id=$(printf '%s' \"$initialize\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\n";
   output_string output "[ -n \"$request_id\" ] || exit 95\n";
+  List.iter write_step before_initialize_response;
   output_string output
     "printf '{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"%s\",\"response\":{}}}\\n' \"$request_id\"\n";
   output_string output "IFS= read -r user_message\n";
-  List.iter
-    (function
-      | Emit line ->
-        output_string output ("emit " ^ shell_quote line ^ "\n")
-      | Emit_and_read line ->
-        output_string output ("emit " ^ shell_quote line ^ "\n");
-        output_string output "IFS= read -r ignored_response\n"
-      | Emit_and_expect_request_id (line, request_id) ->
-        output_string output ("emit " ^ shell_quote line ^ "\n");
-        output_string output "IFS= read -r control_response\n";
-        output_string output
-          (Printf.sprintf
-             "printf '%%s' \"$control_response\" | grep -F '\"request_id\":\"%s\"' >/dev/null || exit 96\n"
-             request_id))
-    steps;
+  List.iter write_step steps;
   output_string output "while IFS= read -r ignored; do :; done\n";
   close_out output;
   Unix.chmod path 0o700;
   path
 ;;
 
-let with_fixture ?auth_json steps f =
-  let path = fixture_script ?auth_json steps in
+let with_fixture ?auth_json ?before_initialize_response steps f =
+  let path = fixture_script ?auth_json ?before_initialize_response steps in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
@@ -166,12 +174,35 @@ let test_non_subscription_auth_is_rejected () =
     | Ok _ -> fail "API-key Claude auth was admitted as subscription")
 ;;
 
+let test_missing_cli_is_not_reported_as_logout () =
+  let outcome =
+    Eio_main.run (fun env ->
+      let config =
+        { (Runtime_claude_code.default_config ~cwd:"/tmp") with
+          cli_path = "/definitely/missing/masc-claude-fixture"
+        }
+      in
+      Runtime_claude_code.probe_subscription
+        ~mgr:(Eio.Stdenv.process_mgr env)
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+        config)
+  in
+  match outcome with
+  | Error (Runtime_claude_code.Spawn_failed _) -> ()
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok _ -> fail "missing Claude CLI was reported as a valid login"
+;;
+
 let rate_limit_rejected =
   {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":1786356000,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
 ;;
 
 let quota_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-1","result":"not inspected","api_error_status":429,"terminal_reason":"api_error"}|}
+;;
+
+let quota_result_with_success_flag =
+  {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-quota-flag-1","result":"must not settle","api_error_status":null}|}
 ;;
 
 let test_quota_is_structurally_classified () =
@@ -184,6 +215,18 @@ let test_quota_is_structurally_classified () =
           }) -> ()
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "typed quota rejection was reported as completion")
+;;
+
+let test_rejected_rate_limit_overrides_success_flag () =
+  with_fixture [ Emit rate_limit_rejected; Emit quota_result_with_success_flag ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Quota_blocked
+          { api_error_status = None
+          ; rate_limit = Some { status = Runtime_claude_code.Rejected; _ }
+          }) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "typed quota rejection was overridden by is_error=false")
 ;;
 
 let mcp_initialize =
@@ -204,6 +247,53 @@ let mcp_list_after_notification =
 
 let mcp_call =
   {|{"type":"control_request","request_id":"mcp-call-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"masc_probe","arguments":{"marker":"from-claude"}}}}}|}
+;;
+
+let probe_tool call_count : Runtime_claude_code.dynamic_tool =
+  { name = "masc_probe"
+  ; description = "Return a fixture marker"
+  ; input_schema = `Assoc [ "type", `String "object" ]
+  ; call =
+      (fun ~call_id:_ _ ->
+        incr call_count;
+        { success = true; content = "MASC_TOOL_RESULT" })
+  }
+;;
+
+let test_tool_call_before_turn_admission_is_rejected () =
+  let call_count = ref 0 in
+  with_fixture
+    ~before_initialize_response:
+      [ Emit_and_read mcp_initialize
+      ; Emit mcp_initialized_notification
+      ; Emit_and_read mcp_call
+      ]
+    []
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ probe_tool call_count ] path with
+      | Error (Runtime_claude_code.Protocol_error { stage = "MCP tools/call"; _ }) ->
+        check int "tool effect count" 0 !call_count
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "tool call ran before durable turn admission")
+;;
+
+let test_post_effect_response_failure_requires_recovery () =
+  let call_count = ref 0 in
+  with_fixture
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_after_closing_input mcp_call
+    ]
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ probe_tool call_count ] path with
+      | Error
+          (Runtime_claude_code.Turn_transport_interrupted
+            { stage = "control success response"
+            ; tool_effect_attempted = true
+            ; _
+            }) -> check int "tool effect count" 1 !call_count
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "post-effect response failure completed the turn")
 ;;
 
 let test_dynamic_tool_callback () =
@@ -278,6 +368,7 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
     Runtime_official_client_mcp.handle_message
       ~session
       ~server_name:"masc"
+      ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
       ~tool_specs
       ~call_tool
       json
@@ -294,6 +385,7 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
       Runtime_official_client_mcp.handle_message
         ~session:fresh_session
         ~server_name:"masc"
+        ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
         ~tool_specs
         ~call_tool:guarded_call_tool
         message
@@ -327,6 +419,7 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
     Runtime_official_client_mcp.handle_message
       ~session:fresh_session
       ~server_name:"masc"
+      ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
       ~tool_specs
       ~call_tool:guarded_call_tool
       (`Assoc
@@ -423,6 +516,7 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
      Runtime_official_client_mcp.handle_message
        ~session
        ~server_name:"masc"
+       ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
        ~tool_specs
        ~call_tool
        (`Assoc
@@ -439,6 +533,7 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
       Runtime_official_client_mcp.handle_message
         ~session
         ~server_name:"masc"
+        ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
         ~tool_specs
         ~call_tool
         message
@@ -511,6 +606,7 @@ let test_shared_mcp_protocol_is_negotiated () =
     Runtime_official_client_mcp.handle_message
       ~session:(Runtime_official_client_mcp.create_session ())
       ~server_name:"masc"
+      ~tool_call_policy:Runtime_official_client_mcp.Allow_tool_calls
       ~tool_specs
       ~call_tool
       message
@@ -674,17 +770,33 @@ let () =
             "non-subscription rejected"
             `Quick
             test_non_subscription_auth_is_rejected
+        ; test_case
+            "missing CLI differs from logout"
+            `Quick
+            test_missing_cli_is_not_reported_as_logout
         ] )
     ; ( "terminal"
       , [ test_case
             "quota is structurally classified"
             `Quick
             test_quota_is_structurally_classified
+        ; test_case
+            "rejected rate limit overrides success flag"
+            `Quick
+            test_rejected_rate_limit_overrides_success_flag
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case "duplicate keys fail closed" `Quick test_duplicate_keys_fail_closed
         ] )
     ; ( "mcp"
       , [ test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
+        ; test_case
+            "pre-admission tool call is rejected"
+            `Quick
+            test_tool_call_before_turn_admission_is_rejected
+        ; test_case
+            "post-effect response failure requires recovery"
+            `Quick
+            test_post_effect_response_failure_requires_recovery
         ; test_case
             "shared bridge owns exact dispatch"
             `Quick

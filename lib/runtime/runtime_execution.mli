@@ -2,6 +2,7 @@
 
     [Agent_core] means MASC/OAS owns the model/tool/checkpoint loop.
     [Codex_app_server] means the official Codex client owns the whole turn;
+    [Claude_code] means the same for the official Claude Code client; and
     [Antigravity_cli] means the official Antigravity client owns its model and
     built-in tool loop. MASC owns admission, process lifetime, durable session
     identity, and result projection. *)
@@ -23,10 +24,17 @@ type antigravity_cli =
   ; timeout_s : float
   }
 
+type claude_code =
+  { cli_path : string
+  ; model : string option
+  ; timeout_s : float
+  }
+
 type t =
   | Agent_core of Llm_provider.Provider_config.t
   | Codex_app_server of codex_app_server
   | Antigravity_cli of antigravity_cli
+  | Claude_code of claude_code
 
 type checkpoint_owner =
   | Masc_oas

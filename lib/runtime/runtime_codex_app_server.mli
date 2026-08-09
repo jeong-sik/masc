@@ -16,6 +16,7 @@ type config =
   ; timeout_s : float
   }
 
+val default_timeout_s : float
 val default_config : unit -> config
 
 type thread_mode =

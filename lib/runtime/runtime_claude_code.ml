@@ -83,6 +83,11 @@ type error =
       }
   | Subscription_required of string
   | Unsupported_control_request of string
+  | Turn_transport_interrupted of
+      { stage : string
+      ; tool_effect_attempted : bool
+      ; detail : string
+      }
   | Turn_failed of string
   | Quota_blocked of
       { api_error_status : int option
@@ -100,6 +105,12 @@ let error_to_string = function
     "Claude Code subscription login required: " ^ detail
   | Unsupported_control_request subtype ->
     "Claude Code requested unsupported control action: " ^ subtype
+  | Turn_transport_interrupted { stage; tool_effect_attempted; detail } ->
+    Printf.sprintf
+      "Claude Code turn transport interrupted during %s (tool_effect_attempted=%b): %s"
+      stage
+      tool_effect_attempted
+      detail
   | Turn_failed detail -> "Claude Code turn failed: " ^ detail
   | Quota_blocked { api_error_status; rate_limit } ->
     let status =
@@ -127,6 +138,7 @@ let error_kind = function
   | Protocol_error _ -> "protocol_error"
   | Subscription_required _ -> "subscription_required"
   | Unsupported_control_request _ -> "unsupported_control_request"
+  | Turn_transport_interrupted _ -> "turn_transport_interrupted"
   | Turn_failed _ -> "turn_failed"
   | Quota_blocked _ -> "quota_blocked"
   | Process_exited _ -> "process_exited"
@@ -285,7 +297,10 @@ let read_subscription ~mgr ~cwd config =
     |> fun result -> Result.bind result parse_subscription
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Subscription_required (Printexc.to_string exn))
+  | Eio.Exn.Io
+      (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
+    Error (Spawn_failed (Printf.sprintf "executable %S was not found" executable))
+  | exn -> Error (Spawn_failed (Printexc.to_string exn))
 ;;
 
 let dynamic_tool_spec (tool : dynamic_tool) =
@@ -331,7 +346,40 @@ let send_control_error io ~request_id detail =
        ])
 ;;
 
-let handle_control_request io ~mcp_session ~tools ~tool_call_count fields =
+type control_phase =
+  | Before_turn_admission
+  | Turn_admitted
+
+let send_control_response
+      io
+      ~control_phase
+      ~stage
+      ~tool_effect_attempted
+      response
+  =
+  try
+    response ();
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    let detail = Printexc.to_string exn in
+    (match control_phase with
+     | Before_turn_admission -> protocol_error stage detail
+     | Turn_admitted ->
+       Error
+         (Turn_transport_interrupted
+            { stage; tool_effect_attempted; detail }))
+;;
+
+let handle_control_request
+      io
+      ~control_phase
+      ~mcp_session
+      ~tools
+      ~tool_call_count
+      fields
+  =
   let stage = "control request" in
   let* request_id = required_string stage "request_id" fields in
   let* request = required_member stage "request" fields in
@@ -343,7 +391,14 @@ let handle_control_request io ~mcp_session ~tools ~tool_call_count fields =
     if server_name <> mcp_server_name
     then
       let detail = Printf.sprintf "unknown SDK MCP server %S" server_name in
-      send_control_error io ~request_id detail;
+      let* () =
+        send_control_response
+          io
+          ~control_phase
+          ~stage:"control error response"
+          ~tool_effect_attempted:false
+          (fun () -> send_control_error io ~request_id detail)
+      in
       Error (Unsupported_control_request subtype)
     else
       let* message = required_member stage "message" request_fields in
@@ -371,6 +426,11 @@ let handle_control_request io ~mcp_session ~tools ~tool_call_count fields =
         Runtime_official_client_mcp.handle_message
           ~session:mcp_session
           ~server_name:mcp_server_name
+          ~tool_call_policy:
+            (match control_phase with
+             | Before_turn_admission ->
+               Runtime_official_client_mcp.Reject_tool_calls
+             | Turn_admitted -> Runtime_official_client_mcp.Allow_tool_calls)
           ~tool_specs
           ~call_tool
           message
@@ -381,16 +441,29 @@ let handle_control_request io ~mcp_session ~tools ~tool_call_count fields =
       (match dispatch.response with
        | None -> Ok ()
        | Some mcp_response ->
-         send_control_success
+         send_control_response
            io
-           ~request_id
-           (`Assoc [ "mcp_response", mcp_response ]);
-         Ok ())
+           ~control_phase
+           ~stage:"control success response"
+           ~tool_effect_attempted:dispatch.tool_called
+           (fun () ->
+             send_control_success
+               io
+               ~request_id
+               (`Assoc [ "mcp_response", mcp_response ])))
   | unsupported ->
-    send_control_error
-      io
-      ~request_id
-      (Printf.sprintf "MASC does not support control request %S" unsupported);
+    let* () =
+      send_control_response
+        io
+        ~control_phase
+        ~stage:"control error response"
+        ~tool_effect_attempted:false
+        (fun () ->
+          send_control_error
+            io
+            ~request_id
+            (Printf.sprintf "MASC does not support control request %S" unsupported))
+    in
     Error (Unsupported_control_request unsupported)
 ;;
 
@@ -444,7 +517,13 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id ~ig
     parse_control_response ~expected_request_id:request_id fields
   | "control_request" ->
     let* () =
-      handle_control_request io ~mcp_session ~tools ~tool_call_count fields
+      handle_control_request
+        io
+        ~control_phase:Before_turn_admission
+        ~mcp_session
+        ~tools
+        ~tool_call_count
+        fields
     in
     await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id ~ignored
   | ("system" | "rate_limit_event") when ignored < 32 ->
@@ -567,26 +646,25 @@ let parse_result ~expected_session_id ~rate_limit fields =
       | Some _ -> protocol_error stage "field \"result\" must be a string or null"
     in
     let* result = result in
-    if is_error
+    let structurally_quota_blocked =
+      Option.equal Int.equal api_error_status (Some 429)
+      || Option.exists
+           (fun (limit : rate_limit) -> limit.status = Rejected)
+           rate_limit
+    in
+    if structurally_quota_blocked
+    then Error (Quota_blocked { api_error_status; rate_limit })
+    else if is_error
     then
-      let structurally_quota_blocked =
-        Option.equal Int.equal api_error_status (Some 429)
-        || Option.exists
-             (fun (limit : rate_limit) -> limit.status = Rejected)
-             rate_limit
-      in
-      if structurally_quota_blocked
-      then Error (Quota_blocked { api_error_status; rate_limit })
-      else
-        Error
-          (Turn_failed
-             (Printf.sprintf
-                "terminal subtype=%s api_status=%s"
-                subtype
-                (Option.fold
-                   ~none:"unknown"
-                   ~some:string_of_int
-                   api_error_status)))
+      Error
+        (Turn_failed
+           (Printf.sprintf
+              "terminal subtype=%s api_status=%s"
+              subtype
+              (Option.fold
+                 ~none:"unknown"
+                 ~some:string_of_int
+                 api_error_status)))
     else if subtype <> "success"
     then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
     else Ok (turn_id, result)
@@ -602,7 +680,13 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
   match type_ with
   | "control_request" ->
     let* () =
-      handle_control_request io ~mcp_session ~tools ~tool_call_count fields
+      handle_control_request
+        io
+        ~control_phase:Turn_admitted
+        ~mcp_session
+        ~tools
+        ~tool_call_count
+        fields
     in
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
@@ -819,7 +903,20 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     invoke_state_callback ~stage:"turn starting callback" (fun () ->
       on_turn_starting ~session_id)
   in
-  io.send (user_message prompt);
+  let* () =
+    try
+      io.send (user_message prompt);
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Error
+        (Turn_transport_interrupted
+           { stage = "user message write"
+           ; tool_effect_attempted = false
+           ; detail = Printexc.to_string exn
+           })
+  in
   await_terminal
     io
     ~mcp_session
@@ -893,14 +990,19 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
             ~on_turn_started)))
 ;;
 
-let validate_config config ~session_mode ~prompt =
+let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
   else if String.trim config.cwd = "" || Filename.is_relative config.cwd
   then Error (Invalid_config "cwd must be an absolute path")
   else if not (Float.is_finite config.timeout_s) || config.timeout_s <= 0.0
   then Error (Invalid_config "timeout_s must be positive and finite")
-  else if String.trim prompt = ""
+  else Ok ()
+;;
+
+let validate_config config ~session_mode ~prompt =
+  let* () = validate_process_config config in
+  if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
   else
     match session_mode with
@@ -941,7 +1043,13 @@ let validate_turn ?(dynamic_tools = []) ?(session_mode = Start) config ~prompt =
   validate_dynamic_tools dynamic_tools
 ;;
 
+let probe_subscription ~mgr ~cwd config =
+  let* () = validate_process_config config in
+  read_subscription ~mgr ~cwd config
+;;
+
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
+    ?admitted_subscription
     ~mgr ~clock ~cwd ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
     ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) config
@@ -949,7 +1057,11 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
   let result =
     let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt in
     let* _ = reasoning_args reasoning_effort in
-    let* subscription = read_subscription ~mgr ~cwd config in
+    let* subscription =
+      match admitted_subscription with
+      | Some subscription -> Ok subscription
+      | None -> probe_subscription ~mgr ~cwd config
+    in
     let session_id =
       match session_mode with
       | Start -> Random_id.uuid_v7 ()

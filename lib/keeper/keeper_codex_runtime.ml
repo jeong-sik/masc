@@ -124,7 +124,7 @@ let recovery_failure_of_client_error = function
     Keeper_official_client_session_store.Provider_rejected
 ;;
 
-let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
+let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~event_bus ~raw_trace
     ~(config : Runtime_execution.codex_app_server) =
@@ -565,11 +565,33 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
        let original_detail = Agent_sdk.Error.to_string original_error in
        (match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
         | Ok () -> turn_result
-        | Error recovery_detail ->
-          Error
+      | Error recovery_detail ->
+        Error
             (internal_error
                (Printf.sprintf
                   "Codex turn failed and recovery state persistence also failed: original=%s recovery=%s"
-                  original_detail
-                  recovery_detail))))
+               original_detail
+               recovery_detail))))
+;;
+
+let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
+    ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
+    ~context_injector ~context ~event_bus ~raw_trace ~config =
+  Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+    run_without_lifecycle
+      ~runtime_id
+      ~keeper_name
+      ~base_path
+      ~goal
+      ~goal_blocks
+      ~system_prompt
+      ~tools
+      ~initial_messages
+      ~model_input_projection
+      ~hooks
+      ~context_injector
+      ~context
+      ~event_bus
+      ~raw_trace
+      ~config)
 ;;

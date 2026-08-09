@@ -448,7 +448,9 @@ let capabilities_for_runtime (rt : t) =
   match rt.execution with
   | Runtime_execution.Agent_core provider_config ->
     Llm_provider.Provider_config.capabilities_for_config_model provider_config
-  | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ -> None
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _ -> None
 ;;
 
 type max_context_source =
@@ -605,6 +607,7 @@ let validate_keeper_dispatch_request_caps
          | Some runtime ->
            (match runtime.execution with
             | Runtime_execution.Codex_app_server _
+            | Runtime_execution.Claude_code _
             | Runtime_execution.Antigravity_cli _ -> None
             | Runtime_execution.Agent_core provider_config ->
               (match
@@ -642,8 +645,9 @@ let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t lis
     List.filter_map
       (fun (r : t) ->
          match r.execution, capabilities_for_runtime r with
-         | (Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _), _ ->
-           None
+         | ( Runtime_execution.Codex_app_server _
+           | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _ ), _ -> None
          | Runtime_execution.Agent_core _, Some _ -> None
          | Runtime_execution.Agent_core provider_config, None ->
            let provider_label =

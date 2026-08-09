@@ -12,6 +12,7 @@ open Server_routes_http_keeper_stream
 include Server_routes_http_routes_dashboard_setup
 
 module Keeper_chat_pending = Server_dashboard_http_keeper_chat_pending
+module Keeper_chat_operations = Server_dashboard_http_keeper_chat_operations
 module Keeper_event_queue_operator =
   Server_dashboard_http_keeper_event_queue_operator
 module Official_client_session = Server_dashboard_official_client_session
@@ -1758,6 +1759,15 @@ let add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_chat_operations.get_route (Http.Request.path request) with
+       | Some route ->
+         with_token_permission_auth
+           ~permission:Masc_domain.CanAdmin
+           (fun state _agent_name req reqd ->
+             Keeper_chat_operations.handle_get state req reqd route)
+           request
+           reqd
+       | None ->
        match
          Keeper_event_queue_operator.pending_get_route
            (Http.Request.path request)
@@ -1798,6 +1808,21 @@ let add_routes ~sw ~clock router =
 
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_chat_operations.mutation_route (Http.Request.path request) with
+       | Some route ->
+         with_token_permission_auth
+           ~permission:Masc_domain.CanAdmin
+           (fun state _agent_name req reqd ->
+             Http.Request.read_body_async reqd (fun body_str ->
+               Keeper_chat_operations.handle_mutation
+                 state
+                 req
+                 reqd
+                 route
+                 body_str))
+           request
+           reqd
+       | None ->
        match Keeper_event_queue_operator.route (Http.Request.path request) with
        | Some keeper_name ->
          with_token_permission_auth

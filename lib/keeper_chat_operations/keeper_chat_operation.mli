@@ -45,6 +45,7 @@ type t =
 
 val state_to_string : state -> string
 val is_terminal : state -> bool
+val to_json : t -> Yojson.Safe.t
 val canonical_json_string : Yojson.Safe.t -> (string, string) result
 val admission_digest : source:Yojson.Safe.t -> input:Yojson.Safe.t -> (string, string) result
 val execution_digest : Yojson.Safe.t -> (string, string) result

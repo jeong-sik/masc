@@ -72,6 +72,44 @@ let is_terminal = function
   | Queued | Running _ -> false
 ;;
 
+let to_json operation =
+  let state_fields =
+    match operation.state with
+    | Queued -> [ "state", `String "Queued" ]
+    | Running { started_at } ->
+      [ "state", `String "Running"; "started_at", `Float started_at ]
+    | Succeeded { completed_at; outcome_ref } ->
+      [ "state", `String "Succeeded"
+      ; "completed_at", `Float completed_at
+      ; "outcome_ref", `String outcome_ref
+      ]
+    | Failed { completed_at; failure = { kind; detail; outcome_ref } } ->
+      [ "state", `String "Failed"
+      ; "completed_at", `Float completed_at
+      ; "failure_kind", `String kind
+      ; "failure_detail", `String detail
+      ; ( "outcome_ref"
+        , match outcome_ref with
+          | None -> `Null
+          | Some value -> `String value )
+      ]
+    | Cancelled { completed_at } ->
+      [ "state", `String "Cancelled"; "completed_at", `Float completed_at ]
+  in
+  `Assoc
+    ([ "schema", `String "masc.keeper_chat_operation.v1"
+     ; "operation_id", `String (Operation_id.to_string operation.operation_id)
+     ; "sequence", `String (Int64.to_string operation.sequence)
+     ; "created_at", `Float operation.created_at
+     ; "source", operation.source
+     ; ( "input"
+       , match operation.input with
+         | None -> `Null
+         | Some input -> input )
+     ]
+     @ state_fields)
+;;
+
 let validate_timestamp ~field value =
   if Float.is_finite value && value >= 0.0
   then Ok ()

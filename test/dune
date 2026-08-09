@@ -1827,6 +1827,7 @@
 
 (include stanzas/test_keeper_turn_admission.inc)
 (include stanzas/test_keeper_owner.inc)
+(include stanzas/test_keeper_chat_operation_http.inc)
 
 
 

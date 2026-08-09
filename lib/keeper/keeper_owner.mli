@@ -27,6 +27,13 @@ type operation_acceptance =
   ; queued_count : int
   }
 
+type operation_error_kind =
+  | Invalid_operation_input
+  | Unknown_operation
+  | Operation_not_queued
+  | Operation_idempotency_conflict
+  | Operation_store_unavailable
+
 type error =
   | Reducer_rejected of Keeper_owner_reducer.error
   | Operation_rejected of Keeper_chat_operation_store.error
@@ -115,6 +122,7 @@ val begin_stopping : t -> (unit, error) result
 (** Reject future external commands. *)
 
 val error_to_string : error -> string
+val operation_error_kind : Keeper_chat_operation_store.error -> operation_error_kind
 
 module For_testing : sig
   val mailbox_depth : t -> int

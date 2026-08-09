@@ -385,6 +385,43 @@ let commit_turn_runtime ~base_path ~keeper_name ~before ~after =
       (Keeper_owner_reducer.Commit_turn_runtime delta)
 ;;
 
+let with_owner_command ~base_path ~keeper_name f =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    f owner |> Result.map_error (fun error -> Command_rejected error)
+;;
+
+let exact_operation ~base_path ~keeper_name operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.exact_operation owner operation_id)
+;;
+
+let submit_operation ~base_path ~keeper_name ~operation_id ~source ~input =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.submit_operation owner ~operation_id ~source ~input)
+;;
+
+let list_queued_operations ~base_path ~keeper_name ~after_sequence ~limit =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.list_queued_operations owner ~after_sequence ~limit)
+;;
+
+let edit_queued_operation ~base_path ~keeper_name ~operation_id ~input =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.edit_queued_operation owner ~operation_id ~input)
+;;
+
+let move_queued_operation_to_end ~base_path ~keeper_name operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.move_queued_operation_to_end owner operation_id)
+;;
+
+let cancel_queued_operation ~base_path ~keeper_name operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.cancel_queued_operation owner operation_id)
+;;
+
 let create_meta ~base_path meta =
   match find_pool base_path with
   | Error error -> Error (Command_lookup_failed error)

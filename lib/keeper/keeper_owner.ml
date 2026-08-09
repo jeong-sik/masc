@@ -21,6 +21,13 @@ type operation_acceptance =
   ; queued_count : int
   }
 
+type operation_error_kind =
+  | Invalid_operation_input
+  | Unknown_operation
+  | Operation_not_queued
+  | Operation_idempotency_conflict
+  | Operation_store_unavailable
+
 type error =
   | Reducer_rejected of Keeper_owner_reducer.error
   | Operation_rejected of Chat_operation_store.error
@@ -91,6 +98,14 @@ let error_to_string = function
   | Store_unavailable detail -> "keeper owner store unavailable: " ^ detail
   | Owner_stopping -> "keeper owner is stopping"
   | Owner_closed -> "keeper owner is closed"
+;;
+
+let operation_error_kind = function
+  | Chat_operation_store.Invalid_input _ -> Invalid_operation_input
+  | Unknown_operation _ -> Unknown_operation
+  | Not_queued _ | Not_running _ -> Operation_not_queued
+  | Idempotency_conflict _ -> Operation_idempotency_conflict
+  | Store_unavailable _ | Integrity_error _ -> Operation_store_unavailable
 ;;
 
 let projection t = Atomic.get t.projection

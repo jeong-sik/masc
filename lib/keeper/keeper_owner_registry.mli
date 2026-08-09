@@ -68,6 +68,46 @@ val create_meta
     the closed [Create] command.  A failed commit leaves the empty actor in
     place so same-name retries remain mailbox-linearized. *)
 
+val exact_operation
+  :  base_path:string
+  -> keeper_name:string
+  -> Keeper_chat_operation.Operation_id.t
+  -> (Keeper_chat_operation.t option, command_error) result
+
+val submit_operation
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_chat_operation.Operation_id.t
+  -> source:Yojson.Safe.t
+  -> input:Yojson.Safe.t
+  -> (Keeper_owner.operation_acceptance, command_error) result
+
+val list_queued_operations
+  :  base_path:string
+  -> keeper_name:string
+  -> after_sequence:int64 option
+  -> limit:int
+  -> (Keeper_chat_operation.t list, command_error) result
+
+val edit_queued_operation
+  :  base_path:string
+  -> keeper_name:string
+  -> operation_id:Keeper_chat_operation.Operation_id.t
+  -> input:Yojson.Safe.t
+  -> (Keeper_chat_operation.t, command_error) result
+
+val move_queued_operation_to_end
+  :  base_path:string
+  -> keeper_name:string
+  -> Keeper_chat_operation.Operation_id.t
+  -> (Keeper_chat_operation.t, command_error) result
+
+val cancel_queued_operation
+  :  base_path:string
+  -> keeper_name:string
+  -> Keeper_chat_operation.Operation_id.t
+  -> (Keeper_chat_operation.t, command_error) result
+
 val all_projections
   :  base_path:string
   -> (Keeper_owner_reducer.projection list, lookup_error) result

@@ -56,6 +56,11 @@ let reject_unknown_fields ~stage ~allowed fields =
   | Some (name, _) -> error stage (Printf.sprintf "unknown field %S" name)
 ;;
 
+let parse_message stage raw_message =
+  try Ok (Yojson.Safe.from_string raw_message) with
+  | Yojson.Json_error detail -> error stage ("invalid JSON: " ^ detail)
+;;
+
 let assoc_at stage = function
   | `Assoc fields -> Ok fields
   | _ -> error stage "expected an object"
@@ -155,8 +160,9 @@ let tools_call ~id ~params ~call_tool =
     Ok { response = Some (tool_result_json ~id result); tool_called = true }
 ;;
 
-let handle_message ~server_name ~tool_specs ~call_tool message =
+let handle_message ~server_name ~tool_specs ~call_tool raw_message =
   let stage = "MCP message" in
+  let* message = parse_message stage raw_message in
   let* () = validate_message_value ~stage ~path:"$" message in
   let* fields = assoc_at stage message in
   let* () =

@@ -27,5 +27,5 @@ val handle_message :
      call_id:string ->
      arguments:Yojson.Safe.t ->
      tool_result option) ->
-  Yojson.Safe.t ->
+  string ->
   (dispatch, error) result

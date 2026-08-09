@@ -276,7 +276,7 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
       ~server_name:"masc"
       ~tool_specs
       ~call_tool
-      json
+      (Yojson.Safe.to_string json)
     |> Result.get_ok
   in
   let list =
@@ -324,27 +324,24 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
        ~server_name:"masc"
        ~tool_specs
        ~call_tool
-       (`Assoc
-          [ "jsonrpc", `String "2.0"
-          ; "id", `Bool true
-          ; "method", `String "tools/list"
-          ])
+       {|{"jsonrpc":"2.0","id":true,"method":"tools/list"}|}
    with
    | Error { stage = "MCP message"; _ } -> ()
    | Error _ -> fail "invalid request id had the wrong error stage"
    | Ok _ -> fail "boolean JSON-RPC request id was admitted");
-  let rejects label json =
+  let rejects_raw label raw_message =
     match
       Runtime_official_client_mcp.handle_message
         ~server_name:"masc"
         ~tool_specs
         ~call_tool
-        json
+        raw_message
     with
     | Error { stage = "MCP message"; _ } -> ()
     | Error _ -> failf "%s had the wrong error stage" label
     | Ok _ -> failf "%s was admitted" label
   in
+  let rejects label json = rejects_raw label (Yojson.Safe.to_string json) in
   rejects
     "explicit null notification id"
     (`Assoc
@@ -361,20 +358,17 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
        ; "method", `String "tools/list"
        ; "params", `Null
        ]);
-  rejects
+  rejects_raw
     "duplicate method"
-    (`Assoc
-       [ "jsonrpc", `String "2.0"
-       ; "id", `Int 3
-       ; "method", `String "tools/list"
-       ; "method", `String "tools/call"
-       ; "params", `Assoc []
-       ]);
+    {|{"jsonrpc":"2.0","id":3,"method":"tools/list","method":"tools/call","params":{}}|};
+  rejects_raw
+    "nested duplicate argument"
+    {|{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"missing","arguments":{"score":1,"score":2}}}|};
   rejects
     "unknown top-level field"
     (`Assoc
        [ "jsonrpc", `String "2.0"
-       ; "id", `Int 4
+       ; "id", `Int 5
        ; "method", `String "tools/list"
        ; "params", `Assoc []
        ; "fallback", `Bool true
@@ -383,7 +377,7 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
     "non-finite nested value"
     (`Assoc
        [ "jsonrpc", `String "2.0"
-       ; "id", `Int 5
+       ; "id", `Int 6
        ; "method", `String "tools/call"
        ; ( "params"
          , `Assoc
@@ -391,6 +385,8 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
              ; "arguments", `Assoc [ "score", `Float Float.nan ]
              ] )
        ])
+  ;
+  rejects_raw "malformed JSON" {|{"jsonrpc":"2.0","id":7|}
 ;;
 
 let test_malformed_json_fails_closed () =

@@ -629,10 +629,27 @@ let test_root_inventory_isolates_invalid_owner_snapshots () =
        List.iter
          (fun keeper_name ->
             match Owner_registry.get ~base_path ~keeper_name with
-            | Error (Owner_registry.Owner_not_found _) -> ()
+            | Error (Owner_registry.Owner_unavailable _) -> ()
             | Error error -> fail (Owner_registry.lookup_error_to_string error)
             | Ok _ -> fail ("invalid owner started: " ^ keeper_name))
-         [ "inventory-corrupt"; "inventory-path-name"; "inventory-payload-name" ];
+         [ "inventory-corrupt"; "inventory-path-name" ];
+       (match
+          Owner_registry.get ~base_path ~keeper_name:"inventory-payload-name"
+        with
+        | Error (Owner_registry.Owner_not_found _) -> ()
+        | Error error -> fail (Owner_registry.lookup_error_to_string error)
+        | Ok _ -> fail "payload-only identity unexpectedly gained an owner");
+       (match
+          Owner_registry.create_meta
+            ~base_path
+            (make_meta "inventory-corrupt")
+        with
+        | Error
+            (Owner_registry.Command_lookup_failed
+              (Owner_registry.Owner_unavailable _)) ->
+          ()
+        | Error error -> fail (Owner_registry.command_error_to_string error)
+        | Ok _ -> fail "corrupt durable owner was overwritten as a new Keeper");
        check int
          "invalid snapshots do not split owner identity"
          1

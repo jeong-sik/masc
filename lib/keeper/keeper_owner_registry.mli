@@ -13,6 +13,10 @@ type install_error =
 type lookup_error =
   | Inventory_not_installed of string
   | Owner_not_found of string
+  | Owner_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
   | Owner_initialization_failed of Keeper_owner.error
   | Inventory_stopping
 
@@ -29,9 +33,11 @@ val install_from_store
   -> (int, install_error) result
 (** Load each valid persisted Keeper independently and start exactly one owner
     actor for it under [sw]. A malformed, missing, or path-identity-mismatched
-    snapshot is reported and excluded without preventing other owners from
-    starting. Failure to enumerate the inventory still fails installation.
-    Returns the installed owner count. *)
+    snapshot is reported and fenced under its exact Keeper name without
+    preventing other owners from starting. The affected name cannot be read,
+    created, or mutated until process restart re-audits durable state. Failure
+    to enumerate the inventory still fails installation. Returns the installed
+    owner count. *)
 
 val get
   :  base_path:string

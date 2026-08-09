@@ -8,6 +8,10 @@ type install_error =
 type lookup_error =
   | Inventory_not_installed of string
   | Owner_not_found of string
+  | Owner_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
   | Owner_initialization_failed of Keeper_owner.error
   | Inventory_stopping
 
@@ -22,6 +26,7 @@ type pool =
   { config : Workspace.config
   ; sw : Eio.Switch.t
   ; owners : (string, Keeper_owner.t) Hashtbl.t
+  ; unavailable : (string, string) Hashtbl.t
   ; owners_mu : Eio.Mutex.t
   ; owner_handles : Keeper_owner.t list Atomic.t
   ; stopping : bool Atomic.t
@@ -51,6 +56,8 @@ let lookup_error_to_string = function
     Printf.sprintf "Keeper owner inventory is not installed for BasePath %s" base_path
   | Owner_not_found keeper_name ->
     Printf.sprintf "Keeper owner not found: %s" keeper_name
+  | Owner_unavailable { keeper_name; detail } ->
+    Printf.sprintf "Keeper owner unavailable: %s: %s" keeper_name detail
   | Owner_initialization_failed error ->
     "Keeper owner initialization failed: " ^ Keeper_owner.error_to_string error
   | Inventory_stopping -> "Keeper owner inventory is stopping"
@@ -80,27 +87,29 @@ let load_all config =
         keeper_name
         detail
     in
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
+    let rec loop metas unavailable = function
+      | [] -> Ok (List.rev metas, List.rev unavailable)
       | keeper_name :: rest ->
         (match Keeper_meta_store.read_meta config keeper_name with
          | Error detail ->
            reject keeper_name detail;
-           loop acc rest
+           loop metas ((keeper_name, detail) :: unavailable) rest
          | Ok None ->
-           reject keeper_name "metadata disappeared during owner inventory load";
-           loop acc rest
+           let detail = "metadata disappeared during owner inventory load" in
+           reject keeper_name detail;
+           loop metas ((keeper_name, detail) :: unavailable) rest
          | Ok (Some meta) when not (String.equal keeper_name meta.name) ->
-           reject
-             keeper_name
-             (Printf.sprintf
-                "metadata identity mismatch: path owner=%s payload owner=%s"
-                keeper_name
-                meta.name);
-           loop acc rest
-         | Ok (Some meta) -> loop (meta :: acc) rest)
+           let detail =
+             Printf.sprintf
+               "metadata identity mismatch: path owner=%s payload owner=%s"
+               keeper_name
+               meta.name
+           in
+           reject keeper_name detail;
+           loop metas ((keeper_name, detail) :: unavailable) rest
+         | Ok (Some meta) -> loop (meta :: metas) unavailable rest)
     in
-    loop [] names
+    loop [] [] names
 ;;
 
 let store_for pool keeper_name : Keeper_owner.store =
@@ -177,30 +186,34 @@ let ensure_empty_in_pool pool keeper_name =
       match Hashtbl.find_opt pool.owners keeper_name with
       | Some owner -> Ok owner
       | None ->
-        (match
-           Keeper_owner.start
-             ~sw:pool.sw
-             ~store:(store_for pool keeper_name)
-             ~keeper_name
-             ~initial_meta:None
-         with
-         | Error error -> Error (Owner_initialization_failed error)
-         | Ok owner ->
-           Hashtbl.add pool.owners keeper_name owner;
-           install_owner_projection pool keeper_name owner;
-           refresh_owner_handles pool;
-           Ok owner))
+        (match Hashtbl.find_opt pool.unavailable keeper_name with
+         | Some detail -> Error (Owner_unavailable { keeper_name; detail })
+         | None ->
+           (match
+              Keeper_owner.start
+                ~sw:pool.sw
+                ~store:(store_for pool keeper_name)
+                ~keeper_name
+                ~initial_meta:None
+            with
+            | Error error -> Error (Owner_initialization_failed error)
+            | Ok owner ->
+              Hashtbl.add pool.owners keeper_name owner;
+              install_owner_projection pool keeper_name owner;
+              refresh_owner_handles pool;
+              Ok owner)))
 ;;
 
 let install_from_store ~sw config =
   let base_path = pool_key config.Workspace.base_path in
   match load_all config with
   | Error _ as error -> error
-  | Ok metas ->
+  | Ok (metas, unavailable) ->
     let pool =
       { config
       ; sw
       ; owners = Hashtbl.create (max 16 (List.length metas))
+      ; unavailable = Hashtbl.of_seq (List.to_seq unavailable)
       ; owners_mu = Eio.Mutex.create ()
       ; owner_handles = Atomic.make []
       ; stopping = Atomic.make false
@@ -235,7 +248,7 @@ let install_from_store ~sw config =
                   ; detail = "root switch stopped during owner installation"
                   })
            | Error
-               (Inventory_not_installed _ | Owner_not_found _
+               (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
                | Owner_initialization_failed _) ->
              Error
                (Inventory_load_failed
@@ -262,7 +275,10 @@ let get ~base_path ~keeper_name =
     Eio.Mutex.use_ro pool.owners_mu (fun () ->
       match Hashtbl.find_opt pool.owners keeper_name with
       | Some owner -> Ok owner
-      | None -> Error (Owner_not_found keeper_name))
+      | None ->
+        (match Hashtbl.find_opt pool.unavailable keeper_name with
+         | Some detail -> Error (Owner_unavailable { keeper_name; detail })
+         | None -> Error (Owner_not_found keeper_name)))
 ;;
 
 let refresh_registry_projection ?lifecycle_token entry meta =

@@ -154,32 +154,40 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
             "failed to reseed keeper identity for %s: invalid trace_id %s (%s)"
             meta.name new_trace_id_raw err)
     in
+    let* updated_meta =
+      match
+        Keeper_owner_registry.apply_meta
+          ~base_path:config.base_path
+          ~keeper_name:meta.name
+          (Keeper_owner_reducer.Handoff_identity
+             { keeper_id = meta.keeper_id
+             ; agent_name = expected_agent_name
+             ; trace_id = new_trace_id
+             ; trace_history =
+                 Json_util.dedupe_keep_order
+                   (previous_trace_id :: meta.runtime.trace_history)
+             ; generation = meta.runtime.nonce + 1
+             ; updated_at = Keeper_meta_contract.now_iso ()
+             })
+      with
+      | Ok (Some updated_meta) -> Ok updated_meta
+      | Ok None ->
+        Error
+          (Printf.sprintf
+             "failed to reseed keeper identity for %s: owner metadata missing"
+             meta.name)
+      | Error error ->
+        Error
+          (Printf.sprintf
+             "failed to persist reseeded keeper identity for %s: %s"
+             meta.name
+             (Keeper_owner_registry.command_error_to_string error))
+    in
     let base_dir = Keeper_types_profile.session_base_dir config in
-    let _session =
-      Keeper_context_runtime.create_session ~session_id:new_trace_id_raw ~base_dir
-    in
-    let updated_meta =
-      { meta with
-        agent_name = expected_agent_name;
-        updated_at = Keeper_meta_contract.now_iso ();
-        runtime =
-          { meta.runtime with
-            trace_id = new_trace_id;
-            trace_history =
-              Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
-            nonce = meta.runtime.nonce + 1;
-          };
-      }
-    in
-    let* () =
-      Keeper_meta_store.write_meta_with_merge
-        ~merge:Keeper_meta_merge.monotonic_usage_counters config updated_meta
-      |> Result.map_error Keeper_meta_store.write_meta_error_to_string
-      |> Result.map_error (fun err ->
-          Printf.sprintf
-            "failed to persist reseeded keeper identity for %s: %s"
-            meta.name err)
-    in
+    ignore
+      (Keeper_context_runtime.create_session
+         ~session_id:new_trace_id_raw
+         ~base_dir);
     Ok
       ( updated_meta,
         Some

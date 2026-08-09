@@ -142,8 +142,21 @@ let receipt_matches_request ~keeper_name request receipt =
 ;;
 
 let read_meta config keeper_name =
-  Keeper_meta_store.read_meta config keeper_name
-  |> Result.map_error (fun detail -> Durable_meta_read_failed detail)
+  match
+    Keeper_owner_registry.get
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+  with
+  | Error error ->
+    Error
+      (Durable_meta_read_failed
+         (Keeper_owner_registry.lookup_error_to_string error))
+  | Ok owner ->
+    (match Keeper_owner.exact_projection owner with
+     | Ok projection -> Ok projection.meta
+     | Error error ->
+       Error
+         (Durable_meta_read_failed (Keeper_owner.error_to_string error)))
 ;;
 
 let validate_identity (receipt : Keeper_paused_work_disposition_receipt.t)
@@ -248,34 +261,34 @@ let project_receipt token config (receipt : Keeper_paused_work_disposition_recei
   let* committed =
     if current.paused
     then
-      let* paused = paused_meta receipt current in
-      let candidate =
-        { (Keeper_meta_contract.mark_resumed paused) with
-          updated_at = Keeper_meta_contract.now_iso ()
-        }
+      let* _paused = paused_meta receipt current in
+      let* committed =
+        match
+          Keeper_owner_registry.apply_meta
+            ~lifecycle_token:token
+            ~base_path:config.base_path
+            ~keeper_name:receipt.keeper_name
+            (Keeper_owner_reducer.Resume
+               { updated_at = Keeper_meta_contract.now_iso () })
+        with
+        | Ok (Some committed) -> Ok committed
+        | Ok None -> Error Durable_meta_missing
+        | Error error ->
+          Error
+            (Projection_failed
+               { stage = Durable_meta
+               ; detail = Keeper_owner_registry.command_error_to_string error
+               })
       in
-      let* () =
-        Keeper_meta_store.write_meta_with_merge_for_lifecycle
-          token
-          ~merge:Keeper_meta_merge.monotonic_usage_counters
-          config
-          candidate
-        |> Result.map_error (fun detail ->
-          Projection_failed { stage = Durable_meta; detail })
-      in
-      (match read_meta config receipt.keeper_name with
-       | Error _ as error -> error
-       | Ok None -> Error Durable_meta_missing
-       | Ok (Some committed) ->
-         let* () = validate_identity receipt committed in
-         if committed.paused
-         then
-           Error
-             (Projection_failed
-                { stage = Durable_meta
-                ; detail = "durable pause bit remained set after commit"
-                })
-         else Ok committed)
+      let* () = validate_identity receipt committed in
+      if committed.paused
+      then
+        Error
+          (Projection_failed
+             { stage = Durable_meta
+             ; detail = "durable pause bit remained set after commit"
+             })
+      else Ok committed
     else Ok current
   in
   match entry with

@@ -34,6 +34,7 @@ type compaction_result =
 type profile_update =
   { instructions : string
   ; sandbox_profile : Keeper_types_profile.sandbox_profile
+  ; sandbox_image : string option
   ; network_mode : Keeper_types_profile.network_mode
   ; allowed_paths : string list
   ; mention_targets : string list
@@ -44,6 +45,7 @@ type profile_update =
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
   ; always_allow : bool option
+  ; oas_env : (string * string) list
   ; updated_at : string
   }
 
@@ -272,6 +274,7 @@ let apply_existing (state : state) meta command =
          { meta with
            instructions = update.instructions
          ; sandbox_profile = update.sandbox_profile
+         ; sandbox_image = update.sandbox_image
          ; network_mode = update.network_mode
          ; allowed_paths = update.allowed_paths
          ; mention_targets = update.mention_targets
@@ -282,6 +285,7 @@ let apply_existing (state : state) meta command =
          ; telemetry_feedback_enabled = update.telemetry_feedback_enabled
          ; telemetry_feedback_window_hours = update.telemetry_feedback_window_hours
          ; always_allow = update.always_allow
+         ; oas_env = update.oas_env
          ; updated_at = update.updated_at
          })
   | Handoff_identity handoff ->

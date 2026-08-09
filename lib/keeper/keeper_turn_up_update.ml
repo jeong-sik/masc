@@ -364,6 +364,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  (Keeper_owner_reducer.Update_profile
                     { instructions = updated.instructions
                     ; sandbox_profile = updated.sandbox_profile
+                    ; sandbox_image = updated.sandbox_image
                     ; network_mode = updated.network_mode
                     ; allowed_paths = updated.allowed_paths
                     ; mention_targets = updated.mention_targets
@@ -375,6 +376,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                     ; telemetry_feedback_window_hours =
                         updated.telemetry_feedback_window_hours
                     ; always_allow = updated.always_allow
+                    ; oas_env = updated.oas_env
                     ; updated_at = updated.updated_at
                     })
              with

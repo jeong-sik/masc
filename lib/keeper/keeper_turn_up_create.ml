@@ -13,14 +13,11 @@ open Keeper_execution
 open Keeper_turn_up_args
 
 
-(* #9749: bootstrap can race a heartbeat/supervisor meta write after
-   crash recovery. Retry on CAS conflict while keeping heartbeat-owned
-   cursors from disk. *)
 let write_initial_meta config meta =
-  write_meta_with_merge
-    ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-    config meta
-  |> Result.map_error Keeper_meta_store.write_meta_error_to_string
+  match Keeper_owner_registry.create_meta ~base_path:config.Workspace.base_path meta with
+  | Ok (Some _) -> Ok ()
+  | Ok None -> Error "Keeper owner removed metadata during create"
+  | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
 
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;

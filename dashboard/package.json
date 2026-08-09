@@ -18,6 +18,7 @@
     "test:serial": "pnpm test",
     "test:e2e:keeper-lane": "../scripts/harness_dashboard_keeper_lane_timeline_e2e.sh",
     "test:e2e:queued-stream": "../scripts/harness_dashboard_keeper_queued_stream_e2e.sh",
+    "test:e2e:official-client-session": "../scripts/harness_dashboard_official_client_session_e2e.sh",
     "test:watch": "vitest",
     "tokens:build": "tsx design-system/tokens/build.ts",
     "tokens:check": "node design-system/tokens/scripts/check-equivalence.mjs"

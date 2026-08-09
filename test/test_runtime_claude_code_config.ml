@@ -49,7 +49,8 @@ let test_materializes_official_client_owner () =
          config.model;
        check (float 0.001) "timeout" 300.0 config.timeout_s
      | Runtime_execution.Agent_core _
-     | Runtime_execution.Codex_app_server _ ->
+     | Runtime_execution.Codex_app_server _
+     | Runtime_execution.Antigravity_cli _ ->
        fail "claude-code was materialized as the wrong execution owner")
 ;;
 

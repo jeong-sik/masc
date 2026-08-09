@@ -592,5 +592,6 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       ~context_injector
       ~context
       ~event_bus
+      ~raw_trace:None
       ~config)
 ;;

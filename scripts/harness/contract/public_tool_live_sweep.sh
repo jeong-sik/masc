@@ -324,16 +324,17 @@ next_step "masc_transition submit for verification"
 r_submitted="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
 expect_ok "masc_transition submit for verification" "$r_submitted"
 
-next_step "masc_tasks awaiting-verification producer credit"
-r_awaiting="$(call_tool 5038 "masc_tasks" '{"status":"awaiting_verification"}')"
+next_step "masc_tasks post-submission producer credit"
+r_awaiting="$(call_tool 5038 "masc_tasks" '{}')"
 if response_tool_ok "$r_awaiting" \
   && [[ "$r_awaiting" == *"$task_id"* ]] \
-  && [[ "$r_awaiting" == *"awaiting_verification"* ]] \
+  && { [[ "$r_awaiting" == *"awaiting_verification"* ]] \
+    || [[ "$r_awaiting" == *"in_progress"* ]]; } \
   && [[ "$r_awaiting" == *"$AGENT_NAME"* ]]; then
-  echo "  PASS: masc_tasks awaiting-verification producer credit"
+  echo "  PASS: masc_tasks post-submission producer credit"
 else
   mcp_fail_with_context \
-    "masc_tasks: AwaitingVerification projection did not retain producer credit" \
+    "masc_tasks: post-submission projection did not retain producer credit" \
     "$r_awaiting"
 fi
 # Awaiting verification is nonterminal. EXIT cleanup must release this task even

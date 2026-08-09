@@ -23,8 +23,15 @@ open Keeper_agent_prompt_metrics
    prompt was accepted, an 800 KB prompt was refused with
    {"code":"1261","message":"Prompt exceeds max length"}, and 300 KB of
    poorly-tokenising content was refused. 64 KB of history on top of the
-   ~41 KB remainder of the bundle stays well below the nearest refusal. *)
-let gate_history_budget_bytes = 64 * 1024
+   ~41 KB remainder of the bundle stays well below the nearest refusal.
+
+   2026-08-09: that "~41 KB remainder" was [completed_tool_calls], which this
+   fix never bounded, and it grew to 791,432 B of an 860,589 B bundle. The
+   judge slot refused it with the same code 1261 quoted above and 45 of 52
+   hitl_auto_judge runs failed. The budget now lives in
+   [Keeper_gate_causal_context] and both axes read it, so the premise this
+   comment rests on cannot decay on one axis while the other holds. *)
+let gate_history_budget_bytes = Keeper_gate_causal_context.evidence_budget_bytes
 
 let tool_use_ids_of_message (message : Agent_core.Types.message) =
   List.filter_map

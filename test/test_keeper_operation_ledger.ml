@@ -66,12 +66,14 @@ let test_strict_identifiers () =
   let left =
     Id.Operation_id.for_keeper_message
       ~causing_operation:parent
+      ~tool_call_id:"call-1"
       ~ordinal:1
       ~target_keeper:"ab"
   in
   let right =
     Id.Operation_id.for_keeper_message
       ~causing_operation:parent
+      ~tool_call_id:"call-1"
       ~ordinal:11
       ~target_keeper:"b"
   in
@@ -79,6 +81,15 @@ let test_strict_identifiers () =
     "framed identity derivation"
     false
     (Id.Operation_id.equal left right)
+  ;
+  let another_call =
+    Id.Operation_id.for_keeper_message
+      ~causing_operation:parent
+      ~tool_call_id:"call-2"
+      ~ordinal:1
+      ~target_keeper:"ab"
+  in
+  check bool "tool call identity participates in dedupe" false (Id.Operation_id.equal left another_call)
 ;;
 
 let test_canonical_json_rejections () =
@@ -245,6 +256,17 @@ let test_ledger_replay_fifo_and_terminal_immutability () =
   (match settled.state with
    | Store.Settled -> ()
    | _ -> fail "Running operation did not settle");
+  let raw_db =
+    Sqlite3.db_open
+      (Filename.concat base_path ".masc/keepers/sangsu/operations.sqlite3")
+  in
+  let direct_update =
+    Sqlite3.exec
+      raw_db
+      "UPDATE operations SET request_digest = lower(hex(randomblob(32))) WHERE state = 'settled'"
+  in
+  ignore (Sqlite3.db_close raw_db : bool);
+  check bool "SQL trigger protects terminal row" true (direct_update <> Sqlite3.Rc.OK);
   let conflicting_outcome = put_outcome blobs "different" in
   (match
      Store.settle

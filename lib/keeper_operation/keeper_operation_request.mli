@@ -21,20 +21,22 @@ type kind =
   | Autonomous
 
 module Source_ref : sig
-  type connector =
-    | Dashboard
-    | Discord
-    | Slack
-
   type t =
     | Operator_message of { request_id : string }
-    | Connector_message of
-        { connector : connector
+    | Discord_message of
+        { guild_id : string
+        ; channel_id : string
         ; message_id : string
+        }
+    | Slack_message of
+        { team_id : string
+        ; channel_id : string
+        ; message_ts : string
         }
     | Keeper_message of
         { keeper_name : string
         ; causing_operation_id : Keeper_operation_id.Operation_id.t
+        ; tool_call_id : string
         ; ordinal : int
         }
     | Event of { event_id : string }

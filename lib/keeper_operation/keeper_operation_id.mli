@@ -15,6 +15,7 @@ module Operation_id : sig
 
   val for_keeper_message
     :  causing_operation:t
+    -> tool_call_id:string
     -> ordinal:int
     -> target_keeper:string
     -> t

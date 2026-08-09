@@ -148,11 +148,16 @@ let tool_error_class_to_yojson = function
 
 let tool_call_result_to_yojson = function
   | Executed (Ok { content; _meta }) ->
+    let metadata =
+      match _meta with
+      | None -> `Null
+      | Some value -> value
+    in
     `Assoc
       [ "kind", `String "executed"
       ; "outcome", `String "succeeded"
       ; "content", `String content
-      ; "metadata", Option.value ~default:`Null _meta
+      ; "metadata", metadata
       ]
   | Executed (Error { message; recoverable; error_class }) ->
     `Assoc

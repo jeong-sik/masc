@@ -1,11 +1,8 @@
-(* RFC-0361 D4 — completion-authority review observation record.
+(* Completion-authority review observation record.
 
-   The registry exists because a review that deferred, raised, or rejected on
-   the evidence contract previously left no durable trace: only the paths that
-   committed a verdict emitted a [task_completion_verdict] event. These cases
-   pin that every outcome constructor survives a write/replay round trip with
-   its detail intact, and that an outcome label this module did not write is an
-   [Error] rather than a permissive default.
+   These cases pin that every outcome constructor survives a write/replay
+   round trip with its detail intact, and that an outcome label this module did
+   not write is an [Error] rather than a permissive default.
 
    Isolated: each case gets its own temp path and the process-wide
    {!Verification_run_registry.global} is never touched. *)
@@ -75,7 +72,9 @@ let register t ~verification_id ~started_at =
 let all_outcomes : (string * E.outcome) list =
   [ "approved", E.Approved
   ; "rejected", E.Rejected { reason = "aria attributes are not committed" }
-  ; "contract_rejected", E.Contract_rejected { detail = "missing required artifact" }
+  ; ( "infrastructure_unavailable"
+    , E.Infrastructure_unavailable
+        { stage = E.Review_preparation; detail = "request store unavailable" } )
   ; "not_reviewed", E.Not_reviewed { gate = "evaluator_unavailable"; detail = "no runtime" }
   ; "commit_failed", E.Commit_failed { detail = "verification id mismatch" }
   ; "raised", E.Raised { detail = "Failure(\"boom\")" }

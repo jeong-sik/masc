@@ -23,14 +23,13 @@ let clamp_limit limit =
   else if l > max_limit then max_limit
   else l
 
-(** Criteria carry the "completion_contract" in their Custom text. *)
+(** Criteria are the exact completion-contract statements. *)
 let completion_contract_of_criteria (criteria : V.criterion list) : string list =
-  List.map (fun (V.Custom text) -> text) criteria
+  criteria
 
 (** Read one required current-schema evidence list. Empty arrays are valid;
-    missing or malformed fields carry a public projection error. No legacy
-    field aliases are consulted and malformed arrays are never partially
-    projected. *)
+    missing or malformed fields carry a public projection error and malformed
+    arrays are never partially projected. *)
 let string_list_of_output field (output : Yojson.Safe.t)
   : string list * string option =
   let missing () =
@@ -154,19 +153,11 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
 
 (* ── Snapshot assembly ──────────────────────────────── *)
 
-(** Load the raw verification request list from the supplied MASC base_path.
-
-    Protected against filesystem errors — failures surface as an empty
-    list plus a log line, matching the tolerance
-    [Verification.list_requests] already offers on a missing dir. *)
+(** Load the raw verification request list from the supplied MASC base_path. *)
 let load_requests ~base_path () : V.verification_request list =
-  try V.list_requests base_path
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      Log.Task.warn "[dashboard-verification] list_requests failed: %s"
-        (Printexc.to_string exn);
-      []
+  match V.list_requests base_path with
+  | Ok requests -> requests
+  | Error detail -> failwith detail
 
 (** Filter by task_id when the caller requested a specific task. Empty
     string is treated as "no filter" to match the HTTP contract. *)
@@ -215,13 +206,8 @@ let summary_json ~base_path () : Yojson.Safe.t =
      ]
      @ fd_pressure_fields ())
 
-(* Single-load companion for handlers that emit both projections
-   side-by-side ([/api/v1/dashboard/proof] is the live caller).
-
-   [summary_json] and [requests_json] each call [load_requests], so
-   the historic proof handler scanned the verification store twice
-   per refresh.  This helper performs one scan and folds the two
-   projections from the shared list. *)
+(* Single-load companion for handlers that emit both projections side by side.
+   One request-store scan feeds both projections. *)
 let proof_compose ~base_path ?limit () : Yojson.Safe.t * Yojson.Safe.t =
   let limit = clamp_limit limit in
   let all = load_requests ~base_path () in

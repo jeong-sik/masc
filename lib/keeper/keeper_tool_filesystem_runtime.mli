@@ -42,6 +42,14 @@ val handle_read_file_with_outcome :
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
 
+val handle_owned_read_file_with_outcome :
+  ownership_root:string ->
+  args:Yojson.Safe.t ->
+  Keeper_tool_execution.t
+(** Read-only boundary for a Workspace producer that has no Keeper runtime
+    metadata. Relative paths are rooted at [ownership_root], and the opened
+    regular file plus every parent component is verified by [Fs_compat]. *)
+
 (** Rebuild the write arguments from a recorded Gate input, including the
     mode the approval carried. [Error] when the recorded effect is one this
     module cannot reproduce exactly, so a caller replays nothing instead of

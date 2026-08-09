@@ -5,12 +5,10 @@
 
 (** {1 Types} *)
 
-(** One constructor, because one is what is produced: request criteria are
-    built as [Custom] over the task's completion contract, and the completion
-    authority accepts only [Custom]. The wire tag stays ["custom"]. *)
-type criterion = Custom of string
+(** One non-empty completion-contract statement. There is one semantic value,
+    so the wire is the string itself rather than a tagged one-arm union. *)
+type criterion = string
 
-val show_criterion : criterion -> string
 val equal_criterion : criterion -> criterion -> bool
 val criterion_to_yojson : criterion -> Yojson.Safe.t
 val criterion_of_yojson : Yojson.Safe.t -> (criterion, string) result
@@ -40,7 +38,9 @@ val save_request : string -> verification_request -> (string, string) result
 val delete_request : string -> string -> (unit, string) result
 
 val load_request : string -> string -> (verification_request, string) result
-val list_requests : string -> verification_request list
+val list_requests : string -> (verification_request list, string) result
+(** Missing storage is an empty list. An unreadable directory or malformed
+    request is an [Error]; the caller never receives a partial list. *)
 
 (** {1 High-level API} *)
 

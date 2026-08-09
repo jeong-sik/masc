@@ -1,14 +1,16 @@
-(** Completion-authority access to one producer's typed filesystem and command
-    descriptors. Descriptor registry drift and unreadable producer state reject
-    surface construction. Every dispatched call is validated and translated by
-    the same descriptor that was advertised. *)
+(** Completion-authority access to one producer's typed read-only filesystem
+    descriptors. A Keeper producer receives its metadata-bound Read and Grep;
+    a Workspace producer without Keeper runtime metadata receives an
+    ownership-root-bound Read. Descriptor registry drift and unreadable
+    producer state reject surface construction. Every dispatched call is
+    validated and translated by the same descriptor that was advertised.
+    Mutating execution is absent: a verifier has no turn continuation that
+    could resume an approved Gate effect. *)
 
 type t
 
 val create :
   config:Workspace.config -> producer:string -> (t, string) result
-
-val ownership_root : t -> string
 
 val schemas : t -> Types_core.tool_schema list
 

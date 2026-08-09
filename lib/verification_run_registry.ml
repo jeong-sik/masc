@@ -1,7 +1,14 @@
+type infrastructure_stage =
+  | Review_preparation
+  | Lookup_surface
+
 type outcome =
   | Approved
   | Rejected of { reason : string }
-  | Contract_rejected of { detail : string }
+  | Infrastructure_unavailable of
+      { stage : infrastructure_stage
+      ; detail : string
+      }
   | Not_reviewed of
       { gate : string
       ; detail : string
@@ -41,13 +48,24 @@ type run =
 let outcome_label = function
   | Approved -> "approved"
   | Rejected _ -> "rejected"
-  | Contract_rejected _ -> "contract_rejected"
+  | Infrastructure_unavailable _ -> "infrastructure_unavailable"
   | Not_reviewed _ -> "not_reviewed"
   | Commit_failed _ -> "commit_failed"
   | Raised _ -> "raised"
 ;;
 
 module Payload = struct
+  let infrastructure_stage_to_string = function
+    | Review_preparation -> "review_preparation"
+    | Lookup_surface -> "lookup_surface"
+  ;;
+
+  let infrastructure_stage_of_string = function
+    | "review_preparation" -> Ok Review_preparation
+    | "lookup_surface" -> Ok Lookup_surface
+    | value -> Error (Printf.sprintf "unknown infrastructure stage %S" value)
+  ;;
+
   type registration =
     { task_id : string
     ; producer : string
@@ -98,8 +116,12 @@ module Payload = struct
   let outcome_fields = function
     | Approved -> []
     | Rejected { reason } -> [ "reason", `String reason ]
-    | Contract_rejected { detail } | Commit_failed { detail } | Raised { detail } ->
+    | Commit_failed { detail } | Raised { detail } ->
       [ "detail", `String detail ]
+    | Infrastructure_unavailable { stage; detail } ->
+      [ "stage", `String (infrastructure_stage_to_string stage)
+      ; "detail", `String detail
+      ]
     | Not_reviewed { gate; detail } ->
       [ "gate", `String gate; "detail", `String detail ]
   ;;
@@ -138,7 +160,8 @@ module Payload = struct
       match label with
       | "approved" -> Ok []
       | "rejected" -> Ok [ "reason" ]
-      | "contract_rejected" | "commit_failed" | "raised" -> Ok [ "detail" ]
+      | "infrastructure_unavailable" -> Ok [ "stage"; "detail" ]
+      | "commit_failed" | "raised" -> Ok [ "detail" ]
       | "not_reviewed" -> Ok [ "gate"; "detail" ]
       | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
     in
@@ -218,9 +241,11 @@ module Payload = struct
       | "rejected" ->
         let* reason = Run_registry_core.Json.string_field "reason" fields in
         Ok (Rejected { reason })
-      | "contract_rejected" ->
+      | "infrastructure_unavailable" ->
+        let* stage = Run_registry_core.Json.string_field "stage" fields in
+        let* stage = infrastructure_stage_of_string stage in
         let* detail = Run_registry_core.Json.string_field "detail" fields in
-        Ok (Contract_rejected { detail })
+        Ok (Infrastructure_unavailable { stage; detail })
       | "not_reviewed" ->
         let* gate = Run_registry_core.Json.string_field "gate" fields in
         let* detail = Run_registry_core.Json.string_field "detail" fields in
@@ -339,8 +364,12 @@ let status_label = function
 let outcome_detail_fields = function
   | Approved -> []
   | Rejected { reason } -> [ "reason", `String reason ]
-  | Contract_rejected { detail } | Commit_failed { detail } | Raised { detail } ->
+  | Commit_failed { detail } | Raised { detail } ->
     [ "detail", `String detail ]
+  | Infrastructure_unavailable { stage; detail } ->
+    [ "stage", `String (Payload.infrastructure_stage_to_string stage)
+    ; "detail", `String detail
+    ]
   | Not_reviewed { gate; detail } ->
     [ "gate", `String gate; "detail", `String detail ]
 ;;

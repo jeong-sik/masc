@@ -7,14 +7,10 @@
 
     @since Phase B+C *)
 
-(* Fail-closed by types: [~assignee] is passed directly by the caller,
-   which already destructures [AwaitingVerification { assignee; _ }]. Removes
-   the prior "unknown" fallback that violated Silent Failure 금지. Issue #7547.
-
-   Contract source rules (must stay aligned with [task_contract] in
+(* Contract source rules (must stay aligned with [task_contract] in
    types_core.ml):
    - [criteria]: the operator-facing "must be true" statements →
-     [task.contract.completion_contract] wrapped in [Verification.Custom].
+     [task.contract.completion_contract] as exact criterion strings.
    - [evidence_refs]: the artefact list the completion authority expects to see →
      [task.contract.verify_gate_evidence] plus required evidence refs,
      passed in by the caller at task-state lifecycle so this function does
@@ -28,18 +24,14 @@ type submit_request_spec =
   ; board_title : string
   ; board_content : string
   ; evidence_fields : (string * Yojson.Safe.t) list
-      (* task-1664: transient required/submitted role split for Board/SSE.
-         Request persistence replaces the raw [submitted_evidence] list with
-         its one typed submit-time snapshot SSOT. *)
+      (* Request persistence replaces [submitted_evidence] with its typed
+         submit-time snapshot SSOT. *)
   ; submitted_evidence : string list
   }
 
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     ~assignee ~evidence_refs =
-  (* Every submission is an ordinary verification request. The
-     [conflict_triage] branch this replaced was selected by reading the
-     planning deliverable's prose for an English "completed" prefix, which
-     matched 0 of the 199 non-empty deliverables in the live store. *)
+  (* Every submission is an ordinary verification request. *)
   let request_kind = "normal" in
   let request_summary = "" in
   let next_action = "" in
@@ -49,13 +41,14 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     Printf.sprintf "Verification requested for task %s (%s) by %s"
       task.id task.title assignee
   in
-  let criteria = List.map (fun s -> Verification.Custom s)
-    (match task.contract with
-     | Some c -> c.completion_contract
-     | None -> []) in
-  (* task-1664: derive the required/submitted role split from the task SSOT.
-     The submitted strings remain transient here; [create_submit_request]
-     replaces them with the typed persisted snapshot. *)
+  let criteria =
+    match task.contract with
+    | Some c -> c.completion_contract
+    | None -> []
+  in
+  (* Derive the required/submitted role split from the task SSOT. The strings
+     remain transient here; [create_submit_request] persists the typed
+     snapshot. *)
   let verification_evidence =
     Masc_task_handlers.Tool_task_completion_review.concrete_verification_evidence
       ~submitted_evidence_refs:evidence_refs

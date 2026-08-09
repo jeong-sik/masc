@@ -7,22 +7,24 @@
 type tool =
   | Read_file
   | Search_files
-  | Execute
 
 let tool_name = function
   | Read_file -> "tool_read_file"
   | Search_files -> "tool_search_files"
-  | Execute -> "tool_execute"
 ;;
 
-let all_tools = [ Read_file; Search_files; Execute ]
+let all_tools = [ Read_file; Search_files ]
 
 type t =
   { ownership_root : string
   ; config : Workspace.config
-  ; producer_meta : Keeper_meta_contract.keeper_meta
+  ; producer_scope : producer_scope
   ; tools : (tool * Keeper_tool_descriptor.t) list
   }
+
+and producer_scope =
+  | Keeper_producer of Keeper_meta_contract.keeper_meta
+  | Workspace_producer
 
 let descriptor_of_tool tool =
   match Keeper_tool_descriptor.descriptors_for_internal (tool_name tool) with
@@ -51,27 +53,45 @@ let rec resolve_tools = function
 
 let create ~config ~producer =
   let open Result.Syntax in
-  let* tools = resolve_tools all_tools in
-  let* producer_meta =
+  let* producer_scope =
     match Keeper_meta_store.read_meta config producer with
     | Error message ->
       Error (Printf.sprintf "producer %s meta unreadable: %s" producer message)
-    | Ok None -> Error (Printf.sprintf "producer %s has no keeper meta" producer)
-    | Ok (Some producer_meta) -> Ok producer_meta
+    | Ok None -> Ok Workspace_producer
+    | Ok (Some producer_meta) -> Ok (Keeper_producer producer_meta)
   in
-  let project_root =
-    Workspace_verification_store.project_root_of_base_path config.base_path
+  let* tools =
+    resolve_tools
+      (match producer_scope with
+       | Keeper_producer _ -> all_tools
+       | Workspace_producer -> [ Read_file ])
+  in
+  let* ownership_root =
+    match producer_scope with
+    | Keeper_producer producer_meta ->
+      Ok (Keeper_sandbox.host_root_abs_of_meta ~config producer_meta)
+    | Workspace_producer ->
+      let project_root =
+        Workspace_verification_store.project_root_of_base_path config.base_path
+      in
+      (try
+         Ok
+           (Keeper_sandbox_config.host_root_abs_of_agent
+              ~base_path:project_root
+              ~agent_name:producer)
+       with
+       | Keeper_sandbox_config.Invalid_keeper_sandbox_config detail ->
+         Error
+           (Printf.sprintf
+              "producer %s sandbox configuration invalid: %s"
+              producer
+              detail))
   in
   let ownership_root =
-    Keeper_sandbox_config.host_root_abs_of_agent
-      ~base_path:project_root
-      ~agent_name:producer
-    |> Env_config_core.strip_trailing_slashes
+    Env_config_core.strip_trailing_slashes ownership_root
   in
-  Ok { ownership_root; config; producer_meta; tools }
+  Ok { ownership_root; config; producer_scope; tools }
 ;;
-
-let ownership_root t = t.ownership_root
 
 (* ================================================================ *)
 (* Schemas                                                          *)
@@ -142,29 +162,28 @@ let result_of_execution (execution : Keeper_tool_execution.t) =
    profile resolves no sandbox and the runtime returns its own error — the judge
    is told the tree is unreachable rather than silently inspecting the host. *)
 let run t tool ~args =
-  match tool with
-  | Read_file ->
+  match t.producer_scope, tool with
+  | Keeper_producer producer_meta, Read_file ->
     Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
       ~turn_sandbox_factory:None
       ~config:t.config
-      ~meta:t.producer_meta
+      ~meta:producer_meta
       ~args
     |> result_of_execution
-  | Search_files ->
+  | Keeper_producer producer_meta, Search_files ->
     Keeper_workspace_ops.handle_tool_search_files_with_outcome
       ~turn_sandbox_factory:None
       ~config:t.config
-      ~meta:t.producer_meta
+      ~meta:producer_meta
       ~args
     |> result_of_execution
-  | Execute ->
-    Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
-      ~turn_sandbox_factory:None
-      ~config:t.config
-      ~meta:t.producer_meta
+  | Workspace_producer, Read_file ->
+    Keeper_tool_filesystem_runtime.handle_owned_read_file_with_outcome
+      ~ownership_root:t.ownership_root
       ~args
-      ()
     |> result_of_execution
+  | Workspace_producer, Search_files ->
+    Error "workspace producers do not expose tool_search_files"
 ;;
 
 let dispatch t ~name ~args =
@@ -174,7 +193,7 @@ let dispatch t ~name ~args =
       Printf.sprintf
         "unknown tool %s; this review offers %s"
         name
-        (String.concat ", " (List.map tool_name all_tools))
+        (String.concat ", " (List.map (fun (tool, _) -> tool_name tool) t.tools))
     in
     log_call t ~name ~argument:"" ~outcome:Unknown_tool;
     Error detail

@@ -1548,7 +1548,7 @@ let test_dashboard_proof_http_json_surfaces_submission_index () =
        ~base_path:config.base_path
        ~task_id:"task-proof-route"
        ~output
-       ~criteria:[ V.Custom "proof route must expose verification evidence" ]
+       ~criteria:[ "proof route must expose verification evidence" ]
        ~worker:"keeper-proof"
        ()
    with

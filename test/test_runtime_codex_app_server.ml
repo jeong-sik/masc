@@ -435,17 +435,21 @@ let test_retry_notifications_are_bounded () =
        | Ok _ -> fail "retry notifications were unbounded")
 ;;
 
-let test_unknown_notifications_are_bounded () =
-  let unknown = {|{"method":"fixture/unknown","params":{}}|} in
+let test_nonterminal_notifications_do_not_preempt_completion () =
+  let progress =
+    {|{"method":"account/rateLimits/updated","params":{"rateLimits":{}}}|}
+  in
   let lines =
     [ init_result; account_chatgpt; thread_result; turn_result ]
-    @ List.init 129 (fun _ -> unknown)
+    @ List.init 256 (fun _ -> progress)
+    @ [ item_completed; turn_completed ]
   in
   with_fixture lines (fun path ->
     match run_fixture path with
-    | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+    | Ok turn ->
+      check string "completed after progress" "MASC_SUBSCRIPTION_OK" turn.text
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok _ -> fail "unknown notifications were unbounded")
+    )
 ;;
 
 let test_item_output_deltas_are_typed_and_unbounded () =
@@ -1948,9 +1952,9 @@ let () =
             `Quick
             test_retry_notifications_are_bounded
          ; test_case
-             "unknown notifications are bounded"
+             "nonterminal notifications do not preempt completion"
              `Quick
-             test_unknown_notifications_are_bounded
+             test_nonterminal_notifications_do_not_preempt_completion
          ; test_case
              "item output deltas are typed and unbounded"
              `Quick

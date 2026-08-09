@@ -39,3 +39,5 @@ val binding_to_execution
     a credential-free CLI transport becomes
     {!Runtime_execution.Codex_app_server}; [antigravity-cli] becomes a typed
     {!Runtime_execution.Antigravity_cli}. Other CLI protocols remain rejected. *)
+    {!Runtime_execution.Codex_app_server}; [claude-code] becomes
+    {!Runtime_execution.Claude_code}. Other CLI protocols remain rejected. *)

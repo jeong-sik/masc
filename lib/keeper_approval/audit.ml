@@ -345,11 +345,13 @@ let get_audit_store ~base_path () =
                Hashtbl.replace audit_stores base_path store;
                store)
         with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error exn)
     with
     | Ok store -> Ok store
     | Error exn -> report_failure exn
   with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> report_failure exn
 ;;
 
@@ -455,6 +457,7 @@ let record
                (audit_today_path (Dated_jsonl.base_dir store))
                json))
       with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error exn
     in
     (match append_result with

@@ -60,6 +60,10 @@ export type KeeperApprovalAuditReceipt =
   | {
       event: KeeperApprovalAuditEvent
       recorded: true
+      cleanup_failure?: {
+        stage: 'append_cleanup'
+        detail: string
+      }
     }
   | {
       event: KeeperApprovalAuditEvent

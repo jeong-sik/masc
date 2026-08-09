@@ -34,6 +34,24 @@ export function normalizeKeeperApprovalAuditReceipt(
     return { event: raw.event, recorded: true }
   }
   if (
+    raw.recorded === true
+    && Object.keys(raw).length === 3
+    && isRecord(raw.cleanup_failure)
+    && raw.cleanup_failure.stage === 'append_cleanup'
+    && typeof raw.cleanup_failure.detail === 'string'
+    && raw.cleanup_failure.detail.trim() !== ''
+    && Object.keys(raw.cleanup_failure).length === 2
+  ) {
+    return {
+      event: raw.event,
+      recorded: true,
+      cleanup_failure: {
+        stage: 'append_cleanup',
+        detail: raw.cleanup_failure.detail,
+      },
+    }
+  }
+  if (
     raw.recorded === false
     && (raw.stage === 'store_create' || raw.stage === 'append')
     && typeof raw.detail === 'string'

@@ -94,6 +94,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
                  { Tool_result.class_ = Tool_result.Runtime_failure
                  ; message = "blocked-by-pre-hook"
                  ; data = `String "blocked-by-pre-hook"
+                 ; metadata = None
                  ; tool_name = name
                  ; duration_ms = 0.0
                  })

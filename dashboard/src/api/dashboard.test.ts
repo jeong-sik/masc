@@ -2272,6 +2272,35 @@ describe('Gate mutation audit receipts', () => {
     await expect(deleteGateApprovalRule('rule-audit'))
       .rejects.toMatchObject({ errorCode: 'protocol_drift' })
   })
+
+  it('preserves a recorded resolution receipt with cleanup failure evidence', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'appr-cleanup',
+        decision: 'approve',
+        rule_id: null,
+        audit_receipts: [{
+          event: 'resolved',
+          recorded: true,
+          cleanup_failure: {
+            stage: 'append_cleanup',
+            detail: 'descriptor cleanup failed',
+          },
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    await expect(resolveGateApproval('appr-cleanup', {
+      decision: 'approve',
+      rememberRule: false,
+    })).resolves.toMatchObject({
+      audit_receipts: [{
+        recorded: true,
+        cleanup_failure: { stage: 'append_cleanup' },
+      }],
+    })
+  })
 })
 
 describe('setGateMode', () => {

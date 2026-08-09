@@ -3825,9 +3825,7 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
        let approval_id = submit ~base_path ~keeper_name ~input in
        Keeper_approval.Audit.For_testing.set_append_jsonl
          (fun _path _json ->
-            raise
-              (Eio.Cancel.Cancelled
-                 (Failure "cancelled approval audit append")));
+            failwith "deterministic approval audit append failure");
        let resolution =
          match
            AQ.resolve_with_policy
@@ -4024,7 +4022,7 @@ let test_cancelled_audit_observation_preserves_committed_allow () =
          (metadata |> member "gate" |> member "audit_receipts" |> to_list |> List.length))
 ;;
 
-let test_audit_lock_wait_cancellation_returns_failed_receipt () =
+let test_audit_lock_wait_cancellation_remains_cancellation () =
   let base_path = temp_dir () in
   let owner_entered = Atomic.make false in
   let release_owner = Atomic.make false in
@@ -4070,13 +4068,9 @@ let test_audit_lock_wait_cancellation_returns_failed_receipt () =
        let cancellation = Eio.Promise.await cancel_context in
        Eio.Cancel.cancel cancellation (Failure "cancel audit lock waiter");
        match Eio.Promise.await result with
-       | `Receipt receipt ->
-         check_failed_audit_receipt
-           ~event_type:Keeper_approval.Audit.Gate_allowed
-           ~stage:Keeper_approval.Audit.Append
-           receipt
-       | `Cancellation_escaped ->
-         Alcotest.fail "audit lock-acquisition cancellation escaped its receipt boundary")
+       | `Receipt _ ->
+         Alcotest.fail "audit lock cancellation was relabelled as a write failure"
+       | `Cancellation_escaped -> ())
 ;;
 
 let test_http_success_exposes_failed_resolution_and_rule_delete_audit () =
@@ -4365,9 +4359,9 @@ let () =
             `Quick
             test_cancelled_audit_observation_preserves_committed_allow
         ; Alcotest.test_case
-            "audit lock wait cancellation returns failed receipt"
+            "audit lock wait cancellation remains cancellation"
             `Quick
-            test_audit_lock_wait_cancellation_returns_failed_receipt
+            test_audit_lock_wait_cancellation_remains_cancellation
         ; Alcotest.test_case
             "HTTP success exposes failed resolution and rule audit"
             `Quick

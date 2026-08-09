@@ -237,6 +237,55 @@ let record_terminal_error terminal_error detail =
   if Option.is_none !terminal_error then terminal_error := Some detail
 ;;
 
+let raw_trace_error terminal_error stage error =
+  let detail =
+    Printf.sprintf
+      "official-client RAW trace %s failed: %s"
+      stage
+      (Agent_sdk.Error.to_string error)
+  in
+  record_terminal_error terminal_error detail;
+  detail
+;;
+
+let record_raw_tool_started ~terminal_error ~raw_trace_run ~invocation ~tool_name ~input =
+  match raw_trace_run with
+  | None -> Ok ()
+  | Some active ->
+    Agent_sdk.Raw_trace.record_tool_execution_started
+      active
+      ~invocation
+      ~tool_name
+      ~tool_input:input
+    |> Result.map_error (raw_trace_error terminal_error "tool start")
+;;
+
+let finish_dynamic_tool_raw
+      ~terminal_error
+      ~raw_trace_run
+      ~invocation
+      ~tool_name
+      result
+  =
+  match raw_trace_run with
+  | None -> result
+  | Some active ->
+    (match
+       Agent_sdk.Raw_trace.record_tool_execution_finished
+         active
+         ~invocation
+         ~tool_name
+         ~tool_result:result.content
+         ~tool_error:(not result.success)
+         ()
+     with
+     | Ok () -> result
+     | Error error ->
+       { success = false
+       ; content = raw_trace_error terminal_error "tool finish" error
+       })
+;;
+
 let apply_context_injection ~runtime_label ~terminal_error ~context
     ~context_injector ~tool_name ~input ~content ~outcome =
   match context_injector with
@@ -268,6 +317,7 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
 
 let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
     ~(hooks : Agent_sdk.Hooks.hooks) ~event_bus ~context_injector ~terminal_error
+    ~raw_trace_run ~next_dynamic_invocation_index
     (tool : Agent_sdk.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
@@ -275,7 +325,7 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
   ; call =
       (fun ~call_id input ->
         let schedule : Agent_sdk.Tool_contract.schedule =
-          { planned_index = 0
+          { planned_index = Atomic.fetch_and_add next_dynamic_invocation_index 1
           ; batch_index = 0
           ; batch_size = 1
           ; execution_mode = Agent_sdk.Tool.execution_mode tool
@@ -287,6 +337,23 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
             ~turn:turn_count
             ~schedule
             ~completion:(Agent_sdk.Tool.completion tool)
+        in
+        match
+          record_raw_tool_started
+            ~terminal_error
+            ~raw_trace_run
+            ~invocation
+            ~tool_name:tool.schema.name
+            ~input
+        with
+        | Error detail -> { success = false; content = detail }
+        | Ok () ->
+        let settle =
+          finish_dynamic_tool_raw
+            ~terminal_error
+            ~raw_trace_run
+            ~invocation
+            ~tool_name:tool.schema.name
         in
         let pre_tool_use =
           invoke_turn_hook
@@ -302,7 +369,7 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
                })
         in
         match pre_tool_use with
-        | Block detail -> { success = false; content = detail }
+        | Block detail -> settle { success = false; content = detail }
         | HookFailed { stage; detail } ->
           let detail =
             Printf.sprintf
@@ -310,7 +377,7 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
               (Agent_sdk.Hooks.hook_stage_to_string stage)
               detail
           in
-          { success = false; content = detail }
+          settle { success = false; content = detail }
         | (ElicitToolApproval _ | ElicitInput _) as decision ->
           let detail =
             Printf.sprintf
@@ -320,7 +387,7 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
                  (Agent_sdk.Hooks.classify_decision decision))
           in
           record_terminal_error terminal_error detail;
-          { success = false; content = detail }
+          settle { success = false; content = detail }
         | (AdjustParams _ | Nudge _) as decision ->
           let detail =
             Printf.sprintf
@@ -330,7 +397,7 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
                  (Agent_sdk.Hooks.classify_decision decision))
           in
           record_terminal_error terminal_error detail;
-          { success = false; content = detail }
+          settle { success = false; content = detail }
         | Continue ->
           (match
              Agent_sdk.Agent_tools.find_and_execute_tool
@@ -354,26 +421,28 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
                ~input:result.input
                ~content:result.content
                ~outcome:result.outcome;
-             { success =
-                 not (Agent_sdk.Types.tool_result_outcome_is_error result.outcome)
-             ; content = result.content
-             }
+             settle
+               { success =
+                   not (Agent_sdk.Types.tool_result_outcome_is_error result.outcome)
+               ; content = result.content
+               }
            | Error error ->
              let detail = tool_hook_error_to_string error in
              (match error with
               | Agent_sdk.Agent_tools.Hook_execution_failed
                   { stage = (Post_tool_use | Post_tool_use_failure); _ } ->
                 record_terminal_error terminal_error detail;
-                { success = true
-                ; content = "Tool completed, but its post-execution hook failed; do not retry"
-                }
+                settle
+                  { success = true
+                  ; content = "Tool completed, but its post-execution hook failed; do not retry"
+                  }
               | Agent_sdk.Agent_tools.Hook_execution_failed _ ->
-                { success = false; content = detail })))
+                settle { success = false; content = detail })))
   }
 ;;
 
 let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_bus
-    ~context_injector ~context ~terminal_error =
+    ~context_injector ~context ~terminal_error ~raw_trace_run =
   match tools, context with
   | [], _ -> Ok []
   | _ :: _, None ->
@@ -382,6 +451,7 @@ let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_b
          ~field:"context"
          (runtime_label ^ " dynamic tools require the Keeper shared context"))
   | tools, Some context ->
+    let next_dynamic_invocation_index = Atomic.make 0 in
     Ok
       (List.map
          (dynamic_tool_of_oas
@@ -393,6 +463,8 @@ let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_b
             ~hooks
             ~event_bus
             ~context_injector
-            ~terminal_error)
+            ~terminal_error
+            ~raw_trace_run
+            ~next_dynamic_invocation_index)
          tools)
 ;;

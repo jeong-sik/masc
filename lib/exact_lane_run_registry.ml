@@ -7,6 +7,10 @@ type lane =
 type outcome =
   | Succeeded
   | Cancelled
+  | Deferred of
+      { code : string
+      ; detail : string
+      }
   | Failed of
       { code : string
       ; detail : string
@@ -55,6 +59,7 @@ let lane_of_key = function
 let outcome_label = function
   | Succeeded -> "succeeded"
   | Cancelled -> "cancelled"
+  | Deferred _ -> "deferred"
   | Failed _ -> "failed"
 ;;
 
@@ -118,6 +123,7 @@ module Payload = struct
   let name = "exact_lane_run_registry"
   let running_noun = "exact lane run(s)"
   let restart_reason = "exact-output fibers do not survive server restart"
+  let completed_retention = `All
 
   let registration_to_yojson registration =
     `Assoc
@@ -152,7 +158,10 @@ module Payload = struct
     let detail =
       match completion.outcome with
       | Succeeded | Cancelled -> []
-      | Failed { code; detail } -> [ "code", `String code; "detail", `String detail ]
+      | Deferred { code; detail } ->
+        [ "code", `String code; "detail", `String detail ]
+      | Failed { code; detail } ->
+        [ "code", `String code; "detail", `String detail ]
     in
     `Assoc
       ([ "outcome", `String (outcome_label completion.outcome)
@@ -169,7 +178,7 @@ module Payload = struct
     let detail_fields =
       match label with
       | "succeeded" | "cancelled" -> Ok []
-      | "failed" -> Ok [ "code"; "detail" ]
+      | "deferred" | "failed" -> Ok [ "code"; "detail" ]
       | value -> Error (Printf.sprintf "unknown exact lane outcome %S" value)
     in
     let* detail_fields = detail_fields in
@@ -188,6 +197,10 @@ module Payload = struct
       match label with
       | "succeeded" -> Ok Succeeded
       | "cancelled" -> Ok Cancelled
+      | "deferred" ->
+        let* code = Run_registry_core.Json.string_field "code" fields in
+        let* detail = Run_registry_core.Json.string_field "detail" fields in
+        Ok (Deferred { code; detail })
       | "failed" ->
         let* code = Run_registry_core.Json.string_field "code" fields in
         let* detail = Run_registry_core.Json.string_field "detail" fields in
@@ -217,25 +230,12 @@ let notify_changed () =
 
 let create = Store.create
 let replay = Store.replay
-let max_completed_retained = Store.max_completed_retained
-
 let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
   (match input with
    | Research_input { raw_trace_path = Some path; _ }
      when String.equal (String.trim path) "" ->
      invalid_arg "exact lane research raw trace path must not be blank"
    | Exact_input _ | Research_input _ -> ());
-  let preview payload =
-    payload
-    |> Observability_redact.redact_json_value
-    |> Observability_redact.preview_json_strings ~max_len:1024
-  in
-  let input =
-    match input with
-    | Exact_input payload -> Exact_input (preview payload)
-    | Research_input { raw_trace_path; payload } ->
-      Research_input { raw_trace_path; payload = preview payload }
-  in
   Store.register
     t
     ~id:run_id
@@ -245,11 +245,6 @@ let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
 ;;
 
 let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
-  let output =
-    output
-    |> Observability_redact.redact_json_value
-    |> Observability_redact.preview_json_strings ~max_len:1024
-  in
   let completion = { Payload.outcome; elapsed_s; output } in
   match Store.complete t ~id:run_id ~completion with
   | `Completed -> notify_changed ()
@@ -303,7 +298,10 @@ let run_to_yojson run =
       let detail =
         match outcome with
         | Succeeded | Cancelled -> []
-        | Failed { code; detail } -> [ "code", `String code; "detail", `String detail ]
+        | Deferred { code; detail } ->
+          [ "code", `String code; "detail", `String detail ]
+        | Failed { code; detail } ->
+          [ "code", `String code; "detail", `String detail ]
       in
       [ "elapsed_s", `Float elapsed_s; "output", output ] @ detail
   in

@@ -108,7 +108,124 @@ let test_blank_research_trace_path_is_rejected_before_persistence () =
          ~subject_id:"trace-blank"
          ~actor:"keeper-a"
          ~started_at:20.0
-         ~input:(R.Research_input { raw_trace_path = Some "  "; payload = `Null }))
+       ~input:(R.Research_input { raw_trace_path = Some "  "; payload = `Null }))
+;;
+
+let test_exact_history_is_not_pruned_across_lanes () =
+  let path = Filename.temp_file "exact-lane-runs-all-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  List.init 80 Fun.id
+  |> List.iter (fun index ->
+    let run_id = Printf.sprintf "run-%02d" index in
+    let lane =
+      match index mod 4 with
+      | 0 -> R.Librarian
+      | 1 -> R.Hitl_auto_judge
+      | 2 -> R.Board_attention
+      | _ -> R.Compaction
+    in
+    R.register_running
+      registry
+      ~run_id
+      ~lane
+      ~subject_id:run_id
+      ~actor:"keeper-a"
+      ~started_at:(float_of_int index)
+      ~input:(R.Exact_input (`Assoc [ "index", `Int index ]));
+    R.mark_completed
+      registry
+      ~run_id
+      ~outcome:R.Succeeded
+      ~elapsed_s:0.1
+      ~output:(`Assoc [ "index", `Int index ]));
+  let replayed = R.replay path in
+  check int "all exact runs survive replay" 80 (List.length (R.list_runs replayed));
+  let permissions = (Unix.stat path).Unix.st_perm land 0o777 in
+  check int "durable registry is private" 0o600 permissions;
+  remove_if_exists path
+;;
+
+let test_failed_durable_registration_is_not_published_in_memory () =
+  let directory = Filename.temp_dir "exact-lane-runs-dir-" "" in
+  let registry = R.create ~path:directory () in
+  let failed =
+    try
+      R.register_running
+        registry
+        ~run_id:"not-published"
+        ~lane:R.Librarian
+        ~subject_id:"trace"
+        ~actor:"keeper-a"
+        ~started_at:1.0
+        ~input:(R.Exact_input `Null);
+      false
+    with
+    | Sys_error _ | Unix.Unix_error _ -> true
+  in
+  check bool "directory cannot be used as durable JSONL" true failed;
+  check int "failed registration absent" 0 (List.length (R.list_runs registry));
+  Unix.rmdir directory
+;;
+
+let test_failed_durable_completion_keeps_running_state () =
+  let path = Filename.temp_file "exact-lane-completion-failure-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"completion-not-published"
+    ~lane:R.Librarian
+    ~subject_id:"trace"
+    ~actor:"keeper-a"
+    ~started_at:1.0
+    ~input:(R.Exact_input `Null);
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  let failed =
+    try
+      R.mark_completed
+        registry
+        ~run_id:"completion-not-published"
+        ~outcome:R.Succeeded
+        ~elapsed_s:0.1
+        ~output:(`String "must-not-publish");
+      false
+    with
+    | Sys_error _ | Unix.Unix_error _ -> true
+  in
+  check bool "directory cannot receive durable completion" true failed;
+  let run = R.get registry ~run_id:"completion-not-published" |> Option.get in
+  check string "failed completion remains running" "running" (R.status_label run.status);
+  Unix.rmdir path
+;;
+
+let test_deferred_external_effect_survives_replay () =
+  let path = Filename.temp_file "exact-lane-deferred-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"deferred-run"
+    ~lane:R.Librarian
+    ~subject_id:"trace"
+    ~actor:"keeper-a"
+    ~started_at:1.0
+    ~input:(R.Research_input { raw_trace_path = Some "/tmp/raw.jsonl"; payload = `Null });
+  R.mark_completed
+    registry
+    ~run_id:"deferred-run"
+    ~outcome:
+      (R.Deferred
+         { code = "librarian_external_effect_deferred"
+         ; detail = "approval is pending"
+         })
+    ~elapsed_s:0.1
+    ~output:(`Assoc [ "outcome", `String "deferred" ]);
+  let replayed = R.replay path in
+  let run = R.get replayed ~run_id:"deferred-run" |> Option.get in
+  check string "deferred remains distinct" "deferred" (R.status_label run.status);
+  remove_if_exists path
 ;;
 
 let () =
@@ -123,5 +240,13 @@ let () =
             test_open_json_input_is_not_replayed_into_current_store
         ; test_case "blank research trace path is rejected" `Quick
             test_blank_research_trace_path_is_rejected_before_persistence
+        ; test_case "exact history is not cross-lane pruned" `Quick
+            test_exact_history_is_not_pruned_across_lanes
+        ; test_case "failed durable registration is not published" `Quick
+            test_failed_durable_registration_is_not_published_in_memory
+        ; test_case "failed durable completion keeps running state" `Quick
+            test_failed_durable_completion_keeps_running_state
+        ; test_case "deferred external effect survives replay" `Quick
+            test_deferred_external_effect_survives_replay
         ] )
     ]

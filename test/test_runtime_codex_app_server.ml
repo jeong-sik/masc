@@ -727,7 +727,7 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
 ;;
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
-    ?base_path
+    ?base_path ?raw_trace_path
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model () =
   let owns_base_path = Option.is_none base_path in
@@ -753,6 +753,19 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                   match Runtime.init_default ~config_path:runtime_path with
                   | Error error -> fail error
                   | Ok () ->
+                    let raw_trace =
+                      Option.map
+                        (fun path ->
+                           match
+                             Agent_sdk.Raw_trace.create
+                               ~session_id:"codex-fixture-session"
+                               ~path
+                               ()
+                           with
+                           | Ok sink -> sink
+                           | Error error -> fail (Agent_sdk.Error.to_string error))
+                        raw_trace_path
+                    in
                     let context =
                       match tools with
                       | [] -> None
@@ -769,6 +782,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ?hooks
                       ?context_injector
                       ?context
+                      ?raw_trace
                       ~sw
                       ~net:(Eio.Stdenv.net env)
                       ())))))
@@ -783,6 +797,112 @@ let test_keeper_dispatches_codex_turn_runtime () =
        | Ok result ->
          check string "Keeper response" "MASC_SUBSCRIPTION_OK" (keeper_response_text result);
          check bool "measured observation" true (Option.is_some result.runtime_observation))
+;;
+
+let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
+  let base_path = temp_workspace "masc-codex-raw-trace-" in
+  let raw_trace_path = Filename.concat base_path "official-codex-raw.jsonl" in
+  let tool =
+    Agent_sdk.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic RAW fixture marker"
+      ~parameters:
+        [ { Agent_sdk.Types.name = "marker"
+          ; description = "Fixture marker"
+          ; param_type = String
+          ; required = true
+          }
+        ]
+      (fun input ->
+         check string
+           "RAW fixture tool sees actual input"
+           "from-codex"
+           Yojson.Safe.Util.(input |> member "marker" |> to_string);
+         Ok { Agent_sdk.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; tool_call_request
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~tools:[ tool ]
+                ~base_path
+                ~raw_trace_path
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Ok result ->
+              (match result.trace_ref with
+               | None -> fail "official Codex turn did not return a RAW trace reference"
+               | Some trace_ref ->
+                 check string "RAW trace path" raw_trace_path trace_ref.path);
+              let records =
+                match Agent_sdk.Raw_trace.read_all ~path:raw_trace_path () with
+                | Ok records -> records
+                | Error error -> fail (Agent_sdk.Error.to_string error)
+              in
+              let kinds =
+                List.map
+                  (fun (record : Agent_sdk.Raw_trace.record) -> record.record_type)
+                  records
+              in
+              List.iter
+                (fun kind ->
+                   check bool
+                     ("RAW contains " ^ Agent_sdk.Raw_trace.record_type_to_string kind)
+                     true
+                     (List.mem kind kinds))
+                [ Agent_sdk.Raw_trace.Run_started
+                ; Tool_execution_started
+                ; Tool_execution_finished
+                ; Assistant_block
+                ; Run_finished
+                ];
+              let tool_start =
+                List.find
+                  (fun (record : Agent_sdk.Raw_trace.record) ->
+                     record.record_type = Tool_execution_started)
+                  records
+              in
+              check string
+                "RAW retains actual tool input"
+                "from-codex"
+                Yojson.Safe.Util.(
+                  Option.get tool_start.tool_input |> member "marker" |> to_string);
+              let tool_finish =
+                List.find
+                  (fun (record : Agent_sdk.Raw_trace.record) ->
+                     record.record_type = Tool_execution_finished)
+                  records
+              in
+              check
+                (option string)
+                "RAW retains actual tool output"
+                (Some "MASC_TOOL_RESULT")
+                tool_finish.tool_result;
+              let finished =
+                List.find
+                  (fun (record : Agent_sdk.Raw_trace.record) ->
+                     record.record_type = Run_finished)
+                  records
+              in
+              check
+                (option string)
+                "RAW retains actual final response"
+                (Some "MASC_SUBSCRIPTION_OK")
+                finished.final_text))
 ;;
 
 let test_keeper_protocol_failure_enters_recovery () =
@@ -1620,19 +1740,59 @@ let test_live_keeper_dynamic_tool_subscription () =
           incr tool_calls;
           Ok { Agent_sdk.Types.content = "MASC_TOOL_RESULT"; _meta = None })
     in
-    match
-      run_keeper_turn
-        ~tools:[ tool ]
-        ~goal:
-          "Call the dynamic tool masc_probe exactly once. After it returns, reply with exactly MASC_TOOL_OK and no other text."
-        ~cli_path:"codex"
-        ~model:"gpt-5.6-sol"
-        ()
-    with
-    | Error error -> fail (Agent_sdk.Error.to_string error)
-    | Ok result ->
-      check int "live typed tool calls" 1 !tool_calls;
-      check string "live tool Keeper response" "MASC_TOOL_OK" (keeper_response_text result)
+    let base_path = temp_workspace "masc-codex-live-tool-raw-" in
+    let raw_trace_path = Filename.concat base_path "live-tool-raw.jsonl" in
+    Fun.protect
+      ~finally:(fun () -> cleanup_tree base_path)
+      (fun () ->
+         match
+           run_keeper_turn
+             ~tools:[ tool ]
+             ~base_path
+             ~raw_trace_path
+             ~goal:
+               "Call the dynamic tool masc_probe exactly once. After it returns, reply with exactly MASC_TOOL_OK and no other text."
+             ~cli_path:"codex"
+             ~model:"gpt-5.6-sol"
+             ()
+         with
+         | Error error -> fail (Agent_sdk.Error.to_string error)
+         | Ok result ->
+           check int "live typed tool calls" 1 !tool_calls;
+           check string
+             "live tool Keeper response"
+             "MASC_TOOL_OK"
+             (keeper_response_text result);
+           (match result.trace_ref with
+            | None -> fail "live Keeper tool turn omitted its RAW trace reference"
+            | Some trace_ref -> check string "live RAW path" raw_trace_path trace_ref.path);
+           let records =
+             match Agent_sdk.Raw_trace.read_all ~path:raw_trace_path () with
+             | Ok records -> records
+             | Error error -> fail (Agent_sdk.Error.to_string error)
+           in
+           let find kind =
+             List.find_opt
+               (fun (record : Agent_sdk.Raw_trace.record) ->
+                  record.record_type = kind)
+               records
+           in
+           (match find Agent_sdk.Raw_trace.Tool_execution_finished with
+            | Some record ->
+              check
+                (option string)
+                "live RAW tool output"
+                (Some "MASC_TOOL_RESULT")
+                record.tool_result
+            | None -> fail "live RAW omitted Tool_execution_finished");
+           match find Agent_sdk.Raw_trace.Run_finished with
+           | Some record ->
+             check
+               (option string)
+               "live RAW final response"
+               (Some "MASC_TOOL_OK")
+               record.final_text
+           | None -> fail "live RAW omitted Run_finished")
 ;;
 
 let test_live_keeper_resumes_official_thread () =
@@ -1776,6 +1936,10 @@ let () =
             "Keeper dispatches Codex runtime"
             `Quick
             test_keeper_dispatches_codex_turn_runtime
+        ; test_case
+            "Keeper Codex RAW contains tool and response"
+            `Quick
+            test_keeper_codex_raw_trace_contains_actual_tool_and_response
         ; test_case
             "Keeper protocol failure enters recovery"
             `Quick

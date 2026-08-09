@@ -38,6 +38,7 @@ module type Payload = sig
   val completion_of_yojson : Yojson.Safe.t -> (completion, string) result
   val running_noun : string
   val restart_reason : string
+  val completed_retention : [ `All | `Latest of int ]
 end
 
 module Make (Payload : Payload) : sig

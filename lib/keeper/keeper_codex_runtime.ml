@@ -10,6 +10,47 @@ module Host = Keeper_official_client_host
 
 let runtime_label = "Codex"
 
+let finish_raw_error raw_trace_run error =
+  match raw_trace_run with
+  | None -> Ok ()
+  | Some active ->
+    Agent_sdk.Raw_trace.finish_run
+      active
+      ~final_text:None
+      ~stop_reason:None
+      ~error:(Some (Agent_sdk.Error.to_string error))
+    |> Result.map (fun _ -> ())
+;;
+
+let finish_raw_success raw_trace_run (result : Runtime_agent.run_result) =
+  match raw_trace_run with
+  | None -> Ok result
+  | Some active ->
+    let* () =
+      result.response.content
+      |> List.mapi (fun block_index block ->
+        Agent_sdk.Raw_trace.record_assistant_block active ~block_index block)
+      |> List.fold_left
+           (fun acc record ->
+              let* () = acc in
+              record)
+           (Ok ())
+    in
+    let* trace_ref =
+      Agent_sdk.Raw_trace.finish_run
+        active
+        ~final_text:
+          (Agent_sdk.Types.text_of_response result.response
+           |> String_util.trim_to_option)
+        ~stop_reason:
+          (Some
+             (Agent_sdk.Types.stop_reason_to_string
+                result.response.stop_reason))
+        ~error:None
+    in
+    Ok { result with trace_ref = Some trace_ref }
+;;
+
 let project_messages messages =
   let rec loop developer history = function
     | [] -> Ok (List.rev developer, List.rev history)
@@ -80,7 +121,7 @@ let recovery_failure_of_client_error = function
 
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
-    ~context_injector ~context ~event_bus
+    ~context_injector ~context ~event_bus ~raw_trace
     ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -205,6 +246,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~context_injector
         ~context
         ~terminal_error
+        ~raw_trace_run:None
     in
     let dynamic_tools = List.map codex_dynamic_tool host_dynamic_tools in
     let* () =
@@ -219,6 +261,36 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       | Ok () -> Ok ()
       | Error error -> Error (codex_error_to_sdk_error error)
     in
+    let* raw_trace_run =
+      match raw_trace with
+      | None -> Ok None
+      | Some sink ->
+        Agent_sdk.Raw_trace.start_run
+          sink
+          ~agent_name:keeper_name
+          ~prompt
+          ?model:config.model
+          ?reasoning_effort:
+            (Option.map
+               Llm_provider.Reasoning_effort.to_string
+               prepared.reasoning_effort)
+          ()
+        |> Result.map Option.some
+    in
+    let* host_dynamic_tools =
+      Host.dynamic_tools
+        ~runtime_label
+        ~keeper_name
+        ~turn_count
+        ~tools:prepared.tools
+        ~hooks
+        ~event_bus
+        ~context_injector
+        ~context
+        ~terminal_error
+        ~raw_trace_run
+    in
+    let dynamic_tools = List.map codex_dynamic_tool host_dynamic_tools in
     let* claimed_session =
       match
         Keeper_official_client_session_store.claim
@@ -233,7 +305,16 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       with
       | Ok session -> Ok session
       | Error detail ->
-        Error (internal_error ("Codex session claim failed: " ^ detail))
+        let error = internal_error ("Codex session claim failed: " ^ detail) in
+        (match finish_raw_error raw_trace_run error with
+         | Ok () -> Error error
+         | Error trace_error ->
+           Error
+             (internal_error
+                (Printf.sprintf
+                   "%s; RAW trace finalization also failed: %s"
+                   (Agent_sdk.Error.to_string error)
+                   (Agent_sdk.Error.to_string trace_error))))
     in
     let session_state = ref claimed_session in
     let recovery_failure =
@@ -466,7 +547,31 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              ~keeper_name
              "Codex cancellation recovery persistence failed: %s"
              recovery_detail);
+        (match
+           Eio.Cancel.protect (fun () ->
+             finish_raw_error raw_trace_run (internal_error detail))
+         with
+         | Ok () -> ()
+         | Error trace_error ->
+           Log.Keeper.error
+             ~keeper_name
+             "Codex cancellation RAW finalization failed: %s"
+             (Agent_sdk.Error.to_string trace_error));
         Printexc.raise_with_backtrace exn backtrace
+    in
+    let turn_result =
+      match turn_result with
+      | Ok result -> finish_raw_success raw_trace_run result
+      | Error error ->
+        (match finish_raw_error raw_trace_run error with
+         | Ok () -> Error error
+         | Error trace_error ->
+           Error
+             (internal_error
+                (Printf.sprintf
+                   "%s; RAW trace finalization also failed: %s"
+                   (Agent_sdk.Error.to_string error)
+                   (Agent_sdk.Error.to_string trace_error))))
     in
     (match turn_result with
      | Ok _ -> turn_result

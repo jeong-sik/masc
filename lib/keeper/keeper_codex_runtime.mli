@@ -14,5 +14,6 @@ val run :
   context_injector:Agent_sdk.Hooks.context_injector option ->
   context:Agent_sdk.Context.t option ->
   event_bus:Agent_sdk.Event_bus.t option ->
+  raw_trace:Agent_sdk.Raw_trace.t option ->
   config:Runtime_execution.codex_app_server ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result

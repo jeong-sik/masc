@@ -701,6 +701,7 @@ let run_named
             ~context_injector
             ~context
             ~event_bus
+            ~raw_trace
             ~config
         in
         let codex_result =

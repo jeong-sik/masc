@@ -28,6 +28,7 @@ module Payload = struct
   let name = "fusion_run_registry"
   let running_noun = "run(s)"
   let restart_reason = "worker fibers do not survive server restart"
+  let completed_retention = `Latest 64
 
   let registration_to_yojson registration =
     `Assoc

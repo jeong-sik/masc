@@ -1,11 +1,13 @@
 (** Runtime adapter for LLM-owned current Memory OS selection.
 
-    A Librarian-owned research phase receives the complete Keeper model-visible
-    tool bundle and records exact tool lifecycle evidence. The existing
+    A Librarian-owned research phase receives the canonical complete Keeper
+    model-visible tool bundle and records exact tool lifecycle evidence. The existing
     tool-free exact-output flow remains the sole selection authority and one
     atomic current-snapshot replacement remains the sole Memory OS mutation.
     If research or its RAW trace is unavailable, the exact flow continues from
-    the original immutable Librarian input and records that degradation. *)
+    the original immutable Librarian input and records that degradation. An
+    external effect waiting for approval leaves Memory unchanged and keeps the
+    Librarian cadence due for the settled follow-up turn. *)
 
 val cadence_step : cadence:int -> counter:int -> int * bool
 val cadence_step_keyed

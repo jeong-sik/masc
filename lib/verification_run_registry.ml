@@ -65,6 +65,7 @@ module Payload = struct
   let name = "verification_run_registry"
   let running_noun = "review(s)"
   let restart_reason = "review fibers do not survive server restart"
+  let completed_retention = `Latest 64
 
   let registration_to_yojson registration =
     `Assoc

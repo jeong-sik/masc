@@ -205,7 +205,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
           check int "bundle contains no duplicate model names" (List.length actual_names)
             (List.length bundle.tools)))
 
-let test_librarian_research_bundle_is_closed_and_read_only () =
+let test_librarian_research_bundle_matches_complete_keeper_surface () =
   ignore (init_registry ());
   let dir =
     Filename.concat
@@ -268,7 +268,7 @@ let test_librarian_research_bundle_is_closed_and_read_only () =
        in
        check
          (list string)
-         "research runner receives only its closed descriptor projection"
+         "research runner receives the complete canonical descriptor projection"
          expected_names
          (List.sort_uniq String.compare actual_names);
        check int
@@ -276,12 +276,7 @@ let test_librarian_research_bundle_is_closed_and_read_only () =
          (List.length expected_names)
          (List.length actual_names);
        List.iter
-         (fun (name, readonly_hint, route) ->
-            check
-              (option bool)
-              (Printf.sprintf "%s is statically read-only" name)
-              (Some true)
-              readonly_hint;
+         (fun (name, _readonly_hint, route) ->
             check bool
               (Printf.sprintf "%s retains a typed runtime route" name)
               true
@@ -290,8 +285,8 @@ let test_librarian_research_bundle_is_closed_and_read_only () =
        List.iter
          (fun name ->
             check bool
-              (Printf.sprintf "%s is not representable in Librarian research" name)
-              false
+              (Printf.sprintf "%s is representable in Librarian research" name)
+              true
               (List.mem name actual_names))
          [ "Execute"
          ; "Edit"
@@ -299,7 +294,7 @@ let test_librarian_research_bundle_is_closed_and_read_only () =
          ; "keeper_memory_write"
          ; "keeper_surface_post"
          ; "masc_fusion"
-         ; "AnalyzeImage"
+         ; "analyze_image"
          ];
        check int
          "each rejected research call records one causal result"
@@ -429,7 +424,7 @@ let test_librarian_research_reserved_exceptions_propagate () =
   | _ -> fail "ordinary research failure used the wrong SDK error"
 ;;
 
-let test_librarian_registry_receipt_excludes_raw_payloads () =
+let test_librarian_registry_receipt_includes_actual_typed_values () =
   let execution_id = Keeper_librarian_research.Execution_id.generate () in
   let receipt : Keeper_librarian_research.receipt =
     { execution_id
@@ -466,14 +461,80 @@ let test_librarian_registry_receipt_excludes_raw_payloads () =
   List.iter
     (fun sentinel ->
        check bool
-         (sentinel ^ " absent from long-lived projection")
-         false
+         (sentinel ^ " retained in Admin-only execution projection")
+         true
          (string_contains projected sentinel))
     [ "SECRET_SYSTEM_SENTINEL"
     ; "SECRET_PROMPT_SENTINEL"
     ; "SECRET_INPUT_SENTINEL"
     ; "SECRET_EVIDENCE_SENTINEL"
     ]
+;;
+
+let test_librarian_duplicate_provider_ids_preserve_each_invocation () =
+  let invocation planned_index =
+    let schedule : Agent_sdk.Tool_contract.schedule =
+      { planned_index
+      ; batch_index = 0
+      ; batch_size = 2
+      ; execution_mode = Agent_sdk.Tool_contract.Concurrent
+      }
+    in
+    Agent_sdk.Tool_contract.Invocation.create
+      ~tool_use_id:"provider-reused-id"
+      ~turn:1
+      ~schedule
+      ~completion:Agent_sdk.Tool_contract.Continue_after_success
+  in
+  let result marker =
+    Keeper_librarian_research.Executed
+      (Ok { Agent_sdk.Types.content = marker; _meta = None })
+  in
+  let calls =
+    Keeper_librarian_research.For_testing.freeze_completed_calls
+      [ invocation 0, "keeper_time_now", `Assoc [ "call", `Int 0 ], result "zero"
+      ; invocation 1, "keeper_time_now", `Assoc [ "call", `Int 1 ], result "one"
+      ]
+  in
+  check int "both provider invocations survive" 2 (List.length calls);
+  check
+    (list int)
+    "structural invocation positions remain distinct"
+    [ 0; 1 ]
+    (List.map
+       (fun (call : Keeper_librarian_research.tool_call) ->
+          Agent_sdk.Tool_contract.Invocation.planned_index call.invocation)
+       calls);
+  List.iter
+    (fun (call : Keeper_librarian_research.tool_call) ->
+       match call.result with
+       | Keeper_librarian_research.Executed (Ok _) -> ()
+       | _ -> fail "completed duplicate invocation lost its terminal result")
+    calls
+;;
+
+let test_librarian_external_effect_blocks_exact_finalizer () =
+  check bool
+    "pending external effect cannot finalize Memory"
+    false
+    (Keeper_librarian_research.finalizer_may_run
+       (Keeper_librarian_research.Research_deferred
+          { session_id = "pending-session"; turns = 1 }));
+  check bool
+    "settled research remains finalizable"
+    true
+    (Keeper_librarian_research.finalizer_may_run
+       (Keeper_librarian_research.Research_completed
+          { evidence =
+              { text = "settled"
+              ; original_bytes = 7
+              ; retained_bytes = 7
+              ; truncated = false
+              }
+          ; session_id = "settled-session"
+          ; turns = 1
+          ; stop_reason = Runtime_agent.Completed
+          }))
 ;;
 
 let test_missing_current_task_reconciled_before_transition_hint () =
@@ -707,14 +768,18 @@ let () =
             test_fusion_default_descriptor_is_bundle_visible;
           test_case "bundle exactly matches model-visible descriptors" `Quick
             test_bundle_exactly_matches_model_visible_descriptors;
-          test_case "librarian research bundle is closed and read-only" `Quick
-            test_librarian_research_bundle_is_closed_and_read_only;
+          test_case "librarian research bundle matches complete Keeper surface" `Quick
+            test_librarian_research_bundle_matches_complete_keeper_surface;
           test_case "librarian research cleanup covers success error cancellation" `Quick
             test_librarian_research_cleanup_contract;
           test_case "librarian research preserves reserved exceptions" `Quick
             test_librarian_research_reserved_exceptions_propagate;
-          test_case "librarian registry receipt excludes raw payloads" `Quick
-            test_librarian_registry_receipt_excludes_raw_payloads;
+          test_case "librarian registry receipt includes actual typed values" `Quick
+            test_librarian_registry_receipt_includes_actual_typed_values;
+          test_case "duplicate provider ids preserve each invocation" `Quick
+            test_librarian_duplicate_provider_ids_preserve_each_invocation;
+          test_case "pending external effect blocks exact finalizer" `Quick
+            test_librarian_external_effect_blocks_exact_finalizer;
           test_case "missing current task reconciles before transition hint" `Quick
             test_missing_current_task_reconciled_before_transition_hint;
           test_case "bundle assembly does not emit assignment" `Quick

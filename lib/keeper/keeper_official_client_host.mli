@@ -79,4 +79,5 @@ val dynamic_tools :
   context_injector:Agent_sdk.Hooks.context_injector option ->
   context:Agent_sdk.Context.t option ->
   terminal_error:string option ref ->
+  raw_trace_run:Agent_sdk.Raw_trace.active_run option ->
   (dynamic_tool list, Agent_sdk.Error.sdk_error) result

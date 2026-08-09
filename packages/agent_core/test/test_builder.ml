@@ -283,6 +283,9 @@ let exact_provider_config () =
     { Llm_provider.Capabilities.openai_compat_chat_capabilities with
       supports_tools = true
     ; supports_structured_output = true
+    ; supports_top_k = true
+    ; supports_min_p = true
+    ; supports_seed = true
     }
   in
   Llm_provider.Provider_config.make

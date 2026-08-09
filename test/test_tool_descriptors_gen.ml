@@ -57,6 +57,17 @@ let test_config_category_ssot () =
     Tool_schemas_specs_types.config_category_enum_strings
 ;;
 
+let test_masc_spawn_is_not_generated () =
+  Alcotest.(check bool)
+    "masc_spawn absent from generated schemas"
+    false
+    (has_schema "masc_spawn" Tool_descriptors_gen.schemas);
+  Alcotest.(check bool)
+    "masc_spawn absent from effective misc schemas"
+    false
+    (has_schema "masc_spawn" Tool_schemas_misc.schemas)
+;;
+
 let test_control_schemas_use_dedicated_typed_projection () =
   let properties schema =
     match schema.input_schema with
@@ -302,6 +313,9 @@ let () =
     ; ( "config category SSOT"
       , [ Alcotest.test_case "enum matches producer" `Quick test_config_category_ssot ]
       )
+    ; ( "retired tool exclusion"
+      , [ Alcotest.test_case "masc_spawn removed" `Quick test_masc_spawn_is_not_generated
+        ] )
     ; ( "control schema SSOT"
       , [ Alcotest.test_case
             "control tools use a dedicated typed projection"

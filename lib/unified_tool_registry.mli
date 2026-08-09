@@ -6,13 +6,13 @@
     The flow is invoked once at startup by the MCP composition root; it is
     idempotent and preserves tags already registered via [Tool_spec]. *)
 
+(** Exact lookup from canonical schema membership or a typed descriptor. *)
 val tag_of_name : string -> Tool_dispatch.module_tag option
 
 val runtime_schema_for_descriptor :
   Keeper_tool_descriptor.t -> Masc_domain.tool_schema option
 (** Resolve the exact validation schema from the descriptor handler's runtime
     owner. *)
-(** Exact lookup from canonical schema membership or a typed descriptor. *)
 
 val tag_of_runtime_handler :
   Keeper_tool_descriptor.runtime_handler -> Tool_dispatch.module_tag

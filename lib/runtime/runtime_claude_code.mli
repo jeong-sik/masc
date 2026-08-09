@@ -4,7 +4,7 @@
     Claude Code owns the subscription session and model loop. MASC owns the
     child lifetime, exact SDK-control/MCP bridge, and terminal projection. *)
 
-type subscription =
+type subscription = private
   { auth_method : string
   ; subscription_type : string
   ; api_provider : string
@@ -86,10 +86,19 @@ val validate_turn :
   prompt:string ->
   (unit, error) result
 
+val probe_subscription :
+  mgr:_ Eio.Process.mgr ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config ->
+  (subscription, error) result
+(** Measure the official CLI login without submitting a model turn. The child
+    receives the same credential-scrubbed environment as [run_turn]. *)
+
 val run_turn :
   ?dynamic_tools:dynamic_tool list ->
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
   ?session_mode:session_mode ->
+  ?admitted_subscription:subscription ->
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->

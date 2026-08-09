@@ -166,6 +166,25 @@ let test_non_subscription_auth_is_rejected () =
     | Ok _ -> fail "API-key Claude auth was admitted as subscription")
 ;;
 
+let test_missing_cli_is_not_reported_as_logout () =
+  let outcome =
+    Eio_main.run (fun env ->
+      let config =
+        { (Runtime_claude_code.default_config ~cwd:"/tmp") with
+          cli_path = "/definitely/missing/masc-claude-fixture"
+        }
+      in
+      Runtime_claude_code.probe_subscription
+        ~mgr:(Eio.Stdenv.process_mgr env)
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+        config)
+  in
+  match outcome with
+  | Error (Runtime_claude_code.Spawn_failed _) -> ()
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok _ -> fail "missing Claude CLI was reported as a valid login"
+;;
+
 let rate_limit_rejected =
   {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":1786356000,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
 ;;
@@ -674,6 +693,10 @@ let () =
             "non-subscription rejected"
             `Quick
             test_non_subscription_auth_is_rejected
+        ; test_case
+            "missing CLI differs from logout"
+            `Quick
+            test_missing_cli_is_not_reported_as_logout
         ] )
     ; ( "terminal"
       , [ test_case

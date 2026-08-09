@@ -270,15 +270,19 @@ let audit_today_path base_dir =
 ;;
 
 let store_create_probe = Atomic.make (fun ~base_path:_ -> ())
+
+type append_outcome =
+  | Append_recorded
+  | Append_recorded_with_settlement_failure of string
+
 let append_jsonl_durable path json =
   let suffix = Yojson.Safe.to_string json ^ "\n" in
   match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
-  | Private_file_succeeded () -> ()
+  | Private_file_succeeded () -> Append_recorded
   | Private_file_succeeded_with_cleanup_failure
       { value = (); cleanup_failure } ->
-    raise
-      (Sys_error
-         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+    Append_recorded_with_settlement_failure
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
   | Private_file_failed error ->
     raise (Sys_error (Fs_compat.private_jsonl_append_error_to_string error))
   | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
@@ -426,14 +430,27 @@ let record
          @ extra_fields
          )
     in
-    (try
-       Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
-        (Atomic.get append_jsonl)
-          (audit_today_path (Dated_jsonl.base_dir store))
-          json);
+    let append_result =
+      try
+        Ok
+          (Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
+             (Atomic.get append_jsonl)
+               (audit_today_path (Dated_jsonl.base_dir store))
+               json))
+      with
+      | exn -> Error exn
+    in
+    (match append_result with
+     | Ok Append_recorded -> { event_type; write_result = Ok () }
+     | Ok (Append_recorded_with_settlement_failure detail) ->
+       record_failure
+         ~keeper_name
+         ~site:Keeper_approval_queue_failure_site.(to_label Audit_append)
+         ~id
+         ~event_type:(event_to_string event_type)
+         (Sys_error detail);
        { event_type; write_result = Ok () }
-     with
-     | exn ->
+     | Error exn ->
        record_failure
          ~keeper_name
          ~site:Keeper_approval_queue_failure_site.(to_label Audit_append)
@@ -791,7 +808,16 @@ module For_testing = struct
   ;;
 
   let set_store_create_probe probe = Atomic.set store_create_probe probe
-  let set_append_jsonl append = Atomic.set append_jsonl append
+  let set_append_jsonl append =
+    Atomic.set append_jsonl (fun path json ->
+      append path json;
+      Append_recorded)
+  ;;
+
+  let set_append_jsonl_cleanup_failure detail =
+    Atomic.set append_jsonl (fun _path _json ->
+      Append_recorded_with_settlement_failure detail)
+  ;;
 
   let with_audit_io_lock f =
     Cross_context_mutex.with_durable_lock audit_io_mutex f

@@ -3766,6 +3766,37 @@ let test_audit_store_failure_keeps_defer_committed_and_visible () =
          Alcotest.fail (Gate.unavailable_reason_to_string reason))
 ;;
 
+let test_audit_cleanup_failure_preserves_recorded_receipt () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      cleanup_dir base_path)
+    (fun () ->
+       Keeper_approval.Audit.For_testing.reset_store ();
+       Keeper_approval.Audit.For_testing.set_append_jsonl_cleanup_failure
+         "deterministic descriptor close failure";
+       let receipt =
+         Keeper_approval.Audit.record
+           ~base_path
+           ~event_type:Keeper_approval.Audit.Pending
+           ~id:"cleanup-settlement"
+           ~keeper_name:"queue-audit-cleanup-failure"
+           ~tool_name:"external-effect"
+           ()
+       in
+       (match receipt.write_result with
+        | Ok () -> ()
+        | Error _ ->
+          Alcotest.fail
+            "durably recorded append was collapsed into a failed receipt");
+       let wire = Keeper_approval.Audit.receipt_to_yojson receipt in
+       Alcotest.(check bool)
+         "wire keeps durable append recorded"
+         true
+         (Safe_ops.json_bool ~default:false "recorded" wire))
+;;
+
 let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
   let base_path = temp_dir () in
   let keeper_name = "queue-audit-append-failure" in
@@ -4309,6 +4340,10 @@ let () =
             "audit store failure keeps defer committed and visible"
             `Quick
             test_audit_store_failure_keeps_defer_committed_and_visible
+        ; Alcotest.test_case
+            "audit cleanup failure preserves recorded receipt"
+            `Quick
+            test_audit_cleanup_failure_preserves_recorded_receipt
         ; Alcotest.test_case
             "audit append failure keeps authority mutations committed"
             `Quick

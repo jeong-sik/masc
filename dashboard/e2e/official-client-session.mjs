@@ -11,7 +11,7 @@ if (!fixtureUrl) throw new Error('OFFICIAL_CLIENT_SESSION_FIXTURE_URL is require
 const artifactDir = process.env.OFFICIAL_CLIENT_SESSION_ARTIFACT_DIR ?? '/tmp'
 const recoveryScreenshot = `${artifactDir}/official-client-session-recovery-required.png`
 const resolvedScreenshot = `${artifactDir}/official-client-session-recovery-resolved.png`
-const loginScreenshot = `${artifactDir}/official-client-login-ready.png`
+const loginScreenshot = `${artifactDir}/official-client-login-self-reported.png`
 const recoveryId = '018f3a4a-27f4-7c9a-8fd8-330c2a3845aa'
 let getRequests = 0
 let postedBody = null
@@ -118,8 +118,9 @@ try {
 
   const loginProbe = page.getByTestId('official-client-login-probe-codex.codex')
   await loginProbe.getByTestId('official-client-login-probe-run-codex.codex').click()
-  await loginProbe.getByTestId('official-client-probe-login').getByText('ready', { exact: true }).waitFor()
+  await loginProbe.getByTestId('official-client-probe-login').getByText('self_reported', { exact: true }).waitFor()
   await loginProbe.getByTestId('official-client-probe-execution').getByText('not_measured', { exact: true }).waitFor()
+  await loginProbe.getByTestId('official-client-probe-details').getByText('unverified', { exact: true }).waitFor()
   await loginProbe.getByText('pro', { exact: true }).waitFor()
   if (loginProbeRequests !== 1) throw new Error(`expected one login probe POST, got ${loginProbeRequests}`)
   if (JSON.stringify(loginProbeBody) !== JSON.stringify({ runtime_id: 'codex.codex' })) {
@@ -143,7 +144,7 @@ try {
   await page.screenshot({ path: resolvedScreenshot, fullPage: true })
   process.stdout.write(`official_client_recovery_required_screenshot=${recoveryScreenshot}\n`)
   process.stdout.write(`official_client_recovery_resolved_screenshot=${resolvedScreenshot}\n`)
-  process.stdout.write(`official_client_login_ready_screenshot=${loginScreenshot}\n`)
+  process.stdout.write(`official_client_login_self_reported_screenshot=${loginScreenshot}\n`)
 } finally {
   await browser.close()
 }

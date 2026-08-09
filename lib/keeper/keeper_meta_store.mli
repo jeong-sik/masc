@@ -80,11 +80,23 @@ val read_meta_if_changed :
   (Keeper_meta_contract.keeper_meta * float) option
 
 (** Durably replace the complete current snapshot. The per-Keeper Owner is the
-    only production caller and therefore the only write authority. A failure
-    after rename is accepted only when exact byte read-back confirms the
-    intended snapshot. *)
+    only production caller and therefore the only write authority. Any failed
+    durability stage remains an error even when the renamed bytes are visible
+    in the current process. *)
 val replace_snapshot :
   Workspace.config -> Keeper_meta_contract.keeper_meta -> (unit, string) result
 
 (** Durably remove the current snapshot for a Keeper deleted by its Owner. *)
 val remove_snapshot : Workspace.config -> name:string -> (unit, string) result
+
+module For_testing : sig
+  val settle_durable_replace
+    :  string
+    -> (unit, Keeper_fs.durable_write_error) result
+    -> (unit, string) result
+
+  val settle_durable_remove
+    :  string
+    -> (unit, Keeper_fs.durable_remove_error) result
+    -> (unit, string) result
+end

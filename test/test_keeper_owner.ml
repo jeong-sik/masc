@@ -336,6 +336,34 @@ let test_store_failure_fences_mutations () =
   | Error error -> fail ("store fence blocked exact projection: " ^ Owner.error_to_string error)
 ;;
 
+let test_visible_post_publish_failure_is_not_durable_success () =
+  let write_error : Keeper_fs.durable_write_error =
+    { renamed = true
+    ; stage = Parent_directory_fsync_after_rename
+    ; failure = Operation_failed "injected parent directory fsync failure"
+    }
+  in
+  (match
+     Keeper_meta_store.For_testing.settle_durable_replace
+       "/owned/keeper.json"
+       (Error write_error)
+   with
+   | Error _ -> ()
+   | Ok () -> fail "visible rename was mistaken for a durable metadata commit");
+  let remove_error : Keeper_fs.durable_remove_error =
+    { removed = true
+    ; failure = Parent_directory_fsync, "injected parent directory fsync failure"
+    }
+  in
+  match
+    Keeper_meta_store.For_testing.settle_durable_remove
+      "/owned/keeper.json"
+      (Error remove_error)
+  with
+  | Error _ -> ()
+  | Ok () -> fail "visible unlink was mistaken for a durable metadata removal"
+;;
+
 let test_identity_and_delete_guards () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -687,6 +715,10 @@ let () =
             "store failure fences mutations"
             `Quick
             test_store_failure_fences_mutations
+        ; test_case
+            "visible publication is not durable success"
+            `Quick
+            test_visible_post_publish_failure_is_not_durable_success
         ; test_case
             "identity and delete guards"
             `Quick

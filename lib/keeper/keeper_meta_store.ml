@@ -282,15 +282,24 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
   read_candidate requested_name
 ;;
 
-let exact_payload_read_back path expected =
-  try
-    match Fs_compat.load_file_opt path with
-    | Some actual when String.equal actual expected -> Ok ()
-    | Some _ -> Error "persisted bytes differ from the intended snapshot"
-    | None -> Error "persisted snapshot is absent"
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error ("snapshot read-back failed: " ^ Printexc.to_string exn)
+let settle_durable_replace path = function
+  | Ok () -> Ok ()
+  | Error error ->
+    Error
+      (Printf.sprintf
+         "failed to durably write metadata %s: %s"
+         path
+         (Keeper_fs.durable_write_error_to_string error))
+;;
+
+let settle_durable_remove path = function
+  | Ok () -> Ok ()
+  | Error error ->
+    Error
+      (Printf.sprintf
+         "failed to durably remove metadata %s: %s"
+         path
+         (Keeper_fs.durable_remove_error_to_string error))
 ;;
 
 let replace_snapshot config (persisted : Keeper_meta_contract.keeper_meta) =
@@ -299,44 +308,22 @@ let replace_snapshot config (persisted : Keeper_meta_contract.keeper_meta) =
   | Some detail -> Error ("Keeper metadata invariant violation: " ^ detail)
   | None ->
     let payload = persisted |> meta_to_json |> Yojson.Safe.pretty_to_string in
-    (match
-       Keeper_fs.save_bytes_durable_atomic
-         ~ownership_root:config.Workspace.base_path
-         path
-         payload
-     with
-     | Ok () -> Ok ()
-     | Error error when error.Keeper_fs.renamed ->
-       (match exact_payload_read_back path payload with
-        | Ok () -> Ok ()
-        | Error read_back_error ->
-          Error
-            (Printf.sprintf
-               "failed to confirm metadata commit %s: %s; %s"
-               path
-               (Keeper_fs.durable_write_error_to_string error)
-               read_back_error))
-     | Error error ->
-       Error
-         (Printf.sprintf
-            "failed to write metadata %s: %s"
-            path
-            (Keeper_fs.durable_write_error_to_string error)))
+    Keeper_fs.save_bytes_durable_atomic
+      ~ownership_root:config.Workspace.base_path
+      path
+      payload
+    |> settle_durable_replace path
 ;;
 
 let remove_snapshot config ~name =
   let path = keeper_meta_path config name in
-  match
-    Keeper_fs.remove_file_durable
-      ~ownership_root:config.Workspace.base_path
-      path
-  with
-  | Ok () -> Ok ()
-  | Error error when error.Keeper_fs.removed && not (Fs_compat.file_exists path) -> Ok ()
-  | Error error ->
-    Error
-      (Printf.sprintf
-         "failed to remove metadata %s: %s"
-         path
-         (Keeper_fs.durable_remove_error_to_string error))
+  Keeper_fs.remove_file_durable
+    ~ownership_root:config.Workspace.base_path
+    path
+  |> settle_durable_remove path
 ;;
+
+module For_testing = struct
+  let settle_durable_replace = settle_durable_replace
+  let settle_durable_remove = settle_durable_remove
+end

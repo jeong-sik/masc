@@ -30,12 +30,51 @@ import { keepers } from '../store'
 
 const MOCK_RUNTIME_PATH = '/tmp/.masc/config/runtime.toml'
 
+const providerProtocols = [
+  {
+    protocol: 'messages-http',
+    transport: 'endpoint',
+    semantics: 'http_provider',
+    credential_policy: 'optional',
+    requires_non_interactive: false,
+  },
+  {
+    protocol: 'openai-compatible-http',
+    transport: 'endpoint',
+    semantics: 'http_provider',
+    credential_policy: 'optional',
+    requires_non_interactive: false,
+  },
+  {
+    protocol: 'ollama-http',
+    transport: 'endpoint',
+    semantics: 'http_provider',
+    credential_policy: 'optional',
+    requires_non_interactive: false,
+  },
+  {
+    protocol: 'codex-app-server',
+    transport: 'command',
+    semantics: 'official_client',
+    credential_policy: 'forbidden',
+    requires_non_interactive: true,
+  },
+  {
+    protocol: 'claude-code',
+    transport: 'command',
+    semantics: 'official_client',
+    credential_policy: 'forbidden',
+    requires_non_interactive: true,
+  },
+] as const
+
 const baseConfig = {
   ok: true,
   path: MOCK_RUNTIME_PATH,
   file_name: 'runtime.toml',
   source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
   reloaded: false,
+  provider_protocols: providerProtocols,
 }
 
 const richSourceText = `[runtime]
@@ -884,13 +923,14 @@ describe('RuntimeTomlEditor', () => {
       container.querySelectorAll('[aria-label="새 provider protocol"] option'),
     ).map(option => (option as HTMLOptionElement).value)
     expect(protocolOptions).toEqual([
+      'messages-http',
       'openai-compatible-http',
       'ollama-http',
-      'openai-compatible-cli',
-      'messages-http',
       'codex-app-server',
+      'claude-code',
     ])
     expect(protocolOptions).not.toContain('messages-cli')
+    expect(protocolOptions).not.toContain('openai-compatible-cli')
     // No transport-kind selector left to switch to 'command'.
     expect(container.querySelector('[aria-label="새 provider transport 종류"]')).toBeNull()
   })

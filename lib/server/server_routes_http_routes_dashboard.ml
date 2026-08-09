@@ -184,6 +184,31 @@ let handle_execute_output_stream ~sw ~clock request reqd =
     request
     reqd
 
+let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
+  let transport =
+    match protocol.transport with
+    | Runtime_toml.Endpoint -> "endpoint"
+    | Runtime_toml.Command -> "command"
+  in
+  let semantics =
+    match protocol.semantics with
+    | Runtime_toml.Http_provider -> "http_provider"
+    | Runtime_toml.Official_client -> "official_client"
+  in
+  let credential_policy =
+    match protocol.credential_policy with
+    | Runtime_toml.Credentials_optional -> "optional"
+    | Runtime_toml.Credentials_forbidden -> "forbidden"
+  in
+  `Assoc
+    [ "protocol", `String protocol.protocol
+    ; "transport", `String transport
+    ; "semantics", `String semantics
+    ; "credential_policy", `String credential_policy
+    ; "requires_non_interactive", `Bool protocol.requires_non_interactive
+    ]
+;;
+
 let runtime_config_raw_json ~path ~source_text ~reloaded =
   `Assoc
     [ ("ok", `Bool true)
@@ -191,6 +216,8 @@ let runtime_config_raw_json ~path ~source_text ~reloaded =
     ; ("file_name", `String "runtime.toml")
     ; ("source_text", `String source_text)
     ; ("reloaded", `Bool reloaded)
+    ; ( "provider_protocols"
+      , `List (List.map runtime_editor_protocol_json Runtime_toml.editor_protocols) )
     ]
 
 (* Line count for the audit [lines] metric. [String.split_on_char '\n'] counts a

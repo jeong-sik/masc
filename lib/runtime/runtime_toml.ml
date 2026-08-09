@@ -3,9 +3,8 @@
     Re-homed from the deleted [Runtime_declarative_parser]. Parses RFC-0058
     layers 1-3 plus [[runtime].default] into a self-standing
     {!Runtime_schema.config}. Reserved top-level namespaces: providers,
-    models, runtime, web_search (plus the dropped routing namespaces system,
-    routes, profiles, which are still reserved so they are never mistaken for a
-    provider table). Any other top-level table is a provider table, with
+    models, runtime, web_search. Dropped routing namespaces system, routes, and
+    profiles are rejected rather than ignored. Any other top-level table is a provider table, with
     sub-tables as model bindings.
 
     Routing layers are intentionally NOT parsed (see {!Runtime_toml} mli):
@@ -104,34 +103,105 @@ let partition_results
 
 (* --- Protocol string -> Runtime_schema.api_format --- *)
 
-let canonical_protocol_of_protocol = function
-  | "messages-cli" | "messages-http" | "openai-compatible-cli"
-  | "openai-compatible-http" | "ollama-http" | "codex-app-server"
-  | "claude-code" | "antigravity-cli" as protocol ->
-    Some protocol
-  | _ -> None
+type editor_transport =
+  | Endpoint
+  | Command
+
+type editor_semantics =
+  | Http_provider
+  | Official_client
+
+type editor_credential_policy =
+  | Credentials_optional
+  | Credentials_forbidden
+
+type editor_protocol =
+  { protocol : string
+  ; transport : editor_transport
+  ; semantics : editor_semantics
+  ; credential_policy : editor_credential_policy
+  ; requires_non_interactive : bool
+  }
+
+type protocol_declaration =
+  { protocol : string
+  ; api_format : Runtime_schema.api_format
+  ; editor : editor_protocol option
+  }
+
+let http_editor protocol =
+  Some
+    { protocol
+    ; transport = Endpoint
+    ; semantics = Http_provider
+    ; credential_policy = Credentials_optional
+    ; requires_non_interactive = false
+    }
+;;
+
+let official_client_editor protocol =
+  Some
+    { protocol
+    ; transport = Command
+    ; semantics = Official_client
+    ; credential_policy = Credentials_forbidden
+    ; requires_non_interactive = true
+    }
+;;
+
+let hidden_protocol protocol api_format =
+  { protocol; api_format; editor = None }
+;;
+
+let http_protocol protocol api_format =
+  { protocol; api_format; editor = http_editor protocol }
+;;
+
+let official_client_protocol protocol api_format =
+  { protocol; api_format; editor = official_client_editor protocol }
+;;
+
+let protocol_declarations =
+  [ hidden_protocol "messages-cli" Runtime_schema.Messages_api
+  ; http_protocol "messages-http" Runtime_schema.Messages_api
+  ; hidden_protocol "openai-compatible-cli" Runtime_schema.Chat_completions_api
+  ; http_protocol
+      "openai-compatible-http"
+      Runtime_schema.Chat_completions_api
+  ; http_protocol "ollama-http" Runtime_schema.Ollama_api
+  ; official_client_protocol
+      "codex-app-server"
+      Runtime_schema.Codex_app_server_runtime
+  ; official_client_protocol "claude-code" Runtime_schema.Claude_code_runtime
+  ; hidden_protocol "antigravity-cli" Runtime_schema.Antigravity_cli_runtime
+  ]
+;;
+
+let protocol_declaration protocol =
+  List.find_opt
+    (fun declaration -> String.equal declaration.protocol protocol)
+    protocol_declarations
+;;
+
+let editor_protocols = List.filter_map (fun declaration -> declaration.editor) protocol_declarations
+
+let canonical_protocol_of_protocol protocol =
+  Option.map (fun declaration -> declaration.protocol) (protocol_declaration protocol)
 ;;
 
 let unknown_protocol_error s =
   Printf.sprintf
-    "unknown protocol %S: expected one of messages-cli, messages-http, \
-     openai-compatible-cli, openai-compatible-http, ollama-http, \
-     codex-app-server, claude-code, antigravity-cli"
+    "unknown protocol %S: expected one of %s"
     s
+    (String.concat ", " (List.map (fun declaration -> declaration.protocol) protocol_declarations))
 ;;
 
 let api_format_of_protocol (s : string)
   : (Runtime_schema.api_format, string) result
   =
-  match s with
-  | "messages-cli" | "messages-http" -> Ok Runtime_schema.Messages_api
-  | "openai-compatible-cli" | "openai-compatible-http" ->
-    Ok Runtime_schema.Chat_completions_api
-  | "ollama-http" -> Ok Runtime_schema.Ollama_api
-  | "codex-app-server" -> Ok Runtime_schema.Codex_app_server_runtime
-  | "antigravity-cli" -> Ok Runtime_schema.Antigravity_cli_runtime
-  | "claude-code" -> Ok Runtime_schema.Claude_code_runtime
-  | _ -> Error (unknown_protocol_error s)
+  match protocol_declaration s with
+  | Some declaration -> Ok declaration.api_format
+  | None -> Error (unknown_protocol_error s)
 ;;
 
 (* --- Transport extraction --- *)
@@ -148,6 +218,45 @@ let transport_of_provider (tbl : Otoml.t) (id : string)
     Error (Printf.sprintf "provider %s: cannot specify both 'endpoint' and 'command'" id)
   | None, None ->
     Error (Printf.sprintf "provider %s: must specify either 'endpoint' or 'command'" id)
+;;
+
+let active_top_level_namespaces = [ "providers"; "models"; "runtime"; "web_search" ]
+let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
+let reserved_namespaces = active_top_level_namespaces @ obsolete_top_level_namespaces
+let is_reserved name = List.mem name reserved_namespaces
+
+let valid_runtime_id_component value =
+  let length = String.length value in
+  length > 0
+  &&
+  let rec loop index =
+    if index = length
+    then true
+    else (
+      match value.[index] with
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> loop (index + 1)
+      | _ -> false)
+  in
+  loop 0
+;;
+
+let validate_runtime_id_component ~kind ~path value =
+  if not (valid_runtime_id_component value)
+  then
+    Error
+      (error
+         path
+         (Printf.sprintf "%s id must match [A-Za-z0-9_-]+" kind))
+  else if is_reserved value
+  then
+    Error
+      (error
+         path
+         (Printf.sprintf
+            "%s id %S collides with a reserved top-level runtime.toml namespace"
+            kind
+            value))
+  else Ok ()
 ;;
 
 (* --- Layer 1: Providers --- *)
@@ -495,7 +604,18 @@ let parse_providers (toml : Otoml.t)
   | None -> Ok []
   | Some providers_tbl ->
     let entries = Otoml.get_table providers_tbl in
-    partition_results (List.map (fun (id, tbl) -> parse_provider id tbl) entries)
+    partition_results
+      (List.map
+         (fun (id, tbl) ->
+            match
+              validate_runtime_id_component
+                ~kind:"provider"
+                ~path:("providers." ^ id)
+                id
+            with
+            | Error _ as error -> error
+            | Ok () -> parse_provider id tbl)
+         entries)
 ;;
 
 (* --- Layer 2: Models --- *)
@@ -860,20 +980,43 @@ let parse_models (toml : Otoml.t)
   | None -> Ok []
   | Some models_tbl ->
     let entries = Otoml.get_table models_tbl in
-    partition_results (List.map (fun (id, tbl) -> parse_model id tbl) entries)
+    partition_results
+      (List.map
+         (fun (id, tbl) ->
+            match
+              validate_runtime_id_component
+                ~kind:"model"
+                ~path:("models." ^ id)
+                id
+            with
+            | Error _ as error -> error
+            | Ok () -> parse_model id tbl)
+         entries)
 ;;
 
 (* --- Reserved namespace detection --- *)
 
-(* The dropped routing namespaces (system, routes, profiles) remain
-   reserved: keeping them out of the provider-table scan ensures a stale
-   [[routes]]/[[profiles]] table in an existing runtime.toml is silently
-   ignored rather than misread as a provider with bogus model bindings. *)
-let reserved_namespaces =
-  [ "providers"; "models"; "system"; "routes"; "profiles"; "runtime"; "web_search" ]
+let reject_obsolete_top_level_namespaces (toml : Otoml.t)
+  : (unit, parse_error list) result
+  =
+  let top_entries = Otoml.get_table toml in
+  let errors =
+    List.filter_map
+      (fun namespace ->
+         if List.mem_assoc namespace top_entries
+         then
+           Some
+             { path = namespace
+             ; message =
+                 (Printf.sprintf
+                    "obsolete top-level namespace %S is not supported"
+                    namespace)
+             }
+         else None)
+      obsolete_top_level_namespaces
+  in
+  if errors = [] then Ok () else Error errors
 ;;
-
-let is_reserved (name : string) : bool = List.mem name reserved_namespaces
 
 (* --- Layer 3: Bindings from provider tables --- *)
 
@@ -1310,6 +1453,7 @@ let parse_exact_output_lanes (toml : Otoml.t)
 ;;
 
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
+  let obsolete_namespaces_result = reject_obsolete_top_level_namespaces toml in
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
   let runtime_section_result = parse_runtime_section toml in
@@ -1319,7 +1463,8 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let exact_output_lanes_result = parse_exact_output_lanes toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
-    errs providers_result
+    errs obsolete_namespaces_result
+    @ errs providers_result
     @ errs models_result
     @ errs runtime_section_result
     @ errs assignments_result

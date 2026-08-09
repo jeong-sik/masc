@@ -1032,9 +1032,80 @@ export interface RuntimeTomlConfig {
   file_name: string
   source_text: string
   reloaded: boolean
+  provider_protocols: RuntimeTomlEditorProtocol[]
   message?: string | null
   reason?: string | null
   issues?: unknown
+}
+
+export type RuntimeTomlEditorTransport = 'endpoint' | 'command'
+export type RuntimeTomlEditorSemantics = 'http_provider' | 'official_client'
+export type RuntimeTomlEditorCredentialPolicy = 'optional' | 'forbidden'
+
+export interface RuntimeTomlEditorProtocol {
+  protocol: string
+  transport: RuntimeTomlEditorTransport
+  semantics: RuntimeTomlEditorSemantics
+  credential_policy: RuntimeTomlEditorCredentialPolicy
+  requires_non_interactive: boolean
+}
+
+const RUNTIME_TOML_EDITOR_PROTOCOL_KEYS = [
+  'credential_policy',
+  'protocol',
+  'requires_non_interactive',
+  'semantics',
+  'transport',
+] as const
+
+function parseRuntimeTomlEditorProtocols(raw: unknown): RuntimeTomlEditorProtocol[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('유효하지 않은 runtime provider protocol inventory')
+  }
+  const seen = new Set<string>()
+  return raw.map((entry) => {
+    if (!isRecord(entry)) throw new Error('유효하지 않은 runtime provider protocol entry')
+    const keys = Object.keys(entry).sort()
+    if (
+      keys.length !== RUNTIME_TOML_EDITOR_PROTOCOL_KEYS.length
+      || keys.some((key, index) => key !== RUNTIME_TOML_EDITOR_PROTOCOL_KEYS[index])
+    ) {
+      throw new Error('유효하지 않은 runtime provider protocol fields')
+    }
+    const protocol = entry.protocol
+    const transport = entry.transport
+    const semantics = entry.semantics
+    const credentialPolicy = entry.credential_policy
+    const requiresNonInteractive = entry.requires_non_interactive
+    if (
+      typeof protocol !== 'string'
+      || protocol === ''
+      || protocol.trim() !== protocol
+      || (transport !== 'endpoint' && transport !== 'command')
+      || (semantics !== 'http_provider' && semantics !== 'official_client')
+      || (credentialPolicy !== 'optional' && credentialPolicy !== 'forbidden')
+      || typeof requiresNonInteractive !== 'boolean'
+      || seen.has(protocol)
+    ) {
+      throw new Error('유효하지 않은 runtime provider protocol contract')
+    }
+    if (
+      (semantics === 'official_client'
+        && (transport !== 'command' || credentialPolicy !== 'forbidden' || !requiresNonInteractive))
+      || (semantics === 'http_provider'
+        && (transport !== 'endpoint' || credentialPolicy !== 'optional' || requiresNonInteractive))
+    ) {
+      throw new Error('일관되지 않은 runtime provider protocol contract')
+    }
+    seen.add(protocol)
+    return {
+      protocol,
+      transport,
+      semantics,
+      credential_policy: credentialPolicy,
+      requires_non_interactive: requiresNonInteractive,
+    }
+  })
 }
 
 function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
@@ -1045,6 +1116,7 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
     file_name: asString(record.file_name) ?? 'runtime.toml',
     source_text: asString(record.source_text, ''),
     reloaded: asBoolean(record.reloaded) ?? false,
+    provider_protocols: parseRuntimeTomlEditorProtocols(record.provider_protocols),
     message: asNullableString(record.message),
     reason: asNullableString(record.reason),
     issues: record.issues,

@@ -178,6 +178,7 @@ export type {
   LatencyBucket,
   DashboardRuntimeModelMetricsResponse,
   RuntimeTomlConfig,
+  RuntimeTomlEditorProtocol,
   RuntimeRoutingLane,
 } from './dashboard-runtime'
 export {

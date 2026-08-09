@@ -713,47 +713,6 @@ export function setRuntimeTomlBindingField(
   return setRuntimeTomlKey(sourceText, runtimeId, field, value)
 }
 
-// Closed set mirroring lib/runtime/runtime_toml.ml's api_format_of_protocol —
-// any other string fails runtime.toml *parse* validation on save
-// (Runtime.save_config_text re-parses via materialize_config). This does not
-// mean every member here can be safely offered by the add-provider form: see
-// RUNTIME_TOML_CREATABLE_PROTOCOLS below for the materialization gate.
-export const RUNTIME_TOML_PROTOCOLS = [
-  'openai-compatible-http',
-  'ollama-http',
-  'openai-compatible-cli',
-  'messages-http',
-  'messages-cli',
-  'codex-app-server',
-] as const
-
-export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
-
-// Subset of RUNTIME_TOML_PROTOCOLS the add-provider form is allowed to offer.
-// HTTP protocols create endpoint-backed providers. Whether a messages-http
-// provider is compatible is owned by the backend provider registry and checked
-// by Runtime.materialize_config at save time; the Dashboard must not duplicate
-// that typed registry decision as a protocol-string heuristic. A typed
-// official-client protocol creates the command-backed runtime its backend
-// adapter owns, while generic command providers remain blocked.
-export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
-  'openai-compatible-http',
-  'ollama-http',
-  'openai-compatible-cli',
-  'messages-http',
-  'codex-app-server',
-] as const
-
-export type RuntimeTomlCreatableProtocol = (typeof RUNTIME_TOML_CREATABLE_PROTOCOLS)[number]
-
-export function isRuntimeTomlCreatableProtocol(protocol: string): protocol is RuntimeTomlCreatableProtocol {
-  return (RUNTIME_TOML_CREATABLE_PROTOCOLS as readonly string[]).includes(protocol)
-}
-
-export function isRuntimeTomlOfficialClientProtocol(protocol: string): boolean {
-  return protocol === 'codex-app-server'
-}
-
 // runtime.toml ids become TOML table headers ([providers.<id>], [models.<id>],
 // and the binding pin [<providerId>.<modelId>]). parseDocument's section regex
 // and bindingSections' 2-part split both assume an id has no '.', so a bare-key

@@ -624,8 +624,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
             ` : null}
 
             <div class=${structuredActive ? '' : 'hidden'} data-testid="runtime-toml-structured">
-              <${RuntimeEnvironmentEditor}
+              ${config ? html`<${RuntimeEnvironmentEditor}
                 sourceText=${draft}
+                providerProtocols=${config.provider_protocols}
                 section=${structuredSection}
                 disabled=${loadState !== 'loaded'}
                 draftDirty=${dirty}
@@ -643,7 +644,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 onDeleteProvider=${handleDeleteProvider}
                 onProviderTransportChange=${handleProviderTransportChange}
                 onProviderCredentialChange=${handleProviderCredentialChange}
-              />
+              />` : null}
             </div>
 
             <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">

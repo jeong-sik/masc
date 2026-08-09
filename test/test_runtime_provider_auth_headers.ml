@@ -366,6 +366,86 @@ max-concurrent = 1
                   claude-code, antigravity-cli")
          errors)
 
+let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
+  let render (protocol : Runtime_toml.editor_protocol) =
+    let transport =
+      match protocol.transport with
+      | Runtime_toml.Endpoint -> "endpoint"
+      | Runtime_toml.Command -> "command"
+    in
+    let semantics =
+      match protocol.semantics with
+      | Runtime_toml.Http_provider -> "http_provider"
+      | Runtime_toml.Official_client -> "official_client"
+    in
+    let credential_policy =
+      match protocol.credential_policy with
+      | Runtime_toml.Credentials_optional -> "optional"
+      | Runtime_toml.Credentials_forbidden -> "forbidden"
+    in
+    Printf.sprintf
+      "%s:%s:%s:%s:%b"
+      protocol.protocol
+      transport
+      semantics
+      credential_policy
+      protocol.requires_non_interactive
+  in
+  check
+    (list string)
+    "only production-materializable protocols are offered"
+    [ "messages-http:endpoint:http_provider:optional:false"
+    ; "openai-compatible-http:endpoint:http_provider:optional:false"
+    ; "ollama-http:endpoint:http_provider:optional:false"
+    ; "codex-app-server:command:official_client:forbidden:true"
+    ; "claude-code:command:official_client:forbidden:true"
+    ]
+    (List.map render Runtime_toml.editor_protocols)
+;;
+
+let test_runtime_toml_rejects_reserved_provider_and_model_ids () =
+  let cases =
+    [ ( "provider"
+      , "providers.runtime"
+      , {|
+[providers.runtime]
+display-name = "Reserved"
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid/v1"
+|} )
+    ; ( "model"
+      , "models.routes"
+      , {|
+[models.routes]
+api-name = "reserved"
+max-context = 1024
+|} )
+    ]
+  in
+  List.iter
+    (fun (kind, path, content) ->
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected reserved %s id to fail" kind
+       | Error errors -> check_parse_error_contains errors path "reserved top-level")
+    cases
+;;
+
+let test_runtime_toml_rejects_obsolete_top_level_namespaces () =
+  List.iter
+    (fun namespace ->
+       let content = Printf.sprintf "[%s]\nlegacy = true\n" namespace in
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected obsolete namespace %s to fail" namespace
+       | Error errors ->
+         check_parse_error
+           errors
+           namespace
+           (Printf.sprintf
+              "obsolete top-level namespace %S is not supported"
+              namespace))
+    [ "system"; "routes"; "profiles" ]
+;;
+
 let test_runtime_toml_accepts_messages_caching_capability () =
   let content =
     {|
@@ -1897,6 +1977,18 @@ let () =
             "runtime TOML rejects legacy protocol aliases"
             `Quick
             test_runtime_toml_rejects_legacy_protocol_aliases
+        ; test_case
+            "runtime TOML editor protocol inventory is backend-owned"
+            `Quick
+            test_runtime_toml_editor_protocol_inventory_is_backend_owned
+        ; test_case
+            "runtime TOML rejects reserved provider and model ids"
+            `Quick
+            test_runtime_toml_rejects_reserved_provider_and_model_ids
+        ; test_case
+            "runtime TOML rejects obsolete top-level namespaces"
+            `Quick
+            test_runtime_toml_rejects_obsolete_top_level_namespaces
         ; test_case
             "runtime TOML reads uses-messages-caching capability"
             `Quick

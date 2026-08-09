@@ -1141,9 +1141,9 @@ export interface DashboardOfficialClientSessionPhase {
 export interface DashboardOfficialClientRecoveryResolutionRecord {
   recovery_id: string
   failure: DashboardOfficialClientRecoveryFailure
-  resolution: {
-    kind: 'retry_previous' | 'restart_fresh'
-  }
+  resolution:
+    | { kind: 'retry_previous' | 'restart_fresh' }
+    | { kind: 'adopt_verified'; settlement: DashboardOfficialClientSettlement }
   resolved_by: string
   resolved_at: number
 }
@@ -1248,11 +1248,19 @@ function decodeOfficialClientResolutionRecord(raw: unknown): DashboardOfficialCl
   const resolved_at = asNumber(raw.resolved_at)
   const kind = asString(raw.resolution.kind)
   if (!recovery_id || !failure || !resolved_by || resolved_at == null) return null
-  if (kind !== 'retry_previous' && kind !== 'restart_fresh') return null
+  const resolution = kind === 'adopt_verified'
+    ? (() => {
+        const settlement = decodeOfficialClientSettlement(raw.resolution.settlement)
+        return settlement ? { kind, settlement } as const : null
+      })()
+    : kind === 'retry_previous' || kind === 'restart_fresh'
+      ? { kind } as const
+      : null
+  if (!resolution) return null
   return {
     recovery_id,
     failure,
-    resolution: { kind },
+    resolution,
     resolved_by,
     resolved_at,
   }

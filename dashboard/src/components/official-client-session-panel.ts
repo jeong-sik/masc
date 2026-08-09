@@ -198,6 +198,9 @@ export function OfficialClientSessionPanel() {
                 · ${lastResolution.resolved_by}
                 · ${timestampText(lastResolution.resolved_at)}
                 · <span class="mono">${lastResolution.failure}</span>
+                ${lastResolution.resolution.kind === 'adopt_verified'
+                  ? html` · verified <span class="mono">${lastResolution.resolution.settlement.session_id}/${lastResolution.resolution.settlement.turn_id}</span>`
+                  : null}
               </div>
             `
             : null}

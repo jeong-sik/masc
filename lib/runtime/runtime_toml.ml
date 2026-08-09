@@ -359,15 +359,19 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
        (match effort_result, execution_mode_result with
         | Error errors, _ | _, Error errors -> Error errors
         | Ok effort, Ok execution_mode ->
+          let sandbox = match sandbox with Some value -> value | None -> false in
+          let disable_slash_commands =
+            match disable_slash_commands with Some value -> value | None -> true
+          in
+          let timeout_s = match timeout_s with Some value -> value | None -> 300.0 in
           Ok
             (Some
                { Runtime_schema.agent
                ; effort
                ; execution_mode
-               ; sandbox = Option.value ~default:false sandbox
-               ; disable_slash_commands =
-                   Option.value ~default:true disable_slash_commands
-               ; timeout_s = Option.value ~default:300.0 timeout_s
+               ; sandbox
+               ; disable_slash_commands
+               ; timeout_s
                })))
   | Messages_api | Chat_completions_api | Ollama_api | Codex_app_server_runtime ->
     (match

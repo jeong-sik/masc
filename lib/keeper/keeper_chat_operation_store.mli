@@ -35,6 +35,7 @@ type edit_input =
 
 type failure_kind =
   | Interrupted_by_restart
+  | Shutdown_interrupted
   | Turn_failed
   | No_visible_reply
   | Transcript_persist_failed

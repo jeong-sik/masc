@@ -557,6 +557,8 @@ let test_owner_serializes_operations_and_settles_restart () =
     ~finally:(fun () -> remove_tree base_path)
     (fun () ->
        let meta = make_meta "operation-owner" in
+       let never_complete, _resolve_never_complete = Eio.Promise.create () in
+       let shutdown_never, _resolve_shutdown_never = Eio.Promise.create () in
        let meta_store =
          { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
        in
@@ -604,8 +606,17 @@ let test_owner_serializes_operations_and_settles_restart () =
            (owner_ok
               (Owner.move_operation_to_end owner ~operation_id:first.operation_id));
          let running =
-           owner_ok (Owner.start_next_operation owner ~started_at:110.0)
-           |> Option.get
+           match
+             owner_ok
+               (Owner.start_next_queued_turn
+                  owner
+                  ~started_at:110.0
+                  ~run:(fun _turn_sw _operation ->
+                    Eio.Promise.await never_complete))
+           with
+           | Owner.Operation_started { operation; _ } -> operation
+           | Operation_queue_empty -> fail "actor lost a queued operation"
+           | Operation_busy _ -> fail "idle actor reported a running operation"
          in
          check string
            "actor move determines next FIFO head"
@@ -643,7 +654,71 @@ let test_owner_serializes_operations_and_settles_restart () =
          check string
            "moved queued operation remains pending"
            "kmsg-owner-1"
-           (List.hd queued).operation_id))
+           (List.hd queued).operation_id;
+         let operation, handle =
+           match
+             owner_ok
+               (Owner.start_next_queued_turn
+                  owner
+                  ~started_at:120.0
+                  ~run:(fun _turn_sw operation ->
+                    Owner.Operation_succeeded
+                      { completed_at = 130.0
+                      ; outcome_ref = "turn-owner-1"
+                      }))
+           with
+           | Owner.Operation_started { operation; handle } -> operation, handle
+           | Operation_queue_empty -> fail "restart did not preserve queued operation"
+           | Operation_busy _ -> fail "interrupted operation retained the running slot"
+         in
+         check string "combined start claims FIFO head" "kmsg-owner-1" operation.operation_id;
+         (match Owner.await_turn handle with
+          | Owner.Turn_succeeded -> ()
+          | Turn_failed detail -> fail ("combined operation failed: " ^ detail)
+          | Turn_cancelled -> fail "combined operation was cancelled");
+         let succeeded =
+           owner_ok (Owner.lookup_operation owner ~operation_id:operation.operation_id)
+         in
+         (match succeeded.state with
+          | Operation.Succeeded { outcome_ref; _ } ->
+            check string "actor commits terminal outcome" "turn-owner-1" outcome_ref
+          | _ -> fail "combined child did not commit Succeeded");
+         check bool
+           "successful actor terminal scrubs input"
+           true
+           (Option.is_none succeeded.input);
+         ignore
+           (owner_ok
+              (Owner.submit_operation
+                 owner
+                 ~operation_id:"kmsg-owner-shutdown"
+                 (dashboard_operation_input ~content:"shutdown" ~submitted_at:140.0 ()))
+            |> accepted_operation);
+         let shutdown_handle =
+           match
+             owner_ok
+               (Owner.start_next_queued_turn
+                  owner
+                  ~started_at:141.0
+                  ~run:(fun _turn_sw _operation ->
+                    Eio.Promise.await shutdown_never))
+           with
+           | Owner.Operation_started { handle; _ } -> handle
+           | Operation_queue_empty -> fail "shutdown operation was not queued"
+           | Operation_busy _ -> fail "successful terminal did not release actor slot"
+         in
+         ignore (owner_ok (Owner.begin_stopping owner));
+         (match Owner.await_turn shutdown_handle with
+          | Owner.Turn_failed _ -> ()
+          | Turn_succeeded -> fail "cancelled running operation reported success"
+          | Turn_cancelled -> fail "running cancellation used queued Cancelled state");
+         let shutdown =
+           owner_ok
+             (Owner.lookup_operation owner ~operation_id:"kmsg-owner-shutdown")
+         in
+         (match shutdown.state with
+          | Operation.Failed { kind = Shutdown_interrupted; _ } -> ()
+          | _ -> fail "running cancellation did not persist Shutdown_interrupted")))
 ;;
 
 let test_root_inventory_loads_and_extends_exactly_once () =

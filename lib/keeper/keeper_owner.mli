@@ -29,6 +29,26 @@ and turn_terminal =
 
 and turn_handle
 
+type operation_terminal =
+  | Operation_succeeded of
+      { completed_at : float
+      ; outcome_ref : string
+      }
+  | Operation_failed of
+      { completed_at : float
+      ; kind : Keeper_chat_operation_store.failure_kind
+      ; detail : string
+      ; outcome_ref : string option
+      }
+
+type operation_turn_start =
+  | Operation_started of
+      { operation : Keeper_chat_operation_store.operation
+      ; handle : turn_handle
+      }
+  | Operation_queue_empty
+  | Operation_busy of { running_operation_id : string }
+
 type t
 
 val start
@@ -86,26 +106,18 @@ val cancel_operation
   -> completed_at:float
   -> (Keeper_chat_operation_store.operation, error) result
 
-val start_next_operation
+val start_next_queued_turn
   :  t
   -> started_at:float
-  -> (Keeper_chat_operation_store.operation option, error) result
-
-val succeed_operation
-  :  t
-  -> operation_id:string
-  -> completed_at:float
-  -> outcome_ref:string
-  -> (Keeper_chat_operation_store.operation, error) result
-
-val fail_operation
-  :  t
-  -> operation_id:string
-  -> completed_at:float
-  -> kind:Keeper_chat_operation_store.failure_kind
-  -> detail:string
-  -> outcome_ref:string option
-  -> (Keeper_chat_operation_store.operation, error) result
+  -> run:
+       (Eio.Switch.t ->
+        Keeper_chat_operation_store.operation ->
+        operation_terminal)
+  -> (operation_turn_start, error) result
+(** Linearize the FIFO durable [Queued -> Running] claim, reducer turn
+    admission, and child fork in one actor command. The child returns only
+    after transcript and connector terminal effects; the actor alone commits
+    the operation terminal state. *)
 
 val start_turn
   :  t
@@ -120,8 +132,9 @@ val await_turn : turn_handle -> turn_terminal
 val turn_handle_operation_id : turn_handle -> string
 
 val begin_stopping : t -> (unit, error) result
-(** Reject future external commands.  The root switch remains the structured
-    cancellation and join authority for the actor and its current child. *)
+(** Reject future external mutations, cancel the active child under its
+    actor-owned switch, and join its typed terminal settlement before
+    returning. The root switch remains the actor lifetime authority. *)
 
 val error_to_string : error -> string
 

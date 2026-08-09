@@ -29,6 +29,7 @@ type edit_input =
 
 type failure_kind =
   | Interrupted_by_restart
+  | Shutdown_interrupted
   | Turn_failed
   | No_visible_reply
   | Transcript_persist_failed
@@ -97,6 +98,7 @@ let commit_fault_for_testing : commit_fault option Atomic.t = Atomic.make None
 
 let failure_kind_to_string = function
   | Interrupted_by_restart -> "interrupted_by_restart"
+  | Shutdown_interrupted -> "shutdown_interrupted"
   | Turn_failed -> "turn_failed"
   | No_visible_reply -> "no_visible_reply"
   | Transcript_persist_failed -> "transcript_persist_failed"
@@ -108,6 +110,7 @@ let failure_kind_to_string = function
 
 let failure_kind_of_string = function
   | "interrupted_by_restart" -> Ok Interrupted_by_restart
+  | "shutdown_interrupted" -> Ok Shutdown_interrupted
   | "turn_failed" -> Ok Turn_failed
   | "no_visible_reply" -> Ok No_visible_reply
   | "transcript_persist_failed" -> Ok Transcript_persist_failed

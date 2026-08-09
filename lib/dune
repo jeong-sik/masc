@@ -111,6 +111,7 @@
   masc.event_bus_slots
   masc.keeper_compaction_evidence
   masc.keeper_chat_delivery_identity
+  masc.keeper_chat_operations
   ;; Leaf boundary over masc.agent_core.llm_provider canonical provider labels.
   ;; Runtime_model extracted to lib/runtime_model/.
   ;; Runtime/AGENT_CORE provider projection + model-label parsing boundary.

@@ -44,7 +44,13 @@ let fixture_script ?(auth_json = auth_subscription) steps =
     ; "CLAUDE_CODE_USE_BEDROCK"
     ; "CLAUDE_CODE_USE_VERTEX"
     ; "CLOUD_ML_REGION"
+    ; "MASC_CLAUDE_SECRET_CANARY"
     ];
+  output_string output "[ -n \"${HOME-}\" ] || exit 91\n";
+  output_string output
+    "[ \"${CLAUDE_CODE_ENTRYPOINT-}\" = masc ] || exit 92\n";
+  output_string output
+    "[ \"${CLAUDE_AGENT_SDK_VERSION-}\" = masc-ocaml ] || exit 93\n";
   output_string output "if [ \"${1-}\" = auth ]; then\n";
   output_string output
     ("  printf '%s\\n' " ^ shell_quote auth_json ^ "\n");
@@ -136,6 +142,7 @@ let test_subscription_turn_and_env_scrub () =
     ; "CLAUDE_CODE_USE_BEDROCK"
     ; "CLAUDE_CODE_USE_VERTEX"
     ; "CLOUD_ML_REGION"
+    ; "MASC_CLAUDE_SECRET_CANARY"
     ];
   with_fixture [ Emit assistant; Emit result ] (fun path ->
     match run_fixture path with

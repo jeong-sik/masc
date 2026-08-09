@@ -213,35 +213,26 @@ let optional_int stage name fields =
     protocol_error stage (Printf.sprintf "field %S must be an integer or null" name)
 ;;
 
-let env_key entry =
-  match String.index_opt entry '=' with
-  | Some index -> String.sub entry 0 index
-  | None -> entry
-;;
-
 let subscription_only_environment () =
-  let blocked =
-    [ "ANTHROPIC_API_KEY"
-    ; "ANTHROPIC_AUTH_TOKEN"
-    ; "ANTHROPIC_API_URL"
-    ; "ANTHROPIC_BASE_URL"
-    ; "ANTHROPIC_BEDROCK_BASE_URL"
-    ; "ANTHROPIC_VERTEX_BASE_URL"
-    ; "ANTHROPIC_VERTEX_PROJECT_ID"
-    ; "CLAUDE_CODE_OAUTH_TOKEN"
-    ; "CLAUDE_CODE_SKIP_BEDROCK_AUTH"
-    ; "CLAUDE_CODE_SKIP_VERTEX_AUTH"
-    ; "CLAUDE_CODE_USE_BEDROCK"
-    ; "CLAUDE_CODE_USE_VERTEX"
-    ; "CLAUDECODE"
-    ; "CLAUDE_CODE_ENTRYPOINT"
-    ; "CLAUDE_AGENT_SDK_VERSION"
-    ; "CLOUD_ML_REGION"
+  let inherited_names =
+    [ "HOME"
+    ; "PATH"
+    ; "TMPDIR"
+    ; "XDG_CONFIG_HOME"
+    ; "XDG_DATA_HOME"
+    ; "XDG_CACHE_HOME"
+    ; "SSL_CERT_FILE"
+    ; "SSL_CERT_DIR"
+    ; "LANG"
+    ; "LC_ALL"
+    ; "LC_CTYPE"
+    ; "TERM"
+    ; "NO_COLOR"
     ]
   in
-  Unix.environment ()
-  |> Array.to_list
-  |> List.filter (fun entry -> not (List.mem (env_key entry) blocked))
+  inherited_names
+  |> List.filter_map (fun name ->
+    Option.map (fun value -> name ^ "=" ^ value) (Sys.getenv_opt name))
   |> fun inherited ->
   ("CLAUDE_CODE_ENTRYPOINT=masc" :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml" :: inherited)
   |> Array.of_list

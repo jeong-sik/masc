@@ -2483,10 +2483,31 @@ let test_approved_web_search_replays_without_model_resubmission () =
              ~base_path:config.base_path
              model_message
          in
+         let projected_evidence =
+           projected_message
+           |> String.split_on_char '\n'
+           |> List.rev
+           |> List.find (fun line -> not (String.equal (String.trim line) ""))
+           |> Yojson.Safe.from_string
+         in
          check bool
-           "durable replay output reaches the provider-only projection"
-           true
+           "durable replay output stays outside the provider-only projection"
+           false
            (contains_substring projected_message "Replayed result");
+         (match
+            projected_evidence
+            |> Yojson.Safe.Util.member "untrusted_tool_output_ref"
+            |> Tool_output.normalized_artifact_ref_of_json
+          with
+          | Tool_output.Decoded_normalized_artifact_ref decoded ->
+            check string
+              "provider-only projection keeps the durable replay identity"
+              output_ref.sha256
+              decoded.sha256
+          | Tool_output.Not_normalized_artifact_ref ->
+            fail "provider replay evidence lost its artifact reference"
+          | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+            fail detail);
          check bool
            "model is forbidden to request the consumed operation again"
            true

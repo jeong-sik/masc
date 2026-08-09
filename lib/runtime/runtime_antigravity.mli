@@ -39,13 +39,15 @@ type usage =
   ; total_tokens : int
   }
 
+type permission_mode = Always_proceed
+
 type turn_result =
   { conversation_id : string
   ; model : string
   ; text : string
   ; num_turns : int
   ; usage : usage
-  ; permission_mode : string
+  ; permission_mode : permission_mode
   ; tool_steps : int
   ; tool_errors : int
   ; resumed : bool

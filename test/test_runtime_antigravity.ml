@@ -54,7 +54,7 @@ let fixture_script ?(require_resume = false) ?(sleep_s = 0.0) ?(exit_code = 0) l
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
   output_string output
-    "test -z \"${GEMINI_API_KEY+x}\" && test -z \"${GEMINI_API_KEY_WORK+x}\" && test -z \"${GOOGLE_API_TOKEN+x}\" && test -z \"${OPENAI_API_KEY+x}\" && test -z \"${OPENAI_API_KEY_MAIN+x}\" && test -z \"${ANTHROPIC_API_KEY+x}\" && test -z \"${ANTHROPIC_API_KEY_WORK+x}\" && test -z \"${AGY_ADC_AUTH+x}\" || exit 92\n";
+    "test -z \"${GEMINI_API_KEY+x}\" && test -z \"${GEMINI_API_KEY_WORK+x}\" && test -z \"${GOOGLE_API_TOKEN+x}\" && test -z \"${OPENAI_API_KEY+x}\" && test -z \"${OPENAI_API_KEY_MAIN+x}\" && test -z \"${ANTHROPIC_API_KEY+x}\" && test -z \"${ANTHROPIC_API_KEY_WORK+x}\" && test -z \"${AGY_ADC_AUTH+x}\" && test -z \"${MASC_PUBLIC_FIXTURE+x}\" || exit 92\n";
   if require_resume
   then
     output_string
@@ -106,9 +106,21 @@ let test_successful_official_client_turn () =
          check int "turn count" 1 turn.num_turns;
          check int "input tokens" 100 turn.usage.input_tokens;
          check int "total tokens" 107 turn.usage.total_tokens;
-         check string "permission mode" "always-proceed" turn.permission_mode;
+         check
+           bool
+           "permission mode"
+           true
+           (turn.permission_mode = Runtime_antigravity.Always_proceed);
          check bool "new conversation" false turn.resumed;
          check bool "measured wall duration" true (turn.wall_duration_s >= 0.0))
+;;
+
+let test_child_environment_is_allowlisted () =
+  Unix.putenv "MASC_PUBLIC_FIXTURE" "must-not-leak";
+  with_fixture [ init (); result () ] (fun path ->
+    match run_fixture path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok _ -> ())
 ;;
 
 let test_resume_requires_exact_identity_and_argv () =
@@ -212,6 +224,27 @@ let test_duplicate_keys_fail_closed () =
        | Ok _ -> fail "duplicate key was admitted")
 ;;
 
+let test_unknown_protocol_vocabulary_fails_closed () =
+  let unknown_permission =
+    {|{"event":"init","conversation_id":"conversation-1","init":{"model":"gemini-fixture","cwd":"/tmp","permission_mode":"unreviewed"}}|}
+  in
+  let cases =
+    [ "permission mode", [ unknown_permission; result () ]
+    ; "step state", [ init (); step ~state:"PAUSED" (); result () ]
+    ; "step type", [ init (); step ~step_type:"shell" (); result () ]
+    ; "result status", [ init (); result ~status:"PARTIAL" () ]
+    ]
+  in
+  List.iter
+    (fun (name, lines) ->
+      with_fixture lines (fun path ->
+        match run_fixture path with
+        | Error (Runtime_antigravity.Protocol_error _) -> ()
+        | Error error -> fail (name ^ ": " ^ Runtime_antigravity.error_to_string error)
+        | Ok _ -> fail (name ^ " was admitted")))
+    cases
+;;
+
 let test_timeout_is_typed () =
   with_fixture
     ~sleep_s:1.0
@@ -301,6 +334,10 @@ let () =
             `Quick
             test_resume_identity_mismatch_fails_closed
         ; test_case
+            "child environment allowlist"
+            `Quick
+            test_child_environment_is_allowlisted
+        ; test_case
             "conversation callback"
             `Quick
             test_conversation_callback_precedes_terminal_result
@@ -311,6 +348,10 @@ let () =
         ; test_case "tool measurements" `Quick test_tool_steps_and_errors_are_measured
         ; test_case "error result" `Quick test_result_error_is_not_success
         ; test_case "duplicate keys" `Quick test_duplicate_keys_fail_closed
+        ; test_case
+            "unknown protocol vocabulary"
+            `Quick
+            test_unknown_protocol_vocabulary_fails_closed
         ; test_case "typed timeout" `Quick test_timeout_is_typed
         ; test_case "process-free admission" `Quick test_admission_is_process_free
         ] )

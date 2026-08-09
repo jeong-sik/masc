@@ -56,13 +56,15 @@ type usage =
   ; total_tokens : int
   }
 
+type permission_mode = Always_proceed
+
 type turn_result =
   { conversation_id : string
   ; model : string
   ; text : string
   ; num_turns : int
   ; usage : usage
-  ; permission_mode : string
+  ; permission_mode : permission_mode
   ; tool_steps : int
   ; tool_errors : int
   ; resumed : bool
@@ -184,21 +186,85 @@ type wire_event =
       { conversation_id : string
       ; model : string
       ; cwd : string
-      ; permission_mode : string
+      ; permission_mode : permission_mode
       }
   | Step_update of
       { conversation_id : string
-      ; state : string
-      ; step_type : string
+      ; state : step_state
+      ; step_type : step_type
       }
   | Result of
       { conversation_id : string
-      ; status : string
+      ; status : result_status
       ; response : string
       ; error : string option
       ; num_turns : int
       ; usage : usage
       }
+
+and step_state =
+  | Active
+  | Done
+  | Step_error
+
+and step_type =
+  | Agent_response
+  | Tool
+
+and result_status =
+  | Success
+  | Result_error
+
+let closed_string stage name parse value =
+  match parse value with
+  | Some value -> Ok value
+  | None ->
+    protocol_error stage (Printf.sprintf "unsupported field %S value %S" name value)
+;;
+
+let parse_permission_mode stage value =
+  closed_string
+    stage
+    "permission_mode"
+    (function
+      | "always-proceed" -> Some Always_proceed
+      | _ -> None)
+    value
+;;
+
+let parse_step_state stage value =
+  closed_string
+    stage
+    "state"
+    (function
+      | "ACTIVE" -> Some Active
+      | "DONE" -> Some Done
+      | "ERROR" -> Some Step_error
+      | _ -> None)
+    value
+;;
+
+let parse_step_type stage value =
+  closed_string
+    stage
+    "step_type"
+    (function
+      | "agent_response" -> Some Agent_response
+      | "tool" -> Some Tool
+      | _ -> None)
+    value
+;;
+
+let parse_result_status stage value =
+  closed_string
+    stage
+    "status"
+    (function
+      | "SUCCESS" -> Some Success
+      | "ERROR" -> Some Result_error
+      | _ -> None)
+    value
+;;
 
 let parse_init fields =
   let stage = "init event" in
@@ -207,7 +273,8 @@ let parse_init fields =
   let* init_fields = assoc_at stage init_json in
   let* model = required_string stage "model" init_fields in
   let* cwd = required_string stage "cwd" init_fields in
-  let* permission_mode = required_string stage "permission_mode" init_fields in
+  let* permission_mode_string = required_string stage "permission_mode" init_fields in
+  let* permission_mode = parse_permission_mode stage permission_mode_string in
   Ok (Init { conversation_id; model; cwd; permission_mode })
 ;;
 
@@ -217,8 +284,10 @@ let parse_step_update fields =
   let* step_fields = assoc_at stage step_json in
   let* conversation_id = required_string stage "conversation_id" step_fields in
   let* _step_index = required_nonnegative_int stage "step_index" step_fields in
-  let* state = required_string stage "state" step_fields in
-  let* step_type = required_string stage "step_type" step_fields in
+  let* state_string = required_string stage "state" step_fields in
+  let* state = parse_step_state stage state_string in
+  let* step_type_string = required_string stage "step_type" step_fields in
+  let* step_type = parse_step_type stage step_type_string in
   Ok (Step_update { conversation_id; state; step_type })
 ;;
 
@@ -227,7 +296,8 @@ let parse_result fields =
   let* result_json = required_member stage "result" fields in
   let* result_fields = assoc_at stage result_json in
   let* conversation_id = required_string stage "conversation_id" result_fields in
-  let* status = required_string stage "status" result_fields in
+  let* status_string = required_string stage "status" result_fields in
+  let* status = parse_result_status stage status_string in
   let* response = required_string ~nonempty:false stage "response" result_fields in
   let* error = optional_string stage "error" result_fields in
   let* num_turns = required_nonnegative_int stage "num_turns" result_fields in
@@ -293,42 +363,36 @@ let env_key entry =
   | None -> entry
 ;;
 
-let contains_substring value needle =
-  let value_length = String.length value in
-  let needle_length = String.length needle in
-  let rec loop offset =
-    if offset + needle_length > value_length
-    then false
-    else if String.equal (String.sub value offset needle_length) needle
-    then true
-    else loop (offset + 1)
-  in
-  needle_length = 0 || loop 0
-;;
-
-let forbidden_environment_key key =
-  contains_substring key "API_KEY"
-  || contains_substring key "API_TOKEN"
-  || List.mem
-       key
-       [ "GOOGLE_APPLICATION_CREDENTIALS"
-       ; "GOOGLE_GENAI_USE_VERTEXAI"
-       ; "GOOGLE_CLOUD_PROJECT"
-       ; "GOOGLE_CLOUD_LOCATION"
-       ; "GOOGLE_CREDENTIALS"
-       ; "GOOGLE_OAUTH_ACCESS_TOKEN"
-       ; "GOOGLE_ACCESS_TOKEN"
-       ; "CLOUDSDK_AUTH_ACCESS_TOKEN"
-       ; "VERTEX_AI_PROJECT"
-       ; "VERTEX_AI_LOCATION"
-       ; "AGY_ADC_AUTH"
-       ]
+let allowed_environment_key key =
+  List.mem
+    key
+    [ "COLORTERM"
+    ; "HOME"
+    ; "LANG"
+    ; "LC_ALL"
+    ; "LC_CTYPE"
+    ; "LOGNAME"
+    ; "PATH"
+    ; "SHELL"
+    ; "SSL_CERT_DIR"
+    ; "SSL_CERT_FILE"
+    ; "TEMP"
+    ; "TERM"
+    ; "TMP"
+    ; "TMPDIR"
+    ; "TZ"
+    ; "USER"
+    ; "XDG_CACHE_HOME"
+    ; "XDG_CONFIG_HOME"
+    ; "XDG_DATA_HOME"
+    ; "XDG_RUNTIME_DIR"
+    ]
 ;;
 
 let official_client_environment () =
   Unix.environment ()
   |> Array.to_list
-  |> List.filter (fun entry -> not (forbidden_environment_key (env_key entry)))
+  |> List.filter (fun entry -> allowed_environment_key (env_key entry))
   |> Array.of_list
 ;;
 
@@ -486,15 +550,15 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready stat
        if Option.is_some state.result
        then protocol_error stage "received step_update after result"
        else
-         let is_tool = String.equal step_type "tool" in
+         let is_tool = step_type = Tool in
          Ok
            { state with
              tool_steps =
                state.tool_steps
-               + if is_tool && String.equal step_state "ACTIVE" then 1 else 0
+               + if is_tool && step_state = Active then 1 else 0
            ; tool_errors =
                state.tool_errors
-               + if is_tool && String.equal step_state "ERROR" then 1 else 0
+               + if is_tool && step_state = Step_error then 1 else 0
            })
   | Result { conversation_id; status; response; error; num_turns; usage } ->
     let stage = "result event" in
@@ -600,7 +664,7 @@ let run_turn ?(conversation_mode = Start) ~mgr ~clock ~cwd
   let wall_duration_s = max 0.0 (Eio.Time.now clock -. started_at) in
   match status, state.init, state.result with
   | `Exited 0, Some (conversation_id, model, permission_mode),
-    Some ("SUCCESS", text, _, num_turns, usage) ->
+    Some (Success, text, _, num_turns, usage) ->
     Ok
       { conversation_id
       ; model
@@ -616,9 +680,8 @@ let run_turn ?(conversation_mode = Start) ~mgr ~clock ~cwd
            | Resume _ -> true)
       ; wall_duration_s
       }
-  | _, Some _, Some (result_status, _, error, _, _)
-    when not (String.equal result_status "SUCCESS") ->
-    let detail = Option.value ~default:("status=" ^ result_status) error in
+  | _, Some _, Some (Result_error, _, error, _, _) ->
+    let detail = Option.value ~default:"status=ERROR" error in
     Error (Turn_failed detail)
   | `Exited 0, _, None ->
     Error (Protocol_error { stage = "process completion"; detail = "missing result event" })

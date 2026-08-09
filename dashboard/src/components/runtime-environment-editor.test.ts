@@ -2,7 +2,10 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
+import type {
+  DashboardRuntimeProviderSnapshot,
+  RuntimeTomlEditorProtocol,
+} from '../api/dashboard'
 import { RuntimeEnvironmentEditor } from './runtime-environment-editor'
 import { keepers } from '../store'
 import type { Keeper } from '../types/core'
@@ -17,6 +20,16 @@ const runtimeCatalogMock = vi.hoisted(() => ({
   },
   loadRuntimeCatalog: vi.fn(),
 }))
+
+const providerProtocols: RuntimeTomlEditorProtocol[] = [
+  {
+    protocol: 'openai-compatible-http',
+    transport: 'endpoint',
+    semantics: 'http_provider',
+    credential_policy: 'optional',
+    requires_non_interactive: false,
+  },
+]
 
 vi.mock('../lib/runtime-catalog-resource', () => ({
   findRuntimeCatalogEntry: (
@@ -86,6 +99,7 @@ function mountEditor(
   render(
     html`<${RuntimeEnvironmentEditor}
       sourceText=${options.sourceText ?? sourceTextWithQuotedAssignments}
+      providerProtocols=${providerProtocols}
       section="assignments"
       onRoutingChange=${() => {}}
       onAssignmentChange=${options.onAssignmentChange ?? (() => {})}
@@ -236,6 +250,7 @@ function mountSection(
   render(
     html`<${RuntimeEnvironmentEditor}
       sourceText=${sourceText}
+      providerProtocols=${providerProtocols}
       section=${section}
       onRoutingChange=${() => {}}
       onAssignmentChange=${() => {}}

@@ -52,6 +52,16 @@ type turn_result =
   ; wall_duration_s : float
   }
 
+type available_model =
+  { id : string
+  ; display_name : string
+  }
+
+type login_probe =
+  { client_version : string
+  ; available_models : available_model list
+  }
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -71,6 +81,16 @@ val validate_turn :
   config ->
   prompt:string ->
   (unit, error) result
+
+(** Execute the authenticated, no-model-turn [agy models] probe and read the
+    exact client version. API credential environment variables are removed in
+    the same way as for model turns. *)
+val probe_login :
+  mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config ->
+  (login_probe, error) result
 
 val run_turn :
   ?conversation_mode:conversation_mode ->

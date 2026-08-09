@@ -75,6 +75,65 @@ let with_fixture ?require_resume ?sleep_s ?exit_code lines f =
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
+let probe_fixture_script
+    ?(models_output = [ "gemini-3.1-pro-high\tGemini 3.1 Pro (High)" ])
+    ?(models_stderr = "Fetching available models...")
+    ?(models_exit_code = 0)
+    ?(version_output = "1.1.11")
+    ()
+  =
+  let path = Filename.temp_file "masc-antigravity-probe-" ".sh" in
+  let output = open_out_bin path in
+  output_string output "#!/bin/sh\n";
+  output_string output
+    "test -z \"${GEMINI_API_KEY+x}\" && test -z \"${GOOGLE_API_TOKEN+x}\" && test -z \"${OPENAI_API_KEY+x}\" && test -z \"${ANTHROPIC_API_KEY+x}\" && test -z \"${AGY_ADC_AUTH+x}\" || exit 92\n";
+  output_string output "case \"$1\" in\n";
+  output_string output "  models)\n";
+  output_string
+    output
+    ("    printf '%s\\n' " ^ shell_quote models_stderr ^ " >&2\n");
+  List.iter
+    (fun line -> output_string output ("    printf '%s\\n' " ^ shell_quote line ^ "\n"))
+    models_output;
+  output_string output (Printf.sprintf "    exit %d\n" models_exit_code);
+  output_string output "    ;;\n";
+  output_string output "  --version)\n";
+  output_string output ("    printf '%s\\n' " ^ shell_quote version_output ^ "\n");
+  output_string output "    ;;\n";
+  output_string output "  *) exit 94 ;;\n";
+  output_string output "esac\n";
+  close_out output;
+  Unix.chmod path 0o700;
+  path
+;;
+
+let with_probe_fixture ?models_output ?models_stderr ?models_exit_code ?version_output f =
+  let path =
+    probe_fixture_script
+      ?models_output
+      ?models_stderr
+      ?models_exit_code
+      ?version_output
+      ()
+  in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
+;;
+
+let run_probe_fixture ?(timeout_s = 2.0) path =
+  Eio_main.run (fun env ->
+    let config =
+      { (Runtime_antigravity.default_config ~cwd:"/tmp" ~model:"gemini-fixture") with
+        cli_path = path
+      ; timeout_s
+      }
+    in
+    Runtime_antigravity.probe_login
+      ~mgr:(Eio.Stdenv.process_mgr env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+      config)
+;;
+
 let run_fixture ?conversation_mode ?on_conversation_ready ?(timeout_s = 2.0) path =
   Eio_main.run (fun env ->
     let config =
@@ -235,6 +294,44 @@ let test_admission_is_process_free () =
   | Ok () -> fail "invalid deterministic config passed admission"
 ;;
 
+let test_login_probe_measures_models_and_version_without_turn () =
+  with_probe_fixture
+    ~models_output:
+      [ "gemini-3.1-pro-high\tGemini 3.1 Pro (High)"
+      ; "claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)"
+      ]
+    (fun path ->
+       match run_probe_fixture path with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok probe ->
+         check string "client version" "1.1.11" probe.client_version;
+         check int "measured model count" 2 (List.length probe.available_models);
+         let first = List.hd probe.available_models in
+         check string "first model id" "gemini-3.1-pro-high" first.id;
+         check string "first display name" "Gemini 3.1 Pro (High)" first.display_name)
+;;
+
+let test_login_probe_rejects_untyped_model_output () =
+  with_probe_fixture ~models_output:[ "not-tab-separated" ] (fun path ->
+    match run_probe_fixture path with
+    | Error (Runtime_antigravity.Protocol_error { stage = "models probe"; _ }) -> ()
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok _ -> fail "malformed model inventory was admitted")
+;;
+
+let test_login_probe_preserves_process_failure () =
+  with_probe_fixture
+    ~models_output:[]
+    ~models_stderr:"Please sign in to view available models."
+    ~models_exit_code:1
+    (fun path ->
+       match run_probe_fixture path with
+       | Error (Runtime_antigravity.Process_exited detail) ->
+         check bool "command retained" true (String.starts_with ~prefix:"agy models failed:" detail)
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "failed login probe was admitted")
+;;
+
 let test_live_start_and_resume () =
   match Sys.getenv_opt "MASC_ANTIGRAVITY_LIVE", Sys.getenv_opt "MASC_ANTIGRAVITY_MODEL" with
   | Some "1", Some model ->
@@ -313,6 +410,20 @@ let () =
         ; test_case "duplicate keys" `Quick test_duplicate_keys_fail_closed
         ; test_case "typed timeout" `Quick test_timeout_is_typed
         ; test_case "process-free admission" `Quick test_admission_is_process_free
+        ] )
+    ; ( "login probe"
+      , [ test_case
+            "measures models and version without a turn"
+            `Quick
+            test_login_probe_measures_models_and_version_without_turn
+        ; test_case
+            "rejects untyped model output"
+            `Quick
+            test_login_probe_rejects_untyped_model_output
+        ; test_case
+            "preserves process failure"
+            `Quick
+            test_login_probe_preserves_process_failure
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

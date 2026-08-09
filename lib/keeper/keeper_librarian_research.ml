@@ -10,6 +10,68 @@ type raw_trace_sink_outcome =
   | Raw_trace_ready of Agent_sdk.Raw_trace.t
   | Raw_trace_degraded of Agent_sdk.Error.sdk_error
 
+type research_tool =
+  | Search_files
+  | Read_file
+  | Time_now
+  | Context_status
+  | Artifact_read
+  | Memory_search
+  | Library_search
+  | Library_read
+  | Surface_read
+  | Web_search
+  | Web_fetch
+  | Fusion_status
+  | Analyze_image
+
+let research_tools =
+  [ Search_files
+  ; Read_file
+  ; Time_now
+  ; Context_status
+  ; Artifact_read
+  ; Memory_search
+  ; Library_search
+  ; Library_read
+  ; Surface_read
+  ; Web_search
+  ; Web_fetch
+  ; Fusion_status
+  ; Analyze_image
+  ]
+;;
+
+let descriptor_owns_research_tool tool (descriptor : Keeper_tool_descriptor.t) =
+  match tool, descriptor.runtime_handler with
+  | Search_files, Tool_search_files
+  | Read_file, Tool_read_file
+  | Time_now, Tool_time_now
+  | Context_status, Tool_context_status
+  | Artifact_read, Tool_artifact_read
+  | Memory_search, Tool_memory_search
+  | Library_search, Tool_library_search
+  | Library_read, Tool_library_read
+  | Surface_read, Tool_surface_read
+  | Web_search, Tool_web_search
+  | Web_fetch, Tool_web_fetch
+  | Fusion_status, Tool_masc_fusion_status
+  | Analyze_image, Tool_analyze_image -> true
+  | _ -> false
+;;
+
+let research_descriptors () =
+  let visible = Keeper_tool_descriptor.model_visible_descriptors () in
+  List.map
+    (fun tool ->
+       match List.filter (descriptor_owns_research_tool tool) visible with
+       | [ descriptor ] -> descriptor
+       | [] -> failwith "Librarian research descriptor is not model-visible"
+       | _ :: _ :: _ ->
+         failwith "Librarian research tool has multiple model-visible descriptors")
+    research_tools
+;;
+
 let create_raw_trace_sink
       ~before_create
       ~(config : Workspace.config)
@@ -146,50 +208,35 @@ let tool_error_class_to_yojson = function
   | Some value -> `String (Agent_sdk.Types.show_tool_error_class value)
 ;;
 
-let tool_call_result_to_yojson = function
-  | Executed (Ok { content; _meta }) ->
-    let metadata =
-      match _meta with
-      | None -> `Null
-      | Some value -> value
-    in
+let registry_tool_call_result_to_yojson = function
+  | Executed (Ok _) ->
     `Assoc
       [ "kind", `String "executed"
       ; "outcome", `String "succeeded"
-      ; "content", `String content
-      ; "metadata", metadata
       ]
-  | Executed (Error { message; recoverable; error_class }) ->
+  | Executed (Error { recoverable; error_class; _ }) ->
     `Assoc
       [ "kind", `String "executed"
       ; "outcome", `String "failed"
-      ; "message", `String message
       ; "recoverable", `Bool recoverable
       ; "error_class", tool_error_class_to_yojson error_class
       ]
-  | Rejected_before_execution detail ->
-    `Assoc
-      [ "kind", `String "rejected_before_execution"
-      ; "detail", `String detail
-      ]
-  | Execution_failure_observed detail ->
-    `Assoc
-      [ "kind", `String "execution_failure_observed"
-      ; "detail", `String detail
-      ]
+  | Rejected_before_execution _ ->
+    `Assoc [ "kind", `String "rejected_before_execution" ]
+  | Execution_failure_observed _ ->
+    `Assoc [ "kind", `String "execution_failure_observed" ]
   | Terminal_observation_missing ->
     `Assoc [ "kind", `String "terminal_observation_missing" ]
 ;;
 
-let tool_call_to_yojson call =
+let registry_tool_call_to_yojson call =
   `Assoc
     [ "invocation", invocation_to_yojson call.invocation
     ; "tool_name", `String call.tool_name
-    ; "input", call.input
     ; "started_at", `Float call.started_at
     ; "finished_at", `Float call.finished_at
     ; "duration_ms", `Float call.duration_ms
-    ; "result", tool_call_result_to_yojson call.result
+    ; "result", registry_tool_call_result_to_yojson call.result
     ]
 ;;
 
@@ -263,6 +310,14 @@ let bounded_evidence_to_yojson evidence =
     ]
 ;;
 
+let registry_bounded_evidence_to_yojson evidence =
+  `Assoc
+    [ "original_bytes", `Int evidence.original_bytes
+    ; "retained_bytes", `Int evidence.retained_bytes
+    ; "truncated", `Bool evidence.truncated
+    ]
+;;
+
 let execution_outcome_to_yojson = function
   | Research_completed { evidence; session_id; turns; stop_reason } ->
     `Assoc
@@ -282,12 +337,31 @@ let execution_outcome_to_yojson = function
   | Research_cancelled -> `Assoc [ "kind", `String "cancelled" ]
 ;;
 
-let trace_ref_to_yojson = function
+let registry_execution_outcome_to_yojson = function
+  | Research_completed { evidence; session_id; turns; stop_reason } ->
+    `Assoc
+      [ "kind", `String "completed"
+      ; "evidence", registry_bounded_evidence_to_yojson evidence
+      ; "session_id", `String session_id
+      ; "turns", `Int turns
+      ; "stop_reason", runtime_stop_reason_to_yojson stop_reason
+      ]
+  | Research_failed error ->
+    `Assoc
+      [ "kind", `String "failed"
+      ; "category"
+      , `String
+          (Agent_sdk.Error.category_label (Agent_sdk.Error.category error))
+      ; "retryable", `Bool (Agent_sdk.Error.is_retryable error)
+      ]
+  | Research_cancelled -> `Assoc [ "kind", `String "cancelled" ]
+;;
+
+let registry_trace_ref_to_yojson = function
   | None -> `Null
   | Some (trace : Agent_sdk.Raw_trace.run_ref) ->
     `Assoc
       [ "worker_run_id", `String trace.worker_run_id
-      ; "path", `String trace.path
       ; "start_seq", `Int trace.start_seq
       ; "end_seq", `Int trace.end_seq
       ; "agent_name", `String trace.agent_name
@@ -296,23 +370,21 @@ let trace_ref_to_yojson = function
       ]
 ;;
 
-let receipt_to_yojson receipt =
+let registry_receipt_to_yojson receipt =
   `Assoc
     [ "owner", `String "librarian"
     ; "execution_id", `String (Execution_id.to_string receipt.execution_id)
     ; "runtime_id", `String receipt.runtime_id
-    ; "frozen_system_prompt", `String receipt.frozen_system_prompt
-    ; "frozen_prompt", `String receipt.frozen_prompt
-    ; "frozen_input", receipt.frozen_input
     ; "started_at", `Float receipt.started_at
     ; "finished_at", `Float receipt.finished_at
     ; "duration_ms", `Float receipt.duration_ms
     ; "tool_names", Json_util.json_string_list receipt.tool_names
-    ; "tool_calls", `List (List.map tool_call_to_yojson receipt.tool_calls)
+    ; "tool_calls"
+    , `List (List.map registry_tool_call_to_yojson receipt.tool_calls)
     ; "terminal_effect", terminal_effect_to_yojson receipt.terminal_effect
     ; "cleanup", cleanup_to_yojson receipt.cleanup
-    ; "outcome", execution_outcome_to_yojson receipt.outcome
-    ; "trace_ref", trace_ref_to_yojson receipt.trace_ref
+    ; "outcome", registry_execution_outcome_to_yojson receipt.outcome
+    ; "trace_ref", registry_trace_ref_to_yojson receipt.trace_ref
     ]
 ;;
 
@@ -508,7 +580,7 @@ let freeze_calls recorder =
         }))
 ;;
 
-let make_bundle (request : request) =
+let make_bundle_with_gate_context (request : request) =
   let gate_context =
     Keeper_gate_causal_context.create
       ~turn_id:None
@@ -517,18 +589,22 @@ let make_bundle (request : request) =
            [ "librarian_research_execution_id"
            , `String (Execution_id.to_string request.execution_id)
            ; "owner", `String "librarian"
-           ; "frozen_input", request.frozen_input
            ])
   in
-  Keeper_tools_oas_bundle.make_tool_bundle
-    ~config:request.config
-    ~meta:request.meta
-    ~publication_recovery:request.publication_recovery
-    ~ctx_snapshot:request.ctx_snapshot
-    ~clock:request.clock
-    ?continuation_channel:request.continuation_channel
-    ~gate_context
-    ()
+  ( Keeper_tools_oas_bundle.make_tool_bundle_for_descriptors
+      ~config:request.config
+      ~meta:request.meta
+      ~publication_recovery:request.publication_recovery
+      ~ctx_snapshot:request.ctx_snapshot
+      ~clock:request.clock
+      ?continuation_channel:request.continuation_channel
+      ~gate_context
+      ~descriptors:(research_descriptors ())
+      ()
+  , gate_context )
+;;
+
+let make_bundle request = make_bundle_with_gate_context request |> fst
 ;;
 
 let protect_with_cleanup ~cleanup ~on_cleanup body =
@@ -655,5 +731,33 @@ module For_testing = struct
     match !cleanup with
     | Some outcome -> names, outcome
     | None -> failwith "librarian research cleanup invariant violated"
+  ;;
+
+  let research_descriptor_contract () =
+    research_descriptors ()
+    |> List.map (fun (descriptor : Keeper_tool_descriptor.t) ->
+      ( descriptor.public_name
+      , descriptor.policy.readonly_hint
+      , Keeper_tool_descriptor.runtime_handler_to_string
+          descriptor.runtime_handler ))
+  ;;
+
+  let invalid_request_gate_callback_count request =
+    let bundle, gate_context = make_bundle_with_gate_context request in
+    protect_with_cleanup
+      ~cleanup:bundle.cleanup
+      ~on_cleanup:(fun _ -> ())
+      (fun () ->
+         List.iter
+           (fun (tool : Agent_sdk.Tool.t) ->
+              ignore (Agent_sdk.Tool.execute tool `Null : Agent_sdk.Types.tool_result))
+           bundle.tools;
+         let snapshot = Keeper_gate_causal_context.snapshot gate_context in
+         match snapshot.snapshot with
+         | `Assoc fields ->
+           (match List.assoc_opt "completed_tool_calls" fields with
+            | Some (`List calls) -> List.length calls
+            | Some _ | None -> failwith "missing completed Gate callback list")
+         | _ -> failwith "invalid Librarian Gate causal snapshot")
   ;;
 end

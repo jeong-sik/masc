@@ -1,10 +1,10 @@
 (** Tool-capable research phase owned by the Librarian.
 
-    Research receives the complete Keeper model-visible tool bundle. Its typed
-    receipt is evidence for the existing tool-free exact Librarian finalizer;
-    it never replaces that finalization authority. This module deliberately
-    has no generic internal-role sum: a later role must prove and own its own
-    production context and failure policy. *)
+    Research receives the closed read/observation-only {!research_tool}
+    authority. Its typed receipt is evidence for the existing tool-free exact
+    Librarian finalizer; it never replaces that finalization authority. This
+    module deliberately has no generic internal-role sum: a later role must
+    prove and own its own production context and failure policy. *)
 
 module Execution_id : sig
   type t
@@ -16,6 +16,23 @@ end
 type raw_trace_sink_outcome =
   | Raw_trace_ready of Agent_sdk.Raw_trace.t
   | Raw_trace_degraded of Agent_sdk.Error.sdk_error
+
+type research_tool =
+  | Search_files
+  | Read_file
+  | Time_now
+  | Context_status
+  | Artifact_read
+  | Memory_search
+  | Library_search
+  | Library_read
+  | Surface_read
+  | Web_search
+  | Web_fetch
+  | Fusion_status
+  | Analyze_image
+(** Closed, read/observation-only authority granted to the detached Librarian
+    research phase. Operational/mutating Keeper tools are not representable. *)
 
 (** Create a fresh retained-trace candidate for one Librarian research phase.
     The caller registers [Agent_sdk.Raw_trace.file_path] as a durable reachability
@@ -106,9 +123,10 @@ val run : on_receipt:(receipt -> unit) -> request -> receipt
     and terminal observation freeze. Cancellation is re-raised only after the
     cancelled receipt has been delivered to this callback. *)
 
-(** Full receipt for durable/raw observation. Exact inputs and tool results are
-    retained here; the finalizer projection below is deliberately bounded. *)
-val receipt_to_yojson : receipt -> Yojson.Safe.t
+(** Secret-free long-lived registry projection. Frozen prompts/input, tool
+    input/output, evidence text, and trace paths remain only in the retained
+    raw-trace blob behind the operator route. *)
+val registry_receipt_to_yojson : receipt -> Yojson.Safe.t
 
 (** Bounded evidence projection consumed by the later exact-output phase. *)
 val finalizer_evidence_to_yojson : receipt -> Yojson.Safe.t
@@ -121,4 +139,11 @@ module For_testing : sig
     -> 'a
 
   val tool_names_for_request : request -> string list * cleanup_outcome
+
+  val research_descriptor_contract : unit -> (string * bool option * string) list
+
+  val invalid_request_gate_callback_count : request -> int
+  (** Dispatch one schema-invalid occurrence through every research tool. No
+      handler executes; each standard Keeper handler must still record exactly
+      one Gate/result callback. *)
 end

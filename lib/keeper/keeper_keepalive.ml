@@ -1152,12 +1152,25 @@ let start_keepalive
            invokes it only after the child-owning switch and all children
            finish. *)
         let cleanup_tracking outcome =
-          let terminal_result =
-            try
-              terminalize_lane outcome;
-              Ok ()
+          let librarian_join_result =
+            match
+              Keeper_memory_lane.cancel_and_join_librarian
+                ~base_path:ctx.config.Workspace.base_path
+                ~keeper_name:live_meta.name
             with
-            | exn -> Error (Printexc.to_string exn)
+            | Keeper_memory_lane.No_librarian_work
+            | Keeper_memory_lane.Librarian_joined _ -> Ok ()
+            | Keeper_memory_lane.Librarian_join_failed detail -> Error detail
+          in
+          let terminal_result =
+            match librarian_join_result with
+            | Error _ as error -> error
+            | Ok () ->
+              (try
+                 terminalize_lane outcome;
+                 Ok ()
+               with
+               | exn -> Error (Printexc.to_string exn))
           in
           let tracking_result =
           try

@@ -22,6 +22,7 @@ vi.mock('../sse-store', () => ({
 
 import { InternalAgentsMonitor } from './internal-agents-monitor'
 import { keepers, shellRuntimeResolution } from '../store'
+import { ApiRequestError } from '../api/core'
 
 afterEach(() => {
   cleanup()
@@ -111,11 +112,11 @@ describe('InternalAgentsMonitor', () => {
         status: 'succeeded',
         elapsedSeconds: 2,
         output: {
-          before: { facts: [{ claim: '낡은 기억' }] },
+          before: { present: true, fact_count: 1 },
           after: {
             revision: 42,
-            facts: [{ claim: '새 기억' }],
-            change: { added: [{ claim: '새 기억' }], removed: [{ claim: '낡은 기억' }], retained: 0 },
+            fact_count: 1,
+            change: { added_count: 1, removed_count: 1, retained: 0 },
           },
         },
       }],
@@ -235,11 +236,11 @@ describe('InternalAgentsMonitor', () => {
         output: {
           research: {
             outcome: { kind: 'not_dispatched' },
-            raw_trace: { kind: 'unavailable', detail: 'sink create failed' },
+            raw_trace: { kind: 'unavailable', category: 'internal', retryable: false },
           },
         },
         code: 'librarian_failed',
-        detail: 'sink create failed',
+        detail: 'Librarian pass failed; inspect the operator raw trace and Memory journal',
       }],
     })
     memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
@@ -251,5 +252,22 @@ describe('InternalAgentsMonitor', () => {
 
     expect(await screen.findByText('RAW trace unavailable')).toBeTruthy()
     expect(rawApi.fetchKeeperRawTrace).not.toHaveBeenCalled()
+  })
+
+  it('states that exact lanes and RAW require an Admin bearer', async () => {
+    api.fetchExactLaneRuns.mockRejectedValue(new ApiRequestError({
+      method: 'GET',
+      path: '/api/v1/dashboard/exact-lane-runs',
+      status: 403,
+      statusText: 'Forbidden',
+    }))
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Exact lanes + RAW: Admin 권한 필요')
+    })
   })
 })

@@ -16,6 +16,7 @@ let keeper_suffix_directive = "/directive"
 let keeper_suffix_paused_work = "/paused-work"
 let keeper_suffix_raw_traces = "/raw-traces"
 let keeper_suffix_raw_trace = "/raw-trace"
+let keeper_suffix_memory_journal = "/memory-journal"
 let keeper_suffix_catchup_judge = "/catchup-judge"
 let keeper_suffix_operator_note = "/operator-note"
 
@@ -200,7 +201,8 @@ let keeper_get_permission req_path =
   else if
     keeper_path_ends_with req_path keeper_suffix_raw_traces
     || keeper_path_ends_with req_path keeper_suffix_raw_trace
-  then Some Masc_domain.CanReadState
+    || keeper_path_ends_with req_path keeper_suffix_memory_journal
+  then Some Masc_domain.CanAdmin
   else None
 
 let trim_to_opt = String_util.trim_to_option

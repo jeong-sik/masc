@@ -18,6 +18,7 @@ import {
   type RawTracePage,
 } from '../api/dashboard-keeper-prompt'
 import { KeeperTurnInspectorPanel } from './keeper-turn-inspector-panel'
+import { ApiRequestError } from '../api/core'
 import { registerInternalAgentRefresh } from '../sse-store'
 import { Btn } from './btn'
 import { EmptyState, ErrorState } from './common/feedback-state'
@@ -34,6 +35,15 @@ type Row =
   | { source: 'fusion'; id: string; run: FusionRunRecord }
 type CommittedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'committed' }>
 type FailedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'failed' }>
+
+function isForbidden(reason: unknown): boolean {
+  return reason instanceof ApiRequestError
+    ? reason.status === 403
+    : typeof reason === 'object'
+      && reason !== null
+      && 'status' in reason
+      && reason.status === 403
+}
 
 const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'all', label: 'All' },
@@ -166,7 +176,9 @@ function ResearchRawTrace({ keeper, path }: { keeper: string; path: string | nul
       .then(setPage)
       .catch((reason: unknown) => {
         if (controller.signal.aborted) return
-        setError(reason instanceof Error ? reason.message : String(reason))
+        setError(isForbidden(reason)
+          ? 'Admin 권한이 있어야 retained RAW blob을 읽을 수 있습니다.'
+          : reason instanceof Error ? reason.message : String(reason))
       })
     return () => controller.abort()
   }, [file, keeper, offset])
@@ -194,7 +206,7 @@ function ResearchRawTrace({ keeper, path }: { keeper: string; path: string | nul
         <code>${page.file}</code>
         <span class="text-[var(--color-fg-muted)]">${page.offset + 1}–${page.offset + page.records.length} / ${page.totalRecords}</span>
       </div>
-      <p class="text-3xs text-[var(--color-fg-muted)]">provider event를 보존한 JSONL의 실제 행입니다. 비밀값은 저장 시점에 redaction되며, registry의 1,024자 typed preview와는 별도 원본입니다.</p>
+      <p class="text-3xs text-[var(--color-fg-muted)]">provider event를 보존한 operator-only JSONL의 실제 행입니다. registry metadata와 달리 민감한 실제 값이 포함될 수 있습니다.</p>
       <div class="flex flex-wrap gap-1" role="group" aria-label="Librarian RAW 표시 방식">
         <button type="button" class="rounded border px-2 py-1 text-3xs" aria-pressed=${view === 'literal'} onClick=${() => setView('literal')}>Literal RAW</button>
         <button type="button" class="rounded border px-2 py-1 text-3xs" aria-pressed=${view === 'tree'} onClick=${() => setView('tree')}>Readable JSON</button>
@@ -232,7 +244,9 @@ function LibrarianJournal({
       .then(setJournal)
       .catch((reason: unknown) => {
         if (controller.signal.aborted) return
-        setError(reason instanceof Error ? reason.message : String(reason))
+        setError(isForbidden(reason)
+          ? 'Admin 권한이 있어야 Memory before/after journal을 읽을 수 있습니다.'
+          : reason instanceof Error ? reason.message : String(reason))
       })
     return () => controller.abort()
   }, [keeper])
@@ -404,13 +418,13 @@ function Details({ row }: { row: Row }) {
       <div class="grid gap-3 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)]">
         <div class="flex flex-wrap items-center gap-2 text-xs">
           <${EvidenceBadge} kind="typed" />
-          <strong>Exact-output registry preview</strong>
-          <span class="text-[var(--color-fg-muted)]">민감값 redaction + 긴 문자열 1,024자 preview</span>
+          <strong>Exact-output registry metadata</strong>
+          <span class="text-[var(--color-fg-muted)]">secret-free 장기 보존 요약 · 실제 값은 operator RAW blob</span>
           <a class="ml-auto text-[var(--color-accent)] hover:underline" href=${keeperHref(row.run.actor)}>Keeper 전체 evidence 열기 →</a>
         </div>
         <div class="grid gap-3 lg:grid-cols-2">
-          <${JsonViewerCard} title="입력값 · typed preview" data=${row.run.input.payload} />
-          <${JsonViewerCard} title="출력값 · typed preview" data=${output} />
+          <${JsonViewerCard} title="입력 metadata · typed" data=${row.run.input.payload} />
+          <${JsonViewerCard} title="출력 metadata · typed" data=${output} />
         </div>
         ${researchTracePath === undefined
           ? html`<p class="text-xs text-[var(--color-fg-muted)]"><span class="mr-2 inline-flex rounded border border-[var(--color-danger)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-danger)]">TRACE JOIN UNAVAILABLE</span>이 exact-only 실행에는 RAW run ref가 없습니다. 시간이나 subject 문자열로 추정 연결하지 않습니다.</p>`
@@ -421,7 +435,7 @@ function Details({ row }: { row: Row }) {
         ${memoryEvidence === null
           ? null
           : html`<div class="grid gap-2 border-t border-[var(--color-border-default)] pt-3">
-              <div class="flex items-center gap-2 text-xs"><${EvidenceBadge} kind="typed" /><strong>Memory before → after</strong><span class="text-[var(--color-fg-muted)]">exact run output가 보존한 동일 실행의 변화</span></div>
+              <div class="flex items-center gap-2 text-xs"><${EvidenceBadge} kind="typed" /><strong>Memory before → after</strong><span class="text-[var(--color-fg-muted)]">registry에는 count/revision만, 실제 추가·제거는 아래 journal</span></div>
               <div class="grid gap-3 lg:grid-cols-2">
                 <${JsonViewerCard} title="Before memory · typed preview" data=${memoryEvidence.before} />
                 <${JsonViewerCard} title="After memory + change · typed preview" data=${memoryEvidence.after} />
@@ -493,7 +507,9 @@ export function InternalAgentsMonitor() {
     const failures: string[] = []
     if (exact.status === 'fulfilled') {
       next.push(...exact.value.runs.map(run => ({ source: 'exact' as const, id: `exact:${run.runId}`, run })))
-    } else failures.push(`Exact lanes: ${String(exact.reason)}`)
+    } else failures.push(isForbidden(exact.reason)
+      ? 'Exact lanes + RAW: Admin 권한 필요 (Settings에서 Admin bearer token을 사용하세요).'
+      : `Exact lanes: ${String(exact.reason)}`)
     if (verification.status === 'fulfilled') {
       next.push(...verification.value.runs.map(run => ({ source: 'verification' as const, id: `verification:${run.verificationId}`, run })))
     } else failures.push(`Verification: ${String(verification.reason)}`)
@@ -558,8 +574,8 @@ export function InternalAgentsMonitor() {
       </div>
 
       <div class="v2-monitoring-card flex flex-wrap gap-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-xs">
-        <span class="flex items-center gap-2"><${EvidenceBadge} kind="raw" /> retained JSONL 실제 행 · 저장 시 secret redaction</span>
-        <span class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /> 정규화·redaction된 구조화 evidence</span>
+        <span class="flex items-center gap-2"><${EvidenceBadge} kind="raw" /> Admin 전용 retained JSONL 실제 행 · 민감값 포함 가능</span>
+        <span class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /> secret-free 장기 보존 metadata</span>
         <span class="flex items-center gap-2"><${EvidenceBadge} kind="excerpt" /> 원문 전체가 아닌 제한된 출력</span>
       </div>
 
@@ -619,7 +635,7 @@ export function InternalAgentsMonitor() {
           >${item.label} ${item.id === 'all' ? rows.length : inventory.find(entry => entry.id === item.id)?.count ?? 0}</button>
         `)}
       </div>
-      ${errors.length > 0 ? html`<${ErrorState}>${errors.join(' · ')}<//>` : null}
+      ${errors.length > 0 ? html`<${ErrorState} message=${errors.join(' · ')} />` : null}
       <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
         <${KeeperTurnInspectorPanel} keepers=${keepers} />
       </div>

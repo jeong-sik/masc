@@ -181,14 +181,21 @@ let test_keeper_sensitive_get_permissions_are_exact () =
     (fun suffix ->
        let path = "/api/v1/keepers/idealist/" ^ suffix in
        check bool (suffix ^ " permission") true
-         (permission path = Some Masc_domain.CanReadState);
+         (permission path = Some Masc_domain.CanAdmin);
        check bool (suffix ^ " trailing segment") true
          (permission (path ^ "/extra") = None))
-    [ "raw-traces"; "raw-trace" ];
+    [ "raw-traces"; "raw-trace"; "memory-journal" ];
   check bool "checkpoint permission" true
     (permission "/api/v1/keepers/idealist/checkpoints" = Some Masc_domain.CanAdmin);
   check bool "ordinary keeper read stays public" true
     (permission "/api/v1/keepers/idealist/trajectory" = None)
+
+let test_internal_exact_lane_registry_is_admin_only () =
+  check bool
+    "exact lane registry requires Admin"
+    true
+    (Server_routes_http_routes_dashboard.For_testing.exact_lane_run_permission
+     = Masc_domain.CanAdmin)
 
 let test_keeper_chat_receipt_route_and_json () =
   let receipt_id =
@@ -3551,6 +3558,8 @@ let () =
             test_keeper_paused_work_route_is_admin_exact;
           test_case "keeper sensitive GET permissions are exact" `Quick
             test_keeper_sensitive_get_permissions_are_exact;
+          test_case "internal exact lane registry is Admin-only" `Quick
+            test_internal_exact_lane_registry_is_admin_only;
           test_case "keeper chat receipt route is typed" `Quick
             test_keeper_chat_receipt_route_and_json;
           test_case "keeper chat recovery route is exact" `Quick

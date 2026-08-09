@@ -396,7 +396,7 @@ type research_observation =
 
 let research_observation_to_yojson = function
   | Research_receipt receipt ->
-    Keeper_librarian_research.receipt_to_yojson receipt
+    Keeper_librarian_research.registry_receipt_to_yojson receipt
   | Raw_trace_unavailable error ->
     `Assoc
       [ "owner", `String "librarian"
@@ -408,7 +408,6 @@ let research_observation_to_yojson = function
             , `String
                 (Agent_sdk.Error.category_label
                    (Agent_sdk.Error.category error))
-            ; "detail", `String (Agent_sdk.Error.to_string error)
             ; "retryable", `Bool (Agent_sdk.Error.is_retryable error)
             ] )
       ]
@@ -519,14 +518,13 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail ~cadence_defe
     ~cadence_deferred
 ;;
 
-let facts_to_yojson facts =
-  `List (List.map Keeper_memory_os_types.fact_to_json facts)
-;;
-
-let current_selection_to_yojson = function
-  | None -> `Null
+let current_selection_registry_summary = function
+  | None -> `Assoc [ "present", `Bool false; "fact_count", `Int 0 ]
   | Some (current : Keeper_librarian.current_selection) ->
-    `Assoc [ "facts", facts_to_yojson current.facts ]
+    `Assoc
+      [ "present", `Bool true
+      ; "fact_count", `Int (List.length current.facts)
+      ]
 ;;
 
 let completed_output
@@ -536,16 +534,16 @@ let completed_output
   =
   `Assoc
     [ "research", research_observation_to_yojson research
-    ; "before", current_selection_to_yojson inp.current
+    ; "before", current_selection_registry_summary inp.current
     ; ( "after"
       , `Assoc
           [ "revision", `Int snapshot.revision
           ; "updated_at", `Float snapshot.updated_at
-          ; "facts", facts_to_yojson snapshot.facts
+          ; "fact_count", `Int (List.length snapshot.facts)
           ; ( "change"
             , `Assoc
-                [ "added", facts_to_yojson snapshot.change.added
-                ; "removed", facts_to_yojson snapshot.change.removed
+                [ "added_count", `Int (List.length snapshot.change.added)
+                ; "removed_count", `Int (List.length snapshot.change.removed)
                 ; "retained", `Int snapshot.change.retained
                 ] )
           ] )
@@ -603,7 +601,6 @@ let run_best_effort
                       ; "message_count", `Int (List.length inp.messages)
                       ; "current_fact_count", `Int current_fact_count
                       ; "max_recall_fact_bytes", `Int inp.max_recall_fact_bytes
-                      ; "frozen_input", research_payload inp
                       ]
                  });
           registered := true
@@ -724,7 +721,10 @@ let run_best_effort
              let detail = extraction_error_to_string error in
              complete
                (Exact_lane_run_registry.Failed
-                  { code = "librarian_failed"; detail })
+                  { code = "librarian_failed"
+                  ; detail =
+                      "Librarian pass failed; inspect the operator raw trace and Memory journal"
+                  })
                (failed_output !research_observation);
              Otel_metric_store.inc_counter
                Keeper_metrics.(to_string MemoryOsLibrarianFailures)
@@ -778,7 +778,10 @@ let run_best_effort
          | exn ->
            complete
              (Exact_lane_run_registry.Failed
-                { code = "librarian_raised"; detail = Printexc.to_string exn })
+                { code = "librarian_raised"
+                ; detail =
+                    "Librarian raised; inspect the operator logs and Memory journal"
+                })
              (failed_output !research_observation);
            raise exn)
       (* Missing Eio context is a failed pass like any other: the keeper's

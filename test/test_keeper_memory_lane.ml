@@ -5,6 +5,7 @@
     leak-safe on a raising unit. *)
 
 module Lane = Masc.Keeper_memory_lane
+module Keeper_lane = Masc.Keeper_lane
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Memory_current = Masc.Keeper_memory_os_current
 module Post_turn_memory = Masc.Keeper_agent_run_post_turn_memory
@@ -366,6 +367,51 @@ let test_releases_on_cancel () =
   | None -> Alcotest.fail "keeper entry missing after cancel"
 ;;
 
+let test_keeper_shutdown_cancels_and_joins_librarian () =
+  Lane.For_testing.reset ();
+  let cancelled = ref false in
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      let started, set_started = Eio.Promise.create () in
+      let never, _set_never = Eio.Promise.create () in
+      let submitted =
+        Lane.submit
+          ~base_path
+          ~keeper_name:"shutdown-owner"
+          ~lane:Lane.Librarian
+          (fun () ->
+             Eio.Promise.resolve set_started ();
+             try Eio.Promise.await never with
+             | Eio.Cancel.Cancelled _ as exn ->
+               cancelled := true;
+               raise exn)
+      in
+      (match submitted with
+       | Lane.Submitted -> ()
+       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
+         Alcotest.fail "shutdown Librarian was not submitted");
+      Eio.Promise.await started;
+      (match
+         Lane.cancel_and_join_librarian
+           ~base_path
+           ~keeper_name:"shutdown-owner"
+       with
+       | Lane.Librarian_joined Keeper_lane.Shutdown_requested -> ()
+       | Lane.Librarian_joined _ ->
+         Alcotest.fail "shutdown Librarian joined with a non-shutdown outcome"
+       | Lane.No_librarian_work -> Alcotest.fail "shutdown missed active Librarian"
+       | Lane.Librarian_join_failed detail -> Alcotest.fail detail);
+      Alcotest.(check bool) "provider scope observed cancellation" true !cancelled;
+      Alcotest.(check (option int))
+        "terminal join drained all Librarian work"
+        (Some 0)
+        (Lane.For_testing.pending
+           ~base_path
+           ~keeper_name:"shutdown-owner"
+           ~lane:Lane.Librarian)))
+;;
+
 (* Submitting against a finished executor switch must not leak the pending
    reservation. Eio.Fiber.fork does not raise to the caller for an off switch, so
    the lane needs its own executor-switch release fallback. *)
@@ -546,6 +592,10 @@ let () =
             test_lanes_have_independent_budgets
         ; Alcotest.test_case "releases on raise" `Quick test_releases_on_raise
         ; Alcotest.test_case "releases on cancel" `Quick test_releases_on_cancel
+        ; Alcotest.test_case
+            "Keeper shutdown cancels and joins Librarian"
+            `Quick
+            test_keeper_shutdown_cancels_and_joins_librarian
         ; Alcotest.test_case
             "finished switch drops without leak"
             `Quick

@@ -205,7 +205,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
           check int "bundle contains no duplicate model names" (List.length actual_names)
             (List.length bundle.tools)))
 
-let test_librarian_research_bundle_exactly_matches_model_visible_descriptors () =
+let test_librarian_research_bundle_is_closed_and_read_only () =
   ignore (init_registry ());
   let dir =
     Filename.concat
@@ -258,20 +258,53 @@ let test_librarian_research_bundle_exactly_matches_model_visible_descriptors () 
        let actual_names, cleanup =
          Keeper_librarian_research.For_testing.tool_names_for_request request
        in
+       let descriptor_contract =
+         Keeper_librarian_research.For_testing.research_descriptor_contract ()
+       in
        let expected_names =
-         Keeper_tool_descriptor.model_visible_descriptors ()
-         |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+         descriptor_contract
+         |> List.map (fun (name, _, _) -> name)
          |> List.sort_uniq String.compare
        in
        check
          (list string)
-         "research runner receives the complete descriptor projection"
+         "research runner receives only its closed descriptor projection"
          expected_names
          (List.sort_uniq String.compare actual_names);
        check int
          "research runner bundle contains no duplicates"
          (List.length expected_names)
          (List.length actual_names);
+       List.iter
+         (fun (name, readonly_hint, route) ->
+            check
+              (option bool)
+              (Printf.sprintf "%s is statically read-only" name)
+              (Some true)
+              readonly_hint;
+            check bool
+              (Printf.sprintf "%s retains a typed runtime route" name)
+              true
+              (String.starts_with ~prefix:"tool_" route))
+         descriptor_contract;
+       List.iter
+         (fun name ->
+            check bool
+              (Printf.sprintf "%s is not representable in Librarian research" name)
+              false
+              (List.mem name actual_names))
+         [ "Execute"
+         ; "Edit"
+         ; "Write"
+         ; "keeper_memory_write"
+         ; "keeper_surface_post"
+         ; "masc_fusion"
+         ];
+       check int
+         "each research callback traverses the standard Gate/result boundary once"
+         (List.length actual_names)
+         (Keeper_librarian_research.For_testing.invalid_request_gate_callback_count
+            request);
        match cleanup with
        | Keeper_librarian_research.Cleanup_succeeded -> ()
        | Cleanup_failed detail -> failf "research bundle cleanup failed: %s" detail
@@ -348,6 +381,53 @@ let test_librarian_research_cleanup_contract () =
       true
       (string_contains detail "cleanup failed")
   | _ -> fail "cleanup failure outcome was not recorded"
+;;
+
+let test_librarian_registry_receipt_excludes_raw_payloads () =
+  let execution_id = Keeper_librarian_research.Execution_id.generate () in
+  let receipt : Keeper_librarian_research.receipt =
+    { execution_id
+    ; runtime_id = "runtime-safe"
+    ; frozen_system_prompt = "SECRET_SYSTEM_SENTINEL"
+    ; frozen_prompt = "SECRET_PROMPT_SENTINEL"
+    ; frozen_input = `Assoc [ "opaque", `String "SECRET_INPUT_SENTINEL" ]
+    ; started_at = 1.0
+    ; finished_at = 2.0
+    ; duration_ms = 1000.0
+    ; tool_names = [ "keeper_time_now" ]
+    ; tool_calls = []
+    ; terminal_effect = Keeper_tools_oas.Terminal_effect_open
+    ; cleanup = Keeper_librarian_research.Cleanup_succeeded
+    ; outcome =
+        Keeper_librarian_research.Research_completed
+          { evidence =
+              { text = "SECRET_EVIDENCE_SENTINEL"
+              ; original_bytes = 24
+              ; retained_bytes = 24
+              ; truncated = false
+              }
+          ; session_id = "session-safe"
+          ; turns = 1
+          ; stop_reason = Runtime_agent.Completed
+          }
+    ; trace_ref = None
+    }
+  in
+  let projected =
+    Keeper_librarian_research.registry_receipt_to_yojson receipt
+    |> Yojson.Safe.to_string
+  in
+  List.iter
+    (fun sentinel ->
+       check bool
+         (sentinel ^ " absent from long-lived projection")
+         false
+         (string_contains projected sentinel))
+    [ "SECRET_SYSTEM_SENTINEL"
+    ; "SECRET_PROMPT_SENTINEL"
+    ; "SECRET_INPUT_SENTINEL"
+    ; "SECRET_EVIDENCE_SENTINEL"
+    ]
 ;;
 
 let test_missing_current_task_reconciled_before_transition_hint () =
@@ -581,10 +661,12 @@ let () =
             test_fusion_default_descriptor_is_bundle_visible;
           test_case "bundle exactly matches model-visible descriptors" `Quick
             test_bundle_exactly_matches_model_visible_descriptors;
-          test_case "librarian research bundle matches model-visible descriptors" `Quick
-            test_librarian_research_bundle_exactly_matches_model_visible_descriptors;
+          test_case "librarian research bundle is closed and read-only" `Quick
+            test_librarian_research_bundle_is_closed_and_read_only;
           test_case "librarian research cleanup covers success error cancellation" `Quick
             test_librarian_research_cleanup_contract;
+          test_case "librarian registry receipt excludes raw payloads" `Quick
+            test_librarian_registry_receipt_excludes_raw_payloads;
           test_case "missing current task reconciles before transition hint" `Quick
             test_missing_current_task_reconciled_before_transition_hint;
           test_case "bundle assembly does not emit assignment" `Quick

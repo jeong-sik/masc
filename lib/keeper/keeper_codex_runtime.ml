@@ -527,7 +527,6 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     in
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
-      ; cwd = base_path
       ; model = config.model
       ; developer_instructions
       ; timeout_s = config.timeout_s
@@ -550,6 +549,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         Runtime_codex_app_server.validate_turn
           ~dynamic_tools
           ~thread_mode
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
           client_config
           ~prompt
       with

@@ -11,7 +11,6 @@ type subscription =
 
 type config =
   { cli_path : string
-  ; cwd : string
   ; model : string option
   ; developer_instructions : string option
   ; timeout_s : float
@@ -23,12 +22,11 @@ let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 4096
 let max_wire_line_bytes = 8 * 1024 * 1024
 let approval_policy = "never"
-let sandbox_mode = "read-only"
+let permissions_profile = ":read-only"
 let thread_is_ephemeral = false
 
-let default_config ~cwd =
+let default_config () =
   { cli_path = "codex"
-  ; cwd
   ; model = None
   ; developer_instructions = None
   ; timeout_s = default_timeout_s
@@ -611,8 +609,8 @@ let invoke_state_callback ~stage callback =
   | exn -> protocol_error stage (Printexc.to_string exn)
 ;;
 
-let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~history ~prompt
-    ~on_thread_ready ~on_turn_starting ~on_turn_started =
+let run_protocol io config ~protocol_cwd ~dynamic_tools ~reasoning_effort ~thread_mode
+    ~history ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_started =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
       (`Assoc
@@ -620,7 +618,7 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~histor
            , `Assoc
                [ "name", `String "masc"
                ; "title", `String "MASC"
-               ; "version", `String "dev"
+               ; "version", `String Version.version
                ] )
          ; "capabilities", `Assoc [ "experimentalApi", `Bool true ]
          ]);
@@ -635,9 +633,9 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~histor
     match thread_mode with
     | Start ->
       ( "thread/start"
-      , ([ "cwd", `String config.cwd
+      , ([ "cwd", `String protocol_cwd
          ; "approvalPolicy", `String approval_policy
-         ; "sandbox", `String sandbox_mode
+         ; "permissions", `String permissions_profile
          ; "ephemeral", `Bool thread_is_ephemeral
          ]
          @ optional_field "model" config.model
@@ -650,9 +648,9 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~histor
     | Resume { thread_id } ->
       ( "thread/resume"
       , [ "threadId", `String thread_id
-        ; "cwd", `String config.cwd
+        ; "cwd", `String protocol_cwd
         ; "approvalPolicy", `String approval_policy
-        ; "sandbox", `String sandbox_mode
+        ; "permissions", `String permissions_profile
         ]
         @ optional_field "model" config.model
         @ optional_field "developerInstructions" config.developer_instructions
@@ -746,13 +744,28 @@ let env_key entry =
   | None -> entry
 ;;
 
+let child_environment_key_allowed = function
+  | "HOME"
+  | "PATH"
+  | "TMPDIR"
+  | "CODEX_HOME"
+  | "XDG_CONFIG_HOME"
+  | "XDG_DATA_HOME"
+  | "XDG_CACHE_HOME"
+  | "SSL_CERT_FILE"
+  | "SSL_CERT_DIR"
+  | "LANG"
+  | "LC_ALL"
+  | "LC_CTYPE"
+  | "TERM"
+  | "NO_COLOR" -> true
+  | _ -> false
+;;
+
 let subscription_only_environment () =
   Unix.environment ()
   |> Array.to_list
-  |> List.filter (fun entry ->
-    match env_key entry with
-    | "OPENAI_API_KEY" | "CODEX_API_KEY" -> false
-    | _ -> true)
+  |> List.filter (fun entry -> child_environment_key_allowed (env_key entry))
   |> Array.of_list
 ;;
 
@@ -813,8 +826,8 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
-let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort ~thread_mode ~history
-    ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_started =
+let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools ~reasoning_effort
+    ~thread_mode ~history ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_started =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -854,6 +867,7 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort ~thread
           run_protocol
             { send; receive }
             config
+            ~protocol_cwd
             ~dynamic_tools
             ~reasoning_effort
             ~thread_mode
@@ -864,20 +878,32 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort ~thread
             ~on_turn_started)))
 ;;
 
-let validate_config config ~thread_mode ~prompt =
+let native_cwd cwd =
+  try
+    let cwd = Eio.Path.native_exn cwd in
+    if String.trim cwd = "" || Filename.is_relative cwd
+    then Error (Invalid_config "cwd must be an absolute native path")
+    else Ok cwd
+  with
+  | exn ->
+    Error
+      (Invalid_config
+         ("cwd must be a native filesystem path: " ^ Printexc.to_string exn))
+;;
+
+let validate_config config ~cwd ~thread_mode ~prompt =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
-  else if String.trim config.cwd = "" || Filename.is_relative config.cwd
-  then Error (Invalid_config "cwd must be an absolute path")
   else if not (Float.is_finite config.timeout_s) || config.timeout_s <= 0.0
   then Error (Invalid_config "timeout_s must be positive and finite")
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
   else
+    let* cwd = native_cwd cwd in
     match thread_mode with
     | Resume { thread_id } when String.equal (String.trim thread_id) "" ->
       Error (Invalid_config "resume thread_id must not be empty")
-    | Start | Resume _ -> Ok ()
+    | Start | Resume _ -> Ok cwd
 ;;
 
 let validate_dynamic_tools tools =
@@ -894,10 +920,18 @@ let validate_dynamic_tools tools =
   loop [] tools
 ;;
 
-let validate_turn ?(dynamic_tools = []) ?(thread_mode = Start) config ~prompt =
-  match validate_config config ~thread_mode ~prompt with
+let validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt =
+  match validate_config config ~cwd ~thread_mode ~prompt with
   | Error _ as error -> error
-  | Ok () -> validate_dynamic_tools dynamic_tools
+  | Ok protocol_cwd ->
+    (match validate_dynamic_tools dynamic_tools with
+     | Error _ as error -> error
+     | Ok () -> Ok protocol_cwd)
+;;
+
+let validate_turn ?(dynamic_tools = []) ?(thread_mode = Start) ~cwd config ~prompt =
+  validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt
+  |> Result.map (fun _ -> ())
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
@@ -905,15 +939,16 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
     ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
     ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) config ~prompt =
   let result =
-    match validate_turn ~dynamic_tools ~thread_mode config ~prompt with
+    match validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt with
     | Error _ as error -> error
-    | Ok () ->
+    | Ok protocol_cwd ->
       Log.Runtime_agent.info "Codex app-server subscription turn starting";
       (try
          run_spawned
            ~mgr
            ~clock
            ~cwd
+           ~protocol_cwd
            config
            ~dynamic_tools
            ~reasoning_effort

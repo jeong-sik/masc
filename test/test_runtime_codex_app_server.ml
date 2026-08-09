@@ -84,7 +84,7 @@ let with_fixture ?capture_path lines f =
 let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp") path =
   Eio_main.run (fun env ->
     let config =
-      { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+      { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
       ; timeout_s = 2.0
       }
@@ -102,12 +102,18 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp
 
 let test_turn_admission_validation_is_process_free () =
   let config =
-    { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with cli_path = "" }
+    { (Runtime_codex_app_server.default_config ()) with cli_path = "" }
   in
-  match Runtime_codex_app_server.validate_turn config ~prompt:"fixture" with
-  | Error (Runtime_codex_app_server.Invalid_config "cli_path must not be empty") -> ()
-  | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-  | Ok () -> fail "invalid deterministic client config passed admission"
+  Eio_main.run (fun env ->
+    match
+      Runtime_codex_app_server.validate_turn
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+        config
+        ~prompt:"fixture"
+    with
+    | Error (Runtime_codex_app_server.Invalid_config "cli_path must not be empty") -> ()
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok () -> fail "invalid deterministic client config passed admission")
 ;;
 
 let tool_call_request =
@@ -494,6 +500,105 @@ let test_declared_cwd_reaches_spawn () =
                    "spawn cwd"
                    (Unix.realpath workspace)
                    (Unix.realpath observed))))
+;;
+
+let test_protocol_uses_spawn_cwd_and_named_permissions () =
+  let workspace = temp_workspace "masc-codex-protocol-cwd-" in
+  let capture_path = Filename.temp_file "masc-codex-protocol-" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_tree workspace;
+      Sys.remove capture_path)
+    (fun () ->
+       with_fixture
+         ~capture_path
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun fixture ->
+            match run_fixture ~cwd:workspace fixture with
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> ());
+       let requests =
+         In_channel.with_open_bin capture_path (fun input ->
+           In_channel.input_lines input |> List.map Yojson.Safe.from_string)
+       in
+       let initialize =
+         List.find
+           (fun json -> Yojson.Safe.Util.member "id" json = `Int 1)
+           requests
+       in
+       let thread_start =
+         List.find
+           (fun json -> Yojson.Safe.Util.member "id" json = `Int 3)
+           requests
+       in
+       let client_info =
+         initialize
+         |> Yojson.Safe.Util.member "params"
+         |> Yojson.Safe.Util.member "clientInfo"
+       in
+       let params = Yojson.Safe.Util.member "params" thread_start in
+       check string
+         "client version SSOT"
+         Version.version
+         (client_info |> Yojson.Safe.Util.member "version" |> Yojson.Safe.Util.to_string);
+       check string
+         "protocol cwd"
+         (Unix.realpath workspace)
+         (params
+          |> Yojson.Safe.Util.member "cwd"
+          |> Yojson.Safe.Util.to_string
+          |> Unix.realpath);
+       check string
+         "named permissions"
+         ":read-only"
+         (params |> Yojson.Safe.Util.member "permissions" |> Yojson.Safe.Util.to_string);
+       check bool
+         "legacy sandbox omitted"
+         true
+         (Yojson.Safe.Util.member "sandbox" params = `Null))
+;;
+
+let test_child_environment_is_allowlisted () =
+  let canary = "MASC_CODEX_SECRET_CANARY" in
+  let previous = Sys.getenv_opt canary in
+  Unix.putenv canary "must-not-reach-child";
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv canary value
+      | None -> Unix.putenv canary "")
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun fixture ->
+            let wrapper = Filename.temp_file "masc-codex-env-wrapper-" ".sh" in
+            Fun.protect
+              ~finally:(fun () -> Sys.remove wrapper)
+              (fun () ->
+                 let output = open_out_bin wrapper in
+                 output_string output "#!/bin/sh\n";
+                 output_string output
+                   "if [ \"${MASC_CODEX_SECRET_CANARY+set}\" = set ]; then exit 71; fi\n";
+                 output_string output "if [ -z \"${HOME:-}\" ]; then exit 72; fi\n";
+                 output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+                 close_out output;
+                 Unix.chmod wrapper 0o700;
+                 match run_fixture wrapper with
+                 | Error error ->
+                   fail (Runtime_codex_app_server.error_to_string error)
+                 | Ok _ -> ())))
 ;;
 
 let write_fixture_file path content =
@@ -1088,7 +1193,7 @@ let test_live_chatgpt_subscription () =
     let result =
       Eio_main.run (fun env ->
         let config =
-          { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+          { (Runtime_codex_app_server.default_config ()) with
             timeout_s = 60.0
           }
         in
@@ -1126,7 +1231,7 @@ let test_live_dynamic_tool_subscription () =
     let result =
       Eio_main.run (fun env ->
         let config =
-          { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+          { (Runtime_codex_app_server.default_config ()) with
             timeout_s = 60.0
           }
         in
@@ -1154,7 +1259,7 @@ let test_live_history_injection_subscription () =
     let result =
       Eio_main.run (fun env ->
         let config =
-          { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+          { (Runtime_codex_app_server.default_config ()) with
             timeout_s = 60.0
           }
         in
@@ -1279,6 +1384,14 @@ let () =
     [ ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
         ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn
+        ; test_case
+            "protocol and spawn share cwd authority"
+            `Quick
+            test_protocol_uses_spawn_cwd_and_named_permissions
+        ; test_case
+            "child environment is allowlisted"
+            `Quick
+            test_child_environment_is_allowlisted
         ; test_case "API key is rejected" `Quick test_api_key_account_is_rejected
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case

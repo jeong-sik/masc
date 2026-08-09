@@ -97,11 +97,11 @@ let illegal_hook_decision ~hook_name decision =
           (Agent_sdk.Hooks.classify_decision decision)))
 ;;
 
-let invoke_turn_hook ~keeper_name ~hook_name hook event =
+let invoke_turn_hook ~keeper_name ~turn_count ~hook_name hook event =
   Agent_sdk.Agent_tools.invoke_hook
     ~tracer:Agent_sdk.Tracing.null
     ~agent_name:keeper_name
-    ~turn_count:1
+    ~turn_count
     ~hook_name
     hook
     event
@@ -114,15 +114,16 @@ type prepared_turn =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
-let prepare_turn ~keeper_name ~system_prompt ~tools ~initial_messages
+let prepare_turn ~keeper_name ~turn_count ~system_prompt ~tools ~initial_messages
     ~model_input_projection ~hooks ~enable_thinking =
   let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
   let before_turn =
     invoke_turn_hook
       ~keeper_name
+      ~turn_count
       ~hook_name:"before_turn"
       hooks.before_turn
-      (Agent_sdk.Hooks.BeforeTurn { turn = 1; messages = initial_messages })
+      (Agent_sdk.Hooks.BeforeTurn { turn = turn_count; messages = initial_messages })
   in
   let* messages =
     match before_turn with
@@ -137,10 +138,11 @@ let prepare_turn ~keeper_name ~system_prompt ~tools ~initial_messages
   let before_turn_params =
     invoke_turn_hook
       ~keeper_name
+      ~turn_count
       ~hook_name:"before_turn_params"
       hooks.before_turn_params
       (Agent_sdk.Hooks.BeforeTurnParams
-         { turn = 1
+         { turn = turn_count
          ; messages
          ; last_tool_results = last_tool_results messages
          ; current_params
@@ -264,7 +266,7 @@ let apply_context_injection ~terminal_error ~context ~context_injector ~tool_nam
           ^ Printexc.to_string exn))
 ;;
 
-let dynamic_tool_of_oas ~keeper_name ~context ~tools
+let dynamic_tool_of_oas ~keeper_name ~turn_count ~context ~tools
     ~(hooks : Agent_sdk.Hooks.hooks) ~event_bus ~context_injector ~terminal_error
     (tool : Agent_sdk.Tool.t) =
   { Runtime_codex_app_server.name = tool.schema.name
@@ -282,13 +284,14 @@ let dynamic_tool_of_oas ~keeper_name ~context ~tools
         let invocation =
           Agent_sdk.Tool_contract.Invocation.create
             ~tool_use_id:call_id
-            ~turn:1
+            ~turn:turn_count
             ~schedule
             ~completion:(Agent_sdk.Tool.completion tool)
         in
         let pre_tool_use =
           invoke_turn_hook
             ~keeper_name
+            ~turn_count
             ~hook_name:"pre_tool_use"
             hooks.pre_tool_use
             (Agent_sdk.Hooks.PreToolUse
@@ -366,8 +369,8 @@ let dynamic_tool_of_oas ~keeper_name ~context ~tools
   }
 ;;
 
-let dynamic_tools ~keeper_name ~tools ~hooks ~event_bus ~context_injector ~context
-    ~terminal_error =
+let dynamic_tools ~keeper_name ~turn_count ~tools ~hooks ~event_bus ~context_injector
+    ~context ~terminal_error =
   match tools, context with
   | [], _ -> Ok []
   | _ :: _, None ->
@@ -380,6 +383,7 @@ let dynamic_tools ~keeper_name ~tools ~hooks ~event_bus ~context_injector ~conte
       (List.map
          (dynamic_tool_of_oas
             ~keeper_name
+            ~turn_count
             ~context
             ~tools
             ~hooks
@@ -397,9 +401,27 @@ let codex_error_to_sdk_error = function
   | error -> Agent_sdk.Error.Internal (Runtime_codex_app_server.error_to_string error)
 ;;
 
-let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~tools
-    ~initial_messages ~model_input_projection ~hooks ~context_injector ~context ~event_bus
-    ~enable_thinking ~(config : Runtime_execution.codex_app_server) =
+let recovery_failure_of_client_error = function
+  | Runtime_codex_app_server.Spawn_failed _ ->
+    Keeper_official_client_session_store.Transient_spawn_failed
+  | Runtime_codex_app_server.Turn_interrupted
+  | Runtime_codex_app_server.Process_exited _
+  | Runtime_codex_app_server.Timeout _ ->
+    Keeper_official_client_session_store.Transport_interrupted
+  | Runtime_codex_app_server.Invalid_config _
+  | Runtime_codex_app_server.Protocol_error _
+  | Runtime_codex_app_server.Rpc_error _
+  | Runtime_codex_app_server.Unsupported_server_request _ ->
+    Keeper_official_client_session_store.Protocol_failed
+  | Runtime_codex_app_server.Subscription_required _
+  | Runtime_codex_app_server.Turn_failed _ ->
+    Keeper_official_client_session_store.Provider_rejected
+;;
+
+let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
+    ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
+    ~context_injector ~context ~event_bus ~enable_thinking
+    ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -413,15 +435,83 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
          "Codex app-server runtime requires the initialized Eio clock")
   | Some env, Some clock ->
     let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
+    let owner_epoch = Keeper_official_client_session_store.process_epoch () in
+    let* stored_session =
+      match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+      | Ok session -> Ok session
+      | Error detail ->
+        Error (internal_error ("Codex session binding load failed: " ^ detail))
+    in
+    let* stored_session =
+      match stored_session with
+      | Some
+          ({ phase = (Start _ | Active _ | Turn_inflight _); _ } as expected) ->
+        (match
+           Keeper_official_client_session_store.reconcile_process_restart
+             ~base_path
+             ~keeper_name
+             ~expected
+             ~current_owner_epoch:owner_epoch
+             ~required_at:(Time_compat.now ())
+         with
+         | Ok reconciled -> Ok (Some reconciled)
+         | Error detail ->
+           Error
+             (config_error
+                ~field:"official_client_session.phase"
+                detail))
+      | None | Some { phase = (Ready | Recovery_required _ | Settled _); _ } ->
+        Ok stored_session
+    in
+    let* claim_plan =
+      match
+        Keeper_official_client_session_store.plan_claim
+          ~expected:stored_session
+          ~client_kind:Codex
+          ~runtime_id
+      with
+      | Ok plan -> Ok plan
+      | Error detail ->
+        Error
+          (config_error
+             ~field:"official_client_session.claim"
+             detail)
+    in
+    let thread_mode =
+      match claim_plan.previous_settlement with
+      | None -> Runtime_codex_app_server.Start
+      | Some { session_id; _ } ->
+        Runtime_codex_app_server.Resume { thread_id = session_id }
+    in
+    let turn_count = claim_plan.turn_count in
     let* prepared =
       prepare_turn
         ~keeper_name
+        ~turn_count
         ~system_prompt
         ~tools
         ~initial_messages
         ~model_input_projection
         ~hooks:(Some hooks)
         ~enable_thinking
+    in
+    let tool_surface_sha256 =
+      Keeper_official_client_session_store.tool_surface_sha256 prepared.tools
+    in
+    let* () =
+      match claim_plan.required_tool_surface_sha256 with
+      | None -> Ok ()
+      | Some stored_tool_surface_sha256
+        when String.equal stored_tool_surface_sha256 tool_surface_sha256 ->
+        Ok ()
+      | Some stored_tool_surface_sha256 ->
+        Error
+          (config_error
+             ~field:"official_client_session.tool_surface_sha256"
+             (Printf.sprintf
+                "stored official-client tool surface %s does not match current surface %s"
+                stored_tool_surface_sha256
+                tool_surface_sha256))
     in
     let* developer_messages, history = project_messages prepared.messages in
     let* prompt =
@@ -447,6 +537,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
     let* dynamic_tools =
       dynamic_tools
         ~keeper_name
+        ~turn_count
         ~tools:prepared.tools
         ~hooks
         ~event_bus
@@ -454,21 +545,155 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
         ~context
         ~terminal_error
     in
+    let* () =
+      match
+        Runtime_codex_app_server.validate_turn
+          ~dynamic_tools
+          ~thread_mode
+          client_config
+          ~prompt
+      with
+      | Ok () -> Ok ()
+      | Error error -> Error (codex_error_to_sdk_error error)
+    in
+    let* claimed_session =
+      match
+        Keeper_official_client_session_store.claim
+          ~base_path
+          ~keeper_name
+          ~expected:stored_session
+          ~client_kind:Codex
+          ~owner_epoch
+          ~runtime_id
+          ~tool_surface_sha256
+          ~updated_at:(Time_compat.now ())
+      with
+      | Ok session -> Ok session
+      | Error detail ->
+        Error (internal_error ("Codex session claim failed: " ^ detail))
+    in
+    let session_state = ref claimed_session in
+    let recovery_failure =
+      ref Keeper_official_client_session_store.Transport_interrupted
+    in
+    let update_session label transition =
+      match transition !session_state with
+      | Ok next ->
+        session_state := next;
+        Ok ()
+      | Error detail ->
+        recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
+        Error (Printf.sprintf "Codex session %s failed: %s" label detail)
+    in
+    let require_recovery detail =
+      match !session_state with
+      | { Keeper_official_client_session_store.phase =
+            (Ready | Settled _ | Recovery_required _)
+        ; _
+        } ->
+        Ok ()
+      | expected ->
+        (match
+           Keeper_official_client_session_store.require_recovery
+             ~base_path
+             ~keeper_name
+             ~expected
+             ~failure:!recovery_failure
+             ~detail
+             ~required_at:(Time_compat.now ())
+         with
+         | Ok recovery ->
+           session_state := recovery;
+           Ok ()
+         | Error detail -> Error detail)
+    in
+    let settle_failed_claim detail =
+      match
+        Keeper_official_client_session_store.failure_disposition
+          !recovery_failure
+      with
+      | Transient ->
+        (match !session_state with
+         | { phase = (Ready | Settled _ | Recovery_required _); _ } -> Ok ()
+         | expected ->
+           (match
+              Keeper_official_client_session_store.release_transient
+                ~base_path
+                ~keeper_name
+                ~expected
+                ~failure:!recovery_failure
+                ~released_at:(Time_compat.now ())
+            with
+            | Ok released ->
+              session_state := released;
+              Ok ()
+            | Error detail -> Error detail))
+      | Ambiguous | Fatal -> require_recovery detail
+    in
     let started_at = Time_compat.now () in
-    (match
+    let turn_result =
+      try
+        (match
        Runtime_codex_app_server.run_turn
          ~mgr:(Eio.Stdenv.process_mgr env)
          ~clock
+         ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
          ~dynamic_tools
          ?reasoning_effort:prepared.reasoning_effort
+         ~thread_mode
          ~history
+         ~on_thread_ready:(fun ~thread_id ->
+           update_session "active transition" (fun expected ->
+             Keeper_official_client_session_store.mark_active
+               ~base_path
+               ~keeper_name
+               ~expected
+               ~session_id:thread_id
+               ~updated_at:(Time_compat.now ())))
+         ~on_turn_starting:(fun ~thread_id ->
+           update_session "turn-starting transition" (fun expected ->
+             Keeper_official_client_session_store.mark_turn_starting
+               ~base_path
+               ~keeper_name
+               ~expected
+               ~session_id:thread_id
+               ~updated_at:(Time_compat.now ())))
+         ~on_turn_started:(fun ~thread_id ~turn_id ->
+           update_session "turn-started transition" (fun expected ->
+             Keeper_official_client_session_store.mark_turn_started
+               ~base_path
+               ~keeper_name
+               ~expected
+               ~session_id:thread_id
+               ~turn_id
+               ~updated_at:(Time_compat.now ())))
          client_config
          ~prompt
      with
-     | Error error -> Error (codex_error_to_sdk_error error)
-     | Ok _ when Option.is_some !terminal_error ->
-       Error (internal_error (Option.get !terminal_error))
+     | Error error ->
+       recovery_failure := recovery_failure_of_client_error error;
+       Error (codex_error_to_sdk_error error)
      | Ok turn ->
+       recovery_failure := Keeper_official_client_session_store.Protocol_failed;
+       let expected_resumed =
+         match thread_mode with
+         | Runtime_codex_app_server.Start -> false
+         | Runtime_codex_app_server.Resume _ -> true
+       in
+       let* () =
+         if Bool.equal expected_resumed turn.resumed
+         then Ok ()
+         else
+           Error
+             (internal_error
+                "Codex app-server reported a thread mode different from the requested session plan")
+       in
+       recovery_failure := Keeper_official_client_session_store.Host_hook_failed;
+       let* () =
+         match !terminal_error with
+         | None -> Ok ()
+         | Some detail -> Error (internal_error detail)
+       in
        let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
        let response =
          { Agent_sdk.Types.id = turn.turn_id
@@ -487,9 +712,10 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
        let after_turn =
          invoke_turn_hook
            ~keeper_name
+           ~turn_count
            ~hook_name:"after_turn"
            hooks.after_turn
-           (Agent_sdk.Hooks.AfterTurn { turn = 1; response })
+           (Agent_sdk.Hooks.AfterTurn { turn = turn_count; response })
        in
        let* () =
          match after_turn with
@@ -501,6 +727,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
        let on_stop =
          invoke_turn_hook
            ~keeper_name
+           ~turn_count
            ~hook_name:"on_stop"
            hooks.on_stop
            (Agent_sdk.Hooks.OnStop { reason = response.stop_reason; response })
@@ -511,6 +738,23 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
          | HookFailed { stage; detail } ->
            Error (hook_error ~hook_name:"on_stop" ~stage detail)
          | decision -> Error (illegal_hook_decision ~hook_name:"on_stop" decision)
+       in
+       recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
+       let* () =
+         match
+           Keeper_official_client_session_store.settle
+             ~base_path
+             ~keeper_name
+             ~expected:!session_state
+             ~session_id:turn.thread_id
+             ~turn_id:turn.turn_id
+             ~updated_at:(Time_compat.now ())
+         with
+         | Ok settled ->
+           session_state := settled;
+           Ok ()
+         | Error detail ->
+           Error (internal_error ("Codex session settlement failed: " ^ detail))
        in
        let capture, _metrics =
          Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
@@ -527,6 +771,8 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
            ~configured_labels:
              [ "codex_app_server"
              ; Printf.sprintf "dynamic_tool_calls=%d" turn.dynamic_tool_calls
+             ; Printf.sprintf "resumed=%b" turn.resumed
+             ; Printf.sprintf "turn_count=%d" turn_count
              ]
            ~candidate_count:1
            ~selected_model_raw:(Some turn.model)
@@ -539,10 +785,37 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt ~t
          { Runtime_agent.response
          ; checkpoint = None
          ; session_id = turn.thread_id
-         ; turns = 1
+         ; turns = turn_count
          ; trace_ref = None
          ; run_validation = None
          ; runtime_observation = Some runtime_observation
          ; stop_reason = Completed
          })
+      with
+      | Eio.Cancel.Cancelled _ as exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        recovery_failure := Keeper_official_client_session_store.Transport_interrupted;
+        let detail = "Codex turn cancelled: " ^ Printexc.to_string exn in
+        (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
+         | Ok () -> ()
+         | Error recovery_detail ->
+           Log.Keeper.error
+             ~keeper_name
+             "Codex cancellation recovery persistence failed: %s"
+             recovery_detail);
+        Printexc.raise_with_backtrace exn backtrace
+    in
+    (match turn_result with
+     | Ok _ -> turn_result
+     | Error original_error ->
+       let original_detail = Agent_sdk.Error.to_string original_error in
+       (match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
+        | Ok () -> turn_result
+        | Error recovery_detail ->
+          Error
+            (internal_error
+               (Printf.sprintf
+                  "Codex turn failed and recovery state persistence also failed: original=%s recovery=%s"
+                  original_detail
+                  recovery_detail))))
 ;;

@@ -10,45 +10,50 @@ module Host = Keeper_official_client_host
 
 let runtime_label = "Codex"
 
-let finish_raw_error raw_trace_run error =
+let finish_raw_error ~keeper_name raw_trace_run error =
   match raw_trace_run with
-  | None -> Ok ()
+  | None -> ()
   | Some active ->
-    Agent_sdk.Raw_trace.finish_run
-      active
-      ~final_text:None
-      ~stop_reason:None
-      ~error:(Some (Agent_sdk.Error.to_string error))
-    |> Result.map (fun _ -> ())
+    ignore
+      (Host.observe_raw_trace ~keeper_name ~stage:Host.Run_finish (fun () ->
+         Agent_sdk.Raw_trace.finish_run
+           active
+           ~final_text:None
+           ~stop_reason:None
+           ~error:(Some (Agent_sdk.Error.to_string error))))
 ;;
 
-let finish_raw_success raw_trace_run (result : Runtime_agent.run_result) =
+let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_result) =
   match raw_trace_run with
-  | None -> Ok result
+  | None -> result
   | Some active ->
-    let* () =
-      result.response.content
-      |> List.mapi (fun block_index block ->
-        Agent_sdk.Raw_trace.record_assistant_block active ~block_index block)
-      |> List.fold_left
-           (fun acc record ->
-              let* () = acc in
-              record)
-           (Ok ())
+    let all_blocks_recorded = ref true in
+    result.response.content
+    |> List.iteri (fun block_index block ->
+      if
+        Option.is_none
+          (Host.observe_raw_trace
+             ~keeper_name
+             ~stage:Host.Assistant_block
+             (fun () ->
+                Agent_sdk.Raw_trace.record_assistant_block active ~block_index block))
+      then all_blocks_recorded := false);
+    let finished =
+      Host.observe_raw_trace ~keeper_name ~stage:Host.Run_finish (fun () ->
+         Agent_sdk.Raw_trace.finish_run
+           active
+           ~final_text:
+             (Agent_sdk.Types.text_of_response result.response
+              |> String_util.trim_to_option)
+           ~stop_reason:
+             (Some
+                (Agent_sdk.Types.stop_reason_to_string
+                   result.response.stop_reason))
+           ~error:None)
     in
-    let* trace_ref =
-      Agent_sdk.Raw_trace.finish_run
-        active
-        ~final_text:
-          (Agent_sdk.Types.text_of_response result.response
-           |> String_util.trim_to_option)
-        ~stop_reason:
-          (Some
-             (Agent_sdk.Types.stop_reason_to_string
-                result.response.stop_reason))
-        ~error:None
-    in
-    Ok { result with trace_ref = Some trace_ref }
+    (match !all_blocks_recorded, finished with
+     | true, Some trace_ref -> { result with trace_ref = Some trace_ref }
+     | false, _ | _, None -> result)
 ;;
 
 let project_messages messages =
@@ -261,21 +266,21 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       | Ok () -> Ok ()
       | Error error -> Error (codex_error_to_sdk_error error)
     in
-    let* raw_trace_run =
+    let raw_trace_run =
       match raw_trace with
-      | None -> Ok None
+      | None -> None
       | Some sink ->
-        Agent_sdk.Raw_trace.start_run
-          sink
-          ~agent_name:keeper_name
-          ~prompt
-          ?model:config.model
-          ?reasoning_effort:
-            (Option.map
-               Llm_provider.Reasoning_effort.to_string
-               prepared.reasoning_effort)
-          ()
-        |> Result.map Option.some
+        Host.observe_raw_trace ~keeper_name ~stage:Host.Run_start (fun () ->
+          Agent_sdk.Raw_trace.start_run
+            sink
+            ~agent_name:keeper_name
+            ~prompt
+            ?model:config.model
+            ?reasoning_effort:
+              (Option.map
+                 Llm_provider.Reasoning_effort.to_string
+                 prepared.reasoning_effort)
+            ())
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
@@ -306,15 +311,8 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       | Ok session -> Ok session
       | Error detail ->
         let error = internal_error ("Codex session claim failed: " ^ detail) in
-        (match finish_raw_error raw_trace_run error with
-         | Ok () -> Error error
-         | Error trace_error ->
-           Error
-             (internal_error
-                (Printf.sprintf
-                   "%s; RAW trace finalization also failed: %s"
-                   (Agent_sdk.Error.to_string error)
-                   (Agent_sdk.Error.to_string trace_error))))
+        finish_raw_error ~keeper_name raw_trace_run error;
+        Error error
     in
     let session_state = ref claimed_session in
     let recovery_failure =
@@ -549,29 +547,17 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              recovery_detail);
         (match
            Eio.Cancel.protect (fun () ->
-             finish_raw_error raw_trace_run (internal_error detail))
+             finish_raw_error ~keeper_name raw_trace_run (internal_error detail))
          with
-         | Ok () -> ()
-         | Error trace_error ->
-           Log.Keeper.error
-             ~keeper_name
-             "Codex cancellation RAW finalization failed: %s"
-             (Agent_sdk.Error.to_string trace_error));
+         | () -> ());
         Printexc.raise_with_backtrace exn backtrace
     in
     let turn_result =
       match turn_result with
-      | Ok result -> finish_raw_success raw_trace_run result
+      | Ok result -> Ok (finish_raw_success ~keeper_name raw_trace_run result)
       | Error error ->
-        (match finish_raw_error raw_trace_run error with
-         | Ok () -> Error error
-         | Error trace_error ->
-           Error
-             (internal_error
-                (Printf.sprintf
-                   "%s; RAW trace finalization also failed: %s"
-                   (Agent_sdk.Error.to_string error)
-                   (Agent_sdk.Error.to_string trace_error))))
+        finish_raw_error ~keeper_name raw_trace_run error;
+        Error error
     in
     (match turn_result with
      | Ok _ -> turn_result

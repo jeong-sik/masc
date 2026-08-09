@@ -237,53 +237,76 @@ let record_terminal_error terminal_error detail =
   if Option.is_none !terminal_error then terminal_error := Some detail
 ;;
 
-let raw_trace_error terminal_error stage error =
-  let detail =
-    Printf.sprintf
-      "official-client RAW trace %s failed: %s"
-      stage
-      (Agent_sdk.Error.to_string error)
-  in
-  record_terminal_error terminal_error detail;
-  detail
+type raw_trace_stage =
+  | Run_start
+  | Assistant_block
+  | Tool_start
+  | Tool_finish
+  | Run_finish
+
+let raw_trace_stage_label = function
+  | Run_start -> "run_start"
+  | Assistant_block -> "assistant_block"
+  | Tool_start -> "tool_start"
+  | Tool_finish -> "tool_finish"
+  | Run_finish -> "run_finish"
 ;;
 
-let record_raw_tool_started ~terminal_error ~raw_trace_run ~invocation ~tool_name ~input =
+let observe_raw_trace ~keeper_name ~stage observe =
+  match
+    try observe () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Agent_sdk.Error.Internal (Printexc.to_string exn))
+  with
+  | Ok value -> Some value
+  | Error error ->
+    let stage = raw_trace_stage_label stage in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string TraceEmitFailures)
+      ~labels:[ "keeper", keeper_name; "source", "official_client_raw"; "stage", stage ]
+      ();
+    Log.Keeper.warn
+      ~keeper_name
+      "official-client RAW trace observation failed at %s; authoritative execution continues: %s"
+      stage
+      (Agent_sdk.Error.to_string error);
+    None
+;;
+
+let record_raw_tool_started ~keeper_name ~raw_trace_run ~invocation ~tool_name ~input =
   match raw_trace_run with
-  | None -> Ok ()
+  | None -> false
   | Some active ->
-    Agent_sdk.Raw_trace.record_tool_execution_started
-      active
-      ~invocation
-      ~tool_name
-      ~tool_input:input
-    |> Result.map_error (raw_trace_error terminal_error "tool start")
+    Option.is_some
+      (observe_raw_trace ~keeper_name ~stage:Tool_start (fun () ->
+         Agent_sdk.Raw_trace.record_tool_execution_started
+           active
+           ~invocation
+           ~tool_name
+           ~tool_input:input))
 ;;
 
 let finish_dynamic_tool_raw
-      ~terminal_error
+      ~keeper_name
+      ~raw_trace_started
       ~raw_trace_run
       ~invocation
       ~tool_name
       result
   =
-  match raw_trace_run with
-  | None -> result
-  | Some active ->
-    (match
-       Agent_sdk.Raw_trace.record_tool_execution_finished
-         active
-         ~invocation
-         ~tool_name
-         ~tool_result:result.content
-         ~tool_error:(not result.success)
-         ()
-     with
-     | Ok () -> result
-     | Error error ->
-       { success = false
-       ; content = raw_trace_error terminal_error "tool finish" error
-       })
+  match raw_trace_started, raw_trace_run with
+  | false, _ | _, None -> result
+  | true, Some active ->
+    ignore
+      (observe_raw_trace ~keeper_name ~stage:Tool_finish (fun () ->
+         Agent_sdk.Raw_trace.record_tool_execution_finished
+           active
+           ~invocation
+           ~tool_name
+           ~tool_result:result.content
+           ~tool_error:(not result.success)
+           ()));
+    result
 ;;
 
 let apply_context_injection ~runtime_label ~terminal_error ~context
@@ -338,106 +361,116 @@ let dynamic_tool_of_oas ~runtime_label ~keeper_name ~turn_count ~context ~tools
             ~schedule
             ~completion:(Agent_sdk.Tool.completion tool)
         in
-        match
+        let raw_trace_started =
           record_raw_tool_started
-            ~terminal_error
+            ~keeper_name
             ~raw_trace_run
             ~invocation
             ~tool_name:tool.schema.name
             ~input
-        with
-        | Error detail -> { success = false; content = detail }
-        | Ok () ->
+        in
         let settle =
           finish_dynamic_tool_raw
-            ~terminal_error
+            ~keeper_name
+            ~raw_trace_started
             ~raw_trace_run
             ~invocation
             ~tool_name:tool.schema.name
         in
-        let pre_tool_use =
-          invoke_turn_hook
-            ~keeper_name
-            ~turn_count
-            ~hook_name:"pre_tool_use"
-            hooks.pre_tool_use
-            (Agent_sdk.Hooks.PreToolUse
-               { invocation
-               ; tool_name = tool.schema.name
-               ; input
-               ; accumulated_cost_usd = 0.0
-               })
-        in
-        match pre_tool_use with
-        | Block detail -> settle { success = false; content = detail }
-        | HookFailed { stage; detail } ->
-          let detail =
-            Printf.sprintf
-              "pre_tool_use hook failed at %s: %s"
-              (Agent_sdk.Hooks.hook_stage_to_string stage)
-              detail
+        let execute () =
+          let pre_tool_use =
+            invoke_turn_hook
+              ~keeper_name
+              ~turn_count
+              ~hook_name:"pre_tool_use"
+              hooks.pre_tool_use
+              (Agent_sdk.Hooks.PreToolUse
+                 { invocation
+                 ; tool_name = tool.schema.name
+                 ; input
+                 ; accumulated_cost_usd = 0.0
+                 })
           in
-          settle { success = false; content = detail }
-        | (ElicitToolApproval _ | ElicitInput _) as decision ->
-          let detail =
-            Printf.sprintf
-              "%s dynamic tool cannot settle hook decision %s without a host approval callback"
-              runtime_label
-              (Agent_sdk.Hooks.decision_kind_to_string
-                 (Agent_sdk.Hooks.classify_decision decision))
-          in
-          record_terminal_error terminal_error detail;
-          settle { success = false; content = detail }
-        | (AdjustParams _ | Nudge _) as decision ->
-          let detail =
-            Printf.sprintf
-              "%s dynamic tool received illegal pre_tool_use decision %s"
-              runtime_label
-              (Agent_sdk.Hooks.decision_kind_to_string
-                 (Agent_sdk.Hooks.classify_decision decision))
-          in
-          record_terminal_error terminal_error detail;
-          settle { success = false; content = detail }
-        | Continue ->
-          (match
-             Agent_sdk.Agent_tools.find_and_execute_tool
-               ~context
-               ~tools
-               ~hooks
-               ~event_bus
-               ~tracer:Agent_sdk.Tracing.null
-               ~agent_name:keeper_name
-               ~invocation
-               tool.schema.name
-               input
-           with
-           | Ok result ->
-             apply_context_injection
-               ~runtime_label
-               ~terminal_error
-               ~context
-               ~context_injector
-               ~tool_name:result.tool_name
-               ~input:result.input
-               ~content:result.content
-               ~outcome:result.outcome;
-             settle
+          match pre_tool_use with
+          | Block detail -> { success = false; content = detail }
+          | HookFailed { stage; detail } ->
+            let detail =
+              Printf.sprintf
+                "pre_tool_use hook failed at %s: %s"
+                (Agent_sdk.Hooks.hook_stage_to_string stage)
+                detail
+            in
+            { success = false; content = detail }
+          | (ElicitToolApproval _ | ElicitInput _) as decision ->
+            let detail =
+              Printf.sprintf
+                "%s dynamic tool cannot settle hook decision %s without a host approval callback"
+                runtime_label
+                (Agent_sdk.Hooks.decision_kind_to_string
+                   (Agent_sdk.Hooks.classify_decision decision))
+            in
+            record_terminal_error terminal_error detail;
+            { success = false; content = detail }
+          | (AdjustParams _ | Nudge _) as decision ->
+            let detail =
+              Printf.sprintf
+                "%s dynamic tool received illegal pre_tool_use decision %s"
+                runtime_label
+                (Agent_sdk.Hooks.decision_kind_to_string
+                   (Agent_sdk.Hooks.classify_decision decision))
+            in
+            record_terminal_error terminal_error detail;
+            { success = false; content = detail }
+          | Continue ->
+            (match
+               Agent_sdk.Agent_tools.find_and_execute_tool
+                 ~context
+                 ~tools
+                 ~hooks
+                 ~event_bus
+                 ~tracer:Agent_sdk.Tracing.null
+                 ~agent_name:keeper_name
+                 ~invocation
+                 tool.schema.name
+                 input
+             with
+             | Ok result ->
+               apply_context_injection
+                 ~runtime_label
+                 ~terminal_error
+                 ~context
+                 ~context_injector
+                 ~tool_name:result.tool_name
+                 ~input:result.input
+                 ~content:result.content
+                 ~outcome:result.outcome;
                { success =
                    not (Agent_sdk.Types.tool_result_outcome_is_error result.outcome)
                ; content = result.content
                }
-           | Error error ->
-             let detail = tool_hook_error_to_string error in
-             (match error with
-              | Agent_sdk.Agent_tools.Hook_execution_failed
-                  { stage = (Post_tool_use | Post_tool_use_failure); _ } ->
-                record_terminal_error terminal_error detail;
-                settle
+             | Error error ->
+               let detail = tool_hook_error_to_string error in
+               (match error with
+                | Agent_sdk.Agent_tools.Hook_execution_failed
+                    { stage = (Post_tool_use | Post_tool_use_failure); _ } ->
+                  record_terminal_error terminal_error detail;
                   { success = true
                   ; content = "Tool completed, but its post-execution hook failed; do not retry"
                   }
-              | Agent_sdk.Agent_tools.Hook_execution_failed _ ->
-                settle { success = false; content = detail })))
+                | Agent_sdk.Agent_tools.Hook_execution_failed _ ->
+                  { success = false; content = detail }))
+        in
+        match execute () with
+        | result -> settle result
+        | exception exn ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          Eio.Cancel.protect (fun () ->
+            ignore
+              (settle
+                 { success = false
+                 ; content = "dynamic tool call exited without an authoritative result"
+                 }));
+          Printexc.raise_with_backtrace exn backtrace)
   }
 ;;
 

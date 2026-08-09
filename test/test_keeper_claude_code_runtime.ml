@@ -398,7 +398,7 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
             "assistant"
             Yojson.Safe.Util.(assistant_history |> member "role" |> to_string);
           let tool_use_block =
-            Yojson.Safe.Util.(assistant_history |> member "content" |> to_list)
+            Yojson.Safe.Util.(assistant_history |> member "content_blocks" |> to_list)
             |> List.hd
           in
           check string

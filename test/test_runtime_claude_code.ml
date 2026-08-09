@@ -257,6 +257,82 @@ let test_mcp_notification_has_no_response () =
       | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
 ;;
 
+let test_shared_mcp_bridge_owns_exact_dispatch () =
+  let tool_specs () =
+    [ `Assoc
+        [ "name", `String "masc_probe"
+        ; "description", `String "fixture"
+        ; "inputSchema", `Assoc [ "type", `String "object" ]
+        ]
+    ]
+  in
+  let call_tool ~name:_ ~call_id:_ ~arguments:_ =
+    fail "unknown tool dispatch reached the callback"
+  in
+  let dispatch json =
+    Runtime_official_client_mcp.handle_message
+      ~server_name:"masc"
+      ~tool_specs
+      ~call_tool
+      json
+    |> Result.get_ok
+  in
+  let list =
+    dispatch
+      (`Assoc
+         [ "jsonrpc", `String "2.0"
+         ; "id", `Int 1
+         ; "method", `String "tools/list"
+         ; "params", `Assoc []
+         ])
+  in
+  check bool "list has response" true (Option.is_some list.response);
+  check bool "list did not call a tool" false list.tool_called;
+  let notification =
+    dispatch
+      (`Assoc
+         [ "jsonrpc", `String "2.0"
+         ; "method", `String "notifications/initialized"
+         ; "params", `Assoc []
+         ])
+  in
+  check (option string) "notification has no response" None
+    (Option.map Yojson.Safe.to_string notification.response);
+  let unknown =
+    dispatch
+      (`Assoc
+         [ "jsonrpc", `String "2.0"
+         ; "id", `String "call-unknown"
+         ; "method", `String "tools/call"
+         ; ( "params"
+           , `Assoc
+               [ "name", `String "missing"
+               ; "arguments", `Assoc []
+               ] )
+         ])
+  in
+  check bool "unknown tool did not execute" false unknown.tool_called;
+  let open Yojson.Safe.Util in
+  check int
+    "unknown tool JSON-RPC code"
+    (-32602)
+    (unknown.response |> Option.get |> member "error" |> member "code" |> to_int);
+  (match
+     Runtime_official_client_mcp.handle_message
+       ~server_name:"masc"
+       ~tool_specs
+       ~call_tool
+       (`Assoc
+          [ "jsonrpc", `String "2.0"
+          ; "id", `Bool true
+          ; "method", `String "tools/list"
+          ])
+   with
+   | Error { stage = "MCP message"; _ } -> ()
+   | Error _ -> fail "invalid request id had the wrong error stage"
+   | Ok _ -> fail "boolean JSON-RPC request id was admitted")
+;;
+
 let test_malformed_json_fails_closed () =
   with_fixture [ Emit "not-json" ] (fun path ->
     match run_fixture path with
@@ -377,6 +453,10 @@ let () =
         ] )
     ; ( "mcp"
       , [ test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
+        ; test_case
+            "shared bridge owns exact dispatch"
+            `Quick
+            test_shared_mcp_bridge_owns_exact_dispatch
         ; test_case
             "notification has no response"
             `Quick

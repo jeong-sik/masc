@@ -19,6 +19,10 @@ type dispatch =
   ; tool_called : bool
   }
 
+(** Parse one JSON-RPC message and reject duplicate object keys at every
+    nesting level before any tool callback can run. *)
+val parse_message : string -> (Yojson.Safe.t, error) result
+
 val handle_message :
   server_name:string ->
   tool_specs:(unit -> Yojson.Safe.t list) ->
@@ -28,4 +32,16 @@ val handle_message :
      arguments:Yojson.Safe.t ->
      tool_result option) ->
   Yojson.Safe.t ->
+  (dispatch, error) result
+
+(** Strict wire entrypoint for transports that receive raw JSON bodies. *)
+val handle_wire_message :
+  server_name:string ->
+  tool_specs:(unit -> Yojson.Safe.t list) ->
+  call_tool:
+    (name:string ->
+     call_id:string ->
+     arguments:Yojson.Safe.t ->
+     tool_result option) ->
+  string ->
   (dispatch, error) result

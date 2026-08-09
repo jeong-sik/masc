@@ -333,6 +333,49 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
    | Ok _ -> fail "boolean JSON-RPC request id was admitted")
 ;;
 
+let test_shared_mcp_wire_is_strict_and_negotiated () =
+  let tool_specs () = [] in
+  let call_tool ~name:_ ~call_id:_ ~arguments:_ = None in
+  let initialize =
+    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}|}
+  in
+  let open Yojson.Safe.Util in
+  (match
+     Runtime_official_client_mcp.handle_wire_message
+       ~server_name:"masc"
+       ~tool_specs
+       ~call_tool
+       initialize
+   with
+   | Error error -> fail (error.stage ^ ": " ^ error.detail)
+   | Ok dispatch ->
+     check string
+       "measured Antigravity protocol"
+       "2025-11-25"
+       (dispatch.response
+        |> Option.get
+        |> member "result"
+        |> member "protocolVersion"
+        |> to_string));
+  let duplicate_method =
+    {|{"jsonrpc":"2.0","id":2,"method":"tools/list","method":"tools/call","params":{}}|}
+  in
+  match
+    Runtime_official_client_mcp.handle_wire_message
+      ~server_name:"masc"
+      ~tool_specs
+      ~call_tool
+      duplicate_method
+  with
+  | Error { stage = "MCP message"; detail } ->
+    check bool
+      "duplicate rejected before dispatch"
+      true
+      (String.starts_with detail ~prefix:"duplicate object key")
+  | Error _ -> fail "duplicate key had the wrong error owner"
+  | Ok _ -> fail "duplicate MCP wire key was admitted"
+;;
+
 let test_malformed_json_fails_closed () =
   with_fixture [ Emit "not-json" ] (fun path ->
     match run_fixture path with
@@ -457,6 +500,10 @@ let () =
             "shared bridge owns exact dispatch"
             `Quick
             test_shared_mcp_bridge_owns_exact_dispatch
+        ; test_case
+            "shared wire is strict and negotiated"
+            `Quick
+            test_shared_mcp_wire_is_strict_and_negotiated
         ; test_case
             "notification has no response"
             `Quick

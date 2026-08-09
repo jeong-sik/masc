@@ -16,6 +16,52 @@ type dispatch =
 let ( let* ) = Result.bind
 let error stage detail = Error { stage; detail }
 
+let rec validate_unique_object_keys ~stage ~path = function
+  | `Assoc fields ->
+    let seen = Hashtbl.create (min 64 (List.length fields)) in
+    let rec loop = function
+      | [] -> Ok ()
+      | (name, value) :: rest ->
+        if Hashtbl.mem seen name
+        then error stage (Printf.sprintf "duplicate object key %S at %s" name path)
+        else
+          let () = Hashtbl.add seen name () in
+          let* () =
+            validate_unique_object_keys ~stage ~path:(path ^ "." ^ name) value
+          in
+          loop rest
+    in
+    loop fields
+  | `List values ->
+    let rec loop index = function
+      | [] -> Ok ()
+      | value :: rest ->
+        let* () =
+          validate_unique_object_keys
+            ~stage
+            ~path:(Printf.sprintf "%s[%d]" path index)
+            value
+        in
+        loop (index + 1) rest
+    in
+    loop 0 values
+  | `Float value when not (Float.is_finite value) ->
+    error stage (Printf.sprintf "non-finite number at %s" path)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Ok ()
+;;
+
+let parse_message text =
+  let stage = "MCP message" in
+  let* message =
+    try Ok (Yojson.Safe.from_string text) with
+    | Yojson.Json_error detail -> error stage ("invalid JSON: " ^ detail)
+    | Stack_overflow -> error stage "JSON nesting exceeds parser limits"
+    | Failure detail -> error stage ("invalid JSON: " ^ detail)
+  in
+  let* () = validate_unique_object_keys ~stage ~path:"$" message in
+  Ok message
+;;
+
 let assoc_at stage = function
   | `Assoc fields -> Ok fields
   | _ -> error stage "expected an object"
@@ -46,18 +92,32 @@ let request_id stage = function
   | _ -> error stage "request id must be a non-empty string or integer"
 ;;
 
-let initialize ~server_name ~id =
-  response
-    ~id
-    (`Assoc
-       [ "protocolVersion", `String "2024-11-05"
-       ; "capabilities", `Assoc [ "tools", `Assoc [] ]
-       ; ( "serverInfo"
-         , `Assoc
-             [ "name", `String server_name
-             ; "version", `String "1.0.0"
-             ] )
-       ])
+let protocol_version params =
+  let supported = [ "2025-11-25"; "2025-06-18"; "2025-03-26"; "2024-11-05" ] in
+  match params with
+  | `Assoc fields ->
+    (match List.assoc_opt "protocolVersion" fields with
+     | Some (`String requested) when List.mem requested supported -> Ok requested
+     | Some (`String _) -> Ok "2025-11-25"
+     | None -> Ok "2024-11-05"
+     | Some _ -> error "MCP initialize" "field \"protocolVersion\" must be a string")
+  | _ -> error "MCP initialize" "params must be an object"
+;;
+
+let initialize ~server_name ~id ~params =
+  let* protocol_version = protocol_version params in
+  Ok
+    (response
+       ~id
+       (`Assoc
+          [ "protocolVersion", `String protocol_version
+          ; "capabilities", `Assoc [ "tools", `Assoc [] ]
+          ; ( "serverInfo"
+            , `Assoc
+                [ "name", `String server_name
+                ; "version", `String "1.0.0"
+                ] )
+          ]))
 ;;
 
 let tool_result_json ~id (result : tool_result) =
@@ -119,8 +179,9 @@ let handle_message ~server_name ~tool_specs ~call_tool message =
     in
     match method_, request with
     | "initialize", Some id ->
+      let* initialize_response = initialize ~server_name ~id ~params in
       Ok
-        { response = Some (initialize ~server_name ~id)
+        { response = Some initialize_response
         ; tool_called = false
         }
     | "tools/list", Some id ->
@@ -146,4 +207,9 @@ let handle_message ~server_name ~tool_specs ~call_tool message =
                  (Printf.sprintf "MCP method %S is not supported" method_))
         ; tool_called = false
         }
+;;
+
+let handle_wire_message ~server_name ~tool_specs ~call_tool text =
+  let* message = parse_message text in
+  handle_message ~server_name ~tool_specs ~call_tool message
 ;;

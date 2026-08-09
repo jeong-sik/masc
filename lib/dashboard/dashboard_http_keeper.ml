@@ -230,27 +230,22 @@ let unresolved_pending_approval row =
   | _ -> false
 
 let latest_pending_approval ~base_path ~keeper_name =
-  let rows =
-    try
-      Keeper_approval.Audit.read_recent
-        ~base_path ~keeper_name ~n:128 ()
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-        Log.Dashboard.warn
-          "keeper dashboard approval activity read failed for %s: %s"
-          keeper_name (Printexc.to_string exn);
-        []
-  in
-  latest_rows_by_approval_id rows
-  |> List.filter unresolved_pending_approval
-  |> List.fold_left
-       (fun acc row ->
-         match acc with
-         | None -> Some row
-         | Some existing when approval_row_newer row existing -> Some row
-         | Some _ -> acc)
-       None
+  match
+    Keeper_approval.Audit.read_recent
+      ~base_path ~keeper_name ~n:128 ()
+  with
+  | Error _ as error -> error
+  | Ok rows ->
+    Ok
+      (latest_rows_by_approval_id rows
+       |> List.filter unresolved_pending_approval
+       |> List.fold_left
+            (fun acc row ->
+              match acc with
+              | None -> Some row
+              | Some existing when approval_row_newer row existing -> Some row
+              | Some _ -> acc)
+            None)
 
 let freshest_activity_source ~meta_ts ~latest_tool ~pending_approval =
   let candidates =
@@ -409,8 +404,22 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 m.runtime.compaction_rt.last_ts; created_ts ]
           in
           let latest_tool_activity = latest_keeper_tool_activity m.name in
-          let pending_approval =
-            latest_pending_approval ~base_path:config.base_path ~keeper_name:m.name
+          let pending_approval, approval_audit_state =
+            match
+              latest_pending_approval
+                ~base_path:config.base_path
+                ~keeper_name:m.name
+            with
+            | Ok pending -> pending, `Assoc [ "state", `String "ready" ]
+            | Error error ->
+              ( None
+              , `Assoc
+                  [ "state", `String "unavailable"
+                  ; ( "stage"
+                    , `String
+                        (Keeper_approval.Audit.read_stage_to_string error.stage) )
+                  ; "error", `String error.detail
+                  ] )
           in
           let activity_source =
             freshest_activity_source
@@ -447,6 +456,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("last_activity_at", activity_at_json last_activity_ts);
               ("live_activity", activity_json);
               ("current_gate", gate_json);
+              ("approval_audit_state", approval_audit_state);
             ]
             @
             (match pending_approval with

@@ -6,6 +6,11 @@ module Rule_types = Keeper_approval_queue_rules_types
 module Gate = Masc.Keeper_gate
 module Gate_mode = Masc.Keeper_gate_mode
 
+let audit_rows_exn = function
+  | Ok rows -> rows
+  | Error error -> Alcotest.fail (Keeper_approval.Audit.read_error_to_string error)
+;;
+
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_rules_" "" in
   Unix.unlink dir;
@@ -648,6 +653,7 @@ let test_manual_mode_continues_when_rule_store_is_unavailable () =
   check bool "rule lookup degradation is metered" true (after -. before >= 1.0);
   let audited =
     Keeper_approval.Audit.read_recent ~base_path ~keeper_name:"keeper" ~n:20 ()
+    |> audit_rows_exn
     |> List.exists (fun json ->
       String.equal
         "gate_exact_rule_store_degraded"
@@ -735,6 +741,7 @@ let test_gate_defers_and_observes_expired_exact_rule () =
         ^ Gate.unavailable_reason_to_string reason));
   let audited =
     Keeper_approval.Audit.read_recent ~base_path ~keeper_name:"keeper" ~n:20 ()
+    |> audit_rows_exn
     |> List.exists (fun json ->
       String.equal
         "gate_exact_rule_expired"

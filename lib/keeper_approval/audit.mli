@@ -1,5 +1,17 @@
 open Keeper_approval_queue_rules_types
 
+type read_stage =
+  | Read_recent
+  | List_recent_resolved
+
+type read_error =
+  { stage : read_stage
+  ; detail : string
+  }
+
+val read_stage_to_string : read_stage -> string
+val read_error_to_string : read_error -> string
+
 (** Typed approval audit events persisted under the workspace MASC root. *)
 type event =
   | Pending
@@ -60,7 +72,11 @@ val recent_resolved_min_window_minutes : int
 val recent_resolved_max_window_minutes : int
 
 val read_recent :
-  base_path:string -> ?keeper_name:string -> ?n:int -> unit -> Yojson.Safe.t list
+  base_path:string ->
+  ?keeper_name:string ->
+  ?n:int ->
+  unit ->
+  (Yojson.Safe.t list, read_error) result
 
 val day_string_of_ts : float -> string
 
@@ -78,7 +94,7 @@ val list_recent_resolved :
   ?limit:int ->
   ?window_minutes:int ->
   unit ->
-  resolved_history
+  (resolved_history, read_error) result
 
 module For_testing : sig
   val reset_store : unit -> unit

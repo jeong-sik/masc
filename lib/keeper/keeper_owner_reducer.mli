@@ -40,6 +40,7 @@ type compaction_result =
 type profile_update =
   { instructions : string
   ; sandbox_profile : Keeper_types_profile.sandbox_profile
+  ; sandbox_image : string option
   ; network_mode : Keeper_types_profile.network_mode
   ; allowed_paths : string list
   ; mention_targets : string list
@@ -50,6 +51,7 @@ type profile_update =
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
   ; always_allow : bool option
+  ; oas_env : (string * string) list
   ; updated_at : string
   }
 

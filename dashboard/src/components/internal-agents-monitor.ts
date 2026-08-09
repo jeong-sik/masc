@@ -28,7 +28,14 @@ import { formatDateTimeKo, relativeTime } from '../lib/format-time'
 import { hashForRoute } from '../router'
 import { keepers as keeperRosterSignal, shellRuntimeResolution } from '../store'
 
-type Filter = 'all' | 'librarian' | 'judge' | 'compaction' | 'verification' | 'fusion'
+type Filter =
+  | 'all'
+  | 'librarian'
+  | 'auto-judge'
+  | 'board-attention'
+  | 'compaction'
+  | 'verification'
+  | 'fusion'
 type Row =
   | { source: 'exact'; id: string; run: ExactLaneRunRecord }
   | { source: 'verification'; id: string; run: VerificationRunRecord }
@@ -48,7 +55,8 @@ function isForbidden(reason: unknown): boolean {
 const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'librarian', label: 'Librarian' },
-  { id: 'judge', label: 'Judge' },
+  { id: 'auto-judge', label: 'Auto Judge' },
+  { id: 'board-attention', label: 'Board Attention' },
   { id: 'compaction', label: 'Compaction' },
   { id: 'verification', label: 'Verification' },
   { id: 'fusion', label: 'Fusion' },
@@ -60,7 +68,7 @@ function laneLabel(row: Row): string {
   switch (row.run.lane) {
     case 'librarian_exact': return 'Librarian'
     case 'hitl_auto_judge': return 'Auto Judge'
-    case 'board_attention_exact': return 'Board Judge'
+    case 'board_attention_exact': return 'Board Attention'
     case 'compaction_exact': return 'Compaction'
   }
 }
@@ -110,9 +118,16 @@ function finishedAt(row: Row): number | undefined {
 function rowKind(row: Row): Exclude<Filter, 'all'> {
   if (row.source === 'verification') return 'verification'
   if (row.source === 'fusion') return 'fusion'
-  if (row.run.lane === 'librarian_exact') return 'librarian'
-  if (row.run.lane === 'compaction_exact') return 'compaction'
-  return 'judge'
+  switch (row.run.lane) {
+    case 'librarian_exact': return 'librarian'
+    case 'hitl_auto_judge': return 'auto-judge'
+    case 'board_attention_exact': return 'board-attention'
+    case 'compaction_exact': return 'compaction'
+    default: {
+      const unreachable: never = row.run.lane
+      return unreachable
+    }
+  }
 }
 
 function EvidenceBadge({ kind }: { kind: 'raw' | 'typed' | 'excerpt' }) {
@@ -466,12 +481,7 @@ function Details({ row }: { row: Row }) {
 
 function matches(row: Row, filter: Filter): boolean {
   if (filter === 'all') return true
-  if (filter === 'verification') return row.source === 'verification'
-  if (filter === 'fusion') return row.source === 'fusion'
-  if (filter === 'librarian') return row.source === 'exact' && row.run.lane === 'librarian_exact'
-  if (filter === 'compaction') return row.source === 'exact' && row.run.lane === 'compaction_exact'
-  return row.source === 'exact'
-    && (row.run.lane === 'hitl_auto_judge' || row.run.lane === 'board_attention_exact')
+  return rowKind(row) === filter
 }
 
 type KeeperIdentity = { name: string; agent_name?: string | null }
@@ -584,7 +594,7 @@ export function InternalAgentsMonitor() {
           <h3 id="internal-agent-inventory-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Observed run inventory</h3>
           <span class="text-3xs text-[var(--color-fg-muted)]">0건인 lane도 숨기지 않습니다.</span>
         </div>
-        <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
           ${inventory.map(item => html`
             <button
               key=${item.id}

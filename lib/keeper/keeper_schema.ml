@@ -54,17 +54,6 @@ let keeper_invocation_target_schema =
     ]
 ;;
 
-let keeper_invocation_run_ref_schema =
-  closed_object_schema
-    ~required:[ "run_id"; "target"; "capability" ]
-    [ "run_id", `Assoc [ "type", `String "string" ]
-    ; "target", keeper_invocation_target_schema
-    ; ( "capability"
-      , `Assoc
-          [ "type", `String "string"; "enum", `List [ `String "invoke_turn" ] ] )
-    ]
-;;
-
 let schemas : tool_schema list = [
   {
     name = "masc_keeper_sandbox_start";
@@ -263,7 +252,7 @@ let schemas : tool_schema list = [
   };
 
   { name = "masc_keeper_delegate"
-  ; description = "Submit one typed, non-blocking Keeper invocation and return its durable run_ref."
+  ; description = "Submit one typed Keeper chat operation and return its durable operation_id without waiting for the turn."
   ; input_schema =
       closed_object_schema
         (* [capability] is not advertised. Its enum has one member, so a
@@ -286,23 +275,29 @@ let schemas : tool_schema list = [
         ]
   }
 ; { name = "masc_keeper_delegate_status"
-  ; description = "Read one Keeper invocation using the exact typed run_ref returned at submission."
+  ; description = "Read one Keeper chat operation by exact target and operation_id."
   ; input_schema =
       closed_object_schema
-        ~required:[ "run_ref" ]
-        [ "run_ref", keeper_invocation_run_ref_schema ]
+        ~required:[ "target"; "operation_id" ]
+        [ "target", keeper_invocation_target_schema
+        ; "operation_id", `Assoc [ "type", `String "string" ]
+        ]
   }
 ; { name = "masc_keeper_delegate_cancel"
-  ; description = "Request cancellation of one Keeper invocation identified by its exact typed run_ref."
+  ; description = "Cancel one queued Keeper chat operation by exact target and operation_id."
   ; input_schema =
       closed_object_schema
-        ~required:[ "run_ref" ]
-        [ "run_ref", keeper_invocation_run_ref_schema ]
+        ~required:[ "target"; "operation_id" ]
+        [ "target", keeper_invocation_target_schema
+        ; "operation_id", `Assoc [ "type", `String "string" ]
+        ]
   }
 ; { name = "masc_keeper_delegate_list"
-  ; description = "List non-terminal Keeper invocations, optionally filtered by a typed Keeper target."
+  ; description = "List queued Keeper chat operations owned by the caller for one exact Keeper target."
   ; input_schema =
-      closed_object_schema ~required:[] [ "target", keeper_invocation_target_schema ]
+      closed_object_schema
+        ~required:[ "target" ]
+        [ "target", keeper_invocation_target_schema ]
   };
 
 

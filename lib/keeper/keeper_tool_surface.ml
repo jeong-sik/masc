@@ -466,6 +466,7 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
         (tool_result_with_tool_name
            ~tool_name:name
            (Keeper_tool_surface_ops.handle_keeper_delegate
+              ?invocation_ref
               ~submitted_by:ctx.agent_name
               ctx
               args))

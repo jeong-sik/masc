@@ -68,7 +68,7 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
   else
     match continuation_channel, surface with
     | Keeper_continuation_channel.Dashboard _,
-      (Surface_ref.Dashboard _ | Surface_ref.Gate _) ->
+      (Surface_ref.Dashboard _ | Surface_ref.Gate _ | Surface_ref.Agent) ->
       if String.trim channel_user_id = ""
       then Ok ()
       else Error "Dashboard Keeper chat operation cannot carry an external speaker"

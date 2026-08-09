@@ -8,6 +8,39 @@ module Chat_operation = Owner.Chat_operation
 
 let json = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
+let runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "keeper_owner_runtime_" ".toml" in
+  let channel = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel runtime_toml);
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error detail -> failf "Runtime.init_default failed: %s" detail
+;;
+
 let make_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -1147,6 +1180,161 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        | Error error -> fail (Owner_registry.lookup_error_to_string error)))
 ;;
 
+let test_agent_delegate_submits_owner_operation_without_waiting () =
+  init_runtime_default_for_tests ();
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "owner-tool-test"));
+       let meta = make_meta "agent-operation-target" in
+       Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
+       Owner_registry.install_from_store ~sw ~operation_executor:None config
+       |> Result.get_ok
+       |> ignore;
+       let ctx : _ Keeper_tool_surface.context =
+         { config
+         ; agent_name = "agent-operation-caller"
+         ; sw
+         ; clock = Eio.Stdenv.clock env
+         ; proc_mgr = None
+         ; net = None
+         ; publication_recovery_provider =
+             Keeper_publication_recovery_availability.non_runtime_provider
+         }
+       in
+       let invocation_ref =
+         let request_id =
+           Mcp_transport_protocol.request_id_of_yojson (`String "delegate-1")
+           |> Result.get_ok
+         in
+         Tool_invocation_ref.external_mcp
+           ~request_id
+           ~session_id:"owner-tool-session"
+         |> Result.get_ok
+       in
+       let args =
+         `Assoc
+           [ "target",
+             `Assoc
+               [ "kind", `String "keeper"
+               ; "name", `String meta.name
+               ]
+           ; "prompt", `String "inspect owner state"
+           ]
+       in
+       let result =
+         Keeper_tool_surface_ops.handle_keeper_delegate
+           ~invocation_ref
+           ~submitted_by:"agent-operation-caller"
+           ctx
+           args
+       in
+       check bool "agent submit returns acceptance" true (Tool_result.is_success result);
+       let data = Tool_result.data result in
+       let operation_id_raw =
+         Yojson.Safe.Util.(data |> member "operation_id" |> to_string)
+       in
+       check string "agent operation is queued" "queued"
+         Yojson.Safe.Util.(data |> member "state" |> to_string);
+       check bool "first agent operation is new" false
+         Yojson.Safe.Util.(data |> member "existing" |> to_bool);
+       let repeated =
+         Keeper_tool_surface_ops.handle_keeper_delegate
+           ~invocation_ref
+           ~submitted_by:"agent-operation-caller"
+           ctx
+           args
+       in
+       check bool "agent retry is accepted" true (Tool_result.is_success repeated);
+       let repeated_data = Tool_result.data repeated in
+       check string "agent retry reuses operation id" operation_id_raw
+         Yojson.Safe.Util.(repeated_data |> member "operation_id" |> to_string);
+       check bool "agent retry returns existing operation" true
+         Yojson.Safe.Util.(repeated_data |> member "existing" |> to_bool);
+       let operation_id = operation_id operation_id_raw in
+       let target =
+         `Assoc
+           [ "kind", `String "keeper"
+           ; "name", `String meta.name
+           ]
+       in
+       let reference =
+         `Assoc
+           [ "target", target
+           ; "operation_id", `String operation_id_raw
+           ]
+       in
+       let status =
+         Keeper_tool_surface_ops.keeper_delegate_status_body
+           ~config
+           ~caller:"agent-operation-caller"
+           reference
+       in
+       check bool "agent status reads operation" true (Tool_result.is_success status);
+       check string "agent status is queued" "Queued"
+         Yojson.Safe.Util.(Tool_result.data status |> member "state" |> to_string);
+       let listed =
+         Keeper_tool_surface_ops.keeper_delegate_list_body
+           ~config
+           ~caller:"agent-operation-caller"
+           (`Assoc [ "target", target ])
+       in
+       check bool "agent list reads queued operations" true
+         (Tool_result.is_success listed);
+       check int "agent list has one operation" 1
+         Yojson.Safe.Util.(Tool_result.data listed |> to_list |> List.length);
+       let operation =
+         match
+           Owner_registry.exact_operation
+             ~base_path
+             ~keeper_name:meta.name
+             operation_id
+         with
+         | Ok (Some operation) -> operation
+         | Ok None -> fail "accepted agent operation is missing"
+         | Error error -> fail (Owner_registry.command_error_to_string error)
+       in
+       let source =
+         match Keeper_chat_operation_payload.source_of_json operation.source with
+         | Ok source -> source
+         | Error detail -> fail detail
+       in
+       check bool "agent operation keeps agent surface" true
+         (match source.surface with Surface_ref.Agent -> true | _ -> false);
+       let input =
+         match operation.input with
+         | None -> fail "queued agent operation lost its input"
+         | Some input ->
+           (match Keeper_chat_operation_payload.input_of_json input with
+            | Ok input -> input
+            | Error detail -> fail detail)
+       in
+       check string "agent operation keeps prompt" "inspect owner state" input.message;
+       let cancelled =
+         Keeper_tool_surface_ops.keeper_delegate_cancel_body
+           ~config
+           ~caller:"agent-operation-caller"
+           reference
+       in
+       check bool "agent cancel settles queued operation" true
+         (Tool_result.is_success cancelled);
+       check string "agent cancel is terminal" "Cancelled"
+         Yojson.Safe.Util.(Tool_result.data cancelled |> member "state" |> to_string);
+       let listed_after_cancel =
+         Keeper_tool_surface_ops.keeper_delegate_list_body
+           ~config
+           ~caller:"agent-operation-caller"
+           (`Assoc [ "target", target ])
+       in
+       check int "cancelled operation leaves queued list" 0
+         Yojson.Safe.Util.(Tool_result.data listed_after_cancel |> to_list |> List.length))
+;;
+
 let test_connector_submit_uses_owner_operation_idempotency () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1541,6 +1729,10 @@ let () =
             "root inventory loads and extends exactly once"
             `Quick
             test_root_inventory_loads_and_extends_exactly_once
+        ; test_case
+            "agent delegate submits owner operation without waiting"
+            `Quick
+            test_agent_delegate_submits_owner_operation_without_waiting
         ; test_case
             "connector submit is owner-idempotent"
             `Quick

@@ -76,7 +76,10 @@ export function OfficialClientSessionPanel() {
 
   const resolve = async (decision: DashboardOfficialClientRecoveryDecision) => {
     const keeperName = selectedKeeper.value
-    const recoveryId = response.value?.session?.phase.recovery_id
+    const currentPhase = response.value?.session?.phase
+    const recoveryId = currentPhase?.kind === 'recovery_required'
+      ? currentPhase.recovery_id
+      : null
     if (!keeperName || !recoveryId || resolving.value) return
     resolving.value = true
     error.value = null
@@ -92,7 +95,10 @@ export function OfficialClientSessionPanel() {
 
   const session = response.value?.session ?? null
   const phase = session?.phase ?? null
-  const recoveryRequired = phase?.kind === 'recovery_required'
+  const recovery = phase?.kind === 'recovery_required' ? phase : null
+  const ownerEpoch = phase && 'owner_epoch' in phase ? phase.owner_epoch : null
+  const sessionId = phase && 'session_id' in phase ? phase.session_id : null
+  const turnId = phase && 'turn_id' in phase ? phase.turn_id : null
   const lastResolution = session?.last_recovery_resolution ?? null
   const transientRelease = session?.last_transient_release ?? null
 
@@ -151,24 +157,24 @@ export function OfficialClientSessionPanel() {
             <div><span class="text-[var(--color-fg-muted)]">completed turns</span> · ${session.turn_count}</div>
             <div><span class="text-[var(--color-fg-muted)]">updated</span> · ${timestampText(session.updated_at)}</div>
             <div title=${session.tool_surface_sha256}><span class="text-[var(--color-fg-muted)]">tool surface</span> · <span class="mono">${compactHash(session.tool_surface_sha256)}</span></div>
-            ${phase.owner_epoch ? html`<div title=${phase.owner_epoch}><span class="text-[var(--color-fg-muted)]">process epoch</span> · <span class="mono">${compactHash(phase.owner_epoch)}</span></div>` : null}
-            ${phase.session_id ? html`<div><span class="text-[var(--color-fg-muted)]">session</span> · <span class="mono">${phase.session_id}</span></div>` : null}
-            ${phase.turn_id ? html`<div><span class="text-[var(--color-fg-muted)]">turn</span> · <span class="mono">${phase.turn_id}</span></div>` : null}
+            ${ownerEpoch ? html`<div title=${ownerEpoch}><span class="text-[var(--color-fg-muted)]">process epoch</span> · <span class="mono">${compactHash(ownerEpoch)}</span></div>` : null}
+            ${sessionId ? html`<div><span class="text-[var(--color-fg-muted)]">session</span> · <span class="mono">${sessionId}</span></div>` : null}
+            ${turnId ? html`<div><span class="text-[var(--color-fg-muted)]">turn</span> · <span class="mono">${turnId}</span></div>` : null}
           </div>
-          ${recoveryRequired
+          ${recovery
             ? html`
               <div class="mt-4 rounded-[var(--r-1)] border border-[var(--danger-20)] bg-[var(--danger-10)] p-3" data-testid="official-client-session-recovery-required">
                 <div class="flex flex-wrap items-center gap-2 mb-2">
                   <${StatusChip} tone="bad" uppercase=${false}>operator resolution required<//>
-                  <span class="mono text-2xs">${phase.recovery_id}</span>
+                  <span class="mono text-2xs">${recovery.recovery_id}</span>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs mb-3">
-                  <div>failure · <span class="mono">${phase.failure}</span></div>
-                  <div>required · ${timestampText(phase.required_at)}</div>
-                  <div>observed session · <span class="mono">${phase.observed_session_id ?? '—'}</span></div>
-                  <div>observed turn · <span class="mono">${phase.observed_turn_id ?? '—'}</span></div>
+                  <div>failure · <span class="mono">${recovery.failure}</span></div>
+                  <div>required · ${timestampText(recovery.required_at)}</div>
+                  <div>observed session · <span class="mono">${recovery.observed_session_id ?? '—'}</span></div>
+                  <div>observed turn · <span class="mono">${recovery.observed_turn_id ?? '—'}</span></div>
                 </div>
-                <div class="mb-3 whitespace-pre-wrap break-words text-xs text-[var(--color-fg-secondary)]">${phase.detail}</div>
+                <div class="mb-3 whitespace-pre-wrap break-words text-xs text-[var(--color-fg-secondary)]">${recovery.detail}</div>
                 <div class="flex flex-wrap gap-2">
                   <${ActionButton}
                     variant="warn"

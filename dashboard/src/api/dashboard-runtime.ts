@@ -1124,19 +1124,42 @@ export interface DashboardOfficialClientSettlement {
   turn_id: string
 }
 
-export interface DashboardOfficialClientSessionPhase {
-  kind: 'ready' | 'start' | 'active' | 'turn_inflight' | 'recovery_required' | 'settled'
-  session_id?: string | null
-  turn_id?: string | null
-  previous_settlement?: DashboardOfficialClientSettlement | null
-  recovery_id?: string | null
-  failure?: DashboardOfficialClientRecoveryFailure | null
-  detail?: string | null
-  required_at?: number | null
-  observed_session_id?: string | null
-  observed_turn_id?: string | null
-  owner_epoch?: string | null
-}
+export type DashboardOfficialClientSessionPhase =
+  | { kind: 'ready' }
+  | {
+      kind: 'start'
+      owner_epoch: string
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'active'
+      owner_epoch: string
+      session_id: string
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'turn_inflight'
+      owner_epoch: string
+      session_id: string
+      turn_id: string | null
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'recovery_required'
+      recovery_id: string
+      failure: DashboardOfficialClientRecoveryFailure
+      detail: string
+      required_at: number
+      owner_epoch: string
+      observed_session_id: string | null
+      observed_turn_id: string | null
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'settled'
+      session_id: string
+      turn_id: string
+    }
 
 export interface DashboardOfficialClientRecoveryResolutionRecord {
   recovery_id: string
@@ -1190,11 +1213,39 @@ const OFFICIAL_CLIENT_KINDS = new Set<DashboardOfficialClientKind>([
   'antigravity',
 ])
 
+const OFFICIAL_CLIENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const OFFICIAL_CLIENT_SHA256 = /^[0-9a-f]{64}$/
+
+function hasExactKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const keys = Object.keys(raw)
+  return keys.length === allowed.length && keys.every(key => allowed.includes(key))
+}
+
+function decodeOfficialClientUuid(raw: unknown): string | null {
+  return typeof raw === 'string' && OFFICIAL_CLIENT_UUID.test(raw) ? raw : null
+}
+
+function decodeOfficialClientNonEmptyString(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.trim() !== '' ? raw : null
+}
+
+function decodeOfficialClientNullableString(raw: unknown): string | null | undefined {
+  if (raw === null) return null
+  return decodeOfficialClientNonEmptyString(raw) ?? undefined
+}
+
 function decodeOfficialClientSettlement(raw: unknown): DashboardOfficialClientSettlement | null {
-  if (!isRecord(raw)) return null
-  const session_id = asString(raw.session_id)
-  const turn_id = asString(raw.turn_id)
+  if (!isRecord(raw) || !hasExactKeys(raw, ['session_id', 'turn_id'])) return null
+  const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+  const turn_id = decodeOfficialClientNonEmptyString(raw.turn_id)
   return session_id && turn_id ? { session_id, turn_id } : null
+}
+
+function decodeOfficialClientNullableSettlement(
+  raw: unknown,
+): DashboardOfficialClientSettlement | null | undefined {
+  if (raw === null) return null
+  return decodeOfficialClientSettlement(raw) ?? undefined
 }
 
 function decodeOfficialClientFailure(raw: unknown): DashboardOfficialClientRecoveryFailure | null {
@@ -1205,46 +1256,111 @@ function decodeOfficialClientFailure(raw: unknown): DashboardOfficialClientRecov
 
 function decodeOfficialClientPhase(raw: unknown): DashboardOfficialClientSessionPhase | null {
   if (!isRecord(raw)) return null
-  const kind = asString(raw.kind)
-  if (!kind || !['ready', 'start', 'active', 'turn_inflight', 'recovery_required', 'settled'].includes(kind)) return null
-  const phase: DashboardOfficialClientSessionPhase = {
-    kind: kind as DashboardOfficialClientSessionPhase['kind'],
-    session_id: asNullableString(raw.session_id),
-    turn_id: asNullableString(raw.turn_id),
-    previous_settlement: raw.previous_settlement == null
-      ? null
-      : decodeOfficialClientSettlement(raw.previous_settlement),
-    recovery_id: asNullableString(raw.recovery_id),
-    failure: raw.failure == null ? null : decodeOfficialClientFailure(raw.failure),
-    detail: asNullableString(raw.detail),
-    required_at: asNumber(raw.required_at),
-    observed_session_id: asNullableString(raw.observed_session_id),
-    observed_turn_id: asNullableString(raw.observed_turn_id),
-    owner_epoch: asNullableString(raw.owner_epoch),
+  switch (raw.kind) {
+    case 'ready':
+      return hasExactKeys(raw, ['kind']) ? { kind: 'ready' } : null
+    case 'start': {
+      if (!hasExactKeys(raw, ['kind', 'owner_epoch', 'previous_settlement'])) return null
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      return owner_epoch && previous_settlement !== undefined
+        ? { kind: 'start', owner_epoch, previous_settlement }
+        : null
+    }
+    case 'active': {
+      if (!hasExactKeys(raw, ['kind', 'owner_epoch', 'session_id', 'previous_settlement'])) return null
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      return owner_epoch && session_id && previous_settlement !== undefined
+        ? { kind: 'active', owner_epoch, session_id, previous_settlement }
+        : null
+    }
+    case 'turn_inflight': {
+      if (!hasExactKeys(raw, ['kind', 'owner_epoch', 'session_id', 'turn_id', 'previous_settlement'])) return null
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+      const turn_id = decodeOfficialClientNullableString(raw.turn_id)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      return owner_epoch && session_id && turn_id !== undefined && previous_settlement !== undefined
+        ? { kind: 'turn_inflight', owner_epoch, session_id, turn_id, previous_settlement }
+        : null
+    }
+    case 'recovery_required': {
+      if (!hasExactKeys(raw, [
+        'kind',
+        'recovery_id',
+        'failure',
+        'detail',
+        'required_at',
+        'owner_epoch',
+        'observed_session_id',
+        'observed_turn_id',
+        'previous_settlement',
+      ])) return null
+      const recovery_id = decodeOfficialClientUuid(raw.recovery_id)
+      const failure = decodeOfficialClientFailure(raw.failure)
+      const detail = decodeOfficialClientNonEmptyString(raw.detail)
+      const required_at = asNumber(raw.required_at)
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const observed_session_id = decodeOfficialClientNullableString(raw.observed_session_id)
+      const observed_turn_id = decodeOfficialClientNullableString(raw.observed_turn_id)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      if (
+        !recovery_id
+        || !failure
+        || !detail
+        || required_at == null
+        || !owner_epoch
+        || observed_session_id === undefined
+        || observed_turn_id === undefined
+        || previous_settlement === undefined
+        || (observed_turn_id !== null && observed_session_id === null)
+      ) return null
+      return {
+        kind: 'recovery_required',
+        recovery_id,
+        failure,
+        detail,
+        required_at,
+        owner_epoch,
+        observed_session_id,
+        observed_turn_id,
+        previous_settlement,
+      }
+    }
+    case 'settled': {
+      if (!hasExactKeys(raw, ['kind', 'session_id', 'turn_id'])) return null
+      const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+      const turn_id = decodeOfficialClientNonEmptyString(raw.turn_id)
+      return session_id && turn_id ? { kind: 'settled', session_id, turn_id } : null
+    }
+    default:
+      return null
   }
-  if (phase.kind === 'recovery_required' && (!phase.recovery_id || !phase.failure || phase.required_at == null)) return null
-  if (['start', 'active', 'turn_inflight', 'recovery_required'].includes(phase.kind) && !phase.owner_epoch) return null
-  if ((phase.kind === 'active' || phase.kind === 'turn_inflight') && !phase.session_id) return null
-  if (phase.kind === 'settled' && (!phase.session_id || !phase.turn_id)) return null
-  return phase
 }
 
 function decodeOfficialClientTransientRelease(raw: unknown): DashboardOfficialClientTransientReleaseRecord | null {
-  if (!isRecord(raw)) return null
-  const failure = asString(raw.failure)
-  const owner_epoch = asString(raw.owner_epoch)
+  if (!isRecord(raw) || !hasExactKeys(raw, ['failure', 'owner_epoch', 'released_at'])) return null
+  const failure = typeof raw.failure === 'string' ? raw.failure : null
+  const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
   const released_at = asNumber(raw.released_at)
   if (failure !== 'transient_spawn_failed' || !owner_epoch || released_at == null) return null
   return { failure, owner_epoch, released_at }
 }
 
 function decodeOfficialClientResolutionRecord(raw: unknown): DashboardOfficialClientRecoveryResolutionRecord | null {
-  if (!isRecord(raw) || !isRecord(raw.resolution)) return null
-  const recovery_id = asString(raw.recovery_id)
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, ['failure', 'recovery_id', 'resolution', 'resolved_at', 'resolved_by'])
+    || !isRecord(raw.resolution)
+    || !hasExactKeys(raw.resolution, ['kind'])
+  ) return null
+  const recovery_id = decodeOfficialClientUuid(raw.recovery_id)
   const failure = decodeOfficialClientFailure(raw.failure)
-  const resolved_by = asString(raw.resolved_by)
+  const resolved_by = decodeOfficialClientNonEmptyString(raw.resolved_by)
   const resolved_at = asNumber(raw.resolved_at)
-  const kind = asString(raw.resolution.kind)
+  const kind = typeof raw.resolution.kind === 'string' ? raw.resolution.kind : null
   if (!recovery_id || !failure || !resolved_by || resolved_at == null) return null
   const resolution = kind === 'retry_previous' || kind === 'restart_fresh'
     ? { kind } as const
@@ -1260,28 +1376,61 @@ function decodeOfficialClientResolutionRecord(raw: unknown): DashboardOfficialCl
 }
 
 function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialClientSessionResponse | null {
-  if (!isRecord(raw) || raw.schema !== 'masc.dashboard.official-client-session.v1' || raw.ok !== true) return null
-  const keeper_name = asString(raw.keeper_name)
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, ['schema', 'ok', 'keeper_name', 'session'])
+    || raw.schema !== 'masc.dashboard.official-client-session.v1'
+    || raw.ok !== true
+  ) return null
+  const keeper_name = decodeOfficialClientNonEmptyString(raw.keeper_name)
   if (!keeper_name) return null
   if (raw.session === null) {
     return { schema: 'masc.dashboard.official-client-session.v1', ok: true, keeper_name, session: null }
   }
-  if (!isRecord(raw.session)) return null
-  const client_kind = asString(raw.session.client_kind)
-  const runtime_id = asString(raw.session.runtime_id)
+  if (
+    !isRecord(raw.session)
+    || !hasExactKeys(raw.session, [
+      'client_kind',
+      'runtime_id',
+      'phase',
+      'turn_count',
+      'tool_surface_sha256',
+      'last_recovery_resolution',
+      'last_transient_release',
+      'updated_at',
+    ])
+  ) return null
+  const client_kind = typeof raw.session.client_kind === 'string'
+    ? raw.session.client_kind
+    : null
+  const runtime_id = decodeOfficialClientNonEmptyString(raw.session.runtime_id)
   const phase = decodeOfficialClientPhase(raw.session.phase)
   const turn_count = asNumber(raw.session.turn_count)
-  const tool_surface_sha256 = asString(raw.session.tool_surface_sha256)
+  const tool_surface_sha256 = typeof raw.session.tool_surface_sha256 === 'string'
+    ? raw.session.tool_surface_sha256
+    : null
   const updated_at = asNumber(raw.session.updated_at)
-  const last_recovery_resolution = raw.session.last_recovery_resolution == null
+  const last_recovery_resolution = raw.session.last_recovery_resolution === null
     ? null
     : decodeOfficialClientResolutionRecord(raw.session.last_recovery_resolution)
-  const last_transient_release = raw.session.last_transient_release == null
+  const last_transient_release = raw.session.last_transient_release === null
     ? null
     : decodeOfficialClientTransientRelease(raw.session.last_transient_release)
-  if (!client_kind || !OFFICIAL_CLIENT_KINDS.has(client_kind as DashboardOfficialClientKind) || !runtime_id || !phase || turn_count == null || !Number.isInteger(turn_count) || turn_count < 0 || !tool_surface_sha256 || updated_at == null) return null
-  if (raw.session.last_recovery_resolution != null && !last_recovery_resolution) return null
-  if (raw.session.last_transient_release != null && !last_transient_release) return null
+  if (
+    !client_kind
+    || !OFFICIAL_CLIENT_KINDS.has(client_kind as DashboardOfficialClientKind)
+    || !runtime_id
+    || !phase
+    || turn_count == null
+    || !Number.isInteger(turn_count)
+    || turn_count < 0
+    || (turn_count === 0 && phase.kind !== 'ready')
+    || !tool_surface_sha256
+    || !OFFICIAL_CLIENT_SHA256.test(tool_surface_sha256)
+    || updated_at == null
+  ) return null
+  if (raw.session.last_recovery_resolution !== null && !last_recovery_resolution) return null
+  if (raw.session.last_transient_release !== null && !last_transient_release) return null
   return {
     schema: 'masc.dashboard.official-client-session.v1',
     ok: true,

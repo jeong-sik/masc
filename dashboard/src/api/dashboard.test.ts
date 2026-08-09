@@ -4196,9 +4196,182 @@ describe('official-client session API', () => {
     const result = await fetchOfficialClientSession('sangsu')
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/runtime/sessions/official-client?keeper_name=sangsu')
-    expect(result.session?.phase.kind).toBe('recovery_required')
-    expect(result.session?.phase.failure).toBe('protocol_failed')
-    expect(result.session?.phase.observed_session_id).toBe('thread-1')
+    const phase = result.session?.phase
+    expect(phase?.kind).toBe('recovery_required')
+    if (phase?.kind !== 'recovery_required') throw new Error('expected recovery-required phase')
+    expect(phase.failure).toBe('protocol_failed')
+    expect(phase.observed_session_id).toBe('thread-1')
+  })
+
+  it.each([
+    {
+      kind: 'start',
+      phase: {
+        kind: 'start',
+        owner_epoch: recoveryPayload.session.phase.owner_epoch,
+        previous_settlement: null,
+      },
+    },
+    {
+      kind: 'active',
+      phase: {
+        kind: 'active',
+        owner_epoch: recoveryPayload.session.phase.owner_epoch,
+        session_id: 'thread-active',
+        previous_settlement: null,
+      },
+    },
+    {
+      kind: 'turn_inflight',
+      phase: {
+        kind: 'turn_inflight',
+        owner_epoch: recoveryPayload.session.phase.owner_epoch,
+        session_id: 'thread-active',
+        turn_id: null,
+        previous_settlement: null,
+      },
+    },
+    {
+      kind: 'settled',
+      phase: {
+        kind: 'settled',
+        session_id: 'thread-settled',
+        turn_id: 'turn-settled',
+      },
+    },
+  ])('accepts exact $kind phase', async ({ phase }) => {
+    const payload = {
+      ...recoveryPayload,
+      session: { ...recoveryPayload.session, phase },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchOfficialClientSession('sangsu')
+
+    expect(result.session?.phase.kind).toBe(phase.kind)
+  })
+
+  it('rejects phase, record, identity, and nullable-field drift', async () => {
+    const malformedPayloads: Array<{ name: string; payload: unknown }> = [
+      {
+        name: 'unknown response field',
+        payload: { ...recoveryPayload, extra: true },
+      },
+      {
+        name: 'unknown session field',
+        payload: {
+          ...recoveryPayload,
+          session: { ...recoveryPayload.session, extra: true },
+        },
+      },
+      {
+        name: 'unknown phase field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: { ...recoveryPayload.session.phase, extra: true },
+          },
+        },
+      },
+      {
+        name: 'missing required nullable phase field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: Object.fromEntries(
+              Object.entries(recoveryPayload.session.phase)
+                .filter(([key]) => key !== 'observed_turn_id'),
+            ),
+          },
+        },
+      },
+      {
+        name: 'invalid recovery UUID',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: { ...recoveryPayload.session.phase, recovery_id: 'not-a-uuid' },
+          },
+        },
+      },
+      {
+        name: 'observed turn without observed session',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: {
+              ...recoveryPayload.session.phase,
+              observed_session_id: null,
+              observed_turn_id: 'turn-without-session',
+            },
+          },
+        },
+      },
+      {
+        name: 'invalid lowercase SHA-256',
+        payload: {
+          ...recoveryPayload,
+          session: { ...recoveryPayload.session, tool_surface_sha256: 'A'.repeat(64) },
+        },
+      },
+      {
+        name: 'zero completed turns outside ready',
+        payload: {
+          ...recoveryPayload,
+          session: { ...recoveryPayload.session, turn_count: 0 },
+        },
+      },
+      {
+        name: 'ready phase carrying another phase field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: { kind: 'ready', owner_epoch: recoveryPayload.session.phase.owner_epoch },
+          },
+        },
+      },
+      {
+        name: 'settlement with an unknown field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: {
+              ...recoveryPayload.session.phase,
+              previous_settlement: {
+                session_id: 'thread-previous',
+                turn_id: 'turn-previous',
+                extra: true,
+              },
+            },
+          },
+        },
+      },
+    ]
+
+    for (const { name, payload } of malformedPayloads) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(fetchOfficialClientSession('sangsu'), name)
+        .rejects.toThrow('유효하지 않은 official-client session payload')
+    }
   })
 
   it('posts the exact recovery fence and selected resolution', async () => {

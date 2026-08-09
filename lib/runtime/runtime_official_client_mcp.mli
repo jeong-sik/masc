@@ -20,6 +20,18 @@ type dispatch =
   ; tool_called : bool
   }
 
+type tool_call = private
+  { id : Yojson.Safe.t
+  ; name : string
+  ; call_id : string
+  ; arguments : Yojson.Safe.t
+  }
+
+type prepared =
+  | Prepared_response of dispatch
+  | Prepared_tools_list of { id : Yojson.Safe.t }
+  | Prepared_tool_call of tool_call
+
 type phase =
   | Awaiting_initialize
   | Awaiting_initialized
@@ -37,6 +49,18 @@ val create_session : unit -> session
 
 val snapshot_session : session -> session_snapshot
 (** One immutable observation of lifecycle phase and negotiated protocol. *)
+
+val prepare_message :
+  session:session ->
+  server_name:string ->
+  Yojson.Safe.t ->
+  (prepared, error) result
+(** Validate one message and commit only its protocol-state transition. Tool
+    inventory and tool effects are returned as typed work for the transport
+    owner to execute outside any protocol-state critical section. *)
+
+val complete_tools_list : id:Yojson.Safe.t -> Yojson.Safe.t list -> dispatch
+val complete_tool_call : tool_call -> tool_result option -> dispatch
 
 val handle_message :
   session:session ->

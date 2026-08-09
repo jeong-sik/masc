@@ -13,6 +13,18 @@ type dispatch =
   ; tool_called : bool
   }
 
+type tool_call =
+  { id : Yojson.Safe.t
+  ; name : string
+  ; call_id : string
+  ; arguments : Yojson.Safe.t
+  }
+
+type prepared =
+  | Prepared_response of dispatch
+  | Prepared_tools_list of { id : Yojson.Safe.t }
+  | Prepared_tool_call of tool_call
+
 type phase =
   | Awaiting_initialize
   | Awaiting_initialized
@@ -260,7 +272,7 @@ let tool_result_json ~id (result : tool_result) =
         @ if result.success then [] else [ "isError", `Bool true ]))
 ;;
 
-let tools_call ~id ~params ~call_tool =
+let prepare_tools_call ~id ~params =
   let stage = "MCP tools/call" in
   let* _request_id, id, call_id = request_id stage id in
   let* fields = assoc_at stage params in
@@ -271,19 +283,33 @@ let tools_call ~id ~params ~call_tool =
     | Some (`Assoc _ as arguments) -> Ok arguments
     | Some _ -> error stage "field \"arguments\" must be an object"
   in
-  match call_tool ~name ~call_id ~arguments with
+  Ok (Prepared_tool_call { id; name; call_id; arguments })
+;;
+
+let complete_tools_list ~id tools =
+  { response =
+      Some
+        (Mcp_transport_protocol.make_response
+           ~id
+           (`Assoc [ "tools", `List tools ]))
+  ; tool_called = false
+  }
+;;
+
+let complete_tool_call request = function
   | None ->
-    Ok
-      { response =
-          Some
-            (Mcp_transport_protocol.make_error
-               ~id
-               (-32602)
-               (Printf.sprintf "unknown official-client tool %S" name))
-      ; tool_called = false
-      }
+    { response =
+        Some
+          (Mcp_transport_protocol.make_error
+             ~id:request.id
+             (-32602)
+             (Printf.sprintf "unknown official-client tool %S" request.name))
+    ; tool_called = false
+    }
   | Some result ->
-    Ok { response = Some (tool_result_json ~id result); tool_called = true }
+    { response = Some (tool_result_json ~id:request.id result)
+    ; tool_called = true
+    }
 ;;
 
 (* TEL-OK: pure fail-closed protocol decoder; the runtime caller owns terminal
@@ -308,7 +334,7 @@ let decode_message message =
     Ok { method_name; request_id; params }
 ;;
 
-let dispatch_message ~session ~server_name ~tool_specs ~call_tool message =
+let dispatch_message ~session ~server_name message =
   match message.method_name, message.request_id with
     | "initialize", Some request_id ->
       let* () = require_phase session ~stage:"MCP initialize" Awaiting_initialize in
@@ -320,29 +346,22 @@ let dispatch_message ~session ~server_name ~tool_specs ~call_tool message =
         transition_initialize session ~stage:"MCP initialize" protocol_version
       in
       Ok
-        { response = Some initialize_response
-        ; tool_called = false
-        }
+        (Prepared_response
+           { response = Some initialize_response
+           ; tool_called = false
+           })
     | "tools/list", Some request_id ->
       let* () = require_phase session ~stage:"MCP tools/list" Ready in
       let id = Mcp_transport_protocol.request_id_to_yojson request_id in
-      Ok
-        { response =
-            Some
-              (Mcp_transport_protocol.make_response
-                 ~id
-                 (`Assoc [ "tools", `List (tool_specs ()) ]))
-        ; tool_called = false
-        }
+      Ok (Prepared_tools_list { id })
     | "tools/call", Some request_id ->
       let* () = require_phase session ~stage:"MCP tools/call" Ready in
-      tools_call
+      prepare_tools_call
         ~id:(Mcp_transport_protocol.request_id_to_yojson request_id)
         ~params:message.params
-        ~call_tool
     | "notifications/initialized", None ->
       let* () = transition_initialized session ~stage:"MCP notifications/initialized" in
-      Ok { response = None; tool_called = false }
+      Ok (Prepared_response { response = None; tool_called = false })
     | _, None ->
       error
         "MCP message"
@@ -350,17 +369,36 @@ let dispatch_message ~session ~server_name ~tool_specs ~call_tool message =
     | _, Some request_id ->
       let id = Mcp_transport_protocol.request_id_to_yojson request_id in
       Ok
-        { response =
-            Some
-              (Mcp_transport_protocol.make_error
-                 ~id
-                 (-32601)
-                 (Printf.sprintf "MCP method %S is not supported" message.method_name))
-        ; tool_called = false
-        }
+        (Prepared_response
+           { response =
+               Some
+                 (Mcp_transport_protocol.make_error
+                    ~id
+                    (-32601)
+                    (Printf.sprintf "MCP method %S is not supported" message.method_name))
+           ; tool_called = false
+           })
+;;
+
+let prepare_message ~session ~server_name message_json =
+  try
+    let* message = decode_message message_json in
+    dispatch_message ~session ~server_name message
+  with
+  | Stack_overflow -> error "MCP message" "JSON nesting exceeds validation limits"
 ;;
 
 let handle_message ~session ~server_name ~tool_specs ~call_tool message_json =
-  let* message = decode_message message_json in
-  dispatch_message ~session ~server_name ~tool_specs ~call_tool message
+  let* prepared = prepare_message ~session ~server_name message_json in
+  match prepared with
+  | Prepared_response dispatch -> Ok dispatch
+  | Prepared_tools_list { id } -> Ok (complete_tools_list ~id (tool_specs ()))
+  | Prepared_tool_call request ->
+    Ok
+      (complete_tool_call
+         request
+         (call_tool
+            ~name:request.name
+            ~call_id:request.call_id
+            ~arguments:request.arguments))
 ;;

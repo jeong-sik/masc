@@ -8,6 +8,9 @@ type snapshot =
   ; authenticated_requests : int
   ; rejected_requests : int
   ; tool_calls : int
+  ; connection_failures : int
+  ; last_connection_error : string option
+  ; listener_failure : string option
   ; negotiated_protocol_version : string option
   }
 
@@ -15,6 +18,9 @@ type mutable_state =
   { mutable authenticated_requests : int
   ; mutable rejected_requests : int
   ; mutable tool_calls : int
+  ; mutable connection_failures : int
+  ; mutable last_connection_error : string option
+  ; mutable listener_failure : string option
   }
 
 type t =
@@ -57,6 +63,9 @@ let snapshot t =
       ; authenticated_requests = t.state.authenticated_requests
       ; rejected_requests = t.state.rejected_requests
       ; tool_calls = t.state.tool_calls
+      ; connection_failures = t.state.connection_failures
+      ; last_connection_error = t.state.last_connection_error
+      ; listener_failure = t.state.listener_failure
       ; negotiated_protocol_version = session.negotiated_protocol_version
       }))
 ;;
@@ -111,23 +120,63 @@ let protocol_error_response id code message =
     ]
 ;;
 
-let dispatch t ~tool_specs ~call_tool message =
-  Eio.Mutex.use_rw ~protect:true t.dispatch_mutex (fun () ->
-    match
-      Runtime_official_client_mcp.handle_message
-        ~session:t.session
-        ~server_name:t.server_name
-        ~tool_specs
-        ~call_tool
-        message
-    with
-    | Error error -> Error error
-    | Ok result ->
-      if result.tool_called
-      then
-        Eio.Mutex.use_rw ~protect:true t.state_mutex (fun () ->
-          t.state.tool_calls <- t.state.tool_calls + 1);
-      Ok result)
+type dispatch_error =
+  | Protocol_error of Runtime_official_client_mcp.error
+  | Protocol_header_error of string
+  | Tool_inventory_failed of exn
+  | Tool_outcome_unknown of
+      { id : Yojson.Safe.t
+      ; name : string
+      ; call_id : string
+      ; cause : exn
+      }
+
+let dispatch t ~request ~tool_specs ~call_tool message =
+  match
+    Eio.Mutex.use_rw ~protect:true t.dispatch_mutex (fun () ->
+      match protocol_version_header t request with
+      | Error detail -> Error (Protocol_header_error detail)
+      | Ok () ->
+        Runtime_official_client_mcp.prepare_message
+          ~session:t.session
+          ~server_name:t.server_name
+          message
+        |> Result.map_error (fun error -> Protocol_error error))
+  with
+  | Error error -> Error error
+  | Ok (Prepared_response result) -> Ok result
+  | Ok (Prepared_tools_list { id }) ->
+    (try
+       Ok (Runtime_official_client_mcp.complete_tools_list ~id (tool_specs ()))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Tool_inventory_failed exn))
+  | Ok (Prepared_tool_call request) ->
+    (try
+       let result =
+         call_tool
+           ~name:request.name
+           ~call_id:request.call_id
+           ~arguments:request.arguments
+       in
+       let dispatch =
+         Runtime_official_client_mcp.complete_tool_call request result
+       in
+       if dispatch.tool_called
+       then
+         Eio.Mutex.use_rw ~protect:true t.state_mutex (fun () ->
+           t.state.tool_calls <- t.state.tool_calls + 1);
+       Ok dispatch
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Tool_outcome_unknown
+            { id = request.id
+            ; name = request.name
+            ; call_id = request.call_id
+            ; cause = exn
+            }))
 ;;
 
 let update_state t f =
@@ -141,6 +190,20 @@ let reject t =
 let record_authenticated_request t =
   update_state t (fun state ->
     state.authenticated_requests <- state.authenticated_requests + 1)
+;;
+
+let record_connection_failure t exn =
+  let detail = Printexc.to_string exn in
+  update_state t (fun state ->
+    state.connection_failures <- state.connection_failures + 1;
+    state.last_connection_error <- Some detail);
+  Log.Runtime_agent.warn "official-client MCP HTTP connection failed: %s" detail
+;;
+
+let record_listener_failure t exn =
+  let detail = Printexc.to_string exn in
+  update_state t (fun state -> state.listener_failure <- Some detail);
+  Log.Runtime_agent.error "official-client MCP HTTP listener failed: %s" detail
 ;;
 
 let authorization_matches t request =
@@ -208,7 +271,7 @@ let content_length request =
   | _ :: _ :: _ -> Error "duplicate Content-Length"
 ;;
 
-let handle_message t ~tool_specs ~call_tool body =
+let handle_message t ~request ~tool_specs ~call_tool body =
   match
     try Ok (Yojson.Safe.from_string body) with
     | Yojson.Json_error detail -> Error detail
@@ -221,12 +284,36 @@ let handle_message t ~tool_specs ~call_tool body =
       `Bad_request
       (protocol_error_response `Null (-32700) ("MCP message: " ^ detail))
   | Ok message ->
-    (match dispatch t ~tool_specs ~call_tool message with
-     | Error { stage; detail } ->
+    (match dispatch t ~request ~tool_specs ~call_tool message with
+     | Error (Protocol_error { stage; detail }) ->
        reject t;
        respond_json
          `Bad_request
          (protocol_error_response `Null (-32600) (stage ^ ": " ^ detail))
+     | Error (Protocol_header_error detail) ->
+       reject t;
+       respond `Bad_request detail
+     | Error (Tool_inventory_failed exn) ->
+       reject t;
+       Log.Runtime_agent.error
+         "official-client MCP tool inventory failed: %s"
+         (Printexc.to_string exn);
+       respond_json
+         `Internal_server_error
+         (protocol_error_response `Null (-32603) "MCP tool inventory unavailable")
+     | Error (Tool_outcome_unknown { id; name; call_id; cause }) ->
+       reject t;
+       Log.Runtime_agent.error
+         "official-client MCP tool outcome unknown (tool=%s call_id=%s error=%s)"
+         name
+         call_id
+         (Printexc.to_string cause);
+       respond_json
+         `Internal_server_error
+         (protocol_error_response
+            id
+            (-32603)
+            "MCP tool outcome is unknown; do not retry this call id")
      | Ok { response = None; _ } -> respond `Accepted ""
      | Ok { response = Some response; _ } ->
        let protocol_version = (snapshot t).negotiated_protocol_version in
@@ -245,32 +332,32 @@ let handle_post t ~tool_specs ~call_tool request body =
     reject t;
     respond `Unsupported_media_type "Content-Type must be application/json")
   else
-    match protocol_version_header t request with
+    match content_length request with
     | Error detail ->
       reject t;
       respond `Bad_request detail
-    | Ok () ->
-      (match content_length request with
-       | Error detail ->
-         reject t;
-         respond `Bad_request detail
-       | Ok (Some length) when length > max_body_bytes ->
+    | Ok (Some length) when length > max_body_bytes ->
+      reject t;
+      respond `Request_entity_too_large "MCP request body exceeds 1048576 bytes"
+    | Ok _ ->
+      (match
+         try
+           Ok Eio.Buf_read.(of_flow ~max_size:max_body_bytes body |> take_all)
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | Eio.Buf_read.Buffer_limit_exceeded -> Error `Too_large
+         | exn -> Error (`Read_failed exn)
+       with
+       | Error `Too_large ->
          reject t;
          respond `Request_entity_too_large "MCP request body exceeds 1048576 bytes"
-       | Ok _ ->
-         (try
-            let body =
-              Eio.Buf_read.(of_flow ~max_size:max_body_bytes body |> take_all)
-            in
-            handle_message t ~tool_specs ~call_tool body
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | Eio.Buf_read.Buffer_limit_exceeded ->
-            reject t;
-            respond `Request_entity_too_large "MCP request body exceeds 1048576 bytes"
-          | _ ->
-            reject t;
-            respond `Bad_request "failed to read MCP request body"))
+       | Error (`Read_failed exn) ->
+         reject t;
+         Log.Runtime_agent.warn
+           "official-client MCP request body read failed: %s"
+           (Printexc.to_string exn);
+         respond `Bad_request "failed to read MCP request body"
+       | Ok body -> handle_message t ~request ~tool_specs ~call_tool body)
 ;;
 
 let request_handler t ~path ~tool_specs ~call_tool _client_addr request body =
@@ -323,6 +410,9 @@ let start ~sw ~net ~secure_random ~server_name ~tool_specs ~call_tool () =
     { authenticated_requests = 0
     ; rejected_requests = 0
     ; tool_calls = 0
+    ; connection_failures = 0
+    ; last_connection_error = None
+    ; listener_failure = None
     }
   in
   let t =
@@ -341,10 +431,10 @@ let start ~sw ~net ~secure_random ~server_name ~tool_specs ~call_tool () =
       ()
   in
   Eio.Fiber.fork ~sw (fun () ->
-    Cohttp_eio.Server.run
-      socket
-      server
-      ~on_error:(fun _ ->
-        Log.Runtime_agent.warn "official-client MCP HTTP connection failed"));
+    try
+      Cohttp_eio.Server.run socket server ~on_error:(record_connection_failure t)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> record_listener_failure t exn);
   t
 ;;

@@ -15,6 +15,9 @@ type snapshot =
   ; authenticated_requests : int
   ; rejected_requests : int
   ; tool_calls : int
+  ; connection_failures : int
+  ; last_connection_error : string option
+  ; listener_failure : string option
   ; negotiated_protocol_version : string option
   }
 

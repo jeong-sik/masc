@@ -102,6 +102,36 @@ let json_request id method_ params =
 
 let member name json = Yojson.Safe.Util.member name json
 
+let initialize_session ~sw ~net ~endpoint ~authorization =
+  let protocol_version = "2025-11-25" in
+  let initialize =
+    json_request
+      1
+      "initialize"
+      (`Assoc
+         [ "protocolVersion", `String protocol_version
+         ; ( "clientInfo"
+           , `Assoc [ "name", `String "test-client"; "version", `String "1" ] )
+         ; "capabilities", `Assoc []
+         ])
+  in
+  let initialized =
+    request ~sw ~net ~endpoint ~authorization initialize
+  in
+  check int "initialize" 200 initialized.status;
+  let notified =
+    request
+      ~protocol_version
+      ~sw
+      ~net
+      ~endpoint
+      ~authorization
+      {|{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}|}
+  in
+  check int "initialized notification" 202 notified.status;
+  protocol_version
+;;
+
 let test_turn_scoped_capability_and_protocol () =
   Eio_main.run
   @@ fun env ->
@@ -334,6 +364,85 @@ let test_turn_scoped_capability_and_protocol () =
     snapshot.negotiated_protocol_version
 ;;
 
+let test_callback_failures_do_not_poison_protocol_state () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let effects = ref 0 in
+  let inventory_fails = ref false in
+  let tool_specs () =
+    if !inventory_fails
+    then failwith "inventory exploded"
+    else [ `Assoc [ "name", `String "masc_effect" ] ]
+  in
+  let call_tool ~name:_ ~call_id:_ ~arguments:_ =
+    incr effects;
+    failwith "effect applied before callback failure"
+  in
+  let bridge =
+    Runtime_official_client_mcp_http.start
+      ~sw
+      ~net:env#net
+      ~secure_random:env#secure_random
+      ~server_name:"masc"
+      ~tool_specs
+      ~call_tool
+      ()
+  in
+  let endpoint, authorization = config_fields bridge in
+  let protocol_version =
+    initialize_session ~sw ~net:env#net ~endpoint ~authorization
+  in
+  let call =
+    request
+      ~protocol_version
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      (json_request
+         2
+         "tools/call"
+         (`Assoc [ "name", `String "masc_effect"; "arguments", `Assoc [] ]))
+  in
+  check int "unknown tool outcome is a server failure" 500 call.status;
+  check int
+    "typed internal JSON-RPC error"
+    (-32603)
+    (Yojson.Safe.from_string call.body
+     |> member "error"
+     |> member "code"
+     |> Yojson.Safe.Util.to_int);
+  check int "effect ran exactly once" 1 !effects;
+  inventory_fails := true;
+  let unavailable =
+    request
+      ~protocol_version
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      (json_request 3 "tools/list" (`Assoc []))
+  in
+  check int "inventory failure is a server failure" 500 unavailable.status;
+  inventory_fails := false;
+  let recovered =
+    request
+      ~protocol_version
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      (json_request 4 "tools/list" (`Assoc []))
+  in
+  check int "callback failure did not poison protocol mutex" 200 recovered.status;
+  let snapshot = Runtime_official_client_mcp_http.snapshot bridge in
+  check bool "session remains ready" true (snapshot.phase = Ready);
+  check int "failed effect is not counted as completed" 0 snapshot.tool_calls;
+  check int "callback failures are observable rejections" 2 snapshot.rejected_requests
+;;
+
 let () =
   run
     "runtime_official_client_mcp_http"
@@ -342,6 +451,12 @@ let () =
             "capability, protocol, phase, and tool callback"
             `Quick
             test_turn_scoped_capability_and_protocol
+        ] )
+    ; ( "effect boundary"
+      , [ test_case
+            "callback failures remain typed and do not poison lifecycle"
+            `Quick
+            test_callback_failures_do_not_poison_protocol_state
         ] )
     ]
 ;;

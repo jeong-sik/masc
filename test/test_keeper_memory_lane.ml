@@ -45,9 +45,6 @@ let run_post_turn ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~turn 
   Post_turn_memory.run
     ~config
     ~meta
-    ~ctx_snapshot:
-      (Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test")
-    ~runtime_id:"test-runtime"
     ~generation:turn
     ~turn
     ~oas_turn_count:1

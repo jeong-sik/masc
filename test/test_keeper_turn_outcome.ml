@@ -485,29 +485,22 @@ let test_queued_delivery_requires_exact_turn_ref () =
 
 let test_terminal_commit_error_cannot_become_delivery_success () =
   let persist_error = "terminal transcript fsync failed" in
-  let check_error label queued_turn =
-    match
-      Stream.For_testing.committed_delivery_outcome
-        ~queued_turn
-        ~turn_ref:None
-        (Error persist_error)
-    with
-    | Error observed -> check string label persist_error observed
-    | Ok None -> fail (label ^ " was downgraded to direct delivery success")
-    | Ok (Some _) -> fail (label ^ " was downgraded to queued delivery success")
-  in
-  check_error "direct commit preserves typed Error" false;
-  check_error "queued commit preserves typed Error" true
+  match
+    Stream.For_testing.committed_delivery_outcome
+      ~turn_ref:None
+      (Error persist_error)
+  with
+  | Error observed -> check string "operation commit preserves typed Error" persist_error observed
+  | Ok _ -> fail "operation commit was downgraded to delivery success"
 
 let test_media_only_queued_reply_uses_delivery_path () =
   match
     Stream.For_testing.empty_reply_delivery_plan
-      ~queued_turn:true
       ~has_visible_blocks:true
       ~has_tool_calls:false
   with
   | `Visible_blocks -> ()
-  | `Tool_calls_only | `Failure | `User_only ->
+  | `Tool_calls_only | `Failure ->
     fail "media-only queued reply must use the delivered assistant path"
 
 let test_media_continuation_uses_assistant_delivery_path () =

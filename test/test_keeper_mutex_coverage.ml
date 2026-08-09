@@ -1597,37 +1597,6 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
          Alcotest.fail "canonical terminal was not exact polling truth")
 ;;
 
-let test_keeper_stream_canonical_settlement_ignores_staged_worker_result () =
-  let status =
-    Keeper_msg_async.Done
-      { ok = true; body = "canonical-disk"; data = None }
-  in
-  let project origin =
-    let entry : Keeper_msg_async.entry =
-      { request_id = "canonical-settlement"
-      ; keeper_name = "keeper"
-      ; base_path = Filename.concat (Filename.get_temp_dir_name ()) "canonical-settlement"
-      ; submitted_by = "owner"
-      ; status
-      ; submitted_at = 0.
-      ; completed_at = Some 0.
-      }
-    in
-    Server_routes_http_keeper_stream.For_testing.worker_settlement_terminal_body
-      ~staged_body:(Some "staged-worker")
-      (Keeper_msg_async.Status_settlement
-         { entry; durability = Keeper_msg_async.Durable; origin })
-  in
-  Alcotest.(check (option string))
-    "canonical reconciliation uses disk body"
-    (Some "canonical-disk")
-    (project Keeper_msg_async.Canonical_reconciliation);
-  Alcotest.(check (option string))
-    "normal transition retains staged stream body"
-    (Some "staged-worker")
-    (project Keeper_msg_async.Transition_commit)
-;;
-
 let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
   with_eio_env
   @@ fun env ->
@@ -2524,10 +2493,6 @@ let () =
             "persistence marker integrity conflict projects canonical terminal"
             `Quick
             test_keeper_msg_async_integrity_conflict_projects_canonical_terminal
-        ; test_case
-            "canonical settlement ignores staged worker result"
-            `Quick
-            test_keeper_stream_canonical_settlement_ignores_staged_worker_result
         ; test_case
             "integrity ambiguity projects exact poll error"
             `Quick

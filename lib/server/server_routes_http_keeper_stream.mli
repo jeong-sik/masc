@@ -160,7 +160,6 @@ type queued_turn_outcome =
   | Deferred of { rejection : Keeper_turn_admission.rejection }
 
 type turn_submission =
-  | Direct_request
   | Owner_operation of
       { operation_id : Keeper_owner.Chat_operation.Operation_id.t
       ; admission_token : Keeper_turn_admission.token
@@ -171,11 +170,6 @@ type turn_submission =
       ; external_message_id : string option
       ; workspace_id : string option
       ; extra_mentions : Keeper_identity.Keeper_id.t list
-      }
-  | Queued_receipt of
-      { receipt_ids : Keeper_chat_delivery_identity.Receipt_ids.t
-      ; claim : unit -> (unit, string) result
-      ; execution_sw : Eio.Switch.t
       }
 
 val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
@@ -194,50 +188,17 @@ val process_single_turn :
   run_id:string ->
   message_id:string ->
   agent_name:string ->
-  submitted_by:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   queued_turn_outcome option
-(** Execute a single keeper turn, publishing events to the provided
-    event stream. Direct HTTP requests enter the durable {!Keeper_msg_async}
-    boundary and run under its server-owned request switch. Queue-consumer
-    turns are already durably owned by {!Keeper_chat_queue}: [Queued_receipt]
-    runs inline under its [execution_sw], parks on the Keeper turn slot, and
-    invokes [claim] for its exact [receipt_ids] only after admission. It does
-    not create a second durable async request. The typed [submission] prevents
-    direct requests from carrying queue claim authority and prevents queued
-    receipts from omitting it. [closed] is a mutable flag that suppresses
-    worker event pushes when set to [true] (used by the SSE adapter when the
-    HTTP stream is closed). [client_disconnects] carries the HTTP stream switch
-    and disconnect signal; it stops only the stream projection and does not
-    cancel an accepted direct request. [auth_token] is [None] for
-    queue-consumer turns where no HTTP request is available.
+(** Execute one already-claimed Owner operation and publish its live turn
+    events. The operation owns transcript provenance, admission, cancellation,
+    and terminal settlement; this function never creates another durable
+    request identity. [closed] and [client_disconnects] affect only a live SSE
+    projection, never the accepted operation. [user_row_origin] decides whether
+    the operation appends the user row or observes an upstream append.
 
-    [user_row_origin] is the durable provenance selected by the accepting
-    boundary. [Needs_append] makes this turn own the user row;
-    [Already_persisted] and [Already_persisted_upstream] prohibit a duplicate
-    append. Queue-consumer turns pass the exact provenance stored with their
-    receipt instead of deriving ownership from a connector label.
-
-    [Queued_receipt] (constructed only by [Server_bootstrap_loops]'s
-    queue-consumer [handle_turn] wiring) changes terminal handling for
-    [No_visible_reply], an empty [Visible_reply], and
-    [Continuation_checkpoint]. A media-only ordinary reply is delivered even
-    when its text is empty. A continuation persists a typed status block and
-    is delivered to the originating connector without inventing assistant
-    prose. A continuation always commits a delivered assistant row
-    ([content = ""] plus the typed status block) — including direct turns,
-    which previously could commit [No_assistant_reply] or [Tool_calls_only]
-    instead. The [claim]
-    callback atomically claims the exact observed queue receipt after turn
-    admission and before transcript or provider effects.
-
-    With no visible blocks, the interactive HTTP stream keeps recording the user line
-    only ([persist_user_message_only]), matching its existing "the keeper will
-    answer on the next turn" semantics; a queued turn instead persists a typed
-    failure row via [persist_failure_reply]. A queued message is claimed from
-    [Keeper_chat_queue] at [claim] — there is no later turn for it
-    to ride along with, so true silence after that claim is terminal, not
-    merely deferred. *)
+    With no visible blocks, the operation records a typed terminal failure
+    rather than inventing assistant prose. *)
 
 val operation_executor :
   state:Mcp_server.server_state ->
@@ -304,15 +265,13 @@ module For_testing : sig
   val queued_delivery_outcome_of_turn_ref :
     Ids.Turn_ref.t option -> queued_turn_outcome
   val committed_delivery_outcome :
-    queued_turn:bool ->
     turn_ref:Ids.Turn_ref.t option ->
     (unit, string) result ->
-    (queued_turn_outcome option, string) result
+    (queued_turn_outcome, string) result
   val empty_reply_delivery_plan :
-    queued_turn:bool ->
     has_visible_blocks:bool ->
     has_tool_calls:bool ->
-    [ `Visible_blocks | `Tool_calls_only | `Failure | `User_only ]
+    [ `Visible_blocks | `Tool_calls_only | `Failure ]
 
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val keeper_tool_failure_log_details :
@@ -323,8 +282,4 @@ module For_testing : sig
     error_body:string ->
     failure_class:Tool_result.tool_failure_class ->
     Yojson.Safe.t
-  val worker_settlement_terminal_body :
-    staged_body:string option ->
-    Keeper_msg_async.worker_settlement ->
-    string option
 end

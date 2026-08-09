@@ -24,7 +24,7 @@ let stderr_tail_bytes = 4096
 let max_wire_line_bytes = 8 * 1024 * 1024
 let approval_policy = "never"
 let sandbox_mode = "read-only"
-let ephemeral_thread = true
+let thread_is_ephemeral = false
 
 let default_config ~cwd =
   { cli_path = "codex"
@@ -35,6 +35,10 @@ let default_config ~cwd =
   }
 ;;
 
+type thread_mode =
+  | Start
+  | Resume of { thread_id : string }
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
@@ -43,6 +47,7 @@ type turn_result =
   ; dynamic_tool_calls : int
   ; subscription : subscription
   ; user_agent : string option
+  ; resumed : bool
   }
 
 type dynamic_tool_result =
@@ -383,8 +388,7 @@ let parse_subscription result =
   | _ -> protocol_error stage "account must be an object or null"
 ;;
 
-let parse_thread_start result =
-  let stage = "thread/start" in
+let parse_thread_response ~stage result =
   let* fields = assoc_at stage result in
   let* thread_json = required_member stage "thread" fields in
   let* thread_fields = assoc_at stage thread_json in
@@ -597,7 +601,18 @@ let history_item (message : history_message) =
     ]
 ;;
 
-let run_protocol io config ~dynamic_tools ~reasoning_effort ~history ~prompt =
+let invoke_state_callback ~stage callback =
+  try
+    match callback () with
+    | Ok () -> Ok ()
+    | Error detail -> protocol_error stage detail
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> protocol_error stage (Printexc.to_string exn)
+;;
+
+let run_protocol io config ~dynamic_tools ~reasoning_effort ~thread_mode ~history ~prompt
+    ~on_thread_ready ~on_turn_starting ~on_turn_started =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
       (`Assoc
@@ -616,26 +631,52 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~history ~prompt =
     ~params:(`Assoc [ "refreshToken", `Bool false ]);
   let* account = await_response io ~id:2 ~method_:"account/read" in
   let* subscription = parse_subscription account in
-  let thread_fields =
-    [ "cwd", `String config.cwd
-    ; "approvalPolicy", `String approval_policy
-    ; "sandbox", `String sandbox_mode
-    ; "ephemeral", `Bool ephemeral_thread
-    ]
-    @ optional_field "model" config.model
-    @ optional_field "developerInstructions" config.developer_instructions
-    @
-    match dynamic_tools with
-    | [] -> []
-    | tools -> [ "dynamicTools", `List (List.map dynamic_tool_spec tools) ]
+  let thread_method, thread_fields, resumed =
+    match thread_mode with
+    | Start ->
+      ( "thread/start"
+      , ([ "cwd", `String config.cwd
+         ; "approvalPolicy", `String approval_policy
+         ; "sandbox", `String sandbox_mode
+         ; "ephemeral", `Bool thread_is_ephemeral
+         ]
+         @ optional_field "model" config.model
+         @ optional_field "developerInstructions" config.developer_instructions
+         @
+         match dynamic_tools with
+         | [] -> []
+         | tools -> [ "dynamicTools", `List (List.map dynamic_tool_spec tools) ])
+      , false )
+    | Resume { thread_id } ->
+      ( "thread/resume"
+      , [ "threadId", `String thread_id
+        ; "cwd", `String config.cwd
+        ; "approvalPolicy", `String approval_policy
+        ; "sandbox", `String sandbox_mode
+        ]
+        @ optional_field "model" config.model
+        @ optional_field "developerInstructions" config.developer_instructions
+      , true )
   in
-  send_request io ~id:3 ~method_:"thread/start" ~params:(`Assoc thread_fields);
-  let* thread = await_response io ~id:3 ~method_:"thread/start" in
-  let* thread_id, model = parse_thread_start thread in
+  send_request io ~id:3 ~method_:thread_method ~params:(`Assoc thread_fields);
+  let* thread = await_response io ~id:3 ~method_:thread_method in
+  let* thread_id, model = parse_thread_response ~stage:thread_method thread in
+  let* () =
+    match thread_mode with
+    | Start -> Ok ()
+    | Resume { thread_id = expected } when String.equal expected thread_id -> Ok ()
+    | Resume { thread_id = expected } ->
+      protocol_error
+        thread_method
+        (Printf.sprintf
+           "resumed thread id mismatch: requested %S but server returned %S"
+           expected
+           thread_id)
+  in
   let turn_request_id =
-    match history with
-    | [] -> Ok 4
-    | messages ->
+    match thread_mode, history with
+    | Resume _, _ | Start, [] -> Ok 4
+    | Start, messages ->
       send_request io ~id:4 ~method_:"thread/inject_items"
         ~params:
           (`Assoc
@@ -646,6 +687,14 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~history ~prompt =
       Ok 5
   in
   let* turn_request_id = turn_request_id in
+  let* () =
+    invoke_state_callback ~stage:"thread ready callback" (fun () ->
+      on_thread_ready ~thread_id)
+  in
+  let* () =
+    invoke_state_callback ~stage:"turn starting callback" (fun () ->
+      on_turn_starting ~thread_id)
+  in
   send_request io ~id:turn_request_id ~method_:"turn/start"
     ~params:
       (`Assoc
@@ -658,6 +707,10 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~history ~prompt =
               (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)));
   let* turn = await_response io ~id:turn_request_id ~method_:"turn/start" in
   let* turn_id = parse_turn_start turn in
+  let* () =
+    invoke_state_callback ~stage:"turn started callback" (fun () ->
+      on_turn_started ~thread_id ~turn_id)
+  in
   let tool_call_count = ref 0 in
   let* text =
     await_turn_terminal
@@ -679,6 +732,7 @@ let run_protocol io config ~dynamic_tools ~reasoning_effort ~history ~prompt =
     ; dynamic_tool_calls = !tool_call_count
     ; subscription
     ; user_agent
+    ; resumed
     }
 ;;
 
@@ -755,14 +809,15 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
-let run_spawned ~mgr ~clock config ~dynamic_tools ~reasoning_effort ~history ~prompt =
+let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort ~thread_mode ~history
+    ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_started =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = ref "" in
     let proc =
-      Eio.Process.spawn ~sw mgr
+      Eio.Process.spawn ~sw mgr ~cwd
         ~env:(subscription_only_environment ())
         ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
         [ config.cli_path; "app-server"; "--stdio" ]
@@ -797,11 +852,15 @@ let run_spawned ~mgr ~clock config ~dynamic_tools ~reasoning_effort ~history ~pr
             config
             ~dynamic_tools
             ~reasoning_effort
+            ~thread_mode
             ~history
-            ~prompt)))
+            ~prompt
+            ~on_thread_ready
+            ~on_turn_starting
+            ~on_turn_started)))
 ;;
 
-let validate_config config ~prompt =
+let validate_config config ~thread_mode ~prompt =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
   else if String.trim config.cwd = "" || Filename.is_relative config.cwd
@@ -810,7 +869,11 @@ let validate_config config ~prompt =
   then Error (Invalid_config "timeout_s must be positive and finite")
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
-  else Ok ()
+  else
+    match thread_mode with
+    | Resume { thread_id } when String.equal (String.trim thread_id) "" ->
+      Error (Invalid_config "resume thread_id must not be empty")
+    | Start | Resume _ -> Ok ()
 ;;
 
 let validate_dynamic_tools tools =
@@ -827,29 +890,39 @@ let validate_dynamic_tools tools =
   loop [] tools
 ;;
 
-let run_turn ?(dynamic_tools = []) ?reasoning_effort ~mgr ~clock ?(history = []) config
-    ~prompt =
+let validate_turn ?(dynamic_tools = []) ?(thread_mode = Start) config ~prompt =
+  match validate_config config ~thread_mode ~prompt with
+  | Error _ as error -> error
+  | Ok () -> validate_dynamic_tools dynamic_tools
+;;
+
+let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
+    ?(history = []) ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
+    ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
+    ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) config ~prompt =
   let result =
-    match validate_config config ~prompt with
+    match validate_turn ~dynamic_tools ~thread_mode config ~prompt with
     | Error _ as error -> error
     | Ok () ->
-      (match validate_dynamic_tools dynamic_tools with
-       | Error _ as error -> error
-       | Ok () ->
       Log.Runtime_agent.info "Codex app-server subscription turn starting";
       (try
          run_spawned
            ~mgr
            ~clock
+           ~cwd
            config
            ~dynamic_tools
            ~reasoning_effort
+           ~thread_mode
            ~history
            ~prompt
+           ~on_thread_ready
+           ~on_turn_starting
+           ~on_turn_started
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
-       | exn -> Error (Spawn_failed (Printexc.to_string exn))))
+       | exn -> Error (Spawn_failed (Printexc.to_string exn)))
   in
   (match result with
    | Ok turn ->

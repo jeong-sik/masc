@@ -178,6 +178,15 @@ export type {
   DashboardRuntimeModelMetricsResponse,
   RuntimeTomlConfig,
   RuntimeRoutingLane,
+  DashboardOfficialClientKind,
+  DashboardOfficialClientRecoveryDecision,
+  DashboardOfficialClientRecoveryFailure,
+  DashboardOfficialClientRecoveryResolutionRecord,
+  DashboardOfficialClientSession,
+  DashboardOfficialClientSessionPhase,
+  DashboardOfficialClientSessionResponse,
+  DashboardOfficialClientSettlement,
+  DashboardOfficialClientTransientReleaseRecord,
 } from './dashboard-runtime'
 export {
   fetchRuntimeProviders,
@@ -189,6 +198,8 @@ export {
   patchRuntimeAssignment,
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
+  fetchOfficialClientSession,
+  resolveOfficialClientSession,
 } from './dashboard-runtime'
 
 export type {

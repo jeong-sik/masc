@@ -95,7 +95,7 @@ val description : t -> string option
 (** {1 Defaults} *)
 
 val default_options : options
-val sdk_version : string
+val agent_core_version : string
 
 (** {1 Construction} *)
 
@@ -139,7 +139,7 @@ val clone : ?copy_context:bool -> t -> t
 (** {1 Agent Card} *)
 
 (** Build a discovery card with the exact caller-owned interface authority.
-    The authority is mandatory and non-empty; OAS never invents an endpoint,
+    The authority is mandatory and non-empty; AGENT_CORE never invents an endpoint,
     protocol binding, or protocol version. *)
 val card
   :  supported_interfaces:Agent_card.supported_interfaces
@@ -158,7 +158,7 @@ type api_strategy =
 (** Additive provider-failure carrier.  Existing execution entry points are
     exact projections of this record's [error] field. *)
 type detailed_error = Provider_failure_attribution.detailed_error =
-  { error : Error.sdk_error
+  { error : Error.t
   ; provider_failure : Provider_failure_attribution.t option
   }
 
@@ -197,9 +197,9 @@ val create_execution_runtime
   :  sw:Eio.Switch.t
   -> domain_mgr:_ Eio.Domain_manager.t
   -> domain_count:int
-  -> (execution_runtime, Error.sdk_error) result
+  -> (execution_runtime, Error.t) result
 
-(** Lossless read-only projection of OAS's canonical recursive execution
+(** Lossless read-only projection of AGENT_CORE's canonical recursive execution
     journal. These values are observations only: they cannot append, admit,
     pause, cancel, or terminate execution. *)
 module Execution_projection : Agent_execution_projection_intf.S
@@ -308,7 +308,7 @@ module Advanced : sig
       before the next provider turn; [Yield] returns with the lease released
       and does not invoke [on_resume] in this call.
 
-      [Yielded] is a successful host outcome: it is not an SDK error, does not
+      [Yielded] is a successful host outcome: it is not an agent-core error, does not
       consume or enforce a turn/time/cost budget, and leaves the agent lifecycle
       [Ready].  Its [checkpoint] is captured only after the callback chooses
       [Yield], avoiding checkpoint-copy overhead on [Continue]. *)
@@ -335,7 +335,7 @@ module Advanced : sig
     -> on_tool_boundary:(tool_boundary -> boundary_decision)
     -> t
     -> Types.content_block list
-    -> (run_outcome, Error.sdk_error) result
+    -> (run_outcome, Error.t) result
 end
 
 (** Detailed counterpart of {!run}. *)
@@ -350,7 +350,7 @@ val run_detailed
   -> (Types.api_response, detailed_error) result
 
 (** Run the agent until a provider returns a terminal response or a typed error.
-    The tool loop is unbounded: OAS does not stop it because of turn count,
+    The tool loop is unbounded: AGENT_CORE does not stop it because of turn count,
     idle-turn count, tool-round count, accumulated cost, or token usage. Those
     values are observations only.
 
@@ -378,7 +378,7 @@ val run
   -> ?execution_store:execution_store
   -> t
   -> string
-  -> (Types.api_response, Error.sdk_error) result
+  -> (Types.api_response, Error.t) result
 
 (** Run agent to completion with a user-authored content block list.
     This is the multimodal entrypoint for callers that need to pass text
@@ -392,7 +392,7 @@ val run_blocks
   -> ?execution_store:execution_store
   -> t
   -> Types.content_block list
-  -> (Types.api_response, Error.sdk_error) result
+  -> (Types.api_response, Error.t) result
 
 (** Detailed counterpart of {!run_blocks}. *)
 val run_blocks_detailed
@@ -416,7 +416,7 @@ val run_stream
   -> ?execution_store:execution_store
   -> t
   -> string
-  -> (Types.api_response, Error.sdk_error) result
+  -> (Types.api_response, Error.t) result
 
 (** Detailed counterpart of {!run_stream}. *)
 val run_stream_detailed
@@ -441,7 +441,7 @@ val run_stream_blocks
   -> ?execution_store:execution_store
   -> t
   -> Types.content_block list
-  -> (Types.api_response, Error.sdk_error) result
+  -> (Types.api_response, Error.t) result
 
 (** Detailed counterpart of {!run_stream_blocks}. *)
 val run_stream_blocks_detailed
@@ -468,7 +468,7 @@ val run_turn_stream
        | `TerminalToolCompleted of Terminal_tool_receipt.t
        | `ToolsExecuted
        ]
-       , Error.sdk_error )
+       , Error.t )
        result
 
 (** Detailed counterpart of {!run_turn_stream}. *)
@@ -501,7 +501,7 @@ val run_with_handoffs
   -> t
   -> targets:Handoff.handoff_target list
   -> string
-  -> (Types.api_response, Error.sdk_error) result
+  -> (Types.api_response, Error.t) result
 
 (** Detailed counterpart of {!run_with_handoffs}. *)
 val run_with_handoffs_detailed
@@ -520,7 +520,7 @@ val run_with_handoffs_blocks
   -> t
   -> targets:Handoff.handoff_target list
   -> Types.content_block list
-  -> (Types.api_response, Error.sdk_error) result
+  -> (Types.api_response, Error.t) result
 
 (** Detailed counterpart of {!run_with_handoffs_blocks}. *)
 val run_with_handoffs_blocks_detailed

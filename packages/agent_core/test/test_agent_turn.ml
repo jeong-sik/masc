@@ -1,6 +1,6 @@
 (** Tests for Agent_turn module — turn preparation and usage. *)
 
-open Agent_sdk
+open Agent_core
 
 let invocation tool_use_id =
   let schedule : Tool_contract.schedule =

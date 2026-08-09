@@ -224,10 +224,10 @@ let message_of_fixture json =
   }
 ;;
 
-let masc_oas_replay_fixture_messages () =
+let masc_agent_core_replay_fixture_messages () =
   let json =
     Yojson.Safe.from_file
-      (source_path "test/fixtures/masc-oas-replay-interleaving.v1.json")
+      (source_path "test/fixtures/masc-agent-core-replay-interleaving.v1.json")
   in
   List.map message_of_fixture (require_list "fixture" "messages" json)
 ;;
@@ -257,7 +257,7 @@ let parse_ok json =
 ;;
 
 (* Symmetric to [parse_ok]: assert the fail-closed all-empty 200 path
-   (oas#2483). Returns the [Empty_completion] payload, which preserves
+   (agent-core boundary). Returns the [Empty_completion] payload, which preserves
    [stop_reason]/[usage]/[telemetry] for downstream inspection. *)
 let parse_empty json : Parse.empty_completion =
   match Parse.parse_openai_response_result (Yojson.Safe.to_string json) with
@@ -587,7 +587,7 @@ let test_content_parts_cover_modalities () =
     "data:image/png;base64,img"
     (member "image_url" image |> member "url" |> to_string);
   let document = List.nth parts 2 in
-  (* oas#2744: a document is emitted as the Chat Completions [file] part. It
+  (* agent-core boundary: a document is emitted as the Chat Completions [file] part. It
      used to be relabelled [image_url], which silently retyped the block as an
      image. *)
   check_string "document type" "file" (member "type" document |> to_string);
@@ -1032,7 +1032,7 @@ let test_serializer_ignored_block_variants () =
     (Serialize.tool_calls_to_openai_json ignored_blocks |> List.length);
   let ollama_blocks =
     (* Documents are excluded here because the Ollama native wire has no
-       document part and rejects them at admission (oas#2744); this case is
+       document part and rejects them at admission (agent-core boundary); this case is
        about tool-call blocks, and the rejection has its own coverage in
        [test_ollama_native_multimodal_variants]. *)
     List.filter
@@ -1345,7 +1345,7 @@ let test_parse_edge_shapes_for_text_and_telemetry () =
    | _ -> Alcotest.fail "invalid JSON fence should keep original text");
   (* Every content block is malformed (dropped) and whitespace-only
      reasoning_content yields no Thinking block, so the completion is
-     all-empty and now fails closed as [Empty_completion] (oas#2483) instead
+     all-empty and now fails closed as [Empty_completion] (agent-core boundary) instead
      of the old [Ok content=[]]. The fail-closed payload still carries the
      stop_reason. *)
   let no_text =

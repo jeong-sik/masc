@@ -1,6 +1,6 @@
 (** Tool_local_runtime_verify -- runtime contract verification. *)
 
-module Oas_types = Agent_sdk.Types
+module Agent_core_types = Agent_core.Types
 
 
 (* http_error_message moved to Provider_http_error.to_message (SSOT,
@@ -63,7 +63,7 @@ let first_endpoint_url endpoints =
 let error_message_of_http_error = Provider_http_error.to_message
 
 (** Probe whether an endpoint supports the OpenAI chat-completions protocol.
-    This is a protocol-level probe; it explicitly depends on OAS
+    This is a protocol-level probe; it explicitly depends on AGENT_CORE
     [Llm_provider.Complete.complete] because the goal is to verify the
     endpoint's wire protocol, not to run a full agent turn. *)
 let probe_chat_completion_compatible
@@ -93,7 +93,7 @@ let probe_chat_completion_compatible
           ~request_path:Masc_network_defaults.openai_chat_completions_path
           ~max_tokens:1 ()
       in
-      let messages : Oas_types.message list = [ Oas_types.user_msg "hi" ] in
+      let messages : Agent_core_types.message list = [ Agent_core_types.user_msg "hi" ] in
       let run_completion () =
         Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
           ~config:provider_config ~messages ()
@@ -119,7 +119,7 @@ let classify_runtime_blocker ~provider_reachable ~slot_reachable
     (Some "provider_unreachable", Some "llama runtime health or slots endpoint failed")
   else if not chat_completion_compatible then
     ( Some "provider_protocol_incompatible",
-      Some "one or more endpoints failed the OAS chat-completions probe" )
+      Some "one or more endpoints failed the AGENT_CORE chat-completions probe" )
   else if
     match expected_model, actual_model_id with
     | Some expected, Some actual -> not (String.equal expected actual)
@@ -206,7 +206,7 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
               ( "provider_error",
                 Json_util.string_opt_to_json
                   (if provider_ok_row then None
-                   else Some "oas discovery marked endpoint unhealthy") );
+                   else Some "agent_core discovery marked endpoint unhealthy") );
               ("slot_reachable", `Bool slot_ok_row);
               ("slot_status_code", Json_util.int_opt_to_json (if slot_ok_row then Some 200 else None));
               ("slot_error", `Null);
@@ -261,7 +261,7 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
     [
       ("checked_at", `String (Masc_domain.now_iso ()));
       ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
-      ("source", `String "oas_discovery");
+      ("source", `String "agent_core_discovery");
       ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
       ("provider_base_url", Json_util.string_opt_to_json (first_endpoint_url endpoints));
       ("slot_url", Json_util.string_opt_to_json (first_endpoint_url endpoints));
@@ -290,7 +290,7 @@ let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
     [
       ("checked_at", `String (Masc_domain.now_iso ()));
       ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
-      ("source", `String "oas_discovery");
+      ("source", `String "agent_core_discovery");
       ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
       ("provider_base_url", `Null);
       ("slot_url", `Null);
@@ -307,8 +307,8 @@ let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
       ("peak_hot_slots", `Int 0);
       ("configured_capacity", `Int 0);
       ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
-      ("runtime_blocker", `String "oas_discovery_unavailable");
-      ("detail", `String "runtime verification requires OAS discovery endpoints");
+      ("runtime_blocker", `String "agent_core_discovery_unavailable");
+      ("detail", `String "runtime verification requires AGENT_CORE discovery endpoints");
       ("pass", `Bool false);
       ("runtimes", `List []);
     ]

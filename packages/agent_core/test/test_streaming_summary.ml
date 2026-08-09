@@ -1,4 +1,4 @@
-(** RFC-OAS-019 Phase 1 unit tests.
+(** Agent Core contract Phase 1 unit tests.
 
     Minimal Phase 1 coverage: the new [Streaming_summary] variant
     serialises round-trip, exposes the right [event_type_name], and the
@@ -109,7 +109,7 @@ let test_terminal_cancelled_roundtrip () =
   | Error msg -> Alcotest.fail (Printf.sprintf "terminal of_yojson failed: %s" msg)
 ;;
 
-(* RFC-OAS-020 TTFT helper tests *)
+(* Agent Core contract TTFT helper tests *)
 
 module Streaming = Llm_provider.Streaming
 module Types = Llm_provider.Types
@@ -262,7 +262,7 @@ let test_sse_event_ping_is_not_token () =
 
 let () =
   Alcotest.run
-    "RFC-OAS-019 Streaming_summary"
+    "Agent Core contract Streaming_summary"
     [ ( "event_type_name"
       , [ Alcotest.test_case
             "Streaming_summary maps to streaming_summary"
@@ -287,7 +287,7 @@ let () =
             `Quick
             test_terminal_cancelled_roundtrip
         ] )
-    ; ( "RFC-OAS-020 token classification"
+    ; ( "Agent Core contract token classification"
       , [ Alcotest.test_case
             "chunk_has_non_empty_delta: content"
             `Quick

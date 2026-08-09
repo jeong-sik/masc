@@ -1,10 +1,10 @@
-(** Dashboard_eval_feed — read-only consumer for OAS eval verdicts.
+(** Dashboard_eval_feed — read-only consumer for AGENT_CORE eval verdicts.
 
-    Parses swiss-verdict JSON (RFC-OAS-002 schema v1) produced by the OAS
+    Parses swiss-verdict JSON (Agent Core contract schema v1) produced by the AGENT_CORE
     harness and exposes eval snapshots for dashboard rendering.
 
     This module only reads.  It never writes or modifies eval data.
-    Data ownership belongs to OAS. *)
+    Data ownership belongs to AGENT_CORE. *)
 
 type layer_result_json = {
   layer_name : string;
@@ -103,7 +103,7 @@ let read_snapshot_json ~agent_name (json : Yojson.Safe.t)
 (* ── File system reading ─────────────────────────────────────────── *)
 
 let eval_base ~base_path =
-  Filename.concat (Filename.concat base_path ".oas") "eval"
+  Filename.concat (Filename.concat base_path ".agent_core") "eval"
 
 let eval_dir ~base_path ~agent_name =
   Filename.concat (eval_base ~base_path) agent_name

@@ -127,7 +127,7 @@ type active_run =
   ; redact_secrets : bool
   }
 
-exception Trace_error of Error.sdk_error
+exception Trace_error of Error.t
 
 let trace_version = 2
 let json_parse_error = Util.json_parse_error
@@ -704,7 +704,7 @@ let finish_run
   Ok run_ref
 ;;
 
-let raise_if_error : type a. (a, Error.sdk_error) result -> unit = function
+let raise_if_error : type a. (a, Error.t) result -> unit = function
   | Ok _ -> ()
   | Error err -> raise (Trace_error err)
 ;;

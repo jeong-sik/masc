@@ -1,10 +1,10 @@
-(** Forward records emitted through [Agent_sdk.Log] into the MASC
+(** Forward records emitted through [Agent_core.Log] into the MASC
     structured log ring / JSONL sink.
 
     Without this sink the agent core global sink registry is empty and all
     [Log.info] / [Log.warn] calls inside the core are silently
     dropped.  With it, every core record lands in the MASC log
-    stream with module name ["oas:<original>"] and the original
+    stream with module name ["agent_core:<original>"] and the original
     structured fields preserved as JSON [details].
 
     Should be called exactly once during server bootstrap. *)

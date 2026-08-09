@@ -58,7 +58,7 @@ type completion_request_error =
   | Output_token_resolution_failed of Types.required_output_token_error
   | Invalid_completion_request of string
 
-(** Whether OAS has an exact provider-native measurement adapter for this
+(** Whether AGENT_CORE has an exact provider-native measurement adapter for this
     request configuration. This is the support SSOT used by both measurement
     dispatch and Agent admission routing. *)
 val supports_completion_request_measurement : Provider_config.t -> bool

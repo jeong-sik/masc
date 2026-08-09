@@ -10,7 +10,7 @@
     over-capacity request whenever atom weight exceeded the sizing sample. *)
 
 module Window = Runtime_model_input_tail_window
-module Types = Agent_sdk.Types
+module Types = Agent_core.Types
 
 let k = Window.atoms_per_window
 

@@ -10,7 +10,7 @@
       [Keeper_runtime_routing.select_runtime], or any routine that would
       shift keeper lifecycle state.
     - Does not read provider names, token counts, or context bytes —
-      those belong to OAS (see [feedback_masc-oas-layer-boundary]).
+      those belong to AGENT_CORE (see [feedback_masc-agent_core-layer-boundary]).
 
     Current scope: all projected sub-FSM live states are written directly
     into [Keeper_registry.registry_entry]. The observer no longer infers
@@ -329,8 +329,8 @@ type snapshot = {
 (** Derive a composite snapshot from a live registry entry.
 
     [correlation_id] and [run_id] may be supplied by the caller when the
-    observer is driven from a known event envelope (OAS event_bus
-    envelope, PR OAS#845). When absent, the snapshot uses
+    observer is driven from a known event envelope (AGENT_CORE event_bus
+    envelope, PR agent-core boundary). When absent, the snapshot uses
     [keeper:<name>:<transition_seq>] as a stable identifier so repeated
     reads within the same keeper transition return the same id. *)
 

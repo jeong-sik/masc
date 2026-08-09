@@ -1,7 +1,7 @@
 (** Unit tests for Artifact_service — kind/mime coercion and persisted
     artifact descriptor behavior. *)
 
-open Agent_sdk
+open Agent_core
 open Alcotest
 
 let with_temp_dir f =
@@ -9,7 +9,7 @@ let with_temp_dir f =
     Filename.concat
       (Filename.get_temp_dir_name ())
       (Printf.sprintf
-         "oas-artifact-service-%d-%06x"
+         "agent_core-artifact-service-%d-%06x"
          (Unix.getpid ())
          (Random.int 0xFFFFFF))
   in

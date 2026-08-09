@@ -1377,7 +1377,7 @@ describe('keeper runtime trace', () => {
         requested_keeper_turn_id: 7,
         manifest_keeper_turn_ids: [7],
         receipt_turn_counts: [7],
-        max_oas_turn_count: 3,
+        max_agent_core_turn_count: 3,
         provider_attempt_started_count: 1,
         provider_attempt_finished_count: 1,
         event_bus_correlated_count: 1,
@@ -1391,7 +1391,7 @@ describe('keeper runtime trace', () => {
 	        finished_count: 1,
 	        terminal_status: 'timeout',
 	        terminal_error: 'Timeout after 120.0s',
-	        terminal_exception_kind: 'outer_oas_timeout',
+	        terminal_exception_kind: 'outer_agent_core_timeout',
 	        attempts: [
 	          {
 	            ts: '2026-05-12T00:00:00Z',
@@ -1399,7 +1399,7 @@ describe('keeper runtime trace', () => {
 	            runtime_id: 'glm-coding-with-spark',
 	            status: 'timeout',
 	            error: 'Timeout after 120.0s',
-	            exception_kind: 'outer_oas_timeout',
+	            exception_kind: 'outer_agent_core_timeout',
 	          },
 	        ],
 	      },
@@ -1426,7 +1426,7 @@ describe('keeper runtime trace', () => {
         ],
         checkpoints: [
           {
-            kind: 'oas_checkpoint',
+            kind: 'agent_core_checkpoint',
             path: '/tmp/checkpoint.json',
             present: false,
             file_stat: null,
@@ -1444,7 +1444,7 @@ describe('keeper runtime trace', () => {
 	    expect(result.turn_identity.provider_lane_resolved_count).toBe(0)
 	    expect(result.turn_identity.provider_attempt_started_count).toBe(1)
 	    expect(result.provider_attempts.terminal_status).toBe('timeout')
-	    expect(result.provider_attempts.attempts[0]?.exception_kind).toBe('outer_oas_timeout')
+	    expect(result.provider_attempts.attempts[0]?.exception_kind).toBe('outer_agent_core_timeout')
 	    expect(result.event_bus.correlation_ids).toEqual(['corr-1'])
     expect(result.memory.memory_flushed_count).toBe(0)
     expect(result.memory.episodes_flushed).toBe(2)
@@ -1604,7 +1604,7 @@ describe('keeper runtime trace', () => {
 	        turn_identity: {
           requested_keeper_turn_id: 7,
           manifest_keeper_turn_ids: [7],
-          max_oas_turn_count: 4,
+          max_agent_core_turn_count: 4,
           provider_lane_resolved_count: 1,
           provider_attempt_started_count: 1,
           provider_attempt_finished_count: 1,
@@ -1647,7 +1647,7 @@ describe('keeper runtime trace', () => {
     const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit]
     expect(url).toBe('/api/v1/keepers/keeper%20sangsu/runtime-trace?trace_id=trace+1&turn_id=7&limit=50')
     expect(init.method).toBeUndefined()
-	    expect(result.turn_identity.max_oas_turn_count).toBe(4)
+	    expect(result.turn_identity.max_agent_core_turn_count).toBe(4)
 	    expect(result.provider_attempts.terminal_status).toBe('provider_returned')
 	    expect(result.memory.memory_injected_count).toBe(1)
     expect(result.runtime_lens.turn_clock.trace_id).toBe('trace 1')
@@ -1770,13 +1770,13 @@ describe('keeper lifecycle', () => {
     expect(result.history_errors).toEqual([])
   })
 
-  it('posts selected OAS history snapshot ids for deletion', async () => {
+  it('posts selected Agent Core history snapshot ids for deletion', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         ok: true,
         action: 'delete_history',
         keeper: 'keeper-test',
-        deleted_snapshot_ids: ['oas-snapshot-1.json'],
+        deleted_snapshot_ids: ['agent-core-snapshot-1.json'],
         missing_snapshot_ids: [],
         inventory: {
           keeper: 'keeper-test',
@@ -1795,16 +1795,16 @@ describe('keeper lifecycle', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await deleteKeeperHistorySnapshots('keeper-test', ['oas-snapshot-1.json'])
+    const result = await deleteKeeperHistorySnapshots('keeper-test', ['agent-core-snapshot-1.json'])
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit]
     expect(url).toBe('/api/v1/keepers/keeper-test/checkpoints')
     expect(JSON.parse(String(init.body))).toEqual({
       action: 'delete_history',
-      snapshot_ids: ['oas-snapshot-1.json'],
+      snapshot_ids: ['agent-core-snapshot-1.json'],
     })
-    expect(result.deleted_snapshot_ids).toEqual(['oas-snapshot-1.json'])
+    expect(result.deleted_snapshot_ids).toEqual(['agent-core-snapshot-1.json'])
   })
 
   it('previews and applies current checkpoint purge through the same admin route', async () => {

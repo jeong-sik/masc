@@ -8,7 +8,7 @@ let redact redaction text =
   |> Keeper_secret_redaction.redact_text redaction
 
 (* Dated per-day store, mirroring the cost-ledger appender
-   ([Keeper_hooks_oas_cost_events.emit_cost_event]); concurrent keepers
+   ([Keeper_hooks_agent_core_cost_events.emit_cost_event]); concurrent keepers
    serialise on a per-day file rather than one global blob. *)
 let wire_capture_dir masc_root = Filename.concat masc_root "wire-capture"
 
@@ -141,7 +141,7 @@ let rec redact_json_strings
     `List (List.map (redact_json_strings redaction) values)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as value -> value
 
-let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
+let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
     ~system_prompt ~extra_system_context ~user_message ~history_messages ~tools
     ?trace_id () =
   if not (enabled ()) then ()
@@ -149,7 +149,7 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
     best_effort ~site:Request_capture ~masc_root ~keeper_name ~turn_id (fun () ->
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let raw_tools =
-        List.map Agent_sdk.Tool.schema_to_json tools
+        List.map Agent_core.Tool.schema_to_json tools
       in
       let tool_schema_bytes =
         Yojson.Safe.to_string (`List raw_tools) |> String.length
@@ -158,8 +158,8 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
         List.map (redact_json_strings redaction) raw_tools
       in
       (* The replayed conversation is not copied into this record. It is
-         already durable in the OAS checkpoint and its [oas-snapshot-*]
-         history, and [capture_request] fires once per SDK turn, so
+         already durable in the AGENT_CORE checkpoint and its [agent-core-snapshot-*]
+         history, and [capture_request] fires once per agent-core turn, so
          embedding it made one record as large as the checkpoint itself
          (measured 2026-08-05: 14,465 messages = 9.8MB per record, which
          exhausts the 64MiB day-file budget after 7 records and skips every
@@ -179,7 +179,7 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
             , match trace_id with
               | Some t -> `String (Keeper_id.Trace_id.to_string t)
               | None -> `Null )
-          ; ("sdk_turn", `Int sdk_turn)
+          ; ("agent_core_turn", `Int agent_core_turn)
           ; ("system_prompt", `String (redact redaction system_prompt))
           ; ( "extra_system_context"
             , json_string_opt redaction extra_system_context )
@@ -199,7 +199,7 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
       in
       write_payload ~masc_root ~keeper_name ~turn_id payload)
 
-let capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
+let capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
     ~response_text ?trace_id () =
   if not (enabled ()) then ()
   else
@@ -215,7 +215,7 @@ let capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~sdk_turn
             , match trace_id with
               | Some t -> `String (Keeper_id.Trace_id.to_string t)
               | None -> `Null )
-          ; ("sdk_turn", `Int sdk_turn)
+          ; ("agent_core_turn", `Int agent_core_turn)
           ; ("response_text", `String (redact redaction response_text))
           ]
       in

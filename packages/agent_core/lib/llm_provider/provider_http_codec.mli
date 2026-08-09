@@ -1,6 +1,6 @@
 (** Private HTTP wire-codec projection used by Complete sync and stream paths.
 
-    The Dune library marks this module private, so external OAS consumers keep
+    The Dune library marks this module private, so external AGENT_CORE consumers keep
     using [Provider_config] and [Complete] without a codec-selection API. *)
 
 type t = private

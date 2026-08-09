@@ -254,12 +254,12 @@ let plan_fingerprint
   let version, admission_material =
     match admission_basis with
     | Measured_context_fit fit ->
-      ( "oas-exact-output-plan-v2"
+      ( "agent_core-exact-output-plan-v2"
       , [ string_of_int fit.input_tokens
         ; string_of_int fit.reserved_output_tokens
         ; string_of_int fit.max_context_tokens
         ] )
-    | Token_measurement_not_required -> "oas-exact-output-plan-unmeasured-v1", []
+    | Token_measurement_not_required -> "agent_core-exact-output-plan-unmeasured-v1", []
   in
   List.iter
     (add_part material)

@@ -28,7 +28,7 @@ type network_error_kind =
 (** Last observed streaming state when an inter-line idle deadline fired.
 
     This is deliberately transport-generic.  Provider-specific parsers
-    translate chunks into OAS SSE events first; the timeout evidence only
+    translate chunks into AGENT_CORE SSE events first; the timeout evidence only
     records the broad activity the stream was in when progress stopped. *)
 type stream_idle_state =
   | Awaiting_first_event
@@ -169,7 +169,7 @@ type provider_failure_kind =
   | Provider_reported_error of { error_type : string option }
   (** The provider sent a structurally valid error envelope inside an
       otherwise accepted response.  [error_type] is provider-owned diagnostic
-      data; OAS does not infer rate-limit or retry semantics from it. *)
+      data; AGENT_CORE does not infer rate-limit or retry semantics from it. *)
   | Request_body_too_large of
       { actual_bytes : int
       ; limit_bytes : int
@@ -179,14 +179,14 @@ type provider_failure_kind =
       independent from the model context-token window. *)
   | Response_body_too_large of { limit_bytes : int }
   (** The provider response exceeded the explicit in-memory parser boundary.
-      The connection is closed immediately; OAS never drains an unbounded
+      The connection is closed immediately; AGENT_CORE never drains an unbounded
       remainder merely to preserve connection reuse. *)
   | Empty_completion of { stop_reason : Types.stop_reason }
-  (** oas#2483: a 200 with no deliverable content (no thinking/text/tool_calls).
+  (** agent-core boundary: a 200 with no deliverable content (no thinking/text/tool_calls).
       The typed stop reason is preserved so downstream policy can distinguish,
       for example, [MaxTokens] from [EndTurn] without parsing diagnostics. *)
   | Context_overflow of { limit : int option }
-  (** oas#2947: the provider reported in its error envelope that the request
+  (** agent-core boundary: the provider reported in its error envelope that the request
       exceeded the model context window (e.g. glm code 1261 "Prompt exceeds
       max length"). Distinct from [Request_body_too_large] (a pre-dispatch
       transport byte boundary) and from an empty completion whose
@@ -266,7 +266,7 @@ val stream_idle_state_to_label : stream_idle_state -> string
 val timeout_phase_of_stream_idle_state : stream_idle_state -> timeout_phase
 val timeout_phase_to_label : timeout_phase -> string
 
-(** RFC-OAS-037: the caller-supplied knob a streaming deadline came from. A
+(** Agent Core contract: the caller-supplied knob a streaming deadline came from. A
     fired timeout names this knob so the operator tunes the budget that
     actually governed the phase, instead of always being pointed at the
     inter-token idle one. *)
@@ -589,7 +589,7 @@ val with_post_stream
     [TimeoutError { phase = Stream_idle state; _ }] so downstream
     policy can see which stream state stalled.
 
-    RFC-OAS-037: [first_event_timeout], when supplied (with [clock]),
+    Agent Core contract: [first_event_timeout], when supplied (with [clock]),
     bounds the wait for the FIRST meaningful line — the time-to-first-event
     (TTFT / prefill) window — separately from [idle_timeout], which arms
     only AFTER the first meaningful line for inter-token idle. A silent
@@ -652,7 +652,7 @@ val read_sse
     and surfaced as [TimeoutError { phase = Stream_idle state; _ }] so
     downstream policy can see which stream state stalled.
 
-    RFC-OAS-037: [first_event_timeout], when supplied (with [clock]),
+    Agent Core contract: [first_event_timeout], when supplied (with [clock]),
     bounds the wait for the FIRST line — the time-to-first-event (TTFT /
     prefill) window — separately from [idle_timeout], which arms only AFTER
     the first line for inter-token idle. A leading blank line does NOT end the

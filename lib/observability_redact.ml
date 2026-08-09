@@ -151,7 +151,7 @@ let truncate ?(max_len = default_max_len) (s : string) : string =
   if String.length s <= max_len then s
   else String.sub s 0 (String_util.utf8_char_boundary s max_len) ^ "...(truncated)"
 
-(* Blob markers (see [Tool_output.encode_for_oas]) carry structural fields
+(* Blob markers (see [Tool_output.encode_for_agent_core]) carry structural fields
    (sha256/bytes/mime) the dashboard needs to render the marker as a "Stored
    blob" preview. Decode, redact only the user-visible preview body, then
    re-encode so those fields survive intact. The prefix matchers do not match a
@@ -159,13 +159,13 @@ let truncate ?(max_len = default_max_len) (s : string) : string =
    structure correct regardless of which patterns run. *)
 let redact_preview ?(max_len = default_max_len) (s : string) : string =
   if Tool_output.is_marker s then
-    match Tool_output.decode_from_oas s with
+    match Tool_output.decode_from_agent_core s with
     | Tool_output.Decoded artifact_ref ->
         let preview =
           artifact_ref.Tool_output.preview |> truncate ~max_len
           |> redact_patterns
         in
-        Tool_output.encode_for_oas
+        Tool_output.encode_for_agent_core
           (Tool_output.Stored (Tool_output.with_preview artifact_ref preview))
     | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
         s |> truncate ~max_len |> redact_patterns

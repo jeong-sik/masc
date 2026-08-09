@@ -57,7 +57,7 @@ type mcp_error =
   | `Mcp_http_failed of string * string
   ]
 
-type sdk_error_poly =
+type core_error_poly =
   [ provider_error
   | tool_error
   | agent_error
@@ -82,7 +82,7 @@ let is_streaming_timeout_phase = function
   | Http_client.Unknown_timeout -> false
 ;;
 
-(* ── Conversion from Error.sdk_error ────────────────────── *)
+(* ── Conversion from Error.t ────────────────────── *)
 
 let of_api_error (err : Retry.api_error) : provider_error =
   match err with
@@ -141,10 +141,10 @@ let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error
       (Retry.Unknown_invalid_request, Printf.sprintf "%s: %s" r.reason r.detail)
 ;;
 
-let of_sdk_error (err : Error.sdk_error) : sdk_error_poly =
+let of_core_error (err : Error.t) : core_error_poly =
   match err with
-  | Error.Api err -> (of_api_error err :> sdk_error_poly)
-  | Error.Provider err -> (of_provider_error err :> sdk_error_poly)
+  | Error.Api err -> (of_api_error err :> core_error_poly)
+  | Error.Provider err -> (of_provider_error err :> core_error_poly)
   | Error.Agent (GuardrailViolation r) -> `Guardrail_violation (r.validator, r.reason)
   | Error.Agent (TripwireViolation r) -> `Tripwire_violation (r.tripwire, r.reason)
   | Error.Agent (InputRequired r) -> `Input_required (r.request_id, r.question)
@@ -170,9 +170,9 @@ let of_sdk_error (err : Error.sdk_error) : sdk_error_poly =
   | Error.Internal s -> `Internal s
 ;;
 
-(* ── Conversion back to Error.sdk_error ─────────────────── *)
+(* ── Conversion back to Error.t ─────────────────── *)
 
-let provider_to_sdk : provider_error -> Error.sdk_error = function
+let provider_to_error : provider_error -> Error.t = function
   | `Rate_limited (after, message) ->
     Error.Api (Retry.RateLimited { retry_after = after; message })
   | `Auth_error msg -> Error.Api (Retry.AuthError { message = msg })
@@ -204,9 +204,9 @@ let provider_to_sdk : provider_error -> Error.sdk_error = function
   | `Payment_required msg -> Error.Api (Retry.PaymentRequired { message = msg })
 ;;
 
-let to_sdk_error (err : sdk_error_poly) : Error.sdk_error =
+let to_core_error (err : core_error_poly) : Error.t =
   match err with
-  | #provider_error as e -> provider_to_sdk e
+  | #provider_error as e -> provider_to_error e
   | `Guardrail_violation (validator, reason) ->
     Error.Agent (GuardrailViolation { validator; reason })
   | `Tripwire_violation (tripwire, reason) ->
@@ -252,7 +252,7 @@ let to_sdk_error (err : sdk_error_poly) : Error.sdk_error =
 (* ── Error with context (moonpool Exn_bt.t inspired) ────── *)
 
 type error_ctx =
-  { error : sdk_error_poly
+  { error : core_error_poly
   ; stage : string option
   ; backtrace : string option
   }
@@ -261,12 +261,12 @@ let with_stage stage error = { error; stage = Some stage; backtrace = None }
 
 (* ── String / retryable ─────────────────────────────────── *)
 
-let to_string (err : [< sdk_error_poly ]) : string =
-  to_sdk_error (err :> sdk_error_poly) |> Error.to_string
+let to_string (err : [< core_error_poly ]) : string =
+  to_core_error (err :> core_error_poly) |> Error.to_string
 ;;
 
-let is_retryable (err : [< sdk_error_poly ]) : bool =
-  match (err :> sdk_error_poly) with
+let is_retryable (err : [< core_error_poly ]) : bool =
+  match (err :> core_error_poly) with
   | `Rate_limited _
   | `Server_error _
   | `Overloaded
@@ -278,7 +278,7 @@ let is_retryable (err : [< sdk_error_poly ]) : bool =
   | `Mcp_tool_call_failed _
   | `Mcp_http_failed _ -> true
   (* Non-retryable: enumerated explicitly (no [_] catch-all) so a future
-     sdk_error_poly tag triggers a partial-match compiler warning instead of
+     core_error_poly tag triggers a partial-match compiler warning instead of
      being silently treated as non-retryable. error_domain.mli's purpose is to
      eliminate defensive catch-alls; this matches the exhaustive sibling
      Error.is_retryable. *)

@@ -643,7 +643,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       ; option_float target.body_timeout_s
       ])
   in
-  ("oas-exact-output-catalog-evidence-v4" :: providers) @ models @ targets
+  ("agent_core-exact-output-catalog-evidence-v4" :: providers) @ models @ targets
 ;;
 
 let frozen_environment ~io names =
@@ -829,7 +829,7 @@ let load_resolver_snapshot ~io ?(catalog = Embedded_default) () =
          in
          let identity_fingerprint =
            hash_parts
-             ([ "oas-exact-output-target-v4"
+             ([ "agent_core-exact-output-target-v4"
               ; target_ref_id target.target_ref
               ; provider.id
               ; PC.string_of_provider_kind provider.kind
@@ -891,7 +891,7 @@ let load_resolver_snapshot ~io ?(catalog = Embedded_default) () =
     |> List.concat_map (fun (id, (target : frozen_target)) ->
       [ id; target.identity.fingerprint ])
     |> fun material ->
-    Catalog_generation (hash_parts ("oas-catalog-generation-v1" :: material))
+    Catalog_generation (hash_parts ("agent_core-catalog-generation-v1" :: material))
   in
   let evidence_material =
     canonical_catalog_evidence catalog model_entries target_declarations

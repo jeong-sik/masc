@@ -681,9 +681,9 @@ describe('buildTraceEvents', () => {
 
 describe('getTraceSummary', () => {
   // Trajectory-sourced tool calls carry no cost. The dollar figure in the trace
-  // summary comes from OAS lifecycle events, which are the only events that
+  // summary comes from Agent Core lifecycle events, which are the only events that
   // report a cost the provider actually charged.
-  it('counts tool_call events; the dollar total comes from OAS events only', () => {
+  it('counts tool_call events; the dollar total comes from Agent Core events only', () => {
     traceSlots.value = {
       'keeper-a': {
         events: [
@@ -706,7 +706,7 @@ describe('getTraceSummary', () => {
     expect(summary.total_cost_usd).toBe(0)
   })
 
-  it('accumulates OAS tokens and cost from lifecycle events', () => {
+  it('accumulates Agent Core tokens and cost from lifecycle events', () => {
     traceSlots.value = {
       'agent-x': {
         events: [
@@ -715,7 +715,7 @@ describe('getTraceSummary', () => {
             ts: 1000,
             ts_iso: '',
             kind: 'lifecycle',
-            sourceLane: 'oas',
+            sourceLane: 'agentCore',
             summary: 'agent completed',
             detail: {
               input_tokens: 500,
@@ -731,7 +731,7 @@ describe('getTraceSummary', () => {
             ts: 2000,
             ts_iso: '',
             kind: 'lifecycle',
-            sourceLane: 'oas',
+            sourceLane: 'agentCore',
             summary: 'agent completed',
             detail: {
               input_tokens: 300,
@@ -752,16 +752,16 @@ describe('getTraceSummary', () => {
     }
 
     const summary = getTraceSummary('agent-x')
-    expect(summary.oas_input_tokens).toBe(800)
-    expect(summary.oas_output_tokens).toBe(230)
-    expect(summary.oas_cache_creation_tokens).toBe(50)
-    expect(summary.oas_cache_read_tokens).toBe(210)
-    expect(summary.oas_cache_miss_input_tokens).toBe(540)
+    expect(summary.agent_core_input_tokens).toBe(800)
+    expect(summary.agent_core_output_tokens).toBe(230)
+    expect(summary.agent_core_cache_creation_tokens).toBe(50)
+    expect(summary.agent_core_cache_read_tokens).toBe(210)
+    expect(summary.agent_core_cache_miss_input_tokens).toBe(540)
     expect(summary.total_cost_usd).toBeCloseTo(0.005)
     expect(summary.lifecycle_count).toBe(2)
   })
 
-  it('accumulates oas_tokens_saved from context compactions', () => {
+  it('accumulates agent_core_tokens_saved from context compactions', () => {
     traceSlots.value = {
       'agent-z': {
         events: [
@@ -769,8 +769,8 @@ describe('getTraceSummary', () => {
             id: 'c1',
             ts: 1000,
             ts_iso: '',
-            kind: 'oas_context',
-            sourceLane: 'oas',
+            kind: 'agent_core_context',
+            sourceLane: 'agentCore',
             summary: 'compact',
             detail: { before_tokens: 1000, after_tokens: 400 },
           },
@@ -778,8 +778,8 @@ describe('getTraceSummary', () => {
             id: 'c2',
             ts: 2000,
             ts_iso: '',
-            kind: 'oas_context',
-            sourceLane: 'oas',
+            kind: 'agent_core_context',
+            sourceLane: 'agentCore',
             summary: 'compact',
             detail: { before_tokens: 600, after_tokens: 300 },
           },
@@ -787,8 +787,8 @@ describe('getTraceSummary', () => {
             id: 'c3',
             ts: 3000,
             ts_iso: '',
-            kind: 'oas_context',
-            sourceLane: 'oas',
+            kind: 'agent_core_context',
+            sourceLane: 'agentCore',
             summary: 'compact (no-op)',
             detail: { before_tokens: 200, after_tokens: 200 },
           },
@@ -803,8 +803,8 @@ describe('getTraceSummary', () => {
     }
 
     const summary = getTraceSummary('agent-z')
-    expect(summary.oas_context_count).toBe(3)
-    expect(summary.oas_tokens_saved).toBe(900) // 600 + 300 + 0
+    expect(summary.agent_core_context_count).toBe(3)
+    expect(summary.agent_core_tokens_saved).toBe(900) // 600 + 300 + 0
   })
 
   it('counts durable llm_request and error_occurred events', () => {
@@ -816,7 +816,7 @@ describe('getTraceSummary', () => {
             ts: 1000,
             ts_iso: '',
             kind: 'lifecycle',
-            sourceLane: 'oas',
+            sourceLane: 'agentCore',
             summary: 'LLM 요청',
             detail: { durable_kind: 'llm_request', turn: 1, model: 'qwen', input_tokens: 100 },
           },
@@ -825,7 +825,7 @@ describe('getTraceSummary', () => {
             ts: 1500,
             ts_iso: '',
             kind: 'lifecycle',
-            sourceLane: 'oas',
+            sourceLane: 'agentCore',
             summary: 'LLM 요청',
             detail: { durable_kind: 'llm_request', turn: 2, model: 'qwen', input_tokens: 200 },
           },
@@ -834,8 +834,8 @@ describe('getTraceSummary', () => {
             ts: 2000,
             ts_iso: '',
             kind: 'lifecycle',
-            sourceLane: 'oas',
-            summary: 'OAS 에러',
+            sourceLane: 'agentCore',
+            summary: 'Agent Core 에러',
             detail: { durable_kind: 'error_occurred', turn: 2, error_domain: 'Api', detail: 'timeout' },
           },
         ],
@@ -849,8 +849,8 @@ describe('getTraceSummary', () => {
     }
 
     const summary = getTraceSummary('agent-y')
-    expect(summary.oas_llm_call_count).toBe(2)
-    expect(summary.oas_error_count).toBe(1)
+    expect(summary.agent_core_llm_call_count).toBe(2)
+    expect(summary.agent_core_error_count).toBe(1)
   })
 })
 
@@ -980,7 +980,7 @@ describe('status filter', () => {
       'keeper-a': {
         events: [
           { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'ok', detail: {} },
-          { id: '2', ts: 2000, ts_iso: '', kind: 'oas_tool', sourceLane: 'oas', summary: 'oas-ok', detail: {} },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'agent_core_tool', sourceLane: 'agentCore', summary: 'agent-core-ok', detail: {} },
           { id: '3', ts: 3000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'fail', detail: {}, error: 'err' },
         ],
         loading: false,

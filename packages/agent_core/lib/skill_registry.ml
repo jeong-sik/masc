@@ -68,7 +68,7 @@ let to_json reg =
     [ "skills", `List (list reg |> List.map skill_to_json); "count", `Int (count reg) ]
 ;;
 
-let skill_of_json (json : Yojson.Safe.t) : (Skill.t, Error.sdk_error) result =
+let skill_of_json (json : Yojson.Safe.t) : (Skill.t, Error.t) result =
   let open Yojson.Safe.Util in
   try
     let name = json |> member "name" |> to_string in
@@ -124,7 +124,7 @@ let skill_of_json (json : Yojson.Safe.t) : (Skill.t, Error.sdk_error) result =
     Error (Error.Internal (Printf.sprintf "Skill_registry.skill_of_json: %s" msg))
 ;;
 
-let of_json (json : Yojson.Safe.t) : (t, Error.sdk_error) result =
+let of_json (json : Yojson.Safe.t) : (t, Error.t) result =
   let open Yojson.Safe.Util in
   try
     let skills_json = json |> member "skills" |> to_list in

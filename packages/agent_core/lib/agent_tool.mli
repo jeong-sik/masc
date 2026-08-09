@@ -16,7 +16,7 @@
 
 (** A function that runs an agent with a prompt and returns the response.
     Captured in a closure at tool creation time. *)
-type agent_runner = string -> (Types.api_response, Error.sdk_error) result
+type agent_runner = string -> (Types.api_response, Error.t) result
 
 type child_output =
   { text : string

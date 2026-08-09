@@ -158,7 +158,7 @@ function IxGraphDag({ branch = "main" }) {
     { x: 120, y: 32, keeper: "nick0cave", hash: "7afa7d", label: "" },
     { x: 200, y: 74, keeper: "masc-improver", hash: "918fd2", label: "feat/keeper-clarity" },
     { x: 280, y: 74, keeper: "masc-improver", hash: "1c5fb3", label: "" },
-    { x: 360, y: 118, keeper: "sangsu", hash: "e45f2e", label: "oas-label" },
+    { x: 360, y: 118, keeper: "sangsu", hash: "e45f2e", label: "agent-core-label" },
     { x: 440, y: 118, keeper: "rama", hash: "44a1b9", label: "research/runtime-step2" },
     { x: 520, y: 32, keeper: "qa-king", hash: "717da6", label: "merge" },
     { x: 600, y: 32, keeper: "nick0cave", hash: "da11b0", label: "tag v0.42" },

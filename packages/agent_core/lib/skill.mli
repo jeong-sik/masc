@@ -45,7 +45,7 @@ val frontmatter_values : (string * string list) list -> string -> string list
 
 val scope_of_string : string -> scope
 val of_markdown : ?path:string -> ?scope:scope -> string -> t
-val load : ?scope:scope -> string -> (t, Error.sdk_error) result
+val load : ?scope:scope -> string -> (t, Error.t) result
 val load_dir : ?scope:scope -> string -> t list
 
 (** {1 Prompt composition} *)

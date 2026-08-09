@@ -446,7 +446,7 @@ thinking-control-format = "reasoning-effort"
     const structuredModel = env.models.find(m => m.id === 'structured')
     // thinking-control-format is present in the fixture (mirroring a real
     // runtime.toml) but intentionally NOT projected into RuntimeTomlModel:
-    // OAS request-building never reads this key (masc #21521), so the parser
+    // Agent Core request-building never reads this key (masc #21521), so the parser
     // does not resurface it as a client-editable field.
     expect(structuredModel).toMatchObject({
       jsonSupport: true,

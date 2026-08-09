@@ -1,7 +1,7 @@
 (* Fusion — 심판 (구현).
    계약/문서: fusion_judge.mli, docs/rfc/RFC-0252 §7.2
 
-   일반 에이전트 실행(Fusion_oas) + Fusion_judge_parse(LLM-facing JSON). *)
+   일반 에이전트 실행(Fusion_agent_core) + Fusion_judge_parse(LLM-facing JSON). *)
 
 (* 질문·패널 답변은 신뢰 불가(모델/사용자 생성)다. XML 메타문자를
    [String_util.escape_xml]로 escape하고 <question>/<panel_answers> 태그로 감싸,
@@ -115,17 +115,17 @@ let attach_usage
   | Ok synthesis -> Ok (synthesis, usage)
   | Error msg -> Error (Fusion_types.Parse_error msg, usage)
 
-let sdk_error_detail (e : Agent_sdk.Error.sdk_error) : string =
+let core_error_detail (e : Agent_core.Error.t) : string =
   match e with
-  | Agent_sdk.Error.Api api_error -> Agent_sdk.Error.Retry.error_message api_error
-  | Agent_sdk.Error.Provider provider_error ->
+  | Agent_core.Error.Api api_error -> Agent_core.Error.Retry.error_message api_error
+  | Agent_core.Error.Provider provider_error ->
     Llm_provider.Error.to_string provider_error
-  | Agent_sdk.Error.Agent _ | Agent_sdk.Error.Mcp _ | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _ | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _ | Agent_sdk.Error.Internal _ ->
-    Agent_sdk.Error.to_string e
+  | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _ ->
+    Agent_core.Error.to_string e
 
-(* [Agent_sdk.Error.sdk_error]를 typed {!judge_failure}로 변환한다. 두 타임아웃 variant를
+(* [Agent_core.Error.t]를 typed {!judge_failure}로 변환한다. 두 타임아웃 variant를
    모두 [Timeout]으로 propagate한다: 외곽 실행 래퍼 [Api (Retry.Timeout _)]와
    provider-level [Provider (Llm_provider.Error.Timeout _)](비스트리밍 sync 경로의
    connect_timeout이 본문 전체를 바운드해 발생, detail "timeout phase=http_operation").
@@ -136,14 +136,14 @@ let sdk_error_detail (e : Agent_sdk.Error.sdk_error) : string =
    유지한다. 이 match가 "to_string 직렬화 → substring 역분류" round-trip 안티패턴의 근본
    해소다: timeout 분류가 컴파일 타입에 묶인다. [prefix]는 호출 context(run 실패 vs
    provider 에러)의 로그/관측 prefix를 보존한다. *)
-let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
+let failure_of_core_error ~runtime_id ~prefix (e : Agent_core.Error.t) :
     Fusion_types.judge_failure =
   match e with
-  | Agent_sdk.Error.Api (Agent_sdk.Error.Retry.Timeout _)
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Timeout
+  | Agent_core.Error.Api (Agent_core.Error.Retry.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> Timeout
   | _ ->
     Provider_error
-      (prefix ^ Fusion_oas.provider_error_detail ~runtime_id (sdk_error_detail e))
+      (prefix ^ Fusion_agent_core.provider_error_detail ~runtime_id (core_error_detail e))
 
 (* 심판 출력 계약은 프롬프트와 파서가 진다. 요청은 wire response format을 싣지
    않는다: 계약은 프롬프트가 항상 싣고 다니는
@@ -176,9 +176,9 @@ let run_composed ~sw ~net ?max_tokens ~judge_system_prompt ~judge_model
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
-  let tools = if web_tools then Fusion_oas.web_tool_bundle () else [] in
+  let tools = if web_tools then Fusion_agent_core.web_tool_bundle () else [] in
   match
-    Fusion_oas.build_agent ~sw ~net ~system_prompt:judge_system_prompt ~tools
+    Fusion_agent_core.build_agent ~sw ~net ~system_prompt:judge_system_prompt ~tools
       ?max_tokens
       ~provider_config_transform:apply_fusion_judge_output_contract
       judge_model
@@ -187,32 +187,32 @@ let run_composed ~sw ~net ?max_tokens ~judge_system_prompt ~judge_model
     Error
       ( Fusion_types.Build_error
           (Printf.sprintf "judge build failed: %s"
-             (Fusion_oas.panel_failure_detail ~runtime_id:judge_model reason))
+             (Fusion_agent_core.panel_failure_detail ~runtime_id:judge_model reason))
       , Fusion_types.zero_usage )
   | Ok agent ->
     (match
-       Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Fusion_judge (fun () ->
-         Ok (Agent_sdk.Async_agent.all ~sw [ (agent, prompt) ]))
+       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Fusion_judge (fun () ->
+         Ok (Agent_core.Async_agent.all ~sw [ (agent, prompt) ]))
      with
      | Error e ->
        Error
-         ( failure_of_sdk_error ~runtime_id:judge_model ~prefix:"judge run failed: " e
+         ( failure_of_core_error ~runtime_id:judge_model ~prefix:"judge run failed: " e
          , Fusion_types.zero_usage )
      | Ok [] -> Error (Fusion_types.Empty_result, Fusion_types.zero_usage)
      | Ok ((_name, Ok resp) :: _) ->
-       let text = Fusion_oas.answer_text resp in
+       let text = Fusion_agent_core.answer_text resp in
        (* 응답은 받았으므로 소비 토큰을 회계한다 — 빈 응답이든 파싱 실패든 동일. *)
-       let usage = Fusion_oas.usage_of resp in
+       let usage = Fusion_agent_core.usage_of resp in
        if String.length (String.trim text) = 0 then
          Error
-           ( Empty_response ("judge: " ^ Fusion_oas.empty_response_detail resp)
+           ( Empty_response ("judge: " ^ Fusion_agent_core.empty_response_detail resp)
            , usage )
        else
          (* 성공 종합·파싱 실패 모두에 심판이 소비한 토큰을 묶는다(panel_answer.usage와 대칭). *)
          attach_usage (Fusion_judge_parse.of_string text) usage
      | Ok ((_name, Error e) :: _) ->
        Error
-         ( failure_of_sdk_error ~runtime_id:judge_model
+         ( failure_of_core_error ~runtime_id:judge_model
              ~prefix:"judge provider error: " e
          , Fusion_types.zero_usage ))
 
@@ -242,5 +242,5 @@ let run_meta ~sw ~net ?max_tokens ~judge_system_prompt ~judge_model ~question
 
 module For_testing = struct
   let apply_output_contract = apply_fusion_judge_output_contract
-  let failure_of_sdk_error = failure_of_sdk_error
+  let failure_of_core_error = failure_of_core_error
 end

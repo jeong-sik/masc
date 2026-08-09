@@ -130,7 +130,7 @@ type capabilities =
         of [supports_multimodal_inputs]: a row can be multimodal for images and
         still have no document representation on its wire. Serialization
         consults this at admission so a document is never re-labelled as
-        another modality (oas#2744). *)
+        another modality (agent-core boundary). *)
   ; modality_priority : Modality.priority
   ; (* Inference task *)
     task : task option
@@ -232,8 +232,8 @@ val anthropic_thinking_control_for_model_id : string -> anthropic_thinking_contr
 
     The catalog is resolved by {!Model_catalog.global}: an explicit runtime
     override installed via {!Model_catalog.set_global}, otherwise the
-    build-time embedded OAS [models.toml]. Embedding hosts and test harnesses
-    can install an explicit runtime override; OAS performs no environment-based
+    build-time embedded AGENT_CORE [models.toml]. Embedding hosts and test harnesses
+    can install an explicit runtime override; AGENT_CORE performs no environment-based
     catalog discovery.
 
     Returns [None] when no catalog is available or when no catalog entry
@@ -243,7 +243,7 @@ val for_model_id_catalog : string -> capabilities option
 (** Look up capabilities for the explicit provider/model pair. A
     provider-scoped catalog row matches only when its normalized
     [provider_name] and complete normalized [id_prefix] equal [provider_label]
-    and [model_id], respectively. OAS never rewrites either value into slash,
+    and [model_id], respectively. AGENT_CORE never rewrites either value into slash,
     colon, or dot-qualified candidates, and does not apply family/prefix
     matching inside the provider scope. When the exact pair is absent,
     [allow_bare_fallback] controls whether this falls back to a

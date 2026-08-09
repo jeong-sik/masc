@@ -274,12 +274,12 @@ let redact_table_cell redaction = function
     Keeper_chat_blocks.Cell_value { v = redact_string redaction v; num; muted }
 
 let redact_trace_step redaction = function
-  | Keeper_chat_blocks.Trace_think { text; content_withheld; ts; oas_block_index } ->
+  | Keeper_chat_blocks.Trace_think { text; content_withheld; ts; agent_core_block_index } ->
     Keeper_chat_blocks.Trace_think
       { text = (if content_withheld then "" else redact_string redaction text)
       ; content_withheld
       ; ts = redact_string_opt redaction ts
-      ; oas_block_index
+      ; agent_core_block_index
       }
   | Keeper_chat_blocks.Trace_reason { text; detail; ts } ->
     Keeper_chat_blocks.Trace_reason
@@ -288,7 +288,7 @@ let redact_trace_step redaction = function
       ; ts = redact_string_opt redaction ts
       }
   | Keeper_chat_blocks.Trace_tool
-      { name; tool_call_id; status; dur; args; result; ts; oas_block_index } ->
+      { name; tool_call_id; status; dur; args; result; ts; agent_core_block_index } ->
     Keeper_chat_blocks.Trace_tool
       { name = redact_string redaction name
       ; tool_call_id = redact_string_opt redaction tool_call_id
@@ -297,7 +297,7 @@ let redact_trace_step redaction = function
       ; args = Option.map (redact_trace_json redaction) args
       ; result = Option.map (redact_trace_json redaction) result
       ; ts = redact_string_opt redaction ts
-      ; oas_block_index
+      ; agent_core_block_index
       }
 
 let redact_block redaction = function

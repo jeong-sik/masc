@@ -59,7 +59,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
           [
             ("trace_id", `String trace_id);
             ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
-            ("max_oas_turn_count", Json_util.int_opt_to_json scan.max_oas_turn_count);
+            ("max_agent_core_turn_count", Json_util.int_opt_to_json scan.max_agent_core_turn_count);
             ("terminal_event_present", `Bool terminal_event_present);
             ( "terminal_event",
               if terminal_event_present then `String "turn_finished" else `Null );
@@ -188,9 +188,9 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                        (if has_provider_lane then "resolved" else "empty"))
                 ~synthetic_events:[]
             );
-            ( "oas_agent",
-              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"oas_agent"
-                ~label:"OAS"
+            ( "agent_core_agent",
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"agent_core_agent"
+                ~label:"AGENT_CORE"
                 ~events:
                   [
                     Keeper_runtime_manifest.Checkpoint_loaded;

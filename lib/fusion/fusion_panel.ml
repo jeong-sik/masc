@@ -1,8 +1,8 @@
 (* Fusion — 패널 fan-out (구현).
    계약/문서: fusion_panel.mli, docs/rfc/RFC-0252 §7.1
 
-   OAS 범용 함수만 소비: Fusion_oas.build_agent → Async_agent.all(병렬).
-   fusion 개념은 OAS에 노출하지 않는다. *)
+   AGENT_CORE 범용 함수만 소비: Fusion_agent_core.build_agent → Async_agent.all(병렬).
+   fusion 개념은 AGENT_CORE에 노출하지 않는다. *)
 
 (* [panelist] = 패널 정체성 (RFC-0278, Fusion_policy.panelist_id) — 라벨 없으면 model
    그대로. panel_answer.model / panel_error.failed_model에 이 정체성을 담는다(심판·sink가
@@ -19,30 +19,30 @@
    native /api/chat format 양쪽에서 prose 반환). 결과: 모델은 prose를 반환, strict 파서가
    패널 전멸 — 2026-07-01 사고(8 run 전부 "0 of 3 panels answered",
    invalid_structured_response 17건). free text에는 이 실패 모드 자체가 없다.
-   thinking 오염 분리는 OAS 소관이며 이미 동작한다(reasoning은 별도 채널,
-   [Fusion_oas.answer_text]는 visible text만 투영 — #22854). *)
+   thinking 오염 분리는 AGENT_CORE 소관이며 이미 동작한다(reasoning은 별도 채널,
+   [Fusion_agent_core.answer_text]는 visible text만 투영 — #22854). *)
 let outcome_of_result ~(panelist : string) ~(model : string)
-    (res : (Agent_sdk.Types.api_response, Agent_sdk.Error.sdk_error) result)
+    (res : (Agent_core.Types.api_response, Agent_core.Error.t) result)
   : Fusion_types.panel_outcome
   =
   match res with
   | Ok resp ->
-    let answer = String.trim (Fusion_oas.answer_text resp) in
+    let answer = String.trim (Fusion_agent_core.answer_text resp) in
     if String.length answer = 0 then
       Fusion_types.Failed
         { failed_model = panelist
-        ; reason = Fusion_types.Empty_response (Fusion_oas.empty_response_detail resp)
+        ; reason = Fusion_types.Empty_response (Fusion_agent_core.empty_response_detail resp)
         }
     else
       Fusion_types.Answered
-        { model = panelist; answer; usage = Fusion_oas.usage_of resp }
-  | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _)) ->
+        { model = panelist; answer; usage = Fusion_agent_core.usage_of resp }
+  | Error (Agent_core.Error.Api (Agent_core.Retry.Timeout _)) ->
     (* per-agent HTTP 타임아웃을 typed [Timeout]으로. 이전에는 to_string 직렬화로
        [Provider_error]에 뭉개져, 외곽 붕괴(전 패널 동시 [Timeout])와 개별 HTTP
        타임아웃을 board 증거에서 구분할 수 없었다. [bridge_failure_of_error]·
-       [Fusion_judge.failure_of_sdk_error]와 대칭. *)
+       [Fusion_judge.failure_of_core_error]와 대칭. *)
     Fusion_types.Failed { failed_model = panelist; reason = Fusion_types.Timeout }
-  | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) ->
+  | Error (Agent_core.Error.Provider (Llm_provider.Error.Timeout _)) ->
     (* provider-level 타임아웃. 비스트리밍 sync 경로의 connect_timeout(기본 60s)이
        응답 본문 전체를 바운드해 발생하며 detail은 "timeout phase=http_operation"으로
        렌더된다. [Api (Retry.Timeout _)] 외곽 래퍼와 다른 variant라 위 arm이 잡지
@@ -56,15 +56,15 @@ let outcome_of_result ~(panelist : string) ~(model : string)
       { failed_model = panelist
       ; reason =
           Fusion_types.Provider_error
-            (Fusion_oas.provider_error_detail ~runtime_id:model
-               (Agent_sdk.Error.to_string e))
+            (Fusion_agent_core.provider_error_detail ~runtime_id:model
+               (Agent_core.Error.to_string e))
       }
 
-let bridge_failure_of_error (error : Agent_sdk.Error.sdk_error) : Fusion_types.panel_failure =
+let bridge_failure_of_error (error : Agent_core.Error.t) : Fusion_types.panel_failure =
   match error with
-  | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _)
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Fusion_types.Timeout
-  | _ -> Fusion_types.Bridge_error (Agent_sdk.Error.to_string error)
+  | Agent_core.Error.Api (Agent_core.Retry.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> Fusion_types.Timeout
+  | _ -> Fusion_types.Bridge_error (Agent_core.Error.to_string error)
 
 let run ~sw ~net ~groups ~prompt ()
   : Fusion_types.panel_outcome list
@@ -75,14 +75,14 @@ let run ~sw ~net ~groups ~prompt ()
   let built, build_failures =
     List.fold_left
       (fun acc (g : Fusion_policy.panel_group) ->
-        let tools = if g.web_tools then Fusion_oas.web_tool_bundle () else [] in
+        let tools = if g.web_tools then Fusion_agent_core.web_tool_bundle () else [] in
         List.fold_left
           (fun (oks, fails) model ->
             (* 정체성은 그룹 라벨 + model로 derive. 카드명(=정체성)으로 빌드하되 provider
                라우팅은 build_agent 내부에서 원 model로 한다 (RFC-0278). *)
             let panelist = Fusion_policy.panelist_id ~label:g.label ~model in
             match
-              Fusion_oas.build_agent ~sw ~net ~system_prompt:g.system_prompt ~tools
+              Fusion_agent_core.build_agent ~sw ~net ~system_prompt:g.system_prompt ~tools
                 ?max_tokens:g.max_output_tokens
                 ~name:panelist model
             with
@@ -97,16 +97,16 @@ let run ~sw ~net ~groups ~prompt ()
   let build_failures = List.rev build_failures in
   (* 2. 모든 그룹을 하나의 Async_agent.all에 union으로 던진다 — 이종 설정은 이미 각
         agent에 baked되어 있으므로 단일 fan-out으로 충분. [run_safe]는 예외/취소
-        관측 경계이며, timeout은 각 agent의 OAS Provider transport가 소유한다.
+        관측 경계이며, timeout은 각 agent의 AGENT_CORE Provider transport가 소유한다.
         [Async_agent.all]은 [Eio.Fiber.List.map] 기반이라 결과를 입력 순서대로 돌려준다.
         그래서 반환 name(=카드명=정체성)에 의존하지 않고 [built]와 위치로 짝지어
         (panelist, model) 둘 다 확보한다 — provider 에러 attribution에 정체성이 아닌
         raw model을 쓰기 위함 (RFC-0278). *)
   let answered =
     match
-      Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Fusion_panel (fun () ->
+      Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Fusion_panel (fun () ->
         Ok
-          (Agent_sdk.Async_agent.all ~sw
+          (Agent_core.Async_agent.all ~sw
              (List.map (fun (agent, _panelist, _model) -> (agent, prompt)) built)))
     with
     | Ok run_results ->

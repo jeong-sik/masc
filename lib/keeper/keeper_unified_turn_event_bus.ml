@@ -30,7 +30,7 @@ type drain_cancel_state =
 type event_bus_subscription =
   | No_event_bus
   | Subscribed of
-      { event_bus : Agent_sdk.Event_bus.t
+      { event_bus : Agent_core.Event_bus.t
       ; event_bus_sub : Runtime_event_bus.handle
       }
 
@@ -57,9 +57,9 @@ let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~tur
         ; event_bus_sub =
             Runtime_event_bus.subscribe
               ~capacity:256
-              ~overflow:Agent_sdk.Event_bus.Drop_oldest
+              ~overflow:Agent_core.Event_bus.Drop_oldest
               ~purpose:"keeper_turn"
-              ~filter:(Agent_sdk.Event_bus.filter_agent keeper_name)
+              ~filter:(Agent_core.Event_bus.filter_agent keeper_name)
               event_bus
         }
     | None -> No_event_bus
@@ -90,13 +90,13 @@ let record_fsm_tool_transitions ~keeper_name ~turn_id old_count events =
   let count = ref old_count in
   let transitions = ref [] in
   List.iter
-    (fun (evt : Agent_sdk.Event_bus.event) ->
+    (fun (evt : Agent_core.Event_bus.event) ->
        match evt.payload with
-       | Agent_sdk.Event_bus.ToolCalled _ ->
+       | Agent_core.Event_bus.ToolCalled _ ->
          let prev = !count in
          count := prev + 1;
          if prev = 0 then transitions := Enter_awaiting :: !transitions
-       | Agent_sdk.Event_bus.ToolCompleted _ ->
+       | Agent_core.Event_bus.ToolCompleted _ ->
          let prev = !count in
          if prev > 0
          then (

@@ -80,7 +80,7 @@ let contains_substring text needle =
 let test_verdict_event_preserves_typed_authority () =
   let event =
     VP.For_testing.verdict_event_json
-      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "oas-agent-run-7" })
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-7" })
       ~task_id:"task-001"
       ~verification_id:"vrf-001"
       ~verdict:Masc_domain.Verdict_approved
@@ -98,7 +98,7 @@ let test_verdict_event_preserves_typed_authority () =
     (event |> member "authority_kind" |> to_string);
   Alcotest.(check string)
     "authority actor"
-    "oas-agent-run-7"
+    "agent_core-agent-run-7"
     (event |> member "authority_actor" |> to_string);
   Alcotest.(check bool)
     "event does not expose verifier role"
@@ -110,7 +110,7 @@ let test_verdict_event_preserves_typed_authority () =
 let test_rejected_verdict_event_preserves_wire_type () =
   let event =
     VP.For_testing.verdict_event_json
-      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "oas-agent-run-8" })
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-8" })
       ~task_id:"task-002"
       ~verification_id:"vrf-002"
       ~verdict:(Masc_domain.Verdict_rejected { reason = "insufficient evidence" })

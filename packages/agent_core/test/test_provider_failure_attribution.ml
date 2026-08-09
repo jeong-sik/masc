@@ -1,4 +1,4 @@
-open Agent_sdk
+open Agent_core
 module Attribution = Provider_failure_attribution
 module Http = Llm_provider.Http_client
 module PC = Llm_provider.Provider_config
@@ -348,7 +348,7 @@ let test_closed_ownership_matrix () =
        })
 ;;
 
-(* oas 429 typed completion (2026-07): a raw HTTP 429 used to fall into the
+(* agent_core 429 typed completion (2026-07): a raw HTTP 429 used to fall into the
    generic [Http_status] evidence via [ownership_of_http_status]'s [_ ->
    Unclassified] catch-all, discarding any retry_after evidence. It must
    now route through the typed capacity vocabulary — [Provider_failure
@@ -420,7 +420,7 @@ let test_coarse_sdk_provider_errors_fail_closed () =
   in
   List.iter
     (fun error ->
-       match Attribution.of_sdk_error error with
+       match Attribution.of_core_error error with
        | { provider_failure = Some attribution; _ } ->
          Alcotest.check
            ownership_testable
@@ -548,7 +548,7 @@ let test_agent_sync_stream_and_legacy_projection () =
 
 let test_empty_completion_overflow_types_as_context_overflow () =
   match
-    Attribution.sdk_error_of_http_error
+    Attribution.core_error_of_http_error
       (Http.ProviderFailure
          { kind = Http.Empty_completion { stop_reason = Types.ContextWindowExceeded }
          ; message = "provider returned an empty assistant turn"
@@ -558,12 +558,12 @@ let test_empty_completion_overflow_types_as_context_overflow () =
   | other -> Alcotest.failf "expected Api ContextOverflow, got %s" (Error.to_string other)
 ;;
 
-(* oas#2947: a provider-reported overflow (glm 1261) must reach the same
+(* agent-core boundary: a provider-reported overflow (glm 1261) must reach the same
    typed [Api ContextOverflow] as the empty-completion overflow above — the
    consumer's compaction/shrink recovery branches on that constructor. *)
 let test_provider_reported_overflow_types_as_context_overflow () =
   match
-    Attribution.sdk_error_of_http_error
+    Attribution.core_error_of_http_error
       (Http.ProviderFailure
          { kind = Http.Context_overflow { limit = None }
          ; message = "Prompt exceeds max length"
@@ -579,7 +579,7 @@ let test_provider_reported_overflow_types_as_context_overflow () =
 
 let test_request_body_limit_preserves_typed_capacity_evidence () =
   match
-    Attribution.sdk_error_of_http_error
+    Attribution.core_error_of_http_error
       (Http.request_body_too_large_error ~actual_bytes:2048 ~limit_bytes:1024)
   with
   | Error.Api
@@ -602,7 +602,7 @@ let test_request_body_limit_preserves_typed_capacity_evidence () =
 
 let test_empty_completion_end_turn_stays_provider_unavailable () =
   match
-    Attribution.sdk_error_of_http_error
+    Attribution.core_error_of_http_error
       (Http.ProviderFailure
          { kind = Http.Empty_completion { stop_reason = Types.EndTurn }
          ; message = "provider returned an empty assistant turn"
@@ -613,7 +613,7 @@ let test_empty_completion_end_turn_stays_provider_unavailable () =
     Alcotest.failf "expected Provider unavailable, got %s" (Error.to_string other)
 ;;
 
-(* Regression guard: an empty turn whose stop_reason token the SDK does not
+(* Regression guard: an empty turn whose stop_reason token agent core does not
    model must not be attributed to provider unavailability. That attribution is
    retried / rotated with the identical prompt, so an overflow reported with an
    unmodeled token would loop without ever raising an error or reaching the
@@ -622,7 +622,7 @@ let test_empty_completion_end_turn_stays_provider_unavailable () =
 let test_empty_completion_unmodeled_stop_reason_fails_loud () =
   let token = "provider_specific_overflow" in
   match
-    Attribution.sdk_error_of_http_error
+    Attribution.core_error_of_http_error
       (Http.ProviderFailure
          { kind = Http.Empty_completion { stop_reason = Types.Unknown token }
          ; message = "provider returned an empty assistant turn"
@@ -642,7 +642,7 @@ let test_empty_completion_unmodeled_stop_reason_fails_loud () =
       (Error.to_string other)
 ;;
 
-(* The SDK error boundary is the second promotion site for the same rule. If it
+(* The agent-core error boundary is the second promotion site for the same rule. If it
    keeps rendering an unmodeled empty completion as provider unavailability, the
    retry loop reappears one layer below the attribution fix. *)
 let test_error_boundary_unmodeled_stop_reason_is_invalid_request () =
@@ -770,7 +770,7 @@ let () =
             `Quick
             test_empty_completion_overflow_types_as_context_overflow
         ; Alcotest.test_case
-            "provider-reported overflow types as context overflow (oas#2947)"
+            "provider-reported overflow types as context overflow (agent-core boundary)"
             `Quick
             test_provider_reported_overflow_types_as_context_overflow
         ; Alcotest.test_case

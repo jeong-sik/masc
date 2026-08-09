@@ -76,10 +76,10 @@ let keeper_runtime_dir config name =
   let dir = Filename.concat (keeper_dir_ config) name in
   ensure_dir_ dir
 
-(* Per-keeper OAS raw-trace store: one JSONL file per keeper turn under
+(* Per-keeper AGENT_CORE raw-trace store: one JSONL file per keeper turn under
    [.masc/keepers/<name>/raw-traces/].  A fresh file per turn keeps
-   [Agent_sdk.Raw_trace.create] from ever scanning previous turns' data
-   (OAS [create -> scan_next_seq -> read_all] parses the whole target
+   [Agent_core.Raw_trace.create] from ever scanning previous turns' data
+   (AGENT_CORE [create -> scan_next_seq -> read_all] parses the whole target
    file to resume its seq counter), so a corrupt or oversized historical
    trace cannot block keeper dispatch and per-turn sink creation stays
    O(1) in lifetime trace volume.  Each turn's [run_ref] (path + seq
@@ -102,7 +102,7 @@ let raw_trace_turn_counter = Atomic.make 0
    resume-appends to the (tiny, same-millisecond) existing file. *)
 let raw_trace_fresh_name_attempts = 8
 
-(* Shape mirrors OAS [Raw_trace.next_worker_run_id] (ts + pid + counter). *)
+(* Shape mirrors AGENT_CORE [Raw_trace.next_worker_run_id] (ts + pid + counter). *)
 let raw_trace_turn_basename () =
   let now_ms =
     (* NDT-OK: file-name prefix only — zero-padded ms sorts retention

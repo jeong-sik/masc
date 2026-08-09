@@ -9,7 +9,7 @@ inputs:
   cache-prefix:
     description: Prefix for the OCaml toolchain cache key
     required: false
-    default: oas-otel-02
+    default: agent_core-otel-02
 
 runs:
   using: composite

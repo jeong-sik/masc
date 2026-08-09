@@ -1,7 +1,7 @@
 (** Tests for prompt caching: usage parsing and add_usage with cache token
     fields. *)
 
-open Agent_sdk.Types
+open Agent_core.Types
 
 (* ------------------------------------------------------------------ *)
 (* parse_response: cache token extraction                               *)
@@ -23,7 +23,7 @@ let test_parse_usage_with_cache_tokens () =
   }|}
   in
   let json = Yojson.Safe.from_string json_str in
-  let resp = Agent_sdk.Llm_provider.Backend_anthropic.parse_response json in
+  let resp = Agent_core.Llm_provider.Backend_anthropic.parse_response json in
   match resp.usage with
   | Some u ->
     Alcotest.(check int) "input_tokens" 100 u.input_tokens;
@@ -47,7 +47,7 @@ let test_parse_usage_without_cache_tokens () =
   }|}
   in
   let json = Yojson.Safe.from_string json_str in
-  let resp = Agent_sdk.Llm_provider.Backend_anthropic.parse_response json in
+  let resp = Agent_core.Llm_provider.Backend_anthropic.parse_response json in
   match resp.usage with
   | Some u ->
     Alcotest.(check int) "input_tokens" 80 u.input_tokens;
@@ -111,7 +111,7 @@ let test_openai_usage_with_cached_tokens () =
   in
   let resp =
     match
-      Agent_sdk.Llm_provider.Backend_openai_parse.parse_openai_response_result json_str
+      Agent_core.Llm_provider.Backend_openai_parse.parse_openai_response_result json_str
     with
     | Ok r -> r
     | Error msg -> failwith (Llm_provider.Backend_openai_parse.parse_error_to_string msg)
@@ -143,7 +143,7 @@ let test_openai_usage_without_cached_tokens () =
   in
   let resp =
     match
-      Agent_sdk.Llm_provider.Backend_openai_parse.parse_openai_response_result json_str
+      Agent_core.Llm_provider.Backend_openai_parse.parse_openai_response_result json_str
     with
     | Ok r -> r
     | Error msg -> failwith (Llm_provider.Backend_openai_parse.parse_error_to_string msg)
@@ -174,7 +174,7 @@ let test_streaming_message_delta_with_cache () =
   }|}
   in
   match
-    Agent_sdk.Llm_provider.Streaming.parse_sse_event (Some "message_delta") data_str
+    Agent_core.Llm_provider.Streaming.parse_sse_event (Some "message_delta") data_str
   with
   | Some (MessageDelta { stop_reason; usage }) ->
     Alcotest.(check bool) "has stop_reason" true (Option.is_some stop_reason);
@@ -198,7 +198,7 @@ let test_streaming_message_delta_without_cache () =
   }|}
   in
   match
-    Agent_sdk.Llm_provider.Streaming.parse_sse_event (Some "message_delta") data_str
+    Agent_core.Llm_provider.Streaming.parse_sse_event (Some "message_delta") data_str
   with
   | Some (MessageDelta { usage; _ }) ->
     (match usage with

@@ -8,10 +8,10 @@ let check = Alcotest.(check (option string))
 
 let test_parallel_spans_have_correct_parents () =
   Eio_main.run (fun _env ->
-    let inst = Agent_sdk.Otel_tracer.create_instance_eio () in
-    let module T = (val Agent_sdk.Otel_tracer.tracer_of_instance inst) in
+    let inst = Agent_core.Otel_tracer.create_instance_eio () in
+    let module T = (val Agent_core.Otel_tracer.tracer_of_instance inst) in
     let parent_attrs =
-      { Agent_sdk.Tracing.kind = Agent_run
+      { Agent_core.Tracing.kind = Agent_run
       ; name = "parent"
       ; agent_name = "test"
       ; turn = 1
@@ -20,13 +20,13 @@ let test_parallel_spans_have_correct_parents () =
       }
     in
     T.with_span parent_attrs (fun () ->
-      let parent_span = Option.get (Agent_sdk.Otel_tracer.inst_current_span inst) in
-      let parent_id = parent_span.Agent_sdk.Otel_tracer.span_id in
+      let parent_span = Option.get (Agent_core.Otel_tracer.inst_current_span inst) in
+      let parent_id = parent_span.Agent_core.Otel_tracer.span_id in
       let child_results =
         Eio.Fiber.List.map
           (fun i ->
              let child_attrs =
-               { Agent_sdk.Tracing.kind = Tool_exec
+               { Agent_core.Tracing.kind = Tool_exec
                ; name = Printf.sprintf "child_%d" i
                ; agent_name = "test"
                ; turn = 1
@@ -36,9 +36,9 @@ let test_parallel_spans_have_correct_parents () =
              in
              T.with_span child_attrs (fun () ->
                let child_span =
-                 Option.get (Agent_sdk.Otel_tracer.inst_current_span inst)
+                 Option.get (Agent_core.Otel_tracer.inst_current_span inst)
                in
-               child_span.Agent_sdk.Otel_tracer.parent_span_id))
+               child_span.Agent_core.Otel_tracer.parent_span_id))
           [ 0; 1; 2 ]
       in
       List.iteri
@@ -49,10 +49,10 @@ let test_parallel_spans_have_correct_parents () =
 
 let test_parallel_spans_do_not_cross_contaminate () =
   Eio_main.run (fun _env ->
-    let inst = Agent_sdk.Otel_tracer.create_instance_eio () in
-    let module T = (val Agent_sdk.Otel_tracer.tracer_of_instance inst) in
+    let inst = Agent_core.Otel_tracer.create_instance_eio () in
+    let module T = (val Agent_core.Otel_tracer.tracer_of_instance inst) in
     let root_attrs =
-      { Agent_sdk.Tracing.kind = Agent_run
+      { Agent_core.Tracing.kind = Agent_run
       ; name = "root"
       ; agent_name = "test"
       ; turn = 1
@@ -68,7 +68,7 @@ let test_parallel_spans_do_not_cross_contaminate () =
         Eio.Fiber.List.map
           (fun i ->
              let sibling_attrs =
-               { Agent_sdk.Tracing.kind = Tool_exec
+               { Agent_core.Tracing.kind = Tool_exec
                ; name = Printf.sprintf "sibling_%d" i
                ; agent_name = "test"
                ; turn = 1
@@ -77,8 +77,8 @@ let test_parallel_spans_do_not_cross_contaminate () =
                }
              in
              T.with_span sibling_attrs (fun () ->
-               let span = Option.get (Agent_sdk.Otel_tracer.inst_current_span inst) in
-               span.Agent_sdk.Otel_tracer.name, span.Agent_sdk.Otel_tracer.parent_span_id))
+               let span = Option.get (Agent_core.Otel_tracer.inst_current_span inst) in
+               span.Agent_core.Otel_tracer.name, span.Agent_core.Otel_tracer.parent_span_id))
           [ 0; 1; 2 ]
       in
       (* All three siblings must have the SAME parent: the root span. *)
@@ -87,17 +87,17 @@ let test_parallel_spans_do_not_cross_contaminate () =
       in
       Alcotest.(check int "all siblings share one parent" 1) (List.length parent_ids);
       (* After all siblings finish, the active span must be the root again. *)
-      let active = Option.get (Agent_sdk.Otel_tracer.inst_current_span inst) in
+      let active = Option.get (Agent_core.Otel_tracer.inst_current_span inst) in
       Alcotest.(check string "active span is root after siblings" "agent_run/root")
-        active.Agent_sdk.Otel_tracer.name))
+        active.Agent_core.Otel_tracer.name))
 ;;
 
 let test_global_with_span_is_fiber_safe () =
   Eio_main.run (fun _env ->
     (* Ensure the global tracer is initialized inside the Eio runtime. *)
-    let (_ : Agent_sdk.Otel_tracer.span) =
-      Agent_sdk.Otel_tracer.start_span
-        { Agent_sdk.Tracing.kind = Agent_run
+    let (_ : Agent_core.Otel_tracer.span) =
+      Agent_core.Otel_tracer.start_span
+        { Agent_core.Tracing.kind = Agent_run
         ; name = "warmup"
         ; agent_name = "test"
         ; turn = 1
@@ -105,9 +105,9 @@ let test_global_with_span_is_fiber_safe () =
         ; links = []
         }
     in
-    Agent_sdk.Otel_tracer.reset ();
+    Agent_core.Otel_tracer.reset ();
     let root_attrs =
-      { Agent_sdk.Tracing.kind = Agent_run
+      { Agent_core.Tracing.kind = Agent_run
       ; name = "global_root"
       ; agent_name = "test"
       ; turn = 1
@@ -115,14 +115,14 @@ let test_global_with_span_is_fiber_safe () =
       ; links = []
       }
     in
-    Agent_sdk.Otel_tracer.with_span root_attrs (fun () ->
-      let parent_span = Option.get (Agent_sdk.Otel_tracer.current_span ()) in
-      let parent_id = parent_span.Agent_sdk.Otel_tracer.span_id in
+    Agent_core.Otel_tracer.with_span root_attrs (fun () ->
+      let parent_span = Option.get (Agent_core.Otel_tracer.current_span ()) in
+      let parent_id = parent_span.Agent_core.Otel_tracer.span_id in
       let child_ids =
         Eio.Fiber.List.map
           (fun i ->
              let child_attrs =
-               { Agent_sdk.Tracing.kind = Tool_exec
+               { Agent_core.Tracing.kind = Tool_exec
                ; name = Printf.sprintf "global_child_%d" i
                ; agent_name = "test"
                ; turn = 1
@@ -130,9 +130,9 @@ let test_global_with_span_is_fiber_safe () =
                ; links = []
                }
              in
-             Agent_sdk.Otel_tracer.with_span child_attrs (fun () ->
-               let child = Option.get (Agent_sdk.Otel_tracer.current_span ()) in
-               child.Agent_sdk.Otel_tracer.parent_span_id))
+             Agent_core.Otel_tracer.with_span child_attrs (fun () ->
+               let child = Option.get (Agent_core.Otel_tracer.current_span ()) in
+               child.Agent_core.Otel_tracer.parent_span_id))
           [ 0; 1; 2 ]
       in
       List.iteri

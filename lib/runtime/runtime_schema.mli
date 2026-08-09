@@ -71,11 +71,11 @@ type provider =
   ; healthcheck_path : string option
   ; headers : (string * string) list option
   ; connect_timeout_s : float option
-    (** Per-provider override for the OAS connect + initial-response-headers
-      wall-clock timeout (seconds). [None] keeps the OAS kind-based default
+    (** Per-provider override for the AGENT_CORE connect + initial-response-headers
+      wall-clock timeout (seconds). [None] keeps the AGENT_CORE kind-based default
       (see [Llm_provider.Provider_config.default_connect_timeout_s]). Declared
       on the provider, not the model, because it is a transport property.
-      oas#2163, RFC-OAS-026 I2: MASC declares the budget; OAS owns enforcement
+      agent-core boundary, Agent Core contract I2: MASC declares the budget; AGENT_CORE owns enforcement
       and phase=Http_operation attribution. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Present exactly when [protocol = "antigravity-cli"]. *)
@@ -84,7 +84,7 @@ type provider =
 
 (** {1 Layer 2: Model} *)
 
-(** Re-exported from OAS so thinking-control capability drift is
+(** Re-exported from AGENT_CORE so thinking-control capability drift is
     compiler-checked. *)
 type thinking_control_format =
   Llm_provider.Capabilities.thinking_control_format =
@@ -138,7 +138,7 @@ type model_spec =
   ; api_name : string
   ; tools_support : bool
   ; max_context : int option
-      (** [models.<id>.max-context] operator override. [None] means the OAS
+      (** [models.<id>.max-context] operator override. [None] means the AGENT_CORE
           capability catalog's max-context is the sole source; resolved via
           {!Runtime.resolve_max_context_of_runtime}, never read directly. *)
   ; thinking_support : bool
@@ -164,7 +164,7 @@ type binding =
   ; max_request_body_bytes : int option
         (** Serialized request-body ceiling for this binding, in bytes.
 
-            OAS validates this knob and [max_concurrent] together in one function
+            AGENT_CORE validates this knob and [max_concurrent] together in one function
             ([Llm_provider] admission declaration) and enforces this one before
             POST: it serializes the body, measures it, and returns a typed
             [Request_body_too_large] when the declared ceiling is exceeded. That
@@ -218,7 +218,7 @@ type config =
         Sole SSOT for keeper-to-runtime assignment. A
         keeper absent from this table routes to the default runtime; an
         assignment to an unknown id is rejected at load. The id is an opaque
-        binding key (only the OAS adapter parses it into provider/model/spec). *)
+        binding key (only the AGENT_CORE adapter parses it into provider/model/spec). *)
   ; media_failover : string list
     (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted
         when a turn's input modality (image/audio/document) exceeds the assigned
@@ -231,7 +231,7 @@ type config =
         Declarations are resolved against materialized runtimes at load time;
         an unknown candidate id is rejected like [\[runtime\].default]. *)
   ; exact_output_lane_decls : exact_output_lane_decl list
-    (** Raw ordered OAS target references from
+    (** Raw ordered AGENT_CORE target references from
         [\[runtime.exact_output_lanes.<id>\]]. *)
   }
 [@@deriving show, eq]

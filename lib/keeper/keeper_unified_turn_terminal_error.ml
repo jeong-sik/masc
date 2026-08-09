@@ -15,14 +15,14 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
       "%s: all runtimes exhausted (terminal) — last_err=%s attempt=%d \
        attempted_runtimes=[%s]"
       keeper_name
-      (Agent_sdk.Error.to_string err)
+      (Agent_core.Error.to_string err)
       attempt
       (String.concat ", " attempted_runtimes);
     Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string OasExecutionErrors)
+      Keeper_metrics.(to_string Agent_coreExecutionErrors)
       ~labels:
         [ "keeper", keeper_name
-        ; "phase", Keeper_oas_execution_error_phase.(to_label Runtime_exhausted)
+        ; "phase", Keeper_agent_core_execution_error_phase.(to_label Runtime_exhausted)
         ]
       ())
   else (
@@ -31,16 +31,16 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
       keeper_name
       Keeper_registry.(Packed Turn_finalizing);
     Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string OasExecutionErrors)
+      Keeper_metrics.(to_string Agent_coreExecutionErrors)
       ~labels:
         [ "keeper", keeper_name
         ; "phase"
-        , Keeper_oas_execution_error_phase.(to_label Terminal_non_exhaustion)
+        , Keeper_agent_core_execution_error_phase.(to_label Terminal_non_exhaustion)
         ]
       ();
     Log.Keeper.warn
       ~keeper_name
       "%s: turn terminal (non-exhaustion error) — err=%s attempt=%d"
       keeper_name
-      (Agent_sdk.Error.to_string err)
+      (Agent_core.Error.to_string err)
       attempt)

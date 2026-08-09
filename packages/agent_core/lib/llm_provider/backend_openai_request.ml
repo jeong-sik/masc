@@ -176,7 +176,7 @@ let capabilities_of_config (config : Provider_config.t) =
 
    Anthropic Messages REQUIRES the field on the wire; that envelope
    resolves through [Backend_anthropic.required_max_output_tokens],
-   which applies an explicit OAS required-envelope fallback (the
+   which applies an explicit AGENT_CORE required-envelope fallback (the
    catalog-declared model maximum, not a provider default) and fails loudly
    when no value is declared anywhere — no invented constants. *)
 let output_token_ceiling (config : Provider_config.t) =
@@ -262,7 +262,7 @@ let build_request_assoc_artifact
     output_token_receipt ~envelope:Types.Openai_chat_max_tokens config
   in
   let assistant_tool_content_format = caps.Capabilities.assistant_tool_content_format in
-  (* oas#2744 — degrade an unrepresentable document to a named text placeholder
+  (* agent-core boundary — degrade an unrepresentable document to a named text placeholder
      before serialization, rather than relabelling it [image_url] (the audit's
      defect) or rejecting the whole request. Rejection retroactively broke every
      later turn of any conversation that already held a document in its history
@@ -290,7 +290,7 @@ let build_request_assoc_artifact
         invalid_arg
           ("Backend_openai_request: " ^ Reasoning_history_projection.error_to_string error)
     in
-    (* oas#2483: inject the chat-template thinking token into the system turn for
+    (* agent-core boundary: inject the chat-template thinking token into the system turn for
        [Chat_template_token] rows, mirroring [backend_ollama]. Without this the
        toggle is a silent no-op on the OpenAI-compat wire ([request_control_fields]
        emits no JSON field for this format) and the model can return a

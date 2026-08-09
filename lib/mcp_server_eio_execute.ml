@@ -267,7 +267,7 @@ let execute_tool_eio
                 ()
             in
             (* Dispatch a single module by tag — creates only that module's context.
-     Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42).
+     Pre-hooks may coerce arguments (e.g. AGENT_CORE type coercion: "42" -> 42).
      Returns [Tool_result.result option] directly — no tuple intermediary. *)
             let dispatch_by_tag (tag : Tool_dispatch.module_tag) : Tool_result.result option =
               let start_time = Time_compat.now () in

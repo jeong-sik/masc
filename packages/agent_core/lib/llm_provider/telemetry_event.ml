@@ -1,4 +1,4 @@
-(** Per-turn telemetry signals emitted by the OAS inference layer.
+(** Per-turn telemetry signals emitted by the AGENT_CORE inference layer.
 
     Closed variant — every constructor has a defined consumer
     in the telemetry feedback loop. No catch-all matching.
@@ -16,7 +16,7 @@ type timeout_type =
   | Unknown_timeout
 [@@deriving yojson, show]
 
-(* RFC-OAS-019 §4.1 — typed kind breakdown for [Streaming_summary].
+(* Agent Core contract §4.1 — typed kind breakdown for [Streaming_summary].
    Counts of SSE-level deltas observed during a stream lifecycle, used
    by downstream operators to triage what a stream actually did without
    having to re-aggregate raw chunks. [done_] uses a trailing underscore
@@ -33,7 +33,7 @@ type streaming_kind_breakdown =
   }
 [@@deriving yojson, show]
 
-(* RFC-OAS-019 §4.4 — terminal classification for [Streaming_summary].
+(* Agent Core contract §4.4 — terminal classification for [Streaming_summary].
    Nominal variant rather than polymorphic — yojson serialisation is
    stable across compiler versions and ppx changes. *)
 type streaming_terminal =

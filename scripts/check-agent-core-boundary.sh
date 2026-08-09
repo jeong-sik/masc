@@ -14,9 +14,9 @@ fail() {
 [[ -f "${core_root}/test/dune" ]] || fail "missing required behavior suite"
 [[ -f "${core_root}/models.toml" ]] || fail "missing required model catalog"
 
-for retired in dune-project agent_sdk.opam .github release-please-config.json; do
-  [[ ! -e "${core_root}/${retired}" ]] \
-    || fail "independent package surface is forbidden: ${core_root}/${retired}"
+for forbidden in dune-project agent_core.opam .github release-please-config.json; do
+  [[ ! -e "${core_root}/${forbidden}" ]] \
+    || fail "independent package surface is forbidden: ${core_root}/${forbidden}"
 done
 
 dune_violations="$({

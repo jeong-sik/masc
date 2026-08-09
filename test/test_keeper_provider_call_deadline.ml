@@ -67,7 +67,7 @@ let test_a_steadily_progressing_turn_stays_near_zero () =
 (* {1 the synthetic Wall_clock timeout joins existing paths} *)
 
 let wall_clock_timeout () =
-  Agent_sdk.Error.Api
+  Agent_core.Error.Api
     (Llm_provider.Retry.Timeout
        { message = "provider call exceeded the configured wall-clock deadline"
        ; phase = Some Llm_provider.Http_client.Wall_clock
@@ -76,7 +76,7 @@ let wall_clock_timeout () =
 
 let test_wall_clock_timeout_carries_the_wall_clock_phase () =
   match wall_clock_timeout () with
-  | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { phase; _ }) ->
+  | Agent_core.Error.Api (Llm_provider.Retry.Timeout { phase; _ }) ->
     check bool "phase is Wall_clock" true
       (match phase with
        | Some Llm_provider.Http_client.Wall_clock -> true
@@ -86,7 +86,7 @@ let test_wall_clock_timeout_carries_the_wall_clock_phase () =
 
 let test_wall_clock_timeout_joins_existing_candidate_rotation () =
   let http_error =
-    Masc.Keeper_turn_driver_try_runtime.sdk_error_to_http_error
+    Masc.Keeper_turn_driver_try_runtime.core_error_to_http_error
       (wall_clock_timeout ())
   in
   match http_error with
@@ -111,7 +111,7 @@ let test_non_timeout_error_does_not_trip_the_observation_channel () =
     "an unrelated error is not misclassified as a provider timeout"
     false
     (Masc.Keeper_provider_runtime_boundary.is_provider_timeout_error
-       (Agent_sdk.Error.Api
+       (Agent_core.Error.Api
           (Llm_provider.Retry.ContextOverflow { message = "exceeded"; limit = None })))
 ;;
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "CDAL Mode Violations Evidence v1",
-  "description": "Current OAS-emitted blocked-attempt evidence for phase-1B single-run friction. This schema describes what exists today, not the richer evidence-v2 target.",
+  "description": "Current agent core-emitted blocked-attempt evidence for phase-1B single-run friction. This schema describes what exists today, not the richer evidence-v2 target.",
   "type": "array",
   "items": {
     "type": "object",

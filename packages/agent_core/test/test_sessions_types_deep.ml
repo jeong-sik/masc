@@ -7,7 +7,7 @@
     - proof_bundle (the large composite type)
     - Edge cases: None fields, empty lists, all-Some fields *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ────────────────────────────────────────────────────── *)
 
@@ -98,7 +98,7 @@ let mk_run_summary ?(final_text = Some "Done.") ?(error = None) () : Raw_trace.r
   ; hook_names = [ "pre_tool"; "post_tool" ]
   ; tool_names = [ "bash"; "read_file" ]
   ; model = Some "glm-5.1"
-  ; tool_choice = Some (Agent_sdk.Types.tool_choice_to_json Agent_sdk.Types.Any)
+  ; tool_choice = Some (Agent_core.Types.tool_choice_to_json Agent_core.Types.Any)
   ; enable_thinking = Some true
   ; preserve_thinking = Some true
   ; thinking_budget = Some 4096
@@ -435,7 +435,7 @@ let test_record_minimal () =
     ; record_type = Raw_trace.Run_started
     ; prompt = Some "hello"
     ; model = Some "glm-5.1"
-    ; tool_choice = Some (Agent_sdk.Types.tool_choice_to_json Agent_sdk.Types.Any)
+    ; tool_choice = Some (Agent_core.Types.tool_choice_to_json Agent_core.Types.Any)
     ; enable_thinking = Some false
     ; preserve_thinking = None
     ; thinking_budget = Some 2048

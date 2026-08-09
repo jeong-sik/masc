@@ -44,7 +44,7 @@ type complete_record = {
   before_tokens : int;
   after_tokens : int;
   tokens_freed : int;       (** before_tokens - after_tokens, clamped >= 0 *)
-  phase_hint : string;      (** OAS raw phase string, e.g. ["proactive(85%)"] *)
+  phase_hint : string;      (** AGENT_CORE raw phase string, e.g. ["proactive(85%)"] *)
   correlation_id : string;
   run_id : string;
 }

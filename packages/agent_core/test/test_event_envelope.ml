@@ -4,7 +4,7 @@
     Pure data: ID generation, source_clock variant round-trip,
     record construction with defaults, and JSON serialisation. *)
 
-open Agent_sdk
+open Agent_core
 open Alcotest
 
 (* ── fresh_id ──────────────────────────────────────────── *)

@@ -7,7 +7,7 @@
     - Type roundtrips *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 (* ── Config defaults ────────────────────────────────────── *)
 
@@ -133,7 +133,7 @@ let test_connect_and_load_returns_mcp_managed () =
     ; name = "typed-test"
     }
   in
-  let result : (Mcp.managed, Error.sdk_error) result =
+  let result : (Mcp.managed, Error.t) result =
     Mcp_http.connect_and_load_managed ~sw ~net spec
   in
   match result with

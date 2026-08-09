@@ -377,7 +377,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             if preserve_system then
               (* Keep only system-role messages *)
               List.filter
-                (fun (m : Agent_sdk.Types.message) ->
+                (fun (m : Agent_core.Types.message) ->
                    (=) m.role Llm_provider.Types.System)
                 existing_messages
             else
@@ -401,7 +401,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           (match meta_for_trace with
            | Some meta ->
                (match
-                  Keeper_context_runtime.save_oas_checkpoint
+                  Keeper_context_runtime.save_agent_core_checkpoint
                     ~multimodal_policy:meta.multimodal_policy
                     ~keeper_name:meta.name
                     ~session
@@ -417,7 +417,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                         err
                     in
                     Log.Keeper.warn
-                      "%s: failed to save cleared OAS checkpoint: %s"
+                      "%s: failed to save cleared AGENT_CORE checkpoint: %s"
                       name detail)
            | None -> ());
           msg_count - List.length cleared_messages
@@ -609,7 +609,7 @@ let () =
    Phase 5 Eio plumbing scope. *)
 (* RFC-0182 Phase 5 PR-B: [eio_context_missing] returns a typed "Eio context
    required" failure when masc_keeper_msg / masc_keeper_up etc. are
-   invoked from a path that lacks ?sw / ?clock (e.g. OAS handler).
+   invoked from a path that lacks ?sw / ?clock (e.g. AGENT_CORE handler).
    Production keeper dispatch from [Mcp_server_eio_execute] always
    provides them via PR-A.2 plumbing. *)
 let eio_context_missing tool_name =

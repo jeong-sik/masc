@@ -178,7 +178,7 @@ describe('keeper turn record cache token counts', () => {
       path: '/keepers/sangsu/raw-traces/turn-1.jsonl',
       start_seq: 1,
       end_seq: 4,
-      agent_name: 'oas-ollama_cloud.deepseek-v4-flash',
+      agent_name: 'agent-core-ollama_cloud.deepseek-v4-flash',
       session_id: 'trace-1',
     }
     getMock.mockResolvedValue(payload(entry({ raw_trace_run_ref: run_ref })))

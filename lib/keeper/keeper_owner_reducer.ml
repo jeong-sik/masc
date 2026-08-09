@@ -85,7 +85,7 @@ type profile_update =
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
   ; always_allow : bool option
-  ; oas_env : (string * string) list
+  ; agent_core_env : (string * string) list
   ; updated_at : string
   }
 
@@ -655,7 +655,7 @@ let apply_existing (state : state) meta command =
          ; telemetry_feedback_enabled = update.telemetry_feedback_enabled
          ; telemetry_feedback_window_hours = update.telemetry_feedback_window_hours
          ; always_allow = update.always_allow
-         ; oas_env = update.oas_env
+         ; agent_core_env = update.agent_core_env
          ; updated_at = update.updated_at
          })
   | Handoff_identity handoff ->

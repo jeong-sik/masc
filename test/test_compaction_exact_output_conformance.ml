@@ -1,6 +1,6 @@
-(** MASC-owned composition proof for the compaction OAS exact-flow boundary.
+(** MASC-owned composition proof for the compaction AGENT_CORE exact-flow boundary.
 
-    OAS owns admission, affine attempts, execute-once, advancement, and receipt
+    AGENT_CORE owns admission, affine attempts, execute-once, advancement, and receipt
     semantics. These tests observe only MASC-owned ordered opaque slot identity,
     source authority, domain validation, registry generation, and source
     terminalization. *)
@@ -11,7 +11,7 @@ module C = Keeper_compaction_llm_summarizer
 module F = Compaction_exact_output_fixture
 module Registry = Runtime_exact_output_registry
 module S = Keeper_structured_output_schema
-module T = Agent_sdk.Types
+module T = Agent_core.Types
 module U = Keeper_compaction_unit
 
 exception Cancel_after_request_arrived
@@ -159,7 +159,7 @@ let completed_exn = function
 
 let captured_observation_exn label = function
   | Some observation -> observation
-  | None -> Alcotest.failf "%s did not observe an OAS attempt identity" label
+  | None -> Alcotest.failf "%s did not observe an AGENT_CORE attempt identity" label
 ;;
 
 let check_identity label (observation : C.attempt_observation) =
@@ -237,7 +237,7 @@ let test_preparation_freezes_order_generation_and_defers_attempt_identity () =
     (Registry.generation registry)
     (C.For_testing.registry_generation prepared);
   Alcotest.(check (list string))
-    "OAS freezes the effective candidate snapshot"
+    "AGENT_CORE freezes the effective candidate snapshot"
     [ "prepare-first"; "prepare-second" ]
     (C.For_testing.candidate_snapshot_slot_ids prepared);
   Alcotest.(check int)
@@ -277,9 +277,9 @@ let test_preparation_bounds_oldest_window_by_exact_request_body () =
     | Ok _ | Error _ -> Alcotest.fail "fixture did not resolve both ordered slots"
   in
   let requirement =
-    Agent_sdk.Exact_output.make_output_requirement
+    Agent_core.Exact_output.make_output_requirement
       ~schema:S.compaction_plan_output_schema
-      ~minimum_guarantee:Agent_sdk.Exact_output.Json_syntax
+      ~minimum_guarantee:Agent_core.Exact_output.Json_syntax
   in
   let projection_bytes units =
     let window =
@@ -288,7 +288,7 @@ let test_preparation_bounds_oldest_window_by_exact_request_body () =
       | Error detail -> Alcotest.failf "projection window failed: %s" detail
     in
     match
-      Agent_sdk.Exact_output.project_request_body
+      Agent_core.Exact_output.project_request_body
         ~target:admitted_target
         ~messages:(C.For_testing.messages_for_plan ~window)
         requirement
@@ -398,7 +398,7 @@ let test_source_authority_precedes_successor_post () =
   let third = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc OAS advancement order"
+      ~source:"masc AGENT_CORE advancement order"
       [ { id = "unreachable-first"; base_url = "http://127.0.0.1:9" }
       ; { id = "successful-second"; base_url = second.base_url }
       ; { id = "forbidden-third"; base_url = third.base_url }
@@ -423,7 +423,7 @@ let test_source_authority_precedes_successor_post () =
      |> completed_exn
       : C.completed_plan);
   Alcotest.(check (list string))
-    "source authority precedes each OAS dispatch"
+    "source authority precedes each AGENT_CORE dispatch"
     [ "authorize:unreachable-first"
     ; "authorize:successful-second"
     ; "post:second"
@@ -578,13 +578,13 @@ let test_summary_that_blocks_next_exact_fold_advances_to_successor () =
       Alcotest.failf "future-fold initial window failed: %s" detail
   in
   let requirement =
-    Agent_sdk.Exact_output.make_output_requirement
+    Agent_core.Exact_output.make_output_requirement
       ~schema:S.compaction_plan_output_schema
-      ~minimum_guarantee:Agent_sdk.Exact_output.Json_syntax
+      ~minimum_guarantee:Agent_core.Exact_output.Json_syntax
   in
   let initial_request_bytes =
     match
-      Agent_sdk.Exact_output.project_request_body
+      Agent_core.Exact_output.project_request_body
         ~target:first_target
         ~messages:(C.For_testing.messages_for_plan ~window:initial_window)
         requirement
@@ -684,7 +684,7 @@ let test_semantic_exhaustion_terminalizes_final_bound () =
     !events
 ;;
 
-let test_final_oas_flow_failure_is_generic_source_terminal () =
+let test_final_agent_core_flow_failure_is_generic_source_terminal () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let failed = F.start_server ~sw ~net ~clock F.Abort_after_request in
@@ -692,7 +692,7 @@ let test_final_oas_flow_failure_is_generic_source_terminal () =
   let first_slot = "generic-flow-failure" in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc generic OAS flow failure"
+      ~source:"masc generic AGENT_CORE flow failure"
       [ { id = first_slot; base_url = failed.base_url }
       ; { id = "forbidden-failure-successor"; base_url = successor.base_url }
       ]
@@ -712,8 +712,8 @@ let test_final_oas_flow_failure_is_generic_source_terminal () =
         prepared
     with
     | Error (C.Exact_execution_terminal terminal) -> terminal
-    | Error _ -> Alcotest.fail "OAS flow failure returned the wrong failure"
-    | Ok _ -> Alcotest.fail "failed OAS flow unexpectedly succeeded"
+    | Error _ -> Alcotest.fail "AGENT_CORE flow failure returned the wrong failure"
+    | Ok _ -> Alcotest.fail "failed AGENT_CORE flow unexpectedly succeeded"
   in
   Alcotest.(check bool)
     "generic terminal does not claim receipt phase"
@@ -916,9 +916,9 @@ let () =
             `Quick
             test_summary_that_blocks_next_exact_fold_advances_to_successor
         ; Alcotest.test_case
-            "final OAS failure is generic terminal"
+            "final AGENT_CORE failure is generic terminal"
             `Quick
-            test_final_oas_flow_failure_is_generic_source_terminal
+            test_final_agent_core_flow_failure_is_generic_source_terminal
         ; Alcotest.test_case
             "semantic exhaustion terminalizes final bound"
             `Quick

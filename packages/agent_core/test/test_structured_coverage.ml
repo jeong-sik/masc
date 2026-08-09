@@ -3,7 +3,7 @@
     Targets uncovered branches in json_extractor (Type_error, Failure) and
     text_extractor edge cases not covered by test_structured.ml. *)
 
-open Agent_sdk
+open Agent_core
 open Types
 
 (* ── Helpers ────────────────────────────────────────────────────── *)

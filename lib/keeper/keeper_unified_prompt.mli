@@ -8,7 +8,7 @@
 
 (** Three-channel turn prompt. The observation frame is separated from the
     persisted user message so it can be injected per-turn (via
-    [dynamic_context]) instead of accumulating in the OAS conversation.
+    [dynamic_context]) instead of accumulating in the AGENT_CORE conversation.
 
     Feedback-loop invariant (#25193, RFC PR #25246, operator decision
     2026-07-20): [world_state] must never be persisted as a conversation

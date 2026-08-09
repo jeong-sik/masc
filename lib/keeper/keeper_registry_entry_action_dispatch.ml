@@ -39,7 +39,7 @@ let execute_observability
   | Mark_dead_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
-  | Cancel_pending_oas -> ()
+  | Cancel_pending_agent_core -> ()
 ;;
 
 let followup_event_of_action

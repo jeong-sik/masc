@@ -1,7 +1,7 @@
 (** External provider catalog overlay.
 
     Provider entries describe connection and runtime metadata without teaching
-    OAS about any downstream coordinator. The catalog augments
+    AGENT_CORE about any downstream coordinator. The catalog augments
     {!Provider_registry.default}: built-in entries remain as seed data, while
     file/runtime catalog entries overwrite or add provider ids at process
     startup.
@@ -83,7 +83,7 @@ val default_model_for_provider : t -> string -> string option
 (** Process-wide catalog overlay.
 
     Returns only the runtime override installed explicitly with {!set_global};
-    [None] means no overlay. OAS never discovers a provider catalog from the
+    [None] means no overlay. AGENT_CORE never discovers a provider catalog from the
     process environment. Callers that need a JSON overlay must call
     {!load_file} and {!set_global}. *)
 val global : unit -> t option

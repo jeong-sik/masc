@@ -91,7 +91,7 @@ describe('statePillTone', () => {
 
 describe('keeperRuntimeLabel', () => {
   it('uses the shared runtime display priority', () => {
-    expect(keeperRuntimeLabel(mk({ runtime_canonical: ' oas.seoul-1 ' }))).toBe('oas.seoul-1')
+    expect(keeperRuntimeLabel(mk({ runtime_canonical: ' agentCore.seoul-1 ' }))).toBe('agentCore.seoul-1')
     expect(keeperRuntimeLabel(mk({ selected_runtime_canonical: 'local·docker' }))).toBe('local·docker')
     expect(keeperRuntimeLabel(mk({ runtime_id: 'keeper_unified' }))).toBe('keeper_unified')
     expect(keeperRuntimeLabel(mk({}))).toBeNull()

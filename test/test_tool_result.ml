@@ -4,7 +4,7 @@ module Tool_result = Tool_result
 module Tool_dispatch = Tool_dispatch
 module Time_compat = Time_compat
 module Keeper_tool_execution = Masc.Keeper_tool_execution
-module Keeper_tools_oas = Masc.Keeper_tools_oas
+module Keeper_tools_agent_core = Masc.Keeper_tools_agent_core
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -367,16 +367,16 @@ let test_deferred_is_distinct_and_projects_one_way () =
   Alcotest.(check bool) "not completed" false (Tool_result.is_success result);
   Alcotest.(check bool) "deferred" true (Tool_result.is_deferred result);
   Alcotest.(check bool) "not failed" false (Tool_result.is_failed result);
-  match Masc.Tool_bridge.to_oas_typed_result result with
-  | Ok { Agent_sdk.Types._meta = Some (`Assoc fields); _ } ->
+  match Masc.Tool_bridge.to_agent_core_typed_result result with
+  | Ok { Agent_core.Types._meta = Some (`Assoc fields); _ } ->
     Alcotest.(check (option string))
-      "opaque OAS marker"
+      "opaque AGENT_CORE marker"
       (Some "deferred")
       (match List.assoc_opt "masc.tool_disposition" fields with
        | Some (`String value) -> Some value
        | Some _ | None -> None)
-  | Ok _ -> Alcotest.fail "deferred OAS projection omitted metadata"
-  | Error _ -> Alcotest.fail "deferred OAS projection became an error"
+  | Ok _ -> Alcotest.fail "deferred AGENT_CORE projection omitted metadata"
+  | Error _ -> Alcotest.fail "deferred AGENT_CORE projection became an error"
 ;;
 
 let test_disposition_wire_decoder_is_strict () =

@@ -1,5 +1,5 @@
 open Alcotest
-open Agent_sdk
+open Agent_core
 module Retry = Llm_provider.Retry
 
 let expect_rate_limited err =

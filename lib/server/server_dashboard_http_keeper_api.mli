@@ -92,15 +92,15 @@ include module type of Server_dashboard_http_keeper_api_types
 val stat_json_of_path : string -> Yojson.Safe.t
 (** [stat] result as JSON; [`Null] when the file is missing. *)
 
-val oas_checkpoint_summary_json :
+val agent_core_checkpoint_summary_json :
   source_kind:string ->
   snapshot_id:string ->
   path:string ->
   is_current:bool ->
   fallback_generation:int ->
-  Agent_sdk.Checkpoint.t ->
+  Agent_core.Checkpoint.t ->
   Yojson.Safe.t
-(** JSON summary of an OAS checkpoint, used by the inventory listing. *)
+(** JSON summary of an AGENT_CORE checkpoint, used by the inventory listing. *)
 
 val keeper_checkpoint_inventory_json :
   Workspace.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t
@@ -135,7 +135,7 @@ type state_diagram_runtime_projection =
 val state_diagram_runtime_projection :
   Keeper_meta_contract.keeper_meta option -> state_diagram_runtime_projection
 (** Redacted runtime/provider projection for [GET /state-diagram].
-    It never exposes concrete OAS provider or model identifiers. *)
+    It never exposes concrete AGENT_CORE provider or model identifiers. *)
 
 val state_diagram_runtime_projection_json :
   state_diagram_runtime_projection -> Yojson.Safe.t

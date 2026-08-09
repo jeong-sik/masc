@@ -1,6 +1,6 @@
 # Track9 Quota Tier Contract
 
-MASC owns the product/operator quota contract for agent work. OAS stays
+MASC owns the product/operator quota contract for agent work. agent core stays
 provider-neutral and should not inherit product tier names.
 
 ## Default Tier Budget

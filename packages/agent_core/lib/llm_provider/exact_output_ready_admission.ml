@@ -340,7 +340,7 @@ let ready_plan
   let request_body_sha256 = Plan.request_body_sha256 plan in
   let plan_fingerprint =
     Resolver.hash_parts
-      [ "oas-exact-output-ready-plan-v2"
+      [ "agent_core-exact-output-ready-plan-v2"
       ; request_body_sha256
       ; Resolver.catalog_generation_fingerprint target.generation
       ; Resolver.target_identity_fingerprint target.identity

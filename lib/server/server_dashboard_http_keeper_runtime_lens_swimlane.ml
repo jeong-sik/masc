@@ -119,7 +119,7 @@ let lane_policies =
     ; mandatory_events = [ Keeper_runtime_manifest.Runtime_routed ]
     ; terminal_events = []
     }
-  ; { lane = "oas_agent"
+  ; { lane = "agent_core_agent"
     ; mandatory_events = [ Keeper_runtime_manifest.Checkpoint_saved ]
     ; terminal_events =
         [ Keeper_runtime_manifest.Checkpoint_saved ]
@@ -152,7 +152,7 @@ let event_lane = function
     "provider"
   | Keeper_runtime_manifest.Checkpoint_loaded
   | Keeper_runtime_manifest.Checkpoint_saved ->
-    "oas_agent"
+    "agent_core_agent"
   | Keeper_runtime_manifest.Context_injected
   | Keeper_runtime_manifest.Context_compacted
   | Keeper_runtime_manifest.Event_bus_correlated ->

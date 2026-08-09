@@ -6,7 +6,7 @@
 
 (* Which exact-output lane serves Gate Auto Judge, read from the published
    runtime registry. The first slot is the model that judges; later slots are
-   OAS failover order. An unpublished or busy registry reports itself as a
+   AGENT_CORE failover order. An unpublished or busy registry reports itself as a
    closed unavailable variant instead of guessing (#26126). *)
 let judge_lane_json () =
   let lane_id = Hitl_summary_worker.lane_id in

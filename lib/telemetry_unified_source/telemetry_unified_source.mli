@@ -6,7 +6,7 @@ type source =
   | Tool_call_io
   | Trajectory_tool_call
   | Tool_usage
-  | Oas_event
+  | Agent_core_event
   | Execution_receipt
   | Goal_event
   | Tool_metric

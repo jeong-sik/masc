@@ -1133,7 +1133,7 @@ describe('thread history merge & persistence', () => {
       toolCallId: 'tc-1',
       name: 'lookup',
       ts: '2026-06-25T00:00:00.000Z',
-      oasBlockIndex: 5,
+      agentCoreBlockIndex: 5,
     })
     appendAssistantToolTraceArgsDelta('echo', 'reply-1', 'tc-1', '{"a":1}')
     markAssistantToolTraceEnded('echo', 'reply-1', 'tc-1')
@@ -1141,7 +1141,7 @@ describe('thread history merge & persistence', () => {
       toolCallId: 'tc-1',
       name: 'lookup-again',
       ts: '2026-06-25T00:00:01.000Z',
-      oasBlockIndex: 6,
+      agentCoreBlockIndex: 6,
     })
 
     const reply = keeperThreads.value.echo?.find(e => e.id === 'reply-1')
@@ -1153,7 +1153,7 @@ describe('thread history merge & persistence', () => {
         status: 'ok',
         args: '{"a":1}',
         ts: '2026-06-25T00:00:00.000Z',
-        oasBlockIndex: 5,
+        agentCoreBlockIndex: 5,
       },
     ])
   })

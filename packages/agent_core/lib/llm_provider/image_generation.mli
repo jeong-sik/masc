@@ -1,7 +1,7 @@
 (** Typed image-generation round trips for catalog-declared image models.
 
     The selected model must declare [task = "image_generation"] in the model
-    catalog (or in an explicit capability override). OAS never infers the task
+    catalog (or in an explicit capability override). AGENT_CORE never infers the task
     from a model id, endpoint, or provider label. *)
 
 type source =
@@ -50,7 +50,7 @@ type response =
     [Glm] uses the Z.AI image-generation wire. [OpenAI_compat] uses the OpenAI
     Image API wire. [Gemini] uses the current Interactions API and requests an
     image-only PNG response. Other provider kinds are rejected before I/O. The
-    caller owns any [timeout_s]; omission installs no OAS deadline. *)
+    caller owns any [timeout_s]; omission installs no AGENT_CORE deadline. *)
 val generate
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

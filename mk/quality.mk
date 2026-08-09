@@ -37,7 +37,7 @@ health:
 	@echo "Health snapshot: .health/health-snapshot.json"
 
 # Warn-only OCaml north-star snapshot. This reports risk-pattern counts without
-# changing CI policy or the public OAS/MCP/task semantics.
+# changing CI policy or the public AGENT_CORE/MCP/task semantics.
 ocaml-health:
 	@mkdir -p .health
 	bash scripts/ocaml-north-star-health.sh --json-out .health/ocaml-north-star-health.json

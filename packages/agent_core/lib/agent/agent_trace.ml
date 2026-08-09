@@ -195,7 +195,7 @@ let%test "raw trace final_text is absent for thinking-only responses" =
 ;;
 
 let with_raw_trace_run_classified_result
-      ~of_sdk_error
+      ~of_core_error
       ~error_to_string
       ~classify_success
       agent
@@ -259,7 +259,7 @@ let with_raw_trace_run_classified_result
               agent.state.config.reasoning_effort)
          ()
      with
-     | Error error -> Error (of_sdk_error error)
+     | Error error -> Error (of_core_error error)
      | Ok active ->
        let ts = Unix.gettimeofday () in
        set_lifecycle
@@ -289,7 +289,7 @@ let with_raw_trace_run_classified_result
            set_lifecycle_for_result result;
            result
          | Error err ->
-           let trace_error = Error (of_sdk_error err) in
+           let trace_error = Error (of_core_error err) in
            (try invoke_on_run_complete agent ~ok:false with
             | exn ->
               set_terminal_lifecycle ~error_to_string agent trace_error;
@@ -328,9 +328,9 @@ let with_raw_trace_run_classified_result
           Printexc.raise_with_backtrace exn backtrace))
 ;;
 
-let with_raw_trace_run_result ~of_sdk_error ~error_to_string agent user_prompt f =
+let with_raw_trace_run_result ~of_core_error ~error_to_string agent user_prompt f =
   with_raw_trace_run_classified_result
-    ~of_sdk_error
+    ~of_core_error
     ~error_to_string
     ~classify_success:(fun response ->
       Run_completed
@@ -344,7 +344,7 @@ let with_raw_trace_run_result ~of_sdk_error ~error_to_string agent user_prompt f
 
 let with_raw_trace_run agent user_prompt f =
   with_raw_trace_run_result
-    ~of_sdk_error:Fun.id
+    ~of_core_error:Fun.id
     ~error_to_string:Error.to_string
     agent
     user_prompt

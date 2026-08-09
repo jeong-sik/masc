@@ -1,8 +1,8 @@
 (** Anthropic Claude API response parsing and request building.
 
     Pure functions operating on {!Llm_provider.Types}.
-    {!build_request} uses {!Provider_config.t} (no agent_sdk coupling).
-    The legacy [build_body_assoc] in agent_sdk delegates here. *)
+    {!build_request} uses {!Provider_config.t} (no agent_core coupling).
+    The legacy [build_body_assoc] in agent_core delegates here. *)
 
 open Types
 
@@ -166,7 +166,7 @@ let effective_max_output_tokens = Backend_openai_request.effective_max_output_to
    - caller [Some n] -> clamped to the catalog ceiling with a one-shot
      WARN (shared clamp semantics via [effective_max_output_tokens]).
    - caller [None] -> the model-catalog maximum or the caller's declared
-     capability-override maximum. This is OAS's explicit required-envelope
+     capability-override maximum. This is AGENT_CORE's explicit required-envelope
      fallback, not a claim that the provider supplies that value as its
      default. The receipt preserves which declaration supplied the value;
      callers that need a smaller request bound can still pass one explicitly.
@@ -339,7 +339,7 @@ let build_request_payload
       if config.cache_system_prompt
       then (
         (* The caller owns the cache opt-in. Anthropic applies the
-           model/platform-specific minimum-token rule server-side; OAS has no
+           model/platform-specific minimum-token rule server-side; AGENT_CORE has no
            tokenizer-independent way to turn that rule into a character
            threshold. *)
         let block =
@@ -411,7 +411,7 @@ let build_request_payload
      caller with [disable_parallel_tool_use = true] and
      tools was still receiving parallel tool calls. Same class of
      silent-drop bug as #834 but for a different field; also fixes
-     the drift with the agent_sdk path in lib/api_anthropic.ml which
+     the drift with the agent_core path in lib/api_anthropic.ml which
      already nests correctly. *)
   let tool_choice_json_with_disable choice =
     let base = tool_choice_to_json choice in
@@ -430,7 +430,7 @@ let build_request_payload
       then (
         (* No explicit tool_choice but caller still wants to disable
            parallel tool use — synthesize an [auto] choice to carry
-           the flag, matching the agent_sdk path at
+           the flag, matching the agent_core path at
            lib/api_anthropic.ml. *)
         let tc =
           `Assoc [ "type", `String "auto"; "disable_parallel_tool_use", `Bool true ]

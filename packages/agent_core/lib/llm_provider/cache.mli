@@ -1,7 +1,7 @@
 (** Response cache interface for LLM completions.
 
     Consumers inject their own cache backend (in-memory, file, Redis, etc.)
-    via the [cache] record. OAS never depends on a specific implementation.
+    via the [cache] record. AGENT_CORE never depends on a specific implementation.
 
     @since 0.54.0
 

@@ -17,7 +17,7 @@ type runtime_manifest_scan =
   ; mutable total_rows : int
   ; mutable has_terminal : bool
   ; mutable terminal_keeper_turn_ids : int list
-  ; mutable max_oas_turn_count : int option
+  ; mutable max_agent_core_turn_count : int option
   ; mutable keeper_turn_ids : int list
   ; mutable event_bus_count : int
   ; mutable event_bus_correlation_ids : string list

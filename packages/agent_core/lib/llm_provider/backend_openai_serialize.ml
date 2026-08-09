@@ -1,13 +1,13 @@
 (** OpenAI-compatible request serialization.
 
-    Converts agent_sdk Types (content blocks, messages, tools) into
+    Converts agent_core Types (content blocks, messages, tools) into
     Openai Chat Completions API JSON format.
 
     @since 0.92.0 extracted from Backend_openai *)
 
 open Types
 
-(* oas#2483 — chat-template thinking-token injection (SSOT for both backends).
+(* agent-core boundary — chat-template thinking-token injection (SSOT for both backends).
 
    The chat-template thinking token is pure system-prompt content, not a
    provider-native request field. Ollama and the OpenAI-compat wire both build
@@ -82,7 +82,7 @@ let system_prompt_with_thinking_token
 ;;
 
 let%test
-    "oas#2483: Chat_template_token + enable_thinking injects the token on the \
+    "agent-core boundary: Chat_template_token + enable_thinking injects the token on the \
      OpenAI-compat side"
   =
   let caps =
@@ -105,7 +105,7 @@ let%test
   | None -> false
 ;;
 
-let%test "oas#2483: a non-token model leaves the system prompt byte-identical" =
+let%test "agent-core boundary: a non-token model leaves the system prompt byte-identical" =
   let config =
     Provider_config.make
       ~kind:Provider_config.OpenAI_compat
@@ -123,7 +123,7 @@ let%test "oas#2483: a non-token model leaves the system prompt byte-identical" =
   = Some "Base prompt."
 ;;
 
-let%test "oas#2483: enable_thinking=false does not inject the token" =
+let%test "agent-core boundary: enable_thinking=false does not inject the token" =
   let caps =
     { Capabilities.ollama_capabilities with
       thinking_control_format = Capabilities.Chat_template_token "<THINK>"
@@ -143,7 +143,7 @@ let%test "oas#2483: enable_thinking=false does not inject the token" =
   = Some "Base prompt."
 ;;
 
-let%test "oas#2488 follow-up: OpenAI-compatible default stays provider-local" =
+let%test "agent-core boundary follow-up: OpenAI-compatible default stays provider-local" =
   let caps =
     { Capabilities.ollama_capabilities with
       thinking_control_format = Capabilities.Chat_template_token "<THINK>"
@@ -228,7 +228,7 @@ let openai_content_parts_of_blocks blocks =
         (`Assoc
             [ "type", `String "image_url"; "image_url", `Assoc [ "url", `String url ] ])
     | Document { media_type; data; source_type } ->
-      (* oas#2744 — a document is not an image. This arm used to emit an
+      (* agent-core boundary — a document is not an image. This arm used to emit an
          [image_url] part, so a PDF reached the model as a picture and no layer
          reported the substitution. Chat Completions carries a document in its
          own [file] part; the payload is the same base64 data URL the sibling
@@ -655,7 +655,7 @@ let ollama_native_user_message ~modality_priority content : Yojson.Safe.t option
              ~block:"image"
              source_type
          | Document { media_type; _ } ->
-           (* oas#2744 — documents used to be appended to [images] "so vision
+           (* agent-core boundary — documents used to be appended to [images] "so vision
               models can attempt to process them as pages". The server has no
               way to tell the two apart, so that was a silent modality change.
               [ollama_messages_of_history] rejects documents at admission

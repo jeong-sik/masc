@@ -368,7 +368,7 @@ export interface DashboardRuntimeModelMetric {
    * across the telemetry window. Distinct from `avg_tok_per_sec` which is
    * wall-clock (includes queue wait + prefill + thinking in the denominator).
    * Null when no entry in the window carried timings (non-Ollama providers or
-   * legacy rows before OAS started emitting inference_timings).
+   * legacy rows before Agent Core started emitting inference_timings).
    */
   hw_decode_avg_tok_per_sec?: number | null
   hw_decode_p50_tok_per_sec?: number | null
@@ -648,7 +648,7 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     supports_extended_thinking: asBoolean(raw.supports_extended_thinking),
     supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
     accepted_reasoning_efforts: decodeNullableStringArray(raw.accepted_reasoning_efforts),
-    // Keep the server-projected wire opaque. The OCaml/OAS capability enum is
+    // Keep the server-projected wire opaque. The OCaml/Agent Core capability enum is
     // the SSOT; duplicating its variants here would drift on the next catalog
     // release and turn a received value into a false "missing" state.
     thinking_control_format: asNullableString(raw.thinking_control_format),

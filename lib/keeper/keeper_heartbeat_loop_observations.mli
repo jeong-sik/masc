@@ -7,4 +7,4 @@ val record_provider_timeout_observation
   -> keeper_name:string
   -> unit
 
-val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
+val is_provider_timeout_error : Agent_core.Error.t -> bool

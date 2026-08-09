@@ -243,7 +243,7 @@ Runtime settings and state live under `.masc/` below `--base-path`. Config files
 | File | Role |
 |------|------|
 | `runtime.toml` | Provider/model catalog + `[runtime].default`. Required to start: if it (or `[runtime].default`) is missing, the server logs `refusing to boot` and exits 1 — no environment-default fallback |
-| `oas-models-overlay.toml` | Deployment-local capability rows merged onto OAS's embedded catalog. Do not copy upstream catalog rows here |
+| `agent-core-models-overlay.toml` | Deployment-local capability rows merged onto agent core's embedded catalog. Do not copy upstream catalog rows here |
 ⚠️ **Legacy / unused keys**: If your `runtime.toml` contains `[autonomous] concurrency` or `[bootstrap] max_active_keepers`, remove it; neither key controls execution.
 
 **When creating agents**
@@ -375,7 +375,7 @@ unless they are linked from a current runbook.
 |---|---|---|
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Build/test/PR expectations | Contributor workflow, not product marketing |
 | [`ROADMAP.md`](ROADMAP.md) | 6-8 week operating view | Check its version header against `dune-project` and `CHANGELOG.md` |
-| [`docs/OAS-MASC-BOUNDARY.md`](docs/OAS-MASC-BOUNDARY.md) | MASC ↔ OAS boundary | Reference doc; prefer its `last_verified` and generated pin block over old prose elsewhere |
+| [`docs/agent core-MASC-BOUNDARY.md`](docs/agent core-MASC-BOUNDARY.md) | MASC ↔ agent core boundary | Reference doc; prefer its `last_verified` and generated pin block over old prose elsewhere |
 | [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | Spec suite entry point | Living draft; individual spec files may still carry migration context |
 | [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Keeper concepts and operator notes | Older manual; for config truth prefer [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md), [`config/runtime.toml`](config/runtime.toml), and live code |
 | [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | Release evidence bundle | Evidence format; version lines must match current release metadata before use |

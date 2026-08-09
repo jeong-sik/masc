@@ -1,6 +1,6 @@
 (** Tests for Agent_lifecycle module — snapshot building, runtime names. *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── build_snapshot tests ─────────────────────────────────── *)
 

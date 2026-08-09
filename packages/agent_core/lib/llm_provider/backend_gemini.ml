@@ -138,7 +138,7 @@ let thinking_config_of_config (config : Provider_config.t) =
         | None, None, None -> None))
 ;;
 
-let gemini_role_of_oas = function
+let gemini_role_of_agent_core = function
   | User | System | Tool -> "user"
   | Assistant -> "model"
 ;;
@@ -494,7 +494,7 @@ let attach_thought_signature thought_signature = function
 
 let parts_of_content_blocks ~role tool_signatures blocks =
   (* Gemini requires an opaque [thoughtSignature] to be replayed on the exact
-     model part that carried it. OAS represents that otherwise-unmodeled field
+     model part that carried it. AGENT_CORE represents that otherwise-unmodeled field
      as a [RedactedThinking] block immediately before its target. Adjacency is
      the structural identity: if a reducer breaks it, fail the request rather
      than attaching the signature to a different part or silently dropping it. *)
@@ -590,7 +590,7 @@ let contents_of_messages (messages : message list) =
          then
            contents
            := `Assoc
-                [ "role", `String (gemini_role_of_oas msg.role); "parts", `List parts ]
+                [ "role", `String (gemini_role_of_agent_core msg.role); "parts", `List parts ]
               :: !contents)
     (Tool_result_projection.messages projection);
   let system_instruction =

@@ -4,7 +4,7 @@
     데이터 모델. 모든 분기는 catch-all(`_`) 없이 명시되어, 새 변형 추가 시
     컴파일러가 누락 사이트를 강제로 드러낸다 (CLAUDE.md §FSM Sparse Match 회피).
 
-    이 모듈은 순수 데이터 타입만 담는다: OAS·키퍼·보드 의존 0, 독립 컴파일 가능.
+    이 모듈은 순수 데이터 타입만 담는다: AGENT_CORE·키퍼·보드 의존 0, 독립 컴파일 가능.
     fan-out(패널), 구조화 출력(심판), 게이트, 가시성은 별도 모듈이 이 타입을 소비한다.
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md
@@ -65,8 +65,8 @@ end
     (CLAUDE.md §Unknown→Permissive 회피). [Async_agent.all]이 per-agent 에러를
     격리하므로 한 패널 실패가 나머지를 죽이지 않는다. *)
 type panel_failure =
-  | Timeout  (** 구조적 타임아웃 (Masc_oas_bridge) *)
-  | Bridge_error of string  (** MASC/OAS bridge bootstrap or wrapper error *)
+  | Timeout  (** 구조적 타임아웃 (Masc_agent_core_bridge) *)
+  | Bridge_error of string  (** MASC/AGENT_CORE bridge bootstrap or wrapper error *)
   | Provider_error of string  (** provider/transport 에러, 메시지 보존 *)
   | Invalid_structured_response of string
       (** provider returned non-empty output that violated the requested panel
@@ -219,16 +219,16 @@ type judge_role =
     를 추가로 담는다. [panel_failure]를 literal하게 공유하지 않는 이유: 판(panel) 전용인
     [Invalid_max_output_tokens]가 심판에서 dead variant가 되기 때문이다.
 
-    근원에서 typed로 propagate한다: [Fusion_judge.run] 계열이 {!Agent_sdk.Error}의
+    근원에서 typed로 propagate한다: [Fusion_judge.run] 계열이 {!Agent_core.Error}의
     [Timeout] variant를 match에서 잡아 [Timeout]으로, provider/transport 에러를
     [Provider_error]로 반환한다. 호출자는 [string]을 역분류하지 않고 exhaustive match로
     분류한다. *)
 type judge_failure =
-  | Timeout  (** 구조적 타임아웃 — Agent_sdk.Error.Api (Retry.Timeout _)에서 propagate *)
+  | Timeout  (** 구조적 타임아웃 — Agent_core.Error.Api (Retry.Timeout _)에서 propagate *)
   | Provider_error of string  (** provider/transport 에러, to_string 보존 *)
   | Empty_response of string  (** 모델이 빈 응답 *)
   | Empty_result  (** Async_agent.all 이 빈 결과를 반환 *)
-  | Build_error of string  (** Fusion_oas.build_agent 실패 *)
+  | Build_error of string  (** Fusion_agent_core.build_agent 실패 *)
   | Parse_error of string  (** Fusion_judge_parse.of_string 파싱 실패 *)
   | Panels_unavailable of skip_reason
       (** 패널 정족수 미달로 심판이 실행조차 되지 않음. 2026-07-01 사고에서 이
@@ -243,7 +243,7 @@ type judge_failure =
     충분하므로 별도 bool 필드를 두지 않는다. *)
 val judge_failure_is_timeout : judge_failure -> bool
 
-(** sink/로그용 사람-가독 문자열. {!Fusion_oas.panel_failure_text}와 대칭. *)
+(** sink/로그용 사람-가독 문자열. {!Fusion_agent_core.panel_failure_text}와 대칭. *)
 val judge_failure_text : judge_failure -> string
 
 (** 대시보드 failure_code 키용 정규화 태그(timeout/provider_error/...). *)

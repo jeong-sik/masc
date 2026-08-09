@@ -96,8 +96,8 @@ describe('workspace API', () => {
   it('fetchWorkspaceFile appends repo_id param when provided', async () => {
     stubFetch({ ok: true, content: 'let x = 1\n', language: 'ocaml' })
 
-    await fetchWorkspaceFile('lib/main.ml', { repoId: 'oas' })
-    expect(mockFetch.mock.calls[0]![0]).toContain('repo_id=oas')
+    await fetchWorkspaceFile('lib/main.ml', { repoId: 'agentCore' })
+    expect(mockFetch.mock.calls[0]![0]).toContain('repo_id=agentCore')
   })
 
   it('fetchWorkspaceFile projects the route HTTP 404 as typed not-found', async () => {

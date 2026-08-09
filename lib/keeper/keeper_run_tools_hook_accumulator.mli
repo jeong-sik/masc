@@ -1,4 +1,4 @@
-(** Hook accumulator + immutable outputs for OAS Agent.run callbacks. *)
+(** Hook accumulator + immutable outputs for Agent_core.Agent.run callbacks. *)
 
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta

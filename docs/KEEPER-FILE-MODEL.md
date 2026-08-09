@@ -53,14 +53,14 @@ Current `[keeper]` fields:
 - `telemetry_feedback_enabled`
 - `telemetry_feedback_window_hours`
 - `always_allow`
-- `[keeper.oas_env]` scalar entries
+- `[keeper.agent_core_env]` scalar entries
 
 Any other TOML key fails closed as `unknown keeper TOML keys`.
 
 ## Runtime and tool context
 
 Runtime assignment lives only in `runtime.toml` under
-`[runtime.assignments]`. Tool definitions do not live in Keeper files. OAS
+`[runtime.assignments]`. Tool definitions do not live in Keeper files. agent core
 supplies the current tool schemas separately for each turn, so `AGENT.md`
 should describe behavior and boundaries without copying a tool catalog.
 

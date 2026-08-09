@@ -1,6 +1,6 @@
 (** The admitted request-body size is recorded per keeper.
 
-    These tests pin that the observer records the exact [body_bytes] OAS
+    These tests pin that the observer records the exact [body_bytes] AGENT_CORE
     reports after provider-specific serialization, attributes it to the right
     keeper, runtime and admitted cap, emits byte-scale histogram buckets, and
     admits every observation — a rejection would turn measurement into typed
@@ -205,7 +205,7 @@ let test_records_byte_scale_histogram_buckets () =
 ;;
 
 let test_admits_a_zero_byte_observation () =
-  (* OAS owns admission; a measurement path must not invent a rejection for an
+  (* AGENT_CORE owns admission; a measurement path must not invent a rejection for an
      unusual-looking value. *)
   let series =
     { keeper_name = "wire-observation-zero"

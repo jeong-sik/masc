@@ -43,7 +43,7 @@ let json_string_opt = function
     byte-identical when serialized via [Yojson.Safe.to_string]. *)
 let wrap_envelope (meta : envelope_meta) (payload : Yojson.Safe.t) : Yojson.Safe.t =
   `Assoc
-    [ "type", `String ("oas:" ^ meta.event_type)
+    [ "type", `String ("agent_core:" ^ meta.event_type)
     ; "event_type", `String meta.event_type
     ; "ts_unix", `Float meta.ts_unix
     ; "correlation_id", `String meta.correlation_id
@@ -468,7 +468,7 @@ let slot_scheduler_observed
     Used by [agent_completed] and [agent_failed] to splice the
     runtime-local Result/Error projection ([result_fields] /
     [error_fields]) onto the typed base record without forcing the
-    leaf event library to depend on [Agent_sdk] variant types.
+    leaf event library to depend on [Agent_core] variant types.
 
     Field order is [<base record fields in atd declaration order> @
     <addendum>], which matches the previous inline `Assoc path in
@@ -490,7 +490,7 @@ let merge_addendum_into_record
     [runtime_event_bridge.ml] retains its [observe_inference_cost]
     side effect (Otel_metric_store histogram) and invokes
     [agent_completed_result_fields result] to project the
-    [Agent_sdk] [Result.t] into the [result_fields] addendum. *)
+    [Agent_core] [Result.t] into the [result_fields] addendum. *)
 let agent_completed
       ~(ts_unix : float)
       ~(correlation_id : string)

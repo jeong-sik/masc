@@ -36,7 +36,7 @@ let stage_to_witness : decision_stage -> packed_decision_stage = function
 
 (* Decision stages valid as ADVANCE targets within a turn.
    Excludes [Decision_undecided] (the initial state, set only by
-   [mark_turn_started] / [mark_sdk_turn_started]).  The 2 spec-forbidden
+   [mark_turn_started] / [mark_agent_core_turn_started]).  The 2 spec-forbidden
    [<active>_to_undecided] transitions are unrepresentable through this
    type, replacing the prior runtime [invalid_arg] inside
    [set_turn_decision_stage]. *)

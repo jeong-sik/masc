@@ -156,7 +156,7 @@ Design decisions:
 - Iteration 9 (keeper sigil + illuminated drop cap): every row now
   opens with a 22 px `.sigil` disc — carved-brass circle holding the
   uppercase first letter of the module name (K for Keeper, O for
-  oas:\*, G for Governance, S for Server). `.sigil_warn` tints amber;
+  agent_core:\*, G for Governance, S for Server). `.sigil_warn` tints amber;
   `.sigil_error` becomes a blood-red glyph on a bone-lit pitch-dark
   field, echoing an illuminated-manuscript initial. The first entry's
   message gains `.message_lead` which drops a 2.4 rem Cinzel/Garamond

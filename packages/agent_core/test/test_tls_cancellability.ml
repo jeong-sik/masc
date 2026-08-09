@@ -1,16 +1,16 @@
-(** RFC-OAS-026 §10.1 regression guard: TLS read cancellability.
+(** Agent Core contract §10.1 regression guard: TLS read cancellability.
 
     [test_eio_cancellability.ml] proves [Eio.Time.with_timeout_exn]
     interrupts [Eio.Buf_read.line] over a RAW TCP loopback flow. Every
     production https provider (ollama.com, api.anthropic.com, ...) runs
-    the same [Buf_read.line] over a TLS-wrapped flow. RFC-OAS-026 §10.1
+    the same [Buf_read.line] over a TLS-wrapped flow. Agent Core contract §10.1
     flags it as medium-confidence/unverified that [with_timeout_exn]
     cancellation actually propagates into a [single_read] blocked inside
     a TLS session — the TLS layer may buffer or hold the read in a way
     that does not propagate cancellation to the underlying socket.
 
-    If TLS read cancellation does NOT propagate, the OAS stream-idle
-    deadline (RFC-OAS-026 F1) is armed at the typed-error layer but the
+    If TLS read cancellation does NOT propagate, the AGENT_CORE stream-idle
+    deadline (Agent Core contract F1) is armed at the typed-error layer but the
     physical interrupt never lands — a stalled https stream hangs past
     the configured idle deadline. This test wraps the slow-drip server
     in TLS (self-signed cert) and asserts the timeout still fires within

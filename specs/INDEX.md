@@ -47,7 +47,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | Cancellation.tla | Cancellation | manual | 2 | 1 | clean={inv:TypeOK, inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} buggy={inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} | bbed415483ac |
 | ContinuationCorrelation.tla | ContinuationCorrelation | manual | 3 | 2 | clean={inv:TypeOK, inv:ContinuationPreservesCorrelation, inv:ContinuationNeverAuthorizesOperation} correlation-buggy={inv:ContinuationPreservesCorrelation} decision-buggy={inv:ContinuationNeverAuthorizesOperation} | 65c3b699244a |
 | SandboxDispatch.tla | SandboxDispatch | manual | 2 | 1 | clean={inv:TypeOK, inv:DockerImpliesDockerVia} buggy={inv:DockerImpliesDockerVia} | 716cc822d7fb |
-| TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:OasBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | 1c05d24d93ea |
+| TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:Agent_coreBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | 1c05d24d93ea |
 
 ### specs/bug-models (12 specs)
 

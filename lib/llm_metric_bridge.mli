@@ -1,6 +1,6 @@
-(** Otel_metric_store-backed bridge for OAS [Llm_provider.Metrics.t].
+(** Otel_metric_store-backed bridge for AGENT_CORE [Llm_provider.Metrics.t].
 
-    The process-wide sink is installed early during server bootstrap so OAS
+    The process-wide sink is installed early during server bootstrap so AGENT_CORE
     provider callbacks update the in-process metric store. The store is then
     exported through the OTel metrics bridge. *)
 

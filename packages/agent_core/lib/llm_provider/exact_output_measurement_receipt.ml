@@ -126,7 +126,7 @@ let measurement_receipt_request_body_sha256 snapshot = snapshot.request_body_sha
 let measurement_receipt_phase snapshot = snapshot.phase
 let measurement_receipt_dispatch_fact snapshot = snapshot.dispatch
 let measurement_receipt_outcome snapshot = snapshot.outcome
-let snapshot_format = "oas.exact-output.measurement-receipt"
+let snapshot_format = "agent_core.exact-output.measurement-receipt"
 let snapshot_version = 1
 let sha256 value = Digestif.SHA256.(to_hex (digest_string value))
 

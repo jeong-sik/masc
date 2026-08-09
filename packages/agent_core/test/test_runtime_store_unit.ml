@@ -11,7 +11,7 @@
     - snapshot_path: path generation with label sanitization
     - save_artifact_text: artifact file creation *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Temp dir helper ─────────────────────────────────────────── *)
 
@@ -19,7 +19,7 @@ let with_temp_dir f =
   let dir =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "oas-test-%d-%06x" (Unix.getpid ()) (Random.int 0xFFFFFF))
+      (Printf.sprintf "agent_core-test-%d-%06x" (Unix.getpid ()) (Random.int 0xFFFFFF))
   in
   Unix.mkdir dir 0o755;
   Fun.protect
@@ -125,7 +125,7 @@ let test_store_create_requires_explicit_root () =
 ;;
 
 let test_store_create_rejects_relative_root () =
-  match Runtime_store.create ~root:"relative/.oas-runtime" () with
+  match Runtime_store.create ~root:"relative/.agent_core-runtime" () with
   | Ok _ -> Alcotest.fail "expected relative session_root rejection"
   | Error (Error.Config (InvalidConfig { field = "session_root"; detail })) ->
     Alcotest.(check string)

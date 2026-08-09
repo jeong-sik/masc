@@ -30,7 +30,7 @@ type stop_reason = Runtime_agent_context.stop_reason =
     }
   | InputRequired of {
       turns_used : int;
-      request : Agent_sdk.Error.input_required;
+      request : Agent_core.Error.input_required;
     }
 
 type cooperative_yield_reason =
@@ -48,8 +48,8 @@ type cooperative_yield_decision =
   | Yield of cooperative_yield_reason
 
 type cooperative_yield_probe =
-  Agent_sdk.Agent.Advanced.tool_boundary ->
-  (cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
+  Agent_core.Agent.Advanced.tool_boundary ->
+  (cooperative_yield_decision, Agent_core.Error.t) result
 (** Why this single Agent Core call yielded control. [Completed] is the
     model's success path. [Yielded_to_chat_waiting] fires when an
     autonomous-lane run stopped at a turn boundary to hand the keeper's
@@ -74,20 +74,20 @@ type config = Runtime_agent_context.config = {
   provider_cfg : Llm_provider.Provider_config.t;
   model_id : string;
   system_prompt : string;
-  tools : Agent_sdk.Tool.t list;
+  tools : Agent_core.Tool.t list;
   stream_idle_timeout_s : float option;
   body_timeout_s : float option;
   max_tokens : int option;
   temperature : float option;
-  hooks : Agent_sdk.Hooks.hooks option;
-  event_bus : Agent_sdk.Event_bus.t option;
+  hooks : Agent_core.Hooks.hooks option;
+  event_bus : Agent_core.Event_bus.t option;
   session_id : string option;
   description : string option;
-  initial_messages : Agent_sdk.Types.message list;
-  model_input_projection : Agent_sdk.Agent.model_input_projection option;
+  initial_messages : Agent_core.Types.message list;
+  model_input_projection : Agent_core.Agent.model_input_projection option;
   pre_dispatch_serialization_observer :
-    Agent_sdk.Agent.pre_dispatch_serialization_observer option;
-  raw_trace : Agent_sdk.Raw_trace.t option;
+    Agent_core.Agent.pre_dispatch_serialization_observer option;
+  raw_trace : Agent_core.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;
   preserve_thinking : bool option;
@@ -95,21 +95,21 @@ type config = Runtime_agent_context.config = {
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
-  context_injector : Agent_sdk.Hooks.context_injector option;
-  context : Agent_sdk.Context.t option;
+  context_injector : Agent_core.Hooks.context_injector option;
+  context : Agent_core.Context.t option;
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;
   min_p : float option;
   on_run_complete : (bool -> unit) option;
-  checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
+  checkpoint_sink : Agent_core.Agent.checkpoint_sink option;
 }
 
 val default_config :
   name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   system_prompt:string ->
-  tools:Agent_sdk.Tool.t list ->
+  tools:Agent_core.Tool.t list ->
   config
 (** Builds a {!config} populated with sensible defaults
     for every field except the four required ones.
@@ -120,12 +120,12 @@ val default_config :
 (** {1 Run result} *)
 
 type run_result = {
-  response : Agent_sdk.Types.api_response;
-  checkpoint : Agent_sdk.Checkpoint.t option;
+  response : Agent_core.Types.api_response;
+  checkpoint : Agent_core.Checkpoint.t option;
   session_id : string;
   turns : int;
-  trace_ref : Agent_sdk.Raw_trace.run_ref option;
-  run_validation : Agent_sdk.Raw_trace.run_validation option;
+  trace_ref : Agent_core.Raw_trace.run_ref option;
+  run_validation : Agent_core.Raw_trace.run_validation option;
   runtime_observation : Runtime_observation.runtime_observation option;
   stop_reason : stop_reason;
 }
@@ -134,9 +134,9 @@ type run_result = {
 
 val label_resolution_error_to_string :
   Runtime_transport.label_resolution_error -> string
-val label_resolution_error_to_sdk_error :
+val label_resolution_error_to_core_error :
   Runtime_transport.label_resolution_error ->
-  Agent_sdk.Error.sdk_error
+  Agent_core.Error.t
 
 val resolve_provider_config_of_label :
   string -> (Llm_provider.Provider_config.t,
@@ -175,9 +175,9 @@ val decide_modality_reroute :
     liveness (deferred to RFC-0260). *)
 
 val content_blocks_for_run :
-  initial_messages:Agent_sdk.Types.message list ->
-  goal_blocks:Agent_sdk.Types.content_block list ->
-  Agent_sdk.Types.content_block list
+  initial_messages:Agent_core.Types.message list ->
+  goal_blocks:Agent_core.Types.content_block list ->
+  Agent_core.Types.content_block list
 (** Active content blocks for a single Agent Core run: prior [initial_messages] plus
     the current goal blocks. Keeper reroute and the runtime capability floor use
     this same view so media retained in history cannot bypass pre-dispatch
@@ -198,9 +198,9 @@ val caps_admit_required_modalities :
 val decide_modality_reroute_for_runtime_candidates :
   assigned:Runtime.t ->
   candidates:Runtime.t list ->
-  ?checkpoint_messages:Agent_sdk.Types.message list ->
-  ?initial_messages:Agent_sdk.Types.message list ->
-  Agent_sdk.Types.content_block list ->
+  ?checkpoint_messages:Agent_core.Types.message list ->
+  ?initial_messages:Agent_core.Types.message list ->
+  Agent_core.Types.content_block list ->
   reroute_decision
 (** Keeper-dispatch variant for scoped candidate sets such as explicit runtime
     lanes. It preserves the caller-provided candidate order and does not consult
@@ -208,8 +208,8 @@ val decide_modality_reroute_for_runtime_candidates :
 
 val strip_unsupported_modality_blocks :
   Llm_provider.Capabilities.capabilities ->
-  Agent_sdk.Types.content_block list ->
-  Agent_sdk.Types.content_block list * (string * int) list
+  Agent_core.Types.content_block list ->
+  Agent_core.Types.content_block list * (string * int) list
 (** RFC-0265 follow-up media degrade. Drop the top-level [Image]/[Document]/[Audio]
     blocks whose modality [caps] does not admit; keep text/thinking/tool blocks.
     Returns the kept blocks and a per-modality drop count. ToolResult-nested media
@@ -217,8 +217,8 @@ val strip_unsupported_modality_blocks :
 
 val strip_unsupported_modality_messages :
   Llm_provider.Capabilities.capabilities ->
-  Agent_sdk.Types.message list ->
-  Agent_sdk.Types.message list * (string * int) list
+  Agent_core.Types.message list ->
+  Agent_core.Types.message list * (string * int) list
 (** [strip_unsupported_modality_blocks] mapped over each message's content,
     accumulating the per-modality drop count across the message list. *)
 
@@ -232,7 +232,7 @@ val media_degrade_note :
     was dropped rather than vanishing. [None] when nothing was dropped. *)
 
 module For_testing : sig
-  val with_oas_tool_of_masc_hook_unset : (unit -> 'a) -> 'a
+  val with_agent_core_tool_of_masc_hook_unset : (unit -> 'a) -> 'a
 
   val stop_reason_of_cooperative_yield :
     turns_used:int -> cooperative_yield_reason -> stop_reason
@@ -242,35 +242,35 @@ module For_testing : sig
     stream_idle_timeout_s:float option ->
     process_clock:(float Eio.Time.clock_ty Eio.Resource.t, string) result ->
     ctx_clock:float Eio.Time.clock_ty Eio.Resource.t option ->
-    (float Eio.Time.clock_ty Eio.Resource.t option, Agent_sdk.Error.sdk_error) result
+    (float Eio.Time.clock_ty Eio.Resource.t option, Agent_core.Error.t) result
 
   val required_modalities_of_content_blocks :
-    Agent_sdk.Types.content_block list -> string list
+    Agent_core.Types.content_block list -> string list
 
 
   val messages_for_run_with_checkpoint :
-    checkpoint_messages:Agent_sdk.Types.message list ->
-    initial_messages:Agent_sdk.Types.message list ->
-    Agent_sdk.Types.message list
+    checkpoint_messages:Agent_core.Types.message list ->
+    initial_messages:Agent_core.Types.message list ->
+    Agent_core.Types.message list
 
   val content_blocks_for_run :
-    initial_messages:Agent_sdk.Types.message list ->
-    goal_blocks:Agent_sdk.Types.content_block list ->
-    Agent_sdk.Types.content_block list
+    initial_messages:Agent_core.Types.message list ->
+    goal_blocks:Agent_core.Types.content_block list ->
+    Agent_core.Types.content_block list
 
 
   val required_modalities_of_messages :
-    Agent_sdk.Types.message list -> string list
+    Agent_core.Types.message list -> string list
 
   val required_modalities_for_run :
-    initial_messages:Agent_sdk.Types.message list ->
-    goal_blocks:Agent_sdk.Types.content_block list ->
+    initial_messages:Agent_core.Types.message list ->
+    goal_blocks:Agent_core.Types.content_block list ->
     string list
 
   val required_modalities_for_run_with_checkpoint :
-    checkpoint_messages:Agent_sdk.Types.message list ->
-    initial_messages:Agent_sdk.Types.message list ->
-    goal_blocks:Agent_sdk.Types.content_block list ->
+    checkpoint_messages:Agent_core.Types.message list ->
+    initial_messages:Agent_core.Types.message list ->
+    goal_blocks:Agent_core.Types.content_block list ->
     string list
 
   val caps_admit_required_modalities :
@@ -279,23 +279,23 @@ module For_testing : sig
   val validate_content_blocks_for_run_against_capabilities :
     provider_label:string ->
     Llm_provider.Capabilities.capabilities ->
-    initial_messages:Agent_sdk.Types.message list ->
-    goal_blocks:Agent_sdk.Types.content_block list ->
-    (unit, Agent_sdk.Error.sdk_error) result
+    initial_messages:Agent_core.Types.message list ->
+    goal_blocks:Agent_core.Types.content_block list ->
+    (unit, Agent_core.Error.t) result
 
   val validate_content_blocks_for_run_against_capabilities_with_checkpoint :
     provider_label:string ->
     Llm_provider.Capabilities.capabilities ->
-    checkpoint_messages:Agent_sdk.Types.message list ->
-    initial_messages:Agent_sdk.Types.message list ->
-    goal_blocks:Agent_sdk.Types.content_block list ->
-    (unit, Agent_sdk.Error.sdk_error) result
+    checkpoint_messages:Agent_core.Types.message list ->
+    initial_messages:Agent_core.Types.message list ->
+    goal_blocks:Agent_core.Types.content_block list ->
+    (unit, Agent_core.Error.t) result
 
   val validate_content_blocks_against_capabilities :
     provider_label:string ->
     Llm_provider.Capabilities.capabilities ->
-    Agent_sdk.Types.content_block list ->
-    (unit, Agent_sdk.Error.sdk_error) result
+    Agent_core.Types.content_block list ->
+    (unit, Agent_core.Error.t) result
 
   val apply_runtime_model_input_capabilities :
     Llm_provider.Capabilities.capabilities ->
@@ -324,16 +324,16 @@ val build :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
-  (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
-(** Builds an [Agent_sdk.Agent.t] from a {!config} ready for a
+  (Agent_core.Agent.t, Agent_core.Error.t) result
+(** Builds an [Agent_core.Agent.t] from a {!config} ready for a
     fresh run over the HTTP provider transport. *)
 
 val resume_from_checkpoint :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
-  checkpoint:Agent_sdk.Checkpoint.t ->
-  (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
+  checkpoint:Agent_core.Checkpoint.t ->
+  (Agent_core.Agent.t, Agent_core.Error.t) result
 (** Resumes from a persisted checkpoint.  Uses
     [Runtime_agent_context.prepare_resume] to reconcile
     [checkpoint.turn_count] with the current config. *)
@@ -342,32 +342,32 @@ val run :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
-  ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?agent_core_checkpoint:Agent_core.Checkpoint.t ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
-  ?agent_ref:Agent_sdk.Agent.t option ref ->
+  ?agent_ref:Agent_core.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
   string ->
-  (run_result, Agent_sdk.Error.sdk_error) result
+  (run_result, Agent_core.Error.t) result
 (** Runs an Agent Core agent against [goal]. When
-    [oas_checkpoint] is present, {!resume_from_checkpoint}
+    [agent_core_checkpoint] is present, {!resume_from_checkpoint}
     is used; otherwise {!build} produces a fresh agent.
     Returns the wrapped {!run_result}; errors propagate
-    as [Agent_sdk.Error.sdk_error]. *)
+    as [Agent_core.Error.t]. *)
 
 val run_blocks :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
-  ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?agent_core_checkpoint:Agent_core.Checkpoint.t ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
-  ?agent_ref:Agent_sdk.Agent.t option ref ->
+  ?agent_ref:Agent_core.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
-  Agent_sdk.Types.content_block list ->
-  (run_result, Agent_sdk.Error.sdk_error) result
+  Agent_core.Types.content_block list ->
+  (run_result, Agent_core.Error.t) result
 (** Runs an Agent Core agent against structured user-authored content blocks. *)
 
 val run_with_masc_tools :
@@ -376,20 +376,20 @@ val run_with_masc_tools :
   config:config ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   string ->
-  (run_result, Agent_sdk.Error.sdk_error) result
+  (run_result, Agent_core.Error.t) result
 (** Variant of {!run} that projects the supplied MASC schemas into exact inline
-    [Agent_sdk.Tool.t] values through [dispatch]. *)
+    [Agent_core.Tool.t] values through [dispatch]. *)
 
-val set_oas_tool_of_masc_hook :
+val set_agent_core_tool_of_masc_hook :
   (name:string ->
    description:string ->
    input_schema:Yojson.Safe.t ->
    (Yojson.Safe.t -> Tool_result.result) ->
-   Agent_sdk.Tool.t) ->
+   Agent_core.Tool.t) ->
   unit
-(** [set_oas_tool_of_masc_hook f] registers a function to project MASC tool schemas
-    into Agent_sdk.Tool.t. Used to decouple the [Tool_bridge] module. *)
+(** [set_agent_core_tool_of_masc_hook f] registers a function to project MASC tool schemas
+    into Agent_core.Tool.t. Used to decouple the [Tool_bridge] module. *)

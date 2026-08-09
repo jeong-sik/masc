@@ -52,10 +52,10 @@ function normalizeNamespace(raw: unknown): OperatorNamespaceSnapshot {
 }
 
 function normalizeInferenceInflight(raw: unknown): InferenceInflightSnapshot | null {
-  if (!isRecord(raw) || raw.boundary_owner !== 'oas_runtime') return null
+  if (!isRecord(raw) || raw.boundary_owner !== 'agent_core_runtime') return null
   const active = asNumber(raw.active)
   if (active === undefined || !Number.isSafeInteger(active) || active < 0) return null
-  return { boundary_owner: 'oas_runtime', active }
+  return { boundary_owner: 'agent_core_runtime', active }
 }
 
 function normalizeGuidanceSummary(raw: unknown): OperatorGuidanceSummary | null {

@@ -213,7 +213,7 @@ because most runtime code already follows that shape.
 ### Runtime Lens Boundary (provider/model identity in JSON)
 
 The Runtime Lens redacts provider/model identity at **external** surfaces
-(metric labels, dashboard OAS bridge, provider error envelopes,
+(metric labels, dashboard agent core bridge, provider error envelopes,
 keeper unified metrics redacted variants). It must **NOT** redact at
 **internal observability** surfaces (boot log, audit log,
 operator-facing `Log.*.info`).

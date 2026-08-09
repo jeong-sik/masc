@@ -76,10 +76,10 @@ describe('notify rules (persisted, per-event-kind opt-in)', () => {
   it('round-trips a disabled rule across a fresh module load', async () => {
     uninstallNotification()
     const first = await loadNotifications()
-    first.setNotifyRuleEnabled('oas:agent_failed', false)
+    first.setNotifyRuleEnabled('agent_core:agent_failed', false)
 
     const second = await loadNotifications()
-    expect(second.isNotifyRuleEnabled('oas:agent_failed')).toBe(false)
+    expect(second.isNotifyRuleEnabled('agent_core:agent_failed')).toBe(false)
     expect(second.isNotifyRuleEnabled('keeper_guardrail')).toBe(true)
   })
 
@@ -88,14 +88,14 @@ describe('notify rules (persisted, per-event-kind opt-in)', () => {
       keeper_guardrail: false,
       keeper_handoff: 'false',
       'approval:pending': 0,
-      'oas:agent_failed': true,
+      'agent_core:agent_failed': true,
       unknown_kind: false,
     }))
     const notif = await loadNotifications()
     expect(notif.isNotifyRuleEnabled('keeper_guardrail')).toBe(false)
     expect(notif.isNotifyRuleEnabled('keeper_handoff')).toBe(true)
     expect(notif.isNotifyRuleEnabled('approval:pending')).toBe(true)
-    expect(notif.isNotifyRuleEnabled('oas:agent_failed')).toBe(true)
+    expect(notif.isNotifyRuleEnabled('agent_core:agent_failed')).toBe(true)
   })
 })
 
@@ -188,13 +188,13 @@ describe('event -> notification delivery (exhaustive over NotifyEventKind)', () 
     unsub()
   })
 
-  it('oas:agent_failed with a valid typed payload includes agent/task/error in the body', async () => {
+  it('agent_core:agent_failed with a valid typed payload includes agent/task/error in the body', async () => {
     const notif = await loadGrantedWithAllRulesOn()
     const unsub = notif.initNotificationDelivery()
     const sse = await import('./sse')
 
     sse.lastEvent.value = baseEvent({
-      type: 'oas:agent_failed',
+      type: 'agent_core:agent_failed',
       payload: {
         agent_name: 'gamma',
         task_id: 'task_7',
@@ -210,16 +210,16 @@ describe('event -> notification delivery (exhaustive over NotifyEventKind)', () 
     expect(shown?.options?.body).toContain('gamma')
     expect(shown?.options?.body).toContain('task_7')
     expect(shown?.options?.body).toContain('boom')
-    expect(shown?.options?.tag).toBe('oas:agent_failed:gamma')
+    expect(shown?.options?.tag).toBe('agent_core:agent_failed:gamma')
     unsub()
   })
 
-  it('oas:agent_failed with a malformed payload still notifies with a generic fallback (not a silent drop)', async () => {
+  it('agent_core:agent_failed with a malformed payload still notifies with a generic fallback (not a silent drop)', async () => {
     const notif = await loadGrantedWithAllRulesOn()
     const unsub = notif.initNotificationDelivery()
     const sse = await import('./sse')
 
-    sse.lastEvent.value = baseEvent({ type: 'oas:agent_failed', agent: 'delta', payload: { garbage: true } })
+    sse.lastEvent.value = baseEvent({ type: 'agent_core:agent_failed', agent: 'delta', payload: { garbage: true } })
     expect(MockNotification.instances).toHaveLength(1)
     expect(MockNotification.instances[0]?.options?.body).toContain('did not match')
     unsub()

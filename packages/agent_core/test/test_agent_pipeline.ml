@@ -3,7 +3,7 @@
     streaming, hooks, and context propagation.
     No real LLM — all responses are canned JSON. *)
 
-open Agent_sdk
+open Agent_core
 open Alcotest
 
 (* ── Mock server: stateful, multi-response ──────────── *)
@@ -477,7 +477,7 @@ let test_agent_run_pre_tool_hook () =
   | Exit -> ()
 ;;
 
-(* ── Test 9: HTTP 500 → sdk_error ────────────────────── *)
+(* ── Test 9: HTTP 500 → core_error ────────────────────── *)
 
 let start_error_mock ~sw ~net ~port status =
   let handler _conn _req body =
@@ -635,8 +635,8 @@ let () =
         ] )
     ; ( "tools"
       , [ test_case "tool use cycle" `Quick test_agent_run_tool_use
-          (* Forced-tool completion-contract tests removed in RFC-OAS-025
-             Option A (forced-tool enforcement moved out of the SDK). *)
+          (* Forced-tool completion-contract tests removed in Agent Core contract
+             Option A (forced-tool enforcement moved out of agent core). *)
         ; test_case "tool error" `Quick test_agent_run_tool_error
         ; test_case "pre_tool hook" `Quick test_agent_run_pre_tool_hook
         ] )

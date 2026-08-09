@@ -16,21 +16,21 @@ let test_elapsed_duration_ms_rejects_non_finite () =
   check int "nan" 0 (Inference_utils.elapsed_duration_ms nan);
   check int "infinity" 0 (Inference_utils.elapsed_duration_ms infinity)
 
-(* Canonical-projection consumption drift-guards (oas roadmap F4 / F12).
-   MASC delegates its zero-usage markers and token arithmetic to OAS so the
+(* Canonical-projection consumption drift-guards (agent_core roadmap F4 / F12).
+   MASC delegates its zero-usage markers and token arithmetic to AGENT_CORE so the
    api_usage SSOT lives in one place. These trip if a divergent re-spelled
    literal is ever re-introduced on the MASC side. *)
 
-let test_zero_usage_tracks_oas_canonical () =
-  check bool "Inference_utils.zero_usage = OAS zero_api_usage" true
-    (Inference_utils.zero_usage = Agent_sdk.Types.zero_api_usage);
-  check bool "Keeper_hooks_oas_types.zero_usage = OAS zero_api_usage" true
-    (Keeper_hooks_oas_types.zero_usage = Agent_sdk.Types.zero_api_usage)
+let test_zero_usage_tracks_agent_core_canonical () =
+  check bool "Inference_utils.zero_usage = AGENT_CORE zero_api_usage" true
+    (Inference_utils.zero_usage = Agent_core.Types.zero_api_usage);
+  check bool "Keeper_hooks_agent_core_types.zero_usage = AGENT_CORE zero_api_usage" true
+    (Keeper_hooks_agent_core_types.zero_usage = Agent_core.Types.zero_api_usage)
 
 let test_total_tokens_parity_and_excludes_cache () =
-  let sample : Agent_sdk.Types.api_usage =
+  let sample : Agent_core.Types.api_usage =
     {
-      Agent_sdk.Types.input_tokens = 7;
+      Agent_core.Types.input_tokens = 7;
       output_tokens = 5;
       cache_creation_input_tokens = 3;
       cache_read_input_tokens = 2;
@@ -40,12 +40,12 @@ let test_total_tokens_parity_and_excludes_cache () =
   (* input + output only — cache tokens are excluded by the projection. *)
   check int "total_tokens excludes cache tokens" 12
     (Inference_utils.total_tokens sample);
-  check int "total_tokens parity with OAS projection"
-    (Agent_sdk.Types.total_tokens sample)
+  check int "total_tokens parity with AGENT_CORE projection"
+    (Agent_core.Types.total_tokens sample)
     (Inference_utils.total_tokens sample)
 
 let test_utf8_sanitization_preserves_tool_failure_provenance () =
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let message : message =
     {
       role = Tool;
@@ -97,8 +97,8 @@ let () =
         ] );
       ( "canonical projection consumption",
         [
-          test_case "zero_usage markers track OAS canonical" `Quick
-            test_zero_usage_tracks_oas_canonical;
+          test_case "zero_usage markers track AGENT_CORE canonical" `Quick
+            test_zero_usage_tracks_agent_core_canonical;
           test_case "total_tokens parity, excludes cache tokens" `Quick
             test_total_tokens_parity_and_excludes_cache;
         ] );

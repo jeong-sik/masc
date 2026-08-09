@@ -39,7 +39,7 @@ let fixed_store_dir ~masc_root ~base_path = function
   | Agent_event  -> Some (Filename.concat masc_root "telemetry")
   | Tool_call_io -> Some (Filename.concat masc_root "tool_calls")
   | Tool_usage   -> Some (Filename.concat masc_root "tool_usage")
-  | Oas_event    -> Some (Filename.concat masc_root "oas-events")
+  | Agent_core_event    -> Some (Filename.concat masc_root "agent-core-events")
   | Tool_metric  -> Some (Filename.concat base_path "data/tool-metrics")
   | Keeper_metric | Trajectory_tool_call | Execution_receipt | Goal_event ->
       None
@@ -50,7 +50,7 @@ let source_freshness_slo_s = function
   | Tool_call_io -> 300.0
   | Trajectory_tool_call -> 300.0
   | Execution_receipt -> 300.0
-  | Oas_event -> 300.0
+  | Agent_core_event -> 300.0
   | Agent_event -> 900.0
   (* Tool_usage covers non-public registered calls, which are sparse by
      design. Match the SSOT in tool_usage_log.ml. *)
@@ -61,10 +61,10 @@ let source_freshness_slo_s = function
 let source_producer = function
   | Keeper_metric -> "keeper_unified_metrics"
   | Agent_event -> "telemetry_eio"
-  | Tool_call_io -> "keeper_hooks_oas|mcp_server_eio_call_tool"
-  | Trajectory_tool_call -> "keeper_hooks_oas|mcp_server_eio_call_tool"
+  | Tool_call_io -> "keeper_hooks_agent_core|mcp_server_eio_call_tool"
+  | Trajectory_tool_call -> "keeper_hooks_agent_core|mcp_server_eio_call_tool"
   | Tool_usage -> "tool_usage_log"
-  | Oas_event -> "oas_event_bus"
+  | Agent_core_event -> "agent_core_event_bus"
   | Execution_receipt -> "keeper_agent_run.execution_receipt"
   | Goal_event -> "goal_fsm"
   | Tool_metric -> "tool_metrics_persist"
@@ -75,7 +75,7 @@ let source_dashboard_surface = function
   | Tool_call_io -> "/api/v1/keepers/:name/tool-calls"
   | Trajectory_tool_call -> "/api/v1/keepers/:name/tool-stats"
   | Tool_usage -> "/api/v1/dashboard/tools"
-  | Oas_event -> "/api/v1/dashboard/telemetry"
+  | Agent_core_event -> "/api/v1/dashboard/telemetry"
   | Execution_receipt -> "/api/v1/dashboard/execution-trust"
   | Goal_event -> "/api/v1/dashboard/goals"
   | Tool_metric -> "/api/v1/tool-metrics"

@@ -596,7 +596,7 @@ let base_for_provider_config (config : Provider_config.t) =
    wire default [clear_thinking = true] the server discards prior reasoning, so
    sending it back violates the contract and grows the request every turn.
 
-   RFC-OAS-029 S1.1/S3.1: the branch predicate is the typed capability the
+   Agent Core contract S1.1/S3.1: the branch predicate is the typed capability the
    catalog row declares, exactly like the [Thinking_object] arm of
    [base_of_capabilities]. No provider identity participates, so an operator can
    move this contract onto another row without touching OCaml. *)

@@ -47,7 +47,7 @@ val count : t -> int
 (** {1 Bulk Loading} *)
 
 (** Load skills from a directory.  Returns the number loaded on success. *)
-val load_from_dir : t -> ?scope:Skill.scope -> string -> (int, Error.sdk_error) result
+val load_from_dir : t -> ?scope:Skill.scope -> string -> (int, Error.t) result
 
 (** {1 JSON Serialization} *)
 
@@ -58,7 +58,7 @@ val skill_to_json : Skill.t -> Yojson.Safe.t
 val to_json : t -> Yojson.Safe.t
 
 (** Deserialize a single skill from JSON. *)
-val skill_of_json : Yojson.Safe.t -> (Skill.t, Error.sdk_error) result
+val skill_of_json : Yojson.Safe.t -> (Skill.t, Error.t) result
 
 (** Deserialize a registry from JSON. *)
-val of_json : Yojson.Safe.t -> (t, Error.sdk_error) result
+val of_json : Yojson.Safe.t -> (t, Error.t) result

@@ -1,9 +1,9 @@
 (* RFC-0301 item 6 — see keeper_stream_media_accum.mli. Mirrors the media chunk
-   accumulation the SSE bridge does ([Keeper_chat_oas_stream_bridge]'s
+   accumulation the SSE bridge does ([Keeper_chat_agent_core_stream_bridge]'s
    [Active_media] block), kept as a parallel turn-local collector rather than a
    shared abstraction so the bridge (which owns live SSE translation) and this
    collector (which owns durable persistence) stay on their own side of the
-   OAS-stream / chat-store boundary. *)
+   AGENT_CORE-stream / chat-store boundary. *)
 
 (* Attach-block label for generated media with no dedicated image/voice reload
    block (documents, unrecognized types). The payload is still persisted and served
@@ -13,7 +13,7 @@ let generic_media_label = "generated media"
 type finalized = {
   index : int;
   media_type : string;
-  source_type : Agent_sdk.Types.media_source_kind;
+  source_type : Agent_core.Types.media_source_kind;
   data : string;
 }
 
@@ -40,7 +40,7 @@ type invalid_reason =
 type block_state =
   | Active_media of
       { media_type : string;
-        source_type : Agent_sdk.Types.media_source_kind;
+        source_type : Agent_core.Types.media_source_kind;
         chunks : string list;
         encoded_bytes : int
       }
@@ -78,8 +78,8 @@ let has_any_tool_identity ~tool_id ~tool_name =
   | _ -> true
 
 let stream_start_is_tool ~index ~content_type ~tool_id ~tool_name =
-  Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
-    (Agent_sdk.Types.ContentBlockStart
+  Agent_core.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
+    (Agent_core.Types.ContentBlockStart
        { index; content_type; tool_id; tool_name })
 
 let add_media_chunk ~media_type ~source_type ~chunks ~encoded_bytes data =
@@ -121,14 +121,14 @@ let finalize_open_media t =
     blocks;
   t.blocks_by_index <- []
 
-let on_event t (evt : Agent_sdk.Types.sse_event) =
+let on_event t (evt : Agent_core.Types.sse_event) =
   match evt with
-  | Agent_sdk.Types.ContentBlockStart { index; content_type; tool_id; tool_name }
+  | Agent_core.Types.ContentBlockStart { index; content_type; tool_id; tool_name }
     when stream_start_is_tool ~index ~content_type ~tool_id ~tool_name
          || has_any_tool_identity ~tool_id ~tool_name ->
       replace_block t index (Invalid_block Tool_block)
-  | Agent_sdk.Types.ContentBlockDelta
-      { index; delta = Agent_sdk.Types.MediaDelta { media_type; source_type; data } } ->
+  | Agent_core.Types.ContentBlockDelta
+      { index; delta = Agent_core.Types.MediaDelta { media_type; source_type; data } } ->
       (match stream_block_for_index t index with
        | Some (Active_media m)
          when String.equal m.media_type media_type && m.source_type = source_type ->
@@ -147,8 +147,8 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
              index
              active.media_type
              media_type
-             (Agent_sdk.Types.media_source_kind_to_string active.source_type)
-             (Agent_sdk.Types.media_source_kind_to_string source_type)
+             (Agent_core.Types.media_source_kind_to_string active.source_type)
+             (Agent_core.Types.media_source_kind_to_string source_type)
        | Some (Invalid_block _) ->
            ()
        | None ->
@@ -161,14 +161,14 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
                 record_oversize_drop t ~index ~media_type ~encoded_bytes
                   ~max_wire_bytes;
                 replace_block t index (Invalid_block Oversize)))
-  | Agent_sdk.Types.ContentBlockStop { index } -> (
+  | Agent_core.Types.ContentBlockStop { index } -> (
       match stream_block_for_index t index with
       | Some (Active_media { media_type; source_type; chunks; encoded_bytes }) ->
           finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes
       | Some (Invalid_block (Tool_block | Oversize)) ->
           remove_block t index
       | None -> ())
-  | Agent_sdk.Types.MessageStop ->
+  | Agent_core.Types.MessageStop ->
       finalize_open_media t
   | _ -> ()
 
@@ -208,7 +208,7 @@ let persist_failure_placeholder ~media_type ~encoded_bytes = function
         ~name:
           (Printf.sprintf
              "generated media unavailable: unsupported source type %s"
-             (Agent_sdk.Types.media_source_kind_to_string source_type))
+             (Agent_core.Types.media_source_kind_to_string source_type))
         ~media_type
         ~size:(Some (Printf.sprintf "%d wire-carrier bytes observed" encoded_bytes))
         ~size_bytes:(Some encoded_bytes)
@@ -275,7 +275,7 @@ let completed_to_chat_block ~base_dir = function
              "generated media reload persist failed index=%d media_type=%S source_type=%s: %s"
              index
              media_type
-             (Agent_sdk.Types.media_source_kind_to_string source_type)
+             (Agent_core.Types.media_source_kind_to_string source_type)
              (Keeper_chat_media_store.persist_error_to_string err);
            persist_failure_placeholder
              ~media_type

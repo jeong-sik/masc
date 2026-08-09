@@ -48,7 +48,7 @@ end
     @since 2.110.0 *)
 val dispatch_keeper_msg_stream :
   ?on_text_delta:(string -> unit) ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?on_admission_rejected:(Keeper_turn_admission.rejection -> unit) ->
   ?on_admitted:(unit -> (unit, string) result) ->
@@ -61,7 +61,7 @@ val dispatch_keeper_msg_stream :
     callers must route the accepted message to their deferred transport. *)
 val dispatch_keeper_msg_stream_if_free :
   ?on_text_delta:(string -> unit) ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   _ context ->
   message:Keeper_invocation_contract.direct_message ->

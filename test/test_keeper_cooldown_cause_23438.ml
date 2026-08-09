@@ -7,7 +7,7 @@
 
    Pinned invariants:
    1. to_string/of_string is a total roundtrip over every constructor.
-   2. sdk_error embed -> classify roundtrip preserves [cooldown_cause]
+   2. core_error embed -> classify roundtrip preserves [cooldown_cause]
       (Some and None) through the JSON wire payload.
    3. [summary_of_masc_internal_error] names the diagnostic; a cause-less
       block renders without the suffix (legacy shape preserved).
@@ -55,9 +55,9 @@ let test_cause_string_roundtrip () =
     (KIE.provider_cooldown_cause_of_string "definitely_not_a_cause" = None)
 
 let embed_and_classify err =
-  KTD.classify_masc_internal_error (KTD.sdk_error_of_masc_internal_error err)
+  KTD.classify_masc_internal_error (KTD.core_error_of_masc_internal_error err)
 
-let test_sdk_error_roundtrip_preserves_cause () =
+let test_core_error_roundtrip_preserves_cause () =
   List.iter
     (fun cause ->
       let original = backpressure_error ~cooldown_cause:cause () in
@@ -79,7 +79,7 @@ let test_sdk_error_roundtrip_preserves_cause () =
       | None -> Alcotest.fail "classify_masc_internal_error returned None")
     all_causes
 
-let test_sdk_error_roundtrip_none_cause () =
+let test_core_error_roundtrip_none_cause () =
   match embed_and_classify (backpressure_error ()) with
   | Some (KIE.Capacity_backpressure { cooldown_cause = None; _ }) -> ()
   | Some (KIE.Capacity_backpressure { cooldown_cause = Some cause; _ }) ->
@@ -122,8 +122,8 @@ let test_summary_names_the_cause () =
 let test_legacy_causes_have_no_lifecycle_authority () =
   List.iter
     (fun cause ->
-      let sdk_error =
-        KTD.sdk_error_of_masc_internal_error
+      let core_error =
+        KTD.core_error_of_masc_internal_error
           (backpressure_error ~cooldown_cause:cause ())
       in
       Alcotest.(check bool)
@@ -131,10 +131,10 @@ let test_legacy_causes_have_no_lifecycle_authority () =
            "legacy %s stays auto-recoverable"
            (KIE.provider_cooldown_cause_to_string cause))
         true
-        (EC.is_auto_recoverable_turn_error sdk_error))
+        (EC.is_auto_recoverable_turn_error core_error))
     all_causes;
   let cause_less =
-    KTD.sdk_error_of_masc_internal_error (backpressure_error ())
+    KTD.core_error_of_masc_internal_error (backpressure_error ())
   in
   Alcotest.(check bool)
     "cause-less block stays auto-recoverable (legacy behaviour)"
@@ -150,13 +150,13 @@ let () =
             `Quick
             test_cause_string_roundtrip
         ; Alcotest.test_case
-            "sdk-error JSON roundtrip preserves cause"
+            "core-error JSON roundtrip preserves cause"
             `Quick
-            test_sdk_error_roundtrip_preserves_cause
+            test_core_error_roundtrip_preserves_cause
         ; Alcotest.test_case
-            "sdk-error JSON roundtrip preserves None"
+            "core-error JSON roundtrip preserves None"
             `Quick
-            test_sdk_error_roundtrip_none_cause
+            test_core_error_roundtrip_none_cause
         ; Alcotest.test_case
             "summary preserves the legacy diagnostic"
             `Quick

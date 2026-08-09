@@ -138,7 +138,7 @@ let test_fleet_rows_derivation_matches_read_recent () =
           (List.map Yojson.Safe.to_string derived))
       [ "alice"; "bob"; "carol"; "absent-keeper" ])
 
-let test_exact_oas_occurrence_persisted () =
+let test_exact_agent_core_occurrence_persisted () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"k"
@@ -226,7 +226,7 @@ let test_model_field_stored () =
 
 let test_turn_context_fields_stored () =
   with_tmp_log (fun () ->
-    (* Mirrors the production reader (keeper_hooks_oas): context is
+    (* Mirrors the production reader (keeper_hooks_agent_core): context is
        written to a per-run cell, read back as a record, and passed
        explicitly to log_call — there is no ambient fallback. *)
     let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
@@ -511,7 +511,7 @@ let test_route_evidence_stored_for_git_push () =
 let test_route_evidence_stored_for_blob_backed_git_push () =
   with_tmp_log (fun () ->
     let marker =
-      Tool_output.encode_for_oas
+      Tool_output.encode_for_agent_core
         (Tool_output.Stored
            (artifact_ref_exn
               ~sha256:(String.make 64 'b')
@@ -835,7 +835,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       (Some "tool_call_io")
       (Safe_ops.json_string_opt "source" summary);
     Alcotest.(check (option string)) "dashboard producer"
-      (Some "keeper_hooks_oas|mcp_server_eio_call_tool")
+      (Some "keeper_hooks_agent_core|mcp_server_eio_call_tool")
       (Safe_ops.json_string_opt "producer" summary);
     Alcotest.(check (option string)) "dashboard surface"
       (Some "/api/v1/dashboard/tool-quality")
@@ -1010,7 +1010,7 @@ let test_dashboard_aggregate_surfaces_coverage_gap () =
     Telemetry_coverage_gap.record
       ~masc_root
       ~source:"tool_call_io"
-      ~producer:"keeper_hooks_oas"
+      ~producer:"keeper_hooks_agent_core"
       ~durable_store:(Filename.concat masc_root "tool_calls")
       ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
       ~stale_reason:"tool_call_io_append_failed"
@@ -1033,7 +1033,7 @@ let test_dashboard_aggregate_ignores_recovered_coverage_gap () =
     Telemetry_coverage_gap.record
       ~masc_root
       ~source:"tool_call_io"
-      ~producer:"keeper_hooks_oas"
+      ~producer:"keeper_hooks_agent_core"
       ~durable_store:(Filename.concat masc_root "tool_calls")
       ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
       ~stale_reason:"tool_call_io_append_failed"
@@ -1120,14 +1120,14 @@ let test_output_valid_utf8_untouched () =
     | _ -> Alcotest.fail "expected exactly one entry")
 
 (* When the tool output is the OCaml [%S]-quoted [masc:blob ...] marker
-   produced by Tool_output.encode_for_oas, the persisted record must
+   produced by Tool_output.encode_for_agent_core, the persisted record must
    normalize it into a structured _blob object so that telemetry readers
    (UI, jq scripts) see a clean JSON shape instead of doubly-escaped
    string fields. *)
 let test_output_blob_marker_normalized () =
   with_tmp_log (fun () ->
     let marker =
-      Tool_output.encode_for_oas
+      Tool_output.encode_for_agent_core
         (Tool_output.Stored
            (artifact_ref_exn
               ~sha256:(String.make 64 'a')
@@ -1255,7 +1255,7 @@ let () =
         ; eio_test "keeper filter" test_read_recent_keeper_filter
         ; eio_test "fleet-row derivation equals read_recent"
             test_fleet_rows_derivation_matches_read_recent
-        ; eio_test "exact OAS occurrence" test_exact_oas_occurrence_persisted
+        ; eio_test "exact AGENT_CORE occurrence" test_exact_agent_core_occurrence_persisted
         ] )
     ; ( "redaction",
         [ eio_test "sensitive-named tool logged with redaction"

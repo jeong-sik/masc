@@ -1279,10 +1279,10 @@ let keeper_chat_history_freshness config name =
 ;;
 
 (* The canonical autonomous User/Assistant/Tool exchange lives in the Keeper's
-   OAS checkpoint, not as duplicate chat-store rows. This read projection uses
+   AGENT_CORE checkpoint, not as duplicate chat-store rows. This read projection uses
    typed turn identity only for stable dashboard grouping and exact raw-trace
    lookup; it is not the Keeper's semantic continuity mechanism. Final text
-   and work trace come from the same exact OAS run. *)
+   and work trace come from the same exact AGENT_CORE run. *)
 let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
   let trace_fields =
     match turn.trace with
@@ -1741,7 +1741,7 @@ let handle_keeper_get_subroutes state req request reqd =
               ("source", `String "trajectory_tool_call");
               ( "producer",
                 `String
-                  "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+                  "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
               ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
               ("dashboard_surface", `String dashboard_surface);
               ("freshness_slo_s", `Float freshness_slo_s);
@@ -1876,7 +1876,7 @@ let handle_keeper_get_subroutes state req request reqd =
                 ("source", `String "tool_call_io");
                 ( "producer",
                   `String
-                    "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+                    "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
                 ("durable_store", `String (Filename.concat masc_root "tool_calls"));
                 ("dashboard_surface", `String dashboard_surface);
                 ("freshness_slo_s", `Float freshness_slo_s);

@@ -1,4 +1,4 @@
-(** Typed telemetry events for the OAS inference layer. *)
+(** Typed telemetry events for the AGENT_CORE inference layer. *)
 
 type timeout_type =
   | No_response
@@ -42,7 +42,7 @@ type t =
       ; chunk_count : int
       ; kind_breakdown : streaming_kind_breakdown
       ; ttft_ms : float option
-        (** RFC-OAS-020: milliseconds from request submission to the
+        (** Agent Core contract: milliseconds from request submission to the
             first parsed chunk that carried a non-empty user-visible
             delta (text, reasoning, or tool-call). Distinct from
             [ttfrc_ms] on [Streaming_first_chunk] which fires on the
@@ -50,7 +50,7 @@ type t =
             completion never delivered a non-empty delta or elapsed
             latency was unavailable. *)
       ; prefill_ms : float option
-        (** RFC-OAS-020: milliseconds from request submission to the
+        (** Agent Core contract: milliseconds from request submission to the
             first SSE event of any kind. [Some] when the provider
             exposes a separable prefill marker
             (e.g. Anthropic [MessageStart] arrives before the first

@@ -3,7 +3,7 @@
     All hardcoded network defaults live here. Other modules reference
     these constants instead of inlining magic strings/numbers.
 
-    The [local_llm_default_url] follows the same env override chain that OAS
+    The [local_llm_default_url] follows the same env override chain that AGENT_CORE
     discovery uses before falling back to the current local runtime URL.
 
     @since 2.241.0 *)
@@ -29,7 +29,7 @@ let openai_chat_completions_path = "/v1/chat/completions"
     When [base_url] already carries a version segment (e.g. [/v1], [/v4]),
     the request path should not repeat it — the concatenation [base_url ^
     request_path] must produce exactly one version prefix.  This constant
-    matches what the OAS SDK's own [api_openai.ml] uses internally. *)
+    matches what the Agent Core's own [api_openai.ml] uses internally. *)
 let chat_completions_path = "/chat/completions"
 
 (** OpenAI-compatible model listing path.  See
@@ -88,9 +88,9 @@ let is_cli_transport_url url =
   && String.sub url 0 plen = cli_transport_prefix
 
 (** Default URL for the local OpenAI-compatible runtime.
-    Override order: OAS_LOCAL_LLM_URL -> local runtime. *)
+    Override order: AGENT_CORE_LOCAL_LLM_URL -> local runtime. *)
 let local_llm_default_url =
-  match nonempty_env "OAS_LOCAL_LLM_URL" with
+  match nonempty_env "AGENT_CORE_LOCAL_LLM_URL" with
   | Some value -> value
   | None -> ollama_default_url
 

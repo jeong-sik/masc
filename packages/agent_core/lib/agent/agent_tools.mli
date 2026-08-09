@@ -34,7 +34,7 @@ type tool_index
 
 (** Build a stable lookup index for the current tool set.
 
-    Exact tool-name lookups preserve first-match list semantics. OAS does not
+    Exact tool-name lookups preserve first-match list semantics. AGENT_CORE does not
     classify or normalize names; any alias must be registered explicitly by
     the consumer. *)
 val build_index : Tool.t list -> tool_index
@@ -158,7 +158,7 @@ val find_and_execute_tool
     [Hooks.Approved] admits the exact call; [Denied] and [Timed_out] return
     deterministic blocked tool results. Generic [ElicitInput]/[Answer] never
     grants execution authority. A missing approval callback fails closed as
-    [Hook_failure]. OAS installs no timer and persists no pending request at
+    [Hook_failure]. AGENT_CORE installs no timer and persists no pending request at
     this boundary; [Timed_out] means the caller enforced and reported its own
     deadline. A non-reserved callback exception becomes [Hook_failure] before
     execution, while cancellation and other reserved exceptions propagate.
@@ -175,13 +175,13 @@ val find_and_execute_tool
     [on_tool_execution_started] and [on_tool_execution_finished] are
     caller-owned lifecycle observers. Their failures, event-bus publication
     failures, journal projection failures, and tracer failures propagate to the
-    caller through [Observer_failure]; OAS never hides an observer failure.
+    caller through [Observer_failure]; AGENT_CORE never hides an observer failure.
 
     [Block] produces a model-visible deterministic result without emitting
     tool-execution lifecycle callbacks or durable events, because no tool ran.
 
     When an Agent-owned execution provider is bound internally, its recursive execution journal is
-    the sole tool-effect authority: OAS durably opens the exact invocation and
+    the sole tool-effect authority: AGENT_CORE durably opens the exact invocation and
     commits an attempt before the handler, atomically settles the exact result,
     and replays a settled result without rerunning observers or the handler.
     Legacy [journal] Tool_called/Tool_completed projections are suppressed on
@@ -233,4 +233,4 @@ val execute_tools
 val recovered_batch_completion
   :  invocations:Tool_contract.Invocation.t list
   -> Types.content_block list
-  -> (batch_completion, Error.sdk_error) result
+  -> (batch_completion, Error.t) result

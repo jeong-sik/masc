@@ -1,4 +1,4 @@
-open Agent_sdk
+open Agent_core
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in
@@ -22,7 +22,7 @@ let with_provider_catalog json f =
 ;;
 
 let with_model_catalog toml f =
-  let path = Filename.temp_file "oas-provider-runtime-binding-models" ".toml" in
+  let path = Filename.temp_file "agent_core-provider-runtime-binding-models" ".toml" in
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc toml);
   Fun.protect
@@ -330,7 +330,7 @@ let test_unknown_explicit_provider_id_never_switches_by_endpoint () =
 ;;
 
 let test_local_openai_compat_capabilities_not_inflated_by_locality () =
-  (* RFC-OAS-034: host locality must not grant the extended capability preset.
+  (* Agent Core contract: host locality must not grant the extended capability preset.
      A local OpenAI-compatible endpoint on a non-default port serving an
      uncatalogued model resolves to base openai_compat capabilities — reasoning
      and extended thinking are NOT inferred from the endpoint being local. Before
@@ -356,7 +356,7 @@ let test_local_openai_compat_capabilities_not_inflated_by_locality () =
 ;;
 
 let test_capabilities_host_invariant_local_vs_remote () =
-  (* RFC-OAS-034: capability = f(runtime x model), not f(host). The same kind +
+  (* Agent Core contract: capability = f(runtime x model), not f(host). The same kind +
      uncatalogued model resolves to the same reasoning capability whether the
      endpoint is local (non-default port) or remote. *)
   let make base_url =

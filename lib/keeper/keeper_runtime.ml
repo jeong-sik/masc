@@ -247,7 +247,7 @@ let keeper_meta_persistent_drift_categories
         (not
            (Keeper_runtime_instructions.text_equal
               current.instructions target.instructions));
-      drift_if "oas_env" (current.oas_env <> target.oas_env);
+      drift_if "agent_core_env" (current.agent_core_env <> target.agent_core_env);
     ]
 
 let keeper_meta_overlay_drift_categories
@@ -368,10 +368,10 @@ let ensure_keeper_meta_with_cause config name =
     let target_always_allow =
       apply_default_opt defaults.always_allow meta.always_allow
     in
-    (* --- OAS Env --- *)
-    let target_oas_env =
-      match defaults.oas_env with
-      | [] -> meta.oas_env
+    (* --- AGENT_CORE Env --- *)
+    let target_agent_core_env =
+      match defaults.agent_core_env with
+      | [] -> meta.agent_core_env
       | env -> env
     in
     let overlayed =
@@ -390,7 +390,7 @@ let ensure_keeper_meta_with_cause config name =
         telemetry_feedback_enabled = target_tf_enabled;
         telemetry_feedback_window_hours = target_tf_window;
         always_allow = target_always_allow;
-        oas_env = target_oas_env;
+        agent_core_env = target_agent_core_env;
       }
     in
     (* Keep the runtime snapshot honest as well as the live overlay for fields
@@ -449,7 +449,7 @@ let ensure_keeper_meta_with_cause config name =
              ; telemetry_feedback_window_hours =
                  persisted_updated.telemetry_feedback_window_hours
              ; always_allow = persisted_updated.always_allow
-             ; oas_env = persisted_updated.oas_env
+             ; agent_core_env = persisted_updated.agent_core_env
              ; updated_at = persisted_updated.updated_at
              })
       with

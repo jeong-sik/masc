@@ -134,7 +134,7 @@ let detect_trend ~window data =
       let m = mean xs in
       let fn = float_of_int n in
       let x_mean = (fn -. 1.0) /. 2.0 in
-      (* RFC-OAS-015: idx counter folded into the accumulator tuple instead
+      (* Agent Core contract: idx counter folded into the accumulator tuple instead
          of an external [ref] mutated via [incr]. Same arithmetic, no
          observable behaviour change — Category B (idiomatic but replaceable
          mutable). *)

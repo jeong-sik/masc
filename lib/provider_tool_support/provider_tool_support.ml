@@ -8,8 +8,8 @@ type runtime_capabilities_override =
   ; supports_inline_tool_choice : bool option
   }
 
-let oas_capabilities_of_config provider_cfg =
-  Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config provider_cfg
+let agent_core_capabilities_of_config provider_cfg =
+  Agent_core.Provider_runtime_binding.capabilities_for_provider_config provider_cfg
 ;;
 
 let apply_override
@@ -31,7 +31,7 @@ let apply_override
 ;;
 
 let capabilities_of_config ?override provider_cfg =
-  let capabilities = oas_capabilities_of_config provider_cfg in
+  let capabilities = agent_core_capabilities_of_config provider_cfg in
   apply_override
     { supports_inline_tools = capabilities.supports_tools
     ; supports_inline_tool_choice =

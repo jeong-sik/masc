@@ -1,10 +1,10 @@
 (** Tests for Agent_tool — agent-as-tool wrapper. *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Mock runners ────────────────────────────────────────────── *)
 
-let mock_runner text _prompt : (Types.api_response, Error.sdk_error) result =
+let mock_runner text _prompt : (Types.api_response, Error.t) result =
   Ok
     { id = "r1"
     ; model = "test"
@@ -15,7 +15,7 @@ let mock_runner text _prompt : (Types.api_response, Error.sdk_error) result =
     }
 ;;
 
-let echo_runner prompt : (Types.api_response, Error.sdk_error) result =
+let echo_runner prompt : (Types.api_response, Error.t) result =
   Ok
     { id = "r1"
     ; model = "test"
@@ -26,11 +26,11 @@ let echo_runner prompt : (Types.api_response, Error.sdk_error) result =
     }
 ;;
 
-let error_runner _prompt : (Types.api_response, Error.sdk_error) result =
+let error_runner _prompt : (Types.api_response, Error.t) result =
   Error (Error.Internal "agent crashed")
 ;;
 
-let structured_runner prompt : (Types.api_response, Error.sdk_error) result =
+let structured_runner prompt : (Types.api_response, Error.t) result =
   Ok
     { id = "child-run-1"
     ; model = "child-model"
@@ -104,7 +104,7 @@ let test_execute_error_propagation () =
 ;;
 
 let test_execute_untyped_malformed_input_errors () =
-  (* RFC-OAS-029 S4.3: the untyped handler delegates to the typed parser and
+  (* Agent Core contract S4.3: the untyped handler delegates to the typed parser and
      propagates its Error instead of silently serializing malformed input as
      the prompt (regression: missing/non-string prompt used to echo back the
      serialized JSON as a successful run). *)
@@ -163,7 +163,7 @@ let test_declared_inputs_match_parser () =
 (* ── Multi-content response ──────────────────────────────────── *)
 
 let test_multi_content () =
-  let runner _prompt : (Types.api_response, Error.sdk_error) result =
+  let runner _prompt : (Types.api_response, Error.t) result =
     Ok
       { id = "r1"
       ; model = "test"

@@ -45,7 +45,7 @@ let build_request_artifact
   in
   (* The chat-template token injection is shared with the OpenAI-compat request
      builder ([Backend_openai_serialize]) so the same catalog row cannot be
-     handled asymmetrically (oas#2483). The token is carried by
+     handled asymmetrically (agent-core boundary). The token is carried by
      [Chat_template_token] in the resolved capabilities (fail-closed at
      catalog/manifest load), so there is no per-request token lookup that could
      be missing. *)
@@ -122,7 +122,7 @@ let build_request_artifact
   let body = ("stream", `Bool stream) :: body in
   (* Ollama accepts [keep_alive] as either integer seconds or a duration
      string. Preserve caller omission; in particular, permanent residency is
-     an operator policy and is never injected by the SDK. Explicit integer
+     an operator policy and is never injected by agent core. Explicit integer
      values such as [-1] must use the JSON integer wire form because Ollama
      parses string values as durations. *)
   let body =
@@ -168,7 +168,7 @@ let build_request_artifact
      top_k / min_p are now capability-gated — not because native
      Ollama rejects them (its Options struct has both, llama.cpp
      samplers support them), but to mirror the #830/#831 contract
-     across every OAS serializer so a future capability record that
+     across every AGENT_CORE serializer so a future capability record that
      lowers either flag actually takes effect everywhere in the
      request-build pipeline.
 

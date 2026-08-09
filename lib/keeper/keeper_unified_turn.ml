@@ -1,4 +1,4 @@
-(** Keeper_unified_turn — Single entry point for keeper cycles via OAS Agent.run().
+(** Keeper_unified_turn — Single entry point for keeper cycles via Agent_core.Agent.run().
 
     Replaces the 3-path dispatcher (social/proactive/autonomy) with a unified
     observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
@@ -23,7 +23,7 @@ type source_disposition =
   | Pause_after_transcript_corruption of { detail : string }
 
 type turn_failure =
-  { error : Agent_sdk.Error.sdk_error
+  { error : Agent_core.Error.t
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
   ; source_disposition : source_disposition
@@ -101,8 +101,8 @@ let execution_boundary_of_turn_failure ~transcript_corruption error =
     Keeper_runtime_failure_route.Masc_execution
   | None, Some (Keeper_internal_error.Gate_replay_repair_required _) ->
     (* This failure is produced by MASC after host replay and before provider
-       dispatch. The shared [Agent_sdk.Error.Internal] carrier must not
-       misattribute that local replay boundary to OAS. *)
+       dispatch. The shared [Agent_core.Error.Internal] carrier must not
+       misattribute that local replay boundary to AGENT_CORE. *)
     Keeper_runtime_failure_route.Masc_execution
   | None,
     Some
@@ -117,7 +117,7 @@ let execution_boundary_of_turn_failure ~transcript_corruption error =
       | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Receipt_persistence_failed _ )
   | None, None ->
-    Keeper_runtime_failure_route.Oas_execution
+    Keeper_runtime_failure_route.Agent_core_execution
 ;;
 
 type turn_success =
@@ -300,8 +300,8 @@ let run_keeper_cycle
   with
   | Error failure ->
     let error =
-      Agent_sdk.Error.Config
-        (Agent_sdk.Error.InvalidConfig
+      Agent_core.Error.Config
+        (Agent_core.Error.InvalidConfig
            { field = "keeper.publication_recovery_scope"
            ; detail =
                Keeper_publication_recovery_scope.failure_to_string failure
@@ -406,7 +406,7 @@ let run_keeper_cycle
 
      State-aware runtime routing resumes inside [main_path]. *)
   let main_path (turn_state : Keeper_unified_turn_execution.turn_state)
-    : (turn_success, Agent_sdk.Error.sdk_error) result
+    : (turn_success, Agent_core.Error.t) result
       * Keeper_unified_turn_execution.turn_state
     =
       let effective_runtime_id =
@@ -435,7 +435,7 @@ let run_keeper_cycle
           ~decision:(`Assoc [ "reason", `String "runtime" ])
           Keeper_runtime_manifest.Runtime_routed
       in
-      (* Concrete runtime health/capacity is owned by OAS/provider adapters.
+      (* Concrete runtime health/capacity is owned by AGENT_CORE/provider adapters.
          Keeper routing no longer rewrites runtimes from provider cooldown or
          process-queue probes. *)
       (match None with
@@ -471,9 +471,9 @@ let run_keeper_cycle
             let terminal_reason_code =
               Printf.sprintf
                 "pre_dispatch_%s"
-                (Keeper_agent_error.terminal_reason_code_of_sdk_error err)
+                (Keeper_agent_error.terminal_reason_code_of_core_error err)
             in
-            let error_message = Agent_sdk.Error.to_string err in
+            let error_message = Agent_core.Error.to_string err in
             Log.Keeper.error
               ~keeper_name:meta.name
               "%s: pre_dispatch failed: %s"
@@ -490,7 +490,7 @@ let run_keeper_cycle
               ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
               ~error_kind:
                 (Keeper_execution_receipt.error_kind_of_string
-                   Agent_sdk.Error.(category err |> category_label))
+                   Agent_core.Error.(category err |> category_label))
               ~error_message
               ~keeper_turn_id
               ();
@@ -503,7 +503,7 @@ let run_keeper_cycle
                   }
               | _ ->
                 Keeper_turn_fsm.Failure_provider_error
-                  { kind = Agent_sdk.Error.(category err |> category_label)
+                  { kind = Agent_core.Error.(category err |> category_label)
                   ; detail = error_message
                   }
             in
@@ -607,15 +607,15 @@ let run_keeper_cycle
                  =
                  (* The observation frame rides [dynamic_context]: rebuilt fresh
                     every turn and composed into the per-turn system prompt, so
-                    it never enters the persisted OAS conversation. Persisting
+                    it never enters the persisted AGENT_CORE conversation. Persisting
                     it as a user message re-fed the model its own observations
                     (943/945 identical frames in one live checkpoint, #25193)
                     and starved compaction. Persisted user content is utterances
                     only (wake marker + HITL resolutions). *)
                  { system_prompt; dynamic_context = world_state }
                in
-               (* 5. Run via OAS Agent.run() with transient-error retry.
-                  The turn-local OAS Event_bus preserves factual
+               (* 5. Run via Agent_core.Agent.run() with transient-error retry.
+                  The turn-local AGENT_CORE Event_bus preserves factual
                   ToolCalled/ToolCompleted pairing and drives
                   Streaming⇄Awaiting_tool_result FSM transitions. It does
                   not infer tool effects or veto retry. *)
@@ -727,7 +727,7 @@ let run_keeper_cycle
                  match
                    Inference_utils.timed (fun () ->
                      match Eio_context.get_clock () with
-                     | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
+                     | Error msg -> Error (Agent_core.Error.Internal msg), turn_state
                      | Ok clock ->
                        start_background_turn_event_bus_drain ~clock;
                        let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms }
@@ -865,13 +865,13 @@ let run_keeper_cycle
                        ~config
                        ~keeper_name:meta.name
                        trajectory_acc
-                       (Trajectory.Failed (Agent_sdk.Error.to_string err));
-                  let e_str = Agent_sdk.Error.to_string err in
+                       (Trajectory.Failed (Agent_core.Error.to_string err));
+                  let e_str = Agent_core.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
                   (match err with
-                      | Agent_sdk.Error.Api (Timeout _) ->
+                      | Agent_core.Error.Api (Timeout _) ->
                         Otel_metric_store.inc_counter
-                          Keeper_metrics.(to_string OasTimeoutClassifications)
+                          Keeper_metrics.(to_string Agent_coreTimeoutClassifications)
                           ~labels:[ "classification", "transient_network" ]
                           ()
                       | _ -> ());
@@ -904,7 +904,7 @@ let run_keeper_cycle
                         match Keeper_turn_driver.classify_masc_internal_error err with
                          | _ ->
                            Keeper_turn_fsm.Failure_provider_error
-                             { kind = Agent_sdk.Error.(category err |> category_label)
+                             { kind = Agent_core.Error.(category err |> category_label)
                              ; detail = short_preview e_str
                              }
                      in
@@ -952,8 +952,8 @@ let run_keeper_cycle
                      else "")
                     (short_preview e_str);
                   Otel_metric_store.inc_counter
-                    Keeper_metrics.(to_string OasExecutionErrors)
-                    ~labels:[ "keeper", meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Cycle_failed) ]
+                    Keeper_metrics.(to_string Agent_coreExecutionErrors)
+                    ~labels:[ "keeper", meta.name; "phase", Keeper_agent_core_execution_error_phase.(to_label Cycle_failed) ]
                     ();
                   let updated_meta =
                     Keeper_unified_metrics.update_metrics_from_failure
@@ -961,10 +961,10 @@ let run_keeper_cycle
                       ~latency_ms
                       ~observation
                       ~reason:e_str
-                      ~sdk_error:err
+                      ~core_error:err
                       ()
                   in
-                  let e_str = Agent_sdk.Error.to_string err in
+                  let e_str = Agent_core.Error.to_string err in
                   let terminal_reason =
                     Keeper_turn_terminal.of_failure
                       ~raw_error:e_str
@@ -1004,7 +1004,7 @@ let run_keeper_cycle
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]
                     ();
-                  (* Route the failure (total over sdk_error), retain the exact
+                  (* Route the failure (total over core_error), retain the exact
                      final execution identity, and record typed failure plus
                      telemetry here. Exhausted failures remain visible without
                      dispatching a second LLM call. *)

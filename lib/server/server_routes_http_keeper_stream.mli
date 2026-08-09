@@ -67,7 +67,7 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
   | User_audio of user_media_block
 (** Semantic user-input blocks accepted from the dashboard.  This is a
     MASC request-boundary type, intentionally distinct from dashboard
-    rich-render [ChatBlock] values and from OAS provider blocks. *)
+    rich-render [ChatBlock] values and from AGENT_CORE provider blocks. *)
 
 type keeper_chat_stream_request = {
   name : string;
@@ -265,16 +265,16 @@ type canonical_reply_payload =
 val canonical_reply_payload_error_to_string :
   canonical_reply_payload_error -> string
 
-type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
-(** Per-stream OAS event bridge state. Abstract outside tests so callers cannot
+type keeper_stream_bridge_state = Keeper_chat_agent_core_stream_bridge.state
+(** Per-stream AGENT_CORE event bridge state. Abstract outside tests so callers cannot
     construct synthetic stream correlation state. *)
 
 type translated_keeper_stream_event =
-  Keeper_chat_oas_stream_bridge.translated_event = {
+  Keeper_chat_agent_core_stream_bridge.translated_event = {
   bridge_state : keeper_stream_bridge_state;
   chat_events : Keeper_chat_events.keeper_chat_event list;
 }
-(** Result of translating one typed OAS stream event into keeper chat events. *)
+(** Result of translating one typed AGENT_CORE stream event into keeper chat events. *)
 
 module For_testing : sig
   val parse_request : string -> (keeper_chat_stream_request, string) result

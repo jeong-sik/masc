@@ -58,7 +58,7 @@ module Behavioral = struct
     }
 
   (** Extract observation from an agent after a run. *)
-  let observe (agent : Agent.t) (result : (api_response, Error.sdk_error) result)
+  let observe (agent : Agent.t) (result : (api_response, Error.t) result)
     : observation
     =
     let final_response =
@@ -180,7 +180,7 @@ module Adversarial = struct
     | ErrorContains of string
 
   type observation =
-    { result : (api_response, Error.sdk_error) result
+    { result : (api_response, Error.t) result
     ; tools_executed : string list
     ; error_message : string option
     }
@@ -309,7 +309,7 @@ module Regression = struct
          | Error msg -> false, Some (Printf.sprintf "Invalid golden JSON: %s" msg))
       | FuzzyMatch { threshold } ->
         (* Simple character-level similarity.
-           RFC-OAS-015 PR-B: replaced the imperative `for` loop with an
+           Agent Core contract PR-B: replaced the imperative `for` loop with an
            external `ref common` counter by a tail-recursive accumulator.
            Same arithmetic, identical traversal order. *)
         let len1 = String.length obs.output_text in

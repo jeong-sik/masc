@@ -13,7 +13,7 @@ val default_getenv : string -> string option
 (** [get ?getenv name] returns [Some v] if [name] is set to a non-empty
     string, [None] otherwise.  Whitespace-only values are treated as unset.
     [?getenv] (default [Sys.getenv_opt]) is a dependency-injection seam
-    (RFC-OAS-024 §6 cut 5): the pure core receives a resolved reader from
+    (Agent Core contract §6 cut 5): the pure core receives a resolved reader from
     boot rather than reading the process environment directly. *)
 val get : ?getenv:(string -> string option) -> string -> string option
 

@@ -1,5 +1,5 @@
 (** Turn event-bus observation summary. Compaction lifecycle belongs to
-    MASC durable lane state, not the lossy OAS observation bus. *)
+    MASC durable lane state, not the lossy AGENT_CORE observation bus. *)
 
 type turn_event_bus_summary = {
   correlation_id : string option;

@@ -338,14 +338,14 @@ let test_transport_health_json () =
        ~last_event_id:0);
   TM.set_grpc_active_streams 1;
   TM.set_grpc_subscribers 2;
-  Otel_metric_store.set_gauge Otel_metric_store.metric_oas_sse_relay_queue_depth 4.0;
-  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_retries
+  Otel_metric_store.set_gauge Otel_metric_store.metric_agent_core_sse_relay_queue_depth 4.0;
+  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_retries
     ~labels:[ ("stage", "append") ] ~delta:2.0 ();
-  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_retries
+  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_retries
     ~labels:[ ("stage", "broadcast") ] ~delta:1.0 ();
-  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drops
     ~labels:[ ("stage", "queue") ] ~delta:3.0 ();
-  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drops
     ~labels:[ ("stage", "append") ] ~delta:1.0 ();
   Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ ("event", "compaction_started") ] ~delta:2.0 ();

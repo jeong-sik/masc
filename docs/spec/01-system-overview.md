@@ -36,7 +36,7 @@ MASC가 명시적으로 **하지 않는 것**:
 | Production multi-tenant SaaS | 단일 머신, localhost-trust 모델. 인증/격리/과금 미구현. |
 | 범용 오케스트레이션 프레임워크 (Temporal/Airflow 대체) | 대상은 AI 에이전트 협업에 한정. DAG 스케줄링, 재시도 정책, 워커 풀 관리는 범위 밖. |
 | 모델 추론 서버 | LLM 호출은 Runtime를 통해 외부 서버(llama-server, GLM Cloud/Coding Plan)로 위임. 자체 GPU 추론 없음. |
-| OAS Agent SDK 대체 | MASC는 OAS에 의존한다. Agent 생명주기(run, checkpoint, context reduction)는 OAS 책임. MASC는 workspace collaboration layer. |
+| agent core Agent SDK 대체 | MASC는 agent core에 의존한다. Agent 생명주기(run, checkpoint, context reduction)는 agent core 책임. MASC는 workspace collaboration layer. |
 | 범용 채팅/메시징 시스템 | Broadcast와 Board는 에이전트 간 조율 목적. 사람 간 커뮤니케이션 도구가 아님. |
 
 ## 3. Deployment Model
@@ -87,7 +87,7 @@ MASC가 명시적으로 **하지 않는 것**:
 | Protocol | MCP JSON-RPC | `tools/call`, `tools/list` over SSE + POST. |
 | gRPC | grpc-direct (h2-eio) | Agent-to-Agent 통신. proto 정의: `proto/`. |
 | GraphQL | HTTP client | Neo4j 접근은 Railway GraphQL API 경유. |
-| AI | agent_sdk (OAS) | Finite Agent.run, typed providers, tools, reasoning, multimodal values. |
+| AI | agent_core (agent core) | Finite Agent.run, typed providers, tools, reasoning, multimodal values. |
 | Inference | Runtime | llama (local) -> GLM Cloud/Coding Plan (fallback) -> skip. |
 | Build | dune 3.13+ | `dune-project` 기반. opam package: `masc`. |
 | Coverage | bisect_ppx | `BISECT_FILE` 환경변수 필수. |
@@ -146,9 +146,9 @@ MASC의 현재 canonical front door는 3가지다.
 
 장기 실행과 연속성을 위한 경로.
 
-- **대상**: keeper lifecycle, long-running execution, OAS-backed autonomy
+- **대상**: keeper lifecycle, long-running execution, agent core-backed autonomy
 - **핵심 도구**: `masc_keeper_up`, `masc_keeper_delegate`, `masc_keeper_status`, `masc_keeper_down`
-- **설명**: keeper는 OAS `Agent.run` 기반으로 실행된다. 자세한 turn lifecycle은 [`04-turn-lifecycle.md`](./04-turn-lifecycle.md)를 참조.
+- **설명**: keeper는 agent core `Agent.run` 기반으로 실행된다. 자세한 turn lifecycle은 [`04-turn-lifecycle.md`](./04-turn-lifecycle.md)를 참조.
 
 ### 7.3 Dashboard and Operator Read Visibility
 
@@ -165,11 +165,11 @@ MASC의 현재 canonical front door는 3가지다.
 |---------|----------|----------|------|------|
 | Neo4j | Railway (`turntable.proxy.rlwy.net:11490`) | Bolt (via GraphQL) | Agent 그래프, COLLABORATED_WITH 관계, Person 노드 | 직접 Cypher 접근 금지. GraphQL API 경유. |
 | Supabase pgvector | Supabase Cloud | PostgreSQL | Vector search (wiki, retrospectives) | `$SUPABASE_DB_URL` |
-| OAS Agent SDK | In-process (OCaml library) | Function call | Finite Agent.run, typed providers, tools, reasoning, multimodal values | MASC는 Keeper lifecycle과 durable product operation을 소유한다. |
+| agent core Agent SDK | In-process (OCaml library) | Function call | Finite Agent.run, typed providers, tools, reasoning, multimodal values | MASC는 Keeper lifecycle과 durable product operation을 소유한다. |
 | Langfuse | Cloud API | HTTP | LLM 호출 tracing, cost attribution | 선택적 활성화. |
 | GraphQL API | Railway (`second-brain-graphql-production.up.railway.app`) | HTTP | Agent 정보 로드, collaboration edge 기록 | `$GRAPHQL_API_KEY` 인증. Query cost limit 2000. |
 | Cloudflare Tunnel | `masc.crying.pictures` | HTTP -> HTTPS | 원격 dashboard 접근 | Origin HTTP/1.1. Cloudflare가 HTTP/2 변환. |
-| local runtime | configured local endpoint | Provider-D-compatible API | 로컬 LLM 추론 (Runtime 1순위) | OAS discovery endpoint. |
+| local runtime | configured local endpoint | Provider-D-compatible API | 로컬 LLM 추론 (Runtime 1순위) | agent core discovery endpoint. |
 | GLM Cloud / Coding Plan | Z.AI API | HTTP | Cloud LLM 추론 (Runtime 2순위) | `sb glm-text` 또는 `glm-coding` runtime 경로. |
 
 ## 9. Invariants (System-Level)
@@ -181,7 +181,7 @@ MASC의 현재 canonical front door는 3가지다.
 | INV-SYS-003 | MCP tool dispatch는 match 패턴을 사용한다. dict/map 라우팅 금지. | Code review. |
 | INV-SYS-004 | 모든 외부 LLM 호출은 Runtime를 경유한다. 직접 HTTP 호출 금지. | `rg` for direct curl/HTTP calls to LLM endpoints. |
 | INV-SYS-005 | MASC는 모델명을 MASC 레벨에 노출하지 않는다. Runtime가 추상화. | Code review, log audit. |
-| INV-SYS-006 | Agent lifecycle (run, checkpoint, context reduction)은 OAS Agent SDK에 위임한다. MASC에서 재구현 금지. | Architecture review. |
+| INV-SYS-006 | Agent lifecycle (run, checkpoint, context reduction)은 agent core Agent SDK에 위임한다. MASC에서 재구현 금지. | Architecture review. |
 
 ## 10. Open Questions
 
@@ -189,5 +189,5 @@ MASC의 현재 canonical front door는 3가지다.
 |----|------|----------|------|
 | OQ-SYS-001 | Sub-library 추출을 어디까지 진행할 것인가? keeper(33K LOC)와 chain(30K LOC)은 별도 sub-library 후보. | `lib/keeper/`, `lib/chain/` | Open |
 | OQ-SYS-002 | HTTP/2 h2c를 기본 transport로 전환할 시점은? Cloudflare Tunnel이 cleartext h2를 지원하지 않는 제약. | `bin/main_eio.ml` | Open |
-| OQ-SYS-003 | MASC -> OAS 이관 완료 후 MASC의 최종 범위는? 순수 workspace collaboration layer만 남길 것인지. | — | Open |
+| OQ-SYS-003 | MASC -> agent core 이관 완료 후 MASC의 최종 범위는? 순수 workspace collaboration layer만 남길 것인지. | — | Open |
 | OQ-SYS-004 | Multi-protocol transport(SSE/gRPC/WebSocket/WebRTC) 중 어디를 canonical으로 수렴할 것인가? | `lib/grpc/`, `lib/server/` | Open |

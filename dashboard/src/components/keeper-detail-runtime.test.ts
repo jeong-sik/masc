@@ -58,7 +58,7 @@ function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnap
     source: 'runtime.toml',
     models: ['model-api'],
     effective_capabilities: {
-      source: 'oas-provider-config-model',
+      source: 'agent-core-provider-config-model',
       accepted_reasoning_efforts: null,
       thinking_control_format: 'reasoning-effort',
       supports_multimodal_inputs: true,
@@ -374,7 +374,7 @@ describe('RuntimeLensSection', () => {
         requested_keeper_turn_id: 7,
         manifest_keeper_turn_ids: [7],
         receipt_turn_counts: [7],
-        max_oas_turn_count: 3,
+        max_agent_core_turn_count: 3,
         provider_lane_resolved_count: 1,
         provider_attempt_started_count: 1,
         provider_attempt_finished_count: 1,
@@ -390,7 +390,7 @@ describe('RuntimeLensSection', () => {
         finished_count: 1,
         terminal_status: 'timeout',
         terminal_error: 'Timeout after 120s',
-        terminal_exception_kind: 'outer_oas_timeout',
+        terminal_exception_kind: 'outer_agent_core_timeout',
         attempts: [],
       },
       event_bus: {
@@ -414,7 +414,7 @@ describe('RuntimeLensSection', () => {
         turn_clock: {
           trace_id: 'trace-lens',
           keeper_turn_id: 7,
-          max_oas_turn_count: 3,
+          max_agent_core_turn_count: 3,
           terminal_event_present: true,
           terminal_event: 'turn_finished',
           manifest_total_rows: 6,
@@ -495,7 +495,7 @@ describe('RuntimeLensSection', () => {
         swimlanes: {
           keeper: lane('keeper', 'Keeper', 2, 'finished'),
           masc_policy_runtime: lane('masc_policy_runtime', 'MASC Runtime', 1, 'error'),
-          oas_agent: lane('oas_agent', 'OAS', 2, 'checkpoint_saved'),
+          agent_core_agent: lane('agent_core_agent', 'Agent Core', 2, 'checkpoint_saved'),
           provider: lane('provider', 'Provider', 2, 'timeout'),
           tool_runtime: lane('tool_runtime', 'Tool Runtime', 0, 'not_observed'),
           memory_context: lane('memory_context', 'Memory/Context', 3, 'flushed'),
@@ -512,7 +512,7 @@ describe('RuntimeLensSection', () => {
             finished_at: null,
             trace_id: 'trace-lens',
             keeper_turn_id: 7,
-            oas_turn_count: 2,
+            agent_core_turn_count: 2,
             provider_attempt_id: 'trace-lens:keeper-7:provider-attempt-1',
             tool_batch_id: null,
             checkpoint_id: null,
@@ -563,7 +563,7 @@ describe('RuntimeLensSection', () => {
         ],
         checkpoints: [
           {
-            kind: 'oas_checkpoint',
+            kind: 'agent_core_checkpoint',
             path: '/tmp/checkpoint.json',
             present: false,
             file_stat: null,
@@ -683,7 +683,7 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('provider attempts')).toBeInTheDocument()
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(0)
     expect(screen.getByText('provider terminal')).toBeInTheDocument()
-    expect(screen.getByText('timeout / outer_oas_timeout')).toBeInTheDocument()
+    expect(screen.getByText('timeout / outer_agent_core_timeout')).toBeInTheDocument()
     expect(screen.getByText('clock edges')).toBeInTheDocument()
     expect(screen.getByText('clock groups')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-lens-clock-groups')).toBeInTheDocument()
@@ -763,7 +763,7 @@ describe('RuntimeLensSection', () => {
     expect(catalog).toHaveTextContent('provider.model')
     expect(catalog).toHaveTextContent('Runtime Provider')
     expect(catalog).toHaveTextContent('model-api')
-    expect(catalog).toHaveTextContent('source:oas-provider-config-model')
+    expect(catalog).toHaveTextContent('source:agent-core-provider-config-model')
     expect(catalog).toHaveTextContent('input:multimodal,image,audio')
     expect(catalog).toHaveTextContent('wire:responses.reasoning')
     expect(catalog).toHaveTextContent('tool-call-replay:required')

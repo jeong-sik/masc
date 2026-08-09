@@ -389,17 +389,17 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | Chat_queued _
     | Reply_details _
     | Continuation_checkpoint _
-    | Oas_stream_connected
-    | Oas_stream_message_start _
-    | Oas_stream_message_delta _
-    | Oas_stream_message_stop
-    | Oas_stream_ping
-    | Oas_content_block_start _
-    | Oas_content_block_stop _
-    | Oas_thinking_delta _
-    | Oas_thinking_signature_delta _
-    | Oas_media_delta _ -> continue ()
-    | Oas_stream_protocol_error error ->
+    | Agent_core_stream_connected
+    | Agent_core_stream_message_start _
+    | Agent_core_stream_message_delta _
+    | Agent_core_stream_message_stop
+    | Agent_core_stream_ping
+    | Agent_core_content_block_start _
+    | Agent_core_content_block_stop _
+    | Agent_core_thinking_delta _
+    | Agent_core_thinking_signature_delta _
+    | Agent_core_media_delta _ -> continue ()
+    | Agent_core_stream_protocol_error error ->
         ignore
           (send_message
              ~content:

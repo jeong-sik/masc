@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 
 let empty_env _name = None
 
@@ -315,7 +315,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
       runtime.model.tools_support;
     check bool (case.runtime_id ^ " thinking") case.thinking
       runtime.model.thinking_support;
-    check bool (case.runtime_id ^ " known to provider-qualified OAS catalog") true
+    check bool (case.runtime_id ^ " known to provider-qualified AGENT_CORE catalog") true
       (Option.is_some
          (Llm_provider.Provider_config.capabilities_for_config_model
             (agent_core_provider_config runtime)));
@@ -346,8 +346,8 @@ let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in
   check bool "retired runtime.json absent" false (Sys.file_exists path)
 
-let with_deployment_oas_model_catalog f =
-  let overlay_path = Filename.concat (repo_root ()) "config/oas-models-overlay.toml" in
+let with_deployment_agent_core_model_catalog f =
+  let overlay_path = Filename.concat (repo_root ()) "config/agent-core-models-overlay.toml" in
   check bool "deployment catalog overlay present" true (Sys.file_exists overlay_path);
   match Llm_provider.Model_catalog.load_file overlay_path with
   | Error msg -> failf "deployment catalog overlay should load: %s" msg
@@ -361,8 +361,8 @@ let with_deployment_oas_model_catalog f =
          | None -> fail "embedded plus deployment overlay catalog should load"
          | Some catalog -> f catalog)
 
-let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   let runpod_model_id = "qwen36-35b-a3b-mtp" in
   let provider_labels = [ "runpod_mtp"; "vllm-qwen3-mtp" ] in
   let expect_provider_lookup provider_name =
@@ -374,7 +374,7 @@ let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
     with
     | None ->
       failf
-        "expected deployment OAS catalog row for provider=%s model=%s"
+        "expected deployment AGENT_CORE catalog row for provider=%s model=%s"
         provider_name
         runpod_model_id
     | Some entry ->
@@ -425,8 +425,8 @@ let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
        | Some gate_caps -> expect_runpod_caps name gate_caps)
     provider_labels
 
-let test_deployment_oas_model_catalog_covers_glm_streaming_reasoning () =
-  with_deployment_oas_model_catalog @@ fun _catalog ->
+let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let model_id = "GLM-5-Turbo" in
   List.iter
     (fun provider_label ->
@@ -450,8 +450,8 @@ let test_deployment_oas_model_catalog_covers_glm_streaming_reasoning () =
               = Delta_reasoning_field "reasoning_content")))
     [ "glm-coding"; "glm-coding-sb-exact" ]
 
-let test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   let model_id = "gemma4-coder-fable5-q4km" in
   let provider_name = "runpod_rtxa6000" in
   (match
@@ -459,7 +459,7 @@ let test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
    with
    | None ->
      failf
-       "expected deployment OAS catalog row for provider=%s model=%s"
+       "expected deployment AGENT_CORE catalog row for provider=%s model=%s"
        provider_name
        model_id
    | Some entry ->
@@ -489,8 +489,8 @@ let test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_token "<|think|>"))
 
-let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_deployment_agent_core_model_catalog_covers_local_gemma4_e2b_qat () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   let model_id = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL" in
   let provider_name = "ollama" in
   (match
@@ -498,7 +498,7 @@ let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
    with
    | None ->
      failf
-       "expected deployment OAS catalog row for provider=%s model=%s"
+       "expected deployment AGENT_CORE catalog row for provider=%s model=%s"
        provider_name
        model_id
    | Some entry ->
@@ -542,8 +542,8 @@ let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
          ~provider_label:"ollama"
          ~model_id)
 
-let test_deployment_oas_model_catalog_preserve_axes_resolve () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   let expect_provider_catalog_field
         ~field_name
         ~get
@@ -556,7 +556,7 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
     with
     | None ->
       failf
-        "expected deployment OAS catalog row for provider=%s model=%s"
+        "expected deployment AGENT_CORE catalog row for provider=%s model=%s"
         provider_name
         model_id
     | Some entry ->
@@ -577,7 +577,7 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
         ~model_id
     with
     | None ->
-      failf "expected OAS capabilities for provider=%s model=%s" provider_name model_id
+      failf "expected AGENT_CORE capabilities for provider=%s model=%s" provider_name model_id
     | Some caps ->
       check bool (provider_name ^ " request-side preserve capability") true
         (Llm_provider.Capabilities.(
@@ -598,7 +598,7 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
         ~model_id
     with
     | None ->
-      failf "expected OAS capabilities for provider=%s model=%s" provider_name model_id
+      failf "expected AGENT_CORE capabilities for provider=%s model=%s" provider_name model_id
     | Some caps ->
       check bool (provider_name ^ " reasoning replay override") true
         (Llm_provider.Capabilities.(
@@ -606,7 +606,7 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
   in
   let expect_bare_kimi_k27_wire_semantics model_id =
     (match Llm_provider.Model_catalog.lookup catalog model_id with
-     | None -> failf "expected deployment OAS catalog row for %s" model_id
+     | None -> failf "expected deployment AGENT_CORE catalog row for %s" model_id
      | Some entry ->
        check (option string) (model_id ^ " native base") (Some "kimi")
          entry.base_label;
@@ -620,7 +620,7 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
        check (option string) (model_id ^ " no catalog replay override") None
          entry.reasoning_replay);
     match Llm_provider.Capabilities.for_model_id model_id with
-    | None -> failf "expected OAS capabilities for %s" model_id
+    | None -> failf "expected AGENT_CORE capabilities for %s" model_id
     | Some caps ->
       check bool (model_id ^ " native no request thinking knob") true
         (Llm_provider.Capabilities.(
@@ -640,11 +640,11 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
     ~model_id:"kimi-k2.7-code";
   expect_bare_kimi_k27_wire_semantics "kimi-k2.7-code"
 
-let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   check
     (option string)
-    "runtime-local alias is not promoted to the OAS catalog"
+    "runtime-local alias is not promoted to the AGENT_CORE catalog"
     None
     (Option.map
        (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
@@ -671,7 +671,7 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
          | None ->
            failf
              "runtime binding %s provider/model %s/%s must resolve through its \
-              OAS Provider_config"
+              AGENT_CORE Provider_config"
              runtime.id
              (Llm_provider.Provider_config.capability_provider_label
                 (agent_core_provider_config runtime))
@@ -687,15 +687,15 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
                   (agent_core_provider_config runtime).model_capabilities_override))
       runtimes
 
-let test_deployment_oas_model_catalog_modality_priorities_resolve () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   let rows =
     List.filter
       (fun (entry : Llm_provider.Model_catalog.model_entry) ->
          Option.is_some entry.modality_priority)
       (Llm_provider.Model_catalog.model_entries catalog)
   in
-  check bool "deployment OAS catalog has modality priority rows" true (rows <> []);
+  check bool "deployment AGENT_CORE catalog has modality priority rows" true (rows <> []);
   List.iter
     (fun (entry : Llm_provider.Model_catalog.model_entry) ->
        match entry.modality_priority with
@@ -726,7 +726,7 @@ let test_deployment_oas_model_catalog_modality_priorities_resolve () =
          (match capabilities with
           | None ->
             failf
-              "modality_priority row %s must resolve through deployment OAS catalog"
+              "modality_priority row %s must resolve through deployment AGENT_CORE catalog"
               entry.id_prefix
           | Some caps ->
             check
@@ -794,7 +794,7 @@ let test_retired_native_streaming_capability_is_rejected () =
          errors)
 
 let test_repo_runtime_toml_loads () =
-  with_deployment_oas_model_catalog @@ fun _catalog ->
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   check bool "repo runtime.toml present" true (Sys.file_exists path);
   match Runtime.load_list ~config_path:path with
@@ -918,7 +918,7 @@ List.iter
      with
      | None -> fail "expected DeepSeek Pro runtime in seed"
      | Some runtime ->
-       check (option (float 0.0)) "DeepSeek keeps OAS connect timeout default"
+       check (option (float 0.0)) "DeepSeek keeps AGENT_CORE connect timeout default"
          None
          (agent_core_provider_config runtime).connect_timeout_s;
        (match runtime.model.capabilities with
@@ -1045,7 +1045,7 @@ let assert_mandatory_exact_output_lanes_declared ~label path =
          | Some { slot_ids = []; _ } ->
            failf
              "%s declares mandatory exact-output lane %s with no slots; startup \
-              requires at least one OAS target ref"
+              requires at least one AGENT_CORE target ref"
              label
              lane_id
          | Some { slot_ids = _ :: _; _ } -> ())
@@ -1101,7 +1101,7 @@ let test_boot_path_fixtures_declare_mandatory_exact_output_lanes () =
    grows an api_key_env fails this test instead of failing a push to main. *)
 let test_release_evidence_fixture_lanes_resolve_without_credentials () =
   let fixture_dir = release_evidence_fixture_dir () in
-  let overlay_path = Filename.concat fixture_dir "oas-models-overlay.toml" in
+  let overlay_path = Filename.concat fixture_dir "agent-core-models-overlay.toml" in
   let overlay_contents =
     try In_channel.with_open_bin overlay_path In_channel.input_all with
     | Sys_error detail ->
@@ -1197,7 +1197,7 @@ let test_release_evidence_fixture_lanes_resolve_without_credentials () =
 let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let root = repo_root () in
   let runtime_path = Filename.concat root "config/runtime.toml" in
-  let overlay_path = Filename.concat root "config/oas-models-overlay.toml" in
+  let overlay_path = Filename.concat root "config/agent-core-models-overlay.toml" in
   let overlay_contents =
     try In_channel.with_open_bin overlay_path In_channel.input_all with
     | Sys_error detail ->
@@ -1234,8 +1234,8 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
       ~minimum_guarantee:Exact_output.Json_syntax
   in
   let messages =
-    [ Agent_sdk.Types.text_message
-        Agent_sdk.Types.User
+    [ Agent_core.Types.text_message
+        Agent_core.Types.User
         "Return one JSON object."
     ]
   in
@@ -1581,7 +1581,7 @@ let test_runtime_toml_parses_optional_max_request_body_bytes () =
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
 let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
-  (* Undeclared must stay None rather than acquiring a default. OAS reads None as
+  (* Undeclared must stay None rather than acquiring a default. AGENT_CORE reads None as
      "no ceiling declared" and passes every size; a default here would silently
      become a product-wide cap nobody chose. *)
   let content =
@@ -1938,7 +1938,7 @@ let with_fake_runtime_model_catalog f =
      base = \"openai_chat\"\n\
      max_context_tokens = 1024\n"
   in
-  let path = Filename.temp_file "oas-models" ".toml" in
+  let path = Filename.temp_file "agent_core-models" ".toml" in
   let oc = open_out path in
   output_string oc content;
   close_out oc;
@@ -1950,13 +1950,13 @@ let with_fake_runtime_model_catalog f =
        )
     (fun () ->
        match Llm_provider.Model_catalog.load_file path with
-       | Error msg -> failf "fake OAS model catalog should load: %s" msg
+       | Error msg -> failf "fake AGENT_CORE model catalog should load: %s" msg
        | Ok catalog ->
          Llm_provider.Model_catalog.set_global catalog;
          f ())
 
 let with_model_catalog_content content f =
-  let path = Filename.temp_file "oas-provider-qualified-models" ".toml" in
+  let path = Filename.temp_file "agent_core-provider-qualified-models" ".toml" in
   let oc = open_out path in
   output_string oc content;
   close_out oc;
@@ -1968,7 +1968,7 @@ let with_model_catalog_content content f =
        )
     (fun () ->
        match Llm_provider.Model_catalog.load_file path with
-       | Error msg -> failf "provider-qualified OAS model catalog should load: %s" msg
+       | Error msg -> failf "provider-qualified AGENT_CORE model catalog should load: %s" msg
        | Ok catalog ->
          Llm_provider.Model_catalog.set_global catalog;
          f ())
@@ -2186,7 +2186,7 @@ let test_routing_reference_domains_stay_distinct () =
   check bool "media_failover refuses a lane id" true
     (String_util.contains_substring media "[runtime].media_failover entry \"safe\"")
 
-let test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog () =
+let test_strict_init_rejects_assigned_runtime_absent_from_agent_core_catalog () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"chat\"\n\
@@ -2203,7 +2203,7 @@ let test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog () =
      max-context = 1024\n\
      \n\
      [models.missing]\n\
-     api-name = \"missing-from-oas-catalog\"\n\
+     api-name = \"missing-from-agent_core-catalog\"\n\
      max-context = 1024\n\
      \n\
      [ollama.good]\n\
@@ -2227,8 +2227,8 @@ let test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog () =
          | Ok () ->
            failf "strict runtime init should reject assigned uncatalogued runtime"
          | Error msg ->
-           check bool "error mentions OAS catalog gate" true
-             (String_util.contains_substring msg "absent from the OAS capability catalog");
+           check bool "error mentions AGENT_CORE catalog gate" true
+             (String_util.contains_substring msg "absent from the AGENT_CORE capability catalog");
            check bool "error mentions assigned runtime id" true
              (String_util.contains_substring msg "ollama.missing")))
 
@@ -2274,11 +2274,11 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
             [provider_name] to add instead of the generic "openai_compat". *)
          check string "provider label" "custom" missing.provider_label;
          check string "model id" "missing-family-123" missing.model_id;
-         check bool "diagnostic names OAS catalog file" true
+         check bool "diagnostic names AGENT_CORE catalog file" true
            (String_util.contains_substring
               (Runtime.strict_init_error_to_string
                  (Runtime.Missing_catalog_models report))
-              "oas-models-overlay.toml");
+              "agent-core-models-overlay.toml");
          check bool "diagnostic reports provider label" true
            (String_util.contains_substring
               (Runtime.strict_init_error_to_string
@@ -2303,7 +2303,7 @@ let test_server_degraded_init_rejects_referenced_uncatalogued_runtimes () =
      max-context = 1024\n\
      \n\
      [models.missing]\n\
-     api-name = \"missing-from-oas-catalog\"\n\
+     api-name = \"missing-from-agent_core-catalog\"\n\
      max-context = 1024\n\
      \n\
      [ollama.good]\n\
@@ -2366,7 +2366,7 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
      max-context = 1024\n\
      \n\
      [models.missing]\n\
-     api-name = \"missing-from-oas-catalog\"\n\
+     api-name = \"missing-from-agent_core-catalog\"\n\
      \n\
      [ollama.good]\n\
      max-request-body-bytes = 65536\n\
@@ -2451,7 +2451,7 @@ let test_server_degraded_init_rejects_uncatalogued_default () =
      max-context = 1024\n\
      \n\
      [models.missing]\n\
-     api-name = \"missing-from-oas-catalog\"\n\
+     api-name = \"missing-from-agent_core-catalog\"\n\
      max-context = 1024\n\
      \n\
      [ollama.good]\n\
@@ -2605,7 +2605,7 @@ let test_cross_verifier_runtime_routing () =
      requirement was on the wrong axis. The right one — can this model call a tool
      — is not declarable: Runtime_schema.model_capabilities carries the shapes of
      tool CHOICE, not tool support. A candidate that cannot serve the tool channel
-     is refused by OAS at dispatch instead, which is failover-eligible. So a model
+     is refused by AGENT_CORE at dispatch instead, which is failover-eligible. So a model
      declaring nothing now resolves for this route. *)
   with_temp_runtime_toml (base ^ "cross_verifier = \"local.chat\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -2702,7 +2702,7 @@ let test_cross_verifier_lane_target () =
        candidates = [\"local.judge\", \"local.chat\"]\n"
   in
   (* Formerly rejected because local.chat declares no JSON mode. The route requests
-     no wire format, so the lane resolves and OAS refuses an unusable candidate at
+     no wire format, so the lane resolves and AGENT_CORE refuses an unusable candidate at
      dispatch instead — pre-dispatch and failover-eligible. *)
   with_temp_runtime_toml json_incapable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -2937,7 +2937,7 @@ let test_deprecated_capability_notice_warns_once_per_process () =
 
 (* PR-6 (bugs #14/#15/#36): [model.max-context] is now optional — a runtime
    can resolve its effective context window from the runtime.toml override,
-   the OAS capability catalog, or the override clamped by the catalog cap.
+   the AGENT_CORE capability catalog, or the override clamped by the catalog cap.
    The four cases below cover [Runtime.resolve_max_context_of_runtime]'s
    full match; the fifth covers the assignment-document default-rider join
    (bug #14) that [Server_dashboard_runtime_resolved_json.assignment_json]
@@ -3081,7 +3081,7 @@ let test_runtime_max_context_override_above_cap_is_clamped () =
            | Error error ->
              failf
                "direct runtime execution should resolve: %s"
-               (Agent_sdk.Error.to_string error)
+               (Agent_core.Error.to_string error)
            | Ok execution ->
              check int
                "direct first attempt receives the provider-effective budget"
@@ -3346,27 +3346,27 @@ let () =
             test_antigravity_cli_rejects_declared_credentials;
           test_case "antigravity options are protocol-scoped" `Quick
             test_antigravity_options_are_protocol_scoped;
-          test_case "deployment OAS catalog covers live RunPod MTP runtime" `Quick
-            test_deployment_oas_model_catalog_covers_live_runpod_mtp;
+          test_case "deployment AGENT_CORE catalog covers live RunPod MTP runtime" `Quick
+            test_deployment_agent_core_model_catalog_covers_live_runpod_mtp;
           test_case
-            "deployment OAS catalog covers GLM typed streaming reasoning"
+            "deployment AGENT_CORE catalog covers GLM typed streaming reasoning"
             `Quick
-            test_deployment_oas_model_catalog_covers_glm_streaming_reasoning;
+            test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning;
           test_case
-            "deployment OAS catalog covers live RunPod RTX A6000 Gemma runtime"
-            `Quick test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma;
+            "deployment AGENT_CORE catalog covers live RunPod RTX A6000 Gemma runtime"
+            `Quick test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma;
           test_case
-            "deployment OAS catalog covers local Gemma4 E2B QAT runtime"
-            `Quick test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat;
+            "deployment AGENT_CORE catalog covers local Gemma4 E2B QAT runtime"
+            `Quick test_deployment_agent_core_model_catalog_covers_local_gemma4_e2b_qat;
           test_case
-            "deployment OAS catalog preserves typed thinking/replay axes"
-            `Quick test_deployment_oas_model_catalog_preserve_axes_resolve;
+            "deployment AGENT_CORE catalog preserves typed thinking/replay axes"
+            `Quick test_deployment_agent_core_model_catalog_preserve_axes_resolve;
           test_case
-            "repo runtime bindings resolve through OAS provider configs"
-            `Quick test_repo_runtime_bindings_resolve_through_oas_provider_config;
+            "repo runtime bindings resolve through AGENT_CORE provider configs"
+            `Quick test_repo_runtime_bindings_resolve_through_agent_core_provider_config;
           test_case
-            "deployment OAS catalog modality priority strings resolve"
-            `Quick test_deployment_oas_model_catalog_modality_priorities_resolve;
+            "deployment AGENT_CORE catalog modality priority strings resolve"
+            `Quick test_deployment_agent_core_model_catalog_modality_priorities_resolve;
           test_case "exact-output lane config is ordered and rejects duplicates" `Quick
             test_exact_output_lane_config_is_ordered_and_rejects_duplicates;
           test_case "exact-output lane rejects unknown keys" `Quick
@@ -3411,7 +3411,7 @@ let () =
           test_case "runtime table preserves empty media_failover" `Quick
             test_runtime_toml_preserves_explicit_empty_media_failover;
           test_case
-            "runtime capability gate uses provider-qualified OAS catalog rows"
+            "runtime capability gate uses provider-qualified AGENT_CORE catalog rows"
             `Quick test_runtime_capability_gate_uses_provider_qualified_catalog;
           test_case "runtime locality uses provider schema" `Quick
             test_runtime_locality_uses_provider_schema;
@@ -3437,8 +3437,8 @@ let () =
             "routing reference domains stay distinct"
             `Quick test_routing_reference_domains_stay_distinct;
           test_case
-            "strict init rejects assigned runtime absent from OAS catalog"
-            `Quick test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog;
+            "strict init rejects assigned runtime absent from AGENT_CORE catalog"
+            `Quick test_strict_init_rejects_assigned_runtime_absent_from_agent_core_catalog;
           test_case "atomic runtime getters are consistent after init" `Quick
             test_runtime_atomic_getters_are_consistent_after_init;
           test_case "max-concurrent is optional opt-in" `Quick

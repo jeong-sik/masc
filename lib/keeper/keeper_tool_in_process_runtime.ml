@@ -874,7 +874,7 @@ let handle_person_note_set_with_outcome ~config ~(meta : keeper_meta) ~args =
        that clears the note (RFC-0229 §3.1); an omitted [note] must be rejected,
        not silently cleared. The prior [json_string ~default:""] collapsed both
        to "", so a keeper that omitted [note] silently deleted an existing note
-       (OAS anti-pattern #2: Unknown -> Permissive Default). The structural
+       (AGENT_CORE anti-pattern #2: Unknown -> Permissive Default). The structural
        dispatch-level gap (in-process dispatch skips required validation) is
        tracked in #21875. *)
     match Safe_ops.json_string_opt "note" args with

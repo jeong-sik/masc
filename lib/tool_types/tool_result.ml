@@ -52,7 +52,7 @@ let log_level_of_failure_class = function
   | Runtime_failure -> Log.Error
 ;;
 
-(** Lightweight observation of an MCP/OAS wire response.  This is not a MASC
+(** Lightweight observation of an MCP/AGENT_CORE wire response.  This is not a MASC
     execution disposition: the external protocol cannot represent [Deferred],
     so callers must never use this projection as the internal outcome SSOT. *)
 type tool_call_outcome = Ok | Error | Unknown

@@ -47,7 +47,7 @@ let run_post_turn ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~turn 
     ~meta
     ~generation:turn
     ~turn
-    ~oas_turn_count:1
+    ~agent_core_turn_count:1
     ~actual_tools:[]
     ~librarian_messages:[]
     ~post_turn_t0:(Time_compat.now ())

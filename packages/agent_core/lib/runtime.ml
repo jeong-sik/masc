@@ -106,8 +106,8 @@ type init_request =
 [@@deriving yojson, show]
 
 type init_response =
-  { sdk_name : string
-  ; sdk_version : string
+  { name : string
+  ; agent_core_version : string
   ; runtime_version : string
   ; protocol_version : string
   ; capabilities : string list
@@ -399,7 +399,7 @@ let protocol_message_to_json = protocol_message_to_yojson
 let protocol_message_of_json json = protocol_message_of_yojson json
 let request_to_string req = req |> request_to_json |> Yojson.Safe.to_string
 let response_to_string resp = resp |> response_to_json |> Yojson.Safe.to_string
-let protocol_version = "oas-runtime-0.2"
+let protocol_version = "agent_core-runtime-0.2"
 
 let protocol_message_to_string msg =
   msg |> protocol_message_to_json |> Yojson.Safe.to_string

@@ -697,7 +697,7 @@ let with_model_catalog_toml contents f =
     | Some catalog -> Model_catalog.set_global catalog
     | None -> Model_catalog.clear_global ()
   in
-  let path = Filename.temp_file "oas-provider-config-models" ".toml" in
+  let path = Filename.temp_file "agent_core-provider-config-models" ".toml" in
   Fun.protect
     ~finally:(fun () ->
       try Sys.remove path with
@@ -1580,7 +1580,7 @@ let test_provider_name_of_config_glm_coding () =
 let test_provider_name_of_config_local_openai_compat () =
   (* A local OpenAI-compatible endpoint resolves to the neutral kind label, not
      the "nous" vendor entry: locality is transport, not vendor identity
-     (RFC-OAS-034). Capabilities for the canonical local llama endpoint come from
+     (Agent Core contract). Capabilities for the canonical local llama endpoint come from
      its explicit endpoint binding, not from this name. *)
   let cfg =
     Provider_config.make
@@ -2095,7 +2095,7 @@ let test_default_api_key_env_known () =
 ;;
 
 let test_default_api_key_env_none_for_others () =
-  (* Local / transport-mediated / OpenAI-compatible share: OAS does not
+  (* Local / transport-mediated / OpenAI-compatible share: AGENT_CORE does not
      dictate a single env var; callers supply their own. *)
   List.iter
     (fun (label, k) ->

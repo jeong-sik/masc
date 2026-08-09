@@ -57,7 +57,7 @@ let without_ambient_manifest f =
 ;;
 
 let with_catalog_toml contents f =
-  let path = Filename.temp_file "oas-thinking-catalog" ".toml" in
+  let path = Filename.temp_file "agent_core-thinking-catalog" ".toml" in
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () ->
@@ -1132,7 +1132,7 @@ let test_ollama_chat_template_token_missing_token_fails_closed () =
   (* The token is part of the [Chat_template_token] constructor, so a
      chat_template_token row with no thinking_control_token now fails closed at
      catalog LOAD naming the offending id_prefix — not per request. *)
-  let path = Filename.temp_file "oas-tokenless-template" ".toml" in
+  let path = Filename.temp_file "agent_core-tokenless-template" ".toml" in
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () ->

@@ -57,7 +57,7 @@ module For_testing : sig
       into turn instructions when no explicit [turn_instructions] is supplied. *)
 
   val direct_no_progress_retry_reason :
-    Agent_sdk.Error.sdk_error -> Keeper_error_classify.degraded_retry_reason option
+    Agent_core.Error.t -> Keeper_error_classify.degraded_retry_reason option
   (** Return a direct-message no-progress retry reason for accept rejections
       that are safe to rotate before surfacing an error. *)
 
@@ -65,7 +65,7 @@ module For_testing : sig
     base_runtime:string ->
     effective_runtime:string ->
     attempted_runtimes:string list ->
-    Agent_sdk.Error.sdk_error ->
+    Agent_core.Error.t ->
     Keeper_turn_runtime_budget.degraded_retry_decision
   (** Retry decision for direct-message no-progress accept rejections.
       Read-only no-progress remains terminal here because it already consumed
@@ -79,14 +79,14 @@ module For_testing : sig
     now_s:(unit -> float) ->
     setup_retry_runtime:
       (string ->
-       (Keeper_turn_runtime_budget.runtime_execution, Agent_sdk.Error.sdk_error) result) ->
+       (Keeper_turn_runtime_budget.runtime_execution, Agent_core.Error.t) result) ->
     publish_cascade_resolution:
       (runtime_id:string ->
        decision:Keeper_unified_turn_cascade_resolution.cascade_decision_kind ->
        reason:string ->
        next_runtime:string option ->
        attempt:int ->
-       Agent_sdk.Error.sdk_error ->
+       Agent_core.Error.t ->
        unit) ->
     emit_runtime_selected:
       (runtime_id:string -> fallback_reason:string -> unit) ->
@@ -96,7 +96,7 @@ module For_testing : sig
       (from_runtime:string ->
        retry:Keeper_error_classify.degraded_retry ->
        rotation_attempt:Keeper_execution_receipt.runtime_rotation_attempt ->
-       fail_open_err:Agent_sdk.Error.sdk_error ->
+       fail_open_err:Agent_core.Error.t ->
        unit) ->
     before_retry:(unit -> unit) ->
     run_once:
@@ -107,9 +107,9 @@ module For_testing : sig
        fallback_reason:Keeper_error_classify.degraded_retry_reason option ->
        runtime_rotation_attempts:
          Keeper_execution_receipt.runtime_rotation_attempt list ->
-       ('a, Agent_sdk.Error.sdk_error) result) ->
+       ('a, Agent_core.Error.t) result) ->
     unit ->
-    ('a * int, Agent_sdk.Error.sdk_error) result
+    ('a * int, Agent_core.Error.t) result
   (** Execute the direct-message no-progress retry loop with injected side
       effects. The initial attempt receives its typed runtime execution record,
       just like a retry. Exposed only to verify fallback selection without
@@ -127,8 +127,8 @@ val surface_context_to_instructions : Yojson.Safe.t -> string option
 
 val handle_keeper_msg :
   ?on_text_delta:(string -> unit) ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
-  ?event_bus:Agent_sdk.Event_bus.t ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
+  ?event_bus:Agent_core.Event_bus.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?on_admission_rejected:(Keeper_turn_admission.rejection -> unit) ->
   ?on_admitted:(unit -> (unit, string) result) ->
@@ -146,7 +146,7 @@ val handle_keeper_msg :
     boundary. *)
 
 val handle_keeper_delegate :
-  ?event_bus:Agent_sdk.Event_bus.t ->
+  ?event_bus:Agent_core.Event_bus.t ->
   _ Keeper_types_profile.context ->
   Keeper_invocation_contract.request ->
   tool_result
@@ -154,8 +154,8 @@ val handle_keeper_delegate :
 
 val handle_keeper_msg_if_free :
   ?on_text_delta:(string -> unit) ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
-  ?event_bus:Agent_sdk.Event_bus.t ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
+  ?event_bus:Agent_core.Event_bus.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   _ Keeper_types_profile.context ->
   Keeper_invocation_contract.direct_message ->

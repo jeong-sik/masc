@@ -248,7 +248,7 @@ function RuntimeSection({
         || entry?.supports_video_input,
       )
     : null
-  // Effort reads OAS-catalog effective_capabilities, the same source request
+  // Effort reads Agent Core-catalog effective_capabilities, the same source request
   // building uses. Catalog transport state, a missing runtime entry, and an
   // entry whose effective capabilities were not projected are distinct facts.
   const effortState = resolveRuntimeEffortState(catalogEntry)

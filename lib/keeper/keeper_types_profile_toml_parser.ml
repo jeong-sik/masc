@@ -2,7 +2,7 @@ include Keeper_config
 include Keeper_types_profile_sandbox
 include Keeper_types_profile_defaults
 include Keeper_types_profile_toml_normalizers
-include Keeper_types_profile_oas_env
+include Keeper_types_profile_agent_core_env
 
 let keeper_toml_field_names =
   [ "name"
@@ -29,15 +29,15 @@ let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
   let known =
     List.map (fun key -> "keeper." ^ key) canonical_keeper_toml_key_names
   in
-  let oas_env_prefix_len = String.length oas_env_key_prefix in
-  let starts_with_oas_env key =
-    String.length key > oas_env_prefix_len
-    && String.starts_with key ~prefix:oas_env_key_prefix
+  let agent_core_env_prefix_len = String.length agent_core_env_key_prefix in
+  let starts_with_agent_core_env key =
+    String.length key > agent_core_env_prefix_len
+    && String.starts_with key ~prefix:agent_core_env_key_prefix
   in
   doc
   |> List.map fst
   |> List.filter (fun key ->
-       not (List.mem key known) && not (starts_with_oas_env key))
+       not (List.mem key known) && not (starts_with_agent_core_env key))
   |> dedupe_keep_order
 
 let toml_value_kind = function
@@ -89,7 +89,7 @@ let validate_known_keeper_field_types doc =
   doc
   |> List.find_map (fun (key, value) ->
        if String.starts_with key ~prefix:"keeper."
-          && not (String.starts_with key ~prefix:oas_env_key_prefix)
+          && not (String.starts_with key ~prefix:agent_core_env_key_prefix)
        then
          match expected key with
          | Some (expected_kind, accepts) when not (accepts value) ->
@@ -100,7 +100,7 @@ let validate_known_keeper_field_types doc =
                 expected_kind
                 (toml_value_kind value))
          | Some _ | None -> None
-       else if String.starts_with key ~prefix:oas_env_key_prefix
+       else if String.starts_with key ~prefix:agent_core_env_key_prefix
                && Option.is_none (string_of_toml_value_for_env value)
        then
          Some
@@ -120,7 +120,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
-  let oas_env = extract_oas_env_from_doc doc in
+  let agent_core_env = extract_agent_core_env_from_doc doc in
   let result =
     match detect_unknown_keeper_toml_keys doc with
     | [] -> Ok ()
@@ -212,7 +212,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         always_allow = bool_ "always_allow";
-        oas_env;
+        agent_core_env;
       })
       max_context_override_result)
 
@@ -259,10 +259,10 @@ let merge_keeper_profile_defaults
       prefer overlay.telemetry_feedback_window_hours
         base.telemetry_feedback_window_hours;
     always_allow = prefer overlay.always_allow base.always_allow;
-    oas_env =
-      (let overlay_keys = List.map fst overlay.oas_env in
+    agent_core_env =
+      (let overlay_keys = List.map fst overlay.agent_core_env in
        let surviving_base =
-         List.filter (fun (k, _) -> not (List.mem k overlay_keys)) base.oas_env
+         List.filter (fun (k, _) -> not (List.mem k overlay_keys)) base.agent_core_env
        in
-       surviving_base @ overlay.oas_env);
+       surviving_base @ overlay.agent_core_env);
   }

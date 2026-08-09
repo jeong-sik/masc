@@ -991,7 +991,7 @@ module Conversation_metadata = struct
     | Invalid
     | Duplicate
 
-  let run_boundary_key = "oas.agent_run_boundary.v1"
+  let run_boundary_key = "agent_core.agent_run_boundary.v1"
   let run_boundary_entry = run_boundary_key, `Bool true
   let run_boundary = [ run_boundary_entry ]
 
@@ -1022,7 +1022,7 @@ module Extra_system_context_provenance = struct
     | Invalid
     | Duplicate
 
-  let key = "oas.extra_system_context.v1"
+  let key = "agent_core.extra_system_context.v1"
   let entry = key, `Bool true
   let metadata = [ entry ]
 
@@ -1060,7 +1060,7 @@ module Reasoning_source = struct
     | Duplicate
   [@@deriving show]
 
-  let key = "oas.reasoning_source.v2"
+  let key = "agent_core.reasoning_source.v2"
   let sha256_hex_length = 64
 
   let provider_instance_id_is_canonical value =
@@ -1571,7 +1571,7 @@ type sse_event =
     The accumulator stores this typed value (not a flattened string). Provider
     envelopes, malformed payloads, unknown events, and incomplete streams are
     preserved as distinct facts at the transport boundary; retry policy is
-    decided above OAS. This replaces the prior [string] carrier that collapsed
+    decided above AGENT_CORE. This replaces the prior [string] carrier that collapsed
     provider-owned failures into one [NetworkError {Unknown}] bucket. *)
 type stream_error =
   | Stream_provider_error of

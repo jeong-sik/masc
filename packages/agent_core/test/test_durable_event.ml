@@ -1,7 +1,7 @@
 (** Tests for Durable_event — event-sourced agent loop journal. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 let ts = 1711234567.0
 

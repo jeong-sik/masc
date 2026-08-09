@@ -1,6 +1,6 @@
 (** Typed owner of one Runtime turn.
 
-    [Agent_core] means MASC/OAS owns the model/tool/checkpoint loop.
+    [Agent_core] means MASC/AGENT_CORE owns the model/tool/checkpoint loop.
     [Codex_app_server] means the official Codex client owns the whole turn;
     [Claude_code] means the same for the official Claude Code client; and
     [Antigravity_cli] means the official Antigravity client owns its model and
@@ -37,13 +37,13 @@ type t =
   | Claude_code of claude_code
 
 type checkpoint_owner =
-  | Masc_oas
+  | Masc_agent_core
   | Official_client
 
 val agent_core_provider_config : t -> Llm_provider.Provider_config.t option
 val model_id : t -> string option
 val label : t -> string
 val checkpoint_owner : t -> checkpoint_owner
-(** Typed owner of the runtime's resumable execution state. [Masc_oas]
-    requires an OAS checkpoint on every successful turn. [Official_client]
-    forbids projecting the client's session state into an OAS checkpoint. *)
+(** Typed owner of the runtime's resumable execution state. [Masc_agent_core]
+    requires an AGENT_CORE checkpoint on every successful turn. [Official_client]
+    forbids projecting the client's session state into an AGENT_CORE checkpoint. *)

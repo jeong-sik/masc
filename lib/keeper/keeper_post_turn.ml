@@ -28,7 +28,7 @@ open Keeper_context_core
 
 type post_turn_lifecycle = {
   updated_meta : keeper_meta;
-  checkpoint : Agent_sdk.Checkpoint.t option;
+  checkpoint : Agent_core.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
@@ -38,7 +38,7 @@ type post_turn_lifecycle = {
 }
 
 type compaction_recovery = {
-  checkpoint : Agent_sdk.Checkpoint.t;
+  checkpoint : Agent_core.Checkpoint.t;
   checkpoint_installation : Keeper_checkpoint_store.installed_checkpoint;
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
@@ -82,7 +82,7 @@ let checkpoint_load_error_detail = function
   | Store_error detail
   | Parse_error detail
   | Io_error detail
-  | Sdk_other_error detail -> detail
+  | Agent_core_error detail -> detail
 
 let checkpoint_identity_error_detail = function
   | Keeper_checkpoint_store.Session_id_invalid detail ->
@@ -189,12 +189,12 @@ let apply_resilience_wirein
           let outcome =
             Resilience.Keeper_bridge.apply_post_turn_resilience
               witness ?audit_store ?strategy_executor ~now
-              ~working_context:cp.Agent_sdk.Checkpoint.working_context
+              ~working_context:cp.Agent_core.Checkpoint.working_context
               ~maybe_error ()
           in
           let new_cp =
             { cp with
-              Agent_sdk.Checkpoint.working_context = outcome.working_context
+              Agent_core.Checkpoint.working_context = outcome.working_context
             }
           in
           { lifecycle with checkpoint = Some new_cp }
@@ -249,10 +249,10 @@ let apply_tool_emission_wirein
           let new_wc =
             Keeper_tool_emission_hook.drain_into_working_context
               acc
-              ~working_context:cp.Agent_sdk.Checkpoint.working_context
+              ~working_context:cp.Agent_core.Checkpoint.working_context
           in
           let new_cp =
-            { cp with Agent_sdk.Checkpoint.working_context = new_wc }
+            { cp with Agent_core.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
         with
@@ -276,7 +276,7 @@ let apply_multimodal_wirein
   | Some cp ->
     (match
        Multimodal.Wirein_helpers.extract_raw_artifacts
-         cp.Agent_sdk.Checkpoint.working_context
+         cp.Agent_core.Checkpoint.working_context
      with
      | Error detail ->
        Log.Keeper.warn
@@ -327,7 +327,7 @@ let apply_multimodal_wirein
               meta
           in
           let new_cp =
-            { cp with Agent_sdk.Checkpoint.working_context = new_wc }
+            { cp with Agent_core.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
         with
@@ -346,7 +346,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
     ~(resilience_audit_store : Shared_audit.Store.t option)
     ~(resilience_strategy_executor : Resilience.Recovery.strategy_executor option)
     ~(meta : keeper_meta)
-    ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
+    ~(checkpoint : Agent_core.Checkpoint.t option) : post_turn_lifecycle =
   (* Reviewer #13214: an executor without an audit store would let
      retry/fallback/handoff/abort callbacks mutate live state
      without the pre-flight RecoveryAttempted envelope that
@@ -393,7 +393,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
         message_count = 0;
       }
   | Some cp ->
-      let ctx = context_of_oas_checkpoint cp in
+      let ctx = context_of_agent_core_checkpoint cp in
       let current_generation =
         checkpoint_generation cp ~fallback:meta.runtime.nonce
       in
@@ -524,27 +524,27 @@ let prepare_compaction_admitted
       ~base_dir
   in
   match
-    Keeper_checkpoint_store.load_oas_with_ref
+    Keeper_checkpoint_store.load_agent_core_with_ref
       ~session_dir:session.session_dir
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
   with
   | Error Keeper_checkpoint_store.Ref_not_found ->
     Log.Keeper.debug
-      "keeper:%s compaction OAS checkpoint not found"
+      "keeper:%s compaction AGENT_CORE checkpoint not found"
       (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
     Error (Checkpoint_ref_load_failed Keeper_checkpoint_store.Ref_not_found)
   | Error error ->
     let detail = checkpoint_ref_load_error_detail error in
     Log.Keeper.error
-      "keeper:%s compaction OAS load error: %s"
+      "keeper:%s compaction AGENT_CORE load error: %s"
       (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       detail;
     Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string OasExecutionErrors)
+      Keeper_metrics.(to_string Agent_coreExecutionErrors)
       ~labels:
         [ "keeper", meta.name
         ; ( "phase"
-          , Keeper_oas_execution_error_phase.(to_label Compaction_checkpoint_load) )
+          , Keeper_agent_core_execution_error_phase.(to_label Compaction_checkpoint_load) )
         ]
       ();
     Error (Checkpoint_ref_load_failed error)
@@ -552,7 +552,7 @@ let prepare_compaction_admitted
     let turn_generation =
       checkpoint_generation checkpoint ~fallback:meta.runtime.nonce
     in
-    let ctx = context_of_oas_checkpoint checkpoint in
+    let ctx = context_of_agent_core_checkpoint checkpoint in
     let retry_meta =
       if turn_generation = meta.runtime.nonce then meta
       else map_runtime (fun rt -> { rt with nonce = turn_generation }) meta
@@ -634,7 +634,7 @@ let prepare_compaction
 
 let commit_prepared_compaction_with
     ?(after_checkpoint_installed = fun () -> ())
-    ~save_oas_checkpoint_if_source
+    ~save_agent_core_checkpoint_if_source
     (prepared : prepared_compaction)
   : prepared_commit_outcome =
   (* Source-CAS commit.  The caller decides which admission (if any) guards
@@ -657,7 +657,7 @@ let commit_prepared_compaction_with
     Not_committed (no_compaction_of_prepared ~cause prepared)
   in
   try
-    let candidate_context = oas_context_of_context context in
+    let candidate_context = agent_core_context_of_context context in
     match
       Keeper_checkpoint_store.compaction_commit_count_of_context
         candidate_context
@@ -676,11 +676,11 @@ let commit_prepared_compaction_with
     | Ok source_commit_count ->
       let commit_count = source_commit_count + 1 in
       let stamped_context =
-        Agent_sdk.Context.copy ~eio:true candidate_context
+        Agent_core.Context.copy ~eio:true candidate_context
       in
-      Agent_sdk.Context.set_scoped
+      Agent_core.Context.set_scoped
         stamped_context
-        Agent_sdk.Context.Session
+        Agent_core.Context.Session
         Keeper_checkpoint_store.compaction_commit_count_context_key
         (`Int commit_count);
       let commit_context =
@@ -689,7 +689,7 @@ let commit_prepared_compaction_with
         }
       in
       (match
-         save_oas_checkpoint_if_source
+         save_agent_core_checkpoint_if_source
            ~multimodal_policy:retry_meta.multimodal_policy
            ~keeper_name:retry_meta.name
            ~session
@@ -785,21 +785,21 @@ let commit_prepared_compaction_with
 
 let commit_prepared_compaction prepared =
   commit_prepared_compaction_with
-    ~save_oas_checkpoint_if_source
+    ~save_agent_core_checkpoint_if_source
     prepared
 ;;
 
 module For_testing = struct
   let commit_prepared_compaction_with_history
         ?after_checkpoint_installed
-        ~save_oas_history
+        ~save_agent_core_history
         prepared
     =
     commit_prepared_compaction_with
       ?after_checkpoint_installed
-      ~save_oas_checkpoint_if_source:
-        (Keeper_context_core.For_testing.save_oas_checkpoint_if_source_with_history
-           ~save_oas_history)
+      ~save_agent_core_checkpoint_if_source:
+        (Keeper_context_core.For_testing.save_agent_core_checkpoint_if_source_with_history
+           ~save_agent_core_history)
       prepared
   ;;
 end

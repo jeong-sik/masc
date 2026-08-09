@@ -6,7 +6,7 @@
 #
 # Local Gemma 4 QAT is a canary runtime, not the fleet default. Keep the
 # default on the cloud runtime and pin only one keeper to local Ollama until
-# sustained turns prove the local box can absorb more load. OAS handles Gemma 4
+# sustained turns prove the local box can absorb more load. AGENT_CORE handles Gemma 4
 # thinking through the chat-template control token path, not Ollama think:true.
 
 [runtime]
@@ -34,14 +34,14 @@ slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 display-name = "Ollama Cloud"
 protocol = "openai-compatible-http"
 endpoint = "https://ollama.com/v1"
-# OAS connect + initial-response-headers wall-clock budget (oas#2163).
+# AGENT_CORE connect + initial-response-headers wall-clock budget (agent-core boundary).
 # Ollama Cloud serving reasoning models (kimi-k2.7-code, minimax-m3) can hold the
 # first response header past the 60s OpenAI_compat default (cold-start /
 # admission queueing / long reasoning prefill), surfacing in the Fusion panel
 # as `phase=http_operation: HTTP operation exceeded wall-clock timeout` — which
 # degraded a panel to 1/3 models (only deepseek-v4-pro cleared 60s). 600s
-# intentionally mirrors OAS `Provider_config.default_connect_timeout_s Ollama`;
-# omit to keep the OAS OpenAI-compatible default. Key spelling is mirrored by
+# intentionally mirrors AGENT_CORE `Provider_config.default_connect_timeout_s Ollama`;
+# omit to keep the AGENT_CORE OpenAI-compatible default. Key spelling is mirrored by
 # `Runtime_schema.connect_timeout_s_key`.
 connect-timeout-s = 600.0
 
@@ -152,7 +152,7 @@ api-name = "glm-4.7"
 max-context = 200000
 tools-support = true
 thinking-support = true
-# Keep long-running keeper turns on non-preserved reasoning by default. OAS owns
+# Keep long-running keeper turns on non-preserved reasoning by default. AGENT_CORE owns
 # GLM's clear_thinking wire contract; enabling preserved thinking here replays
 # historical reasoning into every subsequent keeper turn.
 preserve-thinking = false
@@ -169,16 +169,16 @@ supports-structured-output = false
 api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
 max-context = 262144
 tools-support = true
-# OAS maps this to Gemma 4's <|think|> chat-template token and omits the
+# AGENT_CORE maps this to Gemma 4's <|think|> chat-template token and omits the
 # generic Ollama top-level think field for this model family.
 thinking-support = true
 preserve-thinking = false
 streaming = true
 
 [models.gemma4-26b-a4b-qat.capabilities]
-# This runtime rides OAS native Ollama /api/chat, which does not serialize
-# tool_choice (oas backend_ollama.ml:24). Declaring true here would override
-# oas models.toml's supports_tool_choice=false (provider_runtime_binding.ml
+# This runtime rides AGENT_CORE native Ollama /api/chat, which does not serialize
+# tool_choice (agent_core backend_ollama.ml:24). Declaring true here would override
+# agent_core models.toml's supports_tool_choice=false (provider_runtime_binding.ml
 # applies this override last) while the transport silently drops forced tool
 # choice. Do not re-enable without a serializer path + model-side proof.
 supports-tool-choice = false
@@ -193,7 +193,7 @@ supports-multimodal-inputs = true
 api-name = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
 max-context = 131072
 tools-support = true
-# OAS maps this to Gemma 4's <|think|> chat-template token and omits the
+# AGENT_CORE maps this to Gemma 4's <|think|> chat-template token and omits the
 # generic Ollama top-level think field for this model family.
 thinking-support = true
 preserve-thinking = false
@@ -216,7 +216,7 @@ wizard-default = true
 # Keeper application working set, not the provider's 1M-token capability.
 # The exact final JSON body (system/tail + tools + lossless transcript) must
 # remain bounded so durable canonical history cannot become an n,n+1,... wire
-# replay. OAS rejects an oversized serialized body locally before POST; the
+# replay. AGENT_CORE rejects an oversized serialized body locally before POST; the
 # Keeper turn policy owns any subsequent recovery decision.
 max-request-body-bytes = 524288
 
@@ -237,7 +237,7 @@ api-name = "GLM-5-Turbo"
 max-context = 203000
 tools-support = true
 thinking-support = true
-# Keep long-running keeper turns on non-preserved reasoning by default. OAS owns
+# Keep long-running keeper turns on non-preserved reasoning by default. AGENT_CORE owns
 # GLM's clear_thinking wire contract; enabling preserved thinking here replays
 # historical reasoning into every subsequent keeper turn.
 preserve-thinking = false
@@ -255,7 +255,7 @@ max-request-body-bytes = 262144
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding retained for explicit
 # operator use. Do not route provider-native structured-output lanes here unless
-# the OAS catalog proves a native schema guarantee for this runtime.
+# the AGENT_CORE catalog proves a native schema guarantee for this runtime.
 # api-name originally verified 2026-06-18 against
 # https://ollama.com/v1/chat/completions.
 [models.minimax-m3]
@@ -271,8 +271,8 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-# SSOT = OAS models.toml per official MiniMax Chat docs: Chat tool_choice /
-# response_format / structured output are not documented (jeong-sik/oas#2339).
+# SSOT = agent-core models.toml per official MiniMax Chat documentation; Chat
+# tool_choice, response_format, and structured output are not documented.
 supports-response-format-json = false
 supports-structured-output = false
 supports-image-input = true
@@ -307,7 +307,7 @@ wizard-default = true
 max-request-body-bytes = 524288
 
 # Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name
-# is kept separate from Kimi's direct API route; OAS owns provider/model wire
+# is kept separate from Kimi's direct API route; AGENT_CORE owns provider/model wire
 # details and MASC declares only runtime-local concrete model capabilities.
 # Official Kimi docs checked 2026-07-04: kimi-k2.7-code is the latest
 # code-focused thinking model; keep the short Kimi seed on the current model.
@@ -324,7 +324,7 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-# SSOT = OAS models.toml; Ollama Cloud Kimi rows do not currently advertise a
+# SSOT = AGENT_CORE models.toml; Ollama Cloud Kimi rows do not currently advertise a
 # native schema/response_format guarantee.
 supports-response-format-json = false
 supports-structured-output = false
@@ -777,7 +777,7 @@ supports-tool-choice = false
 supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
-# SSOT = OAS models.toml per official MiniMax Chat docs (jeong-sik/oas#2339).
+# SSOT = agent-core models.toml per official MiniMax Chat documentation.
 supports-response-format-json = false
 supports-structured-output = false
 supports-image-input = true
@@ -1050,7 +1050,7 @@ panel = [
   "ollama_cloud.ollama-cloud-ministral-3-14b",
 ]
 # Fusion judges request provider-native structured output. Keep this on a
-# runtime whose model resolves through the OAS catalog with native schema support.
+# runtime whose model resolves through the AGENT_CORE catalog with native schema support.
 judge = "ollama_cloud.ollama-cloud-devstral-2-123b"
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \

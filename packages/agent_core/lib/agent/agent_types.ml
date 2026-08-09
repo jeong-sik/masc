@@ -38,7 +38,7 @@ type options =
   { provider_config : Llm_provider.Provider_config.t option
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
-    (** RFC-OAS-037: separate bound for the time-to-first-event (TTFT /
+    (** Agent Core contract: separate bound for the time-to-first-event (TTFT /
         prefill) wait, distinct from [stream_idle_timeout_s] which bounds
         inter-token idle only AFTER the first event. When [None] the
         first-event wait is not bounded by the short idle value; when unset it
@@ -51,7 +51,7 @@ type options =
   ; tracer : Tracing.t
   ; trace_link : (string * string) option
     (** Optional (trace_id, span_id) of a parent span to link to.
-        Used to connect OAS agent turns to an external trace root. *)
+        Used to connect AGENT_CORE agent turns to an external trace root. *)
   ; raw_trace : Raw_trace.t option
   ; context_injector : Hooks.context_injector option
   ; mcp_clients : Mcp.managed list
@@ -176,7 +176,7 @@ let update_state t f =
 ;;
 
 let description t = t.options.description
-let sdk_version = Sdk_version.version
+let agent_core_version = Version.version
 
 let typed_provider_name (cfg : Llm_provider.Provider_config.t) =
   Provider_runtime_binding.provider_id_of_provider_config cfg
@@ -199,7 +199,7 @@ let card ~supported_interfaces t =
   Agent_card.of_info
     { agent_name = t.state.config.name
     ; agent_description = t.options.description
-    ; version = sdk_version
+    ; version = agent_core_version
     ; config = t.state.config
     ; tool_schemas =
         List.map (fun (tool : Tool.t) -> tool.schema) (Tool_set.to_list t.tools)

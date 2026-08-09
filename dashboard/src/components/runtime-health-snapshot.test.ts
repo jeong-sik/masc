@@ -375,7 +375,7 @@ describe('RuntimeHealthSnapshot', () => {
         status: 'degraded',
         degraded: true,
         operator_action_required: true,
-        terminal_reason: 'missing_oas_catalog_models',
+        terminal_reason: 'missing_agent_core_catalog_models',
         message: 'runtime catalog degraded boot',
         config_path: '/tmp/masc-test/runtime.toml',
         configured_default_runtime_id: 'glm-coding.glm-5-turbo',
@@ -401,7 +401,7 @@ describe('RuntimeHealthSnapshot', () => {
         dropped_media_failover: [],
         dropped_lane_candidates: [],
         dropped_lanes: [],
-        next_action: 'Add deployment rows to oas-models-overlay.toml (or upstream OAS).',
+        next_action: 'Add deployment rows to agent-core-models-overlay.toml (or upstream Agent Core).',
       },
     })
     const { RuntimeHealthSnapshot } = await import('./runtime-health-snapshot')
@@ -414,11 +414,11 @@ describe('RuntimeHealthSnapshot', () => {
 
     expect(container.textContent).toContain('startup')
     expect(container.textContent).toContain('2 catalog gaps')
-    expect(container.textContent).toContain('missing_oas_catalog_models')
+    expect(container.textContent).toContain('missing_agent_core_catalog_models')
     expect(container.textContent).toContain('effective default: glm-coding.glm-5-turbo')
     expect(container.textContent).toContain('disabled runtimes: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
     expect(container.textContent).toContain('missing catalog: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
-    expect(container.textContent).toContain('next: Add deployment rows to oas-models-overlay.toml (or upstream OAS).')
+    expect(container.textContent).toContain('next: Add deployment rows to agent-core-models-overlay.toml (or upstream Agent Core).')
   })
 
   it('uses force=1 when the operator clicks Live probe', async () => {

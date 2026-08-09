@@ -26,7 +26,7 @@ type completion_request =
         Non-HTTP transports leave it unused: they never saw an HTTP response,
         and inventing one would be a fabricated metric. *)
   ; observe_wire_chunk : Wire_observer.observe_chunk option
-    (** Optional OAS-owned sink for raw provider chunks. A custom streaming
+    (** Optional AGENT_CORE-owned sink for raw provider chunks. A custom streaming
         transport that participates in wire observation calls this sink once
         for every raw provider chunk. The sink, rather than the transport,
         owns redaction, caller delivery, typed failure telemetry, and ordinary
@@ -44,16 +44,16 @@ type completion_request =
         gap between streamed SSE/NDJSON lines, not total stream duration.
         [None] preserves pre-0.205.0 behaviour (no idle deadline). Armed only
         when the transport also holds a clock (closed over at construction).
-        See RFC-OAS-026. @since 0.205.0 *)
+        See Agent Core contract. @since 0.205.0 *)
   ; first_event_timeout_s : float option
-    (** RFC-OAS-037: time-to-first-event (TTFT / prefill) deadline, in
+    (** Agent Core contract: time-to-first-event (TTFT / prefill) deadline, in
         seconds, distinct from [stream_idle_timeout_s]. Bounds only the wait
         for the first streaming event; inter-token idle arms after it. [None]
         falls back to [body_timeout_s], then to [stream_idle_timeout_s] (the
-        bound that applied before RFC-OAS-037); inter-token idle still guards
+        bound that applied before Agent Core contract); inter-token idle still guards
         once the stream produces. @since 0.218.0 *)
   ; body_timeout_s : float option
-    (** RFC-OAS-037 §4.2: total body budget, in seconds. On the streaming path
+    (** Agent Core contract §4.2: total body budget, in seconds. On the streaming path
         it is the fallback bound for the first-event (TTFT/prefill) wait when
         [first_event_timeout_s] is [None] — the common production shape, since
         callers wire [body_timeout_s] but not [first_event_timeout_s]. [None]

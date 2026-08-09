@@ -1,4 +1,4 @@
-(** Tests for the canonical type projections exposed on OAS ADTs:
+(** Tests for the canonical type projections exposed on AGENT_CORE ADTs:
     - [Response_shape.summarize_blocks] (the content-block-list core of
       [summarize]).
     - [Types.total_tokens] (billable token pair on [api_usage]). *)

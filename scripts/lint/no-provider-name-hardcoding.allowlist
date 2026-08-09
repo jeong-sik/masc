@@ -1,4 +1,4 @@
-# Existing provider/model identity debt in the OAS-owned provider migration
+# Existing provider/model identity debt in the AGENT_CORE-owned provider migration
 # boundary. Keep this list shrinking; do not add entries without linking to a
 # catalog/runtime-binding replacement task.
 #

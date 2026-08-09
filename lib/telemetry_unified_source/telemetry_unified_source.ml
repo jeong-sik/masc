@@ -2,7 +2,7 @@
 
     SSOT for the 9-variant [Telemetry_unified.source] enum that names
     each durable telemetry stream (keeper_metric, agent_event,
-    tool_call_io, trajectory_tool_call, tool_usage, oas_event,
+    tool_call_io, trajectory_tool_call, tool_usage, agent_core_event,
     execution_receipt, goal_event, tool_metric).
 
     Pure variant + total bijection (modulo unknown-string → None on
@@ -17,7 +17,7 @@ type source =
   | Tool_call_io   (** Keeper tool calls with full input/output *)
   | Trajectory_tool_call  (** Keeper trajectory-backed tool call rows *)
   | Tool_usage     (** Non-public registered tool invocations *)
-  | Oas_event      (** Durable OAS native/custom event bus relays *)
+  | Agent_core_event      (** Durable AGENT_CORE native/custom event bus relays *)
   | Execution_receipt  (** Keeper execution receipt rows *)
   | Goal_event     (** Goal FSM lifecycle and verification events *)
   | Tool_metric    (** Tool duration and success metrics *)
@@ -28,7 +28,7 @@ let source_to_string = function
   | Tool_call_io -> "tool_call_io"
   | Trajectory_tool_call -> "trajectory_tool_call"
   | Tool_usage -> "tool_usage"
-  | Oas_event -> "oas_event"
+  | Agent_core_event -> "agent_core_event"
   | Execution_receipt -> "execution_receipt"
   | Goal_event -> "goal_event"
   | Tool_metric -> "tool_metric"
@@ -39,7 +39,7 @@ let source_of_string = function
   | "tool_call_io" -> Some Tool_call_io
   | "trajectory_tool_call" -> Some Trajectory_tool_call
   | "tool_usage" -> Some Tool_usage
-  | "oas_event" -> Some Oas_event
+  | "agent_core_event" -> Some Agent_core_event
   | "execution_receipt" -> Some Execution_receipt
   | "goal_event" -> Some Goal_event
   | "tool_metric" -> Some Tool_metric
@@ -51,7 +51,7 @@ let all_sources =
   ; Tool_call_io
   ; Trajectory_tool_call
   ; Tool_usage
-  ; Oas_event
+  ; Agent_core_event
   ; Execution_receipt
   ; Goal_event
   ; Tool_metric

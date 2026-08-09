@@ -209,7 +209,7 @@ type hook_decision =
       [Deterministic]) whose content is the string payload verbatim. Distinct
       from [HookFailed], which represents an unintentional hook failure. Use
       this when the embedding application has already made an explicit
-      decision outside OAS. *)
+      decision outside AGENT_CORE. *)
 
 (** A hook function *)
 type hook = hook_event -> hook_decision

@@ -3,9 +3,9 @@
     checkpoint-store layer. *)
 
 type t =
-  | Oas_cleanup (** OAS checkpoint cleanup pass failed. *)
-  | Oas_save (** OAS checkpoint primary save failed. *)
-  | Oas_delete (** OAS checkpoint delete failed. *)
-  | Oas_archive (** OAS checkpoint history archive failed. *)
+  | Agent_core_cleanup (** AGENT_CORE checkpoint cleanup pass failed. *)
+  | Agent_core_save (** AGENT_CORE checkpoint primary save failed. *)
+  | Agent_core_delete (** AGENT_CORE checkpoint delete failed. *)
+  | Agent_core_archive (** AGENT_CORE checkpoint history archive failed. *)
 
 val to_label : t -> string

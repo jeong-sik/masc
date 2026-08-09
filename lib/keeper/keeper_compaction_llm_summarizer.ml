@@ -1,13 +1,13 @@
-(** LLM-backed keeper context compaction over the OAS exact-output surface.
+(** LLM-backed keeper context compaction over the AGENT_CORE exact-output surface.
     See keeper_compaction_llm_summarizer.mli. MASC owns the domain plan while
-    OAS owns frozen target admission, dispatch, and receipt provenance. *)
+    AGENT_CORE owns frozen target admission, dispatch, and receipt provenance. *)
 
 module Schema = Keeper_structured_output_schema
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 module String_set = Set.Make (String)
 
 type message_text_source =
-  { role : Agent_sdk.Types.role
+  { role : Agent_core.Types.role
   ; text_blocks : string list
   }
 
@@ -85,7 +85,7 @@ type summarizer =
 
 let compaction_summary_metadata_key = "masc.compaction.bounded_summary"
 
-let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
+let message role text : Agent_core.Types.message = Agent_core.Types.text_message role text
 
 let messages_of_unit = function
   | Keeper_compaction_unit.Ordinary_message message -> [ message ]
@@ -109,20 +109,20 @@ let option_json project = function
   | Some value -> project value
 
 let tool_failure_kind_string = function
-  | Agent_sdk.Types.Validation_error -> "validation_error"
-  | Agent_sdk.Types.Recoverable_tool_error -> "recoverable_tool_error"
-  | Agent_sdk.Types.Non_retryable_tool_error -> "non_retryable_tool_error"
-  | Agent_sdk.Types.Reported_tool_error -> "reported_tool_error"
-  | Agent_sdk.Types.Unattributed_tool_error -> "unattributed_tool_error"
+  | Agent_core.Types.Validation_error -> "validation_error"
+  | Agent_core.Types.Recoverable_tool_error -> "recoverable_tool_error"
+  | Agent_core.Types.Non_retryable_tool_error -> "non_retryable_tool_error"
+  | Agent_core.Types.Reported_tool_error -> "reported_tool_error"
+  | Agent_core.Types.Unattributed_tool_error -> "unattributed_tool_error"
 
 let tool_error_class_string = function
-  | Agent_sdk.Types.Transient -> "transient"
-  | Agent_sdk.Types.Deterministic -> "deterministic"
-  | Agent_sdk.Types.Unknown -> "unknown"
+  | Agent_core.Types.Transient -> "transient"
+  | Agent_core.Types.Deterministic -> "deterministic"
+  | Agent_core.Types.Unknown -> "unknown"
 
 let tool_result_outcome_json = function
-  | Agent_sdk.Types.Tool_succeeded -> `Assoc [ "kind", `String "succeeded" ]
-  | Agent_sdk.Types.Tool_failed { failure_kind; error_class } ->
+  | Agent_core.Types.Tool_succeeded -> `Assoc [ "kind", `String "succeeded" ]
+  | Agent_core.Types.Tool_failed { failure_kind; error_class } ->
     `Assoc
       [ "kind", `String "failed"
       ; "failure_kind", `String (tool_failure_kind_string failure_kind)
@@ -136,16 +136,16 @@ type semantic_projection_error =
 let rec semantic_content_blocks_json blocks =
   let rec loop projected_rev = function
     | [] -> Ok (`List (List.rev projected_rev))
-    | Agent_sdk.Types.Text text :: rest ->
+    | Agent_core.Types.Text text :: rest ->
       loop
         (`Assoc [ "type", `String "text"; "text", `String text ] :: projected_rev)
         rest
-    | ( Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.ReasoningDetails _
-      | Agent_sdk.Types.RedactedThinking _ )
+    | ( Agent_core.Types.Thinking _
+      | Agent_core.Types.ReasoningDetails _
+      | Agent_core.Types.RedactedThinking _ )
       :: rest ->
       loop projected_rev rest
-    | Agent_sdk.Types.ToolUse { id; name; input } :: rest ->
+    | Agent_core.Types.ToolUse { id; name; input } :: rest ->
       loop
         (`Assoc
            [ "type", `String "tool_use"
@@ -155,7 +155,7 @@ let rec semantic_content_blocks_json blocks =
            ]
          :: projected_rev)
         rest
-    | Agent_sdk.Types.ToolResult
+    | Agent_core.Types.ToolResult
         { tool_use_id; content; outcome; json; content_blocks }
       :: rest ->
       (match semantic_optional_content_blocks_json content_blocks with
@@ -172,7 +172,7 @@ let rec semantic_content_blocks_json blocks =
               ]
             :: projected_rev)
            rest)
-    | (Agent_sdk.Types.Image _ | Agent_sdk.Types.Document _ | Agent_sdk.Types.Audio _)
+    | (Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _)
       :: _ ->
       Error Unsupported_media
   in
@@ -182,13 +182,13 @@ and semantic_optional_content_blocks_json = function
   | None -> Ok `Null
   | Some blocks -> semantic_content_blocks_json blocks
 
-let semantic_message_json (message : Agent_sdk.Types.message) =
+let semantic_message_json (message : Agent_core.Types.message) =
   match semantic_content_blocks_json message.content with
   | Error _ as error -> error
   | Ok content_blocks ->
     Ok
       (`Assoc
-         [ "role", `String (Agent_sdk.Types.role_to_string message.role)
+         [ "role", `String (Agent_core.Types.role_to_string message.role)
          ; "content_blocks", content_blocks
          ; "name", option_json (fun value -> `String value) message.name
          ; "tool_call_id", option_json (fun value -> `String value) message.tool_call_id
@@ -211,18 +211,18 @@ let message_text_source role blocks =
       if List.exists (fun text -> String.trim text <> "") text_blocks
       then Some { role; text_blocks }
       else None
-    | Agent_sdk.Types.Text text :: rest ->
+    | Agent_core.Types.Text text :: rest ->
       loop (text :: text_blocks_rev) rest
-    | ( Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.ReasoningDetails _
-      | Agent_sdk.Types.RedactedThinking _ )
+    | ( Agent_core.Types.Thinking _
+      | Agent_core.Types.ReasoningDetails _
+      | Agent_core.Types.RedactedThinking _ )
       :: rest ->
       loop text_blocks_rev rest
-    | ( Agent_sdk.Types.ToolUse _
-      | Agent_sdk.Types.ToolResult _
-      | Agent_sdk.Types.Image _
-      | Agent_sdk.Types.Document _
-      | Agent_sdk.Types.Audio _ )
+    | ( Agent_core.Types.ToolUse _
+      | Agent_core.Types.ToolResult _
+      | Agent_core.Types.Image _
+      | Agent_core.Types.Document _
+      | Agent_core.Types.Audio _ )
       :: _ ->
       None
   in
@@ -231,17 +231,17 @@ let message_text_source role blocks =
 let cycle_has_tool_protocol messages =
   let has_tool_use =
     List.exists
-      (fun (message : Agent_sdk.Types.message) ->
+      (fun (message : Agent_core.Types.message) ->
         List.exists
-          (function Agent_sdk.Types.ToolUse _ -> true | _ -> false)
+          (function Agent_core.Types.ToolUse _ -> true | _ -> false)
           message.content)
       messages
   in
   let has_tool_result =
     List.exists
-      (fun (message : Agent_sdk.Types.message) ->
+      (fun (message : Agent_core.Types.message) ->
         List.exists
-          (function Agent_sdk.Types.ToolResult _ -> true | _ -> false)
+          (function Agent_core.Types.ToolResult _ -> true | _ -> false)
           message.content)
       messages
   in
@@ -249,13 +249,13 @@ let cycle_has_tool_protocol messages =
 
 let eligible_source ~first_user_seen source_index = function
   | Keeper_compaction_unit.Ordinary_message
-      ({ role = (Agent_sdk.Types.User | Agent_sdk.Types.Assistant)
+      ({ role = (Agent_core.Types.User | Agent_core.Types.Assistant)
        ; content
        ; name = None
        ; tool_call_id = None
        ; metadata = []
        } as message)
-    when message.role <> Agent_sdk.Types.User || first_user_seen ->
+    when message.role <> Agent_core.Types.User || first_user_seen ->
     (match message_text_source message.role content with
      | Some source -> Some { source_index; payload = Message_text source }
      | None -> None)
@@ -288,7 +288,7 @@ let eligible_sources units =
         ||
         match unit_ with
         | Keeper_compaction_unit.Ordinary_message
-            { role = Agent_sdk.Types.User; _ } -> true
+            { role = Agent_core.Types.User; _ } -> true
         | Keeper_compaction_unit.Ordinary_message _
         | Keeper_compaction_unit.Closed_tool_cycle _ ->
           false
@@ -306,8 +306,8 @@ let has_eligible_units units = eligible_sources units <> []
 
 let prior_summary source_index = function
   | Keeper_compaction_unit.Ordinary_message
-      { role = Agent_sdk.Types.Assistant
-      ; content = [ Agent_sdk.Types.Text text ]
+      { role = Agent_core.Types.Assistant
+      ; content = [ Agent_core.Types.Text text ]
       ; name = None
       ; tool_call_id = None
       ; metadata = [ key, `Bool true ]
@@ -396,7 +396,7 @@ let eligible_units_json (sources : eligible_source list) =
              ; "kind", `String "message_text"
              ; ( "role"
                , `String
-                   (Agent_sdk.Types.role_to_string role) )
+                   (Agent_core.Types.role_to_string role) )
              ; "text_blocks", `List (List.map (fun text -> `String text) text_blocks)
              ]
          | Closed_tool_cycle { semantic_json; _ } ->
@@ -454,7 +454,7 @@ let messages_for_plan ~window =
       (first_index + 1)
       max_keep_from
   in
-  [ message Agent_sdk.Types.System system; message Agent_sdk.Types.User user ]
+  [ message Agent_core.Types.System system; message Agent_core.Types.User user ]
 
 let ( let* ) = Result.bind
 
@@ -530,7 +530,7 @@ let summary_message summary =
   (* Current-format derived state, not a compatibility marker. The exact field
      identifies the one rolling summary consumed by [planning_window_for_units].
      Its blast radius is planning and in-place replacement only. *)
-  { (message Agent_sdk.Types.Assistant summary) with
+  { (message Agent_core.Types.Assistant summary) with
     metadata = [ compaction_summary_metadata_key, `Bool true ]
   }
 
@@ -636,7 +636,7 @@ let largest_fitting_window ~keeper_name ~selected_slots window =
   in
   (* Every candidate contains the same prior summary and an exact prefix of the
      same raw JSON window. Increasing [count] only appends source bytes to the
-     messages handed to OAS, so the exact serialized size is monotone. Binary
+     messages handed to AGENT_CORE, so the exact serialized size is monotone. Binary
      search avoids repeatedly serializing every growing prefix. *)
   let rec search best low high =
     if low > high
@@ -928,9 +928,9 @@ let execute_prepared_lane_current
       ~elapsed_s:(Time_compat.now () -. started_at)
       ~output
   in
-  (* Process-local derived state only. It identifies the exact OAS candidate
+  (* Process-local derived state only. It identifies the exact AGENT_CORE candidate
      whose dispatch callback passed, so cancellation can retain that source.
-     It is not persisted and does not compete with OAS execution ownership. *)
+     It is not persisted and does not compete with AGENT_CORE execution ownership. *)
   let authorized_observation = ref None in
   let before_dispatch candidate =
     let observation = observe_flow_attempt_receipt candidate in
@@ -1004,7 +1004,7 @@ let execute_prepared_lane_current
     with
     | Eio.Cancel.Cancelled _ as cancellation ->
       let raw_bt = Printexc.get_raw_backtrace () in
-      (* OAS owns execution state; MASC retains only the source-authority
+      (* AGENT_CORE owns execution state; MASC retains only the source-authority
          observation. Cancellation is fiber teardown, not a compaction result:
          returning a typed terminal made the heartbeat record a schedule failure
          even though [Cycle.Cancelled] records none. Preserve the authorized

@@ -170,7 +170,7 @@ echo ""
 
 echo "=== Samchon Harness Alignment Check ==="
 echo ""
-echo "Principle 1 (Type Coercion): Check OAS logs for coercion entries"
+echo "Principle 1 (Type Coercion): Check AGENT_CORE logs for coercion entries"
 echo "Principle 2 (Self-Healing):  Retry rate = failure calls / total calls"
 echo "Principle 3 (Schema First):  $FAIL_COUNT failures — each is a harness improvement signal"
 echo "Principle 4 (Small Model QA): Run with MASC_KEEPER_LLM_RERANK=false to test raw 9B"

@@ -1347,7 +1347,7 @@ Source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2`, `/Users/dancer/Dow
 
 ### Should Stay Out Of Scope
 
-- No OAS/provider/model transport logic should be added to the dashboard for visual parity. OAS remains the provider/model/transport boundary; this pass only changes MASC dashboard layout state and CSS.
+- No agent core/provider/model transport logic should be added to the dashboard for visual parity. agent core remains the provider/model/transport boundary; this pass only changes MASC dashboard layout state and CSS.
 - No local-only prototype state should be copied into runtime-backed keeper surfaces. If a v2 (26) control has no durable MASC API, keep it read-only, hidden, or explicitly marked as unsupported rather than stubbing it.
 - No local absolute path default such as `/Users/dancer/me` should be introduced in frontend or OCaml runtime code for this visual work.
 
@@ -1359,7 +1359,7 @@ Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/composer.
 
 - Kept the runtime-backed `ChatComposer` as the single owner of attachments, voice input, queueing, abort, and send client action IDs instead of copying standalone prototype state.
 - Scoped phone composer parity to `.kw-composer-inner` CSS: tighter box geometry, 16px mobile textarea font, denser tools, compact send button, truncated hint line, bounded attachment tray, and mobile-safe draft chip overflow.
-- Tightened mobile context drawer spacing in `.kw-mobile-rail-drawer` without changing keeper/OAS runtime boundaries.
+- Tightened mobile context drawer spacing in `.kw-mobile-rail-drawer` without changing keeper/agent core runtime boundaries.
 
 ### Still Missing Vs v2 (26)
 
@@ -1427,7 +1427,7 @@ Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/fleet.jsx`, `/Users
 ### Implemented In Current Worktree
 
 - Narrowed the visual-parity source guard to the objective's concrete risks: local absolute paths, downloaded artifact paths, `default_base`, and direct frontend env reads.
-- Removed the over-broad raw `MASC_` / `OAS_` substring ban from the guard. Legitimate MASC identifiers and boundary documentation strings should not fail a visual parity guard; OAS coupling remains governed by code ownership and explicit provider/transport changes, not by a raw substring heuristic.
+- Removed the over-broad raw `MASC_` / `AGENT_CORE_` substring ban from the guard. Legitimate MASC identifiers and boundary documentation strings should not fail a visual parity guard; agent core coupling remains governed by code ownership and explicit provider/transport changes, not by a raw substring heuristic.
 
 ### Still Missing Vs v2 (26)
 
@@ -1485,7 +1485,7 @@ Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/keeper-co
 - Moved the mobile “운영 상세” surface closer to the v2 full-detail pattern: full-height content, sticky top identity/action bar, a narrow 56px section rail, content-only scrolling, safe-area padding, and denser active section cards.
 - Closed the follow-up CSS affordance gap on the 56px mobile section rail: `kw-detail-section-tab` is now explicitly `inline-flex` and center-aligned, so the narrow rail does not depend on browser defaults or inherited flex behavior.
 - Matched the mobile keeper config overlay to the v2 full-screen treatment: no phone-side drawer chrome, `100dvh` height, safe-area header/content padding, contained scroll, dark overlay, and 16px form controls to avoid mobile zoom.
-- Kept all detail/config content backed by existing `KeeperDetailBody`, `KeeperDetailSectionRail`, and `KeeperConfigPanel`; no prototype-local config state, fake keeper data, or OAS/provider logic was copied.
+- Kept all detail/config content backed by existing `KeeperDetailBody`, `KeeperDetailSectionRail`, and `KeeperConfigPanel`; no prototype-local config state, fake keeper data, or agent core/provider logic was copied.
 - Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the mobile detail/config surface remains explicit and runtime-owned.
 
 ### Still Missing Vs v2 (26)

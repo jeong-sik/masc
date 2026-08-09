@@ -182,7 +182,7 @@ type capabilities =
         Completions wire may accept images and have no document part at all),
         and the catch-all cannot express the difference. Serialization consults
         this at admission, so a document that the row cannot carry is reported
-        instead of being emitted as some other modality (oas#2744). *)
+        instead of being emitted as some other modality (agent-core boundary). *)
   ; modality_priority : Modality.priority
     (** Block ordering applied to multimodal user messages just before
         serialization. [Visual_first] for Gemma 4 family.
@@ -383,7 +383,7 @@ let kimi_capabilities =
      unsupported — developers prompt the model to force a tool instead. Plain
      [auto] passes through the OpenAI-compatible endpoint so [supports_tool_choice]
      stays true, but a forced *named* tool_choice has no faithful wire
-     representation. OAS therefore treats Kimi like GLM: tools supported, named
+     representation. AGENT_CORE therefore treats Kimi like GLM: tools supported, named
      forced tool_choice rejected with a typed [Unsupported_named_tool_choice]
      rather than serialized into a request the model cannot honor. This is the
      conservative declaration-over-probing default (same rationale as the Ollama
@@ -438,7 +438,7 @@ let openai_compat_chat_capabilities =
     max_context_tokens =
       Some 128_000
       (* [max_output_tokens] stays [None]: this preset covers arbitrary
-       OpenAI-compatible endpoints whose real output ceiling the SDK
+       OpenAI-compatible endpoints whose real output ceiling agent core
        cannot know. A family-level guess here becomes the wire
        [max_tokens] for every catalog-silent model and truncates long
        thinking (thinking and answer share the value). Unknown means
@@ -510,7 +510,7 @@ let mimo_capabilities =
    Allow_text_or_tool, text-only replies accepted even when the consumer
    asked for a tool). Consumers who have verified their model-side
    support declare it per Provider_config via
-   [Provider_config.supports_tool_choice_override]. The SDK does not
+   [Provider_config.supports_tool_choice_override]. Agent Core does not
    match on [model_id] to guess model-side behavior — the consumer
    (e.g. a config loader that knows it deployed DashScope_3.5 w/ the Jinja
    chat template) owns that policy. This is stricter than LiteLLM's
@@ -581,7 +581,7 @@ let glm_capabilities =
     max_output_tokens = Some 40_960
   ; supports_tools = true
   ; (* Z.AI's function-calling docs currently document [tool_choice]
-     as default [auto] and "only supports auto". OAS therefore treats
+     as default [auto] and "only supports auto". AGENT_CORE therefore treats
      Glm as "tools supported, forced tool_choice unsupported":
      callers may still send tools, but named forced tool_choice requests
      are not serialized because GLM has no faithful representation for
@@ -598,7 +598,7 @@ let glm_capabilities =
   ; (* Z.AI's current official docs describe JSON mode via
      response_format={"type":"json_object"} plus prompt/schema-in-text
      guidance, but do not document a native JSON-schema request field
-     equivalent to Openai's json_schema response_format. OAS therefore
+     equivalent to Openai's json_schema response_format. AGENT_CORE therefore
      treats Glm as JSON-mode-only: supports_response_format_json=true
      but supports_structured_output=false. validate_output_schema_request
      rejects JsonSchema response formats for Glm configs to prevent silent
@@ -611,7 +611,7 @@ let glm_capabilities =
        "preserved thinking" ([clear_thinking = false]). Declaring the wire here
        is what makes the replay conditional typed capability data: the dialect
        resolver reads [preserve_thinking_control_format], not a provider
-       identity predicate (RFC-OAS-029 S1.1/S3.1).
+       identity predicate (Agent Core contract S1.1/S3.1).
        Ref: https://docs.z.ai/api-reference/llm/chat-completion *)
     preserve_thinking_control_format = Thinking_object_clear_thinking
   }
@@ -746,7 +746,7 @@ let%test "capabilities_of_kind aliases the same presets as the label classifier"
 ;;
 
 let%test "every base_label vocab value resolves to a preset (no false-reject)" =
-  (* SSOT drift-guard (RFC-OAS-034): [Capability_vocab.base_label_values] is what
+  (* SSOT drift-guard (Agent Core contract): [Capability_vocab.base_label_values] is what
      the catalog/manifest parsers accept for a [base] field. If a listed value
      did NOT resolve here, the parser would accept a label that then silently
      collapses to [default_capabilities] — reopening the gap this closes. So
@@ -1103,7 +1103,7 @@ let apply_manifest_entry (entry : Capability_manifest.entry) : capabilities =
   entry |> overrides_of_manifest_entry |> apply_declarative_capability_overrides
 ;;
 
-let%test "apply_manifest_entry applies thinking_control_format (RFC-OAS-023)" =
+let%test "apply_manifest_entry applies thinking_control_format (Agent Core contract)" =
   match
     Capability_manifest.of_json
       (Yojson.Safe.from_string
@@ -1219,7 +1219,7 @@ let apply_catalog_entry (entry : Model_catalog.model_entry) : capabilities =
 
     The catalog itself is resolved by {!Model_catalog.global}: an explicit
     runtime override installed via {!Model_catalog.set_global}, otherwise the
-    build-time embedded OAS [models.toml]. OAS performs no environment-based
+    build-time embedded AGENT_CORE [models.toml]. AGENT_CORE performs no environment-based
     catalog discovery.
 
     Returns [None] when no catalog is available or when the catalog has
@@ -1416,7 +1416,7 @@ let%test "for_model_id glm-4.5-flash has GLM-4.5 thinking limits" =
    [Model_catalog.set_global] and restore the override afterwards, so they
    are insulated from any caller-installed model catalog. Inline tests that
    exercise the production catalog use the embedded default generated directly
-   from the OAS-owned [models.toml].
+   from the AGENT_CORE-owned [models.toml].
 
    [test_catalog_entry] fills every field with [None]; each fixture entry
    then sets only the capability-relevant fields, mirroring the
@@ -2048,7 +2048,7 @@ let%test
       ; ("glm-ocr-test", fun c -> c.supports_image_input && not c.supports_tools)
       ; ("claude-opus-4-20250501", fun c -> c.max_output_tokens = Some 128_000)
       ; ("gpt-4.1-mini", fun c -> c.max_output_tokens = Some 32_000)
-        (* RFC-OAS-023: the real provider model ids ([deepseek-v4-flash],
+        (* Agent Core contract: the real provider model ids ([deepseek-v4-flash],
          [deepseek-v4-pro]) must resolve to the DeepSeek capability route.
          Before the de-anonymization these matched only the anon
          [deepseek-v4-*] prefixes, so the concrete ids missed the lookup

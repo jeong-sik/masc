@@ -42,8 +42,8 @@ describe('eventKindColor', () => {
     expect(eventKindColor(makeEntry({ kind: 'system' }))).toBe('live-event-system')
   })
 
-  it('returns system class for oas kind', () => {
-    expect(eventKindColor(makeEntry({ kind: 'oas' }))).toBe('live-event-system')
+  it('returns system class for agentCore kind', () => {
+    expect(eventKindColor(makeEntry({ kind: 'agentCore' }))).toBe('live-event-system')
   })
 
   it('returns system class when kind is undefined', () => {
@@ -140,7 +140,7 @@ describe('journalEventKindLabel', () => {
   })
 
   it('falls back to "task" for tasks kind without matching eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'oas_task', kind: 'tasks' }))).toBe('task')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_core_task', kind: 'tasks' }))).toBe('task')
   })
 
   it('falls back to "keeper" for keepers kind without matching eventType', () => {
@@ -148,7 +148,7 @@ describe('journalEventKindLabel', () => {
   })
 
   it('returns "system" as final fallback', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'oas_tool' }))).toBe('system')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_core_tool' }))).toBe('system')
   })
 
   it('returns "system" when both kind and eventType are undefined', () => {

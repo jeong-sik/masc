@@ -3,7 +3,7 @@
     Image generation and speech generation both consume Interactions
     responses; this module owns the modality-independent envelope — field
     readers, the usage block, the status gate, and the steps/model_output
-    walker — so the two consumers cannot drift apart (oas#2633). Modality
+    walker — so the two consumers cannot drift apart (agent-core boundary). Modality
     payloads (image sources, audio blocks) stay in their own modules and are
     injected as decoders.
 

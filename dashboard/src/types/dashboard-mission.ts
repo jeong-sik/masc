@@ -352,7 +352,7 @@ export interface KeeperRecoverResult {
 }
 
 export interface InferenceInflightSnapshot {
-  boundary_owner: 'oas_runtime'
+  boundary_owner: 'agent_core_runtime'
   active: number
 }
 

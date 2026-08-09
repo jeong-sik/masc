@@ -1,4 +1,4 @@
-open Agent_sdk
+open Agent_core
 open Types
 
 let small_string_gen =
@@ -377,7 +377,7 @@ let test_delta_json_all_replacement_ops () =
       true
       (checkpoint_equal rebuilt target)
   | Error err ->
-    Alcotest.failf "expected delta to apply: %s" (Agent_sdk.Error.to_string err)
+    Alcotest.failf "expected delta to apply: %s" (Agent_core.Error.to_string err)
 ;;
 
 let test_delta_json_null_and_rejected_legacy_limit_paths () =
@@ -391,7 +391,7 @@ let test_delta_json_null_and_rejected_legacy_limit_paths () =
    | Ok rebuilt ->
      Alcotest.(check bool) "tool choice none" true (Option.is_none rebuilt.tool_choice)
    | Error err ->
-     Alcotest.failf "expected null delta to apply: %s" (Agent_sdk.Error.to_string err));
+     Alcotest.failf "expected null delta to apply: %s" (Agent_core.Error.to_string err));
   let with_operations operations =
     match Checkpoint.delta_to_json (Checkpoint.compute_delta base base) with
     | `Assoc fields ->
@@ -565,7 +565,7 @@ let test_delta_roundtrip_preserves_message_metadata () =
   let delta = Checkpoint.compute_delta base target in
   match Checkpoint.apply_delta base delta with
   | Error err ->
-    Alcotest.failf "expected delta to apply, got %s" (Agent_sdk.Error.to_string err)
+    Alcotest.failf "expected delta to apply, got %s" (Agent_core.Error.to_string err)
   | Ok rebuilt ->
     (match rebuilt.messages with
      | _ :: [ assistant ] ->

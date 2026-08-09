@@ -150,12 +150,12 @@ let test_sanitize_inherited_test_base_path_opt_keeps_process_temp_path () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_base_path_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/tmp/test-oas-worker-base")
-      ~current:(Some "/tmp/test-oas-worker-base")
+      ~initial:(Some "/tmp/test-agent_core-worker-base")
+      ~current:(Some "/tmp/test-agent_core-worker-base")
       ~home:(Some "/tmp/captured-home/me")
   in
   check (option string) "process temp base preserved"
-    (Some "/tmp/test-oas-worker-base") actual
+    (Some "/tmp/test-agent_core-worker-base") actual
 
 let test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in () =
   let actual =

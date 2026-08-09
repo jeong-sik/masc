@@ -3,7 +3,7 @@
 
     Two data sources:
     1. In-memory ring of recent tool-skip events recorded via
-       [record_tool_skipped]. Called from [Keeper_hooks_oas.broadcast_tool_skipped]
+       [record_tool_skipped]. Called from [Keeper_hooks_agent_core.broadcast_tool_skipped]
        to capture the same (tool_name, reason_code) emitted on SSE. The ring
        gives operators a "last N minutes" view without tailing JSONL.
     2. Live approval queue state returned by
@@ -81,7 +81,7 @@ let record_tool_skipped_with_append ~append
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> record_tool_skipped_failure exn
 
-(** Record a tool-skip event. Called from [Keeper_hooks_oas.broadcast_tool_skipped]
+(** Record a tool-skip event. Called from [Keeper_hooks_agent_core.broadcast_tool_skipped]
     so the in-memory ring stays in sync with the SSE event stream. *)
 let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
   record_tool_skipped_with_append

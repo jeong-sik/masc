@@ -60,15 +60,15 @@ let lightweight_runtime_contract_json ~runtime_blocker_class ~selected_model
     match runtime_verified, selected_model with
     | true, Some _ ->
         "Scoped runtime observation is present; selected model label remains \
-         OAS-owned."
+         AGENT_CORE-owned."
     | false, Some _ ->
         "Selected model label is available, but no scoped runtime observation \
-         verified it. Concrete provider identity remains OAS-owned."
+         verified it. Concrete provider identity remains AGENT_CORE-owned."
     | true, None ->
         "Scoped runtime observation is present. Provider/model identity is owned \
-         by OAS."
+         by AGENT_CORE."
     | false, None ->
-        "Provider/model identity is owned by OAS. MASC status exposes only \
+        "Provider/model identity is owned by AGENT_CORE. MASC status exposes only \
          runtime signals."
   in
   `Assoc

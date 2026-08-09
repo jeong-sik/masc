@@ -41,7 +41,7 @@ The useful substrate is deliberately smaller:
   objective execution invariants.
 - Receipts record what was requested, which boundary decided it, what ran, and
   the explicit result or error. They do not invent a policy class.
-- OAS remains the provider/model-call and agent-lifecycle boundary. It does not
+- agent core remains the provider/model-call and agent-lifecycle boundary. It does not
   learn MASC tools, products, Gate policy, or connector semantics.
 
 Invalid typed input, an escaped path jail, or an unavailable sandbox is an

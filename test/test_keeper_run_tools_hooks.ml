@@ -314,8 +314,8 @@ let encoded_bytes jsons =
 ;;
 
 let bulky_message index =
-  Agent_sdk.Types.text_message
-    Agent_sdk.Types.Assistant
+  Agent_core.Types.text_message
+    Agent_core.Types.Assistant
     (Printf.sprintf "turn %d %s" index (String.make 4096 'x'))
 ;;
 
@@ -371,14 +371,14 @@ let test_gate_history_drops_orphan_tool_result () =
      the newest. A retained result with no visible call reads as evidence of
      something the judge never sees happen. *)
   let call =
-    Agent_sdk.Types.make_message
-      ~role:Agent_sdk.Types.Assistant
-      [ Agent_sdk.Types.ToolUse
+    Agent_core.Types.make_message
+      ~role:Agent_core.Types.Assistant
+      [ Agent_core.Types.ToolUse
           { id = "call-outside-window"; name = "masc_status"; input = `Assoc [] }
       ]
   in
   let orphan_result =
-    Agent_sdk.Types.tool_result_msg
+    Agent_core.Types.tool_result_msg
       ~tool_use_id:"call-outside-window"
       ~content:"cluster snapshot"
       ()

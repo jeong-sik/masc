@@ -29,7 +29,7 @@ val validate_input
 
 (** {1 Schema conversion}
 
-    Convert JSON Schema objects to OAS typed parameter lists.
+    Convert JSON Schema objects to AGENT_CORE typed parameter lists.
     Delegates to {!Mcp_schema.json_schema_to_params} for consumers
     that work with raw JSON schemas (e.g. MCP tool definitions). *)
 

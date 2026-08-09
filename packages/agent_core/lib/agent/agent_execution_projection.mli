@@ -1,7 +1,7 @@
 (** Read-only implementation of one canonical durable Agent execution.
 
     The public surface is owned solely by {!Agent_execution_projection_intf.S}.
-    The constructor below remains private to the wrapped OAS implementation. *)
+    The constructor below remains private to the wrapped AGENT_CORE implementation. *)
 
 include Agent_execution_projection_intf.S
 

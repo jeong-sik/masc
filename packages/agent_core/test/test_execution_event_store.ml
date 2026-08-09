@@ -1,6 +1,6 @@
 open Alcotest
-open Agent_sdk
-module Internal = Agent_sdk__
+open Agent_core
+module Internal = Agent_core__
 module Runtime_internal = Internal.Execution_runtime
 module Event = Internal.Execution_event
 module Codec = Internal.Execution_codec_executor
@@ -52,7 +52,7 @@ let with_temp_dir env f =
            ~domain_count:1)
     in
     let codec = Codec.of_runtime runtime in
-    let native_path = Filename.temp_file "oas-execution-store-" ".dir" in
+    let native_path = Filename.temp_file "agent_core-execution-store-" ".dir" in
     Sys.remove native_path;
     let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
     Fun.protect
@@ -439,7 +439,7 @@ let test_torn_tail_is_explicitly_truncated () =
       ignore (require_store (Store.append_batch writer ~expected_next_seq:1 events)));
     let wal = Eio.Path.(dir / "events.v1.wal") in
     Eio.Path.with_open_out ~append:true ~create:`Never wal (fun file ->
-      Eio.Flow.copy_string "OASE" file;
+      Eio.Flow.copy_string "MACE" file;
       Eio.File.sync file);
     Eio.Switch.run (fun sw ->
       let store, recovery = require_store (open_store ~codec ~sw ~dir) in

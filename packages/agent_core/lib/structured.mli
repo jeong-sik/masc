@@ -29,7 +29,7 @@ val extract
   -> config:agent_config
   -> schema:'a schema
   -> string
-  -> ('a, Error.sdk_error) result
+  -> ('a, Error.t) result
 
 (** {1 Extractors} *)
 
@@ -46,7 +46,7 @@ type response_json_shape =
 val extract_response_json
   :  ?shape:response_json_shape
   -> api_response
-  -> (Yojson.Safe.t, Error.sdk_error) result
+  -> (Yojson.Safe.t, Error.t) result
 
 (** Agent-level extractor form of {!extract_response_json}. *)
 val response_json_extractor
@@ -72,7 +72,7 @@ val run_structured
   -> Agent.t
   -> string
   -> extract:'a extractor
-  -> ('a, Error.sdk_error) result
+  -> ('a, Error.t) result
 
 (** {1 Streaming extraction} *)
 
@@ -85,4 +85,4 @@ val extract_stream
   -> schema:'a schema
   -> on_event:(sse_event -> unit)
   -> string
-  -> ('a * api_response, Error.sdk_error) result
+  -> ('a * api_response, Error.t) result

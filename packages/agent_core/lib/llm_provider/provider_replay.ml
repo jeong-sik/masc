@@ -20,7 +20,7 @@ type decoded =
   | Malformed_replay of malformed_reason
   | Replay of t
 
-let schema = "oas.provider_replay"
+let schema = "agent_core.provider_replay"
 let wire_prefix = schema ^ ".v1:"
 
 let first_duplicate fields =

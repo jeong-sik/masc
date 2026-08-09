@@ -53,7 +53,7 @@ function runtimeProvidersPayload() {
           always_ignored_sampling_params: [],
         },
         request_config: {
-          source: 'oas-provider-config',
+          source: 'agent-core-provider-config',
           provider_kind: 'openai_compat',
           request_path: '/chat/completions',
           request_path_targets_responses_api: false,
@@ -120,7 +120,7 @@ function runtimeProvidersPayload() {
           },
         },
         effective_capabilities: {
-          source: 'oas-provider-config-model',
+          source: 'agent-core-provider-config-model',
           max_context_tokens: 131072,
           max_output_tokens: 65536,
           supports_tools: true,
@@ -394,7 +394,7 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('1 runtime specs')
     expect(container.querySelector('[data-testid="runtime-probe-catalog-spec"]')).not.toBeNull()
     expect(container.textContent).toContain('effective')
-    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('source:agent-core-provider-config-model')
     expect(container.textContent).toContain('request')
     expect(container.textContent).toContain('think:on')
     expect(container.textContent).toContain('declared')

@@ -1,4 +1,4 @@
-open Agent_sdk
+open Agent_core
 
 let install_embedded_model_catalog () =
   Model_catalog_test_support.install_embedded_model_catalog ~suite:"provider"

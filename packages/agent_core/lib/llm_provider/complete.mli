@@ -1,6 +1,6 @@
 (** Standalone LLM completion: build request, send via transport, parse response.
 
-    Self-contained in llm_provider -- no agent_sdk dependency.
+    Self-contained in llm_provider -- no agent_core dependency.
     Consumers can call these functions directly.
 
     @since 0.46.0  Sync completion
@@ -266,17 +266,17 @@ val complete_serialized
 
     [wire_observer], when present, receives provider chunks only after
     {!Wire_observer} best-effort redaction. It is a caller-owned synchronous
-    nonblocking offer: OAS owns no queue, persistence, capacity, retry, path,
+    nonblocking offer: AGENT_CORE owns no queue, persistence, capacity, retry, path,
     or worker. Rejection and ordinary callback exceptions are emitted as typed
     {!Telemetry_event.Wire_observer_failure} observations without changing the
     provider result. Without [on_telemetry], failures are written to the
     diagnostic sink instead of disappearing silently.
 
     The built-in HTTP transport offers every raw provider chunk. An injected
-    streaming transport receives only an OAS-owned
+    streaming transport receives only an AGENT_CORE-owned
     {!Llm_transport.completion_request.observe_wire_chunk} sink, never the
     caller callback; it must call that sink for every raw provider chunk if it
-    participates in wire observation. OAS therefore retains redaction and
+    participates in wire observation. AGENT_CORE therefore retains redaction and
     failure handling even for a custom transport, while the custom transport
     retains responsibility for identifying its raw chunk boundary.
 
@@ -316,7 +316,7 @@ val complete_serialized
     (CLI subprocess) ignore
     [stream_idle_timeout_s].
 
-    RFC-OAS-037: [first_event_timeout_s], when set, bounds the wait for the
+    Agent Core contract: [first_event_timeout_s], when set, bounds the wait for the
     FIRST streaming event separately from [stream_idle_timeout_s]. Until the
     first event arrives the read is bounded by [first_event_timeout_s];
     [stream_idle_timeout_s] arms for inter-token idle only AFTER the first
@@ -328,7 +328,7 @@ val complete_serialized
     none of the three. Inter-token idle still guards once the stream produces,
     and the connect timeout still guards connection setup.
 
-    RFC-OAS-037 §4.2: [body_timeout_s] is the total body budget also used by
+    Agent Core contract §4.2: [body_timeout_s] is the total body budget also used by
     the non-streaming path. On the streaming path it is the fallback bound for
     the first-event wait when [first_event_timeout_s] is [None] — the common
     production shape (callers wire [body_timeout_s], not
@@ -357,7 +357,7 @@ val complete_stream
 
 (** Streaming counterpart of {!complete_admitted}. Capture identity and idle
     deadline are fixed when the request is prepared. Pre-dispatch serialization
-    observation remains an OAS-owned operational sink and cannot alter provider
+    observation remains an AGENT_CORE-owned operational sink and cannot alter provider
     payload fields. *)
 val complete_stream_admitted
   :  sw:Eio.Switch.t

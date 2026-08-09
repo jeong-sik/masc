@@ -23,7 +23,7 @@ val create_error_to_string : create_error -> string
 val pp_create_error : Format.formatter -> create_error -> unit
 val stats : t -> stats
 
-(** Internal execution boundary hidden by the top-level {!Agent_sdk} export.
+(** Internal execution boundary hidden by the top-level {!Agent_core} export.
     A job that re-enters the same runtime from one of its worker fibers runs
     inline on that worker. This is an explicit structural case, not a fallback
     to the caller/server domain, and prevents a full-pool nested-submit

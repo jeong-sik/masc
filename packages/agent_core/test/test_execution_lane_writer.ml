@@ -1,6 +1,6 @@
 open Alcotest
-open Agent_sdk
-module Internal = Agent_sdk__
+open Agent_core
+module Internal = Agent_core__
 module Runtime_internal = Internal.Execution_runtime
 module Event = Internal.Execution_event
 module Codec = Internal.Execution_codec_executor
@@ -69,7 +69,7 @@ let with_temp_dir env f =
            ~domain_count:1)
     in
     let codec = Codec.of_runtime runtime in
-    let native_path = Filename.temp_file "oas-execution-lane-writer-" ".dir" in
+    let native_path = Filename.temp_file "agent_core-execution-lane-writer-" ".dir" in
     Sys.remove native_path;
     let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
     Fun.protect

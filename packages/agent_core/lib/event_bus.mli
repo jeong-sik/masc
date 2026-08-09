@@ -43,7 +43,7 @@ type payload =
   | AgentCompleted of
       { agent_name : string
       ; task_id : string
-      ; result : (Types.api_response, Error.sdk_error) result
+      ; result : (Types.api_response, Error.t) result
       ; elapsed : float
       }
   | AgentYielded of
@@ -61,7 +61,7 @@ type payload =
   | AgentFailed of
       { agent_name : string
       ; task_id : string
-      ; error : Error.sdk_error
+      ; error : Error.t
       ; elapsed : float
       }
   (** Explicit failure variant companion to [AgentCompleted].
@@ -175,18 +175,18 @@ type payload =
   (** Extension point.  [name] must be a dot-separated, lowercase,
           snake-case namespaced identifier (e.g. ["mylib.foo_happened"]).
 
-          Reserved prefixes (OAS-internal):
+          Reserved prefixes (AGENT_CORE-internal):
           - [runtime.*] — bridged from [Runtime] session protocol.
           - [durable.*] — bridged from [Durable_event] journal.
           - [provider.*] — provider-specific escape hatch
             (e.g. [provider.anthropic.cache_hit],
             [provider.openai.reasoning_tokens]).
-          - [oas.*] — reserved for future OAS use.
+          - [agent_core.*] — reserved for future AGENT_CORE use.
 
           External publishers should use their own [Event_bus.t] instance
-          for domain-specific events rather than publishing onto OAS's
-          bus.  Treating OAS's [Event_bus] as a general-purpose telemetry
-          channel creates cross-layer coupling and makes OAS's public
+          for domain-specific events rather than publishing onto AGENT_CORE's
+          bus.  Treating AGENT_CORE's [Event_bus] as a general-purpose telemetry
+          channel creates cross-layer coupling and makes AGENT_CORE's public
           surface a dumping ground.  See [docs/EVENT-CATALOG.md] §2.3. *)
 
 (** {2 Event} *)
@@ -200,16 +200,16 @@ type event =
 (** {2 Payload introspection} *)
 
 (** [payload_kind p] returns a stable, snake_case event-type label for
-    [p].  The label set is part of OAS's stable API: subscribers may
+    [p].  The label set is part of AGENT_CORE's stable API: subscribers may
     persist or compare the strings.
 
     Co-located with the [payload] variant so that adding a new variant
     upstream forces an update here in the same patch (compiler warning
-    8 is fatal under OAS's flag set).  Downstream consumers (logging,
+    8 is fatal under AGENT_CORE's flag set).  Downstream consumers (logging,
     SSE bridges, dashboards) that previously had to maintain their own
     exhaustive [match] on [payload] can call this for the leading
     type label and fall back gracefully on unknown variants instead
-    of breaking the build at OAS pin-bump time.
+    of breaking the build at AGENT_CORE pin-bump time.
 
     Custom payloads use the form [Printf.sprintf "custom:%s" name] so
     operator-defined event types remain distinguishable.
@@ -219,7 +219,7 @@ val payload_kind : payload -> string
 
 (** {2 ID generation} *)
 
-(** Generate a process-local compatibility identifier. OAS's private canonical
+(** Generate a process-local compatibility identifier. AGENT_CORE's private canonical
     execution writer owns its own typed random identity. *)
 val fresh_id : unit -> string
 

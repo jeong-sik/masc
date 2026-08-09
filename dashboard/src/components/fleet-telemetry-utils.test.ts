@@ -155,7 +155,7 @@ describe('buildFleetRows runtime labels', () => {
         name: 'runtime-keeper',
         status: 'active',
         keepalive_running: true,
-        runtime_id: 'oas-keeper_unified',
+        runtime_id: 'agent-core-keeper_unified',
         runtime_canonical: 'primary',
         active_model_label: 'codex-cli:auto',
         trust: {
@@ -209,7 +209,7 @@ describe('buildFleetRows runtime labels', () => {
 
     expect(row).toMatchObject({
       model: 'runtime',
-      runtime_label: 'oas-keeper_unified -> primary',
+      runtime_label: 'agent-core-keeper_unified -> primary',
       provider_label: 'passed_to_next_model · 2 attempts · fallback',
       fallback_label: 'fallback · turn_timeout · 1 hops',
     })

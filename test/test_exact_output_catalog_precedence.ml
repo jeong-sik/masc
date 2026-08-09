@@ -37,7 +37,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   List.iter
     (fun name -> mkdir_p (Filename.concat config_root name))
     [ "keepers"; "prompts" ];
-  let overlay_path = Filename.concat config_root "oas-models-overlay.toml" in
+  let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
   let replacement_path = Filename.concat root "replacement-models.toml" in
   let runtime_path = Filename.concat config_root "runtime.toml" in
   write_file overlay_path overlay_catalog;
@@ -58,7 +58,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   require_not_admitted replacement_snapshot overlay_target;
 
   Unix.putenv "MASC_CONFIG_DIR" config_root;
-  Unix.putenv "OAS_MODEL_CATALOG" replacement_path;
+  Unix.putenv "AGENT_CORE_MODEL_CATALOG" replacement_path;
   let create_server_state () =
     Eio.Switch.run @@ fun sw ->
     ignore
@@ -427,7 +427,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   let runtime_path = Filename.concat config_root "runtime.toml" in
   write_file replacement_path replacement_catalog;
   Unix.putenv "MASC_CONFIG_DIR" config_root;
-  Unix.putenv "OAS_MODEL_CATALOG" replacement_path;
+  Unix.putenv "AGENT_CORE_MODEL_CATALOG" replacement_path;
   let create_server_state () =
     Eio.Switch.run @@ fun sw ->
     ignore
@@ -574,16 +574,16 @@ let test_repo_seed_board_attention_lane_admits () =
   let repo_root = Masc_test_deps.find_project_root () in
   let source_config = Filename.concat repo_root "config" in
   let runtime_path = Filename.concat config_root "runtime.toml" in
-  let overlay_path = Filename.concat config_root "oas-models-overlay.toml" in
+  let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
   write_file
     runtime_path
     (Fs_compat.load_file (Filename.concat source_config "runtime.toml"));
   write_file
     overlay_path
     (Fs_compat.load_file
-       (Filename.concat source_config "oas-models-overlay.toml"));
+       (Filename.concat source_config "agent-core-models-overlay.toml"));
   Unix.putenv "MASC_CONFIG_DIR" config_root;
-  Unix.putenv "OAS_MODEL_CATALOG" "";
+  Unix.putenv "AGENT_CORE_MODEL_CATALOG" "";
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "repo runtime seed failed to load: %s" detail);
@@ -646,7 +646,7 @@ let test_repo_seed_board_attention_lane_admits () =
        require_published_seed "credential-populated repo config plus deployment overlay";
        let overlay_without_pricing =
          Fs_compat.load_file
-           (Filename.concat source_config "oas-models-overlay.toml")
+           (Filename.concat source_config "agent-core-models-overlay.toml")
          |> String.split_on_char '\n'
          |> List.filter (fun line ->
            let line = String.trim line in

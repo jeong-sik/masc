@@ -59,7 +59,7 @@ type exact_attempt_transition =
   ; write_outcome : exact_write_outcome
   }
 (** Exact writes share the Keeper runtime durability outcome SSOT.
-    [Fsync_completed] is the only outcome that permits an OAS POST, slot
+    [Fsync_completed] is the only outcome that permits an AGENT_CORE POST, slot
     failover, or automatic Gate finalization. [Visible_sync_unconfirmed _]
     means the rename is visible and the process projection has converged, but
     parent-directory fsync was not confirmed; callers must not cross those
@@ -376,8 +376,8 @@ val bind_summary_exact_attempt :
   request_body_sha256:string ->
   (exact_attempt_transition, exact_attempt_error) result
 
-(** Bind one exact OAS attempt before provider dispatch. Only
-    [Fsync_completed] permits the OAS POST. A visible unconfirmed bind retains
+(** Bind one exact AGENT_CORE attempt before provider dispatch. Only
+    [Fsync_completed] permits the AGENT_CORE POST. A visible unconfirmed bind retains
     the identity but forbids POST and failover. Repeating the active identity
     strictly rewrites it, allowing durability to be confirmed without changing
     identity. A released attempt may be replaced only by a new identity; every
@@ -393,7 +393,7 @@ val release_summary_exact_attempt_before_dispatch :
   request_body_sha256:string ->
   (exact_attempt_transition, exact_attempt_error) result
 
-(** Mark the matching binding released only after OAS proves the attempt stayed
+(** Mark the matching binding released only after AGENT_CORE proves the attempt stayed
     before dispatch. Only [Fsync_completed] permits failover. A visible
     unconfirmed release retains the original identity, forbids a successor, and
     may be terminalized only with [Exact_terminal_persistence_failure],

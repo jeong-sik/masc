@@ -290,7 +290,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("execution", execution);
          ("proactive", proactive);
          ("auto_execution_session", auto_execution_session_surface_json ());
-         ("hooks", Keeper_hooks_oas.hook_introspection_json ());
+         ("hooks", Keeper_hooks_agent_core.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);
          ("runtime_trust", runtime_trust);
          ("workspace", workspace);

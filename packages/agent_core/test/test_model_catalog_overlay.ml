@@ -304,7 +304,7 @@ let test_lookup_for_provider_prefers_verbatim_over_alias () =
           ~model_id:"model-1"))
 ;;
 
-(* --- review hardening (oas#2604 Codex P2s) --- *)
+(* --- review hardening (agent-core boundary Codex P2s) --- *)
 
 let test_merge_overlay_provider_wins_endpoint_identity () =
   let suite = "merge endpoint identity" in

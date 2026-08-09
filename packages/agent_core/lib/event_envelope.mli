@@ -25,7 +25,7 @@ type t =
   ; source_clock : source_clock
   }
 
-(** Generate a process-local compatibility identifier. OAS's private canonical
+(** Generate a process-local compatibility identifier. AGENT_CORE's private canonical
     execution writer owns its own typed random identity. *)
 val fresh_id : unit -> string
 

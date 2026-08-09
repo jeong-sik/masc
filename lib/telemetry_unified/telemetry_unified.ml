@@ -12,7 +12,7 @@
     - [<masc_root>/tool_calls/]              — Full I/O for keeper tool calls
     - [<masc_root>/trajectories/<keeper>/]   — Keeper trajectory tool-call rows
     - [<masc_root>/tool_usage/]              — Non-public registered tool calls
-    - [<masc_root>/oas-events/]              — Durable OAS native/custom events
+    - [<masc_root>/agent-core-events/]              — Durable AGENT_CORE native/custom events
     - [<masc_root>/keepers/<name>/execution-receipts/]
                                              — Keeper execution receipts
     - [<base_path>/data/tool-metrics/]       — Tool duration/success metrics
@@ -24,7 +24,7 @@ type source = Telemetry_unified_source.source =
   | Tool_call_io
   | Trajectory_tool_call
   | Tool_usage
-  | Oas_event
+  | Agent_core_event
   | Execution_receipt
   | Goal_event
   | Tool_metric
@@ -187,7 +187,7 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
 let source_optional_when_missing = function
   | Goal_event -> true
   | Keeper_metric | Agent_event | Tool_call_io | Trajectory_tool_call
-  | Tool_usage | Oas_event | Execution_receipt | Tool_metric -> false
+  | Tool_usage | Agent_core_event | Execution_receipt | Tool_metric -> false
 
 let coverage_gap_recovered ~latest_ts gap =
   match latest_ts, extract_ts gap with
@@ -331,7 +331,7 @@ let matches_keeper name (json : Yojson.Safe.t) : bool =
           | _ -> false)
       | _ -> false
     in
-    (* keeper_metric: "name" field; tool_call_io: "keeper"; oas_event: "agent_name" *)
+    (* keeper_metric: "name" field; tool_call_io: "keeper"; agent_core_event: "agent_name" *)
     check "name"
     || check "keeper"
     || check "keeper_name"
@@ -649,8 +649,8 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
       | Goal_event ->
         read_goal_events ~masc_root ?since_ts ?until_ts ~n:per_source ()
       (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
-         Oas_event, Tool_metric use directory-based storage. *)
-      | Agent_event | Tool_call_io | Tool_usage | Oas_event | Tool_metric ->
+         Agent_core_event, Tool_metric use directory-based storage. *)
+      | Agent_event | Tool_call_io | Tool_usage | Agent_core_event | Tool_metric ->
         match fixed_store_dir ~masc_root ~base_path source with
         | Some dir ->
           read_fixed_source dir source ~n:per_source ?since_ts ?until_ts ()
@@ -1033,8 +1033,8 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
               ?coverage_gap ()),
         count )
     (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
-       Oas_event, Tool_metric use directory-based storage. *)
-    | Agent_event | Tool_call_io | Tool_usage | Oas_event | Tool_metric ->
+       Agent_core_event, Tool_metric use directory-based storage. *)
+    | Agent_event | Tool_call_io | Tool_usage | Agent_core_event | Tool_metric ->
       let dir = match fixed_store_dir ~masc_root ~base_path source with
         | Some d -> d | None -> "" in
       let dir_state =

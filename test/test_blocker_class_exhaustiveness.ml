@@ -28,11 +28,11 @@ let all_variants : blocker_class list =
   ; Capacity_backpressure
   ; Fiber_unresolved
   ; Stale_turn_timeout
-  ; Sdk_context_window_exceeded
-  ; Sdk_unrecognized_stop_reason
-  ; Sdk_guardrail_violation
-  ; Sdk_tripwire_violation
-  ; Sdk_input_required
+  ; Agent_core_context_window_exceeded
+  ; Agent_core_unrecognized_stop_reason
+  ; Agent_core_guardrail_violation
+  ; Agent_core_tripwire_violation
+  ; Agent_core_input_required
   ; Internal_unhandled_exception
   ; Internal_bridge_exception
   ; Internal_contract_rejected
@@ -94,44 +94,44 @@ let test_unknown_string () =
 
 (* ── Variant count pin ─────────────────────────────────────────── *)
 
-(* ── SDK error → blocker_class mapping exhaustiveness ────────────── *)
+(* ── agent-core error → blocker_class mapping exhaustiveness ────────────── *)
 
-module SdkE = Agent_sdk.Error
-module SdkRetry = Agent_sdk.Retry
+module CoreError = Agent_core.Error
+module CoreRetry = Agent_core.Retry
 module KSB = Masc.Keeper_status_bridge_blocker
 module KTD = Masc.Keeper_turn_driver
 module Reg = Masc.Keeper_registry
 
 let terminal_invocation tool_use_id =
-  Agent_sdk.Tool_contract.Invocation.create
+  Agent_core.Tool_contract.Invocation.create
     ~tool_use_id
     ~turn:3
     ~schedule:
       { planned_index = 1
       ; batch_index = 0
       ; batch_size = 1
-      ; execution_mode = Agent_sdk.Tool_contract.Serial
+      ; execution_mode = Agent_core.Tool_contract.Serial
       }
     ~completion:
-      (Agent_sdk.Tool_contract.Terminal_after_success
-         Agent_sdk.Tool_contract.Effect_outcome_unknown)
+      (Agent_core.Tool_contract.Terminal_after_success
+         Agent_core.Tool_contract.Effect_outcome_unknown)
 ;;
 
-(** Every [Agent_sdk.Error.Agent _] sub-variant must have an explicit blocker
-    decision through the two-layer pipeline in [blocker_class_of_sdk_error]:
+(** Every [Agent_core.Error.Agent _] sub-variant must have an explicit blocker
+    decision through the two-layer pipeline in [blocker_class_of_core_error]:
     1. [classify_masc_internal_error] — for runtime-layer structured errors
-    2. Direct SDK pattern match — for Agent sub-variants
+    2. Direct agent-core pattern match — for Agent sub-variants
 
-    When a new Agent sub-variant is added to the SDK, this test forces the
+    When a new Agent sub-variant is added to agent core, this test forces the
     developer to decide: map it to a blocker_class or list why it is an
     observation/control checkpoint for which [None] is correct. *)
 
-let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
+let all_sdk_agent_variants : (string * CoreError.t) list =
   [ ( "UnrecognizedStopReason"
-    , SdkE.Agent (SdkE.UnrecognizedStopReason { reason = "abrupt" }) )
+    , CoreError.Agent (CoreError.UnrecognizedStopReason { reason = "abrupt" }) )
   ; ( "HookExecutionFailed"
-    , SdkE.Agent
-        (SdkE.HookExecutionFailed
+    , CoreError.Agent
+        (CoreError.HookExecutionFailed
            { hook_name = "post_tool_use"
            ; stage = "execute"
            ; tool_name = Some "Execute"
@@ -139,26 +139,26 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
            ; detail = "hook failed"
            }) )
   ; ( "TerminalToolEffectFailed"
-    , SdkE.Agent
-        (SdkE.TerminalToolEffectFailed
+    , CoreError.Agent
+        (CoreError.TerminalToolEffectFailed
            { tool_use_id = "tool-terminal"
-           ; effect_disposition = SdkE.proven_post_terminal_effect
+           ; effect_disposition = CoreError.proven_post_terminal_effect
            ; detail = "terminal effect failed"
            }) )
   ; ( "TerminalToolDurabilityFailed"
-    , SdkE.Agent
-        (SdkE.TerminalToolDurabilityFailed
+    , CoreError.Agent
+        (CoreError.TerminalToolDurabilityFailed
            { invocation = terminal_invocation "tool-durable"
-           ; effect_disposition = SdkE.unknown_terminal_effect
+           ; effect_disposition = CoreError.unknown_terminal_effect
            ; detail = "receipt persistence failed"
            }) )
   ; ( "GuardrailViolation"
-    , SdkE.Agent (SdkE.GuardrailViolation { validator = "content_filter"; reason = "toxic" }) )
+    , CoreError.Agent (CoreError.GuardrailViolation { validator = "content_filter"; reason = "toxic" }) )
   ; ( "TripwireViolation"
-    , SdkE.Agent (SdkE.TripwireViolation { tripwire = "disallow_shell"; reason = "exec detected" }) )
+    , CoreError.Agent (CoreError.TripwireViolation { tripwire = "disallow_shell"; reason = "exec detected" }) )
   ; ( "InputRequired"
-    , SdkE.Agent
-        (SdkE.InputRequired
+    , CoreError.Agent
+        (CoreError.InputRequired
            { request_id = "req-1"
            ; participant_name = Some "user"
            ; question = "What should I do?"
@@ -177,12 +177,12 @@ let agent_variants_with_no_runtime_blocker =
 
 let test_all_agent_variants_classified_intentionally () =
   List.iter
-    (fun (label, sdk_error) ->
+    (fun (label, core_error) ->
        let expected_none =
          List.exists (fun allowed -> String.equal allowed label)
            agent_variants_with_no_runtime_blocker
        in
-       match KSB.blocker_class_of_sdk_error sdk_error, expected_none with
+       match KSB.blocker_class_of_core_error core_error, expected_none with
        | Some _, false -> ()
        | None, true -> ()
        | Some klass, true ->
@@ -192,28 +192,28 @@ let test_all_agent_variants_classified_intentionally () =
            (blocker_class_to_string klass)
        | None, false ->
          failf
-           "Agent sub-variant %S returned None from blocker_class_of_sdk_error — \
+           "Agent sub-variant %S returned None from blocker_class_of_core_error — \
             either map it to a blocker_class or document why None is correct"
            label)
     all_sdk_agent_variants
 ;;
 
 (** Pin the Agent sub-variant count so additions are visible in diffs.
-    When the SDK adds a new [Agent] sub-variant, bump this number and add it
+    When agent core adds a new [Agent] sub-variant, bump this number and add it
     to [all_sdk_agent_variants]. *)
 let expected_agent_variant_count = 7
 
 let test_agent_variant_count_pin () =
   let count = List.length all_sdk_agent_variants in
   check int
-    "Agent sub-variant count (pin — bump when SDK adds new Agent variants)"
+    "Agent sub-variant count (pin — bump when Agent Core adds new Agent variants)"
     expected_agent_variant_count count
 ;;
 
 let test_api_timeout_prose_does_not_map_to_agent_timeout () =
   let api_timeout =
-    SdkE.Api
-      (SdkRetry.Timeout
+    CoreError.Api
+      (CoreRetry.Timeout
          { message =
              "Turn wall-clock budget exhausted during runtime attempt \
               (budget=554.9s)"
@@ -223,7 +223,7 @@ let test_api_timeout_prose_does_not_map_to_agent_timeout () =
   check (option string)
     "API timeout prose does not synthesize an agent blocker"
     None
-    (KSB.blocker_class_of_sdk_error api_timeout
+    (KSB.blocker_class_of_core_error api_timeout
      |> Option.map blocker_class_to_string)
 ;;
 
@@ -309,7 +309,7 @@ let test_provider_timeout_detail_without_code_does_not_map_to_turn_timeout () =
 
 let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
   let accept_error =
-    KTD.sdk_error_of_masc_internal_error
+    KTD.core_error_of_masc_internal_error
       (KTD.Accept_rejected
          { scope = "runpod_fable5.gemma4-coder-fable5"
          ; model = Some "runtime"
@@ -323,7 +323,7 @@ let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
     provider_runtime_surface_exn
       ~reason:None
       ~code:"accept_rejected"
-      ~detail:(Agent_sdk.Error.to_string accept_error)
+      ~detail:(Agent_core.Error.to_string accept_error)
       ()
   in
   check string
@@ -342,7 +342,7 @@ let () =
         ; test_case "string uniqueness" `Quick test_string_uniqueness
         ; test_case "unknown string returns None" `Quick test_unknown_string
         ] )
-    ; ( "sdk_error_mapping"
+    ; ( "core_error_mapping"
       , [ test_case "all Agent variants are intentionally classified" `Quick
             test_all_agent_variants_classified_intentionally
         ; test_case "Agent variant count pin" `Quick test_agent_variant_count_pin

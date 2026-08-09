@@ -47,7 +47,7 @@ let stage_parse = Pipeline_stage_prepare.stage_parse
 
 (* ── Stage 3: Route ──────────────────────────────────────── *)
 
-(** Convert [Llm_provider.Http_client.http_error] into the [sdk_error]
+(** Convert [Llm_provider.Http_client.http_error] into the [core_error]
     shape the pre-[Complete] dispatch path used to surface (that path,
     formerly [Api.create_message], was removed 2026-07-21). Keeps
     downstream Pipeline/Retry/ContextOverflow handling source-compatible
@@ -180,7 +180,7 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
          | Hooks.Continue -> Ok ()
          | Hooks.HookFailed { stage; detail } ->
            Error
-             (Pipeline_common.hook_failed_sdk_error
+             (Pipeline_common.hook_failed_core_error
                 ~hook_name:"after_turn"
                 ~stage
                 ~tool_name:None
@@ -188,7 +188,7 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
                 ~detail)
          | decision ->
            Error
-             (Pipeline_common.illegal_hook_decision_sdk_error
+             (Pipeline_common.illegal_hook_decision_core_error
                 ~hook_name:"after_turn"
                 ~stage:Hooks.After_turn
                 ~decision)
@@ -343,7 +343,7 @@ let stage_execute ?raw_trace_run ?before_tool_execution ~turn ~response agent to
               (Agent_tools.Hook_execution_failed
                  { hook_name; stage; tool_name; invocation; detail })) ->
          Error
-           (Pipeline_common.hook_failed_sdk_error
+           (Pipeline_common.hook_failed_core_error
               ~hook_name
               ~stage
               ~tool_name:(Some tool_name)
@@ -467,7 +467,7 @@ let stage_output ?raw_trace_run ?before_tool_execution ~turn agent response =
           | Hooks.Continue -> Ok (Complete response)
           | Hooks.HookFailed { stage; detail } ->
             Error
-              (Pipeline_common.hook_failed_sdk_error
+              (Pipeline_common.hook_failed_core_error
                  ~hook_name:"on_stop"
                  ~stage
                  ~tool_name:None
@@ -479,7 +479,7 @@ let stage_output ?raw_trace_run ?before_tool_execution ~turn agent response =
             | Hooks.Nudge _
             | Hooks.Block _ ) as decision ->
             Error
-              (Pipeline_common.illegal_hook_decision_sdk_error
+              (Pipeline_common.illegal_hook_decision_core_error
                  ~hook_name:"on_stop"
                  ~stage:Hooks.On_stop
                  ~decision))
@@ -492,13 +492,13 @@ let tag_error stage result =
   match result with
   | Ok _ as ok -> ok
   | Error e ->
-    let poly = Error_domain.of_sdk_error e in
+    let poly = Error_domain.of_core_error e in
     let ctx = Error_domain.with_stage stage poly in
     Log.warn
       _log
       "pipeline stage failed"
       [ Log.S ("stage", stage); Log.S ("error", Error_domain.ctx_to_string ctx) ];
-    (* Stage context is observation-only. Return canonical [Error.sdk_error]
+    (* Stage context is observation-only. Return canonical [Error.t]
        unchanged, including typed fields and provider attribution. *)
     Error e
 ;;
@@ -506,13 +506,13 @@ let tag_error stage result =
 (* Observation-only domain label for a durable [Error_occurred] event.
 
    Derived from the actual error via [Error.category] — the exhaustive typed
-   SSOT (a new [Error.sdk_error] variant forces a compile error there, so no
+   SSOT (a new [Error.t] variant forces a compile error there, so no
    error can silently fall back to a wrong domain). [String.capitalize_ascii]
    only presents the canonical lowercase [category_label] in the durable
    event's historic capitalized style, keeping "Api" for genuine provider
    ([Error.Api]) errors so those logs stay consistent. It is not a classifier:
    classification lives entirely in the typed [Error.category] match. *)
-let error_domain_of (err : Error.sdk_error) : string =
+let error_domain_of (err : Error.t) : string =
   Error.category err |> Error.category_label |> String.capitalize_ascii
 ;;
 
@@ -569,7 +569,7 @@ let run_new_turn
       Pipeline_execution_scope.open_turn (Execution_context.agent_scope ()) ~ordinal:turn
     in
     (* Stage 3: Route exactly once. Provider [ContextOverflow] remains a typed
-       error; OAS does not mutate the transcript or retry implicitly. *)
+       error; AGENT_CORE does not mutate the transcript or retry implicitly. *)
     (match agent.options.journal with
      | Some j ->
        Agent_execution_event_writer.append
@@ -629,8 +629,8 @@ let run_new_turn
       match api_result with
       | Error e -> Error e
       | Ok (provider_config, response) ->
-        (* RFC-OAS-025 Option A: forced-tool-use enforcement removed.
-          [tool_choice] is enforced server-side by the provider, so the SDK no
+        (* Agent Core contract Option A: forced-tool-use enforcement removed.
+          [tool_choice] is enforced server-side by the provider, so agent core no
           longer validates the response against a completion contract nor retries
           to coerce a tool call (the former
           [handle_missing_required_tool_use]/[validate_completion_contract]

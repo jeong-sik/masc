@@ -5,6 +5,6 @@ val update_metrics_from_failure :
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
   reason:string ->
-  ?sdk_error:Agent_sdk.Error.sdk_error ->
+  ?core_error:Agent_core.Error.t ->
   unit ->
   Keeper_meta_contract.keeper_meta

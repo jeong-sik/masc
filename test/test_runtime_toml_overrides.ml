@@ -246,7 +246,7 @@ let test_resolved_runtime_freezes_toml_values_after_init () =
 
 let test_resolved_stream_idle_timeout_defaults_to_failsafe_floor () =
   (* RFC-0345 / #25128: with no explicit env/toml value the resolver substitutes
-     the fail-safe liveness floor (not [None]) so OAS enforces a bound and a hung
+     the fail-safe liveness floor (not [None]) so AGENT_CORE enforces a bound and a hung
      stream cannot freeze the lane forever. Reverting the floor (back to [None])
      makes this fail. *)
   with_clean_boot_overrides @@ fun () ->

@@ -2,7 +2,7 @@
 
     Allows operators and model deployers to describe capabilities for
     custom, quantized, or future model variants without requiring an
-    OAS code change.
+    AGENT_CORE code change.
 
     The manifest is a JSON file with the following shape:
 
@@ -149,7 +149,7 @@ val lookup : t -> string -> entry option
 (** The currently active manifest.
 
     Returns only the manifest explicitly installed with {!set_global}; [None]
-    means no manifest is active. OAS never discovers a manifest from the
+    means no manifest is active. AGENT_CORE never discovers a manifest from the
     process environment. *)
 val global : unit -> t option
 
@@ -157,7 +157,7 @@ val global : unit -> t option
     {!clear_global} is called.
 
     Use this when the embedding host already holds a parsed declarative
-    manifest and wants OAS to consume the same capability data without
+    manifest and wants AGENT_CORE to consume the same capability data without
     round-tripping through another file.
 
     Safe under multi-domain concurrency via [Atomic.t] internally;

@@ -73,7 +73,7 @@ type entry_action =
   | Mark_dead_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
-  | Cancel_pending_oas
+  | Cancel_pending_agent_core
 type transition_result = {
   prev_phase : phase;
   new_phase : phase;

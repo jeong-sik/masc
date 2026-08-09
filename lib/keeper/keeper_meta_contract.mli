@@ -138,11 +138,11 @@ type blocker_class =
   | Capacity_backpressure
   | Fiber_unresolved
   | Stale_turn_timeout
-  | Sdk_context_window_exceeded
-  | Sdk_unrecognized_stop_reason
-  | Sdk_guardrail_violation
-  | Sdk_tripwire_violation
-  | Sdk_input_required
+  | Agent_core_context_window_exceeded
+  | Agent_core_unrecognized_stop_reason
+  | Agent_core_guardrail_violation
+  | Agent_core_tripwire_violation
+  | Agent_core_input_required
   | Internal_unhandled_exception
   | Internal_bridge_exception
   | Internal_contract_rejected
@@ -299,7 +299,7 @@ type keeper_meta = {
   runtime : agent_runtime_state;
   (* Identity & concurrency *)
   keeper_id : Keeper_id.Uid.t option;
-  oas_env : (string * string) list;
+  agent_core_env : (string * string) list;
 }
 
 (** Sanctioned generic unpause transform. Clears ordinary/operator/dead

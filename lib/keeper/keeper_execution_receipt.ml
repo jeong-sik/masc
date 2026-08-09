@@ -331,10 +331,10 @@ let to_json_with_operator_disposition
     ; "trace_id", `String receipt.trace_id
     ; "generation", `Int receipt.generation
     ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
-    ; ( "oas_turn_count", Json_util.int_opt_to_json receipt.oas_turn_count )
-    ; ( "oas_dispatch_mode", string_opt_json receipt.oas_dispatch_mode )
-    ; ( "oas_internal_runtime_disabled"
-      , `Bool receipt.oas_internal_runtime_disabled )
+    ; ( "agent_core_turn_count", Json_util.int_opt_to_json receipt.agent_core_turn_count )
+    ; ( "agent_core_dispatch_mode", string_opt_json receipt.agent_core_dispatch_mode )
+    ; ( "agent_core_internal_runtime_disabled"
+      , `Bool receipt.agent_core_internal_runtime_disabled )
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
     ; "goal_ids", list_json receipt.goal_ids
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
@@ -371,7 +371,7 @@ let to_json_with_operator_disposition
           ; "attempt_count", `Int receipt.runtime_attempt_count
           ; "fallback_applied", `Bool receipt.runtime_fallback_applied
           ; "outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
-          ; "oas_internal_runtime_allowed", `Bool receipt.oas_internal_runtime_allowed
+          ; "agent_core_internal_runtime_allowed", `Bool receipt.agent_core_internal_runtime_allowed
           ; "degraded_retry_applied", `Bool receipt.degraded_retry_applied
           ; ( "degraded_retry_runtime"
             , match receipt.degraded_retry_runtime with

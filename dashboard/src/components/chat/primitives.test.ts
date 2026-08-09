@@ -274,7 +274,7 @@ describe('ChatTranscript', () => {
   })
 
   it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
-    const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
+    const text = 'Keeper request failed: Internal error: [masc_agent_core_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -2663,7 +2663,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
               {
                 kind: 'progress',
                 text: 'PR 목록을 확인하고 리뷰 상태를 보겠다.',
-                oasBlockIndex: 2,
+                agentCoreBlockIndex: 2,
               },
               {
                 kind: 'tool',
@@ -2687,7 +2687,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(trace?.querySelector('[data-chat-trace-step="chat"]')).toBeNull()
     const progress = trace?.querySelector('[data-chat-trace-step="progress"]') as HTMLElement
     expect(progress.getAttribute('data-chat-trace-provenance')).toBe('intermediate_text')
-    expect(progress.getAttribute('data-chat-trace-oas-block-index')).toBe('2')
+    expect(progress.getAttribute('data-chat-trace-agent-core-block-index')).toBe('2')
     expect(progress.textContent).toContain('PR 목록을 확인하고 리뷰 상태를 보겠다.')
   })
 
@@ -2702,14 +2702,14 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
             source: 'direct_assistant',
             turnRef: 'trace-prov#7',
             traceSteps: [
-              { kind: 'think', text: 'checking context', oasBlockIndex: 3 },
+              { kind: 'think', text: 'checking context', agentCoreBlockIndex: 3 },
               {
                 kind: 'tool',
                 name: 'masc_board_list',
                 toolCallId: 'tc-prov',
                 status: 'ok',
                 args: '{"limit":1}',
-                oasBlockIndex: 4,
+                agentCoreBlockIndex: 4,
               },
             ],
           }),
@@ -2732,14 +2732,14 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     // the data attribute, never the label.
     const think = container.querySelector('[data-chat-trace-step="think"]') as HTMLElement
     expect(think.getAttribute('data-chat-trace-provenance')).toBe('thinking_delta')
-    expect(think.getAttribute('data-chat-trace-oas-block-index')).toBe('3')
+    expect(think.getAttribute('data-chat-trace-agent-core-block-index')).toBe('3')
     expect(think.querySelector('.chat-block-source-badge')?.getAttribute('title'))
       .toBe('source: KEEPER_THINKING_DELTA, content block 3')
 
     const tool = container.querySelector('[data-chat-trace-step="tool"]') as HTMLElement
     expect(tool.getAttribute('data-chat-trace-provenance')).toBe('tool_call_id')
     expect(tool.getAttribute('data-chat-trace-tool-call-id')).toBe('tc-prov')
-    expect(tool.getAttribute('data-chat-trace-oas-block-index')).toBe('4')
+    expect(tool.getAttribute('data-chat-trace-agent-core-block-index')).toBe('4')
     expect(tool.querySelector('.chat-block-source-badge')?.getAttribute('title'))
       .toBe('source: TOOL_CALL_*, tool_call_id=tc-prov, content block 4')
     expect(tool.getAttribute('data-chat-trace-link-state')).toBe('trace-only')

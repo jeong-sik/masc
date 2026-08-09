@@ -325,7 +325,7 @@ let run_keepalive_unified_turn
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
       ~(reactive_wake : bool)
-      ~(shared_context : Agent_sdk.Context.t)
+      ~(shared_context : Agent_core.Context.t)
       ~(deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option)
       ~(on_deferred_runtime_consumed : unit -> unit)
       ~(record_deferred_runtime_lane :
@@ -600,7 +600,7 @@ let run_keepalive_unified_turn
             !consumed_stimuli;
           let event_bus = Event_bus_slots.get_keeper () in
           (* Preserve the typed resolution as input to the originating
-             Keeper's external-effect Gate. It is not an OAS approval. *)
+             Keeper's external-effect Gate. It is not an AGENT_CORE approval. *)
           let hitl_resolution =
             List.find_map
               (fun (stim : Keeper_event_queue.stimulus) ->
@@ -957,13 +957,13 @@ let run_heartbeat_loop
   let _max_silence () =
     Runtime_params.get Runtime_settings.keeper_work_as_hb_max_silence_sec
   in
-  (* Persistent OAS Context.t — created once per keeper lifecycle.
-     OAS Context.t is a mutable cross-turn state container for values
+  (* Persistent AGENT_CORE Context.t — created once per keeper lifecycle.
+     AGENT_CORE Context.t is a mutable cross-turn state container for values
      written directly into the shared context. This preserves shared
      metadata across turns, but per-turn context_injector-local timing
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
-  let shared_context = Agent_sdk.Context.create () in
+  let shared_context = Agent_core.Context.create () in
   let deferred_runtime_lane_ref = ref None in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when

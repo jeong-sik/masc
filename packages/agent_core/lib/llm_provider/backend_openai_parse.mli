@@ -7,7 +7,7 @@
 
 val usage_of_openai_json : Yojson.Safe.t -> Types.api_usage option
 
-(** Identity of an all-empty completion (oas#2483): a 200 that carried no
+(** Identity of an all-empty completion (agent-core boundary): a 200 that carried no
     thinking, text, or tool_calls. Enough for a consumer to attribute the empty
     turn to a runtime binding. *)
 type empty_completion =
@@ -31,7 +31,7 @@ val parse_error_to_string : parse_error -> string
 (** Parse an OpenAI-compatible JSON response (from an already-parsed
     [Yojson.Safe.t]).  [Ok api_response] on success; [Error (Provider_error _)]
     on API error; [Error (Empty_completion _)] when the completion has no
-    thinking/text/tool_calls (oas#2483). Blank text WITH tool_calls stays [Ok]
+    thinking/text/tool_calls (agent-core boundary). Blank text WITH tool_calls stays [Ok]
     (content is non-empty). Use when the caller already holds the parsed JSON to
     avoid re-parsing. *)
 val parse_openai_response_result_json

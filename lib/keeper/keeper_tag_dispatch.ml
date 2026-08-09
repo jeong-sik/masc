@@ -150,7 +150,7 @@ let dispatch
         (workflow_err
            (Printf.sprintf
               "tool '%s' belongs to the removed operator surface; keeper runtime stays \
-               on OAS Agent.run"
+               on Agent_core.Agent.run"
               name))
     (* ── Tier C: MCP-state-dependent ───────────────────────────── *)
     | Mod_inline ->

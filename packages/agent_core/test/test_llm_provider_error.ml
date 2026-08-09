@@ -1,5 +1,5 @@
 (** Coverage for [Llm_provider.Error.provider_error], its [to_string]
-    formatter, and typed transport/retry mapping (oas#1175 - file at 0% coverage in the
+    formatter, and typed transport/retry mapping (agent-core boundary - file at 0% coverage in the
     initial coverage measurement (`66.42%`, run `24887636744`)).
 
     The formatter has one case per variant; the [to_string] group keeps
@@ -474,7 +474,7 @@ let test_provider_failure_remaining_variants_mapping () =
        bool
        "default capability reason"
        true
-       (Agent_sdk.Util.string_contains ~needle:"missing provider capability" reason)
+       (Agent_core.Util.string_contains ~needle:"missing provider capability" reason)
    | _ -> fail "expected InvalidRequest capability mismatch");
   let policy =
     provider_failure
@@ -488,7 +488,7 @@ let test_provider_failure_remaining_variants_mapping () =
        bool
        "policy reason"
        true
-       (Agent_sdk.Util.string_contains ~needle:"rule 3" reason)
+       (Agent_core.Util.string_contains ~needle:"rule 3" reason)
    | _ -> fail "expected InvalidRequest policy rejection");
   let startup =
     provider_failure

@@ -132,17 +132,17 @@ describe('keeperDisplayRuntime', () => {
   it('prefers runtime_canonical then selected_runtime_canonical', () => {
     expect(
       keeperDisplayRuntime({
-        runtime_canonical: 'oas.primary',
-        selected_runtime_canonical: 'oas.secondary',
+        runtime_canonical: 'agentCore.primary',
+        selected_runtime_canonical: 'agentCore.secondary',
         runtime_id: 'legacy.runtime',
       }),
-    ).toEqual({ label: 'Runtime', value: 'oas.primary' })
+    ).toEqual({ label: 'Runtime', value: 'agentCore.primary' })
     expect(
       keeperDisplayRuntime({
-        selected_runtime_canonical: 'oas.secondary',
+        selected_runtime_canonical: 'agentCore.secondary',
         runtime_id: 'legacy.runtime',
       }),
-    ).toEqual({ label: 'Runtime', value: 'oas.secondary' })
+    ).toEqual({ label: 'Runtime', value: 'agentCore.secondary' })
   })
 
   it('falls back to runtime_id', () => {
@@ -207,11 +207,11 @@ describe('keeperRuntimeBlockerLabel', () => {
     expect(keeperRuntimeBlockerLabel('runtime_exhausted')).toBe('런타임 후보 소진')
   })
 
-  it('labels the active SDK blocker variants', () => {
-    expect(keeperRuntimeBlockerLabel('sdk_context_window_exceeded')).toBe('SDK 컨텍스트 윈도 초과')
-    expect(keeperRuntimeBlockerLabel('sdk_unrecognized_stop_reason')).toBe('SDK 미식별 정지 사유')
-    expect(keeperRuntimeBlockerLabel('sdk_guardrail_violation')).toBe('SDK 가드레일 위반')
-    expect(keeperRuntimeBlockerLabel('sdk_tripwire_violation')).toBe('SDK Tripwire 위반')
+  it('labels the active agent-core blocker variants', () => {
+    expect(keeperRuntimeBlockerLabel('agent_core_context_window_exceeded')).toBe('Agent Core 컨텍스트 윈도 초과')
+    expect(keeperRuntimeBlockerLabel('agent_core_unrecognized_stop_reason')).toBe('Agent Core 미식별 정지 사유')
+    expect(keeperRuntimeBlockerLabel('agent_core_guardrail_violation')).toBe('Agent Core 가드레일 위반')
+    expect(keeperRuntimeBlockerLabel('agent_core_tripwire_violation')).toBe('Agent Core Tripwire 위반')
   })
 
   it('SSOT regression guard — every literal in KEEPER_RUNTIME_BLOCKER_CLASSES has a non-null label', () => {

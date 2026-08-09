@@ -17,7 +17,7 @@ type direct_message =
   ; channel : string
   ; user_blocks : Keeper_multimodal_input.user_input_block list
   ; attachments : Keeper_chat_store.attachment list
-  ; user_oas_blocks : Agent_sdk.Types.content_block list option
+  ; user_agent_core_blocks : Agent_core.Types.content_block list option
   }
 
 type run_ref =
@@ -168,8 +168,8 @@ let direct_message
     | Some (`Assoc _ as context) -> Ok (Some context)
     | Some _ -> invalid_wire_value ~field:"surface_context" ~expected:"object"
   in
-  let* user_oas_blocks =
-    Keeper_multimodal_input.to_oas_blocks ~attachments user_blocks
+  let* user_agent_core_blocks =
+    Keeper_multimodal_input.to_agent_core_blocks ~attachments user_blocks
     |> Result.map
          (function
            | [] -> None
@@ -185,7 +185,7 @@ let direct_message
     ; channel = String.trim channel
     ; user_blocks
     ; attachments
-    ; user_oas_blocks
+    ; user_agent_core_blocks
     }
 ;;
 
@@ -216,7 +216,7 @@ let direct_message_channel_session_key message = message.channel_session_key
 let direct_message_channel message = message.channel
 let direct_message_user_blocks message = message.user_blocks
 let direct_message_attachments message = message.attachments
-let direct_message_user_oas_blocks message = message.user_oas_blocks
+let direct_message_user_agent_core_blocks message = message.user_agent_core_blocks
 
 let request_of_json json =
   let* fields = object_fields ~field:"delegate" json in

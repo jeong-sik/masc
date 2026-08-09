@@ -44,12 +44,12 @@ val get_field : string -> Yojson.Safe.t -> Yojson.Safe.t option
 
 (** {1 Network Context} *)
 
-(** Type alias for Eio network capability (Generic + Unix for Agent SDK) *)
+(** Type alias for the Eio network capability used by agent core. *)
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
 (** Set the Eio network reference for server-side network calls.
     Must be called from main_eio.ml during server initialization.
-    Requires Generic + Unix capabilities for Agent SDK compatibility.
+    Requires Generic and Unix capabilities for agent-core calls.
     @param net Eio network capability *)
 val set_net : [> `Generic | `Unix] Eio.Net.ty Eio.Resource.t -> unit
 

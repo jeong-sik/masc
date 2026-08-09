@@ -48,7 +48,7 @@
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
   test_keeper_context_layers
-  test_keeper_hooks_oas_introspection
+  test_keeper_hooks_agent_core_introspection
   test_keeper_run_tools_hooks
   test_board_activity_cache
   test_jsonl_mtime_projection
@@ -56,7 +56,7 @@
   test_keeper_decision_event
   test_attribution
   test_dashboard_attribution
-  test_dashboard_oas_bridge
+  test_dashboard_agent_core_bridge
   test_masc_runtime_events
   test_cancel_wall_bucket
   test_provider_http_error
@@ -91,7 +91,7 @@
   test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
   test_mcp_session_id_header
-  test_keeper_sdk_error_typed_bridge
+  test_keeper_core_error_typed_bridge
   test_keeper_status_bridge
   test_keeper_diagnostic_stale_last_error
   test_read_drop_reason
@@ -144,7 +144,7 @@
   test_sse_qw
   test_sse_stream
   test_health
-  test_keeper_hooks_oas_log_shape
+  test_keeper_hooks_agent_core_log_shape
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
   test_boundary_redaction_runtime_lane
@@ -156,7 +156,7 @@
   test_cost_token_decouple
   test_response_model_empty_10083
   test_keeper_proactive_skip_counter
-  test_oas_empty_response_diagnostic
+  test_agent_core_empty_response_diagnostic
   test_board_author_identity_10297
   test_gc_sampler
   test_process_timeout_counter
@@ -267,7 +267,7 @@
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
   test_keeper_artifact_read_request
-  test_tool_schema_oas_boundary
+  test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
   test_tool_bridge_externalize
@@ -346,7 +346,7 @@
   test_keeper_identity_id
   test_tool_agent_timeline_name_match
   test_keeper_context_layers
-  test_keeper_hooks_oas_introspection
+  test_keeper_hooks_agent_core_introspection
   test_keeper_run_tools_hooks
   test_board_activity_cache
   test_jsonl_mtime_projection
@@ -354,7 +354,7 @@
   test_keeper_decision_event
   test_attribution
   test_dashboard_attribution
-  test_dashboard_oas_bridge
+  test_dashboard_agent_core_bridge
   test_masc_runtime_events
   test_cancel_wall_bucket
   test_provider_http_error
@@ -391,7 +391,7 @@
   test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
   test_mcp_session_id_header
-  test_keeper_sdk_error_typed_bridge
+  test_keeper_core_error_typed_bridge
   test_keeper_status_bridge
   test_keeper_diagnostic_stale_last_error
   test_read_drop_reason
@@ -444,7 +444,7 @@
   test_sse_qw
   test_sse_stream
   test_health
-  test_keeper_hooks_oas_log_shape
+  test_keeper_hooks_agent_core_log_shape
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
   test_boundary_redaction_runtime_lane
@@ -456,7 +456,7 @@
   test_cost_token_decouple
   test_response_model_empty_10083
   test_keeper_proactive_skip_counter
-  test_oas_empty_response_diagnostic
+  test_agent_core_empty_response_diagnostic
   test_board_author_identity_10297
   test_gc_sampler
   test_process_timeout_counter
@@ -567,7 +567,7 @@
   test_tool_input_validation
   test_tool_schema_constraint_enforcement
   test_keeper_artifact_read_request
-  test_tool_schema_oas_boundary
+  test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
   test_tool_bridge_externalize
@@ -698,7 +698,7 @@
  ; scripts/fixtures/<name>/runtime.toml, so a fixture added later is covered
  ; without editing this stanza.
  (deps
-  ../config/oas-models-overlay.toml
+  ../config/agent-core-models-overlay.toml
   ../config/runtime.toml
   (source_tree ../scripts/fixtures))
  (libraries masc_test_deps compaction_exact_output_fixture))
@@ -764,12 +764,12 @@
  (modules test_keeper_manual_compaction_preemption)
  (libraries masc_test_deps))
 
-; Fusion OAS failure-detail tests need Fusion_types constructors from
+; Fusion AGENT_CORE failure-detail tests need Fusion_types constructors from
 ; masc.fusion_core, which is intentionally not re-exported via masc.
 
 (test
- (name test_fusion_oas_error_detail)
- (modules test_fusion_oas_error_detail)
+ (name test_fusion_agent_core_error_detail)
+ (modules test_fusion_agent_core_error_detail)
  (libraries masc_test_deps masc.fusion_core))
 
 ; RFC-0266 Phase 3: masc_fusion_status tool — JSON projection of the run
@@ -956,7 +956,7 @@
   test_board_ttl
   test_board_explicit_writes
   test_keeper_path_check_error
-  test_oas_adapters
+  test_agent_core_adapters
   test_cache_eio
   test_metrics_store_eio
   test_planning_eio
@@ -1100,7 +1100,7 @@
   test_board_ttl
   test_board_explicit_writes
   test_keeper_path_check_error
-  test_oas_adapters
+  test_agent_core_adapters
   test_cache_eio
   test_metrics_store_eio
   test_planning_eio
@@ -1286,7 +1286,7 @@
   eio_main
   unix))
 
-; Production Board-attention adapter proof over the provider-neutral OAS lane.
+; Production Board-attention adapter proof over the provider-neutral AGENT_CORE lane.
 (test
  (name test_keeper_board_attention_exact_flow)
  (modules test_keeper_board_attention_exact_flow)
@@ -1298,13 +1298,13 @@
 ; peek/ack, and that is now removed.
 
 ; Process-isolated proof that exact-output bootstrap honors full catalog
-; replacement precedence over deployment overlays and OAS embedded targets.
+; replacement precedence over deployment overlays and AGENT_CORE embedded targets.
 (test
  (name test_exact_output_catalog_precedence)
  (modules
   test_exact_output_catalog_precedence
   test_exact_output_catalog_precedence_fixture)
- (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
+ (deps ../config/agent-core-models-overlay.toml ../config/runtime.toml)
  (libraries alcotest masc_server masc_test_deps eio_main unix))
 
 ; Production entrypoint coverage for an intentionally absent Eio clock. This
@@ -1926,7 +1926,7 @@
 
 (include stanzas/test_masc_error_is_retryable.inc)
 
-(include stanzas/test_runtime_oas_eio_context_classify.inc)
+(include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 
 
 (include stanzas/test_runtime_model_temperature_toml.inc)
@@ -1960,7 +1960,7 @@
 
 (include stanzas/test_openapi_api_e2e.inc)
 
-(include stanzas/test_masc_oas_bridge_observation.inc)
+(include stanzas/test_masc_agent_core_bridge_observation.inc)
 
 (include stanzas/test_operator_mcp_e2e.inc)
 
@@ -2190,7 +2190,7 @@
  (libraries masc_test_deps ast_grep))
 
 ; RFC-0085 PR-3 — server runtime PID lock absorbed into Host_config.run_dir,
-; and server bootstrap kept free of provider-specific OAS policy wiring.
+; and server bootstrap kept free of provider-specific AGENT_CORE policy wiring.
 
 (test
  (name test_rfc_0085_pr3_server_runtime_paths)
@@ -2230,7 +2230,7 @@
   masc.tool_types
   unix))
 
-; Regression: an OAS input-validation failure reaches the dispatch
+; Regression: an AGENT_CORE input-validation failure reaches the dispatch
 ; observers (Tool_metrics) instead of being dropped by the prior
 ; Handler_error arm.
 

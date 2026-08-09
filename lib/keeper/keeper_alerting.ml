@@ -15,9 +15,9 @@ open Keeper_types_profile
 open Keeper_memory
 
 let merge_usage
-    (a : Agent_sdk.Types.api_usage)
-    (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =
-  { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
+    (a : Agent_core.Types.api_usage)
+    (b : Agent_core.Types.api_usage) : Agent_core.Types.api_usage =
+  { Agent_core.Types.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
     cache_creation_input_tokens =
       a.cache_creation_input_tokens + b.cache_creation_input_tokens;

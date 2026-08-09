@@ -10,7 +10,7 @@
     Determinism note: every field in the fixture is supplied explicitly so
     the wire string is a pure function of the fixture, not of the host
     environment. In particular:
-    - [model_id] ("oas-snapshot-fixture-model") matches no static capability
+    - [model_id] ("agent-core-snapshot-fixture-model") matches no static capability
       prefix and is not expected in any capability manifest, so capability
       lookup falls through to per-kind defaults.
     - [supports_tool_choice_override:true] pins whether the OpenAI/GLM
@@ -29,7 +29,7 @@ let msg role content : message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
-(* One tool declaration in the SDK's input_schema shape. *)
+(* One tool declaration in agent core's input_schema shape. *)
 let tool_decl =
   `Assoc
     [ "name", `String "get_weather"
@@ -131,7 +131,7 @@ let nudged_messages =
 let cfg ~kind ~base_url ~tool_choice =
   Provider_config.make
     ~kind
-    ~model_id:"oas-snapshot-fixture-model"
+    ~model_id:"agent-core-snapshot-fixture-model"
     ~base_url
     ~api_key:"test-key"
     ~max_tokens:1024
@@ -169,7 +169,7 @@ let openai_no_parallel_capability_cfg =
     ()
 ;;
 
-(* RFC-OAS-023 fixture. Unlike the shared [cfg] above, this one uses the real
+(* Agent Core contract fixture. Unlike the shared [cfg] above, this one uses the real
    provider/model identity ([deepseek]/[deepseek-v4-flash]). DeepSeek's direct
    API speaks the OpenAI-compatible Chat Completions wire, but provider-specific
    thinking/tool-choice semantics must come from that exact catalog tuple rather
@@ -195,7 +195,7 @@ let deepseek_cfg ?enable_thinking ?reasoning_effort ~tool_choice () =
    snapshot: Ollama emits the raw schema under [format]; Anthropic wraps it as
    [format].{type:"json_schema", schema}. Guards against a silent-drop
    regression where a serializer refactor stops emitting the schema (the
-   structured-output boundary of RFC-OAS-023 / RFC-OAS-034). OpenAI and Gemini
+   structured-output boundary of Agent Core contract / Agent Core contract). OpenAI and Gemini
    already have this coverage in test_backend_openai_codec / test_backend_gemini;
    these two backends did not. *)
 let output_schema_fixture =
@@ -209,7 +209,7 @@ let output_schema_fixture =
 let schema_cfg ~kind ~base_url =
   Provider_config.make
     ~kind
-    ~model_id:"oas-snapshot-fixture-model"
+    ~model_id:"agent-core-snapshot-fixture-model"
     ~base_url
     ~api_key:"test-key"
     ~max_tokens:1024
@@ -275,17 +275,17 @@ let check_thinking_enabled_clear label expected_clear body =
 (* ── OpenAI-compatible ──────────────────────────────── *)
 
 let openai_forced_expected =
-  {|{"parallel_tool_calls":false,"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"tool_choice":{"type":"function","function":{"name":"get_weather"}},"temperature":0.7,"model":"oas-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}],"role":"assistant","content":null},{"role":"tool","tool_call_id":"call_1","content":"Sunny, 25C"}],"max_tokens":1024}|}
+  {|{"parallel_tool_calls":false,"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"tool_choice":{"type":"function","function":{"name":"get_weather"}},"temperature":0.7,"model":"agent-core-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}],"role":"assistant","content":null},{"role":"tool","tool_call_id":"call_1","content":"Sunny, 25C"}],"max_tokens":1024}|}
 ;;
 
 let openai_required_expected =
-  {|{"parallel_tool_calls":false,"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"tool_choice":"required","temperature":0.7,"model":"oas-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}],"role":"assistant","content":null},{"role":"tool","tool_call_id":"call_1","content":"Sunny, 25C"}],"max_tokens":1024}|}
+  {|{"parallel_tool_calls":false,"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"tool_choice":"required","temperature":0.7,"model":"agent-core-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}],"role":"assistant","content":null},{"role":"tool","tool_call_id":"call_1","content":"Sunny, 25C"}],"max_tokens":1024}|}
 ;;
 
 (* None_ omits both [tools] and [tool_choice] entirely (it does not emit
    "none"). Pinned as current behavior, not a serializer fix. *)
 let openai_none_expected =
-  {|{"temperature":0.7,"model":"oas-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}],"role":"assistant","content":null},{"role":"tool","tool_call_id":"call_1","content":"Sunny, 25C"}],"max_tokens":1024}|}
+  {|{"temperature":0.7,"model":"agent-core-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}],"role":"assistant","content":null},{"role":"tool","tool_call_id":"call_1","content":"Sunny, 25C"}],"max_tokens":1024}|}
 ;;
 
 let test_openai_forced () =
@@ -360,11 +360,11 @@ let test_openai_parallel_disabled_by_capability () =
     (contains ~needle:{|"parallel_tool_calls":false|} body)
 ;;
 
-(* ── DeepSeek via OpenAI-compat (RFC-OAS-023 routing fence) ───
+(* ── DeepSeek via OpenAI-compat (Agent Core contract routing fence) ───
    This fixture pins the current provider wire for [deepseek-v4-flash]
    through the OpenAI-compat backend. It exercises the REAL capability
    lookup (no [supports_tool_choice_override]), so it runs through the
-   prefix dispatcher fixed in RFC-OAS-023.
+   prefix dispatcher fixed in Agent Core contract.
 
    It is a regression FENCE, not a discrimination proof: with
    [enable_thinking=None] and [max_tokens=1024], no thinking control field is
@@ -534,7 +534,7 @@ let test_raw_openai_compat_does_not_infer_glm_thinking_or_replay () =
     body
 ;;
 
-(* Native [kind:Glm] reasoning_content replay gate (oas#2236). Typed [Glm] is
+(* Native [kind:Glm] reasoning_content replay gate (agent-core boundary). Typed [Glm] is
    the sole positive native GLM path: replay historical reasoning_content only
    under Preserved Thinking (clear_thinking=false). Before the gate the native
    path replayed unconditionally, contradicting the default
@@ -600,7 +600,7 @@ let test_native_glm_drops_reasoning_when_thinking_disabled () =
 (* ── Anthropic ──────────────────────────────────────── *)
 
 let anthropic_forced_expected =
-  {|{"tool_choice":{"disable_parallel_tool_use":true,"type":"tool","name":"get_weather"},"tools":[{"name":"get_weather","description":"Get weather for a city","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}],"temperature":0.7,"model":"oas-snapshot-fixture-model","max_tokens":1024,"messages":[{"role":"user","content":[{"type":"text","text":"What's the weather in Seoul?"}]},{"role":"assistant","content":[{"type":"tool_use","id":"call_1","name":"get_weather","input":{"city":"Seoul"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"Sunny, 25C","is_error":false}]}],"stream":false}|}
+  {|{"tool_choice":{"disable_parallel_tool_use":true,"type":"tool","name":"get_weather"},"tools":[{"name":"get_weather","description":"Get weather for a city","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}],"temperature":0.7,"model":"agent-core-snapshot-fixture-model","max_tokens":1024,"messages":[{"role":"user","content":[{"type":"text","text":"What's the weather in Seoul?"}]},{"role":"assistant","content":[{"type":"tool_use","id":"call_1","name":"get_weather","input":{"city":"Seoul"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"Sunny, 25C","is_error":false}]}],"stream":false}|}
 ;;
 
 let test_anthropic_forced () =
@@ -731,7 +731,7 @@ let test_gemini_nudged_tool_turn_merges_followup_text () =
 (* ── GLM (OpenAI-compatible wire format) ────────────── *)
 
 let glm_any_expected =
-  {|{"parallel_tool_calls":false,"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"tool_choice":"auto","temperature":0.7,"model":"oas-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}],"role":"assistant","content":""},{"role":"tool","tool_call_id":"call_1","content":"Sunny, 25C"}],"max_tokens":1024}|}
+  {|{"parallel_tool_calls":false,"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"tool_choice":"auto","temperature":0.7,"model":"agent-core-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Seoul\"}"}}],"role":"assistant","content":""},{"role":"tool","tool_call_id":"call_1","content":"Sunny, 25C"}],"max_tokens":1024}|}
 ;;
 
 let test_glm_any () =
@@ -758,11 +758,11 @@ let test_glm_any () =
 (* ── Ollama (native /api/chat shape) ────────────────── *)
 
 let ollama_any_expected =
-  {|{"options":{"temperature":0.7,"num_predict":1024},"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"keep_alive":-1,"stream":false,"model":"oas-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":{"city":"Seoul"}}}],"role":"assistant","content":null},{"role":"tool","tool_name":"get_weather","content":"Sunny, 25C"}]}|}
+  {|{"options":{"temperature":0.7,"num_predict":1024},"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"keep_alive":-1,"stream":false,"model":"agent-core-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":{"city":"Seoul"}}}],"role":"assistant","content":null},{"role":"tool","tool_name":"get_weather","content":"Sunny, 25C"}]}|}
 ;;
 
 let ollama_parallel_expected =
-  {|{"options":{"temperature":0.7,"num_predict":1024},"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"keep_alive":-1,"stream":true,"model":"oas-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul and London?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":{"city":"Seoul"}}},{"id":"call_2","type":"function","function":{"name":"get_weather","arguments":{"city":"London"}}}],"role":"assistant","content":null},{"role":"tool","tool_name":"get_weather","content":"Sunny, 25C"},{"role":"tool","tool_name":"get_weather","content":"Rain, 16C"}]}|}
+  {|{"options":{"temperature":0.7,"num_predict":1024},"tools":[{"type":"function","function":{"name":"get_weather","description":"Get weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}],"keep_alive":-1,"stream":true,"model":"agent-core-snapshot-fixture-model","messages":[{"role":"user","content":"What's the weather in Seoul and London?"},{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":{"city":"Seoul"}}},{"id":"call_2","type":"function","function":{"name":"get_weather","arguments":{"city":"London"}}}],"role":"assistant","content":null},{"role":"tool","tool_name":"get_weather","content":"Sunny, 25C"},{"role":"tool","tool_name":"get_weather","content":"Rain, 16C"}]}|}
 ;;
 
 let test_ollama_any () =

@@ -546,7 +546,7 @@ function phaseDurationTitle(phase: TurnPhase): string {
     case 'tool_call_log':
       return 'duration_ms from /api/v1/keepers/:name/tool-calls'
     case 'provider_telemetry':
-      return 'request_latency_ms — provider call wall-clock (OAS inference_telemetry)'
+      return 'request_latency_ms — provider call wall-clock (Agent Core inference_telemetry)'
     case 'estimated':
       return 'estimated only; no durable duration for this phase'
     case 'not_recorded':
@@ -648,7 +648,7 @@ function buildTurnDetail(
   phases.push({
     label: '응답 생성',
     kind: 'gen',
-    // RFC-0233 §9 — ground the generation phase in OAS request_latency_ms
+    // RFC-0233 §9 — ground the generation phase in Agent Core request_latency_ms
     // (provider call wall-clock). Absent on the error path or before a
     // response existed → render "측정 없음" rather than fabricating a bar.
     durationMs: record.request_latency_ms ?? null,
@@ -661,7 +661,7 @@ function buildTurnDetail(
     visualOffsetMs: 0,
     meta: (() => {
       if (record.request_latency_ms == null) {
-        return 'provider/OAS duration is not recorded for this turn'
+        return 'provider/Agent Core duration is not recorded for this turn'
       }
       if (record.ttfrc_ms != null) {
         return `provider call wall-clock (request_latency_ms) · 첫 토큰 ${formatMsCompact(record.ttfrc_ms)} (ttfrc_ms)`

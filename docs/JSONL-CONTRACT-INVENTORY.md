@@ -38,7 +38,7 @@ fixtures before any writer implementation is changed.
 | Mention inbox | `.masc/mention_inbox.jsonl` | `Fs_compat.append_jsonl` | `Mention_inbox.load_all_mentions`, `Activity_feed` | `Mention_inbox.mention_record_to_json` | Terminal task mentions are skipped by invariant check before append. |
 | Goal verification events | goal verification event path from `Goal_verification.events_path` | `Fs_compat.append_jsonl` | goal verification state/readers | `Goal_verification.emit_event` | Event append is separate from file-locked state update. |
 | Trajectory | `.masc/trajectories/<keeper>/<trace_id>.jsonl` | `Fs_compat.append_jsonl` | trajectory affinity/status readers | `Trajectory.entry_to_json`, thinking and summary encoders | Previous local mutex helper was removed in favor of `Fs_compat.append_jsonl`. |
-| Runtime/OAS events | date-split OAS/runtime event stores | `Dated_jsonl.append` | dashboard runtime/OAS projections | `Runtime_event_bridge`, `Runtime_trust_persist` | Some append failures recreate `Dated_jsonl` store handles and retry later. |
+| Runtime/agent core events | date-split agent core/runtime event stores | `Dated_jsonl.append` | dashboard runtime/agent core projections | `Runtime_event_bridge`, `Runtime_trust_persist` | Some append failures recreate `Dated_jsonl` store handles and retry later. |
 | Shared audit | `<base_dir>/YYYY-MM/DD.jsonl` | direct `open_out_gen` | `Shared_audit.Store.read_all_entries`, `verify_chain` | `Shared_audit.Envelope` | Hash-chain state means writer migration must preserve append order and `latest_hash`. |
 
 ## Contract Invariants To Pin In `task-382`

@@ -134,17 +134,17 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ( "trace_ref",
           match result.trace_ref with
           | Some trace_ref ->
-              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
+              Agent_core.Raw_trace.run_ref_to_yojson trace_ref
           | None -> `Null );
         ( "run_validation",
           match result.run_validation with
           | Some validation ->
-              Agent_sdk.Raw_trace.run_validation_to_yojson validation
+              Agent_core.Raw_trace.run_validation_to_yojson validation
           | None -> `Null );
         ("inference_telemetry",
          match result.inference_telemetry with
          | Some t ->
-           Keeper_hooks_oas.inference_telemetry_to_runtime_json t
+           Keeper_hooks_agent_core.inference_telemetry_to_runtime_json t
          | None -> `Null);
       ])
   in

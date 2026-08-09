@@ -1,7 +1,7 @@
 # Operator Schema Surface Index
 
 This is the operator-facing map for MASC runtime output, dashboard response,
-SSE, JSONL, and OAS bridge surfaces. It answers where the schema or type truth
+SSE, JSONL, and agent core bridge surfaces. It answers where the schema or type truth
 lives, who produces it, who consumes it, and which test should catch obvious
 path drift.
 
@@ -18,11 +18,11 @@ Machine-readable catalog: `docs/schema-surfaces/operator-output-surfaces.v1.json
 | `masc.keeper_tool_call_log.jsonl.v1` | Keeper tool-call I/O JSONL | `lib/keeper_tool_call_log.mli` | Tool-call log tests |
 | `masc.runtime_contract_projection.v1` | Runtime contract JSON projection | `lib/keeper/keeper_runtime_contract.mli` | Tool-call/runtime contract tests |
 | `masc.mcp_openapi_tool_schema.v1` | MCP tool schemas and generated OpenAPI | `lib/keeper/keeper_schema.mli`, `lib/tool_schema_dsl.mli` | Tool matrix and OpenAPI smoke tests |
-| `masc.oas_bridge_events.v1` | OAS custom events bridged into MASC | `lib/keeper/keeper_event_bridge.mli`, event inventory doc | OAS integration tests |
+| `masc.agent_core_bridge_events.v1` | agent core custom events bridged into MASC | `lib/keeper/keeper_event_bridge.mli`, event inventory doc | agent core integration tests |
 
 ## Boundary Rules
 
 - Dashboard HTTP response shapes must be parsed through `dashboard/src/api/schemas/`.
 - SSE is a freshness transport. Authoritative read models live behind HTTP or durable JSONL artifacts.
-- MASC does not duplicate OAS runtime schemas. OAS-owned surfaces are linked by catalog id in `external_refs`.
+- MASC does not duplicate agent core runtime schemas. agent core-owned surfaces are linked by catalog id in `external_refs`.
 - If a schema source or test file moves, update the machine-readable catalog in the same change.

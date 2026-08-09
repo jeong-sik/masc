@@ -44,5 +44,5 @@ let publish_cascade_resolution
     Log.Keeper.debug
       "cascade_resolution: no masc event bus available, skipping telemetry"
   | Some bus ->
-    let open Agent_sdk.Event_bus in
+    let open Agent_core.Event_bus in
     publish bus (mk_event (Custom ("telemetry_event", payload)))

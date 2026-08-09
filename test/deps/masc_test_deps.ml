@@ -129,7 +129,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Current_task_id
         | Schema.Keeper_id -> `Null
         | Schema.Paused -> `Bool false
-        | Schema.Oas_env -> `Assoc []
+        | Schema.Agent_core_env -> `Assoc []
       in
       let field_values =
         List.map

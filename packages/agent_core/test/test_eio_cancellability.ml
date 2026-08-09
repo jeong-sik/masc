@@ -1,6 +1,6 @@
-(** Regression guard for OAS HTTP cancellation assumption.
+(** Regression guard for AGENT_CORE HTTP cancellation assumption.
 
-    OAS streaming code (lib/llm_provider/http_client.ml [read_sse],
+    AGENT_CORE streaming code (lib/llm_provider/http_client.ml [read_sse],
     [read_ndjson], [post_sync], [with_post_stream]) relies on
     [Eio.Time.with_timeout_exn] to interrupt slow / hung HTTP body reads.
     For that to actually work, [Eio.Buf_read.line] / [Buf_read.take_all]
@@ -8,13 +8,13 @@
     the underlying socket [single_read].
 
     A 2026-04-27 forensic investigation produced reproducers (originally
-    at /tmp/oas-cancel-research/repro/) that confirmed cancellation is
+    at /tmp/agent_core-cancel-research/repro/) that confirmed cancellation is
     intact across four scenarios.  This test ports those reproducers
     so a future Eio/cohttp-eio dependency bump that breaks cancellation
     fails CI immediately, instead of silently regressing into 3585s
     keeper hangs in masc-mcp. boundary-allow: cross-repo regression context.
 
-    Cross-ref: planning/claude-plans/oas-execution-cancellability.md
+    Cross-ref: planning/claude-plans/agent_core-execution-cancellability.md
                 (in jeong-sik/me) — falsified self-confession comment in
                 masc-mcp [keeper_llm_bridge.ml:35-39]. boundary-allow.
 
@@ -82,7 +82,7 @@ let connect_and_consume_headers ~sw ~net port =
   reader
 ;;
 
-(* OAS read_sse loop structure (mirrors lib/llm_provider/http_client.ml). *)
+(* AGENT_CORE read_sse loop structure (mirrors lib/llm_provider/http_client.ml). *)
 let read_sse_loop reader ~on_data =
   let rec loop () =
     match Eio.Buf_read.line reader with

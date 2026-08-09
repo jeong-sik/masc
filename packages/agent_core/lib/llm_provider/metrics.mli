@@ -1,7 +1,7 @@
 (** Metrics hooks for LLM completion observability.
 
     Consumers inject their own metrics backend (Prometheus, StatsD, log, etc.)
-    via the [t] record. OAS never depends on a specific implementation.
+    via the [t] record. AGENT_CORE never depends on a specific implementation.
 
     @since 0.54.0
 
@@ -56,7 +56,7 @@ type t =
     (** Fired when a response carries usage tokens.
       @since 0.185.0 *)
   ; on_tool_calls : provider:string -> model_id:string -> count:int -> unit
-    (** Fired when a provider response contains one or more OAS [ToolUse]
+    (** Fired when a provider response contains one or more AGENT_CORE [ToolUse]
         blocks. The count is provider-agnostic and represents calls emitted
         by the model, not tool execution success.
         @since 0.193.16 *)

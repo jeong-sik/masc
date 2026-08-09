@@ -14,7 +14,7 @@
 open Alcotest
 
 module Transport = Masc.Transport
-module Sdk_tool_contract = Masc.Sdk_tool_contract
+module Agent_core_tool_contract = Masc.Agent_core_tool_contract
 
 (* ============================================================
    protocol Tests
@@ -668,7 +668,7 @@ let test_rest_generate_openapi_document () =
         (operation_id ^ " removed from core remote operations")
         false
         (List.exists (String.equal operation_id)
-           Sdk_tool_contract.core_remote_operation_names);
+           Agent_core_tool_contract.core_remote_operation_names);
       check bool
         (operation_id ^ " absent from OpenAPI operation catalog")
         false
@@ -694,13 +694,13 @@ let test_rest_generate_openapi_document () =
   check_operation_tags "masc_status" [ "tasks" ];
   check_operation_tags "masc_plan_init" [ "planning" ];
   check_operation_tags "masc_broadcast" [ "messaging" ];
-  let sdk_aliases =
-    status_entry |> member "x-agent-sdk" |> member "aliases" |> to_list
+  let agent_core_aliases =
+    status_entry |> member "x-agent-core" |> member "aliases" |> to_list
   in
   check bool "status has no sdk alias masc_workspace_status" false
     (List.exists
        (fun row -> row |> member "name" |> to_string = "masc_workspace_status")
-       sdk_aliases);
+       agent_core_aliases);
   let add_task_entry = operation_entry "masc_add_task" in
   check int "add_task has no fake rest binding"
     0

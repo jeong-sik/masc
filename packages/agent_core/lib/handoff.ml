@@ -26,7 +26,7 @@ type delegate_fn =
   sw:Eio.Switch.t
   -> handoff_target
   -> string
-  -> (Types.api_response, Error.sdk_error) result
+  -> (Types.api_response, Error.t) result
 
 (** Create a handoff tool visible to the LLM.
     [delegate] is the real execution closure. The target name is the exact tool

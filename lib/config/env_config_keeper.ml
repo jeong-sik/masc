@@ -74,7 +74,7 @@ module KeeperWireCapture = struct
     max min_value (min max_value value)
   ;;
 
-  (** Master switch for diagnostic MASC->OAS wire capture. Default off.
+  (** Master switch for diagnostic MASC->AGENT_CORE wire capture. Default off.
       @category Policies @ops_class operator *)
   let enabled () = Feature_flag_registry.get_bool "MASC_KEEPER_WIRE_CAPTURE"
 
@@ -84,7 +84,7 @@ module KeeperWireCapture = struct
   let max_bytes_ceiling = 1024 * 1024 * 1024
 
   (** Maximum age for [<masc_root>/wire-capture] day files retained by the
-      diagnostic MASC->OAS wire-capture harness. Default is 3 days. Range:
+      diagnostic MASC->AGENT_CORE wire-capture harness. Default is 3 days. Range:
       [1, 30] days.
 
       @category Policies @ops_class operator *)
@@ -468,9 +468,9 @@ module KeeperKeepalive = struct
 
   let stream_idle_timeout_env_key = "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
 
-  (** Explicit idle-gap timeout for streaming OAS provider responses.
+  (** Explicit idle-gap timeout for streaming AGENT_CORE provider responses.
       This bounds time between streamed lines, not total turn duration.
-      Unset means disabled: MASC and OAS must not synthesize a provider/model
+      Unset means disabled: MASC and AGENT_CORE must not synthesize a provider/model
       default.  A configured value must be finite and strictly positive;
       malformed values are operator configuration errors, never a fallback.
 
@@ -492,8 +492,8 @@ module KeeperKeepalive = struct
                  detail)))
   ;;
 
-  (** Total HTTP body-consumption deadline for non-streaming OAS completion
-      calls. In agent_sdk this wraps [Complete.complete]'s synchronous HTTP
+  (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE completion
+      calls. In agent_core this wraps [Complete.complete]'s synchronous HTTP
       body read; streaming calls deliberately ignore the knob so active
       long streams are not killed by total duration. Streaming liveness is
       handled by an explicitly configured [stream_idle_timeout_sec] and the

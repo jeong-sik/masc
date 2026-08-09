@@ -4,7 +4,7 @@
     audit).
 
     Single dispatch entry: {!dispatch}.  Two schema lists exposed
-    so the SDK adapter can advertise the operator-remote subset
+    so the Agent Core adapter can advertise the operator-remote subset
     separately from the full tool catalog.
 
     Internal schema-constructor / action-enum / dispatcher helpers stay
@@ -64,13 +64,13 @@ val dispatch :
     different MCP profiles.
 
     {b Why split}: the operator-remote profile is the externally
-    reachable seam (dashboard / SDK), so it advertises only the
+    reachable seam (dashboard / Agent Core), so it advertises only the
     safe-to-expose subset.  The full {!schemas} is consumed inside
     the keeper-bound dispatcher only. *)
 
 val remote_schemas : Masc_domain.tool_schema list
 (** Operator-remote tool schemas — the subset advertised to remote
-    MCP clients.  Pinned at the .mli seam so dashboard / SDK
+    MCP clients.  Pinned at the .mli seam so dashboard / Agent Core
     consumers see a stable list ordering. *)
 
 val schemas : Masc_domain.tool_schema list

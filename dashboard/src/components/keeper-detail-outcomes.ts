@@ -17,7 +17,7 @@ import { MutedSpan, DetailCard } from './keeper-detail-kpi'
 //     Rendered as compact inline counters + a stacked proportion bar.
 //     Secondary row lists compactions_ok / handoffs_ok as chips.
 //
-//   Row 2 — Validator Pass Rate (OAS verdicts)
+//   Row 2 — Validator Pass Rate (Agent Core verdicts)
 //     "pass N/M (P%)" with a horizontal progress bar colored by tone,
 //     plus up to 3 top failure reasons rendered as muted chips.
 //
@@ -37,7 +37,7 @@ export function OutcomesLedger({ keeper, outcomes }: {
   const pctSuccess = ledgerTotal > 0 ? (successes.substantive_turns / ledgerTotal) * 100 : 0
   const pctFail    = ledgerTotal > 0 ? (failures.turn_failed        / ledgerTotal) * 100 : 0
 
-  const verdicts = validation.oas_verdicts
+  const verdicts = validation.agent_core_verdicts
   const verdictTotal = verdicts.pass + verdicts.fail + verdicts.unknown
   const passRatePct = verdictTotal > 0 ? Math.round((verdicts.pass / verdictTotal) * 100) : null
   const passBarColor =
@@ -75,7 +75,7 @@ export function OutcomesLedger({ keeper, outcomes }: {
       ${'' /* Row 2 — Validator Pass Rate */}
       <${DetailCard} class="px-3 py-2">
         <div class="flex items-baseline justify-between gap-2 mb-1.5">
-          <${SectionHeader} size="xs">검증자 (OAS verdict)</${SectionHeader}>
+          <${SectionHeader} size="xs">검증자 (Agent Core verdict)</${SectionHeader}>
           <${MutedSpan}>
             ${verdictTotal > 0 ? `${verdicts.pass}/${verdictTotal} pass` : 'verdict 없음'}
           </${MutedSpan}>
@@ -95,7 +95,7 @@ export function OutcomesLedger({ keeper, outcomes }: {
           ` : null}
         ` : html`
           <div class="text-2xs text-[var(--color-fg-disabled)] leading-snug">
-            이 키퍼에 대해 기록된 OAS verdict가 아직 없습니다.
+            이 키퍼에 대해 기록된 Agent Core verdict가 아직 없습니다.
           </div>
         `}
       <//>

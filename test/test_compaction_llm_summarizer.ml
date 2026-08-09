@@ -3,7 +3,7 @@
 open Masc
 module C = Keeper_compaction_llm_summarizer
 module S = Keeper_structured_output_schema
-module T = Agent_sdk.Types
+module T = Agent_core.Types
 module U = Keeper_compaction_unit
 
 let message ?name ?tool_call_id ?(metadata = []) role content : T.message =

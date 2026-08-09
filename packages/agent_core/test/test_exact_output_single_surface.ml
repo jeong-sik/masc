@@ -1,6 +1,6 @@
 open Alcotest
 open Llm_provider
-module EO = Agent_sdk.Exact_output
+module EO = Agent_core.Exact_output
 
 let _preserve_public_raw_sync_response_surface
       ({ status = _; body = _; retry_after_header = _ } : Http_client.raw_sync_response)
@@ -829,7 +829,7 @@ let test_no_measure_one_post_and_wire_authority () =
        in
        check
          bool
-         "OAS forces strict OpenAI schema"
+         "AGENT_CORE forces strict OpenAI schema"
          true
          Yojson.Safe.Util.(envelope |> member "strict" |> to_bool);
        let nested = Yojson.Safe.Util.member "schema" envelope in

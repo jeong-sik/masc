@@ -1,10 +1,10 @@
 open Result.Syntax
 
 let config_error ~field detail =
-  Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })
+  Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })
 ;;
 
-let internal_error detail = Agent_sdk.Error.Internal detail
+let internal_error detail = Agent_core.Error.Internal detail
 
 module Host = Keeper_official_client_host
 
@@ -16,11 +16,11 @@ let finish_raw_error ~keeper_name raw_trace_run error =
   | Some active ->
     ignore
       (Host.observe_raw_trace ~keeper_name ~stage:Host.Run_finish (fun () ->
-         Agent_sdk.Raw_trace.finish_run
+         Agent_core.Raw_trace.finish_run
            active
            ~final_text:None
            ~stop_reason:None
-           ~error:(Some (Agent_sdk.Error.to_string error))))
+           ~error:(Some (Agent_core.Error.to_string error))))
 ;;
 
 let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_result) =
@@ -36,18 +36,18 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
              ~keeper_name
              ~stage:Host.Assistant_block
              (fun () ->
-                Agent_sdk.Raw_trace.record_assistant_block active ~block_index block))
+                Agent_core.Raw_trace.record_assistant_block active ~block_index block))
       then all_blocks_recorded := false);
     let finished =
       Host.observe_raw_trace ~keeper_name ~stage:Host.Run_finish (fun () ->
-         Agent_sdk.Raw_trace.finish_run
+         Agent_core.Raw_trace.finish_run
            active
            ~final_text:
-             (Agent_sdk.Types.text_of_response result.response
+             (Agent_core.Types.text_of_response result.response
               |> String_util.trim_to_option)
            ~stop_reason:
              (Some
-                (Agent_sdk.Types.stop_reason_to_string
+                (Agent_core.Types.stop_reason_to_string
                    result.response.stop_reason))
            ~error:None)
     in
@@ -59,7 +59,7 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
 let project_messages messages =
   let rec loop developer history = function
     | [] -> Ok (List.rev developer, List.rev history)
-    | (message : Agent_sdk.Types.message) :: rest ->
+    | (message : Agent_core.Types.message) :: rest ->
       let* text =
         Host.text_of_blocks
           ~runtime_label
@@ -67,20 +67,20 @@ let project_messages messages =
           message.content
       in
       (match message.role with
-       | Agent_sdk.Types.System -> loop (text :: developer) history rest
-       | Agent_sdk.Types.User ->
+       | Agent_core.Types.System -> loop (text :: developer) history rest
+       | Agent_core.Types.User ->
          loop developer
            ({ Runtime_codex_app_server.role = User; text } :: history)
            rest
-       | Agent_sdk.Types.Assistant ->
+       | Agent_core.Types.Assistant ->
          loop developer
            ({ Runtime_codex_app_server.role = Assistant; text } :: history)
            rest
-       | Agent_sdk.Types.Tool ->
+       | Agent_core.Types.Tool ->
          Error
            (config_error
               ~field:"initial_messages"
-              "codex-app-server history injection does not admit OAS tool messages"))
+              "codex-app-server history injection does not admit AGENT_CORE tool messages"))
   in
   loop [] [] messages
 ;;
@@ -99,12 +99,12 @@ let codex_dynamic_tool (tool : Host.dynamic_tool) :
   }
 ;;
 
-let codex_error_to_sdk_error = function
+let codex_error_to_core_error = function
   | Runtime_codex_app_server.Invalid_config detail ->
     config_error ~field:"codex_app_server" detail
   | Runtime_codex_app_server.Subscription_required detail ->
     config_error ~field:"codex_subscription" detail
-  | error -> Agent_sdk.Error.Internal (Runtime_codex_app_server.error_to_string error)
+  | error -> Agent_core.Error.Internal (Runtime_codex_app_server.error_to_string error)
 ;;
 
 let recovery_failure_of_client_error = function
@@ -140,7 +140,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          ~field:"eio_clock"
          "Codex app-server runtime requires the initialized Eio clock")
   | Some env, Some clock ->
-    let hooks = Option.value hooks ~default:Agent_sdk.Hooks.empty in
+    let hooks = Option.value hooks ~default:Agent_core.Hooks.empty in
     let owner_epoch = Keeper_official_client_session_store.process_epoch () in
     let* stored_session =
       match Keeper_official_client_session_store.load ~base_path ~keeper_name with
@@ -264,14 +264,14 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           ~prompt
       with
       | Ok () -> Ok ()
-      | Error error -> Error (codex_error_to_sdk_error error)
+      | Error error -> Error (codex_error_to_core_error error)
     in
     let raw_trace_run =
       match raw_trace with
       | None -> None
       | Some sink ->
         Host.observe_raw_trace ~keeper_name ~stage:Host.Run_start (fun () ->
-          Agent_sdk.Raw_trace.start_run
+          Agent_core.Raw_trace.start_run
             sink
             ~agent_name:keeper_name
             ~prompt
@@ -414,7 +414,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
      with
      | Error error ->
        recovery_failure := recovery_failure_of_client_error error;
-       Error (codex_error_to_sdk_error error)
+       Error (codex_error_to_core_error error)
      | Ok turn ->
        recovery_failure := Keeper_official_client_session_store.Protocol_failed;
        let expected_resumed =
@@ -438,14 +438,14 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
        in
        let latency_ms = Int.of_float ((Time_compat.now () -. started_at) *. 1000.0) in
        let response =
-         { Agent_sdk.Types.id = turn.turn_id
+         { Agent_core.Types.id = turn.turn_id
          ; model = turn.model
          ; stop_reason = EndTurn
          ; content = [ Text turn.text ]
          ; usage = None
          ; telemetry =
              Some
-               { Agent_sdk.Types.default_inference_telemetry with
+               { Agent_core.Types.default_inference_telemetry with
                  request_latency_ms = Some latency_ms
                ; canonical_model_id = Some turn.model
                }
@@ -457,7 +457,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
            ~turn_count
            ~hook_name:"after_turn"
            hooks.after_turn
-           (Agent_sdk.Hooks.AfterTurn { turn = turn_count; response })
+           (Agent_core.Hooks.AfterTurn { turn = turn_count; response })
        in
        let* () =
          match after_turn with
@@ -472,7 +472,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
            ~turn_count
            ~hook_name:"on_stop"
            hooks.on_stop
-           (Agent_sdk.Hooks.OnStop { reason = response.stop_reason; response })
+           (Agent_core.Hooks.OnStop { reason = response.stop_reason; response })
        in
        let* () =
          match on_stop with
@@ -520,7 +520,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
            ~selected_model_raw:(Some turn.model)
            ~capture
            ~attempt_details_source:"codex_app_server"
-           ~oas_internal_runtime_allowed:false
+           ~agent_core_internal_runtime_allowed:false
            ()
        in
        Ok
@@ -562,7 +562,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     (match turn_result with
      | Ok _ -> turn_result
      | Error original_error ->
-       let original_detail = Agent_sdk.Error.to_string original_error in
+       let original_detail = Agent_core.Error.to_string original_error in
        (match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
         | Ok () -> turn_result
       | Error recovery_detail ->

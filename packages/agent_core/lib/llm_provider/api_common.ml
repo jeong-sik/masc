@@ -1,6 +1,6 @@
 (** Shared helpers, constants, and content-block serialization for API modules.
 
-    Extracted from agent_sdk for shared use by consumers.
+    Extracted from agent_core for shared use by consumers.
     All types are from {!Llm_provider.Types}. *)
 
 open Types
@@ -16,7 +16,7 @@ let max_response_body = 10 * 1024 * 1024
     Larger than HTTP because stdio carries full JSON-RPC frames. *)
 let max_stdio_buffer = 16 * 1024 * 1024
 
-(** Process-scoped entropy for OAS-allocated tool-use identities.
+(** Process-scoped entropy for AGENT_CORE-allocated tool-use identities.
 
     The identity must not depend on model-generated names or arguments: those
     values are incomplete at streaming block start and repeated calls may have
@@ -34,7 +34,7 @@ let tool_use_id_sequence = Atomic.make 0
 
 let fresh_tool_use_id () =
   let sequence = Atomic.fetch_and_add tool_use_id_sequence 1 in
-  Printf.sprintf "call_oas_%s_%x_%x" tool_use_id_process_scope (Unix.getpid ()) sequence
+  Printf.sprintf "call_agent_core_%s_%x_%x" tool_use_id_process_scope (Unix.getpid ()) sequence
 ;;
 
 let string_is_blank s = String.trim s = ""
@@ -74,7 +74,7 @@ let base64_media_payload ~backend ~block ~data = function
   | (Url | File_id) as source_type -> unsupported_media_source ~backend ~block source_type
 ;;
 
-(* ── Document admission (oas#2744) ───────────────────────────────────────
+(* ── Document admission (agent-core boundary) ───────────────────────────────────────
 
    A [Document] block used to be re-labelled as an [image_url] part on the
    OpenAI-compatible Chat Completions wire. Serializing the same typed block
@@ -177,7 +177,7 @@ let admit_document_messages ~wire_form ~model_id ~supports_document_input messag
   loop messages
 ;;
 
-(* oas#2744 — degrade, not reject.
+(* agent-core boundary — degrade, not reject.
    [admit_document_*] answers "may this document reach the wire"; when it may
    not, the earlier design raised [Invalid_argument], which
    [Complete.complete]'s wrapper turned into a rejected turn. That is right for

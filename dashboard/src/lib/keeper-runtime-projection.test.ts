@@ -107,7 +107,7 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
         keeper_turn_id: 7,
         terminal_event_present: true,
         terminal_event: 'turn_finished',
-        max_oas_turn_count: 3,
+        max_agent_core_turn_count: 3,
       },
       axes: {},
       swimlanes: {},

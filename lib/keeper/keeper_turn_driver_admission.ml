@@ -36,7 +36,7 @@ let runtime_candidates_of_providers provider_cfgs =
 
     MASC drives the runtime FSM directly:
     - Resolves runtime providers from runtime.toml
-    - For each provider, runs OAS with a single provider
+    - For each provider, runs AGENT_CORE with a single provider
     - Uses Runtime_fsm.decide to determine next action on failure
 
     @param accept Optional response validator. Default accepts all.

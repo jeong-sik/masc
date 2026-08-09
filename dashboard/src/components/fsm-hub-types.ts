@@ -435,10 +435,10 @@ export function runtimeOutcomeLabel(value: string | null | undefined): string | 
  *  across multiple paths:
  *  - `Keeper_turn_terminal_code.to_wire` (lib/keeper/keeper_turn_terminal_code.ml:28-50)
  *    emits 10 fixed wire values + parameterized `Provider_runtime_error`,
- *    `Tool_required_unsatisfied`, `Sdk_error` (which inject the raw `code`
+ *    `Tool_required_unsatisfied`, `Agent_core_error` (which inject the raw `code`
  *    string straight onto the wire).
  *  - `Keeper_agent_error.to_terminal_reason_code` (lib/keeper/keeper_agent_error.ml:134-143)
- *    maps Agent SDK Retry variants to `api_error_*` codes
+ *    maps Agent-core retry variants to `api_error_*` codes
  *    (`api_error_server:<http_status>` is parameterized).
  *  - `Keeper_agent_run` emits `"completed"` on Runtime_runner.Completed.
  *  Kept separate from `STATE_DISPLAY_NAMES` because generic tokens like

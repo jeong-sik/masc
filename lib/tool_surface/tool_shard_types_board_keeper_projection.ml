@@ -109,7 +109,7 @@ let schemas : Masc_domain.tool_schema list =
                 ; ( "limit"
                   , `Assoc
                       [ (* #18472 widening removed: a multi-type schema trips
-                           OAS #2343 fail-closed and crashes the keeper cycle, so
+                           agent-core boundary fail-closed and crashes the keeper cycle, so
                            [limit] stays a single scalar "integer". Tool_input_validation
                            rejects a string [limit] against this integer schema, so the
                            description must ask for a bare integer, not a numeric string
@@ -291,7 +291,7 @@ let schemas : Masc_domain.tool_schema list =
                 ; ( "limit"
                   , `Assoc
                       [ (* #18472 widening removed: a multi-type schema trips
-                           OAS #2343 fail-closed and crashes the keeper cycle, so
+                           agent-core boundary fail-closed and crashes the keeper cycle, so
                            [limit] stays a single scalar "integer". Tool_input_validation
                            rejects a string [limit] against this integer schema, so the
                            description must ask for a bare integer, not a numeric string

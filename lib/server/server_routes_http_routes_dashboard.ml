@@ -1695,18 +1695,18 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/oas/telemetry/recent" (fun request reqd ->
+  |> Http.Router.get "/api/v1/dashboard/agent_core/telemetry/recent" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let provider = oas_telemetry_provider_param req in
-         let limit = oas_telemetry_limit_param req in
-         let json = Dashboard_oas_bridge.recent_json ?provider ~limit () in
+         let provider = agent_core_telemetry_provider_param req in
+         let limit = agent_core_telemetry_limit_param req in
+         let json = Dashboard_agent_core_bridge.recent_json ?provider ~limit () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/oas/telemetry/summary" (fun request reqd ->
+  |> Http.Router.get "/api/v1/dashboard/agent_core/telemetry/summary" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let provider = oas_telemetry_provider_param req in
-         let limit = oas_telemetry_limit_param req in
-         let json = Dashboard_oas_bridge.summary_json ?provider ~limit () in
+         let provider = agent_core_telemetry_provider_param req in
+         let limit = agent_core_telemetry_limit_param req in
+         let json = Dashboard_agent_core_bridge.summary_json ?provider ~limit () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
 

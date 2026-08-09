@@ -72,10 +72,10 @@ let tool_schemas_for_profile ?(include_hidden = false)
           |> List.filter (fun (schema : Masc_domain.tool_schema) ->
                  Hashtbl.mem managed_agent_passthrough_tool_set schema.name
                  && Option.is_none
-                      (Sdk_tool_contract.sdk_binding_by_name schema.name)
+                      (Agent_core_tool_contract.agent_core_binding_by_name schema.name)
                  && Tool_catalog.is_visible ~include_hidden:true schema.name)
         in
-        Sdk_tool_contract.sdk_tool_schemas @ passthrough
+        Agent_core_tool_contract.agent_core_tool_schemas @ passthrough
     | Operator_remote -> Tool_operator.remote_schemas ()
   in
   Config.validate_schemas schemas;
@@ -94,7 +94,7 @@ let tool_allowed_in_profile state profile tool_name =
       && Tool_catalog.is_visible ~include_hidden:true tool_name
       && Tool_catalog.allow_direct_call tool_name
   | Managed_agent ->
-      Option.is_some (Sdk_tool_contract.sdk_binding_by_name tool_name)
+      Option.is_some (Agent_core_tool_contract.agent_core_binding_by_name tool_name)
       || (tool_schemas_for_profile state Managed_agent
           |> List.exists (fun (schema : Masc_domain.tool_schema) ->
                  String.equal schema.name tool_name))
@@ -188,7 +188,7 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_chat_recovery_resolve", "Resolve Chat Recovery");
   ("masc_operator_task_recovery_resolve", "Resolve Task Recovery");
   ("masc_operator_confirm", "Operator Confirm");
-  (* SDK projections *)
+  (* agent-core projections *)
 ]
 
 let custom_title_table : string StringMap.t =

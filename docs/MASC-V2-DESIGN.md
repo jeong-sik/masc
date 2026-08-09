@@ -313,5 +313,5 @@ v1 → v2 마이그레이션:
 ### Current References
 
 - **[PRODUCT-OPERATING-PLAN.md](./PRODUCT-OPERATING-PLAN.md)** - current product promise and cleanup posture
-- **[OAS-MASC-BOUNDARY.md](./OAS-MASC-BOUNDARY.md)** - current OAS/MASC ownership split
+- **[agent core-MASC-BOUNDARY.md](./agent core-MASC-BOUNDARY.md)** - current agent core/MASC ownership split
 - **[spec/SPEC-INDEX.md](./spec/SPEC-INDEX.md)** - maintained specification index

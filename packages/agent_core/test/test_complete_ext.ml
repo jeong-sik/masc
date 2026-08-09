@@ -509,7 +509,7 @@ let test_custom_stream_wire_rejection_is_typed_nonfatal () =
     ; complete_stream =
         (fun ?on_telemetry:_ ~on_event:_ request ->
           (match request.observe_wire_chunk with
-           | None -> fail "custom transport did not receive OAS wire sink"
+           | None -> fail "custom transport did not receive AGENT_CORE wire sink"
            | Some observe ->
              observe ~provider:"custom" ~model:request.config.model_id ~chunk:token);
           Ok response)
@@ -570,7 +570,7 @@ let test_custom_stream_wire_observer_and_telemetry_exceptions_are_nonfatal () =
          ; complete_stream =
              (fun ?on_telemetry:_ ~on_event:_ request ->
                (match request.observe_wire_chunk with
-                | None -> fail "custom transport did not receive OAS wire sink"
+                | None -> fail "custom transport did not receive AGENT_CORE wire sink"
                 | Some observe ->
                   observe
                     ~provider:"custom"

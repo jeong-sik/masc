@@ -9,7 +9,7 @@ let () =
   match Array.to_list Sys.argv with
   | [ _; path ] ->
     Printf.printf
-      "(* Generated from the OAS-owned models.toml. Do not edit. *)\nlet contents = %S\n"
+      "(* Generated from the AGENT_CORE-owned models.toml. Do not edit. *)\nlet contents = %S\n"
       (read_file path)
   | argv ->
     Printf.eprintf

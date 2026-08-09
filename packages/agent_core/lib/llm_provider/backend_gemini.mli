@@ -81,7 +81,7 @@ val gemini_part_thought_signature_payload
     @since 0.211.4 *)
 val thought_signature_of_part : Yojson.Safe.t -> string option
 
-(** Decode a Gemini [inlineData] object to its closed replay target and OAS
+(** Decode a Gemini [inlineData] object to its closed replay target and AGENT_CORE
     media block. Missing/blank fields and malformed MIME types fail closed.
     Shared by synchronous and streaming response paths.
     @since 0.211.4 *)
@@ -90,5 +90,5 @@ val media_content_block_of_inline_data
   -> gemini_part_signature_target * Types.content_block
 
 (** Extract [contents] list and optional [systemInstruction] from messages.
-    Exposed for unit-testing the OAS-to-Gemini message mapping. *)
+    Exposed for unit-testing the AGENT_CORE-to-Gemini message mapping. *)
 val contents_of_messages : Types.message list -> Yojson.Safe.t list * Yojson.Safe.t option

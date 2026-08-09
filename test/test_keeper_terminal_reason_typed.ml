@@ -230,9 +230,9 @@ let base_receipt : R.t =
   ; trace_id = "trace-1"
   ; generation = 1
   ; turn_count = Some 1
-  ; oas_turn_count = None
-  ; oas_dispatch_mode = None
-  ; oas_internal_runtime_disabled = false
+  ; agent_core_turn_count = None
+  ; agent_core_dispatch_mode = None
+  ; agent_core_internal_runtime_disabled = false
   ; current_task_id = None
   ; goal_ids = []
   ; outcome = `Error
@@ -250,7 +250,7 @@ let base_receipt : R.t =
   ; runtime_attempt_count = 1
   ; runtime_fallback_applied = false
   ; runtime_outcome = R.Runtime_completed
-  ; oas_internal_runtime_allowed = true
+  ; agent_core_internal_runtime_allowed = true
   ; degraded_retry_applied = false
   ; degraded_retry_runtime = None
   ; fallback_reason = None
@@ -623,8 +623,8 @@ let () =
   in
   let code =
     internal_error
-    |> Keeper_internal_error.sdk_error_of_masc_internal_error
-    |> Masc.Keeper_agent_error.terminal_reason_code_of_sdk_error
+    |> Keeper_internal_error.core_error_of_masc_internal_error
+    |> Masc.Keeper_agent_error.terminal_reason_code_of_core_error
   in
   check
     "capacity producer uses canonical terminal kind"
@@ -901,7 +901,7 @@ let () =
     ; ctx_composition
     ; runtime_observation = None
     ; turn_count = 1
-    ; final_oas_turn_ordinal = 0
+    ; final_agent_core_turn_ordinal = 0
     ; usage = Masc.Inference_utils.zero_usage
     ; usage_reported = true
     ; tool_calls = []

@@ -1049,7 +1049,7 @@ module Mcp_transport = Make(struct let name = "mcp_transport" end)
 module Startup = Make(struct let name = "startup" end)
 module Model_inference_metrics = Make(struct let name = "model_inference_metrics" end)
 module Runtime_agent = Make(struct let name = "runtime_agent" end)
-module Oas_event = Make(struct let name = "oas:event" end)
+module Agent_core_event = Make(struct let name = "agent_core:event" end)
 module H2_gateway = Make(struct let name = "h2_gateway" end)
 
 (* Modules added for former raw-stderr / [Logs.*] server-runtime call sites

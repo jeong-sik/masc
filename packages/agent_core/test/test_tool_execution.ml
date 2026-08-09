@@ -1,7 +1,7 @@
 (** Tests for tool hook execution, scheduling, and lifecycle events. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 open Types
 
 let descriptor_with execution_mode = Tool.ordinary_descriptor execution_mode

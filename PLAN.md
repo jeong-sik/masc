@@ -12,7 +12,7 @@
 - lib/masc_log/log.ml - per-keeper log sampling via MASC_KEEPER_LOG_SAMPLE_RATE (#14532)
 - test/test_keeper_invariant.ml - 14 alcotest tests (#14527, #14538)
 - Sandbox container removal warning on cleanup failure (#14509)
-- keeper_tool_alias 3-tier classification superseded by RFC-0064 (PR #14574): flat `route` table replaces aliases/oas_dual_register/hallucinated_builtins
+- keeper_tool_alias 3-tier classification superseded by RFC-0064 (PR #14574): flat `route` table replaces aliases/agent_core_dual_register/hallucinated_builtins
 
 ## In-Flight PRs
 - #14552 - feat(ide): wire Ide_meta_sync into keeper_exec_fs (Phase 5)
@@ -42,7 +42,7 @@
 - [x] Fail-fast on missing required mounts (via required_mount_result in host_config_provider.ml)
 
 ### Phase 4: Tool Selection
-- [~] Move hardcoded alias table from keeper_tool_alias.ml to config — **superseded by RFC-0064 (PR #14574)** which replaces the 3-tier classification with a flat `route` table at the source. Config-relocation kept the same workaround pattern (N-of-M `oas_dual_register`, string-list `hallucinated_builtins`); RFC-0064 eliminates it structurally.
+- [~] Move hardcoded alias table from keeper_tool_alias.ml to config — **superseded by RFC-0064 (PR #14574)** which replaces the 3-tier classification with a flat `route` table at the source. Config-relocation kept the same workaround pattern (N-of-M `agent_core_dual_register`, string-list `hallucinated_builtins`); RFC-0064 eliminates it structurally.
 - [ ] Add passive-streak metric for tool selection validation (in-flight: PR #14555)
 
 ### Phase 5: IDE/Dashboard Integration

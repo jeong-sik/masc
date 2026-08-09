@@ -156,11 +156,11 @@ let cleanup_tree root =
 
 let keeper_response_text (result : Runtime_agent.run_result) =
   result.response.content
-  |> List.filter_map (function Agent_sdk.Types.Text text -> Some text | _ -> None)
+  |> List.filter_map (function Agent_core.Types.Text text -> Some text | _ -> None)
   |> String.concat ""
 ;;
 
-let message role text : Agent_sdk.Types.message =
+let message role text : Agent_core.Types.message =
   { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
@@ -172,7 +172,7 @@ let content_of_wire_message raw =
 ;;
 
 let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
-    ?event_capture ?oas_checkpoint ?runtime_manifest_context
+    ?event_capture ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
@@ -194,7 +194,7 @@ let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
                     let context =
                       match tools with
                       | [] -> None
-                      | _ :: _ -> Some (Agent_sdk.Context.create ())
+                      | _ :: _ -> Some (Agent_core.Context.create ())
                     in
                     let run () =
                       Keeper_turn_driver.run_named
@@ -206,7 +206,7 @@ let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
                         ~initial_messages
                         ?context
                         ?event_bus
-                        ?oas_checkpoint
+                        ?agent_core_checkpoint
                         ?runtime_manifest_context
                         ?runtime_manifest_append
                         ~sw
@@ -218,7 +218,7 @@ let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
                        let subscription =
                          Runtime_event_bus.subscribe
                            ~capacity:16
-                           ~overflow:Agent_sdk.Event_bus.Drop_oldest
+                           ~overflow:Agent_core.Event_bus.Drop_oldest
                            ~purpose:"claude-code-lifecycle-test"
                            bus
                        in
@@ -235,16 +235,16 @@ let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
 ;;
 
 let checkpoint_with_messages
-      (messages : Agent_sdk.Types.message list)
-  : Agent_sdk.Checkpoint.t
+      (messages : Agent_core.Types.message list)
+  : Agent_core.Checkpoint.t
   =
-  { version = Agent_sdk.Checkpoint.checkpoint_version
-  ; session_id = "oas-session"
-  ; agent_name = "oas-agent"
-  ; model = "oas-model"
+  { version = Agent_core.Checkpoint.checkpoint_version
+  ; session_id = "agent_core-session"
+  ; agent_name = "agent_core-agent"
+  ; model = "agent_core-model"
   ; system_prompt = None
   ; messages
-  ; usage = Agent_sdk.Types.empty_usage
+  ; usage = Agent_core.Types.empty_usage
   ; turn_count = 1
   ; created_at = 1.0
   ; tools = []
@@ -260,22 +260,22 @@ let checkpoint_with_messages
   ; thinking_budget = None
   ; reasoning_effort = None
   ; cache_system_prompt = false
-  ; context = Agent_sdk.Context.create ()
+  ; context = Agent_core.Context.create ()
   ; mcp_sessions = []
   ; working_context = None
   }
 ;;
 
-let test_oas_checkpoint_starts_official_client_turn () =
+let test_agent_core_checkpoint_starts_official_client_turn () =
   let base_path = temp_workspace () in
   let prompt_marker = Filename.concat base_path "checkpoint-prompt.json" in
   let manifests = ref [] in
-  let checkpoint_history : Agent_sdk.Types.message list =
+  let checkpoint_history : Agent_core.Types.message list =
     [ { role = Assistant
       ; content =
           [ ToolUse
-              { id = "oas-tool-call"
-              ; name = "oas_tool"
+              { id = "agent_core-tool-call"
+              ; name = "agent_core_tool"
               ; input = `Assoc []
               }
           ]
@@ -283,9 +283,9 @@ let test_oas_checkpoint_starts_official_client_turn () =
       ; tool_call_id = None
       ; metadata = []
       }
-    ; Agent_sdk.Types.tool_result_msg
-        ~tool_use_id:"oas-tool-call"
-        ~content:"oas tool result"
+    ; Agent_core.Types.tool_result_msg
+        ~tool_use_id:"agent_core-tool-call"
+        ~content:"agent_core tool result"
         ()
     ]
   in
@@ -301,7 +301,7 @@ let test_oas_checkpoint_starts_official_client_turn () =
             match
               run_keeper_turn
                 ~initial_messages:checkpoint_history
-                ~oas_checkpoint:(checkpoint_with_messages checkpoint_history)
+                ~agent_core_checkpoint:(checkpoint_with_messages checkpoint_history)
                 ~runtime_manifest_context:
                   { Keeper_runtime_manifest.manifest_keeper_name =
                       "claude-fixture"
@@ -317,7 +317,7 @@ let test_oas_checkpoint_starts_official_client_turn () =
                 ~goal:"CHECKPOINT_GOAL"
                 ()
             with
-            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Error error -> fail (Agent_core.Error.to_string error)
             | Ok turn ->
               check string
                 "checkpoint response"
@@ -375,12 +375,12 @@ let test_oas_checkpoint_starts_official_client_turn () =
 let test_keeper_projects_typed_tool_history_and_lifecycle () =
   let base_path = temp_workspace () in
   let prompt_marker = Filename.concat base_path "typed-history-prompt.json" in
-  let bus = Agent_sdk.Event_bus.create () in
+  let bus = Agent_core.Event_bus.create () in
   let captured_events = ref [] in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       let tool_use : Agent_sdk.Types.message =
+       let tool_use : Agent_core.Types.message =
          { role = Assistant
          ; content =
              [ ToolUse
@@ -395,7 +395,7 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
          }
        in
        let tool_result =
-         Agent_sdk.Types.tool_result_msg
+         Agent_core.Types.tool_result_msg
            ~tool_use_id:"prior-tool-call"
            ~content:"prior result"
            ()
@@ -416,7 +416,7 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
                 ~goal:"CURRENT_GOAL"
                 ()
             with
-            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Error error -> fail (Agent_core.Error.to_string error)
             | Ok turn ->
               check string
                 "history response"
@@ -454,7 +454,7 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
        let lifecycle_kinds =
          !captured_events
          |> List.map (fun event ->
-           Agent_sdk.Event_bus.payload_kind event.Agent_sdk.Event_bus.payload)
+           Agent_core.Event_bus.payload_kind event.Agent_core.Event_bus.payload)
        in
        check
          (list string)
@@ -466,7 +466,7 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
 let test_keeper_projects_masc_tool () =
   let base_path = temp_workspace () in
   let observed = ref `Null in
-  let marker_param : Agent_sdk.Types.tool_param =
+  let marker_param : Agent_core.Types.tool_param =
     { name = "marker"
     ; description = "Fixture marker"
     ; param_type = String
@@ -474,13 +474,13 @@ let test_keeper_projects_masc_tool () =
     }
   in
   let tool =
-    Agent_sdk.Tool.create
+    Agent_core.Tool.create
       ~name:"masc_probe"
       ~description:"Return a deterministic fixture marker"
       ~parameters:[ marker_param ]
       (fun input ->
         observed := input;
-        Ok { Agent_sdk.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -502,7 +502,7 @@ let test_keeper_projects_masc_tool () =
                ~goal:"USE_TOOL"
                ()
            with
-           | Error error -> fail (Agent_sdk.Error.to_string error)
+           | Error error -> fail (Agent_core.Error.to_string error)
            | Ok turn ->
              check string
                "tool response"
@@ -528,7 +528,7 @@ let load_state base_path =
 let test_post_effect_transport_enters_recovery () =
   let base_path = temp_workspace () in
   let call_count = ref 0 in
-  let marker_param : Agent_sdk.Types.tool_param =
+  let marker_param : Agent_core.Types.tool_param =
     { name = "marker"
     ; description = "Fixture marker"
     ; param_type = String
@@ -536,13 +536,13 @@ let test_post_effect_transport_enters_recovery () =
     }
   in
   let tool =
-    Agent_sdk.Tool.create
+    Agent_core.Tool.create
       ~name:"masc_probe"
       ~description:"Record one deterministic fixture effect"
       ~parameters:[ marker_param ]
       (fun _input ->
         incr call_count;
-        Ok { Agent_sdk.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -563,9 +563,9 @@ let test_post_effect_transport_enters_recovery () =
                 ()
             with
             | Error
-                (Agent_sdk.Error.Provider
+                (Agent_core.Error.Provider
                   (Llm_provider.Error.ProviderUnavailable _)) -> ()
-            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Error error -> fail (Agent_core.Error.to_string error)
             | Ok _ -> fail "post-effect response failure completed the Keeper turn");
        check int "tool effect count" 1 !call_count;
        let state = load_state base_path in
@@ -594,7 +594,7 @@ let test_keeper_settles_and_resumes () =
                ~goal:"FIRST_GOAL"
                ()
            with
-           | Error error -> fail (Agent_sdk.Error.to_string error)
+           | Error error -> fail (Agent_core.Error.to_string error)
            | Ok turn ->
              check string
                "first response"
@@ -621,7 +621,7 @@ let test_keeper_settles_and_resumes () =
                ~goal:"SECOND_GOAL"
                ()
            with
-           | Error error -> fail (Agent_sdk.Error.to_string error)
+           | Error error -> fail (Agent_core.Error.to_string error)
            | Ok turn ->
              check string "session identity" session_id turn.session_id;
              check int "resumed turn" 2 turn.turns;
@@ -652,8 +652,8 @@ let test_quota_enters_typed_recovery () =
     (fun () ->
        with_fixture [ Emit rate_limit_rejected; Emit quota_result ] (fun cli_path ->
          (match run_keeper_turn ~base_path ~cli_path ~goal:"QUOTA_GOAL" () with
-          | Error (Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _)) -> ()
-          | Error error -> fail (Agent_sdk.Error.to_string error)
+          | Error (Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)) -> ()
+          | Error error -> fail (Agent_core.Error.to_string error)
           | Ok _ -> fail "quota rejection completed the Keeper turn");
          let state = load_state base_path in
          match state.phase with
@@ -677,9 +677,9 @@ let test_spawn_failure_releases_claim () =
     (fun () ->
        with_fixture ~remove_after_auth:true [] (fun cli_path ->
          (match run_keeper_turn ~base_path ~cli_path ~goal:"SPAWN_GOAL" () with
-          | Error (Agent_sdk.Error.Provider (Llm_provider.Error.ProviderUnavailable _)) ->
+          | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)) ->
             ()
-          | Error error -> fail (Agent_sdk.Error.to_string error)
+          | Error error -> fail (Agent_core.Error.to_string error)
           | Ok _ -> fail "removed CLI unexpectedly completed the Keeper turn");
          let state = load_state base_path in
          (match state.phase with
@@ -696,9 +696,9 @@ let () =
     [ ( "lifecycle"
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
         ; test_case
-            "OAS checkpoint starts official-client turn"
+            "Agent Core checkpoint starts official-client turn"
             `Quick
-            test_oas_checkpoint_starts_official_client_turn
+            test_agent_core_checkpoint_starts_official_client_turn
         ; test_case
             "projects typed tool history and lifecycle"
             `Quick

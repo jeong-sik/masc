@@ -89,7 +89,7 @@ let sample_record () : Turn_record.t =
         ; path = "/tmp/turn-record-test.jsonl"
         ; start_seq = 8
         ; end_seq = 15
-        ; agent_name = "oas-test-runtime"
+        ; agent_name = "agent_core-test-runtime"
         ; session_id = "trace-1780648779957-00000"
         }
   ; sampling =

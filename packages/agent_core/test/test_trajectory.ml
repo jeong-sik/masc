@@ -1,6 +1,6 @@
 (** Tests for trajectory capture and serialization. *)
 
-open Agent_sdk
+open Agent_core
 
 let eio_run f = Eio_main.run f
 

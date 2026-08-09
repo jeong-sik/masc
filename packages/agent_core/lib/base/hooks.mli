@@ -115,7 +115,7 @@ type elicitation_callback = elicitation_request -> elicitation_response
 
 (** Prompt supplied by a [PreToolUse] hook when caller approval is required.
     It deliberately has no generic JSON schema: authorization is a closed
-    protocol, not an arbitrary elicitation answer. OAS does not install a timer
+    protocol, not an arbitrary elicitation answer. AGENT_CORE does not install a timer
     or persist a pending approval request at this synchronous boundary. *)
 type tool_approval_prompt = { question : string }
 
@@ -168,7 +168,7 @@ type hook_decision =
       }
   (** Returned by [invoke_validated] when a user hook raises or
       returns a stage-illegal decision. Call sites must handle this explicitly;
-      the SDK does not coerce it to [Continue]. *)
+      agent core does not coerce it to [Continue]. *)
   | Block of string
   (** PreToolUse only: intentional caller rejection. The host executes no tool
       and emits an [is_error=true], [Non_retryable_tool_error] tool result whose

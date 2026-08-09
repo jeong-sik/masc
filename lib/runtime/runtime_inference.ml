@@ -14,10 +14,10 @@ let resolve_temperature ~runtime_id ~fallback =
   | Some temperature -> temperature
   | None -> fallback ()
 
-(* masc#24067 / oas#2517: MASC must not synthesize a request [max_tokens]
+(* masc#24067 / agent-core boundary: MASC must not synthesize a request [max_tokens]
    value. The former resolver invented one from either a model capability
    ceiling or a flat fallback. Callers now carry explicit intent as [int
-   option], and OAS alone owns model-capability validation plus
+   option], and AGENT_CORE alone owns model-capability validation plus
    envelope-specific clamp/fallback policy. *)
 
 type seed = {
@@ -54,7 +54,7 @@ let for_runtime ~name =
     (match Runtime_execution.checkpoint_owner runtime.Runtime.execution with
      | Runtime_execution.Official_client ->
        seed_of_thinking_support None
-     | Runtime_execution.Masc_oas ->
+     | Runtime_execution.Masc_agent_core ->
        seed_of_thinking_support
          ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
          (Runtime.thinking_support_of_runtime_id name))

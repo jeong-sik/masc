@@ -72,7 +72,7 @@ val inc_external_subscriber_callback_failure : unit -> unit
     section that delivers dashboard WebSocket deltas. *)
 val observe_external_subscriber_fanout_duration : float -> unit
 
-(** Increments [masc_oas_sse_relay_drop_marker_failures_total].
+(** Increments [masc_agent_core_sse_relay_drop_marker_failures_total].
     Distinct from {!inc_broadcast_failure} so the
     recovery-path failure rate is isolated from normal broadcast
     failures (P2 silent-failure fix, transport scan). *)

@@ -866,8 +866,8 @@ name = "probe"
 "proactive_enabled"	= true
 max_context_override	= 200000
 
-[keeper.oas_env]
-OAS_OPENAI_BASE_URL = "http://127.0.0.1:1"
+[keeper.agent_core_env]
+AGENT_CORE_OPENAI_BASE_URL = "http://127.0.0.1:1"
 |};
   (match
      TL.edit_keeper_toml_fields
@@ -900,7 +900,7 @@ OAS_OPENAI_BASE_URL = "http://127.0.0.1:1"
       (TL.toml_int_opt doc "keeper.max_context_override");
     check (option string) "unrelated table survives"
       (Some "http://127.0.0.1:1")
-      (TL.toml_string_opt doc "keeper.oas_env.OAS_OPENAI_BASE_URL")
+      (TL.toml_string_opt doc "keeper.agent_core_env.AGENT_CORE_OPENAI_BASE_URL")
 
 let test_keeper_toml_writer_rejects_table_assignment_shapes () =
   with_temp_dir "keeper-toml-invalid-writer-shape" @@ fun dir ->
@@ -1042,13 +1042,13 @@ let test_invalid_child_profile_fails_closed_before_dispatch () =
   with
   | Ok _ -> fail "invalid profile reached runtime execution construction"
   | Error
-      (Agent_sdk.Error.Config
-         (Agent_sdk.Error.InvalidConfig { field; detail })) ->
-    check string "typed SDK config field" "keeper.profile" field;
-    check bool "SDK error retains failing path" true
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig { field; detail })) ->
+    check string "typed agent-core config field" "keeper.profile" field;
+    check bool "agent-core error retains failing path" true
       (contains_substring detail keeper_path)
   | Error err ->
-    failf "expected typed InvalidConfig, got %s" (Agent_sdk.Error.to_string err)
+    failf "expected typed InvalidConfig, got %s" (Agent_core.Error.to_string err)
 
 let test_default_source_snapshot_uses_explicit_base_path () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
@@ -1268,12 +1268,12 @@ timeout_count_5m_unhealthy = 3
       ]
       (List.sort String.compare unknown)
 
-let test_oas_env_parses_allowed_keys () =
+let test_agent_core_env_parses_allowed_keys () =
   let input = {|
 [keeper]
-[keeper.oas_env]
-OAS_DEFAULT_MODEL = "provider-a/fast"
-OAS_MAX_TOKENS_DEFAULT = 16384
+[keeper.agent_core_env]
+AGENT_CORE_DEFAULT_MODEL = "provider-a/fast"
+AGENT_CORE_MAX_TOKENS_DEFAULT = 16384
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1281,21 +1281,21 @@ OAS_MAX_TOKENS_DEFAULT = 16384
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
-      check int "oas_env count" 2 (List.length d.oas_env);
+      check int "agent_core_env count" 2 (List.length d.agent_core_env);
       check string "default model value"
-        "provider-a/fast" (List.assoc "OAS_DEFAULT_MODEL" d.oas_env);
+        "provider-a/fast" (List.assoc "AGENT_CORE_DEFAULT_MODEL" d.agent_core_env);
       check string "max tokens default value"
-        "16384" (List.assoc "OAS_MAX_TOKENS_DEFAULT" d.oas_env)
+        "16384" (List.assoc "AGENT_CORE_MAX_TOKENS_DEFAULT" d.agent_core_env)
 
-let test_oas_env_drops_non_oas_prefix () =
+let test_agent_core_env_drops_non_agent_core_prefix () =
   (* Guards against ambient env injection via keeper TOML: arbitrary keys
      outside the audited allowlist are silently dropped. *)
   let input = {|
 [keeper]
-[keeper.oas_env]
+[keeper.agent_core_env]
 PATH = "/evil/bin:/usr/bin"
 LD_PRELOAD = "/tmp/hack.so"
-OAS_DEFAULT_MODEL = "provider-a/fast"
+AGENT_CORE_DEFAULT_MODEL = "provider-a/fast"
 MASC_KEEPER_AUTONOMOUS_MAX_TOKENS = "9999"
 RANDOM_VAR = "nope"
 |} in
@@ -1305,16 +1305,16 @@ RANDOM_VAR = "nope"
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
-      check int "only allowed OAS_* survives" 1 (List.length d.oas_env);
-      check string "allowed OAS key survives"
-        "provider-a/fast" (List.assoc "OAS_DEFAULT_MODEL" d.oas_env);
-      check bool "PATH dropped" false (List.mem_assoc "PATH" d.oas_env);
-      check bool "LD_PRELOAD dropped" false (List.mem_assoc "LD_PRELOAD" d.oas_env);
+      check int "only allowed AGENT_CORE_* survives" 1 (List.length d.agent_core_env);
+      check string "allowed AGENT_CORE key survives"
+        "provider-a/fast" (List.assoc "AGENT_CORE_DEFAULT_MODEL" d.agent_core_env);
+      check bool "PATH dropped" false (List.mem_assoc "PATH" d.agent_core_env);
+      check bool "LD_PRELOAD dropped" false (List.mem_assoc "LD_PRELOAD" d.agent_core_env);
       check bool "unlisted keeper key dropped" false
-        (List.mem_assoc "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS" d.oas_env);
-      check bool "RANDOM_VAR dropped" false (List.mem_assoc "RANDOM_VAR" d.oas_env)
+        (List.mem_assoc "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS" d.agent_core_env);
+      check bool "RANDOM_VAR dropped" false (List.mem_assoc "RANDOM_VAR" d.agent_core_env)
 
-let test_oas_env_absent_means_empty () =
+let test_agent_core_env_absent_means_empty () =
   let input = {|
 [keeper]
 |} in
@@ -1324,27 +1324,27 @@ let test_oas_env_absent_means_empty () =
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
-      check int "no table → empty list" 0 (List.length d.oas_env)
+      check int "no table → empty list" 0 (List.length d.agent_core_env)
 
-let test_oas_env_not_flagged_as_unknown () =
+let test_agent_core_env_not_flagged_as_unknown () =
   let input = {|
 [keeper]
-[keeper.oas_env]
-OAS_DEFAULT_MODEL = "provider-a/fast"
+[keeper.agent_core_env]
+AGENT_CORE_DEFAULT_MODEL = "provider-a/fast"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
   | Ok doc ->
     let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check int "oas_env keys whitelisted" 0 (List.length unknown)
+    check int "agent_core_env keys whitelisted" 0 (List.length unknown)
 
-let test_oas_env_coerces_bool_to_string () =
-  (* Bools in TOML become "1"/"0" strings for active OAS boolean env knobs. *)
+let test_agent_core_env_coerces_bool_to_string () =
+  (* Bools in TOML become "1"/"0" strings for active AGENT_CORE boolean env knobs. *)
   let input = {|
 [keeper]
-[keeper.oas_env]
-OAS_ALLOW_TEST_PROVIDERS = true
-OAS_DELTA_CHECKPOINT = false
+[keeper.agent_core_env]
+AGENT_CORE_ALLOW_TEST_PROVIDERS = true
+AGENT_CORE_DELTA_CHECKPOINT = false
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1353,9 +1353,9 @@ OAS_DELTA_CHECKPOINT = false
     | Error e -> fail e
     | Ok d ->
       check string "true → 1" "1"
-        (List.assoc "OAS_ALLOW_TEST_PROVIDERS" d.oas_env);
+        (List.assoc "AGENT_CORE_ALLOW_TEST_PROVIDERS" d.agent_core_env);
       check string "false → 0" "0"
-        (List.assoc "OAS_DELTA_CHECKPOINT" d.oas_env)
+        (List.assoc "AGENT_CORE_DELTA_CHECKPOINT" d.agent_core_env)
 
 let test_load_keeper_toml_rejects_unknown_keys () =
   let tmp = Filename.temp_file "keeper_unknown" ".toml" in
@@ -1626,8 +1626,8 @@ let () =
             test_detect_unknown_keys_empty_when_all_canonical;
           test_case "flags provider_health table as unknown" `Quick
             test_detect_unknown_keys_flags_provider_health_table;
-          test_case "oas_env keys not flagged as unknown" `Quick
-            test_oas_env_not_flagged_as_unknown;
+          test_case "agent_core_env keys not flagged as unknown" `Quick
+            test_agent_core_env_not_flagged_as_unknown;
           test_case "load_keeper_toml rejects unknown keys" `Quick
             test_load_keeper_toml_rejects_unknown_keys;
           test_case "unknown-key scanner reports files" `Quick
@@ -1639,16 +1639,16 @@ let () =
           test_case "health JSON build exposes runtime binary identity" `Quick
             test_health_json_build_exposes_runtime_binary_identity;
         ] );
-      ( "oas_env",
+      ( "agent_core_env",
         [
-          test_case "parses allowed OAS_* keys" `Quick
-            test_oas_env_parses_allowed_keys;
-          test_case "drops non-OAS_* keys (ambient injection guard)" `Quick
-            test_oas_env_drops_non_oas_prefix;
+          test_case "parses allowed AGENT_CORE_* keys" `Quick
+            test_agent_core_env_parses_allowed_keys;
+          test_case "drops non-AGENT_CORE_* keys (ambient injection guard)" `Quick
+            test_agent_core_env_drops_non_agent_core_prefix;
           test_case "empty when table absent" `Quick
-            test_oas_env_absent_means_empty;
+            test_agent_core_env_absent_means_empty;
           test_case "coerces bool → \"1\"/\"0\" string" `Quick
-            test_oas_env_coerces_bool_to_string;
+            test_agent_core_env_coerces_bool_to_string;
         ] );
       ( "file_loading",
         [

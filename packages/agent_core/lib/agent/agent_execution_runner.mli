@@ -25,7 +25,7 @@ val create_runtime
   :  sw:Eio.Switch.t
   -> domain_mgr:_ Eio.Domain_manager.t
   -> domain_count:int
-  -> (runtime, Error.sdk_error) result
+  -> (runtime, Error.t) result
 
 val runtime_codec : runtime -> Execution_codec_executor.t
 

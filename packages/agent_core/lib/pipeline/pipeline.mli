@@ -28,7 +28,7 @@ type turn_outcome =
     "Internal", not "Api"; genuine provider ([Error.Api]) errors stay "Api".
     This projection is for observation only; it does not affect control flow,
     retry, or provider-failure attribution. *)
-val error_domain_of : Error.sdk_error -> string
+val error_domain_of : Error.t -> string
 
 (** Persist [state] using the same pre-commit checkpoint transaction as turn
     collection. The live agent state is not changed by this function. *)
@@ -36,7 +36,7 @@ val persist_turn_checkpoint_for_state
   :  Agent_types.t
   -> Agent_types.checkpoint_stage
   -> Types.agent_state
-  -> (unit, Error.sdk_error) result
+  -> (unit, Error.t) result
 
 (** Run a single agent turn through the 6-stage pipeline.
     Equivalent to the previous [run_turn_core].
@@ -58,4 +58,4 @@ val run_turn
   -> ?on_provider_failure:(Provider_failure_attribution.t option -> unit)
   -> ?before_tool_execution:(unit -> unit)
   -> Agent_types.t
-  -> (turn_outcome, Error.sdk_error) result
+  -> (turn_outcome, Error.t) result

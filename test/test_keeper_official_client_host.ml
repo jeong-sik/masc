@@ -70,27 +70,27 @@ let with_active_raw_trace body =
     (fun () ->
        Eio_main.run (fun _env ->
          let sink =
-           match Agent_sdk.Raw_trace.create ~path () with
+           match Agent_core.Raw_trace.create ~path () with
            | Ok sink -> sink
-           | Error error -> fail (Agent_sdk.Error.to_string error)
+           | Error error -> fail (Agent_core.Error.to_string error)
          in
          let active =
            match
-             Agent_sdk.Raw_trace.start_run
+             Agent_core.Raw_trace.start_run
                sink
                ~agent_name:"keeper-raw-authority"
                ~prompt:"test"
                ()
            with
            | Ok active -> active
-           | Error error -> fail (Agent_sdk.Error.to_string error)
+           | Error error -> fail (Agent_core.Error.to_string error)
          in
          body ~path ~active))
 ;;
 
 let one_dynamic_tool ~active handler =
   let tool =
-    Agent_sdk.Tool.create
+    Agent_core.Tool.create
       ~name:"effect"
       ~description:"test effect"
       ~parameters:[]
@@ -103,17 +103,17 @@ let one_dynamic_tool ~active handler =
       ~keeper_name:"keeper-raw-authority"
       ~turn_count:1
       ~tools:[ tool ]
-      ~hooks:Agent_sdk.Hooks.empty
+      ~hooks:Agent_core.Hooks.empty
       ~event_bus:None
       ~context_injector:None
-      ~context:(Some (Agent_sdk.Context.create_sync ()))
+      ~context:(Some (Agent_core.Context.create_sync ()))
       ~terminal_error
       ~raw_trace_run:(Some active)
   in
   match projected with
   | Ok [ tool ] -> tool, terminal_error
   | Ok _ -> fail "expected one projected dynamic tool"
-  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Error error -> fail (Agent_core.Error.to_string error)
 ;;
 
 let test_raw_start_failure_does_not_block_tool () =
@@ -122,7 +122,7 @@ let test_raw_start_failure_does_not_block_tool () =
     let tool, terminal_error =
       one_dynamic_tool ~active (fun _input ->
         incr executions;
-        Ok { Agent_sdk.Types.content = "effect-complete"; _meta = None })
+        Ok { Agent_core.Types.content = "effect-complete"; _meta = None })
     in
     break_trace_path path;
     let result = tool.call ~call_id:"call-start-failure" (`Assoc []) in
@@ -178,7 +178,7 @@ let test_raw_finish_failure_does_not_reverse_tool_success () =
       one_dynamic_tool ~active (fun _input ->
         incr executions;
         break_trace_path path;
-        Ok { Agent_sdk.Types.content = "effect-committed"; _meta = None })
+        Ok { Agent_core.Types.content = "effect-committed"; _meta = None })
     in
     let result = tool.call ~call_id:"call-finish-failure" (`Assoc []) in
     check int "effect executed once" 1 !executions;
@@ -203,26 +203,26 @@ let test_cancellation_records_terminal_raw_observation () =
     check bool "cancellation preserved" true cancelled;
     check (option string) "cancellation is not replaced" None !terminal_error;
     let records =
-      match Agent_sdk.Raw_trace.read_all ~path () with
+      match Agent_core.Raw_trace.read_all ~path () with
       | Ok records -> records
-      | Error error -> fail (Agent_sdk.Error.to_string error)
+      | Error error -> fail (Agent_core.Error.to_string error)
     in
     let count kind =
       List.fold_left
         (fun total record ->
-           if record.Agent_sdk.Raw_trace.record_type = kind then total + 1 else total)
+           if record.Agent_core.Raw_trace.record_type = kind then total + 1 else total)
         0
         records
     in
-    check int "one tool start" 1 (count Agent_sdk.Raw_trace.Tool_execution_started);
-    check int "one tool finish" 1 (count Agent_sdk.Raw_trace.Tool_execution_finished))
+    check int "one tool start" 1 (count Agent_core.Raw_trace.Tool_execution_started);
+    check int "one tool finish" 1 (count Agent_core.Raw_trace.Tool_execution_finished))
 ;;
 
-let msg role content : Agent_sdk.Types.message =
+let msg role content : Agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
-let text value = Agent_sdk.Types.Text value
+let text value = Agent_core.Types.Text value
 
 let projection_counts
     { Host.messages = _; dropped_tool_messages; dropped_messages; dropped_blocks } =
@@ -234,7 +234,7 @@ let projection_counts
    admission invariant. Expected values below stay literal. *)
 let projected_texts (projection : Host.history_projection) =
   List.map
-    (fun (message : Agent_sdk.Types.message) ->
+    (fun (message : Agent_core.Types.message) ->
       match
         Host.text_of_blocks
           ~runtime_label:"Test"
@@ -249,8 +249,8 @@ let projected_texts (projection : Host.history_projection) =
 let test_lossless_history_is_preserved_verbatim () =
   let projection =
     Host.project_official_history
-      [ msg Agent_sdk.Types.User [ text "prior user turn" ]
-      ; msg Agent_sdk.Types.Assistant [ text "prior assistant reply" ]
+      [ msg Agent_core.Types.User [ text "prior user turn" ]
+      ; msg Agent_core.Types.Assistant [ text "prior assistant reply" ]
       ]
   in
   check
@@ -265,8 +265,8 @@ let test_lossless_history_is_preserved_verbatim () =
 let test_tool_messages_are_dropped_and_counted () =
   let projection =
     Host.project_official_history
-      [ msg Agent_sdk.Types.User [ text "prior user turn" ]
-      ; Agent_sdk.Types.tool_result_msg
+      [ msg Agent_core.Types.User [ text "prior user turn" ]
+      ; Agent_core.Types.tool_result_msg
           ~tool_use_id:"call-1"
           ~content:"tool output"
           ()
@@ -285,11 +285,11 @@ let test_non_text_blocks_are_stripped_from_kept_messages () =
   let projection =
     Host.project_official_history
       [ msg
-          Agent_sdk.Types.Assistant
-          [ Agent_sdk.Types.Thinking
+          Agent_core.Types.Assistant
+          [ Agent_core.Types.Thinking
               { content = "hidden reasoning"; signature = None }
           ; text "visible reply"
-          ; Agent_sdk.Types.ToolUse
+          ; Agent_core.Types.ToolUse
               { id = "call-1"; name = "prior_tool"; input = `Assoc [] }
           ]
       ]
@@ -306,8 +306,8 @@ let test_fully_unrepresentable_message_is_dropped () =
   let projection =
     Host.project_official_history
       [ msg
-          Agent_sdk.Types.Assistant
-          [ Agent_sdk.Types.ToolUse
+          Agent_core.Types.Assistant
+          [ Agent_core.Types.ToolUse
               { id = "call-1"; name = "prior_tool"; input = `Assoc [] }
           ]
       ]

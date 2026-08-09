@@ -5,14 +5,14 @@ open Server_routes_http
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Config_root_bootstrap = Server_runtime_config_root_bootstrap
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 
 let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
-let oas_model_catalog_env_var_name = "OAS_MODEL_CATALOG"
-let oas_models_overlay_toml_filename = "oas-models-overlay.toml"
+let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
+let agent_core_models_overlay_toml_filename = "agent-core-models-overlay.toml"
 
 (* Seconds withheld from tool-blob maintenance so the boot stages that follow
    it (Runtime_params restore, credential audit, Domain_pool, Keeper gate
@@ -46,28 +46,28 @@ let install_runtime_model_catalog_override ~load_catalog ~set_catalog path =
   | Error detail ->
     raise (Env_config_core.Config_error (Printf.sprintf "catalog %s: %s" path detail))
 
-let configure_oas_model_catalog_env
+let configure_agent_core_model_catalog_env
       ?(env = Sys.getenv_opt)
-      ?(agent_sdk_catalog = Llm_provider.Model_catalog.global)
+      ?(agent_core_catalog = Llm_provider.Model_catalog.global)
       ?(load_catalog = Llm_provider.Model_catalog.load_file)
       ?(set_catalog = Llm_provider.Model_catalog.set_global)
       ()
   =
-  match nonempty_env env oas_model_catalog_env_var_name with
+  match nonempty_env env agent_core_model_catalog_env_var_name with
   | Some path ->
     install_runtime_model_catalog_override ~load_catalog ~set_catalog path;
     Log.Misc.info
-      "model_catalog: OAS_MODEL_CATALOG=%s already configured and loaded"
+      "model_catalog: AGENT_CORE_MODEL_CATALOG=%s already configured and loaded"
       path;
     Some path
   | None ->
-    (match agent_sdk_catalog () with
+    (match agent_core_catalog () with
      | Some _ ->
        Log.Misc.info
-         "model_catalog: no explicit catalog path resolved; using agent_sdk ambient \
+         "model_catalog: no explicit catalog path resolved; using agent_core ambient \
           model catalog"
      | None ->
-       raise (Env_config_core.Config_error "model_catalog: OAS embedded model catalog is unavailable"));
+       raise (Env_config_core.Config_error "model_catalog: AGENT_CORE embedded model catalog is unavailable"));
     None
 
 let warn_ignored_config_root_full_catalogs
@@ -75,23 +75,23 @@ let warn_ignored_config_root_full_catalogs
       ~config_root
       ()
   =
-  if Option.is_none (nonempty_env env oas_model_catalog_env_var_name)
+  if Option.is_none (nonempty_env env agent_core_model_catalog_env_var_name)
   then
-    [ "models.toml"; "oas-models.toml" ]
+    [ "models.toml"; "agent-core-models.toml" ]
     |> List.iter (fun filename ->
       let path = Filename.concat config_root filename in
       if Option.is_some (existing_file path)
       then
         Log.Misc.warn
-          "model_catalog: ignoring retired config-root full catalog %s; OAS embedded catalog plus oas-models-overlay.toml is the deployment SSOT (set OAS_MODEL_CATALOG explicitly only for a deliberate full replacement)"
+          "model_catalog: ignoring retired config-root full catalog %s; AGENT_CORE embedded catalog plus agent-core-models-overlay.toml is the deployment SSOT (set AGENT_CORE_MODEL_CATALOG explicitly only for a deliberate full replacement)"
           path)
 
-(* RFC-0342 D1 / RFC-OAS-036: deployment-local capability deltas live in a
+(* RFC-0342 D1 / Agent Core contract: deployment-local capability deltas live in a
    config-root overlay merged onto the embedded catalog
    ([Model_catalog.set_global_overlay]), instead of a full-catalog fork that
-   shadows every embedded row and goes stale on each OAS release. Only an
-   operator-supplied [OAS_MODEL_CATALOG] keeps full-replacement precedence. *)
-let resolve_oas_model_catalog_overlay_path ?config_root () =
+   shadows every embedded row and goes stale on each AGENT_CORE release. Only an
+   operator-supplied [AGENT_CORE_MODEL_CATALOG] keeps full-replacement precedence. *)
+let resolve_agent_core_model_catalog_overlay_path ?config_root () =
   match config_root with
   | None -> None
   | Some root ->
@@ -99,15 +99,15 @@ let resolve_oas_model_catalog_overlay_path ?config_root () =
     if String.equal root "" then
       None
     else
-      existing_file (Filename.concat root oas_models_overlay_toml_filename)
+      existing_file (Filename.concat root agent_core_models_overlay_toml_filename)
 
-let configure_oas_model_catalog_overlay
+let configure_agent_core_model_catalog_overlay
       ?config_root
       ?(load_catalog = Llm_provider.Model_catalog.load_file)
       ?(set_overlay = Llm_provider.Model_catalog.set_global_overlay)
       ()
   =
-  match resolve_oas_model_catalog_overlay_path ?config_root () with
+  match resolve_agent_core_model_catalog_overlay_path ?config_root () with
   | None -> None
   | Some path ->
     (match load_catalog path with
@@ -235,7 +235,7 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
               (Printf.sprintf
                  "exact-output registry: mandatory lane %S is missing in %s; add \
                   [runtime.exact_output_lanes.%s] with a non-empty slots array \
-                  of OAS target refs, or reset the preserved runtime.toml and \
+                  of AGENT_CORE target refs, or reset the preserved runtime.toml and \
                   restart so MASC can reseed it; existing runtime configs are \
                   never migrated automatically"
                  lane_id
@@ -246,7 +246,7 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
            (Env_config_core.Config_error
               (Printf.sprintf
                  "exact-output registry: mandatory lane %S has no slots in %s; \
-                  configure at least one OAS target ref or reset the preserved \
+                  configure at least one AGENT_CORE target ref or reset the preserved \
                   runtime.toml and restart so MASC can reseed it; existing \
                   runtime configs are never migrated automatically"
                  lane_id
@@ -291,11 +291,11 @@ let configure_exact_output_registry ?config_root () =
   in
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
   let catalog, catalog_description =
-    match nonempty_env Sys.getenv_opt oas_model_catalog_env_var_name with
+    match nonempty_env Sys.getenv_opt agent_core_model_catalog_env_var_name with
     | Some path -> Exact_output.Full_replacement_file path, " from full replacement " ^ path
     | None ->
-      (match resolve_oas_model_catalog_overlay_path ?config_root () with
-       | None -> Exact_output.Embedded_default, " from OAS embedded catalog"
+      (match resolve_agent_core_model_catalog_overlay_path ?config_root () with
+       | None -> Exact_output.Embedded_default, " from AGENT_CORE embedded catalog"
        | Some path ->
          (match read_exact_output_overlay path with
           | Ok contents ->
@@ -343,7 +343,7 @@ let configure_exact_output_registry ?config_root () =
               lanes)
        then
          Log.Server.warn
-           "exact_output: compaction is degraded until [runtime.exact_output_lanes.compaction_exact] is configured with OAS target refs";
+           "exact_output: compaction is degraded until [runtime.exact_output_lanes.compaction_exact] is configured with AGENT_CORE target refs";
        if
          not
            (List.exists
@@ -352,7 +352,7 @@ let configure_exact_output_registry ?config_root () =
               lanes)
        then
          Log.Server.warn
-           "exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with OAS target refs")
+           "exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with AGENT_CORE target refs")
 ;;
 
 let install_domain_pool_references domain_pool =
@@ -483,8 +483,8 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   bootstrap_base_path_config_root ~base_path;
   let config_root = (startup_config_resolution ~base_path).config_root.path in
   warn_ignored_config_root_full_catalogs ~config_root ();
-  let (_ : string option) = configure_oas_model_catalog_env () in
-  let (_ : string option) = configure_oas_model_catalog_overlay ~config_root () in
+  let (_ : string option) = configure_agent_core_model_catalog_env () in
+  let (_ : string option) = configure_agent_core_model_catalog_overlay ~config_root () in
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads
      [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing

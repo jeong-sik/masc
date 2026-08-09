@@ -25,8 +25,8 @@ let metric_sse_external_fanout_duration_seconds =
   "masc_sse_external_fanout_duration_seconds"
 ;;
 
-let metric_oas_sse_relay_drop_marker_failures =
-  Otel_metric_store_core.declare_counter "masc_oas_sse_relay_drop_marker_failures_total"
+let metric_agent_core_sse_relay_drop_marker_failures =
+  Otel_metric_store_core.declare_counter "masc_agent_core_sse_relay_drop_marker_failures_total"
 ;;
 
 let metric_sse_queue_depth_avg = Otel_metric_store_core.declare_gauge "masc_sse_queue_depth_avg"

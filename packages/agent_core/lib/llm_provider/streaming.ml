@@ -1,7 +1,7 @@
 (** SSE event parsing and synthetic event emission.
 
-    Pure functions operating on {!Llm_provider.Types}. No agent_sdk coupling.
-    The streaming HTTP client (create_message_stream) remains in agent_sdk. *)
+    Pure functions operating on {!Llm_provider.Types}. No agent_core coupling.
+    The streaming HTTP client (create_message_stream) remains in agent_core. *)
 
 open Types
 
@@ -167,7 +167,7 @@ let parse_sse_event event_type data_str =
     Some (SSEParseFailed { raw = data_str; reason = "json_error: " ^ msg })
 ;;
 
-(* RFC-OAS-020: TTFT classification — distinguishes Anthropic prelude
+(* Agent Core contract: TTFT classification — distinguishes Anthropic prelude
    events ([MessageStart], [ContentBlockStart], [Ping]) from the
    first generated token. Capture point in [Complete] uses this
    to fill [Streaming_summary.ttft_ms]. *)
@@ -370,7 +370,7 @@ type openai_sse_parse_result =
       }
   | Openai_parse_failed of openai_chunk_parse_error
 
-(* RFC-OAS-020: TTFT classification for OpenAI-compat / Gemini /
+(* Agent Core contract: TTFT classification for OpenAI-compat / Gemini /
    Ollama chunk streams. [true] when this chunk would surface a
    visible token (or tool-call argument) to the application;
    [false] for role-prelude chunks, [DONE]-only finalisers, and
@@ -728,7 +728,7 @@ type tool_index_route =
 
 type tool_identity_origin =
   | Provider_supplied
-  | Oas_allocated
+  | Agent_core_allocated
 
 type tool_block_identity =
   { id : string
@@ -911,7 +911,7 @@ let tool_route_failure_reason = function
   | Ambiguous_idless_continuation ->
     "ambiguous_tool_call_index: id-less continuation follows multiple tool identities"
   | Late_provider_identity ->
-    "late_provider_tool_call_id: provider identity arrived after an OAS identity was \
+    "late_provider_tool_call_id: provider identity arrived after an AGENT_CORE identity was \
      emitted"
   | Provider_identity_route_conflict ->
     "provider_tool_call_id_route_conflict: one provider identity used multiple wire \
@@ -964,7 +964,7 @@ let open_tool_block
     let identity =
       match non_blank_provider_tool_id provider_tool_id with
       | Some id -> { id; origin = Provider_supplied }
-      | None -> { id = Api_common.fresh_tool_use_id (); origin = Oas_allocated }
+      | None -> { id = Api_common.fresh_tool_use_id (); origin = Agent_core_allocated }
     in
     register_tool_block_identity ?tx state ~block_index identity;
     state.next_block_index <- max state.next_block_index (block_index + 1);
@@ -1027,7 +1027,7 @@ let resolve_tool_block
        (match Hashtbl.find_opt state.tool_block_indices wire_index with
         | Some (Tool_index_single block_index) ->
           (match Hashtbl.find_opt state.tool_block_identities block_index with
-           | Some { origin = Oas_allocated; _ } -> reject Late_provider_identity
+           | Some { origin = Agent_core_allocated; _ } -> reject Late_provider_identity
            | Some { origin = Provider_supplied; _ } ->
              (match index_policy with
               | Next_available | Next_after_carrier -> open_and_record ()
@@ -1053,7 +1053,7 @@ let resolve_tool_block
 
 (* OpenAI-compatible streams carry no wire [content_block_stop] event (unlike
    Anthropic, whose stops are parsed straight off the wire). Synthesize one
-   [ContentBlockStop] per block this state opened so the emitted OAS event
+   [ContentBlockStop] per block this state opened so the emitted AGENT_CORE event
    sequence stays symmetric: every [ContentBlockStart] gets a matching
    [ContentBlockStop]. The stream accumulator ignores stops, but block-lifecycle
    consumers depend on them — a stop closes a tool block so the NEXT provider
@@ -1710,7 +1710,7 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
   else (
     (* Decode through the shared total boundary (#2620): a valid-JSON
        non-object frame raises Util.Type_error out of [member], which a
-       Json_error-only guard would let escape the parser (oas#2632). *)
+       Json_error-only guard would let escape the parser (agent-core boundary). *)
     let decode json =
       let open Yojson.Safe.Util in
       let evt_type =
@@ -3434,7 +3434,7 @@ let%test "ollama_chunk_to_events: tool_calls emit Start+InputJsonSnapshot" =
         }
     ; ContentBlockDelta { index = 0; delta = InputJsonSnapshot args }
     ; MessageDelta { stop_reason = Some StopToolUse; _ }
-    ] -> String.starts_with ~prefix:"call_oas_" tool_id && args = {|{"q":"hello"}|}
+    ] -> String.starts_with ~prefix:"call_agent_core_" tool_id && args = {|{"q":"hello"}|}
   | unexpected_events ->
     let (_ : sse_event list) = unexpected_events in
     false

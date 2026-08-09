@@ -88,21 +88,21 @@ if [[ "$SELF_TEST" = "1" ]]; then
     "$keeper" "$trace" "$turn" >"$receipt_path"
   manifest_path="$manifest_dir/$trace.jsonl"
   jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:00Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"checkpoint_loaded",runtime_id:null,status:"ok",decision:{},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:00Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"checkpoint_loaded",runtime_id:null,status:"ok",decision:{},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:01Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_lane_resolved",runtime_id:"fixture",status:"resolved",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false,requested_tool_names:["keeper_tool_search"],materialized_tool_names:["keeper_tool_search"],resolved_lane:"inline"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:01Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"provider_lane_resolved",runtime_id:"fixture",status:"resolved",decision:{runtime_engine:"masc_keeper_named_runtime",agent_core_dispatch_mode:"single_provider_agent_run",agent_core_internal_runtime_allowed:false,requested_tool_names:["keeper_tool_search"],materialized_tool_names:["keeper_tool_search"],resolved_lane:"inline"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:02Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_attempt_started",runtime_id:"fixture",status:"started",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:02Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"provider_attempt_started",runtime_id:"fixture",status:"started",decision:{runtime_engine:"masc_keeper_named_runtime",agent_core_dispatch_mode:"single_provider_agent_run",agent_core_internal_runtime_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:03Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:2,event:"provider_attempt_finished",runtime_id:"fixture",status:"provider_returned",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:03Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:2,event:"provider_attempt_finished",runtime_id:"fixture",status:"provider_returned",decision:{runtime_engine:"masc_keeper_named_runtime",agent_core_dispatch_mode:"single_provider_agent_run",agent_core_internal_runtime_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --arg p "$checkpoint_path" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:04Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"checkpoint_saved",runtime_id:null,status:"ok",decision:{},links:{receipt_path:null,checkpoint_path:$p,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:04Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"checkpoint_saved",runtime_id:null,status:"ok",decision:{},links:{receipt_path:null,checkpoint_path:$p,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --arg p "$receipt_path" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:05Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"receipt_appended",runtime_id:null,status:"ok",decision:{},links:{receipt_path:$p,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:05Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"receipt_appended",runtime_id:null,status:"ok",decision:{},links:{receipt_path:$p,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:06Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"event_bus_correlated",runtime_id:null,status:"observed",decision:{correlation_id:"corr-self-test",run_id:"run-self-test",caused_by:null,overflow_imminent:null,context_compact_started_count:0,context_compacted_count:0,last_compaction:null},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:06Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"event_bus_correlated",runtime_id:null,status:"observed",decision:{correlation_id:"corr-self-test",run_id:"run-self-test",caused_by:null,overflow_imminent:null,context_compact_started_count:0,context_compacted_count:0,last_compaction:null},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --arg p "$tool_log_path" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:09Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"turn_finished",runtime_id:null,status:"success",decision:{},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:$p}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:09Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"turn_finished",runtime_id:null,status:"success",decision:{},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:$p}}' >>"$manifest_path"
   "$0" --base-path "$tmp" --keeper "$keeper" --trace-id "$trace" \
     --turn-id "$turn" --mode provider --expect-tool-call-log
   fail_keeper="runtime-truth-gate-timeout"
@@ -117,15 +117,15 @@ if [[ "$SELF_TEST" = "1" ]]; then
     "$fail_keeper" "$fail_trace" "$fail_turn" >"$fail_receipt_path"
   fail_manifest_path="$fail_manifest_dir/$fail_trace.jsonl"
   jq -cn --arg k "$fail_keeper" --arg t "$fail_trace" --argjson turn "$fail_turn" \
-    '{schema_version:1,ts:"2026-05-12T00:01:00Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_lane_resolved",runtime_id:"fixture",status:"resolved",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false,requested_tool_names:[],materialized_tool_names:[],resolved_lane:"inline"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:01:00Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"provider_lane_resolved",runtime_id:"fixture",status:"resolved",decision:{runtime_engine:"masc_keeper_named_runtime",agent_core_dispatch_mode:"single_provider_agent_run",agent_core_internal_runtime_allowed:false,requested_tool_names:[],materialized_tool_names:[],resolved_lane:"inline"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
   jq -cn --arg k "$fail_keeper" --arg t "$fail_trace" --argjson turn "$fail_turn" \
-    '{schema_version:1,ts:"2026-05-12T00:01:01Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_attempt_started",runtime_id:"fixture",status:"started",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:01:01Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"provider_attempt_started",runtime_id:"fixture",status:"started",decision:{runtime_engine:"masc_keeper_named_runtime",agent_core_dispatch_mode:"single_provider_agent_run",agent_core_internal_runtime_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
   jq -cn --arg k "$fail_keeper" --arg t "$fail_trace" --argjson turn "$fail_turn" \
-    '{schema_version:1,ts:"2026-05-12T00:01:02Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_attempt_finished",runtime_id:"fixture",status:"timeout",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false,exception_kind:"outer_oas_timeout",error:"Timeout after 120.0s"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:01:02Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"provider_attempt_finished",runtime_id:"fixture",status:"timeout",decision:{runtime_engine:"masc_keeper_named_runtime",agent_core_dispatch_mode:"single_provider_agent_run",agent_core_internal_runtime_allowed:false,exception_kind:"outer_agent_core_timeout",error:"Timeout after 120.0s"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
   jq -cn --arg k "$fail_keeper" --arg t "$fail_trace" --arg p "$fail_receipt_path" --argjson turn "$fail_turn" \
-    '{schema_version:1,ts:"2026-05-12T00:01:05Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"receipt_appended",runtime_id:null,status:"ok",decision:{},links:{receipt_path:$p,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:01:05Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"receipt_appended",runtime_id:null,status:"ok",decision:{},links:{receipt_path:$p,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
   jq -cn --arg k "$fail_keeper" --arg t "$fail_trace" --argjson turn "$fail_turn" \
-    '{schema_version:1,ts:"2026-05-12T00:01:06Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"turn_finished",runtime_id:null,status:"error",decision:{terminal_reason_code:"api_error_timeout"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:01:06Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,agent_core_turn_count:null,event:"turn_finished",runtime_id:null,status:"error",decision:{terminal_reason_code:"api_error_timeout"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
   "$0" --base-path "$tmp" --keeper "$fail_keeper" --trace-id "$fail_trace" \
     --turn-id "$fail_turn" --mode provider
   exit 0
@@ -226,16 +226,16 @@ if [[ "$MODE" = "provider" ]]; then
         and (.decision.run_id == null or (.decision.run_id | type == "string"))
         and (.decision.context_compact_started_count | type == "number")
         and (.decision.context_compacted_count | type == "number")
-    ' >/dev/null || fail "event_bus_correlated is missing OAS event-bus summary fields"
+    ' >/dev/null || fail "event_bus_correlated is missing AGENT_CORE event-bus summary fields"
   fi
 
   printf '%s\n' "$turn_rows" | jq -e '
     select(.event == "provider_lane_resolved")
     | .decision.runtime_engine == "masc_keeper_named_runtime"
-      and .decision.oas_dispatch_mode == "single_provider_agent_run"
-      and .decision.oas_internal_runtime_allowed == false
+      and .decision.agent_core_dispatch_mode == "single_provider_agent_run"
+      and .decision.agent_core_internal_runtime_allowed == false
       and (.decision.materialized_tool_names | type == "array")
-  ' >/dev/null || fail "provider_lane_resolved is missing keeper/OAS boundary or lane fields"
+  ' >/dev/null || fail "provider_lane_resolved is missing keeper/AGENT_CORE boundary or lane fields"
 fi
 
 receipt_path="$(printf '%s\n' "$turn_rows" | jq -r '

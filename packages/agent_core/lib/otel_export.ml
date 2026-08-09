@@ -78,8 +78,8 @@ let build_otlp_body ~service_name (spans : Otel_tracer.span list) : string =
                       [ `Assoc
                           [ ( "scope"
                             , `Assoc
-                                [ "name", `String "agent_sdk.otel_export"
-                                ; "version", `String Sdk_version.version
+                                [ "name", `String "agent_core.otel_export"
+                                ; "version", `String Version.version
                                 ] )
                           ; "spans", `List (List.map Otel_tracer.span_to_json spans)
                           ]
@@ -109,8 +109,8 @@ let build_otlp_metrics_body ~service_name (metrics : Otel_tracer.metric_entry li
                       [ `Assoc
                           [ ( "scope"
                             , `Assoc
-                                [ "name", `String "agent_sdk.otel_export"
-                                ; "version", `String Sdk_version.version
+                                [ "name", `String "agent_core.otel_export"
+                                ; "version", `String Version.version
                                 ] )
                           ; ( "metrics"
                             , `List (List.map Otel_tracer.metric_entry_to_json metrics) )

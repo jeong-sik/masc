@@ -173,7 +173,7 @@ let disabled_is_noop () =
     let base = Filename.temp_dir "wirecap_off" "" in
     Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
       ~turn_id:1
-      ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
+      ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"u" ~history_messages:[] ~tools:[] ();
     Alcotest.(check (list string))
       "no jsonl written when disabled" [] (find_jsonl base))
@@ -184,13 +184,13 @@ let enabled_writes_redacted () =
     install_projected_secret ~base_path:base ~keeper_name:"sangsu";
     let history =
       [
-        Agent_sdk.Types.assistant_msg "좋아, 연구 시작한다";
-        Agent_sdk.Types.user_msg "continue";
+        Agent_core.Types.assistant_msg "좋아, 연구 시작한다";
+        Agent_core.Types.user_msg "continue";
       ]
     in
     Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
       ~turn_id:7
-      ~sdk_turn:3
+      ~agent_core_turn:3
       ~system_prompt:("token " ^ projected_secret ^ " end")
       ~extra_system_context:(Some "dynamic context")
       ~user_message:"hello world" ~history_messages:history ~tools:[] ();
@@ -205,7 +205,7 @@ let enabled_writes_redacted () =
     check_json_string "request kind recorded" "kind" "request" json;
     check_json_string "keeper name recorded" "keeper" "sangsu" json;
     check_json_int "turn_id recorded" "turn_id" 7 json;
-    check_json_int "sdk_turn recorded" "sdk_turn" 3 json;
+    check_json_int "agent_core_turn recorded" "agent_core_turn" 3 json;
     check_json_null "missing trace_id is null" "trace_id" json;
     check_json_string "extra context recorded" "extra_system_context"
       "dynamic context" json;
@@ -230,7 +230,7 @@ let enabled_writes_redacted () =
       (contains ~needle:"좋아, 연구 시작한다" content))
 
 (* The record must not scale with the replayed conversation: [capture_request]
-   runs once per SDK turn, so a per-message payload made a single record as
+   runs once per agent-core turn, so a per-message payload made a single record as
    large as the checkpoint and exhausted the day-file byte budget within a few
    turns. Growing the history by three orders of magnitude must leave the
    record the same size apart from the message count. *)
@@ -239,7 +239,7 @@ let record_size_is_independent_of_history_length () =
     let capture ~history_messages =
       let base = Filename.temp_dir "wirecap_size" "" in
       Wire.capture_request ~base_path:base ~masc_root:base
-        ~keeper_name:"sangsu" ~turn_id:1 ~sdk_turn:1 ~system_prompt:"sys"
+        ~keeper_name:"sangsu" ~turn_id:1 ~agent_core_turn:1 ~system_prompt:"sys"
         ~extra_system_context:None ~user_message:"u" ~history_messages
         ~tools:[] ();
       match find_jsonl base with
@@ -249,7 +249,7 @@ let record_size_is_independent_of_history_length () =
     in
     let long_history =
       List.init 2000 (fun i ->
-        Agent_sdk.Types.assistant_msg
+        Agent_core.Types.assistant_msg
           (Printf.sprintf "replayed turn %d: %s" i (String.make 200 'x')))
     in
     let short = capture ~history_messages:[] in
@@ -267,22 +267,22 @@ let request_captures_exact_redacted_tool_schemas () =
     let base = Filename.temp_dir "wirecap_tools" "" in
     install_projected_secret ~base_path:base ~keeper_name:"sangsu";
     let tool =
-      Agent_sdk.Tool.create
+      Agent_core.Tool.create
         ~name:"probe_tool"
         ~description:("search with " ^ projected_secret)
         ~parameters:
-          [ { Agent_sdk.Types.name = "query"
+          [ { Agent_core.Types.name = "query"
             ; description = "query " ^ projected_secret
-            ; param_type = Agent_sdk.Types.String
+            ; param_type = Agent_core.Types.String
             ; required = true
             }
           ]
-        (fun _input -> Ok { Agent_sdk.Types.content = "ok"; _meta = None })
+        (fun _input -> Ok { Agent_core.Types.content = "ok"; _meta = None })
     in
-    let raw_tools = `List [ Agent_sdk.Tool.schema_to_json tool ] in
+    let raw_tools = `List [ Agent_core.Tool.schema_to_json tool ] in
     Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
       ~turn_id:8
-      ~sdk_turn:2 ~system_prompt:"sys" ~extra_system_context:None
+      ~agent_core_turn:2 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"hello" ~history_messages:[] ~tools:[ tool ] ();
     let files = find_jsonl base in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
@@ -316,7 +316,7 @@ let request_trace_id_emitted () =
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-req-abc" in
     Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
       ~turn_id:1
-      ~trace_id ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
+      ~trace_id ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"hello" ~history_messages:[] ~tools:[] ();
     let json = read_single_json_record base in
     check_json_string "request trace_id string recorded" "trace_id"
@@ -337,7 +337,7 @@ let request_capture_failure_is_best_effort () =
       write_failures_metric ~labels (fun () ->
         Wire.capture_request ~base_path:root_file ~masc_root:root_file ~keeper_name
           ~turn_id
-          ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
+          ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
           ~user_message:"hello" ~history_messages:[] ~tools:[] ()))
 
 let response_disabled_is_noop () =
@@ -345,7 +345,7 @@ let response_disabled_is_noop () =
     let base = Filename.temp_dir "wirecap_resp_off" "" in
     Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
       ~turn_id:1
-      ~sdk_turn:2 ~response_text:"anything" ();
+      ~agent_core_turn:2 ~response_text:"anything" ();
     Alcotest.(check (list string))
       "no jsonl written when disabled" [] (find_jsonl base))
 
@@ -355,7 +355,7 @@ let response_capture_writes_redacted () =
     install_projected_secret ~base_path:base ~keeper_name:"sangsu";
     Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
       ~turn_id:9
-      ~sdk_turn:4 ~response_text:("out " ^ projected_secret ^ " done") ();
+      ~agent_core_turn:4 ~response_text:("out " ^ projected_secret ^ " done") ();
     let files = find_jsonl base in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
@@ -367,7 +367,7 @@ let response_capture_writes_redacted () =
       (contains ~needle:"[REDACTED]" (json_string "response_text" json));
     check_json_string "keeper name recorded" "keeper" "sangsu" json;
     check_json_int "turn_id recorded" "turn_id" 9 json;
-    check_json_int "sdk_turn recorded" "sdk_turn" 4 json;
+    check_json_int "agent_core_turn recorded" "agent_core_turn" 4 json;
     check_json_null "missing trace_id is null" "trace_id" json)
 
 let response_capture_failure_is_best_effort () =
@@ -385,7 +385,7 @@ let response_capture_failure_is_best_effort () =
       write_failures_metric ~labels (fun () ->
         Wire.capture_response ~base_path:root_file ~masc_root:root_file ~keeper_name
           ~turn_id
-          ~sdk_turn:1 ~response_text:"ok" ()))
+          ~agent_core_turn:1 ~response_text:"ok" ()))
 
 let response_trace_id_emitted () =
   with_flag "1" (fun () ->
@@ -393,7 +393,7 @@ let response_trace_id_emitted () =
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-resp-xyz" in
     Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
       ~turn_id:2
-      ~sdk_turn:1 ~trace_id ~response_text:"ok" ();
+      ~agent_core_turn:1 ~trace_id ~response_text:"ok" ();
     let json = read_single_json_record base in
     check_json_string "response trace_id string recorded" "trace_id"
       "trace-resp-xyz" json)
@@ -411,7 +411,7 @@ let capture_prunes_old_files () =
         write_file old_file (String.make 1024 'x');
         Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
           ~turn_id:10
-          ~sdk_turn:1 ~response_text:"bounded" ();
+          ~agent_core_turn:1 ~response_text:"bounded" ();
         Alcotest.(check bool) "old capture file pruned" false
           (Sys.file_exists old_file);
         Alcotest.(check int) "only current capture remains" 1
@@ -455,13 +455,13 @@ let capture_cache_reloads_when_retention_changes () =
       with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "30" (fun () ->
         Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
           ~turn_id:20
-          ~sdk_turn:1 ~response_text:"cache warmup" ());
+          ~agent_core_turn:1 ~response_text:"cache warmup" ());
       Alcotest.(check bool) "old capture retained by warm cache" true
         (Sys.file_exists old_file);
       with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
         Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
           ~turn_id:21
-          ~sdk_turn:1 ~response_text:"cache reload" ());
+          ~agent_core_turn:1 ~response_text:"cache reload" ());
       Alcotest.(check bool) "old capture pruned after retention change" false
         (Sys.file_exists old_file)))
 
@@ -471,7 +471,7 @@ let capture_skips_when_current_file_cap_would_be_exceeded () =
       let base = Filename.temp_dir "wirecap_cap" "" in
       let keeper_name = "wirecap_cap_metric" in
       Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name ~turn_id:11
-        ~sdk_turn:1 ~response_text:"small" ();
+        ~agent_core_turn:1 ~response_text:"small" ();
       let files = find_jsonl base in
       Alcotest.(check int) "small record written" 1 (List.length files);
       let before = read_file (List.hd files) in
@@ -489,7 +489,7 @@ let capture_skips_when_current_file_cap_would_be_exceeded () =
         record_skipped_metric ~labels (fun () ->
           Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name
             ~turn_id:12
-            ~sdk_turn:1 ~response_text:(String.make 4096 'x') ());
+            ~agent_core_turn:1 ~response_text:(String.make 4096 'x') ());
       let after = read_file (List.hd files) in
       Alcotest.(check string)
         "oversized record skipped without mutating current day file"
@@ -522,7 +522,7 @@ let response_capture_matches_replayed_history_text () =
       ~masc_root:base
       ~keeper_name:"history_keeper"
       ~turn_id:5
-      ~sdk_turn:2
+      ~agent_core_turn:2
       ~response_text:history_text
       ();
     let files = find_jsonl base in

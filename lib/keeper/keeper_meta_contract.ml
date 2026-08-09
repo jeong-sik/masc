@@ -98,7 +98,7 @@ type blocker_class =
   | Fiber_unresolved
     (** 2026-05-05: turn fiber finished without invoking [resolve_done]
         (cancelled mid-turn, raised an exception not handled by the
-        body, or the OAS request returned but the keeper switch tore
+        body, or the AGENT_CORE request returned but the keeper switch tore
         down before completion bookkeeping ran).  Maps 1:1 to the
         supervisor's [Keeper_registry.Fiber_unresolved] observation key, so
         blocker_class stamping mirrors the same diagnosis on keeper_meta. *)
@@ -111,18 +111,18 @@ type blocker_class =
         per-keeper meta lacked a structured blocker class for the majority
         cohort during a fleet stall (observed: 6/14 keepers in
         cohort=stale_turn_timeout). *)
-  | Sdk_context_window_exceeded
-  | Sdk_unrecognized_stop_reason
-  | Sdk_guardrail_violation
-  | Sdk_tripwire_violation
-  | Sdk_input_required
+  | Agent_core_context_window_exceeded
+  | Agent_core_unrecognized_stop_reason
+  | Agent_core_guardrail_violation
+  | Agent_core_tripwire_violation
+  | Agent_core_input_required
   | Internal_unhandled_exception
     (** RFC-0159 follow-up (task-194): unhandled internal exception escaped the
-        turn driver.  Previously [blocker_class_of_sdk_error] returned [None]
+        turn driver.  Previously [blocker_class_of_core_error] returned [None]
         for this variant, so dashboards/operators could not distinguish an
         unhandled internal failure from a clean turn. *)
   | Internal_bridge_exception
-    (** Internal bridge (OAS/stream) exception escaped the turn driver. *)
+    (** Internal bridge (AGENT_CORE/stream) exception escaped the turn driver. *)
   | Internal_contract_rejected
     (** Internal contract was rejected by the turn driver. *)
   | Incomplete_tool_transcript
@@ -139,11 +139,11 @@ let blocker_class_to_string = function
   | Capacity_backpressure -> "capacity_backpressure"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
-  | Sdk_context_window_exceeded -> "sdk_context_window_exceeded"
-  | Sdk_unrecognized_stop_reason -> "sdk_unrecognized_stop_reason"
-  | Sdk_guardrail_violation -> "sdk_guardrail_violation"
-  | Sdk_tripwire_violation -> "sdk_tripwire_violation"
-  | Sdk_input_required -> "sdk_input_required"
+  | Agent_core_context_window_exceeded -> "agent_core_context_window_exceeded"
+  | Agent_core_unrecognized_stop_reason -> "agent_core_unrecognized_stop_reason"
+  | Agent_core_guardrail_violation -> "agent_core_guardrail_violation"
+  | Agent_core_tripwire_violation -> "agent_core_tripwire_violation"
+  | Agent_core_input_required -> "agent_core_input_required"
   | Internal_unhandled_exception -> "internal_unhandled_exception"
   | Internal_bridge_exception -> "internal_bridge_exception"
   | Internal_contract_rejected -> "internal_contract_rejected"
@@ -158,11 +158,11 @@ let blocker_class_of_serialized_string = function
   | "capacity_backpressure" -> Some Capacity_backpressure
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
-  | "sdk_context_window_exceeded" -> Some Sdk_context_window_exceeded
-  | "sdk_unrecognized_stop_reason" -> Some Sdk_unrecognized_stop_reason
-  | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation
-  | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
-  | "sdk_input_required" -> Some Sdk_input_required
+  | "agent_core_context_window_exceeded" -> Some Agent_core_context_window_exceeded
+  | "agent_core_unrecognized_stop_reason" -> Some Agent_core_unrecognized_stop_reason
+  | "agent_core_guardrail_violation" -> Some Agent_core_guardrail_violation
+  | "agent_core_tripwire_violation" -> Some Agent_core_tripwire_violation
+  | "agent_core_input_required" -> Some Agent_core_input_required
   | "internal_unhandled_exception" -> Some Internal_unhandled_exception
   | "internal_bridge_exception" -> Some Internal_bridge_exception
   | "internal_contract_rejected" -> Some Internal_contract_rejected
@@ -433,7 +433,7 @@ type keeper_meta =
     runtime : agent_runtime_state
   ; (* -- Identity & concurrency -- *)
     keeper_id : Keeper_id.Uid.t option
-  ; oas_env : (string * string) list
+  ; agent_core_env : (string * string) list
   }
 
 (* Sanctioned generic unpause transform. Reset-required transcript and terminal
@@ -571,9 +571,9 @@ let effective_meta_of_profile_defaults
           always_allow =
             apply_profile_default_opt defaults.always_allow
               meta.always_allow;
-          oas_env =
-            (match defaults.oas_env with
-             | [] -> meta.oas_env
+          agent_core_env =
+            (match defaults.agent_core_env with
+             | [] -> meta.agent_core_env
              | env -> env);
         }
 ;;
@@ -595,7 +595,7 @@ let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string
 
 (* A keeper's runtime is assigned in runtime.toml ([[runtime.assignments]],
    the sole SSOT), keyed by keeper name. An unassigned keeper uses the default
-   runtime. The id is opaque here; only the OAS adapter parses it. *)
+   runtime. The id is opaque here; only the AGENT_CORE adapter parses it. *)
 let runtime_id_of_meta (meta : keeper_meta) =
   match Runtime.runtime_id_for_keeper meta.name with
   | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id

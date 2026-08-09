@@ -292,7 +292,7 @@ let test_observation_tool_names_are_preserved () =
     {
       sample_board_event with
       post_id = "diagnostic-observation-1";
-      preview = "keeper_turn_id=turn-1 masc_oas_error=provider-timeout";
+      preview = "keeper_turn_id=turn-1 masc_agent_core_error=provider-timeout";
     }
   in
   let obs = { base_observation with pending_board_events = [ event ] } in
@@ -301,8 +301,8 @@ let test_observation_tool_names_are_preserved () =
   in
   check bool "keeper diagnostic token remains in observation" true
     (contains_sub "keeper_turn_id=turn-1" user_msg);
-  check bool "OAS diagnostic token remains in observation" true
-    (contains_sub "masc_oas_error=provider-timeout" user_msg);
+  check bool "AGENT_CORE diagnostic token remains in observation" true
+    (contains_sub "masc_agent_core_error=provider-timeout" user_msg);
   check bool "observation remains intact" true
     (contains_sub event.preview user_msg)
 ;;

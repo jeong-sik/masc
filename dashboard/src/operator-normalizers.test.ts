@@ -543,24 +543,24 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.available_actions[0]!.action_type).toBe('keeper_probe')
   })
 
-  it('normalizes the exact OAS inference observation', () => {
+  it('normalizes the exact Agent Core inference observation', () => {
     const result = normalizeOperatorSnapshot({
       inference_inflight: {
-        boundary_owner: 'oas_runtime',
+        boundary_owner: 'agent_core_runtime',
         active: 1,
       },
     })
     expect(result.inference_inflight).toEqual({
-      boundary_owner: 'oas_runtime',
+      boundary_owner: 'agent_core_runtime',
       active: 1,
     })
   })
 
   it.each([
     { boundary_owner: 'runtime', active: 1 },
-    { boundary_owner: 'oas_runtime', active: -1 },
-    { boundary_owner: 'oas_runtime', active: 1.5 },
-    { boundary_owner: 'oas_runtime' },
+    { boundary_owner: 'agent_core_runtime', active: -1 },
+    { boundary_owner: 'agent_core_runtime', active: 1.5 },
+    { boundary_owner: 'agent_core_runtime' },
   ])('rejects inference observations outside the exact boundary contract', (inferenceInflight) => {
     const result = normalizeOperatorSnapshot({ inference_inflight: inferenceInflight })
 

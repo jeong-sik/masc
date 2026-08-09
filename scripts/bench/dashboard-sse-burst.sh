@@ -5,7 +5,7 @@
 # with instructions for three recorded Chrome Performance scenarios.
 #
 # Scenarios:
-#   A) SSE burst   — high-frequency event ingest → journal + OAS buffer
+#   A) SSE burst   — high-frequency event ingest → journal + AGENT_CORE buffer
 #   B) search typing — telemetry page search input responsiveness
 #   C) scroll       — session-trace 500+ entries scroll FPS
 #
@@ -47,7 +47,7 @@ Step 1 — start the dev dashboard (separate shell):
 
 Step 2 — open Chrome DevTools → Performance tab. For each scenario:
 
-Scenario A — SSE burst (journal + OAS buffer hot path)
+Scenario A — SSE burst (journal + AGENT_CORE buffer hot path)
   1. Disable throttling, enable CPU 4x slowdown.
   2. Start recording.
   3. Trigger heavy board activity OR leave keeper chatter running for 10s.

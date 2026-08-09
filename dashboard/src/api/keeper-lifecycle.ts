@@ -207,7 +207,7 @@ export function clearKeeper(
 
 export interface KeeperCheckpointSummary {
   snapshot_id: string
-  source_kind: 'oas_current' | 'oas_history' | string
+  source_kind: 'agent_core_current' | 'agent_core_history' | string
   is_current: boolean
   path: string
   created_at: number
@@ -222,13 +222,13 @@ export interface KeeperCheckpointSummary {
 }
 
 export interface KeeperCheckpointCurrentError {
-  kind: 'store_error' | 'parse_error' | 'io_error' | 'sdk_other_error' | string
+  kind: 'store_error' | 'parse_error' | 'io_error' | 'agent_core_error' | string
   detail: string
 }
 
 export interface KeeperCheckpointHistoryError {
   snapshot_id: string
-  source_kind: 'oas_history' | string
+  source_kind: 'agent_core_history' | string
   is_current: false
   path: string
   file_stat: {
@@ -236,7 +236,7 @@ export interface KeeperCheckpointHistoryError {
     mtime?: number
   } | null
   status: 'missing' | 'unavailable'
-  error_kind: 'not_found' | 'store_error' | 'parse_error' | 'io_error' | 'sdk_other_error' | string
+  error_kind: 'not_found' | 'store_error' | 'parse_error' | 'io_error' | 'agent_core_error' | string
   error_detail: string | null
 }
 

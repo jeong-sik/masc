@@ -1,6 +1,6 @@
 (** Tests for Image and Document content block serialization round-trips *)
 
-open Agent_sdk
+open Agent_core
 
 (* Helper: compare content_block via show string since no eq deriving *)
 let check_block msg expected actual =

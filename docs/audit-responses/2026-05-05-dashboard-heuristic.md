@@ -51,13 +51,13 @@ read, (3) 관련 `.mli`/문서/RFC 인용, (4) `git log`로 최근 활동 확인
 ### §3 Admission Queue
 
 > Audit의 "가장 심각" 분류와 정반대로, **passthrough는 의도적 architectural rollback**.
-> RFC-0026이 admission router를 OAS runtime 레이어로 이동시키는 것이 결정된 상태.
+> RFC-0026이 admission router를 agent core runtime 레이어로 이동시키는 것이 결정된 상태.
 > MEMORY `feedback_semaphore_tier_is_architectural_anti_pattern.md`(2026-05-05)와도
 > 일치 — MASC-layer Semaphore tier는 silent skip 안티패턴이었음.
 
 | 클레임 | 분류 | 근거 | 해소 |
 |--------|------|------|------|
-| §3.1 `with_permit` 100% passthrough | **B** | 당시 코멘트도 provider-level throttling은 OAS 소유라고 명시했다. 해당 MASC admission 모듈은 2026-07-13 완전히 제거되었다. Audit의 경로 역시 stale snapshot이었다. | provider-capacity gate를 MASC에 복원하지 않는다. |
+| §3.1 `with_permit` 100% passthrough | **B** | 당시 코멘트도 provider-level throttling은 agent core 소유라고 명시했다. 해당 MASC admission 모듈은 2026-07-13 완전히 제거되었다. Audit의 경로 역시 stale snapshot이었다. | provider-capacity gate를 MASC에 복원하지 않는다. |
 | §3.2 `snapshot()` 항상 `0/0/max`, `insert_sorted`/`waiter`/`global.waiters` dead code | **C** | 코드는 클레임대로 동작. 그러나 dead code는 **의도된 RFC-0026 admission router 관측 scaffolding** — 삭제하면 runtime-layer router 도입 시 재구현 비용. | 코드 코멘트에 "observability scaffolding; do not delete" 추가 (PR-B). |
 | §3.3 metric `inflight` ↔ 실제 concurrency 불일치 (`wait_ms:0` 항상) | B | passthrough 의도이므로 wait_ms:0이 정확한 표현. 단 metric histogram의 외부 관찰자가 "passthrough mode" label을 못 보기 때문에 misread 위험. | follow-up: dashboard label + RFC-0026 runtime router 도입 시 같이 정리. |
 

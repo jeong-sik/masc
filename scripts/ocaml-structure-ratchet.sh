@@ -141,7 +141,7 @@ METRICS=(
   "keeper_mli_missing|Add .mli for the new lib/keeper/keeper_*.ml file. See planning/claude-plans/moonlit-finding-russell.md PR#2-4."
   "workspace_mli_missing|Add .mli for the new lib/workspace/*.ml file."
   "godsplit_count|Do not add new ';; godsplit' markers in lib/dune — extract a real sub-library instead. See PR#7-10."
-  "lib_dune_lines|lib/dune is growing — consider extracting modules into a sub-library (lib/keeper/dune, lib/oas/dune, lib/dashboard/dune)."
+  "lib_dune_lines|lib/dune is growing — consider extracting modules into a sub-library (lib/keeper/dune, lib/agent_core/dune, lib/dashboard/dune)."
   "inferred_dump_headers|Replace the '(** X inferred mli **)' header with a real one-line docstring. See PR#11286/11290/11296/11303/11309/11321/11401 for the closure series."
   "lib_other_mli_missing|Add .mli for the new public lib/*/*.ml file, or mark implementation-only modules private in the local dune stanza."
 )

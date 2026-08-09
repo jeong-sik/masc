@@ -19,43 +19,43 @@ type resumed =
 val open_turn
   :  Execution_agent_scope.t option
   -> ordinal:int
-  -> (t, Error.sdk_error) result
+  -> (t, Error.t) result
 
-val resume_current : Execution_agent_scope.t option -> (resumed, Error.sdk_error) result
+val resume_current : Execution_agent_scope.t option -> (resumed, Error.t) result
 
 (** Complete an interrupted [close_success] for a settled boundary: closes the
     still-open turn when the crash landed between the provider close and the turn
     close. A fully-closed turn boundary needs no further journal write. *)
-val finalize_settled : settled_boundary -> (unit, Error.sdk_error) result
+val finalize_settled : settled_boundary -> (unit, Error.t) result
 
 val turn_ordinal : t -> int
-val before_provider_attempt : t -> Binding_identity.t -> (unit, Error.sdk_error) result
+val before_provider_attempt : t -> Binding_identity.t -> (unit, Error.t) result
 val provider : t -> Execution_agent_scope.provider_attempt option
 
 val record_provider_response
   :  t
   -> Llm_provider.Types.api_response
-  -> (unit, Error.sdk_error) result
+  -> (unit, Error.t) result
 
-val provider_response : t -> (Llm_provider.Types.api_response, Error.sdk_error) result
-val invocations_settled : t -> (bool, Error.sdk_error) result
+val provider_response : t -> (Llm_provider.Types.api_response, Error.t) result
+val invocations_settled : t -> (bool, Error.t) result
 
 val invocations
   :  t
-  -> (Execution_agent_scope.invocation_authority list, Error.sdk_error) result
+  -> (Execution_agent_scope.invocation_authority list, Error.t) result
 
 (** Exact settled result authority, reconstructed from persisted invocation
     nodes and ordered by their immutable planned index. *)
 val settled_invocations_with_results
   :  t
-  -> (Execution_agent_scope.settled_invocation list, Error.sdk_error) result
+  -> (Execution_agent_scope.settled_invocation list, Error.t) result
 
 val settled_invocations
   :  settled_boundary
-  -> (Execution_agent_scope.invocation_authority list, Error.sdk_error) result
+  -> (Execution_agent_scope.invocation_authority list, Error.t) result
 
 val settled_response
   :  settled_boundary
-  -> (Llm_provider.Types.api_response, Error.sdk_error) result
+  -> (Llm_provider.Types.api_response, Error.t) result
 
-val close_success : t -> (unit, Error.sdk_error) result
+val close_success : t -> (unit, Error.t) result

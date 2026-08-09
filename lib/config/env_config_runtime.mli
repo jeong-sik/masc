@@ -131,9 +131,9 @@ module Worker : sig
   val local_runtime_cooldown_sec_opt : unit -> string option
 end
 
-(** {1 OAS SSE bridge} *)
+(** {1 AGENT_CORE SSE bridge} *)
 
-module Oas_sse : sig
+module Agent_core_sse : sig
   val drain_interval_sec : float
 end
 

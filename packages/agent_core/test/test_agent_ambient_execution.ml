@@ -1,6 +1,6 @@
-open Agent_sdk
+open Agent_core
 open Alcotest
-module Internal = Agent_sdk__
+module Internal = Agent_core__
 module Context = Internal.Execution_context
 module Scope = Internal.Execution_agent_scope
 
@@ -62,7 +62,7 @@ let test_explicit_store_conflicts_with_ambient_child () =
     | Ok runtime -> runtime
     | Error error -> fail (Error.to_string error)
   in
-  let native_path = Filename.temp_file "oas-ambient-conflict-" ".dir" in
+  let native_path = Filename.temp_file "agent_core-ambient-conflict-" ".dir" in
   Sys.remove native_path;
   let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
   Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 dir;

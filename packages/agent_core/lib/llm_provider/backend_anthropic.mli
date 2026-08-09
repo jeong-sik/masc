@@ -13,8 +13,8 @@ val request_payload : request_artifact -> string
 val request_output_token_receipt : request_artifact -> Types.output_token_receipt
 
 (** Provider-correct Claude thinking request field for a model family.
-    Exposed so the legacy Agent SDK Anthropic builder can share the same
-    manual-budget vs adaptive-thinking dispatch as this backend. *)
+    Shared by the Anthropic request builders so manual-budget and adaptive
+    thinking use the same dispatch. *)
 val thinking_config_for_config
   :  Capabilities.anthropic_thinking_control
   -> Provider_config.t

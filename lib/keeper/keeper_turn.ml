@@ -2,7 +2,7 @@
 
     Orchestrates keeper turns by building domain-specific system prompt
     configuration and delegating to {!Keeper_agent_run.run_turn} which
-    owns the full OAS-backed context lifecycle (checkpoint, prompt state,
+    owns the full AGENT_CORE-backed context lifecycle (checkpoint, prompt state,
     Agent.run).
 
     Sub-modules:
@@ -342,8 +342,8 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
      | Error err ->
        let reason =
          Keeper_turn_fsm.Failure_provider_error
-           { kind = Agent_sdk.Error.(category err |> category_label)
-           ; detail = Agent_sdk.Error.to_string err
+           { kind = Agent_core.Error.(category err |> category_label)
+           ; detail = Agent_core.Error.to_string err
            }
        in
        Keeper_turn_fsm.emit_transition
@@ -408,9 +408,9 @@ let run_keeper_invocation_turn_admitted_inner
     | None ->
         (match on_text_delta with
          | None -> None
-         | Some cb -> Some (fun (evt : Agent_sdk.Types.sse_event) ->
+         | Some cb -> Some (fun (evt : Agent_core.Types.sse_event) ->
              match evt with
-             | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
+             | Agent_core.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
              | _ -> ()))
   in
   let name = Keeper_invocation_contract.target_name request in
@@ -433,7 +433,7 @@ let run_keeper_invocation_turn_admitted_inner
       , Keeper_invocation_contract.direct_message_direct_reply direct_message
       , Keeper_invocation_contract.direct_message_channel_session_key direct_message
       , Keeper_invocation_contract.direct_message_channel direct_message
-      , Keeper_invocation_contract.direct_message_user_oas_blocks direct_message )
+      , Keeper_invocation_contract.direct_message_user_agent_core_blocks direct_message )
   in
     match ensure_keeper_exists
       ~ctx ~name
@@ -454,7 +454,7 @@ let run_keeper_invocation_turn_admitted_inner
            ~base_path:ctx.config.base_path
            ~keeper_name:meta.name
        with
-       | Error err -> tool_result_error (Agent_sdk.Error.to_string err)
+       | Error err -> tool_result_error (Agent_core.Error.to_string err)
        | Ok profile_defaults ->
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a Delegate keeper,
          evict each image to the artifact store + an eager analyze_image reading
@@ -513,7 +513,7 @@ let run_keeper_invocation_turn_admitted_inner
        with
 	         | Error error ->
 	           Progress.stop_tracking turn_task_id;
-	           tool_result_error (Agent_sdk.Error.to_string error)
+	           tool_result_error (Agent_core.Error.to_string error)
 	         | Ok initial_execution ->
             let base_dir =
               let root = session_base_dir ctx.config in
@@ -614,7 +614,7 @@ let run_keeper_invocation_turn_admitted_inner
 	            let run_result, latency_ms =
 	              Inference_utils.timed (fun () ->
 	                  match Eio_context.get_clock () with
-	                  | Error msg -> Error (Agent_sdk.Error.Internal msg)
+	                  | Error msg -> Error (Agent_core.Error.Internal msg)
 	                  | Ok clock ->
 	                  let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms
 	                      ; _
@@ -638,8 +638,8 @@ let run_keeper_invocation_turn_admitted_inner
 	                      ~next_runtime
 	                      ~attempt
 	                      ~error_kind:
-	                        (Some Agent_sdk.Error.(category err |> category_label))
-	                      ~error_message:(Some (Agent_sdk.Error.to_string err))
+	                        (Some Agent_core.Error.(category err |> category_label))
+	                      ~error_message:(Some (Agent_core.Error.to_string err))
 	                  in
 	                  let setup_direct_retry_runtime runtime_id =
 	                    Keeper_unified_turn_pre_dispatch.build_runtime_execution
@@ -690,7 +690,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                retry.next_runtime
 		                                reason
 		                                (short_preview
-		                                   (Agent_sdk.Error.to_string
+		                                   (Agent_core.Error.to_string
 		                                      fail_open_err));
 		                              Keeper_turn_helpers.record_pre_dispatch_terminal_observation
 		                                ~config:ctx.config
@@ -702,20 +702,20 @@ let run_keeper_invocation_turn_admitted_inner
 		                                  (Printf.sprintf
 		                                     "direct_retry_setup_%s"
 		                                     (Keeper_agent_error
-		                                      .terminal_reason_code_of_sdk_error
+		                                      .terminal_reason_code_of_core_error
 		                                        fail_open_err))
 		                                ~activity_kind:
 		                                  "direct_no_progress_retry_setup"
 		                                ~trajectory_outcome:
 		                                  (Trajectory.Failed
-		                                     (Agent_sdk.Error.to_string
+		                                     (Agent_core.Error.to_string
 		                                        fail_open_err))
 		                                ~error_kind:
-		                                  (Agent_sdk.Error.(
+		                                  (Agent_core.Error.(
 		                                     category fail_open_err |> category_label)
 		                                   |> Keeper_execution_receipt.error_kind_of_string)
 		                                ~error_message:
-		                                  (Agent_sdk.Error.to_string fail_open_err)
+		                                  (Agent_core.Error.to_string fail_open_err)
 		                                ~degraded_retry_applied:true
 		                                ~degraded_retry_runtime:retry.next_runtime
 		                                ~fallback_reason:retry.fallback_reason
@@ -758,8 +758,8 @@ let run_keeper_invocation_turn_admitted_inner
 		            in
 		            match run_result with
             | Error err ->
-              let e_str = Agent_sdk.Error.to_string err in
-              let user_message = Keeper_agent_error.user_message_of_sdk_error err in
+              let e_str = Agent_core.Error.to_string err in
+              let user_message = Keeper_agent_error.user_message_of_core_error err in
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    (Trajectory.Failed e_str) in
@@ -869,7 +869,7 @@ let run_keeper_invocation_turn_admitted_inner
                   | None -> `Null
                 in
                 let cache_miss_input_tokens =
-                  Keeper_hooks_oas.cache_miss_input_tokens
+                  Keeper_hooks_agent_core.cache_miss_input_tokens
                     ~input_tokens:u.input_tokens
                     ~cache_creation_input_tokens:u.cache_creation_input_tokens
                     ~cache_read_input_tokens:u.cache_read_input_tokens

@@ -413,7 +413,7 @@ let tool_schema_of_json index json =
   | Error detail -> invalid_config ~field:(Printf.sprintf "tools[%d]" index) ~detail
 ;;
 
-let of_json (json : Yojson.Safe.t) : (agent_card, Error.sdk_error) result =
+let of_json (json : Yojson.Safe.t) : (agent_card, Error.t) result =
   match json with
   | `Assoc fields ->
     let ( let* ) = Result.bind in

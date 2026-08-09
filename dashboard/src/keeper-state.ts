@@ -142,7 +142,7 @@ export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry)
 }
 
 /** Turns the keeper ran on its own. Their semantic conversation is persisted
- *  in the OAS checkpoint; typed turn records provide a stable dashboard
+ *  in the Agent Core checkpoint; typed turn records provide a stable dashboard
  *  projection without duplicating it into the chat store. Shown without the
  *  internal toggle and folded into one collapsed group. */
 export function isAutonomousTurnEntry(entry: KeeperConversationEntry): boolean {
@@ -460,7 +460,7 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
         text: '',
         contentWithheld: true,
         ts: asString(raw.ts),
-        oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+        agentCoreBlockIndex: asNumber(raw.agentCoreBlockIndex) ?? asNumber(raw.agent_core_block_index) ?? undefined,
       })
     }
     const text = asString(raw.text)
@@ -469,7 +469,7 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
           kind,
           text,
           ts: asString(raw.ts),
-          oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+          agentCoreBlockIndex: asNumber(raw.agentCoreBlockIndex) ?? asNumber(raw.agent_core_block_index) ?? undefined,
         })
       : null
   }
@@ -486,7 +486,7 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
           kind: 'progress',
           text,
           ts: asString(raw.ts),
-          oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+          agentCoreBlockIndex: asNumber(raw.agentCoreBlockIndex) ?? asNumber(raw.agent_core_block_index) ?? undefined,
         })
       : null
   }
@@ -505,7 +505,7 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
       args: normalizeTracePayload(raw.args),
       result: normalizeTracePayload(raw.result),
       ts: asString(raw.ts) ?? undefined,
-      oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+      agentCoreBlockIndex: asNumber(raw.agentCoreBlockIndex) ?? asNumber(raw.agent_core_block_index) ?? undefined,
     })
   }
   return null
@@ -1120,7 +1120,7 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
 export function promoteAssistantTextToProgress(
   name: string,
   entryId: string,
-  meta: { oasBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number } = {},
 ): void {
   updateThreadEntry(name, entryId, entry => {
     const text = entry.rawText ?? entry.text
@@ -1129,7 +1129,7 @@ export function promoteAssistantTextToProgress(
       kind: 'progress' as const,
       text,
       ts: new Date().toISOString(),
-      oasBlockIndex: meta.oasBlockIndex,
+      agentCoreBlockIndex: meta.agentCoreBlockIndex,
     })
     return {
       ...entry,
@@ -1145,19 +1145,19 @@ function writeAssistantThinkingText(
   name: string,
   entryId: string,
   text: string,
-  meta: { oasBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number } = {},
   mode: 'append' | 'snapshot',
 ): void {
   if (!text.trim()) return
-  const oasBlockIndex = meta.oasBlockIndex
+  const agentCoreBlockIndex = meta.agentCoreBlockIndex
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
     const last = existing[existing.length - 1]
     const sameThinkingBlock =
       last?.kind === 'think'
-      && (oasBlockIndex === undefined
-        ? last.oasBlockIndex === undefined
-        : last.oasBlockIndex === oasBlockIndex)
+      && (agentCoreBlockIndex === undefined
+        ? last.agentCoreBlockIndex === undefined
+        : last.agentCoreBlockIndex === agentCoreBlockIndex)
     // Stamp the occurrence time on a NEW think step so the work-trace card can
     // interleave it with tool entries by occurrence order. When consecutive
     // deltas merge into the same step, the first stamp is preserved: the step
@@ -1176,7 +1176,7 @@ function writeAssistantThinkingText(
               kind: 'think',
               text: nextText,
               ts: last.ts,
-              oasBlockIndex: last.oasBlockIndex,
+              agentCoreBlockIndex: last.agentCoreBlockIndex,
             }),
           ]
         : [
@@ -1185,7 +1185,7 @@ function writeAssistantThinkingText(
               kind: 'think',
               text: nextText,
               ts: new Date().toISOString(),
-              oasBlockIndex,
+              agentCoreBlockIndex,
             }),
           ]
     return {
@@ -1205,7 +1205,7 @@ export function appendAssistantThinkingDelta(
   name: string,
   entryId: string,
   delta: string,
-  meta: { oasBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number } = {},
 ): void {
   writeAssistantThinkingText(name, entryId, delta, meta, 'append')
 }
@@ -1214,7 +1214,7 @@ export function setAssistantThinkingSnapshot(
   name: string,
   entryId: string,
   text: string,
-  meta: { oasBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number } = {},
 ): void {
   writeAssistantThinkingText(name, entryId, text, meta, 'snapshot')
 }
@@ -1231,7 +1231,7 @@ function warnMissingToolTrace(
 export function appendAssistantToolTraceStep(
   name: string,
   entryId: string,
-  step: { toolCallId: string; name: string; ts?: string; oasBlockIndex?: number },
+  step: { toolCallId: string; name: string; ts?: string; agentCoreBlockIndex?: number },
 ): void {
   const toolCallId = nonBlankToolCallId(step.toolCallId)
   const toolName = step.name.trim()
@@ -1250,7 +1250,7 @@ export function appendAssistantToolTraceStep(
       name: toolName,
       status: 'pending',
       ts: step.ts ?? new Date().toISOString(),
-      oasBlockIndex: step.oasBlockIndex,
+      agentCoreBlockIndex: step.agentCoreBlockIndex,
     })
     const traceSteps =
       index === -1
@@ -1263,7 +1263,7 @@ export function appendAssistantToolTraceStep(
                   toolCallId,
                   status: trace.status ?? 'pending',
                   ts: trace.ts ?? nextStep.ts,
-                  oasBlockIndex: trace.oasBlockIndex ?? nextStep.oasBlockIndex,
+                  agentCoreBlockIndex: trace.agentCoreBlockIndex ?? nextStep.agentCoreBlockIndex,
                 })
               : trace,
           )
@@ -1455,7 +1455,7 @@ function mergeLocalAssistantTraceSteps(
   localEntries: KeeperConversationEntry[],
   // Tracks local trace sources already claimed by an earlier history row.
   // Join order: requestId (backend-stamped turn identity) first, then
-  // turn_ref when OAS/MASC provides it on both the live reply details and
+  // turn_ref when Agent Core/MASC provides it on both the live reply details and
   // the persisted history row. There is no text-based fallback: a local
   // trace source that shares neither key with the history row stays
   // unmerged (and is dropped by the same requestId rule in replaceThread

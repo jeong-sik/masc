@@ -1,12 +1,12 @@
 {
   "version": 1,
   "updated_at": "2026-07-21",
-  "description": "Operator-facing index of OAS runtime output and schema surfaces. Entries whose producer referenced the deleted Runtime_server / Runtime_sync / Runtime_projection / Runtime_evidence cluster (removed in v0.217.x) are marked removed_in; their schema files under docs/schemas/ are retained for historical decode only.",
+  "description": "Operator-facing index of AGENT_CORE runtime output and schema surfaces. Entries whose producer referenced the deleted Runtime_server / Runtime_sync / Runtime_projection / Runtime_evidence cluster (removed in v0.217.x) are marked removed_in; their schema files under docs/schemas/ are retained for historical decode only.",
   "surfaces": [
     {
-      "id": "oas.event_bus.v1",
+      "id": "agent_core.event_bus.v1",
       "kind": "event_bus",
-      "owner": "OAS",
+      "owner": "AGENT_CORE",
       "producer": "Event_bus publishers",
       "consumer": ["library subscribers", "runtime/event bridges"],
       "wire_or_artifact": "In-process Event_bus.event",
@@ -18,11 +18,11 @@
       "notes": "Native payloads stay provider-agnostic; downstream domain events should use Custom or a downstream bus."
     },
     {
-      "id": "oas.runtime_protocol.v2",
+      "id": "agent_core.runtime_protocol.v2",
       "kind": "runtime_protocol",
-      "owner": "OAS",
+      "owner": "AGENT_CORE",
       "producer": "Runtime (type truth only)",
-      "consumer": ["oas_runtime subprocess clients"],
+      "consumer": ["agent_core_runtime subprocess clients"],
       "wire_or_artifact": "Runtime.protocol_message over NDJSON stdio",
       "schema_source": ["lib/runtime.mli"],
       "validator": "protocol_message JSON roundtrip tests",
@@ -33,9 +33,9 @@
       "removed_in": null
     },
     {
-      "id": "oas.runtime_sync_window.v1",
+      "id": "agent_core.runtime_sync_window.v1",
       "kind": "json_schema",
-      "owner": "OAS",
+      "owner": "AGENT_CORE",
       "producer": "removed in v0.217.x (was Runtime_sync)",
       "consumer": ["offline/runtime sync clients", "downstream replay tooling", "external resume/A2A adapters"],
       "wire_or_artifact": "Runtime sync window JSON",
@@ -48,9 +48,9 @@
       "removed_in": "v0.217.x"
     },
     {
-      "id": "oas.runtime_report.v1",
+      "id": "agent_core.runtime_report.v1",
       "kind": "json_schema",
-      "owner": "OAS",
+      "owner": "AGENT_CORE",
       "producer": "removed in v0.217.x (was Runtime_projection)",
       "consumer": ["runtime protocol clients", "session evidence readers"],
       "wire_or_artifact": "Runtime.report JSON artifact and Report_response payload",
@@ -63,9 +63,9 @@
       "removed_in": "v0.217.x"
     },
     {
-      "id": "oas.runtime_proof.v1",
+      "id": "agent_core.runtime_proof.v1",
       "kind": "json_schema",
-      "owner": "OAS",
+      "owner": "AGENT_CORE",
       "producer": "removed in v0.217.x (was Runtime_projection)",
       "consumer": ["runtime protocol clients", "session evidence readers"],
       "wire_or_artifact": "Runtime.proof JSON artifact and Prove_response payload",
@@ -78,9 +78,9 @@
       "removed_in": "v0.217.x"
     },
     {
-      "id": "oas.runtime_telemetry_report.v1",
+      "id": "agent_core.runtime_telemetry_report.v1",
       "kind": "json_schema",
-      "owner": "OAS",
+      "owner": "AGENT_CORE",
       "producer": "removed in v0.217.x (was Runtime_evidence)",
       "consumer": ["session evidence readers", "downstream telemetry projections"],
       "wire_or_artifact": "runtime-telemetry-json artifact and structured telemetry reader payload",
@@ -93,9 +93,9 @@
       "removed_in": "v0.217.x"
     },
     {
-      "id": "oas.runtime_evidence_bundle.v1",
+      "id": "agent_core.runtime_evidence_bundle.v1",
       "kind": "json_schema",
-      "owner": "OAS",
+      "owner": "AGENT_CORE",
       "producer": "removed in v0.217.x (was Runtime_evidence)",
       "consumer": ["session evidence readers", "downstream proof consumers"],
       "wire_or_artifact": "runtime-evidence JSON artifact",
@@ -108,9 +108,9 @@
       "removed_in": "v0.217.x"
     },
     {
-      "id": "oas.raw_trace_record.v1",
+      "id": "agent_core.raw_trace_record.v1",
       "kind": "jsonl_artifact",
-      "owner": "OAS",
+      "owner": "AGENT_CORE",
       "producer": "Raw_trace",
       "consumer": ["proof/report tooling", "session evidence readers"],
       "wire_or_artifact": "Raw trace JSONL record",
@@ -122,9 +122,9 @@
       "notes": "Records run, assistant block, tool execution, hook, and terminal trace events. Raw_trace remains live via Runtime_store."
     },
     {
-      "id": "oas.raw_trace_manifest.v1",
+      "id": "agent_core.raw_trace_manifest.v1",
       "kind": "json_schema",
-      "owner": "OAS",
+      "owner": "AGENT_CORE",
       "producer": "removed in v0.217.x (was Runtime_evidence; Raw_trace rows still written via Runtime_store)",
       "consumer": ["session evidence readers", "downstream raw trace tooling"],
       "wire_or_artifact": "runtime-raw-trace-json artifact",
@@ -137,9 +137,9 @@
       "removed_in": "v0.217.x"
     },
     {
-      "id": "oas.structured_schema.v1",
+      "id": "agent_core.structured_schema.v1",
       "kind": "ocaml_interface",
-      "owner": "OAS",
+      "owner": "AGENT_CORE",
       "producer": "Structured output helpers",
       "consumer": ["agent callers", "provider-native structured output routes"],
       "wire_or_artifact": "Structured.schema to provider-native JSON Schema",

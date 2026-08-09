@@ -66,7 +66,7 @@ type field =
   | Latched_reason
   | Current_task_id
   | Keeper_id
-  | Oas_env
+  | Agent_core_env
 
 let all_fields =
   [ Schema
@@ -120,7 +120,7 @@ let all_fields =
   ; Latched_reason
   ; Current_task_id
   ; Keeper_id
-  ; Oas_env
+  ; Agent_core_env
   ]
 
 let field_name = function
@@ -175,7 +175,7 @@ let field_name = function
   | Latched_reason -> "latched_reason"
   | Current_task_id -> "current_task_id"
   | Keeper_id -> "keeper_id"
-  | Oas_env -> "oas_env"
+  | Agent_core_env -> "agent_core_env"
 ;;
 
 let current_field_names = List.map field_name all_fields

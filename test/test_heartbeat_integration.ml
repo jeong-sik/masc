@@ -2964,11 +2964,11 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "shutdown-dead-tombstone-completion" in
-  let completion_bus = Agent_sdk.Event_bus.create () in
+  let completion_bus = Agent_core.Event_bus.create () in
   let completion_subscription =
     Masc.Runtime_event_bus.subscribe
       ~capacity:256
-      ~overflow:Agent_sdk.Event_bus.Drop_oldest
+      ~overflow:Agent_core.Event_bus.Drop_oldest
       ~purpose:"dead-tombstone-completion-test"
       completion_bus
   in
@@ -3153,8 +3153,8 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
       check int "Tombstone_reaped delivered once" 1 !hook_deliveries;
       (match Masc.Runtime_event_bus.drain completion_subscription with
        | [ event ] ->
-         (match event.Agent_sdk.Event_bus.payload with
-          | Agent_sdk.Event_bus.Custom
+         (match event.Agent_core.Event_bus.payload with
+          | Agent_core.Event_bus.Custom
               ("masc.keeper.lifecycle", `Assoc fields) ->
             (match List.assoc_opt "event" fields, List.assoc_opt "detail" fields with
              | Some (`String event_name), Some (`String detail) ->
@@ -3165,7 +3165,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
                   ^ Shutdown_types.Operation_id.to_string operation_id)
                  detail
              | _ -> fail "dead completion event payload lost typed fields")
-          | Agent_sdk.Event_bus.Custom (topic, _) ->
+          | Agent_core.Event_bus.Custom (topic, _) ->
             fail ("unexpected completion event topic: " ^ topic)
           | _ -> fail "dead completion did not publish a custom lifecycle event")
        | events ->
@@ -3218,11 +3218,11 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun owner_sw ->
   let base_dir = temp_dir "dashboard-purge-finalization" in
-  let completion_bus = Agent_sdk.Event_bus.create () in
+  let completion_bus = Agent_core.Event_bus.create () in
   let completion_subscription =
     Masc.Runtime_event_bus.subscribe
       ~capacity:256
-      ~overflow:Agent_sdk.Event_bus.Drop_oldest
+      ~overflow:Agent_core.Event_bus.Drop_oldest
       ~purpose:"dashboard-purge-completion-test"
       completion_bus
   in
@@ -3442,8 +3442,8 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
               (Heartbeat.list ())));
       (match Masc.Runtime_event_bus.drain completion_subscription with
        | [ event ] ->
-         (match event.Agent_sdk.Event_bus.payload with
-          | Agent_sdk.Event_bus.Custom
+         (match event.Agent_core.Event_bus.payload with
+          | Agent_core.Event_bus.Custom
               ("masc.keeper.lifecycle", `Assoc fields) ->
             check string
               "dashboard purge lifecycle event"

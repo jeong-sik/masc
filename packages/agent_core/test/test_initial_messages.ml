@@ -3,7 +3,7 @@
     history via agent_config.initial_messages. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 open Types
 
 (* ── Helper: build an agent with initial_messages ──── *)

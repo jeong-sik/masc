@@ -1,18 +1,18 @@
-(** Canonical tool projections (RFC-OAS-024, WP8 — Increments 1-2).
+(** Canonical tool projections (Agent Core contract, WP8 — Increments 1-2).
 
     Typed read-projections of the tool-call/tool-result dimensions of
     {!Types.content_block}. These are {b not} a second in-memory SSOT:
     [content_block] remains the canonical representation and every value here is
     derived from it at the provider boundary.
 
-    Scope (RFC-OAS-024 §7): Increment 1 shipped [tool_result_of_block].
+    Scope (Agent Core contract §7): Increment 1 shipped [tool_result_of_block].
     Increment 2 adds [provider_tool_call] and [tool_calls_of_response] as a
     structural projection for downstream renderers/executors. Reasoning metadata
     is only linked when it is immediately adjacent in the canonical content
     order; this module never infers semantic ownership across Text/media/result
     boundaries and never exposes raw provider reasoning payloads.
 
-    Boundary (RFC-OAS-024 §1): OAS-owned provider canonicalization only. Depends
+    Boundary (Agent Core contract §1): AGENT_CORE-owned provider canonicalization only. Depends
     solely on provider-boundary types and references no execution, policy, or
     coordinator concept. The downstream consumer is named only as an unnamed
     external role.
@@ -40,7 +40,7 @@ type provider_reasoning_block =
 (** Reasoning blocks immediately adjacent to a tool call.
 
     [Adjacent_reasoning blocks] means the blocks are contiguous immediately
-    before the [ToolUse] in canonical content order. It does {b not} mean OAS
+    before the [ToolUse] in canonical content order. It does {b not} mean AGENT_CORE
     inferred provider intent. *)
 type adjacent_reasoning =
   | No_adjacent_reasoning
@@ -94,7 +94,7 @@ type provider_tool_result =
   ; structured_content : Yojson.Safe.t option
     (** Projection of [ToolResult.json] (WP4 parsed payload), verbatim. Not a
           fresh parse, and {b not} the request-level structured-output contract
-          (RFC-OAS-024 D7). *)
+          (Agent Core contract D7). *)
   ; outcome : Types.tool_result_outcome
   }
 

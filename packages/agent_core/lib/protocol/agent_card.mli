@@ -54,7 +54,7 @@ val create_supported_interface
   -> protocol_version:string
   -> ?tenant:string
   -> unit
-  -> (supported_interface, Error.sdk_error) result
+  -> (supported_interface, Error.t) result
 
 val supported_interfaces
   :  supported_interface
@@ -63,7 +63,7 @@ val supported_interfaces
 
 val supported_interfaces_of_list
   :  supported_interface list
-  -> (supported_interfaces, Error.sdk_error) result
+  -> (supported_interfaces, Error.t) result
 
 val supported_interfaces_to_list : supported_interfaces -> supported_interface list
 
@@ -89,7 +89,7 @@ type agent_card =
 (** {1 Serialization} *)
 
 val to_json : agent_card -> Yojson.Safe.t
-val of_json : Yojson.Safe.t -> (agent_card, Error.sdk_error) result
+val of_json : Yojson.Safe.t -> (agent_card, Error.t) result
 
 (** {1 Construction from agent info} *)
 

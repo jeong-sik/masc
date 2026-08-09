@@ -1,7 +1,7 @@
 open Keeper_approval_queue
 open Keeper_approval_queue_rules_types
 
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 module Registry = Runtime_exact_output_registry
 module Schema = Keeper_structured_output_schema
 
@@ -22,7 +22,7 @@ let () =
     ~help:
       "Total HITL exact-output flow outcomes classified by [outcome]. MASC \
        records domain and durability outcomes only; provider selection, \
-       admission, dispatch, and failover remain OAS-owned."
+       admission, dispatch, and failover remain AGENT_CORE-owned."
     ()
 ;;
 
@@ -61,7 +61,7 @@ let build_context_bundle ~(entry : pending_approval) =
   | None -> `Assoc (request_identity @ [ "partial_context", `Bool true ])
 ;;
 
-let message role text = Agent_sdk.Types.text_message role text
+let message role text = Agent_core.Types.text_message role text
 
 let canonical_output_contract =
   Printf.sprintf
@@ -71,9 +71,9 @@ let canonical_output_contract =
 ;;
 
 let messages_for_summary ~system_prompt ~context_bundle =
-  [ message Agent_sdk.Types.System system_prompt
-  ; message Agent_sdk.Types.User canonical_output_contract
-  ; message Agent_sdk.Types.User (Yojson.Safe.to_string context_bundle)
+  [ message Agent_core.Types.System system_prompt
+  ; message Agent_core.Types.User canonical_output_contract
+  ; message Agent_core.Types.User (Yojson.Safe.to_string context_bundle)
   ]
 ;;
 

@@ -1,4 +1,4 @@
-(** Masc_context_injector — OAS context_injector for MASC agents.
+(** Masc_context_injector — AGENT_CORE context_injector for MASC agents.
 
     @since context_injector integration *)
 
@@ -35,7 +35,7 @@ let key_tool_error_count = "session:tool_error_count"
 (* Injector factory                                                  *)
 (* ================================================================ *)
 
-let make ~(config : config) () : Agent_sdk.Hooks.context_injector =
+let make ~(config : config) () : Agent_core.Hooks.context_injector =
   let call_count = Atomic.make 0 in
   let success_count = Atomic.make 0 in
   let error_count = Atomic.make 0 in
@@ -46,7 +46,7 @@ let make ~(config : config) () : Agent_sdk.Hooks.context_injector =
     if is_ok then ignore (Atomic.fetch_and_add success_count 1)
     else ignore (Atomic.fetch_and_add error_count 1);
     let outcome_str = if is_ok then "ok" else "error" in
-    Some Agent_sdk.Hooks.{
+    Some Agent_core.Hooks.{
       context_updates = [
         (key_wall_time, `String (Masc_domain.iso8601_of_unix_seconds now));
         (* Session anchor: lets [render_temporal_summary] recompute a
@@ -67,18 +67,18 @@ let make ~(config : config) () : Agent_sdk.Hooks.context_injector =
 (* ================================================================ *)
 
 let get_string ctx key =
-  match Agent_sdk.Context.get ctx key with
+  match Agent_core.Context.get ctx key with
   | Some (`String s) -> Some s
   | _ -> None
 
 let get_float ctx key =
-  match Agent_sdk.Context.get ctx key with
+  match Agent_core.Context.get ctx key with
   | Some (`Float f) -> Some f
   | Some (`Int i) -> Some (float_of_int i)
   | _ -> None
 
 let get_int ctx key =
-  match Agent_sdk.Context.get ctx key with
+  match Agent_core.Context.get ctx key with
   | Some (`Int i) -> Some i
   | _ -> None
 
@@ -96,12 +96,12 @@ let tool_summary_fields ctx =
       key_tool_call_count key_last_tool_name key_last_tool_outcome;
     None
 
-let render_temporal_summary ?now (ctx : Agent_sdk.Context.t) : string option =
+let render_temporal_summary ?now (ctx : Agent_core.Context.t) : string option =
   (* [key_wall_time] presence is the "at least one tool has executed"
      sentinel (turn 0 renders no block). We do NOT display its stored
      value: it is the last tool-call timestamp and goes stale across
      idle turns, which is exactly the bug this renderer must avoid. *)
-  match Agent_sdk.Context.get ctx key_wall_time with
+  match Agent_core.Context.get ctx key_wall_time with
   | None -> None
   | Some _ ->
     let now = match now with Some n -> n | None -> Time_compat.now () in

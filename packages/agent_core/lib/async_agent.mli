@@ -37,7 +37,7 @@ val spawn
 
 (** [await future] blocks the calling fiber until the background
     agent completes (or is cancelled). *)
-val await : 'a future -> ('a, Error.sdk_error) Result.t
+val await : 'a future -> ('a, Error.t) Result.t
 
 (** [is_ready future] returns [true] if the result is already available. *)
 val is_ready : 'a future -> bool
@@ -69,7 +69,7 @@ val race
   :  sw:Eio.Switch.t
   -> ?clock:_ Eio.Time.clock
   -> (Agent.t * string) list
-  -> (string * Types.api_response, Error.sdk_error) Result.t
+  -> (string * Types.api_response, Error.t) Result.t
 
 (** [all ~sw ?clock ?max_fibers agents] runs all [(agent, prompt)] pairs
     and waits for all to complete. Returns a list of
@@ -84,4 +84,4 @@ val all
   -> ?clock:_ Eio.Time.clock
   -> ?max_fibers:int
   -> (Agent.t * string) list
-  -> (string * (Types.api_response, Error.sdk_error) Result.t) list
+  -> (string * (Types.api_response, Error.t) Result.t) list

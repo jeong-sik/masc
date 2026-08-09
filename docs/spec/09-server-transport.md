@@ -817,7 +817,7 @@ sequenceDiagram
 - `GET /api/v1/openapi.json`으로 접근
 - 모든 REST-바인딩된 MCP 도구를 OpenAPI path로 변환
 - `x-mcp-operations`: MCP 도구 카탈로그 (inputSchema, tags, help entry)
-- `x-agent-sdk-tools`: SDK alias 바인딩
+- `x-agent-core-tools`: Agent Core 바인딩
 - `/mcp` POST 엔드포인트에 전체 operation catalog 첨부
 
 ---
@@ -865,7 +865,7 @@ sequenceDiagram
 | `server_routes_http_routes_dashboard.ml` | - | Keeper Gate dashboard routes |
 | `sse.ml` | 474 | SSE event registry + broadcast |
 | `sse_workspace_filter.ml` | 63 | Workspace별 SSE 필터링 |
-| `keeper_event_bridge.ml` | - | Agent core Event_bus -> SSE 이벤트 브릿지 |
+| `keeper_event_bridge.ml` | - | Agent Core Event_bus -> SSE 이벤트 브릿지 |
 | `transport.ml` | 674 | 프로토콜 바인딩 추상화 + OpenAPI 생성 |
 | `http_server_eio.ml` | 675 | httpun-eio 래퍼 (Router, Compression) |
 | `auth.ml` | 435 | 인증/인가 코어 |

@@ -80,7 +80,7 @@ val error_message : api_error -> string
     rotating replays the same oversized prompt. [Empty_attributed] means a
     recognized non-overflow stop_reason, for which the caller's existing
     provider-unavailability handling applies. [Empty_unattributed] carries the
-    raw stop_reason token the SDK does not model: the caller must surface it
+    raw stop_reason token agent core does not model: the caller must surface it
     instead of folding it into transient provider unavailability, which would
     retry the identical prompt forever and hide an overflow reported with an
     unmodeled token. Derived from the typed stop_reason alone — no provider

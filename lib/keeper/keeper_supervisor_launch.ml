@@ -210,7 +210,7 @@ let launch_supervised_fiber_body
       Eio_guard.protect
         (fun () ->
            try
-             (* MASC owns the worker's input and durable callbacks, while OAS
+             (* MASC owns the worker's input and durable callbacks, while AGENT_CORE
                 owns target admission, dispatch, and advancement. The fork
                 itself lives in [Keeper_keepalive] so both lane-start paths
                 produce the same lane. *)

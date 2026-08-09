@@ -1,4 +1,4 @@
-(** SDK metrics collection — counters and histograms.
+(** Agent-core metrics collection — counters and histograms.
 
     Instance-based: each agent can maintain independent metrics.
     Follows OpenTelemetry semantic conventions for gen_ai metrics.

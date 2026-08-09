@@ -158,7 +158,7 @@ let trajectory_line_to_chat_trace_step = function
          { text = entry.content
          ; content_withheld = false
          ; ts = Some entry.ts_iso
-         ; oas_block_index = None
+         ; agent_core_block_index = None
          })
   | Trajectory.Tool_call entry ->
     let result =
@@ -183,7 +183,7 @@ let trajectory_line_to_chat_trace_step = function
                 | Yojson.Json_error _ -> `String entry.args_json)
          ; result
          ; ts = Some entry.ts_iso
-         ; oas_block_index = None
+         ; agent_core_block_index = None
          })
 ;;
 

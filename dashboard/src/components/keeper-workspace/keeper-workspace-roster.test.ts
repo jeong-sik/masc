@@ -496,12 +496,12 @@ describe('KeeperWorkspaceRoster', () => {
     keepers.value = [mk({
       name: 'nobase',
       status: 'running',
-      runtime_canonical: 'oas.primary',
+      runtime_canonical: 'agentCore.primary',
       model: 'anthropic/claude-x',
     })]
     render(html`<${KeeperWorkspaceRoster} activeName="nobase" />`, host)
     const handle = host.querySelector('.kw-kp-handle') as HTMLElement
-    expect(handle?.textContent).toBe('oas.primary')
+    expect(handle?.textContent).toBe('agentCore.primary')
     expect(handle?.textContent).not.toBe('anthropic/claude-x')
   })
 

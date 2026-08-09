@@ -32,11 +32,11 @@ val reconnect_all
   -> mgr:_ Eio.Process.mgr
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> info list
-  -> Mcp.managed list * (info * Error.sdk_error) list
+  -> Mcp.managed list * (info * Error.t) list
 
 (** {2 JSON serialization} *)
 
 val info_to_json : info -> Yojson.Safe.t
-val info_of_json : Yojson.Safe.t -> (info, Error.sdk_error) result
+val info_of_json : Yojson.Safe.t -> (info, Error.t) result
 val info_list_to_json : info list -> Yojson.Safe.t
-val info_list_of_json : Yojson.Safe.t -> (info list, Error.sdk_error) result
+val info_list_of_json : Yojson.Safe.t -> (info list, Error.t) result

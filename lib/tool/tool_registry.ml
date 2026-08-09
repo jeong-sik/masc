@@ -52,7 +52,7 @@ let with_registry_ro f = Eio_guard.with_mutex_ro registry_mu f
 
 module StringSet = Set_util.StringSet
 
-(** Tool_registry sits below keeper/OAS dispatch; depending on Config or tool
+(** Tool_registry sits below keeper/AGENT_CORE dispatch; depending on Config or tool
     schemas creates cycles. Explicit metadata is its local catalog truth. *)
 let stats_catalog_tool_names : StringSet.t Eio.Lazy.t =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->

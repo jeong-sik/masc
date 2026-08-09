@@ -87,7 +87,7 @@ let to_http_spec (info : info) : Mcp_http.http_spec option =
     Returns a pair: (successfully connected, failed infos with error messages).
     Failed connections do not abort the others. *)
 let reconnect_all ~sw ~mgr ~net (infos : info list)
-  : Mcp.managed list * (info * Error.sdk_error) list
+  : Mcp.managed list * (info * Error.t) list
   =
   List.fold_left
     (fun (connected, failed) info ->
@@ -189,7 +189,7 @@ let info_to_json (info : info) : Yojson.Safe.t =
     ]
 ;;
 
-let info_of_json json : (info, Error.sdk_error) result =
+let info_of_json json : (info, Error.t) result =
   try
     let open Yojson.Safe.Util in
     let* () =
@@ -270,7 +270,7 @@ let info_list_to_json (infos : info list) : Yojson.Safe.t =
   `List (List.map info_to_json infos)
 ;;
 
-let info_list_of_json json : (info list, Error.sdk_error) result =
+let info_list_of_json json : (info list, Error.t) result =
   try
     let open Yojson.Safe.Util in
     json |> to_list |> List.map info_of_json |> result_all

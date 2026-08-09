@@ -53,7 +53,7 @@ let cli_subprocess_idle_sec = cli_subprocess_idle_sec_live
 
 (* SSOT: Env_config_keeper.KeeperKeepalive.body_timeout_sec_override
    (same env var, same clamp [10, 600]). Opt-in: unset -> None.
-   OAS applies this only to non-streaming sync body reads; streaming
+   AGENT_CORE applies this only to non-streaming sync body reads; streaming
    liveness is progress-based. *)
 let body_timeout_override_sec_live () =
   match Env_config_core.raw_value_opt "MASC_KEEPER_BODY_TIMEOUT_SEC" with
@@ -84,7 +84,7 @@ let provider_call_deadline_sec_live () =
 (* Fail-safe liveness floor for the streaming inter-line idle timeout
    (seconds). When neither [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC] nor runtime.toml
    [turn.stream_idle_timeout_sec] is set, the resolved value would be [None] and
-   OAS would apply no inter-line idle bound, letting a hung provider stream
+   AGENT_CORE would apply no inter-line idle bound, letting a hung provider stream
    freeze the keeper chat lane indefinitely (#25128, measured 30+ min). This is a
    single universal liveness ceiling — NOT a per-provider tuned default
    (RFC-0345 §3.1) — an order of magnitude above any legitimate inter-token gap

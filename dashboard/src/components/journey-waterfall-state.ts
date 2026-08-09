@@ -43,7 +43,7 @@ export interface JourneyWaterfallRuntimeEvidence {
   staleReason: string | null
   traceId: string
   keeperTurnId: number | null
-  maxOasTurnCount: number | null
+  maxAgentCoreTurnCount: number | null
   providerTerminalStatus: string | null
   providerTerminalExceptionKind: string | null
   providerAttemptStartedCount: number
@@ -181,7 +181,7 @@ export function summarizeRuntimeTrace(
     staleReason: trace.stale_reason,
     traceId: trace.trace_id,
     keeperTurnId: runtimeKeeperTurnId(trace),
-    maxOasTurnCount: clock.max_oas_turn_count ?? trace.turn_identity.max_oas_turn_count,
+    maxAgentCoreTurnCount: clock.max_agent_core_turn_count ?? trace.turn_identity.max_agent_core_turn_count,
     providerTerminalStatus: trace.provider_attempts.terminal_status,
     providerTerminalExceptionKind: trace.provider_attempts.terminal_exception_kind,
     providerAttemptStartedCount: trace.provider_attempts.started_count,

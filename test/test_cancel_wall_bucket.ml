@@ -1,6 +1,6 @@
 (** Drift-guard for [Cancel_wall_bucket.of_wall] — pins the five
     wall-clock bucket boundaries (60/300/600/1800s) and labels shared by
-    [keeper_llm_bridge] and [masc_oas_bridge]. If a boundary or label
+    [keeper_llm_bridge] and [masc_agent_core_bridge]. If a boundary or label
     moves, the two cancel-metric sources stop being unionable; this test
     fails before that drift can ship. *)
 

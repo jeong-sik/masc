@@ -96,7 +96,7 @@ describe('RuntimeMonitor', () => {
             always_ignored_sampling_params: ['temperature'],
           },
           request_config: {
-            source: 'oas-provider-config',
+            source: 'agent-core-provider-config',
             provider_kind: 'openai_compat',
             request_path: '/chat/completions',
             request_path_targets_responses_api: false,
@@ -131,7 +131,7 @@ describe('RuntimeMonitor', () => {
             connect_timeout_s: 120,
           },
           effective_capabilities: {
-            source: 'oas-provider-config-model',
+            source: 'agent-core-provider-config-model',
             max_context_tokens: 131072,
             max_output_tokens: 65536,
             supports_tools: true,
@@ -373,7 +373,7 @@ describe('RuntimeMonitor', () => {
 
     expect(container.textContent).toContain('params · wire:chat_template_kwargs')
     expect(container.textContent).toContain(
-      'request · kind:openai_compat · source:oas-provider-config · path:/chat/completions',
+      'request · kind:openai_compat · source:agent-core-provider-config · path:/chat/completions',
     )
     expect(container.textContent).toContain('system-prompt')
     expect(container.textContent).toContain('preserve:off')
@@ -406,8 +406,8 @@ describe('RuntimeMonitor', () => {
       'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
     )
     expect(container.textContent).toContain('price-in:0.1')
-    expect(container.textContent).toContain('effective · source:oas-provider-config-model · ctx:131072 · out:65536')
-    expect(container.textContent).toContain('source:oas-provider-config-model · ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
+    expect(container.textContent).toContain('effective · source:agent-core-provider-config-model · ctx:131072 · out:65536')
+    expect(container.textContent).toContain('source:agent-core-provider-config-model · ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
     expect(container.textContent).toContain('runtime-mcp-tools')
     expect(container.textContent).toContain('reasoning · extended-thinking · reasoning-budget · effort:low,medium,high')
     expect(container.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
@@ -468,14 +468,14 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('policy · replay on tool call')
     expect(container.textContent).toContain('required')
     expect(container.textContent).toContain('request · source')
-    expect(container.textContent).toContain('oas-provider-config')
+    expect(container.textContent).toContain('agent-core-provider-config')
     expect(container.textContent).toContain('request · system prompt')
     expect(container.textContent).toContain('declared provider · capabilities block')
     expect(container.textContent).toContain('declared model · capability source')
     expect(container.textContent).toContain('binding · provider.model')
     expect(container.textContent).toContain('runpod_mtp,qwen')
     expect(container.textContent).toContain('effective · source')
-    expect(container.textContent).toContain('oas-provider-config-model')
+    expect(container.textContent).toContain('agent-core-provider-config-model')
     expect(container.textContent).toContain('effective · max context')
     expect(container.textContent).toContain('131,072')
     expect(container.textContent).toContain('effective · tools')
@@ -603,7 +603,7 @@ describe('RuntimeMonitor', () => {
               usage_reported: false,
               telemetry_reported: true,
               coverage_reason: 'missing_usage_and_inference',
-              coverage_stage: 'oas',
+              coverage_stage: 'agentCore',
             },
           ],
           buckets: [],
@@ -628,9 +628,9 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).not.toContain('no-usage/no-usage')
   })
 
-  it('renders the latest oas telemetry sample from the push-fed read model', async () => {
-    const { latestOasTelemetrySample } = await import('../oas-telemetry-store')
-    latestOasTelemetrySample.value = {
+  it('renders the latest agentCore telemetry sample from the push-fed read model', async () => {
+    const { latestAgentCoreTelemetrySample } = await import('../agent-core-telemetry-store')
+    latestAgentCoreTelemetrySample.value = {
       provider_id: 'runtime',
       model_id: 'runtime',
       ttfb_ms: 121.4,
@@ -642,26 +642,26 @@ describe('RuntimeMonitor', () => {
     }
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
-      () => container.querySelector('[data-testid="oas-latest-telemetry-sample"]') != null,
-      'oas latest telemetry sample line',
+      () => container.querySelector('[data-testid="agent-core-latest-telemetry-sample"]') != null,
+      'agentCore latest telemetry sample line',
     )
 
-    const line = container.querySelector('[data-testid="oas-latest-telemetry-sample"]')?.textContent ?? ''
-    expect(line).toContain('oas latest · runtime')
+    const line = container.querySelector('[data-testid="agent-core-latest-telemetry-sample"]')?.textContent ?? ''
+    expect(line).toContain('agentCore latest · runtime')
     expect(line).toContain('ttfb 121ms')
     expect(line).toContain('total 845ms')
     expect(line).toContain('42.1 tok/s')
     expect(line).toContain('success')
-    latestOasTelemetrySample.value = null
+    latestAgentCoreTelemetrySample.value = null
   })
 
-  it('omits the oas telemetry sample line before any push arrives', async () => {
+  it('omits the agentCore telemetry sample line before any push arrives', async () => {
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
       'runtime binding',
     )
 
-    expect(container.querySelector('[data-testid="oas-latest-telemetry-sample"]')).toBeNull()
+    expect(container.querySelector('[data-testid="agent-core-latest-telemetry-sample"]')).toBeNull()
   })
 })

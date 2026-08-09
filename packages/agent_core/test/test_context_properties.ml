@@ -7,7 +7,7 @@
     - Diff correctness
     - Key non-leakage across scopes *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Generators ────────────────────────────────────────── *)
 

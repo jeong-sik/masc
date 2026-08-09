@@ -50,7 +50,7 @@ MAX_AMP="${MAX_AMP:-8}"
 KEEPER_PROMPT="${KEEPER_PROMPT:-analyst}"
 # Source root holding config/keepers/<KEEPER_PROMPT>/AGENT.md.
 KEEPER_SOURCE_ROOT="${MASC_KEEPER_SOURCE_ROOT:-}"
-BORROW_MODEL="${BORROW_MODEL:-deepseek-v4-flash}"  # must be an OAS catalog id_prefix
+BORROW_MODEL="${BORROW_MODEL:-deepseek-v4-flash}"  # must be an AGENT_CORE catalog id_prefix
 HOG_LEVELS="${HOG_LEVELS:-0 $((NCPU-1))}"       # host CPU hogs to sweep alongside keeper load
 
 RUN_ID="${RUN_ID:-keeperload-$(date +%Y%m%d_%H%M%S)-$$}"
@@ -222,7 +222,7 @@ fi
 MOCK_PORT="$(harness_pick_free_port)"
 cat > "$BASE_PATH/.masc/config/runtime.toml" <<EOF
 # Mock runtime: borrow a catalog-valid model id ($BORROW_MODEL is an
-# OAS catalog id_prefix) so init_default_strict's capability gate passes,
+# AGENT_CORE catalog id_prefix) so init_default_strict's capability gate passes,
 # but route the provider to the local network-free mock.
 [runtime]
 default = "mock.mockmodel"
@@ -247,7 +247,7 @@ max-concurrent = 64
 max-request-body-bytes = 524288
 EOF
 
-cat > "$BASE_PATH/.masc/config/oas-models-overlay.toml" <<EOF
+cat > "$BASE_PATH/.masc/config/agent-core-models-overlay.toml" <<EOF
 [[providers]]
 id = "mock"
 kind = "openai_compat"

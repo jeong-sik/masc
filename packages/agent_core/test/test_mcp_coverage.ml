@@ -8,7 +8,7 @@
     - MCP HTTP explicit config type verification
     - Mcp_http.parse/SSE body parsing (internal but covered via connect path) *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ──────────────────────────────────────────────── *)
 
@@ -40,15 +40,15 @@ let test_merge_env_empty () =
 ;;
 
 let test_merge_env_override () =
-  let result = Mcp.merge_env [ "OAS_TEST_KEY_XYZ", "test_value" ] in
-  let found = Array.exists (fun entry -> entry = "OAS_TEST_KEY_XYZ=test_value") result in
+  let result = Mcp.merge_env [ "AGENT_CORE_TEST_KEY_XYZ", "test_value" ] in
+  let found = Array.exists (fun entry -> entry = "AGENT_CORE_TEST_KEY_XYZ=test_value") result in
   Alcotest.(check bool) "contains override" true found
 ;;
 
 let test_merge_env_multiple () =
-  let result = Mcp.merge_env [ "OAS_KEY_A", "val_a"; "OAS_KEY_B", "val_b" ] in
-  let has_a = Array.exists (fun e -> e = "OAS_KEY_A=val_a") result in
-  let has_b = Array.exists (fun e -> e = "OAS_KEY_B=val_b") result in
+  let result = Mcp.merge_env [ "AGENT_CORE_KEY_A", "val_a"; "AGENT_CORE_KEY_B", "val_b" ] in
+  let has_a = Array.exists (fun e -> e = "AGENT_CORE_KEY_A=val_a") result in
+  let has_b = Array.exists (fun e -> e = "AGENT_CORE_KEY_B=val_b") result in
   Alcotest.(check bool) "has key_a" true has_a;
   Alcotest.(check bool) "has key_b" true has_b
 ;;
@@ -217,18 +217,18 @@ let test_type_mapping_all () =
     [ "null"; ""; "custom" ]
 ;;
 
-(* ── mcp_tool_to_sdk_tool extended ────────────────────────── *)
+(* ── mcp_tool_to_agent_core_tool extended ────────────────────────── *)
 
-let test_mcp_tool_to_sdk_tool_empty_schema () =
+let test_mcp_tool_to_agent_core_tool_empty_schema () =
   let mcp_tool : Mcp.mcp_tool =
     { name = "empty_params"; description = "No parameters"; input_schema = `Assoc [] }
   in
   let call_fn _input : Types.tool_result = Ok { content = "ok"; _meta = None } in
-  let sdk_tool = Mcp.mcp_tool_to_sdk_tool ~call_fn mcp_tool in
-  Alcotest.(check string) "name" "empty_params" sdk_tool.schema.name;
-  Alcotest.(check int) "no params" 0 (List.length sdk_tool.schema.parameters);
+  let agent_core_tool = Mcp.mcp_tool_to_agent_core_tool ~call_fn mcp_tool in
+  Alcotest.(check string) "name" "empty_params" agent_core_tool.schema.name;
+  Alcotest.(check int) "no params" 0 (List.length agent_core_tool.schema.parameters);
   (* Execute with empty input *)
-  match Tool.execute sdk_tool (`Assoc []) with
+  match Tool.execute agent_core_tool (`Assoc []) with
   | Ok { content; _meta = _ } -> Alcotest.(check string) "ok" "ok" content
   | Error _ -> Alcotest.fail "expected Ok"
 ;;
@@ -282,7 +282,7 @@ let () =
         ] )
     ; "type_mapping", [ Alcotest.test_case "all types" `Quick test_type_mapping_all ]
     ; ( "tool_bridge"
-      , [ Alcotest.test_case "empty schema" `Quick test_mcp_tool_to_sdk_tool_empty_schema
+      , [ Alcotest.test_case "empty schema" `Quick test_mcp_tool_to_agent_core_tool_empty_schema
         ] )
     ; ( "server_spec"
       , [ Alcotest.test_case "construction" `Quick test_server_spec_construction ] )

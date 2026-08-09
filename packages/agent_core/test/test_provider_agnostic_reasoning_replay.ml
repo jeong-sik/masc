@@ -607,7 +607,7 @@ let test_openai_responses_replays_only_opaque_item () =
     Yojson.Safe.Util.(List.hd input |> member "type" |> to_string = "reasoning")
 ;;
 
-(* ── RFC-OAS-029 S1.1/S3.1: identity read once, replay read from the record ── *)
+(* ── Agent Core contract S1.1/S3.1: identity read once, replay read from the record ── *)
 
 let resolved_replay_policy config =
   (Reasoning_dialect.for_provider_config config).replay_policy
@@ -806,7 +806,7 @@ let test_clear_thinking_gate_is_capability_not_identity () =
      = Reasoning_replay_contract.All_assistant_messages)
 ;;
 
-(* ── RFC-OAS-029 S3.1: the rotation drop is a declared policy ── *)
+(* ── Agent Core contract S3.1: the rotation drop is a declared policy ── *)
 
 let test_rotation_policy_is_declared_per_dialect () =
   let rotation ?request_path ~kind ~model_id ~base_url () =

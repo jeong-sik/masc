@@ -1,6 +1,6 @@
-(** OAS Runtime wire protocol types.
+(** AGENT_CORE Runtime wire protocol types.
 
-    Defines the full request/response/event protocol between the OAS
+    Defines the full request/response/event protocol between the AGENT_CORE
     runtime and its consumers (CLI, IDE, coordinators).
 
     @since 0.50.0
@@ -120,8 +120,8 @@ type init_request =
 [@@deriving yojson, show]
 
 type init_response =
-  { sdk_name : string
-  ; sdk_version : string
+  { name : string
+  ; agent_core_version : string
   ; runtime_version : string
   ; protocol_version : string
   ; capabilities : string list

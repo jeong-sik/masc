@@ -128,7 +128,7 @@ type trace_step =
       text : string;
       content_withheld : bool;
       ts : string option;
-      oas_block_index : int option;
+      agent_core_block_index : int option;
     }
   | Trace_reason of {
       text : string;
@@ -143,7 +143,7 @@ type trace_step =
       args : Yojson.Safe.t option;
       result : Yojson.Safe.t option;
       ts : string option;
-      oas_block_index : int option;
+      agent_core_block_index : int option;
     }
 
 type trace_block = { trace : trace_step list }
@@ -325,7 +325,7 @@ let trace_status_to_yojson = function
 ;;
 
 let trace_step_to_yojson = function
-  | Trace_think { text; content_withheld; ts; oas_block_index } ->
+  | Trace_think { text; content_withheld; ts; agent_core_block_index } ->
     (* Mirrors the [Thinking { redacted }] wire rule: the flag is only emitted
        when true, and [text] is forced to "" at the boundary regardless of the
        in-memory record, so a caller-side bug cannot ship reasoning text behind
@@ -335,14 +335,14 @@ let trace_step_to_yojson = function
       ([ ("kind", `String "think"); ("text", `String wire_text) ]
        @ (if content_withheld then [ ("content_withheld", `Bool true) ] else [])
        @ opt_string_field "ts" ts
-       @ opt_int_field "oas_block_index" oas_block_index)
+       @ opt_int_field "agent_core_block_index" agent_core_block_index)
   | Trace_reason { text; detail; ts } ->
     `Assoc
       ([ ("kind", `String "reason"); ("text", `String text) ]
        @ opt_string_field "detail" detail
        @ opt_string_field "ts" ts)
   | Trace_tool
-      { name; tool_call_id; status; dur; args; result; ts; oas_block_index } ->
+      { name; tool_call_id; status; dur; args; result; ts; agent_core_block_index } ->
     `Assoc
       ([ ("kind", `String "tool"); ("name", `String name) ]
        @ opt_string_field "tool_call_id" tool_call_id
@@ -351,7 +351,7 @@ let trace_step_to_yojson = function
        @ opt_json_field "args" args
        @ opt_json_field "result" result
        @ opt_string_field "ts" ts
-       @ opt_int_field "oas_block_index" oas_block_index)
+       @ opt_int_field "agent_core_block_index" agent_core_block_index)
 ;;
 
 let table_cell_of_yojson = function
@@ -671,10 +671,10 @@ let block_of_yojson json : chat_block option =
                    { text = (if content_withheld then "" else text)
                    ; content_withheld
                    ; ts = get_step_string "ts"
-                   ; oas_block_index =
-                       (match get_step_int "oas_block_index" with
+                   ; agent_core_block_index =
+                       (match get_step_int "agent_core_block_index" with
                         | Some _ as v -> v
-                        | None -> get_step_int "oasBlockIndex")
+                        | None -> get_step_int "agent_coreBlockIndex")
                    }))
          | Some "reason" ->
            Option.bind (get_step_string "text") (fun text ->
@@ -703,10 +703,10 @@ let block_of_yojson json : chat_block option =
                   ; args = List.assoc_opt "args" step_fields
                   ; result = List.assoc_opt "result" step_fields
                   ; ts = get_step_string "ts"
-                  ; oas_block_index =
-                      (match get_step_int "oas_block_index" with
+                  ; agent_core_block_index =
+                      (match get_step_int "agent_core_block_index" with
                        | Some _ as v -> v
-                       | None -> get_step_int "oasBlockIndex")
+                       | None -> get_step_int "agent_coreBlockIndex")
                   }))
          | _ -> None)
       | _ -> None

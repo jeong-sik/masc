@@ -1,7 +1,7 @@
 (** Result monadic binding operators.
 
     Centralized definitions for {!Result} binding operators used across
-    the agent_sdk codebase. Open this module in files that use [let*]
+    the agent_core codebase. Open this module in files that use [let*]
     and [let+] for Result-based computation chains.
 
     Also provides {!Let_syntax} for [ppx_let] support ([let%bind],

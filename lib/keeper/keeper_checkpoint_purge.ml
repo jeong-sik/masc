@@ -44,41 +44,41 @@ type item =
   ; flat_last : int
   }
 
-let is_text_only (message : Agent_sdk.Types.message) =
+let is_text_only (message : Agent_core.Types.message) =
   (match message.role with
-   | Agent_sdk.Types.User | Agent_sdk.Types.Assistant -> true
-   | Agent_sdk.Types.System | Agent_sdk.Types.Tool -> false)
+   | Agent_core.Types.User | Agent_core.Types.Assistant -> true
+   | Agent_core.Types.System | Agent_core.Types.Tool -> false)
   && Option.is_none message.tool_call_id
   && message.content <> []
   && List.for_all
        (function
-         | Agent_sdk.Types.Text _ -> true
+         | Agent_core.Types.Text _ -> true
          | _ -> false)
        message.content
 ;;
 
-let has_tool_use (message : Agent_sdk.Types.message) =
+let has_tool_use (message : Agent_core.Types.message) =
   List.exists
     (function
-      | Agent_sdk.Types.ToolUse _ -> true
+      | Agent_core.Types.ToolUse _ -> true
       | _ -> false)
     message.content
 ;;
 
 (* R2: remove unsigned reasoning blocks. Signed thinking and
    [RedactedThinking] replay byte-exact on tool turns and are kept. *)
-let strip_reasoning_blocks (message : Agent_sdk.Types.message) =
+let strip_reasoning_blocks (message : Agent_core.Types.message) =
   let kept, stripped =
     List.fold_left
       (fun (kept, stripped) block ->
          match block with
-         | Agent_sdk.Types.Thinking { signature = None; _ }
-         | Agent_sdk.Types.ReasoningDetails _ -> kept, stripped + 1
+         | Agent_core.Types.Thinking { signature = None; _ }
+         | Agent_core.Types.ReasoningDetails _ -> kept, stripped + 1
          | _ -> block :: kept, stripped)
       ([], 0)
       message.content
   in
-  { message with Agent_sdk.Types.content = List.rev kept }, stripped
+  { message with Agent_core.Types.content = List.rev kept }, stripped
 ;;
 
 (* R3: replace a SUCCESSFUL tool result's payload with the fixed marker while
@@ -88,15 +88,15 @@ let strip_reasoning_blocks (message : Agent_sdk.Types.message) =
    could learn from, and the exemption is a type-level distinction (the typed
    outcome), not content classification — RFC-0351 §2 permits judging by
    type. *)
-let clear_tool_result_blocks (message : Agent_sdk.Types.message) =
+let clear_tool_result_blocks (message : Agent_core.Types.message) =
   let cleared_count = ref 0 in
   let content =
     List.map
       (fun block ->
          match block with
-         | Agent_sdk.Types.ToolResult { outcome = Agent_sdk.Types.Tool_failed _; _ }
+         | Agent_core.Types.ToolResult { outcome = Agent_core.Types.Tool_failed _; _ }
            -> block
-         | Agent_sdk.Types.ToolResult
+         | Agent_core.Types.ToolResult
              ({ content; json; content_blocks; _ } as result) ->
            if String.equal content cleared_tool_result_content
               && Option.is_none json
@@ -104,7 +104,7 @@ let clear_tool_result_blocks (message : Agent_sdk.Types.message) =
            then block
            else (
              incr cleared_count;
-             Agent_sdk.Types.ToolResult
+             Agent_core.Types.ToolResult
                { result with
                  content = cleared_tool_result_content
                ; json = None
@@ -113,14 +113,14 @@ let clear_tool_result_blocks (message : Agent_sdk.Types.message) =
          | _ -> block)
       message.content
   in
-  { message with Agent_sdk.Types.content }, !cleared_count
+  { message with Agent_core.Types.content }, !cleared_count
 ;;
 
 (* An item after R2/R3: its surviving messages ([] when R2 emptied and
    dropped it) and, when it is an unprotected text-only ordinary message, the
    R1 grouping key over its full derived representation. *)
 type transformed_item =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
   ; dedup_key : string option
   }
 
@@ -203,7 +203,7 @@ let purge_messages ~config messages =
          pass to find). *)
       let dedup_key_of message =
         if is_text_only message
-        then Some (Agent_sdk.Types.show_message message)
+        then Some (Agent_core.Types.show_message message)
         else None
       in
       let purge_item item =
@@ -217,15 +217,15 @@ let purge_messages ~config messages =
           | Keeper_compaction_unit.Ordinary_message message ->
             if config.strip_thinking
                && (match message.role with
-                   | Agent_sdk.Types.Assistant -> true
-                   | Agent_sdk.Types.User
-                   | Agent_sdk.Types.System
-                   | Agent_sdk.Types.Tool -> false)
+                   | Agent_core.Types.Assistant -> true
+                   | Agent_core.Types.User
+                   | Agent_core.Types.System
+                   | Agent_core.Types.Tool -> false)
                && not (has_tool_use message)
             then (
               let stripped_message, stripped = strip_reasoning_blocks message in
               reasoning_blocks_stripped := !reasoning_blocks_stripped + stripped;
-              match stripped_message.Agent_sdk.Types.content with
+              match stripped_message.Agent_core.Types.content with
               | [] ->
                 incr reasoning_messages_dropped;
                 { messages = []; dedup_key = None }
@@ -279,9 +279,9 @@ let purge_messages ~config messages =
              } )))
 ;;
 
-let purge ~config (ckpt : Agent_sdk.Checkpoint.t) =
+let purge ~config (ckpt : Agent_core.Checkpoint.t) =
   match purge_messages ~config ckpt.messages with
   | Error error -> Error error
   | Ok (messages, report) ->
-    Ok ({ ckpt with Agent_sdk.Checkpoint.messages }, report)
+    Ok ({ ckpt with Agent_core.Checkpoint.messages }, report)
 ;;

@@ -26,10 +26,10 @@ let require_last_execution_for_finalize ~keeper_name turn_state =
   | Some exec -> Ok exec
   | None ->
     let err =
-      Agent_sdk.Error.Internal
+      Agent_core.Error.Internal
         (Printf.sprintf "%s: last_execution missing at turn finalize" keeper_name)
     in
-    Log.Keeper.error "%s" (Agent_sdk.Error.to_string err);
+    Log.Keeper.error "%s" (Agent_core.Error.to_string err);
     Error err
 ;;
 
@@ -123,10 +123,10 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
 (* Exhaustive match on [Keeper_turn_disposition.t].
    Pre-fix this used [String.starts_with ~prefix:"api_error_"] on the
    wire form of [terminal_reason.code]; that substring guard depended
-   on SDK-error wires being routed through [Unknown { raw_error = _ }]
+   on agent-core error wires being routed through [Unknown { raw_error = _ }]
    because [normalize_code] no longer collapsed them to "provider_error".
-   With [of_failure] now emitting [Provider_error (Sdk_error _)] typed
-   for the SDK-error fallback, this routing reduces to a clean variant
+   With [of_failure] now emitting [Provider_error (Agent_core_error _)] typed
+   for the agent-core error fallback, this routing reduces to a clean variant
    match — no substring classifier left in this function. *)
 let registry_failure_reason_of_terminal_reason
       (terminal_reason : Keeper_turn_terminal.t)
@@ -172,7 +172,7 @@ let registry_failure_reason_of_terminal_reason
 type turn_tool_event_tracker =
   { pending_tool_inputs : Yojson.Safe.t list StringMap.t
   ; tool_completed_count : int
-  ; integrity_error : Agent_sdk.Error.sdk_error option
+  ; integrity_error : Agent_core.Error.t option
   }
 
 let create_turn_tool_event_tracker () =
@@ -226,21 +226,21 @@ let record_unmatched_tool_completed
   match tracker.integrity_error with
   | Some _ -> tracker
   | None ->
-    { tracker with integrity_error = Some (Agent_sdk.Error.Internal message) }
+    { tracker with integrity_error = Some (Agent_core.Error.Internal message) }
 ;;
 
 let record_turn_tool_events
       ~(keeper_name : string)
       (tracker : turn_tool_event_tracker)
-      (events : Agent_sdk.Event_bus.event list)
+      (events : Agent_core.Event_bus.event list)
   : turn_tool_event_tracker
   =
   List.fold_left
-    (fun tracker (evt : Agent_sdk.Event_bus.event) ->
+    (fun tracker (evt : Agent_core.Event_bus.event) ->
        match evt.payload with
-       | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
+       | Agent_core.Event_bus.ToolCalled { tool_name; input; _ } ->
          push_turn_tool_input tracker tool_name input
-       | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } ->
+       | Agent_core.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } ->
          let tracker =
            { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
          in
@@ -252,7 +252,7 @@ let record_turn_tool_events
               ~keeper_name
               ~tool_name
               ~outcome:"ok")
-       | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Error _; _ } ->
+       | Agent_core.Event_bus.ToolCompleted { tool_name; output = Error _; _ } ->
          let tracker =
            { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
          in

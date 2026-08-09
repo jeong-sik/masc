@@ -1,6 +1,6 @@
 (** Tests for Fs_result — result-based filesystem operations. *)
 
-open Agent_sdk
+open Agent_core
 
 let check_string = Alcotest.(check string)
 let check_bool = Alcotest.(check bool)

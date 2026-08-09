@@ -3,7 +3,7 @@
     Covers JSON round-trips for complex types, monotonicity invariants,
     idle detection, pricing, context reduction, and tool_choice. *)
 
-open Agent_sdk
+open Agent_core
 open Types
 
 (* ── Generators ──────────────────────────────────────────────── *)

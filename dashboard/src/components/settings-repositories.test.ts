@@ -42,9 +42,9 @@ const REPO_MASC = {
 
 const REPO_MANUAL = {
   ...REPO_MASC,
-  id: 'oas',
-  name: 'oas',
-  url: 'https://github.com/jeong-sik/oas.git',
+  id: 'agentCore',
+  name: 'agentCore',
+  url: 'https://github.com/jeong-sik/agentCore.git',
   auto_sync: false,
 }
 

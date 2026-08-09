@@ -64,8 +64,8 @@ val command_in_path : ?path:string -> string -> bool
     Availability is determined by credential values only.
 
     Entries explicitly installed with {!Provider_catalog.set_global} are
-    overlaid last and may add or replace provider ids without changing SDK
-    code. OAS does not discover a provider catalog from the environment.
+    overlaid last and may add or replace provider ids without changing agent core
+    code. AGENT_CORE does not discover a provider catalog from the environment.
 
     Endpoint, request-path, provider-id, and capability values come only from
     those declarations. Process environment reads are restricted to credential

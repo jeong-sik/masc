@@ -97,7 +97,7 @@ let test_top_level_store_list_is_ssot () =
     ; "costs"
     ; "events"
     ; "messages"
-    ; "oas-events"
+    ; "agent-core-events"
     ; "telemetry"
     ; "tool_calls"
     ; "transition-audit"
@@ -156,8 +156,8 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   let old_ts = Unix.gettimeofday () -. (40. *. 86400.) in
   let p segs = List.fold_left Filename.concat masc_root segs in
   (* top-level dated store: stale by filename month, fresh by future month *)
-  let oas_old = p [ "oas-events"; "2020-01"; "01.jsonl" ] in
-  let oas_fresh = p [ "oas-events"; "2999-01"; "01.jsonl" ] in
+  let agent_core_old = p [ "agent-core-events"; "2020-01"; "01.jsonl" ] in
+  let agent_core_fresh = p [ "agent-core-events"; "2999-01"; "01.jsonl" ] in
   (* logs: flat day files, stale by mtime *)
   let logs_old = p [ "logs"; "system_log_2020-01-01.jsonl" ] in
   let logs_fresh = p [ "logs"; "system_log_2999-01-01.jsonl" ] in
@@ -177,8 +177,8 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   let decision_fresh = p [ "decision_audit"; "keeper-a"; "2999-01"; "01.jsonl" ] in
   List.iter
     write
-    [ oas_old
-    ; oas_fresh
+    [ agent_core_old
+    ; agent_core_fresh
     ; logs_old
     ; logs_fresh
     ; turn_old
@@ -207,8 +207,8 @@ let test_prune_shared_jsonl_stores_production_geometry () =
     "stale decision_audit day removed" false (Sys.file_exists decision_old);
   Alcotest.(check bool)
     "future decision_audit day kept" true (Sys.file_exists decision_fresh);
-  Alcotest.(check bool) "stale oas-events day removed" false (Sys.file_exists oas_old);
-  Alcotest.(check bool) "future oas-events day kept" true (Sys.file_exists oas_fresh);
+  Alcotest.(check bool) "stale agent-core-events day removed" false (Sys.file_exists agent_core_old);
+  Alcotest.(check bool) "future agent-core-events day kept" true (Sys.file_exists agent_core_fresh);
   Alcotest.(check bool) "stale log day removed" false (Sys.file_exists logs_old);
   Alcotest.(check bool) "fresh log day kept" true (Sys.file_exists logs_fresh);
   Alcotest.(check bool) "stale turn-records day removed" false (Sys.file_exists turn_old);

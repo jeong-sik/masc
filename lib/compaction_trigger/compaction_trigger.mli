@@ -11,7 +11,7 @@ type serving_input_capacity =
       ; accepted_through : int
       ; rejected_from : int
       }
-(** Provider-neutral token-capacity evidence produced by OAS admission. The
+(** Provider-neutral token-capacity evidence produced by AGENT_CORE admission. The
     measured request and accepted/rejected boundary remain distinct from both
     a model context-window declaration and serialized request-body bytes. *)
 
@@ -25,8 +25,8 @@ type t =
       }
       (** The serialized request body exceeded the byte capacity the target
           declares. Both integers are measured, never estimated:
-          [Agent_sdk.Retry.Request_body_too_large] carries them from the
-          serialization OAS performs before any HTTP call, so
+          [Agent_core.Retry.Request_body_too_large] carries them from the
+          serialization AGENT_CORE performs before any HTTP call, so
           [actual_bytes > limit_bytes] already held upstream and
           {!of_detail_json} rejects a record where it does not.
 
@@ -40,7 +40,7 @@ type t =
           {!Request_body_over_capacity}, neither the request bytes nor a byte
           limit are known, so this constructor must not fabricate either one. *)
   | Serving_input_capacity of serving_input_capacity
-      (** OAS exhausted admission candidates and returned a measured token
+      (** AGENT_CORE exhausted admission candidates and returned a measured token
           boundary. Only [Boundary_unknown] and [Input_rejected] can construct
           this trigger; unavailable or stale measurements are not compaction
           requests. *)

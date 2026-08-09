@@ -46,12 +46,12 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
     | _ -> None
   in
 
-  let oas_telemetry_limit_param req =
+  let agent_core_telemetry_limit_param req =
     Server_utils.int_query_param req "limit" ~default:50
     |> Server_utils.clamp ~min_v:1 ~max_v:200
   in
 
-  let oas_telemetry_provider_param req =
+  let agent_core_telemetry_provider_param req =
     trimmed_query_param req "provider"
   in
 
@@ -973,19 +973,19 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             let json = dashboard_perf_http_json (Mcp_server.workspace_config state) in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/oas/telemetry/recent" ->
+      | `GET, "/api/v1/dashboard/agent_core/telemetry/recent" ->
           with_h2_public_read h2_reqd (fun _state ->
-            let provider = oas_telemetry_provider_param httpun_request in
-            let limit = oas_telemetry_limit_param httpun_request in
-            let json = Dashboard_oas_bridge.recent_json ?provider ~limit () in
+            let provider = agent_core_telemetry_provider_param httpun_request in
+            let limit = agent_core_telemetry_limit_param httpun_request in
+            let json = Dashboard_agent_core_bridge.recent_json ?provider ~limit () in
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/oas/telemetry/summary" ->
+      | `GET, "/api/v1/dashboard/agent_core/telemetry/summary" ->
           with_h2_public_read h2_reqd (fun _state ->
-            let provider = oas_telemetry_provider_param httpun_request in
-            let limit = oas_telemetry_limit_param httpun_request in
-            let json = Dashboard_oas_bridge.summary_json ?provider ~limit () in
+            let provider = agent_core_telemetry_provider_param httpun_request in
+            let limit = agent_core_telemetry_limit_param httpun_request in
+            let json = Dashboard_agent_core_bridge.summary_json ?provider ~limit () in
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 

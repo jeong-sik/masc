@@ -61,7 +61,7 @@ check_boundary() {
   local strict_projection_targets=()
   local mixed_projection_targets=()
   retired_projection_pattern='Keeper_compaction_projection_target|keeper_compaction_projection_target|\bprojection_(request|target)\b|\b(captured_evidence|committed_evidence)\b'
-  strict_projection_pattern="${retired_projection_pattern}|Runtime\\.resolve_assignment|\\bruntime\\.(id|provider|provider_config|model|model_id|protocol)\\b|\\bprovider\\.(id|kind|protocol|model|model_id)\\b|\\bmodel\\.(id|provider|protocol)\\b|\\b(Llm_provider\\.)?Provider_config\\b|\\bprovider_config\\b|\\b(provider_id|model_id|oas_provider_kind|provider_kind)\\b|\\.protocol\\b|\\bprotocol[[:space:]]*[:=]|\"protocol\""
+  strict_projection_pattern="${retired_projection_pattern}|Runtime\\.resolve_assignment|\\bruntime\\.(id|provider|provider_config|model|model_id|protocol)\\b|\\bprovider\\.(id|kind|protocol|model|model_id)\\b|\\bmodel\\.(id|provider|protocol)\\b|\\b(Llm_provider\\.)?Provider_config\\b|\\bprovider_config\\b|\\b(provider_id|model_id|agent_core_provider_kind|provider_kind)\\b|\\.protocol\\b|\\bprotocol[[:space:]]*[:=]|\"protocol\""
 
   while IFS= read -r candidate; do
     strict_projection_targets+=("${candidate}")

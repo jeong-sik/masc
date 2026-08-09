@@ -1,7 +1,7 @@
 (** Shared completed tool-call input boundary.
 
     Provider codecs may carry a completed tool input as JSON or JSON text. The
-    SDK accepts only a JSON object; other JSON values are not executable tool
+    Agent Core accepts only a JSON object; other JSON values are not executable tool
     arguments. Carrier-specific absence policy stays at each codec boundary. *)
 
 type parse_error =

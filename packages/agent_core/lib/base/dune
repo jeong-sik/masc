@@ -1,7 +1,7 @@
 (include_subdirs no)
 
 (library
- (name agent_sdk_base)
+ (name agent_core_base)
  (public_name masc.agent_core.base)
  (wrapped true)
  (libraries llm_provider yojson eio str)

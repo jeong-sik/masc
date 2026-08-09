@@ -13,7 +13,7 @@
     different accounts and are admitted independently.
 
     No declaration ([max_concurrent_requests = None]) means no admission:
-    dispatch behavior is unchanged. OAS never selects a limit from provider
+    dispatch behavior is unchanged. AGENT_CORE never selects a limit from provider
     kind, URL, model, or process environment — the consumer declares it
     (declaration-over-probing, the same contract as [connect_timeout_s]).
 

@@ -1953,7 +1953,7 @@ let test_docker_mount_failure_message_preserves_path () =
 
 let test_docker_mount_failure_structured_details () =
   let mount_path =
-    "/host_mnt/Users/dancer/me/.masc/playground/docker/repos/oas/.worktrees/"
+    "/host_mnt/Users/dancer/me/.masc/playground/docker/repos/agent_core/.worktrees/"
     ^ String.make 280 'b'
   in
   let output =

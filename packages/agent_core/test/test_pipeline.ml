@@ -3,10 +3,10 @@
     Pipeline is internal, so we test correctness through
     Provider_mock.next_response and agent state inspection. *)
 
-open Agent_sdk
-module Internal = Agent_sdk__
-module Internal_agent = Agent_sdk__Agent_types
-module Internal_pipeline = Agent_sdk__Pipeline
+open Agent_core
+module Internal = Agent_core__
+module Internal_agent = Agent_core__Agent_types
+module Internal_pipeline = Agent_core__Pipeline
 module Internal_runtime = Internal.Execution_runtime
 module Internal_codec = Internal.Execution_codec_executor
 module Internal_writer = Internal.Execution_lane_writer
@@ -555,7 +555,7 @@ let unwrap_raw_trace = function
 ;;
 
 let test_stream_route_carries_exact_raw_trace_run_id () =
-  let trace_path = Filename.temp_file "oas-pipeline-capture-id" ".jsonl" in
+  let trace_path = Filename.temp_file "agent_core-pipeline-capture-id" ".jsonl" in
   Fun.protect
     ~finally:(fun () -> Sys.remove trace_path)
     (fun () ->
@@ -1261,9 +1261,9 @@ let test_prepare_turn_extra_context () =
 
 (* ── Error_domain: tag_error ─────────────────────────────── *)
 
-let test_error_domain_of_sdk_error () =
+let test_error_domain_of_core_error () =
   let err = Error.Agent (UnrecognizedStopReason { reason = "weird" }) in
-  let poly = Error_domain.of_sdk_error err in
+  let poly = Error_domain.of_core_error err in
   match poly with
   | `Unrecognized_stop_reason s -> Alcotest.(check string) "reason" "weird" s
   | _ -> Alcotest.fail "expected Unrecognized_stop_reason"
@@ -1271,13 +1271,13 @@ let test_error_domain_of_sdk_error () =
 
 let test_error_domain_roundtrip () =
   let err = Error.Internal "test error" in
-  let poly = Error_domain.of_sdk_error err in
-  let back = Error_domain.to_sdk_error poly in
+  let poly = Error_domain.of_core_error err in
+  let back = Error_domain.to_core_error poly in
   Alcotest.(check string) "roundtrip" (Error.to_string err) (Error.to_string back)
 ;;
 
 let test_error_domain_with_stage () =
-  let poly = Error_domain.of_sdk_error (Error.Internal "fail") in
+  let poly = Error_domain.of_core_error (Error.Internal "fail") in
   let ctx = Error_domain.with_stage "route" poly in
   let s = Error_domain.ctx_to_string ctx in
   Alcotest.(check bool) "contains stage" true (String.length s > 0);
@@ -1305,7 +1305,7 @@ let test_error_domain_is_retryable () =
 ;;
 
 let test_error_domain_provider_errors () =
-  let errs : Error_domain.sdk_error_poly list =
+  let errs : Error_domain.core_error_poly list =
     [ `Auth_error "bad key"
     ; `Server_error (500, "internal")
     ; `Overloaded
@@ -1323,7 +1323,7 @@ let test_error_domain_provider_errors () =
 (* Pipeline.error_domain_of stamps the durable [Error_occurred] event's
    [error_domain] from the actual error's typed category, not a hardcoded
    "Api". A durable journal/store-write failure surfaces as [Error.Internal]
-   (see Pipeline_execution_scope.sdk_error), so it must be labeled "Internal",
+   (see Pipeline_execution_scope.core_error), so it must be labeled "Internal",
    not misattributed to the provider "Api" domain. The Internal->Internal
    assertion fails if the hardcoded [error_domain = "Api"] is restored. *)
 let test_error_domain_of_persistence_not_api () =
@@ -1396,7 +1396,7 @@ let with_execution_test_dir prefix f =
 ;;
 
 let test_terminal_disposition_retires_settled_provider_failure () =
-  with_execution_test_dir "oas-agent-terminal-failure-"
+  with_execution_test_dir "agent_core-agent-terminal-failure-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let checkpoint_count = ref 0 in
   let locator_persisted = ref false in
@@ -1474,7 +1474,7 @@ let test_terminal_disposition_retires_settled_provider_failure () =
 ;;
 
 let test_terminal_disposition_sink_failure_fails_call () =
-  with_execution_test_dir "oas-agent-terminal-sink-failure-"
+  with_execution_test_dir "agent_core-agent-terminal-sink-failure-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let callback_count = ref 0 in
   let response = Provider_mock.text_response "done" [] in
@@ -1521,7 +1521,7 @@ let test_terminal_disposition_sink_failure_fails_call () =
 ;;
 
 let test_terminal_disposition_observes_cancellation () =
-  with_execution_test_dir "oas-agent-terminal-cancel-"
+  with_execution_test_dir "agent_core-agent-terminal-cancel-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let terminal_disposition = ref None in
   let cancel () = raise (Eio.Cancel.Cancelled Exit) in
@@ -1576,7 +1576,7 @@ let test_agent_run_uses_durable_tool_authority () =
     | Ok runtime -> runtime
     | Error error -> Alcotest.fail (Error.to_string error)
   in
-  let native_path = Filename.temp_file "oas-agent-execution-" ".dir" in
+  let native_path = Filename.temp_file "agent_core-agent-execution-" ".dir" in
   Sys.remove native_path;
   let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
   Fun.protect
@@ -1793,7 +1793,7 @@ let test_agent_run_resumes_tool_without_duplicate_effects
     | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error)
   in
   let codec = Internal_codec.of_runtime internal_runtime in
-  let native_path = Filename.temp_file "oas-agent-resume-" ".dir" in
+  let native_path = Filename.temp_file "agent_core-agent-resume-" ".dir" in
   Sys.remove native_path;
   let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
   Fun.protect
@@ -2053,7 +2053,7 @@ let test_unattempted_legacy_invocation_requires_typed_readmission () =
     | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error)
   in
   let codec = Internal_codec.of_runtime runtime in
-  let native_path = Filename.temp_file "oas-legacy-tool-approval-" ".dir" in
+  let native_path = Filename.temp_file "agent_core-legacy-tool-approval-" ".dir" in
   Sys.remove native_path;
   let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
   Fun.protect
@@ -2300,7 +2300,7 @@ let test_agent_run_resumes_settled_closed_turn
     | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error)
   in
   let codec = Internal_codec.of_runtime internal_runtime in
-  let native_path = Filename.temp_file "oas-agent-settled-" ".dir" in
+  let native_path = Filename.temp_file "agent_core-agent-settled-" ".dir" in
   Sys.remove native_path;
   let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
   Fun.protect
@@ -2609,7 +2609,7 @@ let test_terminal_durability_failure_is_typed_non_retryable () =
     | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error)
   in
   let codec = Internal_codec.of_runtime runtime in
-  let native_path = Filename.temp_file "oas-terminal-durability-" ".dir" in
+  let native_path = Filename.temp_file "agent_core-terminal-durability-" ".dir" in
   Sys.remove native_path;
   let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
   Fun.protect
@@ -2751,7 +2751,7 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
   in
   let run_case label case =
     let native_path =
-      Filename.temp_file ("oas-agent-malformed-terminal-" ^ label) ".dir"
+      Filename.temp_file ("agent_core-agent-malformed-terminal-" ^ label) ".dir"
     in
     Sys.remove native_path;
     let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
@@ -3143,7 +3143,7 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
   in
   let codec = Internal_codec.of_runtime internal_runtime in
   let run_case label resume_mode =
-    let native_path = Filename.temp_file ("oas-agent-precheckpoint-" ^ label) ".dir" in
+    let native_path = Filename.temp_file ("agent_core-agent-precheckpoint-" ^ label) ".dir" in
     Sys.remove native_path;
     let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
     Fun.protect
@@ -3335,7 +3335,7 @@ let test_agent_run_resumes_all_blocked_settled_turn () =
     | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error)
   in
   let codec = Internal_codec.of_runtime internal_runtime in
-  let native_path = Filename.temp_file "oas-agent-all-blocked-" ".dir" in
+  let native_path = Filename.temp_file "agent_core-agent-all-blocked-" ".dir" in
   Sys.remove native_path;
   let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
   Fun.protect
@@ -3529,7 +3529,7 @@ let test_agent_run_resume_fires_on_yield () =
     | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error)
   in
   let codec = Internal_codec.of_runtime internal_runtime in
-  let native_path = Filename.temp_file "oas-agent-resume-yield-" ".dir" in
+  let native_path = Filename.temp_file "agent_core-agent-resume-yield-" ".dir" in
   Sys.remove native_path;
   let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
   Fun.protect
@@ -3758,7 +3758,7 @@ let () =
         ; Alcotest.test_case "cumulative" `Quick test_accumulate_usage_cumulative
         ] )
     ; ( "error_domain"
-      , [ Alcotest.test_case "of_sdk_error" `Quick test_error_domain_of_sdk_error
+      , [ Alcotest.test_case "of_core_error" `Quick test_error_domain_of_core_error
         ; Alcotest.test_case "roundtrip" `Quick test_error_domain_roundtrip
         ; Alcotest.test_case "with_stage" `Quick test_error_domain_with_stage
         ; Alcotest.test_case "is_retryable" `Quick test_error_domain_is_retryable

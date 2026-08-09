@@ -176,18 +176,18 @@ let make_meta
   | Error detail -> failf "keeper meta fixture failed: %s" detail
 
 let make_checkpoint () =
-  Agent_sdk.Checkpoint.
+  Agent_core.Checkpoint.
     { version = checkpoint_version
     ; session_id = "trace-post-turn-no-auto-compact"
     ; agent_name = "post-turn-no-auto-compact"
     ; model = "test-model"
     ; system_prompt = None
     ; messages =
-        [ Agent_sdk.Types.text_message Agent_sdk.Types.User "keep"
-        ; Agent_sdk.Types.text_message Agent_sdk.Types.Assistant (String.make 2048 'x')
-        ; Agent_sdk.Types.text_message Agent_sdk.Types.User (String.make 2048 'y')
+        [ Agent_core.Types.text_message Agent_core.Types.User "keep"
+        ; Agent_core.Types.text_message Agent_core.Types.Assistant (String.make 2048 'x')
+        ; Agent_core.Types.text_message Agent_core.Types.User (String.make 2048 'y')
         ]
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Agent_core.Types.empty_usage
     ; turn_count = 7
     ; created_at = 1_700_000_000.0
     ; tools = []
@@ -199,24 +199,24 @@ let make_checkpoint () =
     ; min_p = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.Off
+    ; response_format = Agent_core.Types.Off
     ; thinking_budget = None
     ; reasoning_effort = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
 
-let block_message role content : Agent_sdk.Types.message =
+let block_message role content : Agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 
 let tool_use id =
-  Agent_sdk.Types.ToolUse
+  Agent_core.Types.ToolUse
     { id; name = "test_tool"; input = `Assoc [ "id", `String id ] }
 
 let tool_result id =
-  Agent_sdk.Types.ToolResult
+  Agent_core.Types.ToolResult
     { tool_use_id = id
     ; content = "result:" ^ id
     ; outcome = Tool_succeeded
@@ -253,7 +253,7 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
         ensure_registered_keeper ~base_path:config.base_path meta;
         let checkpoint = { (make_checkpoint ()) with messages } in
         let context =
-          checkpoint |> Masc.Keeper_context_core.context_of_oas_checkpoint
+          checkpoint |> Masc.Keeper_context_core.context_of_agent_core_checkpoint
         in
         let preparation =
           Compact_policy.compact_for_request_typed
@@ -272,14 +272,14 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
       run_case
         ~name:"atomic-cycle-evidence"
         ~messages:
-          [ block_message Agent_sdk.Types.User [ Agent_sdk.Types.Text "prompt" ]
-          ; block_message Agent_sdk.Types.Assistant
-              [ Agent_sdk.Types.Thinking
+          [ block_message Agent_core.Types.User [ Agent_core.Types.Text "prompt" ]
+          ; block_message Agent_core.Types.Assistant
+              [ Agent_core.Types.Thinking
                   { content = "private"; signature = None }
               ; tool_use "atomic"
               ]
-          ; block_message Agent_sdk.Types.Tool
-              [ Agent_sdk.Types.ToolResult
+          ; block_message Agent_core.Types.Tool
+              [ Agent_core.Types.ToolResult
                   { tool_use_id = "atomic"
                   ; content = String.make 4096 'r'
                   ; outcome = Tool_succeeded
@@ -287,21 +287,21 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
                   ; content_blocks = None
                   }
               ]
-          ; block_message Agent_sdk.Types.Assistant
-              [ Agent_sdk.Types.Text "raw suffix" ]
+          ; block_message Agent_core.Types.Assistant
+              [ Agent_core.Types.Text "raw suffix" ]
           ]
         (summarize_response "done");
       run_case
         ~name:"reasoning-normalization-evidence"
         ~messages:
-          [ block_message Agent_sdk.Types.User [ Agent_sdk.Types.Text "prompt" ]
-          ; block_message Agent_sdk.Types.Assistant
-              [ Agent_sdk.Types.Thinking
+          [ block_message Agent_core.Types.User [ Agent_core.Types.Text "prompt" ]
+          ; block_message Agent_core.Types.Assistant
+              [ Agent_core.Types.Thinking
                   { content = String.make 4096 'p'; signature = None }
-              ; Agent_sdk.Types.Text "visible"
+              ; Agent_core.Types.Text "visible"
               ]
-          ; block_message Agent_sdk.Types.User
-              [ Agent_sdk.Types.Text "follow-up" ]
+          ; block_message Agent_core.Types.User
+              [ Agent_core.Types.Text "follow-up" ]
           ]
         (summarize_response "visible"))
 ;;
@@ -368,10 +368,10 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
            ~session_id:checkpoint.session_id
            ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
        in
-       let context = Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
+       let context = Masc.Keeper_context_core.context_of_agent_core_checkpoint checkpoint in
        let expected_source =
          match
-          Masc.Keeper_context_core.save_oas_checkpoint_classified
+          Masc.Keeper_context_core.save_agent_core_checkpoint_classified
             ~multimodal_policy:meta.multimodal_policy
             ~keeper_name:meta.name
             ~session
@@ -381,7 +381,7 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
         with
         | Ok _ ->
           (match
-             Masc.Keeper_checkpoint_store.load_oas_with_ref
+             Masc.Keeper_checkpoint_store.load_agent_core_with_ref
                ~session_dir:session.session_dir
                ~session_id:checkpoint.session_id
            with
@@ -476,7 +476,7 @@ let test_malformed_structure_preserves_checkpoint () =
   let orphan = block_message User [ tool_result "orphan" ] in
   let checkpoint = { (make_checkpoint ()) with messages = [ orphan ] } in
   let context =
-    Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
+    Masc.Keeper_context_core.context_of_agent_core_checkpoint checkpoint in
   ensure_registered_keeper ~base_path:config.base_path meta;
   let preparation =
     Compact_policy.compact_for_request_typed
@@ -601,9 +601,9 @@ let test_prepare_commit_source_cas () =
            ~session_id:checkpoint.session_id
            ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
        in
-       let context = Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
+       let context = Masc.Keeper_context_core.context_of_agent_core_checkpoint checkpoint in
        (match
-          Masc.Keeper_context_core.save_oas_checkpoint_classified
+          Masc.Keeper_context_core.save_agent_core_checkpoint_classified
             ~multimodal_policy:meta.multimodal_policy
             ~keeper_name:meta.name
             ~session
@@ -669,7 +669,7 @@ let test_prepare_commit_source_cas () =
         (fun () ->
            match
              Post_turn.For_testing.commit_prepared_compaction_with_history
-               ~save_oas_history:(fun ~session_dir:_ _ ->
+               ~save_agent_core_history:(fun ~session_dir:_ _ ->
                  raise_history_cancellation ())
                prepared
            with
@@ -738,7 +738,7 @@ let test_prepare_commit_source_cas () =
      | Post_turn.Committed _ ->
        fail "stale prepared value committed past the source CAS");
     (match
-       Masc.Keeper_checkpoint_store.load_oas
+       Masc.Keeper_checkpoint_store.load_agent_core
          ~session_dir:session.session_dir
          ~session_id:session.session_id
      with
@@ -782,10 +782,10 @@ let test_post_install_cancellation_returns_committed_failure () =
            ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
        in
        let context =
-         Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint
+         Masc.Keeper_context_core.context_of_agent_core_checkpoint checkpoint
        in
        (match
-          Masc.Keeper_context_core.save_oas_checkpoint_classified
+          Masc.Keeper_context_core.save_agent_core_checkpoint_classified
             ~multimodal_policy:meta.multimodal_policy
             ~keeper_name:meta.name
             ~session
@@ -831,7 +831,7 @@ let test_post_install_cancellation_returns_committed_failure () =
              raise
                (Eio.Cancel.Cancelled
                   (Failure "injected post-install compaction cancellation")))
-           ~save_oas_history:(fun ~session_dir:_ _ -> ())
+           ~save_agent_core_history:(fun ~session_dir:_ _ -> ())
            prepared
        in
        (match outcome with
@@ -874,7 +874,7 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
       let meta = make_meta ~name:"invalid-evidence-terminal" () in
       ensure_registered_keeper ~base_path:config.base_path meta;
       let context =
-        make_checkpoint () |> Masc.Keeper_context_core.context_of_oas_checkpoint
+        make_checkpoint () |> Masc.Keeper_context_core.context_of_agent_core_checkpoint
       in
       let plan_for_units ~units =
         match
@@ -951,7 +951,7 @@ let test_post_dispatch_non_reducing_output_is_terminal () =
             ~meta
             ~trigger:Compaction_trigger.Manual
             (make_checkpoint ()
-             |> Masc.Keeper_context_core.context_of_oas_checkpoint)
+             |> Masc.Keeper_context_core.context_of_agent_core_checkpoint)
         in
         check int (name ^ " performs one POST") 1 (Exact_fixture.post_count server);
         (match preparation.decision with

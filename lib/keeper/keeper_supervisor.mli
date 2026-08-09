@@ -5,7 +5,7 @@
     (resolved Promise) and performs automatic restart with exponential
     backoff.
 
-    This does not supervise the OAS [Agent.run] lifecycle.
+    This does not supervise the AGENT_CORE [Agent.run] lifecycle.
 
     @since 2.102.0 *)
 

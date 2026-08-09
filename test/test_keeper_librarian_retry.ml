@@ -53,9 +53,9 @@ let input () : Librarian.input =
         { Librarian.facts = [ current_a; current_b ] }
   ; max_recall_fact_bytes = 64 * 1024
   ; messages =
-      [ Agent_sdk.Types.make_message
-          ~role:Agent_sdk.Types.User
-          [ Agent_sdk.Types.Text "new conversation" ]
+      [ Agent_core.Types.make_message
+          ~role:Agent_core.Types.User
+          [ Agent_core.Types.Text "new conversation" ]
       ]
   }
 ;;
@@ -388,17 +388,17 @@ let test_prompt_carries_keeper_instructions () =
 
 let user_text_of_messages messages =
   messages
-  |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
-    if m.role = Agent_sdk.Types.User
+  |> List.filter_map (fun (m : Agent_core.Types.message) ->
+    if m.role = Agent_core.Types.User
     then
       Some
         (m.content
          |> List.filter_map (function
-           | Agent_sdk.Types.Text s -> Some s
-           | Agent_sdk.Types.ToolResult _ | Agent_sdk.Types.ToolUse _
-           | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.ReasoningDetails _
-           | Agent_sdk.Types.RedactedThinking _ | Agent_sdk.Types.Image _
-           | Agent_sdk.Types.Document _ | Agent_sdk.Types.Audio _ -> None)
+           | Agent_core.Types.Text s -> Some s
+           | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolUse _
+           | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+           | Agent_core.Types.RedactedThinking _ | Agent_core.Types.Image _
+           | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
          |> String.concat "\n")
     else None)
   |> String.concat "\n"

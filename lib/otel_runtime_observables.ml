@@ -35,12 +35,12 @@ let pool_counter_evict_failure = "masc_pool_evict_failure_total"
 let pool_counter_create = "masc_pool_create_total"
 
 (* Stores implicated in the 2026-06 freeze incidents: unbounded JSONL growth
-   in tool_calls / oas-events starved the telemetry readers (#20677), and
+   in tool_calls / agent-core-events starved the telemetry readers (#20677), and
    trajectories reached 483MB (#20682). Sizes are per masc-root subdirectory;
    the label value is the directory name. *)
 let watched_store_dirs =
   [ "tool_calls"
-  ; "oas-events"
+  ; "agent-core-events"
   ; "telemetry"
   ; "tool_usage"
   ; "trajectories"
@@ -150,16 +150,16 @@ let fd_samples () =
 ;;
 
 let bus_samples_of ~bus_label bus =
-  let stats = Agent_sdk.Event_bus.stats bus in
+  let stats = Agent_core.Event_bus.stats bus in
   let by_contract =
     (* Aggregate identical contracts so label sets stay unique. *)
     List.fold_left
-      (fun acc (s : Agent_sdk.Event_bus.subscription_stats) ->
+      (fun acc (s : Agent_core.Event_bus.subscription_stats) ->
         let purpose = Option.value s.purpose ~default:"unspecified" in
         let overflow =
           match s.overflow with
-          | Agent_sdk.Event_bus.Drop_oldest -> "drop_oldest"
-          | Agent_sdk.Event_bus.Drop_newest -> "drop_newest"
+          | Agent_core.Event_bus.Drop_oldest -> "drop_oldest"
+          | Agent_core.Event_bus.Drop_newest -> "drop_newest"
         in
         let key = purpose, s.capacity, overflow in
         let count, depth, dropped =
@@ -184,7 +184,7 @@ let bus_samples_of ~bus_label bus =
          in
          [ gauge
              ~labels
-             Otel_metric_store.metric_oas_bus_capacity
+             Otel_metric_store.metric_agent_core_bus_capacity
              (Float.of_int (count * capacity))
          ; gauge ~labels metric_bus_subscriber_depth (Float.of_int depth)
          ; counter_labeled ~labels metric_bus_subscriber_dropped (Float.of_int dropped)
@@ -198,7 +198,7 @@ let bus_samples () =
        | Some bus -> bus_samples_of ~bus_label:"masc_domain" bus
        | None -> [])
     ; (match Event_bus_slots.get_keeper () with
-       | Some bus -> bus_samples_of ~bus_label:"oas_runtime" bus
+       | Some bus -> bus_samples_of ~bus_label:"agent_core_runtime" bus
        | None -> [])
     ]
 ;;

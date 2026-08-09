@@ -10,7 +10,7 @@ let next_fail_open_runtime_for_turn
       ~(base_runtime : string)
       ~(effective_runtime : string)
       ~(attempted_runtimes : string list)
-      (err : Agent_sdk.Error.sdk_error)
+      (err : Agent_core.Error.t)
   : EC.degraded_retry option
   =
   EC.degraded_rotation_after_recoverable_error

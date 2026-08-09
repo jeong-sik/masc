@@ -1,6 +1,6 @@
 open Alcotest
 open Llm_provider
-module EO = Agent_sdk.Exact_output
+module EO = Agent_core.Exact_output
 
 exception Advance_committed_before_successor
 
@@ -2916,7 +2916,7 @@ let test_all_candidate_rejections_return_typed_zero_dispatch_terminal () =
 exception Rejection_advance_committed_before_successor
 
 let test_exception_after_durable_rejection_stops_before_successor () =
-  let durable_path = Filename.temp_file "oas-rejection-advance-" ".json" in
+  let durable_path = Filename.temp_file "agent_core-rejection-advance-" ".json" in
   Fun.protect
     ~finally:(fun () -> Sys.remove durable_path)
     (fun () ->
@@ -3105,7 +3105,7 @@ let test_predispatch_transport_failure_advances_after_durable_callback () =
 ;;
 
 let test_exception_after_durable_advance_stops_before_successor () =
-  let durable_path = Filename.temp_file "oas-exact-flow-advance-" ".json" in
+  let durable_path = Filename.temp_file "agent_core-exact-flow-advance-" ".json" in
   Fun.protect
     ~finally:(fun () ->
       try Sys.remove durable_path with

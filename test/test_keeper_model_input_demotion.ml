@@ -9,7 +9,7 @@
     adversarial review — to break that direction. *)
 
 module Demotion = Masc.Keeper_model_input_demotion
-module Types = Agent_sdk.Types
+module Types = Agent_core.Types
 module Window = Runtime_model_input_tail_window
 
 (* The production encoder, not a test-local one: the bound is only meaningful
@@ -70,7 +70,7 @@ let markers messages = List.concat_map content_of messages
 (* --- 1. Bound soundness (RFC-0363 §6 test 2) -------------------------- *)
 
 (* The placeholder must bound the real marker for every byte range, because
-   [encode_for_oas] renders the preview with [%S] — bytes outside 0x20-0x7E
+   [encode_for_agent_core] renders the preview with [%S] — bytes outside 0x20-0x7E
    expand fourfold — and the JSON encoder then escapes those escapes. A Korean
    body and a body of raw high bytes are the cases that broke the RFC's first
    draft, where the bound was stated as a flat 200-300 bytes. *)
@@ -187,7 +187,7 @@ let invalid_markers_are_not_demoted () =
     "fixture really is marker-shaped"
     true
     (Tool_output.is_marker corrupt);
-  (match Tool_output.decode_from_oas corrupt with
+  (match Tool_output.decode_from_agent_core corrupt with
    | Tool_output.Invalid_marker _ -> ()
    | Tool_output.Not_marker | Tool_output.Decoded _ ->
      Alcotest.fail "fixture must decode as Invalid_marker");
@@ -204,7 +204,7 @@ let invalid_markers_are_not_demoted () =
 let stored_results_are_not_demoted_again () =
   let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
   let marker =
-    Tool_output.encode_for_oas
+    Tool_output.encode_for_agent_core
       (Tool_blob_store.put store ~bytes:(String.make 4000 'a') ~mime:"text/plain")
   in
   let messages = history_with_tool_bodies [ marker ] in

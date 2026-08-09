@@ -13,14 +13,14 @@
     Mirrors the media collector's shape deliberately: a turn-local mutable
     accumulator fed the same raw events, kept separate from the SSE bridge so
     live translation and durable persistence stay on their own side of the
-    OAS-stream / chat-store boundary. *)
+    AGENT_CORE-stream / chat-store boundary. *)
 
 type t
 
 val create : unit -> t
 
-val on_event : t -> Agent_sdk.Types.sse_event -> unit
-(** Feed one raw OAS stream event. A tool-bearing [ContentBlockStart] opens a
+val on_event : t -> Agent_core.Types.sse_event -> unit
+(** Feed one raw AGENT_CORE stream event. A tool-bearing [ContentBlockStart] opens a
     block, argument deltas append to it, and [ContentBlockStop] / [MessageStop]
     finalize. Snapshots replace the accumulated fragments rather than appending,
     matching the provider contract. A [MediaDelta] marks its index as

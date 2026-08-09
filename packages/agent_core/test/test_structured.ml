@@ -1,6 +1,6 @@
 (** Unit tests for Structured output module. *)
 
-open Agent_sdk
+open Agent_core
 open Types
 
 (* --- Test schema --- *)

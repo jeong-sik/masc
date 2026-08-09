@@ -34,7 +34,7 @@
 #   MASC_RELEASE_BASE_URL  Override the release asset base URL (mirror or
 #                  air-gapped install; file:// works). Defaults to
 #                  https://github.com/<repo>/releases/download
-#   OAS_MODEL_CATALOG  Explicit full model catalog override. When unset, OAS's
+#   AGENT_CORE_MODEL_CATALOG  Explicit full model catalog override. When unset, AGENT_CORE's
 #                  embedded catalog is merged with the deployment overlay.
 #   MASC_RUNTIME_EVENTS=0/1  Override OCaml Runtime_events. When unset, the
 #                  generated server command keeps the binary's default.
@@ -772,8 +772,8 @@ PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"
 PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"
 
 model_catalog_env_value() {
-  if [ -n "${OAS_MODEL_CATALOG:-}" ]; then
-    echo "$OAS_MODEL_CATALOG"
+  if [ -n "${AGENT_CORE_MODEL_CATALOG:-}" ]; then
+    echo "$AGENT_CORE_MODEL_CATALOG"
   else
     echo ""
   fi
@@ -788,7 +788,7 @@ run_masc_with_install_env() {
   if [ -n "$catalog" ]; then
     MASC_BASE_PATH="$BASE_PATH" \
       MASC_BASE_PATH_INPUT="$BASE_PATH" \
-      OAS_MODEL_CATALOG="$catalog" \
+      AGENT_CORE_MODEL_CATALOG="$catalog" \
       MASC_RUNTIME_EVENTS="${MASC_RUNTIME_EVENTS:-0}" \
       "$@"
   else
@@ -895,7 +895,7 @@ fi
 if [ "$SEED_CONFIG" -eq 1 ]; then
   CONFIG_DIR="$BASE_PATH/.masc/config"
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
-  MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/oas-models-overlay.toml"
+  MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"
 
   if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$FORCE" -eq 0 ]; then
     log "config already present at $CONFIG_DIR, skipping seed"
@@ -936,7 +936,7 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     }
 
     seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"
-    seed_config_if_missing "oas-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"
+    seed_config_if_missing "agent-core-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"
   fi
 fi
 
@@ -1042,7 +1042,7 @@ if [ "${MASC_RUNTIME_EVENTS+x}" = "x" ]; then
 fi
 start_env="${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
 if [ -n "$catalog_hint" ]; then
-  start_env="OAS_MODEL_CATALOG=\"$catalog_hint\" $start_env"
+  start_env="AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\" $start_env"
 fi
 
 cat <<EOF

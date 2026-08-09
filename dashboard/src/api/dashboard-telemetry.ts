@@ -12,7 +12,7 @@ export type TelemetrySource =
   | 'tool_call_io'
   | 'trajectory_tool_call'
   | 'tool_usage'
-  | 'oas_event'
+  | 'agent_core_event'
   | 'execution_receipt'
   | 'goal_event'
   | 'tool_metric'
@@ -88,7 +88,7 @@ function decodeTelemetrySource(value: unknown): TelemetrySource | null {
     case 'tool_call_io':
     case 'trajectory_tool_call':
     case 'tool_usage':
-    case 'oas_event':
+    case 'agent_core_event':
     case 'execution_receipt':
     case 'goal_event':
     case 'tool_metric':

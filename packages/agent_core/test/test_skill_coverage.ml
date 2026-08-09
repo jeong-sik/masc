@@ -12,7 +12,7 @@
     - supporting_file_paths with absolute and relative paths
     - load error handling (non-existent file) *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── strip_quotes ─────────────────────────────────────────── *)
 

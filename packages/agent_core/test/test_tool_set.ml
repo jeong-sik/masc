@@ -1,4 +1,4 @@
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ──────────────────────────────────────────────── *)
 

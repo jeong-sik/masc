@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "oas:runtime-sync-window:v1",
-  "title": "OAS Runtime Sync Window v1",
-  "description": "Versioned replay window over existing OAS runtime events and canonical event envelopes.",
+  "$id": "agent_core:runtime-sync-window:v1",
+  "title": "AGENT_CORE Runtime Sync Window v1",
+  "description": "Versioned replay window over existing AGENT_CORE runtime events and canonical event envelopes.",
   "type": "object",
   "required": [
     "schema_version",

@@ -50,15 +50,15 @@ check_boundary() {
   require_pattern \
     'Exact_output\.snapshot_flow' \
     "$WORKER" \
-    "worker must snapshot one immutable OAS flow"
+    "worker must snapshot one immutable AGENT_CORE flow"
   require_pattern \
     'Exact_output\.start_flow' \
     "$WORKER" \
-    "worker must allocate only an OAS flow attempt"
+    "worker must allocate only an AGENT_CORE flow attempt"
   require_pattern \
     'Exact_output\.execute_flow_once' \
     "$WORKER" \
-    "worker must execute only the affine OAS flow"
+    "worker must execute only the affine AGENT_CORE flow"
   require_pattern \
     '~validate([^_[:alnum:]]|$)' \
     "$WORKER" \
@@ -82,7 +82,7 @@ check_boundary() {
   require_pattern \
     '~bind:Keeper_approval_queue\.bind_summary_exact_attempt' \
     "$WORKER" \
-    "production queue authority must bind the real OAS receipt"
+    "production queue authority must bind the real AGENT_CORE receipt"
   require_pattern \
     '~release_before_dispatch:[[:space:]]*Keeper_approval_queue\.release_summary_exact_attempt_before_dispatch' \
     "$WORKER" \
@@ -131,11 +131,11 @@ check_boundary() {
   forbid_pattern \
     'Http_client|Cohttp|request_path|Retry\.|retry_policy|retry_after|is_retryable|Error_domain|Capabilities|capability_|supports_|validate_output_schema_request' \
     "$WORKER" \
-    "worker must not bypass OAS HTTP, retry, or capability policy"
+    "worker must not bypass AGENT_CORE HTTP, retry, or capability policy"
   forbid_pattern \
     'ready_flow_admissions|Candidate_admitted|Candidate_rejected|admission_error' \
     "$WORKER" \
-    "MASC must not interpret OAS candidate admission causes"
+    "MASC must not interpret AGENT_CORE candidate admission causes"
   forbid_pattern \
     'Exact_output\.(admit|start_attempt|execute_once)([^_[:alnum:]]|$)' \
     "$WORKER" \
@@ -147,7 +147,7 @@ check_boundary() {
   forbid_pattern \
     'Exact_output\.(receipt_phase|receipt_dispatch_count)|exact_execution_failed_before_dispatch' \
     "$WORKER" \
-    "MASC must not interpret OAS receipt phase/count or restore phase-derived outcomes"
+    "MASC must not interpret AGENT_CORE receipt phase/count or restore phase-derived outcomes"
   forbid_pattern \
     'fail_summary_exact_attempt_before_dispatch' \
     "$ROOT/lib" \

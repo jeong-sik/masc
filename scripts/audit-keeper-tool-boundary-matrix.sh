@@ -3,7 +3,7 @@
 #
 # The matrix is intentionally file-granular. If a scoped keeper module appears
 # without an owner, the tool boundary can drift silently across execution,
-# sandbox, shell, repo-hosting observation, hook, and OAS bridge surfaces.
+# sandbox, shell, repo-hosting observation, hook, and AGENT_CORE bridge surfaces.
 
 set -euo pipefail
 
@@ -39,7 +39,7 @@ manifest_re = re.compile(
 owners = {
     "execution-dispatch",
     "hook-observation",
-    "oas-tool-bridge",
+    "agent_core-tool-bridge",
     "sandbox-runtime",
     "shell-surface",
     "tool-surface-policy",

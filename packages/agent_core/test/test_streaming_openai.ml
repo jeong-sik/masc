@@ -329,7 +329,7 @@ let test_events_late_provider_tool_id_fails_closed () =
   | [ SSEParseFailed { reason; _ } ] ->
     Alcotest.(check string)
       "late provider identity is explicit"
-      "late_provider_tool_call_id: provider identity arrived after an OAS identity was \
+      "late_provider_tool_call_id: provider identity arrived after an AGENT_CORE identity was \
        emitted"
       reason
   | _ -> Alcotest.fail "expected a typed late-provider-identity failure"
@@ -1106,7 +1106,7 @@ let test_responses_stream_idless_tool_identity_matches_final_response () =
     match added with
     | [ ContentBlockStart { index = 0; content_type = "tool_use"; tool_id = Some id; _ } ]
       -> id
-    | _ -> Alcotest.fail "expected an OAS identity on the Responses tool start"
+    | _ -> Alcotest.fail "expected an AGENT_CORE identity on the Responses tool start"
   in
   let _ =
     feed
@@ -1142,9 +1142,9 @@ let test_responses_stream_item_id_is_not_tool_identity () =
       true
       (not (String.equal tool_id "fc_item_only"));
     Alcotest.(check bool)
-      "id-less call receives OAS identity"
+      "id-less call receives AGENT_CORE identity"
       true
-      (String.starts_with ~prefix:"call_oas_" tool_id)
+      (String.starts_with ~prefix:"call_agent_core_" tool_id)
   | _ -> Alcotest.fail "expected one identified Responses tool start"
 ;;
 
@@ -1374,7 +1374,7 @@ let test_responses_stream_incomplete_content_filter_drops_tool () =
    malformed tool-argument buffer to empty arguments. A non-empty buffer that
    fails to parse is a malformed tool call and surfaces a typed
    [Stream_parse_failed]; an empty buffer is the legitimate no-arguments case
-   and yields [`Assoc []]. (RFC-OAS-029 S8: no silent permissive default.) *)
+   and yields [`Assoc []]. (Agent Core contract S8: no silent permissive default.) *)
 let malformed_tool_args_tag = "malformed_tool_use_arguments"
 
 let test_stream_tool_args_malformed_fails_closed () =

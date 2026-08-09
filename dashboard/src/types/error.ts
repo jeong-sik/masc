@@ -31,7 +31,7 @@ export interface DashboardError {
 }
 
 // Classify error message to ErrorCode.
-// Matches known patterns from OAS Error.to_string and tool_args.ml responses.
+// Matches known patterns from Agent Core Error.to_string and tool_args.ml responses.
 const CLASSIFIERS: ReadonlyArray<[RegExp, ErrorCode]> = [
   [/not found|does not exist|no such/i, 'not_found'],
   [/timeout|timed out|deadline exceeded/i, 'timeout'],

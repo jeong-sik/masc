@@ -23,7 +23,7 @@ type turn_state =
 val require_last_execution_for_finalize :
   keeper_name:string ->
   turn_state ->
-  (Keeper_turn_runtime_budget.runtime_execution, Agent_sdk.Error.sdk_error) result
+  (Keeper_turn_runtime_budget.runtime_execution, Agent_core.Error.t) result
 
 val turn_event_bus_manifest_decision :
   Keeper_turn_runtime_budget.turn_event_bus_summary -> Yojson.Safe.t
@@ -45,16 +45,16 @@ type turn_tool_event_tracker
 
 val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
 val turn_tool_event_integrity_error :
-  turn_tool_event_tracker -> Agent_sdk.Error.sdk_error option
+  turn_tool_event_tracker -> Agent_core.Error.t option
 val turn_tool_completed_count : turn_tool_event_tracker -> int
 
-(** Drive the tracker over a batch of [Agent_sdk.Event_bus.event]s,
+(** Drive the tracker over a batch of [Agent_core.Event_bus.event]s,
     matching [ToolCalled] <-> [ToolCompleted] pairs and recording integrity
     violations. Returns the updated tracker. *)
 val record_turn_tool_events :
   keeper_name:string ->
   turn_tool_event_tracker ->
-  Agent_sdk.Event_bus.event list ->
+  Agent_core.Event_bus.event list ->
   turn_tool_event_tracker
 
 (** Record the observation for a streaming turn cancelled externally.

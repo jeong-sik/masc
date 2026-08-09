@@ -21,4 +21,4 @@ val save_atomic
   :  dir:Eio.Fs.dir_ty Eio.Path.t
   -> name:string
   -> string
-  -> (unit, Error.sdk_error) result
+  -> (unit, Error.t) result

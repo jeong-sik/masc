@@ -125,9 +125,9 @@ type t =
   ; trace_id : string
   ; generation : int
   ; turn_count : int option
-  ; oas_turn_count : int option
-  ; oas_dispatch_mode : string option
-  ; oas_internal_runtime_disabled : bool
+  ; agent_core_turn_count : int option
+  ; agent_core_dispatch_mode : string option
+  ; agent_core_internal_runtime_disabled : bool
   ; current_task_id : string option
   ; goal_ids : string list
   ; outcome : outcome_kind
@@ -147,7 +147,7 @@ type t =
   ; runtime_attempt_count : int
   ; runtime_fallback_applied : bool
   ; runtime_outcome : runtime_outcome
-  ; oas_internal_runtime_allowed : bool
+  ; agent_core_internal_runtime_allowed : bool
   ; degraded_retry_applied : bool
   ; degraded_retry_runtime : string option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option

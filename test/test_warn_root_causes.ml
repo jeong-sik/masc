@@ -105,7 +105,7 @@ let test_web_tools_are_bundle_visible () =
         (fun () ->
           let names =
             bundle.tools
-            |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+            |> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
           in
           check bool "WebSearch remains bundle-visible" true
             (List.mem "WebSearch" names);
@@ -152,9 +152,9 @@ let test_fusion_default_descriptor_is_bundle_visible () =
         (fun () ->
           let names =
             bundle.tools
-            |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+            |> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
           in
-          check bool "masc_fusion is in the executable OAS tool bundle" true
+          check bool "masc_fusion is in the executable Agent Core tool bundle" true
             (List.mem "masc_fusion" names)))
 
 let test_bundle_exactly_matches_model_visible_descriptors () =
@@ -194,7 +194,7 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
           in
           let actual_names =
             bundle.tools
-            |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+            |> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
             |> List.sort_uniq String.compare
           in
           check
@@ -247,7 +247,7 @@ let test_missing_current_task_reconciled_before_transition_hint () =
         (fun () ->
           let description =
             bundle.tools
-            |> List.find_map (fun (tool : Agent_sdk.Tool.t) ->
+            |> List.find_map (fun (tool : Agent_core.Tool.t) ->
                  if String.equal tool.schema.name "masc_transition"
                  then Some tool.schema.description
                  else None)
@@ -407,12 +407,12 @@ let test_concurrent_atomic_writes_never_empty () =
   (try Unix.unlink path with _ -> ());
   (try Unix.rmdir dir with _ -> ())
 
-(* ── Test 3: Keeper/OAS failure severities on main path ─────────────── *)
+(* ── Test 3: Keeper/Agent Core failure severities on main path ─────────────── *)
 
 let test_keeper_mainline_failures_log_at_error () =
   check bool "missing checkpoint after run logs at ERROR" true
     (file_contains_pattern "lib/keeper/keeper_agent_run_finalize_response.ml"
-       {|"runtime=%s missing OAS checkpoint after run"|});
+       {|"runtime=%s missing Agent Core checkpoint after run"|});
   (* The deterministic memory-bank write (and its "memory_write failed" log
      site) was removed with the bank — RFC keeper-memory-consolidation
      Stage 4. *)
@@ -432,7 +432,7 @@ let () =
         [
           test_case "web tools are bundle visible" `Quick
             test_web_tools_are_bundle_visible;
-          test_case "fusion default descriptor reaches OAS bundle" `Quick
+          test_case "fusion default descriptor reaches Agent Core bundle" `Quick
             test_fusion_default_descriptor_is_bundle_visible;
           test_case "bundle exactly matches model-visible descriptors" `Quick
             test_bundle_exactly_matches_model_visible_descriptors;

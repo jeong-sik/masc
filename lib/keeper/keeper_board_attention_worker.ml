@@ -721,8 +721,8 @@ let setup_error_detail = function
     "board exact lane has no admitted slots"
   | Exact_flow.Candidate_invalid { position; slot_id = _ } ->
     Printf.sprintf "board exact lane slot %d has invalid identity" position
-  | Exact_flow.Flow_snapshot_failed -> "OAS exact-flow snapshot failed"
-  | Exact_flow.Flow_start_failed -> "OAS exact-flow start failed"
+  | Exact_flow.Flow_snapshot_failed -> "AGENT_CORE exact-flow snapshot failed"
+  | Exact_flow.Flow_start_failed -> "AGENT_CORE exact-flow start failed"
 ;;
 
 let exact_provenance_equal

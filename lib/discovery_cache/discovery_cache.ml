@@ -1,6 +1,6 @@
-(** Discovery_cache — cached wrapper over OAS Provider Discovery.
+(** Discovery_cache — cached wrapper over AGENT_CORE Provider Discovery.
 
-    All probing logic lives in OAS. This module adds:
+    All probing logic lives in AGENT_CORE. This module adds:
     - TTL-based caching (30s default)
     - Convenience queries (any_local_healthy, idle/busy counts)
     - Eio capability injection (set_env at server init)
@@ -79,4 +79,4 @@ let cache_age_seconds () =
 
 (* ── Convenience queries ─────────────────────────────────── *)
 
-(* ── JSON (delegates to OAS) ─────────────────────────────── *)
+(* ── JSON (delegates to AGENT_CORE) ─────────────────────────────── *)

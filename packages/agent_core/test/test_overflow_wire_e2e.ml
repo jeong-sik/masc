@@ -1,4 +1,4 @@
-(** oas#2621 end-to-end regression: an empty completion whose OpenAI/GLM wire
+(** agent-core boundary end-to-end regression: an empty completion whose OpenAI/GLM wire
     [finish_reason] is the overflow token must classify as
     [Retry.ContextOverflow], not provider-unavailability.
 
@@ -15,7 +15,7 @@
     parse paths (both OpenAI-compatible and GLM) and asserts the resulting
     typed [stop_reason] reaches the classifier as [ContextOverflow]. *)
 
-open Agent_sdk
+open Agent_core
 module Http = Llm_provider.Http_client
 module Types = Llm_provider.Types
 module Wire = Llm_provider.Stop_reason_wire
@@ -105,7 +105,7 @@ let test_attribution_end_to_end () =
   let body = empty_completion_body ~finish_reason:overflow_token in
   let stop_reason = empty_completion_stop_reason "glm" (Glm.parse_response_result body) in
   match
-    Attribution.sdk_error_of_http_error (Http.empty_completion_error ~stop_reason)
+    Attribution.core_error_of_http_error (Http.empty_completion_error ~stop_reason)
   with
   | Error.Api (Retry.ContextOverflow { limit = None; _ }) -> ()
   | other -> Alcotest.failf "expected Api ContextOverflow, got %s" (Error.to_string other)
@@ -122,7 +122,7 @@ let test_non_overflow_control () =
     Types.EndTurn
     stop_reason;
   match
-    Attribution.sdk_error_of_http_error (Http.empty_completion_error ~stop_reason)
+    Attribution.core_error_of_http_error (Http.empty_completion_error ~stop_reason)
   with
   | Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
   | other ->

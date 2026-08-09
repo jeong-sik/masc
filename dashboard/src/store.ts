@@ -338,58 +338,58 @@ export const fusionRuns = signal<FusionRunRecord[]>([])
 export const fusionRunsLoading = signal(false)
 export const fusionRunsError = signal<string | null>(null)
 
-// --- OAS monitoring state ---
+// --- Agent Core monitoring state ---
 
-import type { OasAgentEvent, OasHealthSummary } from './types/oas'
+import type { AgentCoreAgentEvent, AgentCoreHealthSummary } from './types/agent-core'
 
 import {
-  OAS_AGENT_EVENT_BUFFER,
+  AGENT_CORE_AGENT_EVENT_BUFFER,
   HEARTBEAT_STALE_MS,
   SHELL_TTL_MS,
 } from './config/constants'
 import { RingBuffer } from './lib/ring-buffer'
 
-const oasAgentEventsRing = new RingBuffer<OasAgentEvent>(OAS_AGENT_EVENT_BUFFER)
-export const oasAgentEvents = signal<OasAgentEvent[]>([])
-export const oasTotalEvents = signal(0)
-export const oasReplayLoadedEvents = signal(0)
-export const oasReplayTotalMatchingEvents = signal(0)
-export const oasReplayTruncated = signal(false)
-export const oasTotalLlmCalls = signal(0)
-export const oasTotalErrors = signal(0)
-export const oasLastLlmCallTs = signal<number | null>(null)
-export const oasLastErrorTs = signal<number | null>(null)
-export const oasEvidenceRefsCount = signal(0)
-export const oasArtifactRefsCount = signal(0)
-export const oasRawTraceRefsCount = signal(0)
-export const oasReportRefsCount = signal(0)
-export const oasProofRefsCount = signal(0)
-export const oasTelemetryRefsCount = signal(0)
-export const oasRuntimeEvidenceRefsCount = signal(0)
-export const oasLastEvidenceTs = signal<number | null>(null)
+const agentCoreAgentEventsRing = new RingBuffer<AgentCoreAgentEvent>(AGENT_CORE_AGENT_EVENT_BUFFER)
+export const agentCoreAgentEvents = signal<AgentCoreAgentEvent[]>([])
+export const agentCoreTotalEvents = signal(0)
+export const agentCoreReplayLoadedEvents = signal(0)
+export const agentCoreReplayTotalMatchingEvents = signal(0)
+export const agentCoreReplayTruncated = signal(false)
+export const agentCoreTotalLlmCalls = signal(0)
+export const agentCoreTotalErrors = signal(0)
+export const agentCoreLastLlmCallTs = signal<number | null>(null)
+export const agentCoreLastErrorTs = signal<number | null>(null)
+export const agentCoreEvidenceRefsCount = signal(0)
+export const agentCoreArtifactRefsCount = signal(0)
+export const agentCoreRawTraceRefsCount = signal(0)
+export const agentCoreReportRefsCount = signal(0)
+export const agentCoreProofRefsCount = signal(0)
+export const agentCoreTelemetryRefsCount = signal(0)
+export const agentCoreRuntimeEvidenceRefsCount = signal(0)
+export const agentCoreLastEvidenceTs = signal<number | null>(null)
 
-export function resetOasRuntimeSignals(): void {
-  oasAgentEventsRing.clear()
-  oasAgentEvents.value = []
-  oasTotalEvents.value = 0
-  oasReplayLoadedEvents.value = 0
-  oasReplayTotalMatchingEvents.value = 0
-  oasReplayTruncated.value = false
-  oasTotalLlmCalls.value = 0
-  oasTotalErrors.value = 0
-  oasLastLlmCallTs.value = null
-  oasLastErrorTs.value = null
-  oasEvidenceRefsCount.value = 0
-  oasArtifactRefsCount.value = 0
-  oasRawTraceRefsCount.value = 0
-  oasReportRefsCount.value = 0
-  oasProofRefsCount.value = 0
-  oasTelemetryRefsCount.value = 0
-  oasRuntimeEvidenceRefsCount.value = 0
-  oasLastEvidenceTs.value = null
+export function resetAgentCoreRuntimeSignals(): void {
+  agentCoreAgentEventsRing.clear()
+  agentCoreAgentEvents.value = []
+  agentCoreTotalEvents.value = 0
+  agentCoreReplayLoadedEvents.value = 0
+  agentCoreReplayTotalMatchingEvents.value = 0
+  agentCoreReplayTruncated.value = false
+  agentCoreTotalLlmCalls.value = 0
+  agentCoreTotalErrors.value = 0
+  agentCoreLastLlmCallTs.value = null
+  agentCoreLastErrorTs.value = null
+  agentCoreEvidenceRefsCount.value = 0
+  agentCoreArtifactRefsCount.value = 0
+  agentCoreRawTraceRefsCount.value = 0
+  agentCoreReportRefsCount.value = 0
+  agentCoreProofRefsCount.value = 0
+  agentCoreTelemetryRefsCount.value = 0
+  agentCoreRuntimeEvidenceRefsCount.value = 0
+  agentCoreLastEvidenceTs.value = null
 }
 
-export function noteOasReplayWindow(input: {
+export function noteAgentCoreReplayWindow(input: {
   loadedEvents: number
   totalMatchingEvents: number
   truncated: boolean
@@ -397,13 +397,13 @@ export function noteOasReplayWindow(input: {
   const loadedEvents = Math.max(0, Math.floor(input.loadedEvents))
   const totalMatchingEvents = Math.max(loadedEvents, Math.floor(input.totalMatchingEvents))
   const truncated = input.truncated && totalMatchingEvents > loadedEvents
-  oasReplayLoadedEvents.value = loadedEvents
-  oasReplayTotalMatchingEvents.value = totalMatchingEvents
-  oasReplayTruncated.value = truncated
-  oasTotalEvents.value = totalMatchingEvents
+  agentCoreReplayLoadedEvents.value = loadedEvents
+  agentCoreReplayTotalMatchingEvents.value = totalMatchingEvents
+  agentCoreReplayTruncated.value = truncated
+  agentCoreTotalEvents.value = totalMatchingEvents
 }
 
-function sameOasAgentEvent(left: OasAgentEvent, right: OasAgentEvent): boolean {
+function sameAgentCoreAgentEvent(left: AgentCoreAgentEvent, right: AgentCoreAgentEvent): boolean {
   if (left.event_key != null && right.event_key != null) {
     return left.event_key === right.event_key
   }
@@ -439,30 +439,30 @@ function sameOasAgentEvent(left: OasAgentEvent, right: OasAgentEvent): boolean {
   }
 }
 
-export function pushOasAgentEvent(event: OasAgentEvent): void {
-  const head = oasAgentEventsRing.peek()
-  if (head != null && sameOasAgentEvent(head, event)) {
+export function pushAgentCoreAgentEvent(event: AgentCoreAgentEvent): void {
+  const head = agentCoreAgentEventsRing.peek()
+  if (head != null && sameAgentCoreAgentEvent(head, event)) {
     return
   }
-  oasAgentEventsRing.push(event)
-  oasAgentEvents.value = oasAgentEventsRing.toArray() as OasAgentEvent[]
+  agentCoreAgentEventsRing.push(event)
+  agentCoreAgentEvents.value = agentCoreAgentEventsRing.toArray() as AgentCoreAgentEvent[]
 }
 
-/** Record an OAS durable LLM-call event. Increments the global
+/** Record an Agent Core durable LLM-call event. Increments the global
  *  counter and pins the latest timestamp so the runtime panel can
  *  surface recency. */
-export function recordOasLlmCall(tsMs: number): void {
-  oasTotalLlmCalls.value++
-  oasLastLlmCallTs.value = Math.max(oasLastLlmCallTs.value ?? 0, tsMs)
+export function recordAgentCoreLlmCall(tsMs: number): void {
+  agentCoreTotalLlmCalls.value++
+  agentCoreLastLlmCallTs.value = Math.max(agentCoreLastLlmCallTs.value ?? 0, tsMs)
 }
 
-/** Record an OAS durable error event. */
-export function recordOasError(tsMs: number): void {
-  oasTotalErrors.value++
-  oasLastErrorTs.value = Math.max(oasLastErrorTs.value ?? 0, tsMs)
+/** Record an Agent Core durable error event. */
+export function recordAgentCoreError(tsMs: number): void {
+  agentCoreTotalErrors.value++
+  agentCoreLastErrorTs.value = Math.max(agentCoreLastErrorTs.value ?? 0, tsMs)
 }
 
-export function recordOasEvidenceRefs(input: {
+export function recordAgentCoreEvidenceRefs(input: {
   evidenceRefsCount?: number
   artifactRefsCount?: number
   rawTraceRefsCount?: number
@@ -490,37 +490,37 @@ export function recordOasEvidenceRefs(input: {
   ) {
     return
   }
-  oasEvidenceRefsCount.value += evidenceRefsCount
-  oasArtifactRefsCount.value += artifactRefsCount
-  oasRawTraceRefsCount.value += rawTraceRefsCount
-  oasReportRefsCount.value += reportRefsCount
-  oasProofRefsCount.value += proofRefsCount
-  oasTelemetryRefsCount.value += telemetryRefsCount
-  oasRuntimeEvidenceRefsCount.value += runtimeEvidenceRefsCount
+  agentCoreEvidenceRefsCount.value += evidenceRefsCount
+  agentCoreArtifactRefsCount.value += artifactRefsCount
+  agentCoreRawTraceRefsCount.value += rawTraceRefsCount
+  agentCoreReportRefsCount.value += reportRefsCount
+  agentCoreProofRefsCount.value += proofRefsCount
+  agentCoreTelemetryRefsCount.value += telemetryRefsCount
+  agentCoreRuntimeEvidenceRefsCount.value += runtimeEvidenceRefsCount
   if (typeof input.tsMs === 'number' && Number.isFinite(input.tsMs)) {
-    oasLastEvidenceTs.value = Math.max(oasLastEvidenceTs.value ?? 0, input.tsMs)
+    agentCoreLastEvidenceTs.value = Math.max(agentCoreLastEvidenceTs.value ?? 0, input.tsMs)
   }
 }
 
-export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() => ({
-  agentEventsCount: oasAgentEvents.value.length,
-  totalEvents: oasTotalEvents.value,
-  replayLoadedEvents: oasReplayLoadedEvents.value,
-  replayTotalMatchingEvents: oasReplayTotalMatchingEvents.value,
-  replayTruncated: oasReplayTruncated.value,
-  hasMore: oasReplayTruncated.value,
-  totalLlmCalls: oasTotalLlmCalls.value,
-  totalErrors: oasTotalErrors.value,
-  lastLlmCallTs: oasLastLlmCallTs.value,
-  lastErrorTs: oasLastErrorTs.value,
-  evidenceRefsCount: oasEvidenceRefsCount.value,
-  artifactRefsCount: oasArtifactRefsCount.value,
-  rawTraceRefsCount: oasRawTraceRefsCount.value,
-  reportRefsCount: oasReportRefsCount.value,
-  proofRefsCount: oasProofRefsCount.value,
-  telemetryRefsCount: oasTelemetryRefsCount.value,
-  runtimeEvidenceRefsCount: oasRuntimeEvidenceRefsCount.value,
-  lastEvidenceTs: oasLastEvidenceTs.value,
+export const agentCoreHealthSummary: ReadonlySignal<AgentCoreHealthSummary> = computed(() => ({
+  agentEventsCount: agentCoreAgentEvents.value.length,
+  totalEvents: agentCoreTotalEvents.value,
+  replayLoadedEvents: agentCoreReplayLoadedEvents.value,
+  replayTotalMatchingEvents: agentCoreReplayTotalMatchingEvents.value,
+  replayTruncated: agentCoreReplayTruncated.value,
+  hasMore: agentCoreReplayTruncated.value,
+  totalLlmCalls: agentCoreTotalLlmCalls.value,
+  totalErrors: agentCoreTotalErrors.value,
+  lastLlmCallTs: agentCoreLastLlmCallTs.value,
+  lastErrorTs: agentCoreLastErrorTs.value,
+  evidenceRefsCount: agentCoreEvidenceRefsCount.value,
+  artifactRefsCount: agentCoreArtifactRefsCount.value,
+  rawTraceRefsCount: agentCoreRawTraceRefsCount.value,
+  reportRefsCount: agentCoreReportRefsCount.value,
+  proofRefsCount: agentCoreProofRefsCount.value,
+  telemetryRefsCount: agentCoreTelemetryRefsCount.value,
+  runtimeEvidenceRefsCount: agentCoreRuntimeEvidenceRefsCount.value,
+  lastEvidenceTs: agentCoreLastEvidenceTs.value,
 }))
 
 // --- Loading flags ---

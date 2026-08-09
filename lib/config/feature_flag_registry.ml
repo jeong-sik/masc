@@ -97,7 +97,7 @@ let all_flags : flag list = [
     lifecycle = Active };
 
   { env_name = "MASC_KEEPER_WIRE_CAPTURE";
-    description = "Default-off diagnostic MASC-to-OAS request/response wire capture";
+    description = "Default-off diagnostic MASC-to-AGENT_CORE request/response wire capture";
     default = false; category = "keeper";
     lifecycle = Experimental };
 

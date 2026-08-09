@@ -81,7 +81,7 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
   | Hooks.Continue -> Ok ()
   | Hooks.HookFailed { stage; detail } ->
     Error
-      (Pipeline_common.hook_failed_sdk_error
+      (Pipeline_common.hook_failed_core_error
          ~hook_name:"before_turn"
          ~stage
          ~tool_name:None
@@ -93,7 +93,7 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
        against a validation bypass or future hook matrix drift. [Block] is
        legal only at pre_tool_use, so it is illegal here. *)
     Error
-      (Pipeline_common.illegal_hook_decision_sdk_error
+      (Pipeline_common.illegal_hook_decision_core_error
          ~hook_name:"before_turn"
          ~stage:Hooks.Before_turn
          ~decision:before_decision)
@@ -101,7 +101,7 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
 
 let last_tool_results_from = Agent_turn.last_tool_results_from
 
-(* Wiring coverage (RFC-OAS-024 WP8 Inc1): the consumed [last_tool_results_from]
+(* Wiring coverage (Agent Core contract WP8 Inc1): the consumed [last_tool_results_from]
    path routes [ToolResult] blocks through
    [Canonical_tool.tool_result_of_block] and lowers the projection back to
    [Types.tool_result]. A result carrying a [json] (WP4 structured) payload
@@ -173,7 +173,7 @@ let stage_parse ?raw_trace_run ?clock ~turn agent =
     | Ok params -> Ok params
     | Error (Agent_turn.Hook_failed { stage; detail }) ->
       Error
-        (Pipeline_common.hook_failed_sdk_error
+        (Pipeline_common.hook_failed_core_error
            ~hook_name:"before_turn_params"
            ~stage
            ~tool_name:None
@@ -181,7 +181,7 @@ let stage_parse ?raw_trace_run ?clock ~turn agent =
            ~detail)
     | Error (Agent_turn.Illegal_decision decision) ->
       Error
-        (Pipeline_common.illegal_hook_decision_sdk_error
+        (Pipeline_common.illegal_hook_decision_core_error
            ~hook_name:"before_turn_params"
            ~stage:Hooks.Before_turn_params
            ~decision)

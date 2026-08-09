@@ -478,7 +478,7 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SseBroadcastFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string WorkspaceHeartbeatFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnMetricsSnapshotFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string OasExecutionErrors) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string Agent_coreExecutionErrors) |> int_of_float)
         (* MemoryOsLibrarianFailures is intentionally excluded: librarian
            failures are not tool errors and are surfaced separately in the
            LIBRARIAN header segment (LIBRARIAN-FAILURES-SINCE-START). *)
@@ -512,7 +512,7 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string CrashPersistenceFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string KeepaliveSignalFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetaJsonFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolsOasFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolsAgent_coreFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnUpUpdateFailures) |> int_of_float)
 + (Otel_metric_store.metric_total Keeper_metrics.(to_string ExecutionReceiptFailures) |> int_of_float)
 + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolExecuteFailures) |> int_of_float)

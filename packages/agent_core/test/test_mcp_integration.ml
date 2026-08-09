@@ -2,7 +2,7 @@
     Covers server_spec, managed types, merge_env, connect_all,
     close_all, and Agent integration with MCP clients. *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ───────────────────────────────────────────────────── *)
 
@@ -30,7 +30,7 @@ let with_temp_script body f =
   let dir =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "oas-mcp-%d-%06x" (Unix.getpid ()) (Random.int 0xFFFFFF))
+      (Printf.sprintf "agent-core-mcp-%d-%06x" (Unix.getpid ()) (Random.int 0xFFFFFF))
   in
   Unix.mkdir dir 0o755;
   let path = Filename.concat dir "fake_mcp_server.py" in
@@ -86,9 +86,9 @@ let test_merge_env_empty () =
 ;;
 
 let test_merge_env_add_new () =
-  let result = Mcp.merge_env [ "OAS_TEST_NEW_VAR_12345", "hello" ] in
+  let result = Mcp.merge_env [ "AGENT_CORE_TEST_NEW_VAR_12345", "hello" ] in
   let has_var =
-    Array.exists (fun entry -> entry = "OAS_TEST_NEW_VAR_12345=hello") result
+    Array.exists (fun entry -> entry = "AGENT_CORE_TEST_NEW_VAR_12345=hello") result
   in
   Alcotest.(check bool) "new var present" true has_var
 ;;
@@ -105,18 +105,18 @@ let test_merge_env_override () =
 ;;
 
 let test_merge_env_multiple () =
-  let result = Mcp.merge_env [ "OAS_A", "1"; "OAS_B", "2"; "OAS_C", "3" ] in
+  let result = Mcp.merge_env [ "AGENT_CORE_A", "1"; "AGENT_CORE_B", "2"; "AGENT_CORE_C", "3" ] in
   let count =
     Array.to_list result
-    |> List.filter (fun e -> String.length e >= 4 && String.sub e 0 4 = "OAS_")
+    |> List.filter (fun e -> String.length e >= 11 && String.sub e 0 11 = "AGENT_CORE_")
     |> List.length
   in
-  Alcotest.(check bool) "at least 3 OAS_ vars" true (count >= 3)
+  Alcotest.(check bool) "at least 3 AGENT_CORE_ vars" true (count >= 3)
 ;;
 
 let test_merge_env_preserves_existing () =
   let base_count = Array.length (Unix.environment ()) in
-  let result = Mcp.merge_env [ "OAS_TEST_UNIQUE_99999", "x" ] in
+  let result = Mcp.merge_env [ "AGENT_CORE_TEST_UNIQUE_99999", "x" ] in
   (* Should have base_count + 1 (the new var) *)
   Alcotest.(check int) "count = base + 1" (base_count + 1) (Array.length result)
 ;;

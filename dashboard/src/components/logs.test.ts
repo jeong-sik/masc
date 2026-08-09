@@ -62,7 +62,7 @@ describe('log diagnostics', () => {
         entry({
           level: 'WARN',
           message:
-            'keeper_llm_bridge: OAS execution timed out after 300.0s (budget=300s)',
+            'keeper_llm_bridge: Agent Core execution timed out after 300.0s (budget=300s)',
         }),
       ),
     ).toBeNull()
@@ -121,8 +121,8 @@ describe('log diagnostics', () => {
         message: 'keeper provider timeout',
         details: {
           failure_envelope: {
-            surface: 'keeper_oas_bridge',
-            entity_kind: 'oas_execution',
+            surface: 'keeper_agent_core_bridge',
+            entity_kind: 'agent_core_execution',
             entity_id: null,
             cause_code: 'provider_timeout',
             severity: 'bad',

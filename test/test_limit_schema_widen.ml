@@ -2,7 +2,7 @@
 
    #18472 widened [limit] from strict ["integer"] to the union
    ["integer", "string"] across five sites so the correction_pipeline
-   would not fire when an LLM emitted a numeric string. OAS #2343 then
+   would not fire when an LLM emitted a numeric string. agent-core boundary then
    made mcp_schema fail-closed: a [type] array with more than one
    non-null member raises Invalid_argument
    ("property \"limit\" type array must contain exactly one non-null
@@ -94,7 +94,7 @@ let check_limit_description name desc =
 let desc_case tools name () =
   check_limit_description name (limit_description (find_tool_schema tools name))
 
-(* A [type] array with more than one non-null member is exactly what OAS
+(* A [type] array with more than one non-null member is exactly what AGENT_CORE
    #2343 fail-closed rejects. Assert every [limit] is a single scalar. *)
 let check_single_type name type_value =
   match type_value with
@@ -105,7 +105,7 @@ let check_single_type name type_value =
       single
   | `List _ ->
     Alcotest.failf
-      "%s: limit type is a multi-type array; OAS #2343 fail-closed rejects it \
+      "%s: limit type is a multi-type array; agent-core boundary fail-closed rejects it \
        and crashes the keeper cycle (see #18472 revert)"
       name
   | other ->

@@ -1,7 +1,7 @@
-(** Core types for Anthropic Agent SDK.
+(** Base types for Agent Core.
 
     LLM-level types (role, message, content_block, etc.) are defined in
-    {!Llm_provider.Types} and re-exported here for backward compatibility.
+    {!Llm_provider.Types} and re-exported through the public core surface.
     Agent-specific types (model, agent_config, agent_state) remain local. *)
 
 (* ================================================================ *)
@@ -10,7 +10,7 @@
 include Llm_provider.Types
 
 (* ================================================================ *)
-(* tool_choice JSON parsing -- depends on OAS Error module           *)
+(* tool_choice JSON parsing -- depends on AGENT_CORE Error module           *)
 (* ================================================================ *)
 
 let tool_choice_of_json json =
@@ -66,12 +66,12 @@ let response_format_of_json json =
 ;;
 
 (* ================================================================ *)
-(* Agent-specific types (internal to OAS)                             *)
+(* Agent-specific types (internal to AGENT_CORE)                             *)
 (* ================================================================ *)
 
 (** Exact provider model identifier.
 
-    OAS does not expand aliases or choose a model on the caller's behalf.
+    AGENT_CORE does not expand aliases or choose a model on the caller's behalf.
     Provider/model catalogs may expose their own explicit defaults at their
     typed resolution boundary. *)
 type model = string [@@deriving yojson, show]

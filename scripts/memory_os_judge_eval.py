@@ -37,9 +37,9 @@ three distinct config keys: [runtime.assignments] verifier / [fusion] judge /
 [memory_os] judge.
 
 NOTE (boundary): the ideal home for the live judge is the OCaml harness
-(test/eval_memory_os_value.ml) calling the OAS provider abstraction directly. This
+(test/eval_memory_os_value.ml) calling the AGENT_CORE provider abstraction directly. This
 Python path resolves the provider from runtime.toml and speaks raw HTTP instead, so
-it does NOT inherit OAS transport (retry / stream). Acceptable for a 1-shot
+it does NOT inherit AGENT_CORE transport (retry / stream). Acceptable for a 1-shot
 off-server batch eval; revisit if the judge ever moves onto a hot path.
 """
 

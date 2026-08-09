@@ -121,11 +121,11 @@ type provider_failure_kind =
       ; limit_bytes : int
       }
   | Response_body_too_large of { limit_bytes : int }
-  (* oas#2483: the provider returned a 200 with no deliverable content (no
+  (* agent-core boundary: the provider returned a 200 with no deliverable content (no
      thinking, text, or tool_calls). Distinct from a parse error. Preserve the
      typed stop reason so policy remains outside this transport fact. *)
   | Empty_completion of { stop_reason : Types.stop_reason }
-  (* oas#2947: provider-reported context-window overflow (e.g. glm 1261),
+  (* agent-core boundary: provider-reported context-window overflow (e.g. glm 1261),
      kept typed so consumers reach their compaction/shrink path instead of
      seeing a generic invalid-request. *)
   | Context_overflow of { limit : int option }
@@ -2422,7 +2422,7 @@ let require_clock_when_idle ~site ~clock ~idle_timeout =
   | Some _, _ | None, None -> ()
 ;;
 
-(* RFC-OAS-037: same fail-loud contract for the first-event (TTFT/prefill)
+(* Agent Core contract: same fail-loud contract for the first-event (TTFT/prefill)
    deadline. Either an explicit [first_event_timeout] OR the [body_timeout]
    fallback that now backs it (see [resolve_first_event_timeout]) would
    silently disarm without a clock, leaving the prefill wait unbounded. The
@@ -2437,7 +2437,7 @@ let require_clock_when_first_event ~site ~clock ~first_event_timeout ~body_timeo
      | None, None -> ())
 ;;
 
-(* RFC-OAS-037: the caller-supplied knob a streaming deadline came from.
+(* Agent Core contract: the caller-supplied knob a streaming deadline came from.
    Carried so a fired timeout can name the budget the operator must tune,
    rather than always blaming the inter-token idle knob. *)
 type timeout_knob =
@@ -2461,7 +2461,7 @@ type first_event_bound =
       }
   | Unarmed
 
-(* RFC-OAS-037 §4.2: resolve the effective first-event (TTFT/prefill) bound.
+(* Agent Core contract §4.2: resolve the effective first-event (TTFT/prefill) bound.
    Every arm returns a caller-supplied value — this function never invents a
    deadline of its own:
 
@@ -2497,7 +2497,7 @@ let resolve_first_event_timeout ~first_event_timeout ~body_timeout ~idle_timeout
   | Unarmed -> None
 ;;
 
-(* RFC-OAS-037: name the knob whose value produced the deadline that fired, so
+(* Agent Core contract: name the knob whose value produced the deadline that fired, so
    an operator tunes the budget that actually governs. Derived from the SAME
    resolver as the armed bound — the precedence chain exists in exactly one
    place, so the message can never drift from the behaviour. Only the
@@ -2543,7 +2543,7 @@ let read_sse
      SAME [with_timeout_exn] window preserves the armed deadline so a
      provider that emits only keepalives still trips it when no real event
      arrives.
-     RFC-OAS-037: the wait for the FIRST meaningful line is the
+     Agent Core contract: the wait for the FIRST meaningful line is the
      time-to-first-event (TTFT / prefill) window; bound it with
      [first_event_timeout] (a separate, larger liveness budget) rather than
      the short [idle_timeout], which arms only AFTER the first event for
@@ -2615,7 +2615,7 @@ let read_sse
          behaviour. *)
       | None, _ -> inner ()
     in
-    (* P3a (RFC-OAS-037 review): the transition to the inter-token idle budget
+    (* P3a (Agent Core contract review): the transition to the inter-token idle budget
        must fire on GENUINE first output — a data field — NOT on a bare event
        type, blank dispatch delimiter, or other metadata. An [event] field
        selects the dispatch type but carries no payload; counting it as the
@@ -2699,7 +2699,7 @@ let read_sse
     wrapped in [Eio.Time.with_timeout_exn] so a stalled stream raises
     [Eio.Time.Timeout] after [idle_timeout] seconds of silence.
 
-    RFC-OAS-037: the wait for the FIRST line is the time-to-first-event
+    Agent Core contract: the wait for the FIRST line is the time-to-first-event
     (TTFT / prefill) window, bounded by [first_event_timeout] when set;
     otherwise it falls back to [body_timeout], then to [idle_timeout] (the
     pre-RFC bound), and stays unarmed when the caller wired none of them.
@@ -2732,7 +2732,7 @@ let read_ndjson
          best-effort rather than a loud failure here. *)
       | None, _ -> Eio.Buf_read.line reader
     in
-    (* P3a (RFC-OAS-037 review): a bare blank line is a delimiter, not real
+    (* P3a (Agent Core contract review): a bare blank line is a delimiter, not real
        provider output — the [loop] below skips it. Flip to the inter-token
        idle budget only on a non-empty line so a leading blank does not switch
        budgets prematurely (SSE [Sse_blank] parity). *)
@@ -3184,7 +3184,7 @@ let%test "read_sse: idle_timeout fires when stream stalls mid-read" =
   | Eio.Time.Timeout -> true
 ;;
 
-(* ── RFC-OAS-037: first_event_timeout (TTFT/prefill) tests ── *)
+(* ── Agent Core contract: first_event_timeout (TTFT/prefill) tests ── *)
 
 (* Acceptance (a): a silent prefill that produces its first event AFTER the
    short inter-token idle but WITHIN the first-event budget must succeed —
@@ -3300,7 +3300,7 @@ let%test "read_ndjson: first_event_timeout admits a silent prefill past idle" =
   List.rev !lines = [ "{\"a\":1}" ]
 ;;
 
-(* ── RFC-OAS-037 review: effective first-event bound resolution ── *)
+(* ── Agent Core contract review: effective first-event bound resolution ── *)
 
 (* The pure resolver is the deterministic seam for the fallback policy: one
    test per arm of the precedence chain
@@ -3345,7 +3345,7 @@ let%test "resolve_first_event_timeout: all-None stays unarmed" =
   = None
 ;;
 
-(* RFC-OAS-037 attribution: a fired deadline must name the knob that supplied
+(* Agent Core contract attribution: a fired deadline must name the knob that supplied
    its value. Pinning all three first-event sources plus one later phase means
    a regression to the old "always stream_idle_timeout_s" message fails here. *)
 let%test "governing_timeout_knob: first-event names its explicit knob" =
@@ -3392,7 +3392,7 @@ let%test "timeout_knob_to_param: names match the caller-facing parameters" =
 
 (* P3b (production default): [first_event_timeout = None] + [body_timeout = Some
    small] + a reader that never emits a first event. Pre-fix the first-event
-   wait was fully unbounded and this read hung forever (defeating RFC-OAS-037
+   wait was fully unbounded and this read hung forever (defeating Agent Core contract
    acceptance point (4)); the body_timeout fallback now bounds it. The long
    inter-token idle budget must NOT rescue it — the first-event bound does. *)
 let%test "read_sse: body_timeout bounds the first-event wait when first_event is None" =

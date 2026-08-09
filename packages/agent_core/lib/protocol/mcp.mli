@@ -26,7 +26,7 @@ val json_schema_type_to_param_type : string -> Types.param_type
 val json_schema_type_to_param_type_result : string -> (Types.param_type, string) result
 val json_schema_to_params : Yojson.Safe.t -> Types.tool_param list
 val json_schema_to_params_result : Yojson.Safe.t -> (Types.tool_param list, string) result
-val mcp_tool_of_sdk_tool : Mcp_schema.Sdk_types.tool -> mcp_tool
+val mcp_tool_of_agent_core_tool : Mcp_schema.Sdk_types.tool -> mcp_tool
 
 (** Re-export of {!Mcp_schema.tool_of_input_schema_result}: derives the
     parameter view from [~input_schema] and keeps that schema as the
@@ -40,12 +40,12 @@ val tool_of_input_schema_result
   -> (Yojson.Safe.t -> Types.tool_result)
   -> (Tool.t, string) result
 
-val mcp_tool_to_sdk_tool
+val mcp_tool_to_agent_core_tool
   :  call_fn:(Yojson.Safe.t -> Types.tool_result)
   -> mcp_tool
   -> Tool.t
 
-val mcp_tool_to_sdk_tool_result
+val mcp_tool_to_agent_core_tool_result
   :  call_fn:(Yojson.Safe.t -> Types.tool_result)
   -> mcp_tool
   -> (Tool.t, string) result
@@ -65,35 +65,35 @@ val connect
   -> args:string list
   -> ?env:string array
   -> unit
-  -> (t, Error.sdk_error) result
+  -> (t, Error.t) result
 
-val initialize : t -> (unit, Error.sdk_error) result
+val initialize : t -> (unit, Error.t) result
 val close : t -> unit
 val is_alive : t -> bool
 
 (** {1 Tool operations} *)
 
-val list_tools : t -> (mcp_tool list, Error.sdk_error) result
+val list_tools : t -> (mcp_tool list, Error.t) result
 val call_tool : t -> name:string -> arguments:Yojson.Safe.t -> Types.tool_result
-val to_tools : t -> mcp_tool list -> (Tool.t list, Error.sdk_error) result
+val to_tools : t -> mcp_tool list -> (Tool.t list, Error.t) result
 
 (** {1 Resource and prompt operations} *)
 
-val list_resources : t -> (Mcp_schema.mcp_resource list, Error.sdk_error) result
+val list_resources : t -> (Mcp_schema.mcp_resource list, Error.t) result
 
 val read_resource
   :  t
   -> uri:string
-  -> (Mcp_schema.mcp_resource_contents list, Error.sdk_error) result
+  -> (Mcp_schema.mcp_resource_contents list, Error.t) result
 
-val list_prompts : t -> (Mcp_schema.mcp_prompt list, Error.sdk_error) result
+val list_prompts : t -> (Mcp_schema.mcp_prompt list, Error.t) result
 
 val get_prompt
   :  t
   -> name:string
   -> ?arguments:(string * string) list
   -> unit
-  -> (Mcp_schema.mcp_prompt_result, Error.sdk_error) result
+  -> (Mcp_schema.mcp_prompt_result, Error.t) result
 
 (** {1 Managed connections} *)
 val text_of_tool_result : Mcp_schema.Sdk_types.tool_result -> string
@@ -128,25 +128,25 @@ val connect_and_load
   :  sw:Eio.Switch.t
   -> mgr:_ Eio.Process.mgr
   -> server_spec
-  -> (managed, Error.sdk_error) result
+  -> (managed, Error.t) result
 
 val connect_all
   :  sw:Eio.Switch.t
   -> mgr:_ Eio.Process.mgr
   -> server_spec list
-  -> (managed list, Error.sdk_error) result
+  -> (managed list, Error.t) result
 
 val reconnect
   :  sw:Eio.Switch.t
   -> mgr:_ Eio.Process.mgr
   -> managed
-  -> (managed, Error.sdk_error) result
+  -> (managed, Error.t) result
 
 val connect_all_best_effort
   :  sw:Eio.Switch.t
   -> mgr:_ Eio.Process.mgr
   -> server_spec list
-  -> managed list * (string * Error.sdk_error) list
+  -> managed list * (string * Error.t) list
 
 val close_managed : managed -> unit
 val close_all : managed list -> unit

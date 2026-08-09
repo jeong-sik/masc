@@ -1,4 +1,4 @@
-(** Typed provider/runtime observations for SDK errors crossing from OAS into
+(** Typed provider/runtime observations for agent-core errors crossing from AGENT_CORE into
     MASC. This boundary classifies transport facts only; it never decides a
     Keeper lifecycle transition. *)
 
@@ -102,8 +102,8 @@ let timeout_phase_of_label label =
 ;;
 
 type timeout_source =
-  | Oas_api
-  | Oas_provider
+  | Agent_core_api
+  | Agent_core_provider
 
 type provider_timeout =
   { phase : timeout_phase option
@@ -114,7 +114,7 @@ type t =
   | Provider_timeout of provider_timeout
   | Not_provider_runtime_failure
 
-let timeout_phase_of_oas_phase phase =
+let timeout_phase_of_agent_core_phase phase =
   Llm_provider.Http_client.timeout_phase_to_label phase
   |> timeout_phase_of_label
 ;;
@@ -165,7 +165,7 @@ let classify_provider_runtime_error_record ~code ~detail =
   if provider_runtime_error_looks_like_timeout ~code
   then
     Provider_timeout
-      { source = Oas_provider
+      { source = Agent_core_provider
       ; phase =
         (Option.bind
            (provider_runtime_error_timeout_phase_label ~code)
@@ -198,12 +198,12 @@ let classify_masc_internal_error = function
 let classify_provider_error = function
   | Llm_provider.Error.Timeout { timeout_phase; _ } ->
     provider_timeout
-      ~source:Oas_provider
-      ~phase:(Option.bind timeout_phase timeout_phase_of_oas_phase)
+      ~source:Agent_core_provider
+      ~phase:(Option.bind timeout_phase timeout_phase_of_agent_core_phase)
   | Llm_provider.Error.NetworkError { timeout_phase = Some phase; _ } ->
     provider_timeout
-      ~source:Oas_provider
-      ~phase:(timeout_phase_of_oas_phase phase)
+      ~source:Agent_core_provider
+      ~phase:(timeout_phase_of_agent_core_phase phase)
   | Llm_provider.Error.MissingApiKey _
   | Llm_provider.Error.InvalidConfig _
   | Llm_provider.Error.ParseError _
@@ -224,25 +224,25 @@ let classify_provider_error = function
     Not_provider_runtime_failure
 ;;
 
-let classify_sdk_error (err : Agent_sdk.Error.sdk_error) : t =
+let classify_core_error (err : Agent_core.Error.t) : t =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some _ as internal_error -> classify_masc_internal_error internal_error
   | None ->
     (match err with
-     | Agent_sdk.Error.Api (Timeout _) ->
-       provider_timeout ~source:Oas_api ~phase:None
-     | Agent_sdk.Error.Provider provider_error ->
+     | Agent_core.Error.Api (Timeout _) ->
+       provider_timeout ~source:Agent_core_api ~phase:None
+     | Agent_core.Error.Provider provider_error ->
        classify_provider_error provider_error
-     | Agent_sdk.Error.Api (NetworkError _ | Overloaded _ | ServerError _
+     | Agent_core.Error.Api (NetworkError _ | Overloaded _ | ServerError _
        | RateLimited _ | AuthError _ | AuthorizationError _ | PaymentRequired _
        | InvalidRequest _ | NotFound _ | ContextOverflow _ | InputCapacity _)
-     | Agent_sdk.Error.Agent _
-     | Agent_sdk.Error.Mcp _
-     | Agent_sdk.Error.Config _
-     | Agent_sdk.Error.Serialization _
-     | Agent_sdk.Error.Io _
-     | Agent_sdk.Error.Orchestration _
-     | Agent_sdk.Error.Internal _ ->
+     | Agent_core.Error.Agent _
+     | Agent_core.Error.Mcp _
+     | Agent_core.Error.Config _
+     | Agent_core.Error.Serialization _
+     | Agent_core.Error.Io _
+     | Agent_core.Error.Orchestration _
+     | Agent_core.Error.Internal _ ->
        Not_provider_runtime_failure)
 ;;
 
@@ -252,5 +252,5 @@ let is_provider_timeout = function
 ;;
 
 let is_provider_timeout_error err =
-  classify_sdk_error err |> is_provider_timeout
+  classify_core_error err |> is_provider_timeout
 ;;

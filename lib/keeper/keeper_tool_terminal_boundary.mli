@@ -2,5 +2,5 @@
     Agent Core cooperative-yield boundary. *)
 
 val decision
-  :  Keeper_tools_oas.terminal_effect_state
-  -> (Runtime_agent.cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
+  :  Keeper_tools_agent_core.terminal_effect_state
+  -> (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result

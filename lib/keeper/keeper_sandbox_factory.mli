@@ -10,7 +10,7 @@
     context within a turn.  The runtime can still execute from different cwd
     values via [Keeper_turn_sandbox_runtime.container_cwd_of_host].
 
-    Background: pre-PR-3b, [keeper_tools_oas.make_tool_bundle] inspected
+    Background: pre-PR-3b, [keeper_tools_agent_core.make_tool_bundle] inspected
     [meta.sandbox_profile] eagerly at turn-start.  The factory still creates
     runtimes lazily at each call site, but freezes its construction meta so
     path resolution and dispatch use one sandbox profile for the whole turn.

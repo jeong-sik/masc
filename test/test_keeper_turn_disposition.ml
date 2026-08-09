@@ -51,8 +51,8 @@ let canonical_app_codes : (string * D.t) list =
    documented in the RFC; only [severity] (rendered as string) is
    asserted against legacy here. *)
 let runtime_wire_codes : (string * D.t) list =
-  [ "api_error_overloaded", D.Provider_error (Code.Sdk_error "api_error_overloaded")
-  ; "api_error_server:502", D.Provider_error (Code.Sdk_error "api_error_server:502")
+  [ "api_error_overloaded", D.Provider_error (Code.Agent_core_error "api_error_overloaded")
+  ; "api_error_server:502", D.Provider_error (Code.Agent_core_error "api_error_server:502")
   ]
 ;;
 
@@ -129,7 +129,7 @@ let test_runtime_wire_severity_byte_compat () =
    - [of_wire] is best-effort. Recognised app strings round-trip.
      Recognised runtime wires (RFC-0042) round-trip via projection.
      Parametrised runtime payloads (Provider_runtime_error of string,
-     Sdk_error of string, Exception_unhandled of string) and
+     Agent_core_error of string, Exception_unhandled of string) and
      unrecognised legacy wires deserialise to [Unknown { raw_error }];
      no round-trip is possible without a wire-prefix scheme that
      RFC-0042 explicitly defers (§3.1 "intentionally flat"). *)
@@ -170,7 +170,7 @@ let test_round_trip_lossy_payloads () =
       , D.Provider_error (Code.Provider_runtime_error "p_500")
       , "p_500" )
     ; ( "Provider_error/Sdk payload"
-      , D.Provider_error (Code.Sdk_error "api_error_overloaded")
+      , D.Provider_error (Code.Agent_core_error "api_error_overloaded")
       , "api_error_overloaded" )
     ]
   in
@@ -204,8 +204,8 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Exception_unhandled "x"
     , D.Provider_error (Code.Exception_unhandled "x") )
   ; ( "Sdk"
-    , Code.Sdk_error "api_error_server:502"
-    , D.Provider_error (Code.Sdk_error "api_error_server:502") )
+    , Code.Agent_core_error "api_error_server:502"
+    , D.Provider_error (Code.Agent_core_error "api_error_server:502") )
   ]
 ;;
 
@@ -255,7 +255,7 @@ let check_runtime_failure_reason raw_error expected_code =
 
 let test_registry_failure_reason_preserves_no_provider_runtime_reason () =
   let raw_error =
-    "Internal error: [masc_oas_error] \
+    "Internal error: [masc_agent_core_error] \
      {\"kind\":\"runtime_exhausted\",\"runtime_id\":\"runtime.strict_tool_candidates\",\
      \"reason\":\"no_providers_available\"}"
   in
@@ -266,14 +266,14 @@ let test_registry_failure_reason_preserves_no_provider_runtime_reason () =
 
 let test_registry_failure_reason_does_not_classify_free_form_detail () =
   let raw_error =
-    Keeper_internal_error.sdk_error_of_masc_internal_error
+    Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Runtime_exhausted
          { runtime_id = "runtime.opaque_detail"
          ; reason =
              Keeper_internal_error.Other_detail
                "connection refused; HTTP 429; wall-clock timeout"
          })
-    |> Agent_sdk.Error.to_string
+    |> Agent_core.Error.to_string
   in
   check_runtime_failure_reason raw_error "runtime_exhausted_provider_failure"
 ;;
@@ -300,7 +300,7 @@ let test_missing_last_execution_is_typed_error () =
       empty_turn_state
   with
   | Ok _ -> Alcotest.fail "expected missing last_execution to return a typed error"
-  | Error (Agent_sdk.Error.Internal message) ->
+  | Error (Agent_core.Error.Internal message) ->
     Alcotest.(check string)
       "internal error message"
       "keeper_under_test: last_execution missing at turn finalize"
@@ -308,7 +308,7 @@ let test_missing_last_execution_is_typed_error () =
   | Error err ->
     Alcotest.failf
       "expected Internal error, got %s"
-      (Agent_sdk.Error.to_string err)
+      (Agent_core.Error.to_string err)
 ;;
 
 let () =

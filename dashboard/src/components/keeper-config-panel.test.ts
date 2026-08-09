@@ -569,11 +569,11 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
-      allowed_paths_text: 'workspace/masc\n workspace/oas \nworkspace/oas\n',
+      allowed_paths_text: 'workspace/masc\n workspace/agentCore \nworkspace/agentCore\n',
       mention_targets_text: 'alpha\n beta \nalpha\n',
     }), c)
 
-    expect(payload.allowed_paths).toEqual(['workspace/masc', 'workspace/oas'])
+    expect(payload.allowed_paths).toEqual(['workspace/masc', 'workspace/agentCore'])
     expect(payload.mention_targets).toEqual(['alpha', 'beta'])
   })
 
@@ -722,7 +722,7 @@ const mocks = vi.hoisted(() => {
             always_ignored_sampling_params: [],
           },
           request_config: {
-            source: 'oas-provider-config',
+            source: 'agent-core-provider-config',
             provider_kind: 'openai_compat',
             request_path: '/chat/completions',
             request_path_targets_responses_api: false,
@@ -790,7 +790,7 @@ const mocks = vi.hoisted(() => {
             },
           },
           effective_capabilities: {
-            source: 'oas-provider-config-model',
+            source: 'agent-core-provider-config-model',
             max_context_tokens: 131072,
             max_output_tokens: 65536,
             supports_tools: true,
@@ -933,7 +933,7 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('RunPod MTP')
     expect(container.textContent).toContain('Qwen/Qwen3-32B')
     expect(container.textContent).toContain('effective')
-    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('source:agent-core-provider-config-model')
     expect(container.textContent).toContain('request')
     expect(container.textContent).toContain('think:on')
     expect(container.textContent).toContain('policy')

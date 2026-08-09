@@ -9,7 +9,7 @@ type t =
   ; mutable provider : Execution_agent_scope.provider_attempt option
   }
 
-let sdk_error error = Error.Internal (Execution_agent_scope.error_to_string error)
+let core_error error = Error.Internal (Execution_agent_scope.error_to_string error)
 
 (* A [Closed Succeeded] turn/provider found at a resume ordinal under a still-open
    run: an idempotent completed boundary. [Settled_provider_closed] carries the
@@ -32,17 +32,17 @@ let open_turn scope ~ordinal =
   | None -> Ok { turn = Transient ordinal; provider = None }
   | Some scope ->
     (match Execution_agent_scope.resume_turn scope ~ordinal with
-     | Error error -> Error (sdk_error error)
+     | Error error -> Error (core_error error)
      | Ok (Resume_turn_open turn) -> Ok { turn = Durable turn; provider = None }
      | Ok Resume_turn_absent ->
        Execution_agent_scope.open_turn scope ~ordinal
        |> Result.map (fun turn -> { turn = Durable turn; provider = None })
-       |> Result.map_error sdk_error
+       |> Result.map_error core_error
      | Ok (Resume_turn_settled _) ->
        (* A fresh turn ordinal must not already be a settled boundary; a collision
           is inconsistent topology rather than reopening durably-settled work. *)
        Error
-         (sdk_error
+         (core_error
             (Execution_agent_scope.Resume_topology_mismatch
                "fresh turn ordinal is already settled")))
 ;;
@@ -52,26 +52,26 @@ let resume_current scope =
   | None -> Ok Fresh
   | Some scope ->
     (match Execution_agent_scope.resume_current_turn scope with
-     | Error error -> Error (sdk_error error)
+     | Error error -> Error (core_error error)
      | Ok Resume_turn_absent -> Ok Fresh
      | Ok (Resume_turn_settled turn) ->
        (match Execution_agent_scope.resume_provider_attempt turn with
-        | Error error -> Error (sdk_error error)
+        | Error error -> Error (core_error error)
         | Ok Resume_provider_absent ->
           Error
-            (sdk_error
+            (core_error
                (Execution_agent_scope.Resume_topology_mismatch
                   "closed succeeded turn has no provider attempt authority"))
         | Ok (Resume_provider_settled provider) ->
           Ok (Settled { provider = Some provider; turn_to_close = None })
         | Ok (Resume_provider_open _) ->
           Error
-            (sdk_error
+            (core_error
                (Execution_agent_scope.Resume_topology_mismatch
                   "closed turn contains an open provider attempt")))
      | Ok (Resume_turn_open turn) ->
        (match Execution_agent_scope.resume_provider_attempt turn with
-        | Error error -> Error (sdk_error error)
+        | Error error -> Error (core_error error)
         | Ok Resume_provider_absent -> Ok Fresh
         | Ok (Resume_provider_settled provider) ->
           Ok (Settled { provider = Some provider; turn_to_close = Some turn })
@@ -84,7 +84,7 @@ let finalize_settled boundary =
   | None -> Ok ()
   | Some turn ->
     Execution_agent_scope.close_turn turn Execution_event.Succeeded
-    |> Result.map_error sdk_error
+    |> Result.map_error core_error
 ;;
 
 let turn_ordinal t =
@@ -99,7 +99,7 @@ let before_provider_attempt t binding =
   | Durable turn ->
     Execution_agent_scope.open_provider_attempt turn ~ordinal:0 binding
     |> Result.map (fun provider -> t.provider <- Some provider)
-    |> Result.map_error sdk_error
+    |> Result.map_error core_error
 ;;
 
 let provider (t : t) = t.provider
@@ -109,10 +109,10 @@ let record_provider_response (t : t) response =
   | Transient _, None -> Ok ()
   | Durable _, Some provider ->
     Execution_agent_scope.record_provider_response provider response
-    |> Result.map_error sdk_error
+    |> Result.map_error core_error
   | Transient _, Some _ | Durable _, None ->
     Error
-      (sdk_error
+      (core_error
          (Execution_agent_scope.Resume_topology_mismatch
             "provider response has no matching provider attempt authority"))
 ;;
@@ -120,10 +120,10 @@ let record_provider_response (t : t) response =
 let provider_response (t : t) =
   match t.provider with
   | Some provider ->
-    Execution_agent_scope.provider_response provider |> Result.map_error sdk_error
+    Execution_agent_scope.provider_response provider |> Result.map_error core_error
   | None ->
     Error
-      (sdk_error
+      (core_error
          (Execution_agent_scope.Resume_topology_mismatch
             "active execution has no provider response authority"))
 ;;
@@ -133,46 +133,46 @@ let invocations_settled (t : t) =
   | None -> Ok false
   | Some provider ->
     Execution_agent_scope.provider_invocations_settled provider
-    |> Result.map_error sdk_error
+    |> Result.map_error core_error
 ;;
 
 let invocations (t : t) =
   match t.provider with
   | None ->
     Error
-      (sdk_error
+      (core_error
          (Execution_agent_scope.Resume_topology_mismatch
             "active execution has no provider invocation authority"))
   | Some provider ->
-    Execution_agent_scope.provider_invocations provider |> Result.map_error sdk_error
+    Execution_agent_scope.provider_invocations provider |> Result.map_error core_error
 ;;
 
 let settled_invocations_with_results (t : t) =
   match t.provider with
   | None ->
     Error
-      (sdk_error
+      (core_error
          (Execution_agent_scope.Resume_topology_mismatch
             "active execution has no provider invocation authority"))
   | Some provider ->
     Execution_agent_scope.provider_settled_invocations provider
-    |> Result.map_error sdk_error
+    |> Result.map_error core_error
 ;;
 
 let settled_invocations boundary =
   match boundary.provider with
   | None -> Ok []
   | Some provider ->
-    Execution_agent_scope.provider_invocations provider |> Result.map_error sdk_error
+    Execution_agent_scope.provider_invocations provider |> Result.map_error core_error
 ;;
 
 let settled_response boundary =
   match boundary.provider with
   | Some provider ->
-    Execution_agent_scope.provider_response provider |> Result.map_error sdk_error
+    Execution_agent_scope.provider_response provider |> Result.map_error core_error
   | None ->
     Error
-      (sdk_error
+      (core_error
          (Execution_agent_scope.Resume_topology_mismatch
             "settled execution has no provider response authority"))
 ;;
@@ -183,10 +183,10 @@ let close_success (t : t) =
   | Some provider, Durable turn ->
     let* () =
       Execution_agent_scope.close_provider_attempt provider Execution_event.Succeeded
-      |> Result.map_error sdk_error
+      |> Result.map_error core_error
     in
     Execution_agent_scope.close_turn turn Execution_event.Succeeded
-    |> Result.map_error sdk_error
+    |> Result.map_error core_error
   | None, Durable _ | Some _, Transient _ ->
-    Error (sdk_error Execution_agent_scope.Invocation_locator_mismatch)
+    Error (core_error Execution_agent_scope.Invocation_locator_mismatch)
 ;;

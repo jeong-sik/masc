@@ -1,6 +1,6 @@
 (** Unit tests for Streaming.{create_stream_acc, accumulate_event, finalize_stream_acc}. *)
 
-open Agent_sdk
+open Agent_core
 module Retry = Llm_provider.Retry
 open Types
 
@@ -11,7 +11,7 @@ module Streaming = struct
   include Llm_provider.Streaming
   include Llm_provider.Complete_stream_acc
 
-  let map_http_error = Provider_failure_attribution.sdk_error_of_http_error
+  let map_http_error = Provider_failure_attribution.core_error_of_http_error
 end
 
 (* ── Helpers ──────────────────────────────────────────────── *)

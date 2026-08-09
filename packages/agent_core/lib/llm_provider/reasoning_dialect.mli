@@ -5,7 +5,7 @@
     typed record: default toggle state, effort aliases, sampling interactions,
     and history replay policy.
 
-    The intent is to keep provider policy in OAS while letting downstream
+    The intent is to keep provider policy in AGENT_CORE while letting downstream
     agent runtimes decide how to surface or pause around reasoning events.
 
     @since 0.207.0 *)

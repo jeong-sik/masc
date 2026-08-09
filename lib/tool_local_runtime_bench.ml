@@ -1,7 +1,7 @@
 (** Tool_local_runtime_bench -- concurrency benchmark against runtime pool. *)
 
 include Tool_local_runtime_http
-module Oas_types = Agent_sdk.Types
+module Agent_core_types = Agent_core.Types
 
 
 (* http_error_message moved to Provider_http_error.to_message (SSOT,
@@ -95,13 +95,13 @@ let validate_requested_model (runtime : Runtime.t) requested_model =
     Error
       (Printf.sprintf
          "runtime %S is owned by an official CLI client; local_runtime_bench only \
-          measures OAS agent_core providers"
+          measures Agent Core providers"
          runtime.id)
   | Runtime_execution.Antigravity_cli _ ->
     Error
       (Printf.sprintf
          "runtime %S is owned by antigravity-cli; local_runtime_bench only \
-          measures OAS agent_core providers"
+          measures Agent Core providers"
          runtime.id)
   | Runtime_execution.Agent_core provider_config ->
     (match requested_model with
@@ -168,22 +168,22 @@ let ensure_runtime_reachable (runtime : Runtime.t)
        | Error err ->
            Error (Printf.sprintf "runtime %S unavailable: %s" runtime.id err))
 
-let oas_completion_at (runtime : Runtime.t)
+let agent_core_completion_at (runtime : Runtime.t)
     (provider_config : Llm_provider.Provider_config.t) ~prompt ~max_tokens
     ~timeout_sec () =
   match Masc_eio_env.get_opt () with
   | None ->
-      (* MASC-OAS boundary: raw curl fallback removed.
+      (* MASC-AGENT_CORE boundary: raw curl fallback removed.
          Bench must run inside an Eio-managed context. *)
       ( { success = false; latency_ms = 0;
-          error = Some "Eio environment not available; bench requires OAS runtime context" },
+          error = Some "Eio environment not available; bench requires AGENT_CORE runtime context" },
         runtime.id )
   | Some env -> (
       let started = Time_compat.now () in
       let provider_config =
         { provider_config with max_tokens = Some max_tokens }
       in
-          let messages : Oas_types.message list = [ Oas_types.user_msg prompt ] in
+          let messages : Agent_core_types.message list = [ Agent_core_types.user_msg prompt ] in
           let run_completion () =
             Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
               ~config:provider_config ~messages ()
@@ -225,7 +225,7 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
           (List.init parallelism (fun fiber_idx ->
                fun () ->
                  let sample, runtime_id =
-                   oas_completion_at runtime provider_config ~prompt ~max_tokens
+                   agent_core_completion_at runtime provider_config ~prompt ~max_tokens
                      ~timeout_sec ()
                  in
                  update_runtime_breakdown runtime_breakdown ~runtime_id ~sample;
@@ -258,7 +258,7 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
         (`Assoc
           [
             ("server_url", `String provider_config.base_url);
-            ("source", `String "oas_complete");
+            ("source", `String "agent_core_complete");
             ("model_id", `String provider_config.model_id);
             ("runtime_pool", `String runtime.id);
             ("parallelism", `Int parallelism);

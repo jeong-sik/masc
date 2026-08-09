@@ -100,8 +100,8 @@ val is_retryable : t -> bool
 (** [is_retryable err] — would replaying the same operation, without
     additional caller action, have a chance of succeeding?
 
-    Mirrors the [Error.is_retryable] helper that OAS exposes on
-    its [sdk_error]. Conservative: when in doubt the result is
+    Mirrors the [Error.is_retryable] helper that AGENT_CORE exposes on
+    its [core_error]. Conservative: when in doubt the result is
     [false] so callers don't loop on deterministic failures.
 
     {ul

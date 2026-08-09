@@ -1,22 +1,22 @@
-(** OAS boundary adapter for tool results, schemas, and tool definitions.
+(** AGENT_CORE boundary adapter for tool results, schemas, and tool definitions.
 
     MASC dispatch uses typed [Tool_result.result] internally.  This module is the
     boundary adapter that converts typed MASC results to/from
-    [Agent_sdk.Types.tool_result = (tool_output, tool_error) Result.t].
+    [Agent_core.Types.tool_result = (tool_output, tool_error) Result.t].
 
     Central [Tool_dispatch.handler] implementations should return
     [Tool_result.result] directly rather than reintroducing tuple dispatch.
 
     @since 2.95.1 — result conversion
-    @since 2.110.0 — schema conversion + OAS Tool.t creation
+    @since 2.110.0 — schema conversion + AGENT_CORE Tool.t creation
     @since 2.??? — externalize large outputs via [Tool_blob_store] *)
 
 (** {1 Tool Output Externalization}
 
     Tool outputs above [default_externalize_threshold_bytes] are stored
     in the content-addressed blob store ([Tool_blob_store]) and the
-    OAS [content] field carries a blob marker
-    ([Tool_output.encode_for_oas (Stored {...})]). Smaller outputs flow
+    AGENT_CORE [content] field carries a blob marker
+    ([Tool_output.encode_for_agent_core (Stored {...})]). Smaller outputs flow
     through unchanged.
 
     Stored results remain content-addressed references at the durable and
@@ -61,7 +61,7 @@ let maybe_externalize ?base_path ?(mime = "text/plain")
              Tool_blob_store.put_durable store ~bytes:msg ~mime
            in
            Ok
-             (Tool_output.encode_for_oas
+             (Tool_output.encode_for_agent_core
                 (Tool_output.Stored reference))
          with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -73,8 +73,8 @@ let maybe_externalize ?base_path ?(mime = "text/plain")
 (** {1 Result Conversion} *)
 
 let make_tool_error ?(recoverable = false) ?error_class message
-  : Agent_sdk.Types.tool_result =
-  Error { Agent_sdk.Types.message; recoverable; error_class }
+  : Agent_core.Types.tool_result =
+  Error { Agent_core.Types.message; recoverable; error_class }
 
 let project_content ?base_path ~model_projection message =
   match model_projection with
@@ -101,33 +101,33 @@ let externalization_tool_error ~recoverable error =
       ~recoverable
       ~error_class:
         (if recoverable
-         then Agent_sdk.Types.Transient
-         else Agent_sdk.Types.Unknown)
+         then Agent_core.Types.Transient
+         else Agent_core.Types.Unknown)
       "tool output artifact storage failed"
   | Inline_budget_exceeded ->
     make_tool_error
       ~recoverable:false
-      ~error_class:Agent_sdk.Types.Deterministic
+      ~error_class:Agent_core.Types.Deterministic
       "tool output exceeds descriptor budget"
 ;;
 
-let oas_error_class_of_tool_failure_class = function
-  | Tool_result.Transient_error -> Agent_sdk.Types.Transient
+let agent_core_error_class_of_tool_failure_class = function
+  | Tool_result.Transient_error -> Agent_core.Types.Transient
   | Tool_result.Policy_rejection
   | Tool_result.Workflow_rejection ->
-    Agent_sdk.Types.Deterministic
-  | Tool_result.Runtime_failure -> Agent_sdk.Types.Unknown
+    Agent_core.Types.Deterministic
+  | Tool_result.Runtime_failure -> Agent_core.Types.Unknown
 ;;
 
 (** {1 Schema Conversion}
 
-    OAS owns the JSON Schema to [tool_param] contract. Invalid, missing, or
+    AGENT_CORE owns the JSON Schema to [tool_param] contract. Invalid, missing, or
     ambiguous property types fail at this boundary instead of being guessed
     as strings or reduced to the first union member. *)
 
 let params_of_json_schema schema =
   let params =
-    match Agent_sdk.Mcp.json_schema_to_params_result schema with
+    match Agent_core.Mcp.json_schema_to_params_result schema with
     | Ok params -> params
     | Error detail -> invalid_arg detail
   in
@@ -140,7 +140,7 @@ let params_of_json_schema schema =
            (fun (name, _) ->
               not
                 (List.exists
-                   (fun (param : Agent_sdk.Types.tool_param) ->
+                   (fun (param : Agent_core.Types.tool_param) ->
                       String.equal param.name name)
                    params))
            properties
@@ -157,9 +157,9 @@ let params_of_json_schema schema =
          name)
 ;;
 
-(** {1 OAS Tool.t Creation}
+(** {1 AGENT_CORE Tool.t Creation}
 
-    Create OAS [Tool.t] from MASC schema definition + dispatch handler.
+    Create AGENT_CORE [Tool.t] from MASC schema definition + dispatch handler.
     This allows incremental migration: each tool can be converted independently. *)
 
 let project_result
@@ -169,7 +169,7 @@ let project_result
       ~model_projection
       message
       on_content
-  : Agent_sdk.Types.tool_result
+  : Agent_core.Types.tool_result
   =
   match project_content ?base_path ~model_projection message with
   | Ok content -> on_content content
@@ -180,13 +180,13 @@ let project_result
       error
 ;;
 
-let to_oas_typed_result
+let to_agent_core_typed_result
       ?base_path
       ?(model_projection = Tool_output.default_model_projection)
       ?on_externalization_error
       ?(externalization_error_recoverable = true)
       (tr : Tool_result.result)
-  : Agent_sdk.Types.tool_result
+  : Agent_core.Types.tool_result
   =
   match tr with
   | Tool_result.Completed output ->
@@ -197,7 +197,7 @@ let to_oas_typed_result
       ~model_projection
       (Tool_result.message tr)
       (fun content ->
-         Ok { Agent_sdk.Types.content; _meta = output.metadata })
+         Ok { Agent_core.Types.content; _meta = output.metadata })
   | Tool_result.Deferred output ->
     let disposition_field =
       "masc.tool_disposition", `String (Tool_result.string_of_disposition tr)
@@ -215,7 +215,7 @@ let to_oas_typed_result
       ~model_projection
       (Tool_result.message tr)
       (fun content ->
-         Ok { Agent_sdk.Types.content; _meta = Some metadata })
+         Ok { Agent_core.Types.content; _meta = Some metadata })
   | Tool_result.Failed { class_; message; metadata; _ } ->
     let message =
       match metadata with
@@ -237,22 +237,22 @@ let to_oas_typed_result
       (fun message ->
        make_tool_error
          ~recoverable:(Tool_result.is_retryable class_)
-         ~error_class:(oas_error_class_of_tool_failure_class class_)
+         ~error_class:(agent_core_error_class_of_tool_failure_class class_)
          message)
 
-(** Create an OAS [Tool.t] from a MASC tool schema and a typed handler.
+(** Create an AGENT_CORE [Tool.t] from a MASC tool schema and a typed handler.
 
     [handler] receives raw JSON args and returns a {!Tool_result.result}.
-    The bridge converts the result to OAS [tool_result] automatically.
+    The bridge converts the result to AGENT_CORE [tool_result] automatically.
 
     {[
-      let oas_tool = oas_tool_of_masc
+      let agent_core_tool = agent_core_tool_of_masc
         ~name:"masc_board_post"
         ~description:"Post to the board..."
         ~input_schema:schema_json
         (fun args -> handle_board_post ctx args)
     ]} *)
-let oas_tool_of_masc
+let agent_core_tool_of_masc
     ?descriptor
     ?base_path
     ?model_projection
@@ -261,19 +261,19 @@ let oas_tool_of_masc
     ~name
     ~description
     ~input_schema
-    handler : Agent_sdk.Tool.t =
+    handler : Agent_core.Tool.t =
   let parameters = params_of_json_schema input_schema in
-  let oas_handler json_args =
-    to_oas_typed_result
+  let agent_core_handler json_args =
+    to_agent_core_typed_result
       ?base_path
       ?model_projection
       ?on_externalization_error
       ?externalization_error_recoverable
       (handler json_args)
   in
-  Agent_sdk.Tool.create ?descriptor ~name ~description ~parameters oas_handler
+  Agent_core.Tool.create ?descriptor ~name ~description ~parameters agent_core_handler
 
-let oas_tool_of_masc_with_execution_env
+let agent_core_tool_of_masc_with_execution_env
     ?descriptor
     ?base_path
     ?model_projection
@@ -283,21 +283,21 @@ let oas_tool_of_masc_with_execution_env
     ~description
     ~input_schema
   handler
-  : Agent_sdk.Tool.t
+  : Agent_core.Tool.t
   =
-  let oas_handler execution_env json_args =
-    to_oas_typed_result
+  let agent_core_handler execution_env json_args =
+    to_agent_core_typed_result
       ?base_path
       ?model_projection
       ?on_externalization_error
       ?externalization_error_recoverable
       (handler execution_env json_args)
   in
-  match Agent_sdk.Types.tool_schema_of_input_schema ~name ~description ~input_schema () with
-  | Ok schema -> Agent_sdk.Base.Tool.of_schema ?descriptor schema oas_handler
+  match Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema () with
+  | Ok schema -> Agent_core.Base.Tool.of_schema ?descriptor schema agent_core_handler
   | Error detail ->
     invalid_arg (Printf.sprintf "tool %S schema invalid: %s" name detail)
 
 let () =
-  Runtime_agent.set_oas_tool_of_masc_hook (fun ~name ~description ~input_schema handler ->
-    oas_tool_of_masc ~name ~description ~input_schema handler)
+  Runtime_agent.set_agent_core_tool_of_masc_hook (fun ~name ~description ~input_schema handler ->
+    agent_core_tool_of_masc ~name ~description ~input_schema handler)

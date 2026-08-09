@@ -106,11 +106,11 @@ val default_ollama_endpoint : string
 (** Canonical local LLM endpoint fallback.
     This is intentionally not an environment snapshot. Use
     {!resolve_default_endpoint} when runtime configuration should read
-    [OAS_LOCAL_LLM_URL]. *)
+    [AGENT_CORE_LOCAL_LLM_URL]. *)
 val default_endpoint : string
 
 (** Call-time resolver for the canonical local LLM endpoint.
-    Reads [OAS_LOCAL_LLM_URL] at call time, falling back to
+    Reads [AGENT_CORE_LOCAL_LLM_URL] at call time, falling back to
     {!Constants.Endpoints.default_url}. Prefer this over {!default_endpoint}
     when the value must reflect environment changes after module init. [getenv]
     defaults to {!Cli_common_env.get}; tests may inject it to avoid mutating the

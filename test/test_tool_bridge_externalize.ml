@@ -60,11 +60,11 @@ let test_threshold_default_under () =
   let result_large = externalize_exn large in
   Alcotest.(check string) "large unchanged when no base path" large result_large
 
-(* --- Round-trip via to_oas_typed_result on small payloads --- *)
+(* --- Round-trip via to_agent_core_typed_result on small payloads --- *)
 
-let test_to_oas_typed_small_inlined () =
+let test_to_agent_core_typed_small_inlined () =
   let small = "small ok" in
-  match B.to_oas_typed_result (tool_ok ~tool_name:"test" small) with
+  match B.to_agent_core_typed_result (tool_ok ~tool_name:"test" small) with
   | Ok { content; _ } ->
       Alcotest.(check string) "inlined verbatim" small content;
       Alcotest.(check bool) "no marker" false (O.is_marker content)
@@ -74,7 +74,7 @@ let test_incident_sized_result_stays_inline () =
   with_temp_base_path (fun dir ->
     let payload = String.make 2_500 'w' in
     match
-      B.to_oas_typed_result
+      B.to_agent_core_typed_result
         ~base_path:dir
         (tool_ok ~tool_name:"WebSearch" payload)
     with
@@ -86,7 +86,7 @@ let test_incident_sized_result_stays_inline () =
 let test_bounded_inline_rejects_oversized_result () =
   let payload = String.make (B.default_externalize_threshold_bytes + 1) 'x' in
   match
-    B.to_oas_typed_result
+    B.to_agent_core_typed_result
       ~model_projection:Tool_output.bounded_inline_model_projection
       (tool_ok ~tool_name:"keeper_artifact_read" payload)
   with
@@ -98,7 +98,7 @@ let test_bounded_inline_rejects_oversized_result () =
       message;
     Alcotest.(check bool) "bounded projection is not retryable" false recoverable;
     (match error_class with
-     | Some Agent_sdk.Types.Deterministic -> ()
+     | Some Agent_core.Types.Deterministic -> ()
      | _ -> Alcotest.fail "bounded projection failure is not deterministic")
 
 let test_artifact_reader_owns_inline_projection () =
@@ -122,7 +122,7 @@ let test_tool_identity_does_not_bypass_externalization () =
     let payload = String.make (B.default_externalize_threshold_bytes + 1) 'b' in
     let check_tool tool_name =
       match
-        B.to_oas_typed_result
+        B.to_agent_core_typed_result
           ~base_path:dir
           (tool_ok ~tool_name payload)
       with
@@ -133,14 +133,14 @@ let test_tool_identity_does_not_bypass_externalization () =
     check_tool "opaque_tool_a";
     check_tool "opaque_tool_b")
 
-let test_to_oas_typed_error_inlined () =
-  match B.to_oas_typed_result (tool_error ~tool_name:"test" "fail") with
+let test_to_agent_core_typed_error_inlined () =
+  match B.to_agent_core_typed_result (tool_error ~tool_name:"test" "fail") with
   | Ok _ -> Alcotest.fail "expected Error"
   | Error { message; recoverable; _ } ->
       Alcotest.(check string) "message" "fail" message;
       Alcotest.(check bool) "default recoverable=false" false recoverable
 
-let test_to_oas_typed_error_ignores_json_metadata () =
+let test_to_agent_core_typed_error_ignores_json_metadata () =
   let msg =
     {|{"ok":false,"error":"try again","recoverable":true,"error_class":"transient_mutex_contention"}|}
   in
@@ -154,16 +154,16 @@ let test_to_oas_typed_error_ignores_json_metadata () =
       ; duration_ms = 0.0
       }
   in
-  match B.to_oas_typed_result tr with
+  match B.to_agent_core_typed_result tr with
   | Ok _ -> Alcotest.fail "expected Error"
   | Error { message; recoverable; error_class } ->
       Alcotest.(check string) "message" msg message;
       Alcotest.(check bool) "runtime failure stays non-recoverable" false recoverable;
       (match error_class with
-       | Some Agent_sdk.Types.Unknown -> ()
+       | Some Agent_core.Types.Unknown -> ()
        | _ -> Alcotest.fail "expected typed runtime failure mapping")
 
-let test_to_oas_typed_error_preserves_explicit_metadata () =
+let test_to_agent_core_typed_error_preserves_explicit_metadata () =
   let metadata = `Assoc [ "gate", `Assoc [ "decision", `String "allow" ] ] in
   let tr =
     Tool_result.make_err
@@ -173,7 +173,7 @@ let test_to_oas_typed_error_preserves_explicit_metadata () =
       ~metadata
       "effect failed"
   in
-  match B.to_oas_typed_result tr with
+  match B.to_agent_core_typed_result tr with
   | Ok _ -> Alcotest.fail "expected Error"
   | Error { message; _ } ->
     let open Yojson.Safe.Util in
@@ -195,7 +195,7 @@ let test_to_oas_typed_error_preserves_explicit_metadata () =
        |> member "decision"
        |> to_string)
 
-let test_to_oas_typed_result_preserves_workflow_rejection () =
+let test_to_agent_core_typed_result_preserves_workflow_rejection () =
   let tr =
     Tool_result.error
       ~failure_class:Tool_result.Workflow_rejection
@@ -203,15 +203,15 @@ let test_to_oas_typed_result_preserves_workflow_rejection () =
       ~start_time:0.0
       "Invalid task state: submit_for_verification requires verification evidence"
   in
-  match B.to_oas_typed_result tr with
+  match B.to_agent_core_typed_result tr with
   | Ok _ -> Alcotest.fail "expected Error"
   | Error { recoverable; error_class; _ } ->
     Alcotest.(check bool) "workflow rejection is non-recoverable" false recoverable;
     (match error_class with
-     | Some Agent_sdk.Types.Deterministic -> ()
+     | Some Agent_core.Types.Deterministic -> ()
      | _ -> Alcotest.fail "expected deterministic error_class")
 
-let test_to_oas_typed_result_preserves_transient_failure_class () =
+let test_to_agent_core_typed_result_preserves_transient_failure_class () =
   let tr =
     Tool_result.error
       ~failure_class:Tool_result.Transient_error
@@ -219,19 +219,19 @@ let test_to_oas_typed_result_preserves_transient_failure_class () =
       ~start_time:0.0
       {|{"ok":false,"error":"mutex contention","failure_class":"transient_error","recoverable":true,"error_class":"transient_mutex_contention"}|}
   in
-  match B.to_oas_typed_result tr with
+  match B.to_agent_core_typed_result tr with
   | Ok _ -> Alcotest.fail "expected Error"
   | Error { recoverable; error_class; _ } ->
     Alcotest.(check bool) "transient remains recoverable" true recoverable;
     (match error_class with
-     | Some Agent_sdk.Types.Transient -> ()
+     | Some Agent_core.Types.Transient -> ()
      | _ -> Alcotest.fail "expected transient error_class")
 
-let test_round_trip_through_oas () =
+let test_round_trip_through_agent_core () =
   let payload = "inline payload" in
-  match B.to_oas_typed_result (tool_ok ~tool_name:"test" payload) with
+  match B.to_agent_core_typed_result (tool_ok ~tool_name:"test" payload) with
   | Ok { content; _ } ->
-      let decoded = O.decode_from_oas content in
+      let decoded = O.decode_from_agent_core content in
       (match decoded with
        | O.Not_marker ->
            (* Not a marker: the raw content is the payload itself. *)
@@ -246,27 +246,27 @@ let test_round_trip_through_oas () =
 let test_execution_env_preserves_exact_invocation () =
   let seen_invocation = ref None in
   let tool =
-    B.oas_tool_of_masc_with_execution_env
+    B.agent_core_tool_of_masc_with_execution_env
       ~name:"occurrence_probe"
-      ~description:"capture exact OAS invocation"
+      ~description:"capture exact AGENT_CORE invocation"
       ~input_schema:(`Assoc [ "type", `String "object" ])
       (fun execution_env _input ->
-         seen_invocation := Agent_sdk.Tool.Execution_env.invocation execution_env;
+         seen_invocation := Agent_core.Tool.Execution_env.invocation execution_env;
          tool_ok ~tool_name:"occurrence_probe" "ok")
   in
   let invocation =
-    Agent_sdk.Tool_contract.Invocation.create
+    Agent_core.Tool_contract.Invocation.create
       ~tool_use_id:""
       ~turn:7
-      ~completion:Agent_sdk.Tool_contract.Continue_after_success
+      ~completion:Agent_core.Tool_contract.Continue_after_success
       ~schedule:
         { planned_index = 2
         ; batch_index = 0
         ; batch_size = 1
-        ; execution_mode = Agent_sdk.Tool_contract.Serial
+        ; execution_mode = Agent_core.Tool_contract.Serial
         }
   in
-  (match Agent_sdk.Tool.execute ~invocation tool (`Assoc []) with
+  (match Agent_core.Tool.execute ~invocation tool (`Assoc []) with
    | Ok _ -> ()
    | Error _ -> Alcotest.fail "expected successful bridge execution");
   match !seen_invocation with
@@ -275,12 +275,12 @@ let test_execution_env_preserves_exact_invocation () =
     Alcotest.(check string)
       "blank provider id preserved"
       ""
-      (Agent_sdk.Tool_contract.Invocation.tool_use_id seen);
-    Alcotest.(check int) "turn preserved" 7 (Agent_sdk.Tool_contract.Invocation.turn seen);
+      (Agent_core.Tool_contract.Invocation.tool_use_id seen);
+    Alcotest.(check int) "turn preserved" 7 (Agent_core.Tool_contract.Invocation.turn seen);
     Alcotest.(check int)
       "planned index preserved"
       2
-      (Agent_sdk.Tool_contract.Invocation.planned_index seen)
+      (Agent_core.Tool_contract.Invocation.planned_index seen)
 
 (* --- Marker encoding round-trip via the bridge --- *)
 
@@ -291,7 +291,7 @@ let test_externalize_with_temp_base_path () =
       in
       let result = externalize_exn ~base_path:dir payload in
       Alcotest.(check bool) "encoded as marker" true (O.is_marker result);
-      match O.decode_from_oas result with
+      match O.decode_from_agent_core result with
       | O.Decoded { sha256; bytes; _ } ->
         Alcotest.(check int) "byte count" (String.length payload) bytes;
         Alcotest.(check int) "sha length" 64 (String.length sha256)
@@ -335,7 +335,7 @@ let test_bounded_read_page_is_not_nested () =
       "bounded page remains provider-visible"
       output
       (match
-         B.to_oas_typed_result
+         B.to_agent_core_typed_result
            ~model_projection:Tool_output.bounded_inline_model_projection
            (tool_ok ~tool_name:"keeper_artifact_read" output)
        with
@@ -360,13 +360,13 @@ let test_blob_store_failure_is_typed () =
            (String.length message > 0));
       let observed = ref None in
       (match
-         B.to_oas_typed_result
+         B.to_agent_core_typed_result
            ~base_path:path
            ~on_externalization_error:(fun { message; _ } ->
              observed := Some message)
            (tool_ok ~tool_name:"test" payload)
        with
-       | Ok _ -> Alcotest.fail "projection failure became OAS success"
+       | Ok _ -> Alcotest.fail "projection failure became AGENT_CORE success"
        | Error { message; recoverable; error_class } ->
          Alcotest.(check string)
            "provider error hides storage internals"
@@ -374,7 +374,7 @@ let test_blob_store_failure_is_typed () =
            message;
          Alcotest.(check bool) "provider may retry" true recoverable;
          (match error_class with
-          | Some Agent_sdk.Types.Transient -> ()
+          | Some Agent_core.Types.Transient -> ()
           | _ -> Alcotest.fail "expected transient storage failure"));
       (match !observed with
        | Some diagnostic ->
@@ -384,7 +384,7 @@ let test_blob_store_failure_is_typed () =
            (String.length diagnostic > 0)
        | None -> Alcotest.fail "projection failure observer was not called");
       (match
-         B.to_oas_typed_result
+         B.to_agent_core_typed_result
            ~base_path:path
            ~externalization_error_recoverable:false
            (tool_ok ~tool_name:"effectful-test" payload)
@@ -396,7 +396,7 @@ let test_blob_store_failure_is_typed () =
            false
            recoverable;
          (match error_class with
-          | Some Agent_sdk.Types.Unknown -> ()
+          | Some Agent_core.Types.Unknown -> ()
           | _ -> Alcotest.fail "expected unknown post-effect failure class")))
 
 let () =
@@ -407,9 +407,9 @@ let () =
           Alcotest.test_case "no base path = passthrough" `Quick
             test_threshold_default_under;
         ] );
-      ( "to_oas_typed_result",
+      ( "to_agent_core_typed_result",
         [
-          Alcotest.test_case "small inlined" `Quick test_to_oas_typed_small_inlined;
+          Alcotest.test_case "small inlined" `Quick test_to_agent_core_typed_small_inlined;
           Alcotest.test_case "2.5KB result stays inline" `Quick
             test_incident_sized_result_stays_inline;
           Alcotest.test_case "bounded inline rejects oversize" `Quick
@@ -418,17 +418,17 @@ let () =
             test_artifact_reader_owns_inline_projection;
           Alcotest.test_case "tool name does not bypass externalization" `Quick
             test_tool_identity_does_not_bypass_externalization;
-          Alcotest.test_case "error inlined" `Quick test_to_oas_typed_error_inlined;
+          Alcotest.test_case "error inlined" `Quick test_to_agent_core_typed_error_inlined;
           Alcotest.test_case "error JSON cannot override typed metadata" `Quick
-            test_to_oas_typed_error_ignores_json_metadata;
+            test_to_agent_core_typed_error_ignores_json_metadata;
           Alcotest.test_case "error preserves explicit metadata" `Quick
-            test_to_oas_typed_error_preserves_explicit_metadata;
+            test_to_agent_core_typed_error_preserves_explicit_metadata;
           Alcotest.test_case "typed workflow rejection is deterministic" `Quick
-            test_to_oas_typed_result_preserves_workflow_rejection;
+            test_to_agent_core_typed_result_preserves_workflow_rejection;
           Alcotest.test_case "typed transient remains recoverable" `Quick
-            test_to_oas_typed_result_preserves_transient_failure_class;
-          Alcotest.test_case "round-trip through OAS" `Quick
-            test_round_trip_through_oas;
+            test_to_agent_core_typed_result_preserves_transient_failure_class;
+          Alcotest.test_case "round-trip through AGENT_CORE" `Quick
+            test_round_trip_through_agent_core;
           Alcotest.test_case "execution env preserves exact invocation" `Quick
             test_execution_env_preserves_exact_invocation;
         ] );

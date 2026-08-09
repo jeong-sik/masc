@@ -2,11 +2,11 @@
     provider-bound conversation history (RFC-0351 §3 L5, #26534 PR-C, #26544,
     #26551).
 
-    [project] keeps only the most recent atoms of the message list that OAS
+    [project] keeps only the most recent atoms of the message list that AGENT_CORE
     is about to send to a provider. One atom is either an organic [User]
     message or an [Assistant] message together with the [Tool] messages that
     answer it, so a cut can never separate a tool result from the tool call
-    that produced it. Durable agent state and checkpoints are untouched: OAS
+    that produced it. Durable agent state and checkpoints are untouched: AGENT_CORE
     applies a [model_input_projection] to the provider-bound copy only
     ({!Runtime_agent_context.config.model_input_projection}).
 
@@ -36,7 +36,7 @@
     refills toward it, the same sawtooth an atom-count window had, now
     bounded in the unit the target actually refuses on.
 
-    Messages carrying OAS extra-system-context provenance are never counted
+    Messages carrying AGENT_CORE extra-system-context provenance are never counted
     as atoms and never dropped; that block is re-assembled fresh each turn by
     the keeper hooks and must survive the cut. When the cut leaves a
     non-[User] message at the head of the transmitted history, a constant
@@ -63,8 +63,8 @@ type label =
   | Atom of int  (** Zero-based index of the atom this message belongs to. *)
 
 val annotate
-  :  Agent_sdk.Types.message list
-  -> (Agent_sdk.Types.message * label) list * int
+  :  Agent_core.Types.message list
+  -> (Agent_core.Types.message * label) list * int
 (** Label every message with its atom index, in order, and return the atom
     count. [User] and [Assistant] open a new atom; [Tool] joins the atom of the
     assistant that issued the call, so both sides of a tool exchange always
@@ -95,7 +95,7 @@ type budget_error =
           refused instead. *)
 
 type projection =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
   ; dropped_atoms : int
         (** Exact raw-history cut chosen for [messages]. Projection stages that
             rewrite historical bytes use this as their cache-stable anchor: the
@@ -104,25 +104,25 @@ type projection =
 
 val budget_error_to_string : budget_error -> string
 (** Diagnostic rendering carrying the measured values. Suitable as the
-    [Error] payload of an [Agent_sdk.Agent.model_input_projection], which
+    [Error] payload of an [Agent_core.Agent.model_input_projection], which
     aborts the turn before request measurement or dispatch. *)
 
 val project_with_drop
-  :  measure_message_bytes:(Agent_sdk.Types.message -> int)
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
   -> capacity_bytes:int
   -> reserved_bytes:int
-  -> Agent_sdk.Types.message list
+  -> Agent_core.Types.message list
   -> (projection, budget_error) result
 (** The canonical projection result, including the exact atom cut selected
     from the unmodified input. [messages] is physically the input list when
     [dropped_atoms = 0]. *)
 
 val project
-  :  measure_message_bytes:(Agent_sdk.Types.message -> int)
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
   -> capacity_bytes:int
   -> reserved_bytes:int
-  -> Agent_sdk.Types.message list
-  -> (Agent_sdk.Types.message list, budget_error) result
+  -> Agent_core.Types.message list
+  -> (Agent_core.Types.message list, budget_error) result
 (** [project ~measure_message_bytes ~capacity_bytes ~reserved_bytes messages]
     returns the most recent suffix of [messages] whose measured size fits
     [capacity_bytes - reserved_bytes], with pinned messages preserved in

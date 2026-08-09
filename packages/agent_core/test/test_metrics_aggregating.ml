@@ -295,7 +295,7 @@ let test_aggregating_save_snapshot_json () =
   let dir =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "oas-metrics-snapshot-%d" (Unix.getpid ()))
+      (Printf.sprintf "agent_core-metrics-snapshot-%d" (Unix.getpid ()))
   in
   let path = Filename.concat dir "provider-snapshot.json" in
   Fun.protect

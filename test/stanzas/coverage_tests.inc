@@ -20,7 +20,7 @@
   test_mention_coverage
   test_resilience_coverage
   test_types_coverage
-  test_oas_message_constructor_contract
+  test_agent_core_message_constructor_contract
   test_dashboard_coverage
   test_rate_limit_coverage
   test_session_coverage
@@ -62,7 +62,7 @@
   test_mention_coverage
   test_resilience_coverage
   test_types_coverage
-  test_oas_message_constructor_contract
+  test_agent_core_message_constructor_contract
   test_dashboard_coverage
   test_rate_limit_coverage
   test_session_coverage

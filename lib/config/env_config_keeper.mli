@@ -157,7 +157,7 @@ module KeeperKeepalive : sig
       raises {!Env_config_core.Config_error}. *)
 
   val body_timeout_sec_override : float option
-  (** Total HTTP body-consumption deadline for non-streaming OAS completion
+  (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE completion
       calls. [None] (env unset) leaves the runtime builder wire untouched.
       [Some s] forwards to [Builder.with_body_timeout] for sync completion
       paths. Streaming paths ignore it and rely on an explicitly configured

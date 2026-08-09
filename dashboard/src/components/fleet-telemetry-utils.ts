@@ -23,7 +23,7 @@ export const STALE_ACTIVITY_SEC = 900
 export const TOOL_SUCCESS_WARN_PCT = 90
 const TELEMETRY_ACTIVITY_FRESH_SEC = 300
 const TELEMETRY_SOURCE_STALE_SEC = 900
-const OAS_EVENT_LAG_WARN_SEC = 600
+const AGENT_CORE_EVENT_LAG_WARN_SEC = 600
 
 export interface FleetRow {
   name: string
@@ -608,33 +608,33 @@ export function sourceDetail(source: TelemetrySourceSummary): string {
 export function buildTelemetryWarnings(sources: TelemetrySourceSummary[]): string[] {
   const warnings: string[] = []
   const bySource = new Map(sources.map(source => [source.source, source]))
-  const oasEvent = bySource.get('oas_event')
-  if (!oasEvent) return warnings
+  const agentCoreEvent = bySource.get('agent_core_event')
+  if (!agentCoreEvent) return warnings
 
-  if (oasEvent.exists === false) {
-    warnings.push('OAS event relay store is missing.')
+  if (agentCoreEvent.exists === false) {
+    warnings.push('Agent Core event relay store is missing.')
     return warnings
   }
 
-  if (oasEvent.entry_count <= 0) return warnings
+  if (agentCoreEvent.entry_count <= 0) return warnings
 
-  const oasAge = numericAge(oasEvent.latest_age_s)
+  const agentCoreAge = numericAge(agentCoreEvent.latest_age_s)
   const agentEvent = bySource.get('agent_event')
   const agentAge = numericAge(agentEvent?.latest_age_s)
-  const oasTs = numericAge(oasEvent.latest_ts_unix)
+  const agentCoreTs = numericAge(agentCoreEvent.latest_ts_unix)
   const agentTs = numericAge(agentEvent?.latest_ts_unix)
 
-  if (agentTs != null && oasTs != null) {
-    const lag = agentTs - oasTs
-    if (lag >= OAS_EVENT_LAG_WARN_SEC) {
-      warnings.push(`OAS event relay trails agent events by ${formatElapsedCompact(lag)}.`)
+  if (agentTs != null && agentCoreTs != null) {
+    const lag = agentTs - agentCoreTs
+    if (lag >= AGENT_CORE_EVENT_LAG_WARN_SEC) {
+      warnings.push(`Agent Core event relay trails agent events by ${formatElapsedCompact(lag)}.`)
       return warnings
     }
   }
 
-  if (oasAge != null && oasAge >= TELEMETRY_SOURCE_STALE_SEC) {
+  if (agentCoreAge != null && agentCoreAge >= TELEMETRY_SOURCE_STALE_SEC) {
     if (agentAge == null || agentAge <= TELEMETRY_ACTIVITY_FRESH_SEC) {
-      warnings.push(`OAS event relay stale: last durable event ${formatElapsedCompact(oasAge)} ago.`)
+      warnings.push(`Agent Core event relay stale: last durable event ${formatElapsedCompact(agentCoreAge)} ago.`)
     }
   }
 

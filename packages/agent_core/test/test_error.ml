@@ -1,10 +1,10 @@
-(** Tests for error.ml — structured SDK error types *)
+(** Tests for error.ml — structured agent-core error types *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 module Retry = Llm_provider.Retry
 
-let sdk_error_testable =
+let core_error_testable =
   Alcotest.testable (fun fmt e -> Format.pp_print_string fmt (Error.to_string e)) ( = )
 ;;
 
@@ -14,7 +14,7 @@ let category_testable =
     ( = )
 ;;
 
-let category_cases : (string * Error.sdk_error * Error.category * string) list =
+let category_cases : (string * Error.t * Error.category * string) list =
   [ "Api", Error.Api (Retry.AuthError { message = "bad key" }), Error.Api_category, "api"
   ; ( "Provider"
     , Error.Provider
@@ -292,7 +292,7 @@ let test_retryable_internal () =
 let test_equality () =
   let a = Error.Api (Retry.AuthError { message = "x" }) in
   let b = Error.Api (Retry.AuthError { message = "x" }) in
-  check sdk_error_testable "same errors are equal" a b
+  check core_error_testable "same errors are equal" a b
 ;;
 
 let test_inequality () =

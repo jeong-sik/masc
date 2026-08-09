@@ -8,7 +8,7 @@ let target_keys =
   ; "last_runtime_attempt"
   ; "current_task_id"
   ; "keeper_id"
-  ; "oas_env"
+  ; "agent_core_env"
   ; "schema"
   ]
 

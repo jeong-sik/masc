@@ -19,8 +19,8 @@ exception Cancelled
 (* ── Future type ──────────────────────────────────────────────── *)
 
 type 'a future =
-  { promise : ('a, Error.sdk_error) Result.t Eio.Promise.t
-  ; resolver : ('a, Error.sdk_error) Result.t Eio.Promise.u
+  { promise : ('a, Error.t) Result.t Eio.Promise.t
+  ; resolver : ('a, Error.t) Result.t Eio.Promise.u
   ; cancelled_u : unit Eio.Promise.u
   ; resolved : bool Atomic.t
   ; cancel_sent : bool Atomic.t

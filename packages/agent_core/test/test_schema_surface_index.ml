@@ -120,16 +120,16 @@ let test_required_surfaces_present () =
   let ids = catalog () |> surfaces |> List.map (require_string "id") in
   List.iter
     (fun id -> check bool ("required surface: " ^ id) true (List.mem id ids))
-    [ "oas.event_bus.v1"
-    ; "oas.runtime_protocol.v2"
-    ; "oas.runtime_sync_window.v1"
-    ; "oas.runtime_report.v1"
-    ; "oas.runtime_proof.v1"
-    ; "oas.runtime_telemetry_report.v1"
-    ; "oas.runtime_evidence_bundle.v1"
-    ; "oas.raw_trace_record.v1"
-    ; "oas.raw_trace_manifest.v1"
-    ; "oas.structured_schema.v1"
+    [ "agent_core.event_bus.v1"
+    ; "agent_core.runtime_protocol.v2"
+    ; "agent_core.runtime_sync_window.v1"
+    ; "agent_core.runtime_report.v1"
+    ; "agent_core.runtime_proof.v1"
+    ; "agent_core.runtime_telemetry_report.v1"
+    ; "agent_core.runtime_evidence_bundle.v1"
+    ; "agent_core.raw_trace_record.v1"
+    ; "agent_core.raw_trace_manifest.v1"
+    ; "agent_core.structured_schema.v1"
     ]
 ;;
 

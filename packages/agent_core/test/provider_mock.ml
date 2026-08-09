@@ -1,7 +1,7 @@
-(** Test-only scripted provider responses. Production OAS exposes no mock
+(** Test-only scripted provider responses. Production AGENT_CORE exposes no mock
     provider or mock transport. *)
 
-open Agent_sdk
+open Agent_core
 open Types
 
 type response_fn = message list -> api_response

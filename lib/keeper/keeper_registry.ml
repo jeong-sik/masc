@@ -587,7 +587,7 @@ let set_board_cursor ~base_path name ts post_id =
 (* -- Tool usage tracking ------------------------------------------- *)
 
 (* Safe without a mutex: updates go through [update_entry]'s CAS loop, so
-   keeper-turn OAS callbacks and runtime MCP server callbacks can both
+   keeper-turn AGENT_CORE callbacks and runtime MCP server callbacks can both
    record usage for the same keeper without clobbering each other. *)
 let record_tool_use ~base_path name ~tool_name ~disposition =
   match

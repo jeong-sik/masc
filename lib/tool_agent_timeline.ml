@@ -291,7 +291,7 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
        let error_str = Safe_ops.json_string_opt "error" e.payload in
        let source_str = Safe_ops.json_string_opt "source" e.payload in
        let keeper_turn_id = Safe_ops.json_int_opt "keeper_turn_id" e.payload in
-       let oas_turn = Safe_ops.json_int_opt "oas_turn" e.payload in
+       let agent_core_turn = Safe_ops.json_int_opt "agent_core_turn" e.payload in
        let task_id = Safe_ops.json_string_opt "task_id" e.payload in
        let provider = Safe_ops.json_string_opt "provider" e.payload in
        let typed_outcome = Yojson.Safe.Util.member "typed_outcome" e.payload in
@@ -309,7 +309,7 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
                  ("error", Json_util.string_opt_to_json error_str);
                  ("source", Json_util.string_opt_to_json source_str);
                  ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
-                 ("oas_turn", Json_util.int_opt_to_json oas_turn);
+                 ("agent_core_turn", Json_util.int_opt_to_json agent_core_turn);
                  ("task_id", Json_util.string_opt_to_json task_id);
                  ("provider", Json_util.string_opt_to_json provider);
                  ("typed_outcome", typed_outcome);

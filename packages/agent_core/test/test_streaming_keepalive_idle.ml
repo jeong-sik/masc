@@ -16,7 +16,7 @@
     not renew the armed budget either. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 open Llm_provider
 
 let collect_sse_events payload =

@@ -451,10 +451,10 @@ const runtimeBlockerLabels = {
   heartbeat_failures: '하트비트 실패',
   turn_failures: '턴 실패 반복',
   exception: '런타임 예외',
-  sdk_context_window_exceeded: 'SDK 컨텍스트 윈도 초과',
-  sdk_unrecognized_stop_reason: 'SDK 미식별 정지 사유',
-  sdk_guardrail_violation: 'SDK 가드레일 위반',
-  sdk_tripwire_violation: 'SDK Tripwire 위반',
+  agent_core_context_window_exceeded: 'Agent Core 컨텍스트 윈도 초과',
+  agent_core_unrecognized_stop_reason: 'Agent Core 미식별 정지 사유',
+  agent_core_guardrail_violation: 'Agent Core 가드레일 위반',
+  agent_core_tripwire_violation: 'Agent Core Tripwire 위반',
 } satisfies Record<KeeperRuntimeBlockerClass, string>
 
 export function keeperRuntimeBlockerLabel(

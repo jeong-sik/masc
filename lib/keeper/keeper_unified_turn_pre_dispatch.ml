@@ -9,8 +9,8 @@ open Keeper_types_profile
 open Keeper_context_runtime
 
 let profile_load_error ~keeper_name error =
-  Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig
+  Agent_core.Error.Config
+    (Agent_core.Error.InvalidConfig
        { field = "keeper.profile"
        ; detail =
            Printf.sprintf
@@ -29,12 +29,12 @@ let build_runtime_execution
       ~(meta : keeper_meta)
       ~(runtime_id : string)
   : ( Keeper_turn_runtime_budget.runtime_execution
-    , Agent_sdk.Error.sdk_error )
+    , Agent_core.Error.t )
     result
   =
   let runtime_id = String.trim runtime_id in
   if String.equal runtime_id "" then
-    Error (Agent_sdk.Error.Internal "runtime_id must be non-empty")
+    Error (Agent_core.Error.Internal "runtime_id must be non-empty")
   else
   let log_pre_dispatch_error ~site detail =
     Log.Keeper.error
@@ -55,8 +55,8 @@ let build_runtime_execution
     in
     log_pre_dispatch_error ~site:"resolve_context_window" detail;
     Error
-      (Agent_sdk.Error.Config
-         (Agent_sdk.Error.InvalidConfig
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
             { field = "runtime.context_window"; detail }))
   | Ok max_context_resolution ->
     let max_context =

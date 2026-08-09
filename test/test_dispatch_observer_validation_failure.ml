@@ -1,9 +1,9 @@
 open Alcotest
 
-(** Regression test for the OAS input-validation observer-drop bug.
+(** Regression test for the AGENT_CORE input-validation observer-drop bug.
 
-    Before the fix, [Keeper_tools_oas_handler] fired the dispatch
-    observers with [Dispatch_outcome.Handler_error] on an OAS
+    Before the fix, [Keeper_tools_agent_core_handler] fired the dispatch
+    observers with [Dispatch_outcome.Handler_error] on an AGENT_CORE
     input-validation failure.  All three dispatch observers
     (Tool_metrics / Tool_usage_log / Otel_dispatch_hook) match only
     [Handled, Some _] and drop everything else via [_ -> ()], so the
@@ -35,7 +35,7 @@ let test_validation_failure_recorded_by_metrics () =
   Tool_metrics.install ();
   let result = mk_validation_failure ~tool_name in
   (* Same call shape as the fixed validation path in
-     Keeper_tools_oas_handler. *)
+     Keeper_tools_agent_core_handler. *)
   Tool_dispatch.run_dispatch_observers Dispatch_outcome.Handled (Some result);
   Tool_dispatch.clear_hooks ();
   match Tool_metrics.stats_for tool_name with

@@ -504,7 +504,7 @@ let with_runtime_config ~model cli_path f =
 
 let keeper_response_text (result : Runtime_agent.run_result) =
   result.response.content
-  |> List.filter_map (function Agent_sdk.Types.Text text -> Some text | _ -> None)
+  |> List.filter_map (function Agent_core.Types.Text text -> Some text | _ -> None)
   |> String.concat ""
 ;;
 
@@ -677,11 +677,11 @@ let write_fixture_file path content =
 ;;
 
 let fixture_tool ?(parameters = []) ~name ~description () =
-  Agent_sdk.Tool.create
+  Agent_core.Tool.create
     ~name
     ~description
     ~parameters
-    (fun _ -> Ok { Agent_sdk.Types.content = "fixture"; _meta = None })
+    (fun _ -> Ok { Agent_core.Types.content = "fixture"; _meta = None })
 ;;
 
 let production_keeper_meta ~base_path ~trace_id =
@@ -794,19 +794,19 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       Option.map
                         (fun path ->
                            match
-                             Agent_sdk.Raw_trace.create
+                             Agent_core.Raw_trace.create
                                ~session_id:"codex-fixture-session"
                                ~path
                                ()
                            with
                            | Ok sink -> sink
-                           | Error error -> fail (Agent_sdk.Error.to_string error))
+                           | Error error -> fail (Agent_core.Error.to_string error))
                         raw_trace_path
                     in
                     let context =
                       match tools with
                       | [] -> None
-                      | _ :: _ -> Some (Agent_sdk.Context.create ())
+                      | _ :: _ -> Some (Agent_core.Context.create ())
                     in
                     Keeper_turn_driver.run_named
                       ~runtime_id:"codex.codex"
@@ -830,7 +830,7 @@ let test_keeper_dispatches_codex_turn_runtime () =
     [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
     (fun cli_path ->
        match run_keeper_turn ~cli_path ~model:"gpt-fixture" () with
-       | Error error -> fail (Agent_sdk.Error.to_string error)
+       | Error error -> fail (Agent_core.Error.to_string error)
        | Ok result ->
          check string "Keeper response" "MASC_SUBSCRIPTION_OK" (keeper_response_text result);
          check bool "measured observation" true (Option.is_some result.runtime_observation))
@@ -840,11 +840,11 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
   let base_path = temp_workspace "masc-codex-raw-trace-" in
   let raw_trace_path = Filename.concat base_path "official-codex-raw.jsonl" in
   let tool =
-    Agent_sdk.Tool.create
+    Agent_core.Tool.create
       ~name:"masc_probe"
       ~description:"Return a deterministic RAW fixture marker"
       ~parameters:
-        [ { Agent_sdk.Types.name = "marker"
+        [ { Agent_core.Types.name = "marker"
           ; description = "Fixture marker"
           ; param_type = String
           ; required = true
@@ -855,7 +855,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
            "RAW fixture tool sees actual input"
            "from-codex"
            Yojson.Safe.Util.(input |> member "marker" |> to_string);
-         Ok { Agent_sdk.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+         Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -879,29 +879,29 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 ~model:"gpt-fixture"
                 ()
             with
-            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result ->
               (match result.trace_ref with
                | None -> fail "official Codex turn did not return a RAW trace reference"
                | Some trace_ref ->
                  check string "RAW trace path" raw_trace_path trace_ref.path);
               let records =
-                match Agent_sdk.Raw_trace.read_all ~path:raw_trace_path () with
+                match Agent_core.Raw_trace.read_all ~path:raw_trace_path () with
                 | Ok records -> records
-                | Error error -> fail (Agent_sdk.Error.to_string error)
+                | Error error -> fail (Agent_core.Error.to_string error)
               in
               let kinds =
                 List.map
-                  (fun (record : Agent_sdk.Raw_trace.record) -> record.record_type)
+                  (fun (record : Agent_core.Raw_trace.record) -> record.record_type)
                   records
               in
               List.iter
                 (fun kind ->
                    check bool
-                     ("RAW contains " ^ Agent_sdk.Raw_trace.record_type_to_string kind)
+                     ("RAW contains " ^ Agent_core.Raw_trace.record_type_to_string kind)
                      true
                      (List.mem kind kinds))
-                [ Agent_sdk.Raw_trace.Run_started
+                [ Agent_core.Raw_trace.Run_started
                 ; Tool_execution_started
                 ; Tool_execution_finished
                 ; Assistant_block
@@ -909,7 +909,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 ];
               let tool_start =
                 List.find
-                  (fun (record : Agent_sdk.Raw_trace.record) ->
+                  (fun (record : Agent_core.Raw_trace.record) ->
                      record.record_type = Tool_execution_started)
                   records
               in
@@ -920,7 +920,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                   Option.get tool_start.tool_input |> member "marker" |> to_string);
               let tool_finish =
                 List.find
-                  (fun (record : Agent_sdk.Raw_trace.record) ->
+                  (fun (record : Agent_core.Raw_trace.record) ->
                      record.record_type = Tool_execution_finished)
                   records
               in
@@ -931,7 +931,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 tool_finish.tool_result;
               let finished =
                 List.find
-                  (fun (record : Agent_sdk.Raw_trace.record) ->
+                  (fun (record : Agent_core.Raw_trace.record) ->
                      record.record_type = Run_finished)
                   records
               in
@@ -992,10 +992,10 @@ let test_keeper_protocol_failure_enters_recovery () =
                  ()
              with
              | Error
-                 (Agent_sdk.Error.Config
-                   (Agent_sdk.Error.InvalidConfig { field; _ })) ->
+                 (Agent_core.Error.Config
+                   (Agent_core.Error.InvalidConfig { field; _ })) ->
                check string "recovery gate field" "official_client_session.claim" field
-             | Error error -> fail (Agent_sdk.Error.to_string error)
+             | Error error -> fail (Agent_core.Error.to_string error)
              | Ok _ -> fail "unresolved Codex recovery admitted a duplicate turn")))
 ;;
 
@@ -1221,7 +1221,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
          ]
          (fun cli_path ->
             match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
-            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result ->
               check string
                 "post-resolution Keeper response"
@@ -1306,12 +1306,12 @@ let test_keeper_resumes_persisted_codex_thread () =
                 ~model:"gpt-fixture"
                 ()
             with
-            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result -> check int "initial turn count" 1 result.turns);
        let before_turn_ordinal = ref 0 in
        let after_turn_ordinal = ref 0 in
-       let hooks : Agent_sdk.Hooks.hooks =
-         { Agent_sdk.Hooks.empty with
+       let hooks : Agent_core.Hooks.hooks =
+         { Agent_core.Hooks.empty with
            before_turn =
              Some
                (function
@@ -1346,7 +1346,7 @@ let test_keeper_resumes_persisted_codex_thread () =
                 ~model:"gpt-fixture"
                 ()
             with
-            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result ->
               check string "resumed response" "MASC_RESUMED_OK" (keeper_response_text result);
               check string "official thread" "thread-1" result.session_id;
@@ -1384,7 +1384,7 @@ let test_keeper_rejects_changed_tool_surface_on_resume () =
                  ~model:"gpt-fixture"
                  ()
              with
-             | Error error -> fail (Agent_sdk.Error.to_string error)
+             | Error error -> fail (Agent_core.Error.to_string error)
              | Ok _ -> ());
             let tool = fixture_tool ~name:"new_tool" ~description:"new surface" () in
             match
@@ -1396,13 +1396,13 @@ let test_keeper_rejects_changed_tool_surface_on_resume () =
                 ()
             with
             | Error
-                (Agent_sdk.Error.Config
-                  (Agent_sdk.Error.InvalidConfig { field; _ })) ->
+                (Agent_core.Error.Config
+                  (Agent_core.Error.InvalidConfig { field; _ })) ->
               check string
                 "fingerprint field"
                 "official_client_session.tool_surface_sha256"
                 field
-            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Error error -> fail (Agent_core.Error.to_string error)
             | Ok _ -> fail "changed tool surface silently resumed the Codex thread"))
 ;;
 
@@ -1412,10 +1412,10 @@ let assert_production_keeper_result result =
     "MASC_SUBSCRIPTION_OK"
     result.Keeper_agent_run.response_text;
   check int "production Keeper turn count" 1 result.turn_count;
-  check int "production after-turn ordinal" 1 result.final_oas_turn_ordinal;
+  check int "production after-turn ordinal" 1 result.final_agent_core_turn_ordinal;
   check bool "production measured observation" true
     (Option.is_some result.runtime_observation);
-  check bool "official client does not fabricate OAS checkpoint" true
+  check bool "official client does not fabricate AGENT_CORE checkpoint" true
     (Option.is_none result.checkpoint)
 ;;
 
@@ -1442,7 +1442,7 @@ let test_production_keeper_dispatches_codex_runtime () =
                 ~cli_path
                 ~model:"gpt-fixture"
             with
-            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result -> assert_production_keeper_result result))
 ;;
 
@@ -1468,7 +1468,7 @@ let test_production_keeper_resumes_across_trace_rotation () =
                 ~cli_path
                 ~model:"gpt-fixture"
             with
-            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Error error -> fail (Agent_core.Error.to_string error)
             | Ok _ -> ());
        with_fixture
          [ init_result
@@ -1487,7 +1487,7 @@ let test_production_keeper_resumes_across_trace_rotation () =
                 ~cli_path
                 ~model:"gpt-fixture"
             with
-            | Error error -> fail (Agent_sdk.Error.to_string error)
+            | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result ->
               check string
                 "production resumed response"
@@ -1520,11 +1520,11 @@ let test_keeper_projects_typed_tools_and_hooks () =
   let projection_saw_context = ref false in
   let injector_calls = ref 0 in
   let tool =
-    Agent_sdk.Tool.create
+    Agent_core.Tool.create
       ~name:"masc_probe"
       ~description:"Return a deterministic Keeper fixture marker"
       ~parameters:
-        [ { Agent_sdk.Types.name = "marker"
+        [ { Agent_core.Types.name = "marker"
           ; description = "Fixture marker"
           ; param_type = String
           ; required = true
@@ -1536,10 +1536,10 @@ let test_keeper_projects_typed_tools_and_hooks () =
           "typed tool input"
           "from-codex"
           Yojson.Safe.Util.(input |> member "marker" |> to_string);
-        Ok { Agent_sdk.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
   in
-  let hooks : Agent_sdk.Hooks.hooks =
-    { Agent_sdk.Hooks.empty with
+  let hooks : Agent_core.Hooks.hooks =
+    { Agent_core.Hooks.empty with
       before_turn =
         Some
           (fun _ ->
@@ -1578,18 +1578,18 @@ let test_keeper_projects_typed_tools_and_hooks () =
   let model_input_projection messages =
     projection_saw_context :=
       List.exists
-        (fun (message : Agent_sdk.Types.message) ->
+        (fun (message : Agent_core.Types.message) ->
           message.role = System
           && String.equal
                "fixture-context"
-               (Agent_sdk.Types.text_of_content message.content))
+               (Agent_core.Types.text_of_content message.content))
         messages;
     Ok messages
   in
   let context_injector ~tool_name:_ ~input:_ ~output:_ =
     incr injector_calls;
     Some
-      { Agent_sdk.Hooks.context_updates = [ "fixture_tool_seen", `Bool true ]
+      { Agent_core.Hooks.context_updates = [ "fixture_tool_seen", `Bool true ]
       ; extra_messages = []
       }
   in
@@ -1613,7 +1613,7 @@ let test_keeper_projects_typed_tools_and_hooks () =
            ~model:"gpt-fixture"
            ()
        with
-       | Error error -> fail (Agent_sdk.Error.to_string error)
+       | Error error -> fail (Agent_core.Error.to_string error)
        | Ok result ->
          check string "Keeper response" "MASC_SUBSCRIPTION_OK" (keeper_response_text result);
          List.iter
@@ -1631,8 +1631,8 @@ let test_keeper_projects_typed_tools_and_hooks () =
 ;;
 
 let test_keeper_rejects_unprojected_turn_parameters () =
-  let hooks : Agent_sdk.Hooks.hooks =
-    { Agent_sdk.Hooks.empty with
+  let hooks : Agent_core.Hooks.hooks =
+    { Agent_core.Hooks.empty with
       before_turn_params =
         Some
           (function
@@ -1652,10 +1652,10 @@ let test_keeper_rejects_unprojected_turn_parameters () =
     (fun cli_path ->
        match run_keeper_turn ~hooks ~cli_path ~model:"gpt-fixture" () with
        | Error
-           (Agent_sdk.Error.Config
-             (Agent_sdk.Error.InvalidConfig { field; detail = _ })) ->
+           (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig { field; detail = _ })) ->
          check string "rejected parameter" "temperature" field
-       | Error error -> fail (Agent_sdk.Error.to_string error)
+       | Error error -> fail (Agent_core.Error.to_string error)
        | Ok _ -> fail "unprojected temperature was silently ignored")
 ;;
 
@@ -1758,7 +1758,7 @@ let test_live_keeper_chatgpt_subscription () =
   then Alcotest.skip ()
   else
     match run_keeper_turn ~cli_path:"codex" ~model:"gpt-5.6-sol" () with
-    | Error error -> fail (Agent_sdk.Error.to_string error)
+    | Error error -> fail (Agent_core.Error.to_string error)
     | Ok result ->
       check string "live Keeper response" "MASC_SUBSCRIPTION_OK" (keeper_response_text result)
 ;;
@@ -1769,13 +1769,13 @@ let test_live_keeper_dynamic_tool_subscription () =
   else
     let tool_calls = ref 0 in
     let tool =
-      Agent_sdk.Tool.create
+      Agent_core.Tool.create
         ~name:"masc_probe"
         ~description:"Return the exact marker MASC_TOOL_RESULT"
         ~parameters:[]
         (fun _ ->
           incr tool_calls;
-          Ok { Agent_sdk.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+          Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
     in
     let base_path = temp_workspace "masc-codex-live-tool-raw-" in
     let raw_trace_path = Filename.concat base_path "live-tool-raw.jsonl" in
@@ -1793,7 +1793,7 @@ let test_live_keeper_dynamic_tool_subscription () =
              ~model:"gpt-5.6-sol"
              ()
          with
-         | Error error -> fail (Agent_sdk.Error.to_string error)
+         | Error error -> fail (Agent_core.Error.to_string error)
          | Ok result ->
            check int "live typed tool calls" 1 !tool_calls;
            check string
@@ -1804,17 +1804,17 @@ let test_live_keeper_dynamic_tool_subscription () =
             | None -> fail "live Keeper tool turn omitted its RAW trace reference"
             | Some trace_ref -> check string "live RAW path" raw_trace_path trace_ref.path);
            let records =
-             match Agent_sdk.Raw_trace.read_all ~path:raw_trace_path () with
+             match Agent_core.Raw_trace.read_all ~path:raw_trace_path () with
              | Ok records -> records
-             | Error error -> fail (Agent_sdk.Error.to_string error)
+             | Error error -> fail (Agent_core.Error.to_string error)
            in
            let find kind =
              List.find_opt
-               (fun (record : Agent_sdk.Raw_trace.record) ->
+               (fun (record : Agent_core.Raw_trace.record) ->
                   record.record_type = kind)
                records
            in
-           (match find Agent_sdk.Raw_trace.Tool_execution_finished with
+           (match find Agent_core.Raw_trace.Tool_execution_finished with
             | Some record ->
               check
                 (option string)
@@ -1822,7 +1822,7 @@ let test_live_keeper_dynamic_tool_subscription () =
                 (Some "MASC_TOOL_RESULT")
                 record.tool_result
             | None -> fail "live RAW omitted Tool_execution_finished");
-           match find Agent_sdk.Raw_trace.Run_finished with
+           match find Agent_core.Raw_trace.Run_finished with
            | Some record ->
              check
                (option string)
@@ -1849,7 +1849,7 @@ let test_live_keeper_resumes_official_thread () =
               ~model:"gpt-5.6-sol"
               ()
           with
-          | Error error -> fail (Agent_sdk.Error.to_string error)
+          | Error error -> fail (Agent_core.Error.to_string error)
           | Ok result ->
             check string
               "first live response"
@@ -1863,7 +1863,7 @@ let test_live_keeper_resumes_official_thread () =
              ~model:"gpt-5.6-sol"
              ()
          with
-         | Error error -> fail (Agent_sdk.Error.to_string error)
+         | Error error -> fail (Agent_core.Error.to_string error)
          | Ok result ->
            check string
              "resumed live response"
@@ -1889,7 +1889,7 @@ let test_live_production_keeper_subscription () =
              ~cli_path:"codex"
              ~model:"gpt-5.6-sol"
          with
-         | Error error -> fail (Agent_sdk.Error.to_string error)
+         | Error error -> fail (Agent_core.Error.to_string error)
          | Ok result -> assert_production_keeper_result result)
 ;;
 
@@ -1898,19 +1898,19 @@ let test_official_client_host_text_projection_is_hard_cut () =
      Keeper_official_client_host.text_of_blocks
        ~runtime_label:"fixture"
        ~field:"messages"
-       [ Agent_sdk.Types.Text "first"; Text "second" ]
+       [ Agent_core.Types.Text "first"; Text "second" ]
    with
    | Ok text -> check string "text blocks preserve order" "first\nsecond" text
-   | Error error -> fail (Agent_sdk.Error.to_string error));
+   | Error error -> fail (Agent_core.Error.to_string error));
   match
     Keeper_official_client_host.text_of_blocks
       ~runtime_label:"fixture"
       ~field:"messages"
-      [ Agent_sdk.Types.Thinking { content = "private"; signature = None } ]
+      [ Agent_core.Types.Thinking { content = "private"; signature = None } ]
   with
-  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; _ })) ->
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ })) ->
     check string "rejected field" "messages" field
-  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Error error -> fail (Agent_core.Error.to_string error)
   | Ok _ -> fail "non-text official-client projection was silently admitted"
 ;;
 

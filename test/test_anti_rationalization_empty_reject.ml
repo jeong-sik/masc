@@ -84,7 +84,7 @@ let test_response_text_is_never_parsed_as_verdict () =
 let test_evaluator_failure_is_unavailable_not_reject () =
   with_reviewer
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
-       Error (Agent_sdk.Error.Internal "review transport unavailable"))
+       Error (Agent_core.Error.Internal "review transport unavailable"))
     (fun () ->
        let result = review () in
        Alcotest.(check string)

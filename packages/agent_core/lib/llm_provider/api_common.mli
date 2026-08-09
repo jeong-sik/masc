@@ -49,7 +49,7 @@ val base64_media_payload
 
 (** {2 Document admission}
 
-    A [Document] block must never be emitted as some other modality (oas#2744:
+    A [Document] block must never be emitted as some other modality (agent-core boundary:
     the OpenAI-compatible Chat Completions serializer used to relabel it
     [image_url], so the model saw a picture where the caller sent a file, and
     nothing reported it). Two typed facts decide whether a document may go out:
@@ -119,7 +119,7 @@ val document_omitted_placeholder : media_type:string -> Types.content_block
     documents and every other block untouched. Returns the rewritten history and
     the number of documents degraded.
 
-    This is the request/serialize-path remedy for oas#2744: a document is never
+    This is the request/serialize-path remedy for agent-core boundary: a document is never
     relabelled as another modality (the original defect) and never rejects the
     turn (which retroactively broke conversations already holding a document in
     history against a model without the capability) — it degrades to a named

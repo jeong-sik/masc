@@ -11,8 +11,8 @@ type restore_error =
 type projection =
   | Unchanged
   | Media_degraded of
-      { canonical_prefix : Agent_sdk.Types.message list
-      ; dispatch_prefix : Agent_sdk.Types.message list
+      { canonical_prefix : Agent_core.Types.message list
+      ; dispatch_prefix : Agent_core.Types.message list
       }
 
 let unchanged = Unchanged
@@ -23,7 +23,7 @@ let media_degraded ~canonical_prefix ~dispatch_prefix =
   Media_degraded { canonical_prefix; dispatch_prefix }
 ;;
 
-let rec split ~(prefix : Agent_sdk.Types.message list) messages =
+let rec split ~(prefix : Agent_core.Types.message list) messages =
   match prefix, messages with
   | [], suffix -> Ok suffix
   | _ :: _, [] -> Error Prefix_longer_than_messages
@@ -48,7 +48,7 @@ let restore_messages projection checkpoint_messages =
                { canonical_mismatch; dispatch_mismatch })))
 ;;
 
-let restore_checkpoint projection (checkpoint : Agent_sdk.Checkpoint.t) =
+let restore_checkpoint projection (checkpoint : Agent_core.Checkpoint.t) =
   match restore_messages projection checkpoint.messages with
   | Error error -> Error error
   | Ok messages -> Ok { checkpoint with messages }

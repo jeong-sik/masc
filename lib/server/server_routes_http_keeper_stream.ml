@@ -480,7 +480,7 @@ let handle_keeper_turn_interrupt state request reqd =
                ])))
 ;;
 
-(* No cumulative timeout or work budget for keeper_msg. Keeper calls OAS with
+(* No cumulative timeout or work budget for keeper_msg. Keeper calls AGENT_CORE with
    unbounded turn/idle sentinels; turn, token, and cost usage are observations,
    not lifecycle authority. Explicit cancellation plus provider/tool progress
    boundaries settle real liveness failures without discarding the request or
@@ -1166,7 +1166,7 @@ let chat_request_terminal_status = function
 ;;
 
 type keeper_stream_worker_event =
-  | Stream_event of Agent_sdk.Types.sse_event
+  | Stream_event of Agent_core.Types.sse_event
   | Stream_client_disconnected
   | Stream_dashboard_queued of dashboard_deferred_chat
   | Stream_queued_turn_deferred of Keeper_turn_admission.rejection
@@ -1405,16 +1405,16 @@ let empty_reply_delivery_plan ~queued_turn ~has_visible_blocks ~has_tool_calls =
   then `Failure
   else `User_only
 
-type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
+type keeper_stream_bridge_state = Keeper_chat_agent_core_stream_bridge.state
 
 type translated_keeper_stream_event =
-  Keeper_chat_oas_stream_bridge.translated_event =
+  Keeper_chat_agent_core_stream_bridge.translated_event =
   { bridge_state : keeper_stream_bridge_state
   ; chat_events : Keeper_chat_events.keeper_chat_event list
   }
 
-let empty_keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.empty_state
-let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
+let empty_keeper_stream_bridge_state = Keeper_chat_agent_core_stream_bridge.empty_state
+let translate_agent_core_stream_event = Keeper_chat_agent_core_stream_bridge.translate
 
 (* [user_row_origin] and [submission] are required labelled arguments. Every
    caller presents the typed transcript provenance and execution ownership
@@ -1462,10 +1462,10 @@ let process_single_turn ~user_row_origin ~submission
     ]
   in
   let direct_message = direct_message_of_request payload in
-  (* Stream model text deltas live with per-delta redaction. The typed OAS
+  (* Stream model text deltas live with per-delta redaction. The typed AGENT_CORE
      bridge owns per-provider-message state so only the final provider
      message controls terminal resend suppression; canonical terminal content
-     always comes from the assembled OAS response carried by [body]. *)
+     always comes from the assembled AGENT_CORE response carried by [body]. *)
   let worker_events = Eio.Stream.create worker_events_buffer_size in
   let worker_completion, worker_completion_resolver = Eio.Promise.create () in
   let client_disconnect, client_disconnect_resolver = Eio.Promise.create () in
@@ -2731,7 +2731,7 @@ let process_single_turn ~user_row_origin ~submission
              (completion_or_disconnect
               :> [ `Client_disconnected
                   | `Completion of keeper_stream_completion
-                  | `Stream_event of Agent_sdk.Types.sse_event
+                  | `Stream_event of Agent_core.Types.sse_event
                   ])))
   in
   let rec consume_worker_events bridge_state =
@@ -2739,7 +2739,7 @@ let process_single_turn ~user_row_origin ~submission
     | `Client_disconnected -> None
     | `Stream_event evt ->
         let translated =
-          translate_oas_stream_event ~redact_text
+          translate_agent_core_stream_event ~redact_text
             ~base_dir:base_path bridge_state evt
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
@@ -2843,7 +2843,7 @@ let process_single_turn ~user_row_origin ~submission
           if
             (not suppress_terminal_reply)
             && not
-                 (Keeper_chat_oas_stream_bridge.terminal_message_had_text
+                 (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text
                     bridge_state)
           then
             split_keeper_reply_chunks visible_reply

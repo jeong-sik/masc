@@ -195,9 +195,9 @@ let project ~timestamp ~redact_text ~redact_json state event =
              Ag_ui.Text_message_end) )
   | External_effect_completed ->
       state, Some (custom ~timestamp ~redact_json state External_effect_completed `Null)
-  | Oas_stream_connected ->
+  | Agent_core_stream_connected ->
       state, Some (custom ~timestamp ~redact_json state Connected `Null)
-  | Oas_stream_message_start { provider_message_id; model; usage } ->
+  | Agent_core_stream_message_start { provider_message_id; model; usage } ->
       let value =
         `Assoc
           ([ "provider_message_id", `String provider_message_id
@@ -206,22 +206,22 @@ let project ~timestamp ~redact_text ~redact_json state event =
            @ json_opt "usage" (Option.map api_usage_to_json usage))
       in
       state, Some (custom ~timestamp ~redact_json state Stream_message_start value)
-  | Oas_stream_message_delta { stop_reason; usage } ->
+  | Agent_core_stream_message_delta { stop_reason; usage } ->
       let value =
         `Assoc
           (json_opt "stop_reason"
              (Option.map
                 (fun reason ->
-                   `String (Agent_sdk.Types.stop_reason_to_string reason))
+                   `String (Agent_core.Types.stop_reason_to_string reason))
                 stop_reason)
            @ json_opt "usage" (Option.map api_usage_to_json usage))
       in
       state, Some (custom ~timestamp ~redact_json state Stream_message_delta value)
-  | Oas_stream_message_stop ->
+  | Agent_core_stream_message_stop ->
       state, Some (custom ~timestamp ~redact_json state Stream_message_stop `Null)
-  | Oas_stream_ping ->
+  | Agent_core_stream_ping ->
       state, Some (custom ~timestamp ~redact_json state Stream_ping `Null)
-  | Oas_content_block_start
+  | Agent_core_content_block_start
       { index; content_type; tool_call_id; tool_call_name } ->
       let value =
         `Assoc
@@ -234,30 +234,30 @@ let project ~timestamp ~redact_text ~redact_json state event =
                (Option.map (fun value -> `String value) tool_call_name))
       in
       state, Some (custom ~timestamp ~redact_json state Content_block_start value)
-  | Oas_content_block_stop { index } ->
+  | Agent_core_content_block_stop { index } ->
       state, Some (custom ~timestamp ~redact_json state Content_block_stop
                      (`Assoc [ "index", `Int index ]))
-  | Oas_thinking_delta { index; delta } ->
+  | Agent_core_thinking_delta { index; delta } ->
       state, Some (custom ~timestamp ~redact_json state Thinking_delta
                      (`Assoc [ "index", `Int index; "delta", `String delta ]))
-  | Oas_thinking_signature_delta { index; signature_bytes } ->
+  | Agent_core_thinking_signature_delta { index; signature_bytes } ->
       state, Some (custom ~timestamp ~redact_json state Thinking_signature_delta
                      (`Assoc
                         [ "index", `Int index
                         ; "signature_bytes", `Int signature_bytes
                         ]))
-  | Oas_media_delta { index; media_type; source_type; media_ref } ->
+  | Agent_core_media_delta { index; media_type; source_type; media_ref } ->
       state, Some (custom ~timestamp ~redact_json state Media_delta
                      (`Assoc
                         [ "index", `Int index
                         ; "media_type", `String media_type
                         ; ( "source_type"
                           , `String
-                              (Agent_sdk.Types.media_source_kind_to_string
+                              (Agent_core.Types.media_source_kind_to_string
                                  source_type) )
                         ; "media_ref", `String media_ref
                         ]))
-  | Oas_stream_protocol_error error ->
+  | Agent_core_stream_protocol_error error ->
       state, Some (custom ~timestamp ~redact_json state Stream_protocol_error
                      (stream_protocol_error_to_json error))
   | Queue_request event ->

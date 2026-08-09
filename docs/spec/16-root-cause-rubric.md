@@ -14,7 +14,7 @@ code_refs:
 
 ## Purpose
 
-Every open issue in `masc` and `oas` should be classifiable into one or more of seven categories, each defined by a **structural marker** — a pattern a `rg` grep or an LLM pass can detect without prose interpretation. Prose interpretation has been empirically shown to produce false pairings (see `~/me/memory/handoff-2026-04-19-issue-close-sweep.md` for the 0/17 triage hallucination incident).
+Every open issue in `masc` and `agent core` should be classifiable into one or more of seven categories, each defined by a **structural marker** — a pattern a `rg` grep or an LLM pass can detect without prose interpretation. Prose interpretation has been empirically shown to produce false pairings (see `~/me/memory/handoff-2026-04-19-issue-close-sweep.md` for the 0/17 triage hallucination incident).
 
 The rubric is applied two ways:
 
@@ -43,15 +43,15 @@ The rubric is applied two ways:
 | Example | `emit_task_activity ~correlation_id:_` signature exists but no caller wires a real value (`#7520`) |
 | Issue body triggers | "metric", "correlation_id", "OTel", "span", "observability gap" |
 
-### BND — OAS-MASC Boundary Violation
+### BND — agent core-MASC Boundary Violation
 
 | Field | Content |
 |-------|---------|
 | Label | `root-cause:BND` |
 | Color | `#ff6600` |
-| Marker | MASC-side code reimplements something OAS already provides: lifecycle, budget, retry, approval hook, context injector |
-| Example | `context_oas_sync` manually tracking token counts duplicates OAS context_injector |
-| Issue body triggers | "OAS 재구현", "lifecycle", "budget", "retry", "approval hook", "MASC-side reimplement" |
+| Marker | MASC-side code reimplements something agent core already provides: lifecycle, budget, retry, approval hook, context injector |
+| Example | `context_agent_core_sync` manually tracking token counts duplicates agent core context_injector |
+| Issue body triggers | "agent core 재구현", "lifecycle", "budget", "retry", "approval hook", "MASC-side reimplement" |
 
 ### SIL — Silent Failure
 

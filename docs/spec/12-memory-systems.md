@@ -9,15 +9,15 @@ code_refs:
 
 # Memory Systems
 
-MASC owns durable domain memory. OAS owns the active transcript, checkpoint,
-and context reduction. MASC does not create an OAS memory object and neither
+MASC owns durable domain memory. agent core owns the active transcript, checkpoint,
+and context reduction. MASC does not create an agent core memory object and neither
 side derives memory from a model-authored state envelope.
 
 ## Stores
 
 | Store | Owner | Purpose |
 |---|---|---|
-| OAS checkpoint/context | OAS | active transcript and restartable agent context |
+| agent core checkpoint/context | agent core | active transcript and restartable agent context |
 | Memory OS current snapshot | MASC | current claims selected by the librarian plus explicit writes |
 | Procedural memory | MASC | verified reusable procedures |
 | Tool/history logs | MASC | observable evidence and recall source |
@@ -38,7 +38,7 @@ direct writer trace/generation, and exact added/removed/retained delta.
 
 Assistant reply text is never parsed into goal, progress, future work,
 questions, constraints, or any other memory category. An ordinary reply may
-remain in OAS checkpoint history, but it cannot become durable MASC memory
+remain in agent core checkpoint history, but it cannot become durable MASC memory
 without an explicit memory boundary.
 
 Write failures return or record an explicit error. The caller must not present
@@ -65,7 +65,7 @@ or scheduler state.
 
 ## Compaction
 
-OAS reduces active context through its checkpoint/context APIs. MASC may
+agent core reduces active context through its checkpoint/context APIs. MASC may
 request a configured strategy and observe the outcome, but must not rewrite
 the transcript through domain-specific text parsing.
 
@@ -77,12 +77,12 @@ capacity heuristic decides which memories survive.
 
 ## Generation and Handoff
 
-A Keeper rollover commits a new OAS checkpoint first, then advances the MASC
+A Keeper rollover commits a new agent core checkpoint first, then advances the MASC
 generation/trace lineage. Long-term memory remains in its MASC store. There is
 no reply-derived short-term cache and no prose replay sidecar.
 
 See:
 
 - [Keeper State Ownership](../KEEPER-STATE-OWNERSHIP.md)
-- [OAS/MASC Boundary](../OAS-MASC-BOUNDARY.md)
+- [agent core/MASC Boundary](../agent core-MASC-BOUNDARY.md)
 - [Keeper Continuity Validation](../KEEPER-CONTINUITY-VALIDATION.md)

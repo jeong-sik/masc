@@ -3,7 +3,7 @@
 **Status**: production release gate
 **Updated**: 2026-07-10
 
-Keeper continuity means that one ordered Keeper lane can restore its OAS
+Keeper continuity means that one ordered Keeper lane can restore its agent core
 checkpoint, consume typed wake events, and keep making observable progress
 without blocking other Keeper lanes.
 
@@ -11,7 +11,7 @@ without blocking other Keeper lanes.
 
 Release only when all items are true:
 
-1. checkpoint save and restore use OAS checkpoint primitives;
+1. checkpoint save and restore use agent core checkpoint primitives;
 2. MASC owns domain transitions and exposes matching receipts/tool results;
 3. the validation in
    [KEEPER-CONTINUITY-VALIDATION.md](./KEEPER-CONTINUITY-VALIDATION.md) passes;

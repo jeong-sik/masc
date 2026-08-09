@@ -7,7 +7,7 @@ open Keeper_tool_descriptor
    masc_operator_* can call into Eio-bound
    primitives (start_keepalive, Keeper_msg_async.submit, LLM-call fibers,
    Operator_control.context) without re-introducing dispatch-ref
-   plumbing.  Default = [None]; callers without Eio context (OAS handler,
+   plumbing.  Default = [None]; callers without Eio context (AGENT_CORE handler,
    tests) leave them unset and the Eio-bound descriptor handlers return
    a typed "Eio context not provided" failure instead of crashing. *)
 type context =
@@ -26,7 +26,7 @@ type context =
     (* RFC-0320: the connector conversation the current turn started from,
        so async tools (masc_fusion) can route their completion wake back to
        the originating channel. [None] on non-connector turns and on callers
-       without turn context (OAS handler defaults, tests). *)
+       without turn context (AGENT_CORE handler defaults, tests). *)
   ; gate_context : (unit -> Keeper_gate.causal_context) option
     (* Exact outer-turn evidence for contextual Gate judgment. Runtime handlers
        pass it through without inspecting the snapshot. *)

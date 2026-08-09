@@ -248,7 +248,7 @@ Workspace 기반 투표 시스템 (Board 투표와 별개).
 | `masc_vote_status` | 투표 현황 조회 |
 | `masc_votes` | 전체 투표 목록 |
 
-OAS `Tool.t` 인터페이스도 `Tool_bridge.oas_tool_of_masc`로 제공.
+agent core `Tool.t` 인터페이스도 `Tool_bridge.agent_core_tool_of_masc`로 제공.
 
 ---
 

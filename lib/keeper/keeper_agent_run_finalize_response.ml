@@ -24,7 +24,7 @@ let finalize
     ~actual_keeper_tool_names
     ~(result : Runtime_agent.run_result)
     ~last_persisted_checkpoint
-    ~final_oas_turn_ordinal
+    ~final_agent_core_turn_ordinal
     ~checkpoint_persistence_error
     ~post_turn_t0
     ~runtime_id_string
@@ -70,9 +70,9 @@ let finalize
       ~response_text
       ~consume:(fun ~response_text ->
         let assistant_msg =
-          Agent_sdk.Types.make_message
-           ~role:Agent_sdk.Types.Assistant
-           [ Agent_sdk.Types.Text response_text ]
+          Agent_core.Types.make_message
+           ~role:Agent_core.Types.Assistant
+           [ Agent_core.Types.Text response_text ]
         in
         Keeper_context_runtime.persist_message
           ~source:history_assistant_source
@@ -93,7 +93,7 @@ let finalize
                 "runtime disappeared before checkpoint finalization: %s"
                 runtime_id_string))
   in
-  let save_oas_checkpoint result_checkpoint =
+  let save_agent_core_checkpoint result_checkpoint =
     let checkpoint, source_already_persisted =
         Keeper_replay_checkpoint.select_finalization_checkpoint
           ~last_persisted_checkpoint
@@ -126,7 +126,7 @@ let finalize
            if already_persisted
            then Ok `Reused
            else
-             Keeper_checkpoint_store.save_oas_classified
+             Keeper_checkpoint_store.save_agent_core_classified
                ~session_dir:session.session_dir
                patched
              |> Result.map (fun outcome -> `Written outcome)
@@ -136,9 +136,9 @@ let finalize
        | Ok (`Written (Keeper_checkpoint_store.Saved _)) ->
          append_manifest ~site:"checkpoint_saved"
            ~keeper_turn_id:manifest_keeper_turn_id
-           ~oas_turn_count:result.turns
+           ~agent_core_turn_count:result.turns
            ~checkpoint_path:
-             (Keeper_checkpoint_store.oas_checkpoint_path
+             (Keeper_checkpoint_store.agent_core_checkpoint_path
                 ~session_dir:session.session_dir
                 ~session_id:patched.session_id)
            ~decision:
@@ -168,7 +168,7 @@ let finalize
        | Ok (`Written (Keeper_checkpoint_store.Stale_noop
                 { incoming_turn_count; known_turn_count })) ->
          Log.Keeper.warn ~keeper_name:meta.name
-           "runtime=%s OAS checkpoint stale no-op: incoming turn_count=%d, last saved=%d"
+           "runtime=%s AGENT_CORE checkpoint stale no-op: incoming turn_count=%d, last saved=%d"
            (Keeper_meta_contract.runtime_id_of_meta meta)
            incoming_turn_count known_turn_count;
          Otel_metric_store.inc_counter
@@ -178,7 +178,7 @@ let finalize
          Ok None
        | Error e ->
          Log.Keeper.error ~keeper_name:meta.name
-           "runtime=%s OAS checkpoint save failed: %s"
+           "runtime=%s AGENT_CORE checkpoint save failed: %s"
            (Keeper_meta_contract.runtime_id_of_meta meta)
            e;
          Otel_metric_store.inc_counter
@@ -188,11 +188,11 @@ let finalize
          Error
            (checkpoint_persistence_error
               ~keeper_name:meta.name
-              ~detail:("OAS checkpoint save failed: " ^ e))))
+              ~detail:("AGENT_CORE checkpoint save failed: " ^ e))))
   in
-  let missing_oas_checkpoint () =
+  let missing_agent_core_checkpoint () =
       Log.Keeper.error ~keeper_name:meta.name
-        "runtime=%s missing OAS checkpoint after run"
+        "runtime=%s missing AGENT_CORE checkpoint after run"
         (Keeper_meta_contract.runtime_id_of_meta meta);
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)
@@ -201,11 +201,11 @@ let finalize
       Error
         (checkpoint_persistence_error
            ~keeper_name:meta.name
-           ~detail:"missing OAS checkpoint after run")
+           ~detail:"missing AGENT_CORE checkpoint after run")
   in
-  let unexpected_oas_checkpoint () =
+  let unexpected_agent_core_checkpoint () =
     Log.Keeper.error ~keeper_name:meta.name
-      "runtime=%s official-client runtime returned an OAS checkpoint"
+      "runtime=%s official-client runtime returned an AGENT_CORE checkpoint"
       (Keeper_meta_contract.runtime_id_of_meta meta);
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string CheckpointFailures)
@@ -214,16 +214,16 @@ let finalize
     Error
       (checkpoint_persistence_error
          ~keeper_name:meta.name
-         ~detail:"official-client runtime returned an OAS checkpoint")
+         ~detail:"official-client runtime returned an AGENT_CORE checkpoint")
   in
   let saved_checkpoint_result =
     match checkpoint_owner_result, result.checkpoint with
     | Error error, _ -> Error error
-    | Ok Runtime_execution.Masc_oas, Some result_checkpoint ->
-      save_oas_checkpoint result_checkpoint
-    | Ok Runtime_execution.Masc_oas, None -> missing_oas_checkpoint ()
+    | Ok Runtime_execution.Masc_agent_core, Some result_checkpoint ->
+      save_agent_core_checkpoint result_checkpoint
+    | Ok Runtime_execution.Masc_agent_core, None -> missing_agent_core_checkpoint ()
     | Ok Runtime_execution.Official_client, Some _ ->
-      unexpected_oas_checkpoint ()
+      unexpected_agent_core_checkpoint ()
     | Ok Runtime_execution.Official_client, None -> Ok None
   in
   match saved_checkpoint_result with
@@ -234,7 +234,7 @@ let finalize
        boundary. *)
     let librarian_messages =
       match saved_checkpoint with
-      | Some checkpoint -> checkpoint.Agent_sdk.Checkpoint.messages
+      | Some checkpoint -> checkpoint.Agent_core.Checkpoint.messages
       | None -> Option.to_list assistant_msg
     in
     Keeper_agent_run_post_turn_memory.run
@@ -242,7 +242,7 @@ let finalize
       ~meta
       ~generation
       ~turn:manifest_keeper_turn_id
-      ~oas_turn_count:result.turns
+      ~agent_core_turn_count:result.turns
       ~actual_tools:actual_keeper_tool_names
       ~librarian_messages
       ~post_turn_t0
@@ -256,7 +256,7 @@ let finalize
       ; ctx_composition
       ; runtime_observation = result.runtime_observation
       ; turn_count = result.turns
-      ; final_oas_turn_ordinal
+      ; final_agent_core_turn_ordinal
       ; usage
       ; usage_reported = Option.is_some result.response.usage
       ; tool_calls = List.rev acc.tool_calls

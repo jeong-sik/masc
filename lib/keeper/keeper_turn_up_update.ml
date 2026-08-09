@@ -376,7 +376,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                     ; telemetry_feedback_window_hours =
                         updated.telemetry_feedback_window_hours
                     ; always_allow = updated.always_allow
-                    ; oas_env = updated.oas_env
+                    ; agent_core_env = updated.agent_core_env
                     ; updated_at = updated.updated_at
                     })
              with

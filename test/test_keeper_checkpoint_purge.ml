@@ -4,7 +4,7 @@
    drift from what was validated. *)
 
 module Purge = Masc.Keeper_checkpoint_purge
-module Types = Agent_sdk.Types
+module Types = Agent_core.Types
 
 let text_message role text : Types.message =
   { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
@@ -284,7 +284,7 @@ let test_config_bounds_are_enforced () =
 
 let test_checkpoint_fields_pass_through () =
   let checkpoint =
-    Agent_sdk.Checkpoint.
+    Agent_core.Checkpoint.
       { version = checkpoint_version
       ; session_id = "trace-purge-fixture"
       ; agent_name = "purge-fixture"
@@ -311,7 +311,7 @@ let test_checkpoint_fields_pass_through () =
       ; thinking_budget = None
       ; reasoning_effort = None
       ; cache_system_prompt = false
-      ; context = Agent_sdk.Context.create_sync ()
+      ; context = Agent_core.Context.create_sync ()
       ; mcp_sessions = []
       ; working_context = None
       }
@@ -323,11 +323,11 @@ let test_checkpoint_fields_pass_through () =
     Alcotest.(check string)
       "session identity unchanged"
       checkpoint.session_id
-      purged.Agent_sdk.Checkpoint.session_id;
+      purged.Agent_core.Checkpoint.session_id;
     Alcotest.(check int)
       "turn watermark unchanged"
       checkpoint.turn_count
-      purged.Agent_sdk.Checkpoint.turn_count
+      purged.Agent_core.Checkpoint.turn_count
 
 let () =
   Alcotest.run

@@ -1,4 +1,4 @@
-open Agent_sdk
+open Agent_core
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
@@ -71,7 +71,7 @@ let with_tmp_store f =
   @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let suffix = string_of_int (Random.int 999999) in
-  let tmp_dir = Eio.Path.(fs / "/tmp" / ("oas-test-" ^ suffix)) in
+  let tmp_dir = Eio.Path.(fs / "/tmp" / ("agent_core-test-" ^ suffix)) in
   let store = create_ok tmp_dir in
   Fun.protect
     ~finally:(fun () ->
@@ -92,7 +92,7 @@ let test_create_returns_error_on_bad_path () =
   @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let suffix = string_of_int (Random.int 999999) in
-  let file_path = Eio.Path.(fs / "/tmp" / ("oas-not-a-dir-" ^ suffix)) in
+  let file_path = Eio.Path.(fs / "/tmp" / ("agent_core-not-a-dir-" ^ suffix)) in
   Eio.Path.save ~create:(`Or_truncate 0o644) file_path "x";
   let bad_path = Eio.Path.(file_path / "sub") in
   Fun.protect
@@ -110,7 +110,7 @@ let test_list_returns_error_when_dir_removed () =
   @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let suffix = string_of_int (Random.int 999999) in
-  let tmp_dir = Eio.Path.(fs / "/tmp" / ("oas-test-list-err-" ^ suffix)) in
+  let tmp_dir = Eio.Path.(fs / "/tmp" / ("agent_core-test-list-err-" ^ suffix)) in
   let store = create_ok tmp_dir in
   Eio.Path.rmtree ~missing_ok:true tmp_dir;
   match Checkpoint_store.list store with
@@ -123,8 +123,8 @@ let test_create_auto_creates_directory () =
   @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let suffix = string_of_int (Random.int 999999) in
-  let tmp_dir = Eio.Path.(fs / "/tmp" / ("oas-test-nested-" ^ suffix) / "sub" / "dir") in
-  let parent = Eio.Path.(fs / "/tmp" / ("oas-test-nested-" ^ suffix)) in
+  let tmp_dir = Eio.Path.(fs / "/tmp" / ("agent_core-test-nested-" ^ suffix) / "sub" / "dir") in
+  let parent = Eio.Path.(fs / "/tmp" / ("agent_core-test-nested-" ^ suffix)) in
   Fun.protect
     ~finally:(fun () ->
       try Eio.Path.rmtree ~missing_ok:true parent with

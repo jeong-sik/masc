@@ -9,7 +9,7 @@ export interface KeeperRuntimeTraceTurnIdentity {
   requested_keeper_turn_id: number | null
   manifest_keeper_turn_ids: number[]
   receipt_turn_counts: number[]
-  max_oas_turn_count: number | null
+  max_agent_core_turn_count: number | null
   provider_lane_resolved_count: number
   provider_attempt_started_count: number
   provider_attempt_finished_count: number
@@ -101,7 +101,7 @@ export type KeeperRuntimeManifestScanDiagnostics =
 export interface KeeperRuntimeLensTurnClock {
   trace_id: string
   keeper_turn_id: number | null
-  max_oas_turn_count: number | null
+  max_agent_core_turn_count: number | null
   terminal_event_present: boolean
   terminal_event: string | null
   manifest_total_rows: number
@@ -210,7 +210,7 @@ export interface KeeperRuntimeLensLane {
 export interface KeeperRuntimeLensSwimlanes {
   keeper: KeeperRuntimeLensLane
   masc_policy_runtime: KeeperRuntimeLensLane
-  oas_agent: KeeperRuntimeLensLane
+  agent_core_agent: KeeperRuntimeLensLane
   provider: KeeperRuntimeLensLane
   tool_runtime: KeeperRuntimeLensLane
   memory_context: KeeperRuntimeLensLane
@@ -240,7 +240,7 @@ export interface KeeperRuntimeLensClockEdge {
   finished_at: string | null
   trace_id: string
   keeper_turn_id: number | null
-  oas_turn_count: number | null
+  agent_core_turn_count: number | null
   provider_attempt_id: string | null
   tool_batch_id: string | null
   checkpoint_id: string | null
@@ -478,7 +478,7 @@ function parseRuntimeTraceTurnIdentity(raw: unknown): KeeperRuntimeTraceTurnIden
     requested_keeper_turn_id: nullableNumberField(obj, 'requested_keeper_turn_id'),
     manifest_keeper_turn_ids: numberListField(obj, 'manifest_keeper_turn_ids'),
     receipt_turn_counts: numberListField(obj, 'receipt_turn_counts'),
-    max_oas_turn_count: nullableNumberField(obj, 'max_oas_turn_count'),
+    max_agent_core_turn_count: nullableNumberField(obj, 'max_agent_core_turn_count'),
     provider_lane_resolved_count: numberField(obj, 'provider_lane_resolved_count'),
     provider_attempt_started_count: numberField(obj, 'provider_attempt_started_count'),
     provider_attempt_finished_count: numberField(obj, 'provider_attempt_finished_count'),
@@ -548,7 +548,7 @@ function parseRuntimeLensTurnClock(raw: unknown, fallbackTraceId: string): Keepe
   return {
     trace_id: stringField(obj, 'trace_id') || fallbackTraceId,
     keeper_turn_id: nullableNumberField(obj, 'keeper_turn_id'),
-    max_oas_turn_count: nullableNumberField(obj, 'max_oas_turn_count'),
+    max_agent_core_turn_count: nullableNumberField(obj, 'max_agent_core_turn_count'),
     terminal_event_present: obj.terminal_event_present === true,
     terminal_event: nullableStringField(obj, 'terminal_event'),
     manifest_total_rows: numberField(obj, 'manifest_total_rows'),
@@ -708,7 +708,7 @@ function parseRuntimeLensSwimlanes(raw: unknown): KeeperRuntimeLensSwimlanes {
   return {
     keeper: parseRuntimeLensLane(obj.keeper, 'keeper', 'Keeper'),
     masc_policy_runtime: parseRuntimeLensLane(obj.masc_policy_runtime, 'masc_policy_runtime', 'MASC Runtime'),
-    oas_agent: parseRuntimeLensLane(obj.oas_agent, 'oas_agent', 'OAS'),
+    agent_core_agent: parseRuntimeLensLane(obj.agent_core_agent, 'agent_core_agent', 'Agent Core'),
     provider: parseRuntimeLensLane(obj.provider, 'provider', 'Provider'),
     tool_runtime: parseRuntimeLensLane(obj.tool_runtime, 'tool_runtime', 'Tool Runtime'),
     memory_context: parseRuntimeLensLane(obj.memory_context, 'memory_context', 'Memory/Context'),
@@ -747,7 +747,7 @@ function parseRuntimeLensClockEdge(raw: unknown): KeeperRuntimeLensClockEdge {
     finished_at: nullableStringField(obj, 'finished_at'),
     trace_id: stringField(obj, 'trace_id'),
     keeper_turn_id: nullableNumberField(obj, 'keeper_turn_id'),
-    oas_turn_count: nullableNumberField(obj, 'oas_turn_count'),
+    agent_core_turn_count: nullableNumberField(obj, 'agent_core_turn_count'),
     provider_attempt_id: nullableStringField(obj, 'provider_attempt_id'),
     tool_batch_id: nullableStringField(obj, 'tool_batch_id'),
     checkpoint_id: nullableStringField(obj, 'checkpoint_id'),

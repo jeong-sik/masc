@@ -54,7 +54,7 @@ let test_rerecord_overwrites () =
 
 (* ── Bridge stamping ──────────────────────────────────── *)
 
-let mk_event ?caused_by payload : Agent_sdk.Event_bus.event =
+let mk_event ?caused_by payload : Agent_core.Event_bus.event =
   { meta =
       { correlation_id = "corr-1"
       ; run_id = "run-1"
@@ -65,15 +65,15 @@ let mk_event ?caused_by payload : Agent_sdk.Event_bus.event =
   }
 
 let invocation ?(turn = 0) ?(planned_index = 0) tool_use_id =
-  Agent_sdk.Tool_contract.Invocation.create
+  Agent_core.Tool_contract.Invocation.create
     ~tool_use_id
     ~turn
-    ~completion:Agent_sdk.Tool_contract.Continue_after_success
+    ~completion:Agent_core.Tool_contract.Continue_after_success
     ~schedule:
       { planned_index
       ; batch_index = 0
       ; batch_size = 1
-      ; execution_mode = Agent_sdk.Tool_contract.Serial
+      ; execution_mode = Agent_core.Tool_contract.Serial
       }
 
 let test_tool_called_carries_tool_use_id () =
@@ -81,9 +81,9 @@ let test_tool_called_carries_tool_use_id () =
   let json =
     Bridge.native_event_to_json
       (mk_event
-         (Agent_sdk.Event_bus.ToolCalled
+         (Agent_core.Event_bus.ToolCalled
             { invocation = invocation "tu-3"
-            ; agent_name = "oas-r1"
+            ; agent_name = "agent_core-r1"
             ; tool_name = "Read"
             ; input = `Null
             }))
@@ -101,12 +101,12 @@ let test_tool_called_carries_tool_use_id () =
 
 let test_tool_completed_stamps_execution_id () =
   Join.For_testing.clear ();
-  (* The hook records the pair before OAS publishes ToolCompleted. *)
+  (* The hook records the pair before AGENT_CORE publishes ToolCompleted. *)
   Join.record ~tool_use_id:"tu-4" ~execution_id:"exec-2-0001";
   let json =
     Bridge.native_event_to_json
       (mk_event ~caused_by:"run-called-1"
-         (Agent_sdk.Event_bus.ToolCompleted
+         (Agent_core.Event_bus.ToolCompleted
             { invocation = invocation ~turn:1 ~planned_index:3 "tu-4"
             ; agent_name = "keeper-x-agent"
             ; tool_name = "Read"
@@ -133,9 +133,9 @@ let test_tool_completed_without_entry_omits_execution_id () =
   let json =
     Bridge.native_event_to_json
       (mk_event
-         (Agent_sdk.Event_bus.ToolCompleted
+         (Agent_core.Event_bus.ToolCompleted
             { invocation = invocation ~turn:2 "tu-5"
-            ; agent_name = "oas-worker"
+            ; agent_name = "agent_core-worker"
             ; tool_name = "Execute"
             ; output = Ok { content = "ok"; _meta = None }
             }))
@@ -150,11 +150,11 @@ let test_tool_approval_completed_preserves_exact_occurrence () =
   let json =
     Bridge.native_event_to_json
       (mk_event
-         (Agent_sdk.Event_bus.ToolApprovalCompleted
+         (Agent_core.Event_bus.ToolApprovalCompleted
             { invocation = invocation ~turn:4 ~planned_index:2 "tu-approved"
             ; agent_name = "keeper-approval"
             ; tool_name = "Execute"
-            ; approval = Agent_sdk.Hooks.Approved
+            ; approval = Agent_core.Hooks.Approved
             }))
     |> Option.get
   in
@@ -188,9 +188,9 @@ let test_empty_tool_use_id_omitted_from_payload () =
   let json =
     Bridge.native_event_to_json
       (mk_event
-         (Agent_sdk.Event_bus.ToolCalled
+         (Agent_core.Event_bus.ToolCalled
             { invocation = invocation ""
-            ; agent_name = "oas-r1"
+            ; agent_name = "agent_core-r1"
             ; tool_name = "Read"
             ; input = `Null
             }))
@@ -203,7 +203,7 @@ let test_non_terminal_agent_outcomes_keep_distinct_wire_types () =
   let yielded =
     Bridge.native_event_to_json
       (mk_event
-         (Agent_sdk.Event_bus.AgentYielded
+         (Agent_core.Event_bus.AgentYielded
             { agent_name = "keeper-yield"
             ; task_id = "run-yield"
             ; turn = 4
@@ -217,7 +217,7 @@ let test_non_terminal_agent_outcomes_keep_distinct_wire_types () =
     (Some "agent_yielded")
     (string_of_field (member "event_type" yielded));
   check (option int) "yield turn" (Some 4) (int_of_field (payload_member "turn" yielded));
-  let request : Agent_sdk.Error.input_required =
+  let request : Agent_core.Error.input_required =
     { request_id = "request-1"
     ; participant_name = Some "operator"
     ; question = "Continue?"
@@ -229,7 +229,7 @@ let test_non_terminal_agent_outcomes_keep_distinct_wire_types () =
   let input_required =
     Bridge.native_event_to_json
       (mk_event
-         (Agent_sdk.Event_bus.AgentInputRequired
+         (Agent_core.Event_bus.AgentInputRequired
             { agent_name = "keeper-input"
             ; task_id = "run-input"
             ; request
@@ -336,10 +336,10 @@ let test_terminal_agent_failure_projection_redacts_detail () =
     ~secret:effect_secret
     ~expected_variant:"terminal_tool_effect_failed"
     ~expected_tool_use_id:"tool-terminal-safe"
-    (Agent_sdk.Error.Agent
-       (Agent_sdk.Error.TerminalToolEffectFailed
+    (Agent_core.Error.Agent
+       (Agent_core.Error.TerminalToolEffectFailed
           { tool_use_id = "tool-terminal-safe"
-          ; effect_disposition = Agent_sdk.Error.proven_post_terminal_effect
+          ; effect_disposition = Agent_core.Error.proven_post_terminal_effect
           ; detail = effect_secret
           }));
   let durability_secret = "terminal-durability-secret-2cc19a31" in
@@ -348,23 +348,23 @@ let test_terminal_agent_failure_projection_redacts_detail () =
     ~secret:durability_secret
     ~expected_variant:"terminal_tool_durability_failed"
     ~expected_tool_use_id:"tool-durable-safe"
-    (Agent_sdk.Error.Agent
-       (Agent_sdk.Error.TerminalToolDurabilityFailed
+    (Agent_core.Error.Agent
+       (Agent_core.Error.TerminalToolDurabilityFailed
           { invocation =
               invocation ~turn:9 ~planned_index:4 "tool-durable-safe"
-          ; effect_disposition = Agent_sdk.Error.unknown_terminal_effect
+          ; effect_disposition = Agent_core.Error.unknown_terminal_effect
           ; detail = durability_secret
           }))
 ;;
 
 let test_agent_failed_matches_typed_sse_event () =
-  let agent_name = "oas-r1" in
+  let agent_name = "agent_core-r1" in
   let task_id = "task-failed-1" in
   let elapsed_s = 4.25 in
   let caused_by = "run-agent-started-1" in
   let error =
-    Agent_sdk.Error.Agent
-      (Agent_sdk.Error.HookExecutionFailed
+    Agent_core.Error.Agent
+      (Agent_core.Error.HookExecutionFailed
          { hook_name = "post_tool_use"
          ; stage = "execute"
          ; tool_name = Some "Execute"
@@ -381,7 +381,7 @@ let test_agent_failed_matches_typed_sse_event () =
     Bridge.native_event_to_json
       (mk_event
          ~caused_by
-         (Agent_sdk.Event_bus.AgentFailed
+         (Agent_core.Event_bus.AgentFailed
             { agent_name; task_id; error; elapsed = elapsed_s }))
     |> Option.get
     |> Yojson.Safe.to_string
@@ -418,23 +418,23 @@ let test_authorization_errors_have_typed_projection () =
   check_projection
     "API authorization"
     "api"
-    (Agent_sdk.Error.Api
-       (Agent_sdk.Retry.AuthorizationError { message = "permission refused" }));
+    (Agent_core.Error.Api
+       (Agent_core.Retry.AuthorizationError { message = "permission refused" }));
   check_projection
     "provider authorization"
     "provider"
-    (Agent_sdk.Error.Provider
+    (Agent_core.Error.Provider
        (Llm_provider.Error.AuthorizationError
           { provider = "provider"; detail = "permission refused" }))
 
 let test_request_body_too_large_projection_preserves_bounds () =
   let projection =
     Error_json.agent_failed_error_projection
-      (Agent_sdk.Error.Api
-         (Agent_sdk.Retry.InvalidRequest
+      (Agent_core.Error.Api
+         (Agent_core.Retry.InvalidRequest
             { message = "request body too large"
             ; reason =
-                Agent_sdk.Retry.Request_body_too_large
+                Agent_core.Retry.Request_body_too_large
                   { actual_bytes = 1_671_330; limit_bytes = 1_048_576 }
             }))
   in
@@ -462,11 +462,11 @@ let test_request_body_too_large_projection_preserves_bounds () =
 let test_provider_request_body_refusal_projection_preserves_status () =
   let projection =
     Error_json.agent_failed_error_projection
-      (Agent_sdk.Error.Api
-         (Agent_sdk.Retry.InvalidRequest
+      (Agent_core.Error.Api
+         (Agent_core.Retry.InvalidRequest
             { message = "payload too large"
             ; reason =
-                Agent_sdk.Retry.Request_body_refused_by_provider { status = 413 }
+                Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
             }))
   in
   check
@@ -505,12 +505,12 @@ let test_input_capacity_projection_preserves_evidence () =
   in
   let projection =
     Error_json.agent_failed_error_projection
-      (Agent_sdk.Error.Api
-         (Agent_sdk.Retry.InputCapacity
+      (Agent_core.Error.Api
+         (Agent_core.Retry.InputCapacity
             { message = "typed capacity"
             ; constraint_
             ; reason =
-                Agent_sdk.Retry.Serving_constraint_rejected
+                Agent_core.Retry.Serving_constraint_rejected
                   (Llm_provider.Serving_constraint.Input_rejected
                      { input_tokens = 524299
                      ; accepted_through = 524298
@@ -547,8 +547,8 @@ let test_input_capacity_projection_preserves_evidence () =
 let test_timeout_projection_preserves_phase () =
   let projection =
     Error_json.agent_failed_error_projection
-      (Agent_sdk.Error.Api
-         (Agent_sdk.Retry.Timeout
+      (Agent_core.Error.Api
+         (Agent_core.Retry.Timeout
             { message = "per-provider timeout after 90.0s"
             ; phase = Some Llm_provider.Http_client.Admission
             }))
@@ -571,8 +571,8 @@ let test_timeout_projection_preserves_phase () =
 let test_timeout_projection_without_phase_reports_null () =
   let projection =
     Error_json.agent_failed_error_projection
-      (Agent_sdk.Error.Api
-         (Agent_sdk.Retry.Timeout { message = "unattributed timeout"; phase = None }))
+      (Agent_core.Error.Api
+         (Agent_core.Retry.Timeout { message = "unattributed timeout"; phase = None }))
   in
   check
     (option string)

@@ -54,7 +54,7 @@ let inline_output_fingerprint value =
 ;;
 
 let output_fingerprint output_text =
-  match Tool_output.decode_from_oas output_text with
+  match Tool_output.decode_from_agent_core output_text with
   | Tool_output.Decoded { sha256; bytes; mime; _ } ->
     Some (digest_json (stored_output_identity_json ~sha256 ~bytes ~mime))
   | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->

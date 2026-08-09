@@ -78,7 +78,7 @@ let invalid_request_budget_exhausted ~keeper_name err =
          attempts; degrading to ordinary crash accounting: %s"
         keeper_name
         max_consecutive_invalid_request_failures
-        (Keeper_types_profile.short_preview (Agent_sdk.Error.to_string err));
+        (Keeper_types_profile.short_preview (Agent_core.Error.to_string err));
     exhausted)
 ;;
 

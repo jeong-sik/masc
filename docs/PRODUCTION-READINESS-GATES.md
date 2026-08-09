@@ -102,25 +102,25 @@ If a live environment cannot run the performance harness, the release evidence
 must say `blocked` or `not evaluated`; it must not silently treat missing
 performance data as green.
 
-## Gate 4: OAS Pin And Boundary
+## Gate 4: agent core Pin And Boundary
 
 Commands:
 
 ```bash
-scripts/check-oas-pin.sh --local-only
-scripts/oas-drift-check.sh
+scripts/check-agent-core-pin.sh --local-only
+scripts/agent-core-drift-check.sh
 ```
 
 Threshold:
 
 | metric | required value |
 |---|---:|
-| declared OAS base version | matches installed `agent_sdk` |
-| declared OAS SHA | matches local or remote API surface |
-| OAS API fingerprint drift | 0 |
-| MASC-specific semantics added to OAS | 0 |
+| declared agent core base version | matches installed `agent_core` |
+| declared agent core SHA | matches local or remote API surface |
+| agent core API fingerprint drift | 0 |
+| MASC-specific semantics added to agent core | 0 |
 
-OAS remains the generic runtime/proof layer.  MASC owns keeper runtime evidence,
+agent core remains the generic runtime/proof layer.  MASC owns keeper runtime evidence,
 operator semantics, and product promotion gates.
 
 ## Promotion Rule

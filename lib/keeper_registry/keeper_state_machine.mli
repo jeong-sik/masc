@@ -190,7 +190,7 @@ type entry_action =
   | Mark_dead_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
-  | Cancel_pending_oas
+  | Cancel_pending_agent_core
 
 (** Result of applying an event. *)
 type transition_result = {
@@ -268,7 +268,7 @@ val can_transition : from_phase:phase -> to_phase:phase -> bool
 (** [true] when a keeper phase is allowed to execute a unified turn.
     Runtime contract:
     - [Running] and [Failing] may execute turns.
-    - All other phases must skip OAS turn execution until the keeper
+    - All other phases must skip AGENT_CORE turn execution until the keeper
       re-enters an executable phase. *)
 val can_execute_turn : phase -> bool
 

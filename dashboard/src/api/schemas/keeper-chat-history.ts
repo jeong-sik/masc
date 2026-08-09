@@ -96,8 +96,8 @@ const KeeperChatTraceStepSchema = union([
     text: string(),
     content_withheld: optional(boolean()),
     ts: optional(string()),
-    oas_block_index: optional(number()),
-    oasBlockIndex: optional(number()),
+    agent_core_block_index: optional(number()),
+    agentCoreBlockIndex: optional(number()),
   }),
   object({
     kind: literal('reason'),
@@ -115,8 +115,8 @@ const KeeperChatTraceStepSchema = union([
     args: optional(unknown()),
     result: optional(unknown()),
     ts: optional(string()),
-    oas_block_index: optional(number()),
-    oasBlockIndex: optional(number()),
+    agent_core_block_index: optional(number()),
+    agentCoreBlockIndex: optional(number()),
   }),
 ])
 

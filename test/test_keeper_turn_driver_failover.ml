@@ -18,7 +18,7 @@ let write_file path content =
 
 let with_model_catalog_content content f =
   let original = Llm_provider.Model_catalog.global () in
-  let path = Filename.temp_file "runtime-failover-oas-models" ".toml" in
+  let path = Filename.temp_file "runtime-failover-agent_core-models" ".toml" in
   Fun.protect
     ~finally:(fun () ->
       (match original with
@@ -29,19 +29,19 @@ let with_model_catalog_content content f =
     (fun () ->
       write_file path content;
       match Llm_provider.Model_catalog.load_file path with
-      | Error msg -> Alcotest.failf "test OAS model catalog should load: %s" msg
+      | Error msg -> Alcotest.failf "test AGENT_CORE model catalog should load: %s" msg
       | Ok catalog ->
         Llm_provider.Model_catalog.set_global catalog;
         f ())
 
-let checkpoint_with_session_id session_id : Agent_sdk.Checkpoint.t =
-  { version = Agent_sdk.Checkpoint.checkpoint_version
+let checkpoint_with_session_id session_id : Agent_core.Checkpoint.t =
+  { version = Agent_core.Checkpoint.checkpoint_version
   ; session_id
   ; agent_name = "agent-test"
   ; model = "model-test"
   ; system_prompt = None
   ; messages = []
-  ; usage = Agent_sdk.Types.empty_usage
+  ; usage = Agent_core.Types.empty_usage
   ; turn_count = 1
   ; created_at = 0.0
   ; tools = []
@@ -54,24 +54,24 @@ let checkpoint_with_session_id session_id : Agent_sdk.Checkpoint.t =
   ; reasoning_effort = None
   ; enable_thinking = None
   ; preserve_thinking = None
-  ; response_format = Agent_sdk.Types.Off
+  ; response_format = Agent_core.Types.Off
   ; thinking_budget = None
   ; cache_system_prompt = false
-  ; context = Agent_sdk.Context.create_sync ()
+  ; context = Agent_core.Context.create_sync ()
   ; mcp_sessions = []
   ; working_context = None
   }
 
-let message ?(role = Agent_sdk.Types.Assistant) content : Agent_sdk.Types.message =
+let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 
 let retryable_network_error message =
-  Agent_sdk.Error.Api
-    (Agent_sdk.Retry.NetworkError
+  Agent_core.Error.Api
+    (Agent_core.Retry.NetworkError
        { message; kind = Llm_provider.Http_client.Unknown })
 
 let accept_empty_no_progress_error scope =
-  Driver.sdk_error_of_masc_internal_error
+  Driver.core_error_of_masc_internal_error
     (Driver.Accept_rejected
        { scope
        ; model = Some "runtime"
@@ -539,7 +539,7 @@ let test_prior_checkpoint_appends_current_goal_once () =
     let prior_checkpoint =
       { (checkpoint_with_session_id "prior-session") with
         messages =
-          [ message ~role:Agent_sdk.Types.User [ Agent_sdk.Types.Text "prior goal" ] ]
+          [ message ~role:Agent_core.Types.User [ Agent_core.Types.Text "prior goal" ] ]
       }
     in
     let agent_ref = ref None in
@@ -551,7 +551,7 @@ let test_prior_checkpoint_appends_current_goal_once () =
          ~base_path:(Filename.get_temp_dir_name ())
          ~goal:current_goal
          ~session_id:prior_checkpoint.session_id
-         ~oas_checkpoint:prior_checkpoint
+         ~agent_core_checkpoint:prior_checkpoint
          ~agent_ref
          ~sw
          ~net:env#net
@@ -563,20 +563,20 @@ let test_prior_checkpoint_appends_current_goal_once () =
          "invalid provider endpoints unexpectedly completed the resumed run");
     let messages =
       match !agent_ref with
-      | Some agent -> (Agent_sdk.Agent.state agent).messages
-      | None -> Alcotest.fail "expected resumed OAS agent"
+      | Some agent -> (Agent_core.Agent.state agent).messages
+      | None -> Alcotest.fail "expected resumed AGENT_CORE agent"
     in
     let user_messages =
       List.filter
-        (fun (entry : Agent_sdk.Types.message) ->
-           entry.role = Agent_sdk.Types.User)
+        (fun (entry : Agent_core.Types.message) ->
+           entry.role = Agent_core.Types.User)
         messages
     in
     let current_goal_count =
       List.fold_left
-        (fun count (entry : Agent_sdk.Types.message) ->
+        (fun count (entry : Agent_core.Types.message) ->
            match entry.role, entry.content with
-           | Agent_sdk.Types.User, [ Agent_sdk.Types.Text text ]
+           | Agent_core.Types.User, [ Agent_core.Types.Text text ]
              when String.equal text current_goal ->
              count + 1
            | _ -> count)
@@ -627,8 +627,8 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
     in
     (match result with
      | Error
-         (Agent_sdk.Error.Config
-           (Agent_sdk.Error.InvalidConfig
+         (Agent_core.Error.Config
+           (Agent_core.Error.InvalidConfig
              { field = "max-request-body-bytes"; detail })) ->
        Alcotest.(check bool)
          "typed rejection names the deferred tail runtime"
@@ -637,7 +637,7 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
      | Error error ->
        Alcotest.failf
          "expected final request-cap rejection, got %s"
-         (Agent_sdk.Error.to_string error)
+         (Agent_core.Error.to_string error)
      | Ok _ ->
        Alcotest.fail
          "transformed uncapped deferred runtime reached provider execution");
@@ -706,7 +706,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
       }
     in
     let image =
-      Agent_sdk.Types.image_block
+      Agent_core.Types.image_block
         ~media_type:"image/png"
         ~data:(Base64.encode_string "synthetic-image")
         ()
@@ -724,7 +724,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
          ~sw
          ~net:env#net
          ()
-       : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result);
+       : (Runtime_agent.run_result, Agent_core.Error.t) result);
     let degraded =
       List.find_opt
         (fun (manifest : Runtime_manifest.t) ->
@@ -789,7 +789,7 @@ let run_checkpoint_lane_turn ~history_messages ~on_manifests =
       }
     in
     let checkpoint =
-      { (checkpoint_with_session_id "oas-session") with
+      { (checkpoint_with_session_id "agent_core-session") with
         messages = history_messages
       }
     in
@@ -798,9 +798,9 @@ let run_checkpoint_lane_turn ~history_messages ~on_manifests =
         ~runtime_id:"checkpoint_lane"
         ~keeper_name:"checkpoint-runtime-compat-keeper"
         ~base_path:(Filename.get_temp_dir_name ())
-        ~goal:"continue the OAS turn"
+        ~goal:"continue the AGENT_CORE turn"
         ~initial_messages:history_messages
-        ~oas_checkpoint:checkpoint
+        ~agent_core_checkpoint:checkpoint
         ~runtime_manifest_context:context
         ~runtime_manifest_append:(fun manifest -> manifests := manifest :: !manifests)
         ~body_timeout_s:0.5
@@ -808,33 +808,33 @@ let run_checkpoint_lane_turn ~history_messages ~on_manifests =
         ~net:env#net
         ()
     with
-    | Ok _ -> Alcotest.fail "the OAS fixture endpoint unexpectedly completed"
+    | Ok _ -> Alcotest.fail "the AGENT_CORE fixture endpoint unexpectedly completed"
     | Error
-        (Agent_sdk.Error.Config
-           (Agent_sdk.Error.InvalidConfig { field = "oas_checkpoint"; _ })) ->
-      Alcotest.fail "the official-client runtime must start without OAS resume"
+        (Agent_core.Error.Config
+           (Agent_core.Error.InvalidConfig { field = "agent_core_checkpoint"; _ })) ->
+      Alcotest.fail "the official-client runtime must start without AGENT_CORE resume"
     | Error
-        (Agent_sdk.Error.Config
-           (Agent_sdk.Error.InvalidConfig { field = "initial_messages"; _ })) ->
+        (Agent_core.Error.Config
+           (Agent_core.Error.InvalidConfig { field = "initial_messages"; _ })) ->
       Alcotest.fail
         "projected official-client history must stay representable"
     | Error _ -> on_manifests !manifests)
 
-let test_oas_checkpoint_preserves_official_client_history () =
+let test_agent_core_checkpoint_preserves_official_client_history () =
   let history_messages =
     [ message
-        ~role:Agent_sdk.Types.User
-        [ Agent_sdk.Types.Text "prior user turn" ]
+        ~role:Agent_core.Types.User
+        [ Agent_core.Types.Text "prior user turn" ]
     ; message
-        [ Agent_sdk.Types.Thinking
+        [ Agent_core.Types.Thinking
             { content = "prior provider reasoning"; signature = None }
-        ; Agent_sdk.Types.ToolUse
+        ; Agent_core.Types.ToolUse
             { id = "prior-tool-call"
             ; name = "prior_tool"
             ; input = `Assoc []
             }
         ]
-    ; Agent_sdk.Types.tool_result_msg
+    ; Agent_core.Types.tool_result_msg
         ~tool_use_id:"prior-tool-call"
         ~content:"prior tool result"
         ()
@@ -894,9 +894,9 @@ let test_oas_checkpoint_preserves_official_client_history () =
 let test_lossless_official_client_history_emits_no_projection_row () =
   let history_messages =
     [ message
-        ~role:Agent_sdk.Types.User
-        [ Agent_sdk.Types.Text "prior user turn" ]
-    ; message [ Agent_sdk.Types.Text "prior assistant reply" ]
+        ~role:Agent_core.Types.User
+        [ Agent_core.Types.Text "prior user turn" ]
+    ; message [ Agent_core.Types.Text "prior assistant reply" ]
     ]
   in
   run_checkpoint_lane_turn ~history_messages ~on_manifests:(fun manifests ->
@@ -939,10 +939,10 @@ let test_lane_media_reroute_stays_within_lane () =
           remaining_candidate_ids
       in
       let image_block =
-        Agent_sdk.Types.Image
+        Agent_core.Types.Image
           { media_type = "image/png"
           ; data = Base64.encode_string "image"
-          ; source_type = Agent_sdk.Types.Base64
+          ; source_type = Agent_core.Types.Base64
           }
       in
       match
@@ -1001,17 +1001,17 @@ let test_attempt_loop_stops_on_nonretryable_failure () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Error (Agent_sdk.Error.Internal "primary terminal failure"), None
+          Error (Agent_core.Error.Internal "primary terminal failure"), None
         | "fallback.test_model" -> Ok runtime_id, None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
   (match result with
    | Ok runtime_id -> Alcotest.failf "unexpected fallback success: %s" runtime_id
-   | Error (Agent_sdk.Error.Internal msg) ->
+   | Error (Agent_core.Error.Internal msg) ->
      Alcotest.(check string) "primary error preserved" "primary terminal failure" msg
    | Error e ->
-     Alcotest.failf "expected primary Internal error, got %s" (Agent_sdk.Error.to_string e));
+     Alcotest.failf "expected primary Internal error, got %s" (Agent_core.Error.to_string e));
   Alcotest.(check (list string))
     "attempted candidates"
     [ "primary.test_model" ]
@@ -1056,7 +1056,7 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
    | Error e ->
      Alcotest.failf
        "expected fallback success, got %s"
-       (Agent_sdk.Error.to_string e));
+       (Agent_core.Error.to_string e));
   Alcotest.(check (list string))
     "attempted candidates"
     [ "primary.test_model"; "fallback.test_model" ]
@@ -1082,7 +1082,7 @@ let test_attempt_loop_retries_provider_wire_failure_same_turn () =
   let deferred = ref 0 in
   let events = ref [] in
   let provider_wire_error =
-    Agent_sdk.Error.Provider
+    Agent_core.Error.Provider
       (Llm_provider.Error.ProviderWireError
          { provider = "test-provider"
          ; format = Llm_provider.Http_client.Sse
@@ -1113,7 +1113,7 @@ let test_attempt_loop_retries_provider_wire_failure_same_turn () =
    | Error error ->
      Alcotest.failf
        "expected same-turn provider-wire fallback, got %s"
-       (Agent_sdk.Error.to_string error));
+       (Agent_core.Error.to_string error));
   Alcotest.(check (list string))
     "provider-wire failure advances to the next lane candidate"
     [ "primary.test_model"; "fallback.test_model" ]
@@ -1157,8 +1157,8 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
    | Error err ->
      Alcotest.(check string)
        "primary no-progress error preserved"
-       (Agent_sdk.Error.to_string primary_error)
-       (Agent_sdk.Error.to_string err)
+       (Agent_core.Error.to_string primary_error)
+       (Agent_core.Error.to_string err)
    | Ok runtime_id ->
      Alcotest.failf "unexpected fallback success: %s" runtime_id);
   Alcotest.(check (list string))
@@ -1213,7 +1213,7 @@ let test_attempt_loop_does_not_gate_network_retry () =
    | Error e ->
      Alcotest.failf
        "expected fallback success, got %s"
-       (Agent_sdk.Error.to_string e));
+       (Agent_core.Error.to_string e));
   Alcotest.(check bool)
     "network retry does not call no-progress gate"
     false
@@ -1229,9 +1229,9 @@ let test_attempt_loop_does_not_gate_network_retry () =
 
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
-    [ Agent_sdk.Agent.After_assistant_collected
-    ; Agent_sdk.Agent.After_tool_results_appended
-    ; Agent_sdk.Agent.After_context_injection
+    [ Agent_core.Agent.After_assistant_collected
+    ; Agent_core.Agent.After_tool_results_appended
+    ; Agent_core.Agent.After_context_injection
     ]
   in
   List.iter
@@ -1261,8 +1261,8 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
         | Error err ->
           Alcotest.(check string)
             "primary error preserved"
-            (Agent_sdk.Error.to_string primary_error)
-            (Agent_sdk.Error.to_string err)
+            (Agent_core.Error.to_string primary_error)
+            (Agent_core.Error.to_string err)
         | Ok runtime_id ->
           Alcotest.failf "unexpected fallback success: %s" runtime_id);
        Alcotest.(check (list string))
@@ -1275,7 +1275,7 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
          (List.length !events))
     stages
 
-let test_attempt_loop_preserves_last_sdk_error () =
+let test_attempt_loop_preserves_last_core_error () =
   let events = ref [] in
   let result =
     Driver.For_testing.attempt_runtime_candidates
@@ -1288,7 +1288,7 @@ let test_attempt_loop_preserves_last_sdk_error () =
   in
   (match result with
    | Ok _ -> Alcotest.fail "expected final candidate error"
-   | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.NetworkError { message; _ })) ->
+   | Error (Agent_core.Error.Api (Agent_core.Retry.NetworkError { message; _ })) ->
      Alcotest.(check string)
        "last candidate error preserved"
        "fallback.test_model failed"
@@ -1296,7 +1296,7 @@ let test_attempt_loop_preserves_last_sdk_error () =
    | Error e ->
      Alcotest.failf
        "expected final network error, got %s"
-       (Agent_sdk.Error.to_string e));
+       (Agent_core.Error.to_string e));
   let events = List.rev !events in
   Alcotest.(check (list string))
     "failed runtime ids"
@@ -1309,8 +1309,8 @@ let test_attempt_loop_preserves_last_sdk_error () =
      |> List.map decision_runtime_id)
 
 let context_overflow_error message =
-  Agent_sdk.Error.Api
-    (Agent_sdk.Retry.ContextOverflow { message; limit = Some 32768 })
+  Agent_core.Error.Api
+    (Agent_core.Retry.ContextOverflow { message; limit = Some 32768 })
 
 let serving_constraint () =
   Llm_provider.Serving_constraint.make
@@ -1325,8 +1325,8 @@ let serving_constraint () =
   |> Result.get_ok
 
 let input_capacity_error reason =
-  Agent_sdk.Error.Api
-    (Agent_sdk.Retry.InputCapacity
+  Agent_core.Error.Api
+    (Agent_core.Retry.InputCapacity
        { message = "typed input-capacity admission"
        ; constraint_ = serving_constraint ()
        ; reason
@@ -1345,24 +1345,24 @@ let test_attempt_loop_input_capacity_does_not_advance_masc_lane () =
         | "unmeasurable.test_model" ->
           Error
             (input_capacity_error
-               (Agent_sdk.Retry.Token_measurement_unavailable
+               (Agent_core.Retry.Token_measurement_unavailable
                   Llm_provider.Input_token_count.Anthropic_messages_count_tokens)),
           None
         | other ->
           Alcotest.failf
-            "MASC advanced to candidate %s without an OAS flow receipt"
+            "MASC advanced to candidate %s without an AGENT_CORE flow receipt"
             other)
       [ "unmeasurable.test_model"; "measurable.test_model" ]
   in
   (match result with
-   | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.InputCapacity _)) -> ()
+   | Error (Agent_core.Error.Api (Agent_core.Retry.InputCapacity _)) -> ()
    | Error error ->
      Alcotest.failf
        "typed input capacity was not preserved: %s"
-       (Agent_sdk.Error.to_string error)
+       (Agent_core.Error.to_string error)
    | Ok _ -> Alcotest.fail "MASC must not advance an InputCapacity failure");
   Alcotest.(check (list string))
-    "only OAS may advance the candidate flow"
+    "only AGENT_CORE may advance the candidate flow"
     [ "unmeasurable.test_model" ]
     !attempts
 
@@ -1395,7 +1395,7 @@ let test_attempt_loop_overflow_tries_next_candidate () =
    | Error e ->
      Alcotest.failf
        "expected larger-context fallback success, got %s"
-       (Agent_sdk.Error.to_string e));
+       (Agent_core.Error.to_string e));
   Alcotest.(check (list string))
     "overflow continues the lane walk"
     [ "small.test_model"; "large.test_model" ]
@@ -1449,8 +1449,8 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
           Error (context_overflow_error "prompt exceeds context window"), None
         | "fallback.test_model" ->
           ( Error
-              (Agent_sdk.Error.Api
-                 (Agent_sdk.Retry.RateLimited
+              (Agent_core.Error.Api
+                 (Agent_core.Retry.RateLimited
                     { retry_after = None; message = "weekly usage limit" }))
           , None )
         | other -> Alcotest.failf "unexpected candidate %s" other)
@@ -1484,14 +1484,14 @@ let test_attempt_loop_midwalk_terminal_outranks_observed_overflow () =
         | "small.test_model" ->
           Error (context_overflow_error "prompt exceeds context window"), None
         | "broken.test_model" ->
-          Error (Agent_sdk.Error.Internal "hard mid-lane failure"), None
+          Error (Agent_core.Error.Internal "hard mid-lane failure"), None
         | other ->
           Alcotest.failf "walk must stop before candidate %s" other)
       [ "small.test_model"; "broken.test_model"; "fallback.test_model" ]
   in
   (match result with
    | Ok _ -> Alcotest.fail "expected mid-lane stop"
-   | Error (Agent_sdk.Error.Internal msg) ->
+   | Error (Agent_core.Error.Internal msg) ->
      Alcotest.(check string)
        "stopping error preserved"
        "hard mid-lane failure"
@@ -1499,7 +1499,7 @@ let test_attempt_loop_midwalk_terminal_outranks_observed_overflow () =
    | Error e ->
      Alcotest.failf
        "expected stopping Internal error, got %s"
-       (Agent_sdk.Error.to_string e));
+       (Agent_core.Error.to_string e));
   Alcotest.(check (list string))
     "walk stopped at the terminal candidate"
     [ "small.test_model"; "broken.test_model" ]
@@ -1509,8 +1509,8 @@ let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
   let attempts = ref [] in
   let deferred = ref [] in
   let err =
-    Agent_sdk.Error.Api
-      (Agent_sdk.Retry.ServerError
+    Agent_core.Error.Api
+      (Agent_core.Retry.ServerError
          { status = 500; message = "checkpoint-observed failure" })
   in
   let result =
@@ -1566,7 +1566,7 @@ let test_deferred_cycle_starts_at_supplied_successor_and_keeps_tail () =
    | Ok runtime_id ->
      Alcotest.(check string) "same-run tail succeeds" "runtime.c" runtime_id
    | Error error ->
-     Alcotest.failf "expected suffix success: %s" (Agent_sdk.Error.to_string error));
+     Alcotest.failf "expected suffix success: %s" (Agent_core.Error.to_string error));
   Alcotest.(check (list string))
     "next cycle starts at B then advances to C"
     [ "runtime.b"; "runtime.c" ]
@@ -1641,7 +1641,7 @@ let test_missing_deferred_successor_is_typed_error () =
     Driver.For_testing.resolve_runtime_candidates
       [ "runtime.definitely-missing-deferred-successor" ]
   with
-  | Error (Agent_sdk.Error.Internal detail) ->
+  | Error (Agent_core.Error.Internal detail) ->
     Alcotest.(check bool)
       "missing successor is loud"
       true
@@ -1649,7 +1649,7 @@ let test_missing_deferred_successor_is_typed_error () =
   | Error error ->
     Alcotest.failf
       "expected typed internal missing-successor error, got %s"
-      (Agent_sdk.Error.to_string error)
+      (Agent_core.Error.to_string error)
   | Ok _ -> Alcotest.fail "missing successor unexpectedly resolved"
 
 let test_missing_deferred_head_is_consumed_once () =
@@ -1660,11 +1660,11 @@ let test_missing_deferred_head_is_consumed_once () =
       "runtime.definitely-missing-deferred-head"
   in
   (match result with
-   | Error (Agent_sdk.Error.Internal _) -> ()
+   | Error (Agent_core.Error.Internal _) -> ()
    | Error error ->
      Alcotest.failf
        "expected typed missing-head error, got %s"
-       (Agent_sdk.Error.to_string error)
+       (Agent_core.Error.to_string error)
    | Ok _ -> Alcotest.fail "missing deferred head unexpectedly resolved");
   Alcotest.(check int) "missing head consumed once" 1 !consumed
 
@@ -1724,9 +1724,9 @@ let () =
             `Quick
             test_run_named_media_degrade_emits_typed_manifest;
           Alcotest.test_case
-            "OAS checkpoint preserves official-client history"
+            "AGENT_CORE checkpoint preserves official-client history"
             `Quick
-            test_oas_checkpoint_preserves_official_client_history;
+            test_agent_core_checkpoint_preserves_official_client_history;
           Alcotest.test_case
             "lossless official-client history emits no projection row"
             `Quick
@@ -1776,9 +1776,9 @@ let () =
             `Quick
             test_typed_checkpoint_is_the_same_run_retry_authority;
           Alcotest.test_case
-            "attempt loop preserves last SDK error"
+            "attempt loop preserves last Agent Core error"
             `Quick
-            test_attempt_loop_preserves_last_sdk_error;
+            test_attempt_loop_preserves_last_core_error;
           Alcotest.test_case
             "context overflow tries next lane candidate"
             `Quick

@@ -645,7 +645,7 @@ let%test "sampling_parameter round-trips through to_string and of_string" =
    ([Model_catalog.parse_entry]) and manifest ([Capability_manifest]) parsers
    validate against at parse time, so an unknown/misspelled [base] fails closed
    instead of silently resolving to [default_capabilities]
-   (RFC-OAS-034 §2 rule 4 — unknown -> None, not permissive default).
+   (Agent Core contract §2 rule 4 — unknown -> None, not permissive default).
 
    Must stay in sync with the set of labels [Capabilities.capabilities_for_provider_label]
    resolves to [Some]; a drift-guard test in [Capabilities] pins the forward

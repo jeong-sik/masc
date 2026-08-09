@@ -1,7 +1,7 @@
 (** Dashboard read model for autonomous keeper turns.
 
     The current {!Turn_record.t} owns the closed turn kind, keeper/agent
-    identity, generation, and exact OAS raw-trace run reference. This reader
+    identity, generation, and exact AGENT_CORE raw-trace run reference. This reader
     selects only [Autonomous] records and projects only that recorded run.
     Final text and typed execution steps come from the same exact raw trace;
     it never scans or concatenates provider runs. *)

@@ -2,7 +2,7 @@
 
     Two new counters were added in PR-J:
     1. [masc_keeper_lifecycle_callback_failures_total{callback,...}] —
-       bumped when lifecycle or per-keeper OAS hook side effects raise.
+       bumped when lifecycle or per-keeper AGENT_CORE hook side effects raise.
        Lifecycle wrappers emit [callback] only;
        per-keeper hook sites also include [keeper].
     2. [masc_keeper_event_bus_drain_total{site,outcome}] — bumped on
@@ -114,7 +114,7 @@ let test_drain_outcome_label_distinction () =
 
 (* ── Documented label vocabulary check ──────────────────────
    The lifecycle wrappers and the per-keeper hook sites in
-   keeper_hooks_oas.ml must stay aligned with
+   keeper_hooks_agent_core.ml must stay aligned with
    otel_metric_store.mli. This test pins the callback vocabulary so a future
    refactor that renames a label without updating the docs is caught. *)
 

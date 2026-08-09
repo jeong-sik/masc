@@ -105,7 +105,7 @@ let write_file path content =
        so concurrent [write_file] calls on the same target never share
        a tmp path. This closes the [rename] race where writer A's
        rename consumes the tmp before writer B's rename runs
-       (oas checkpoint_store.ml / a2a_task_store.ml / memory_file_backend.ml). *)
+       (agent_core checkpoint_store.ml / a2a_task_store.ml / memory_file_backend.ml). *)
     let tmp_path = Filename.temp_file ~temp_dir:dir (base ^ ".") ".tmp" in
     let clean_tmp () =
       try Sys.remove tmp_path with

@@ -376,7 +376,7 @@ let seed_server_config ~base_path =
     Fun.protect
       ~finally:(fun () -> close_out_noerr oc)
       (fun () -> output_string oc runtime_seed);
-  let overlay_dst = Filename.concat config_dir "oas-models-overlay.toml" in
+  let overlay_dst = Filename.concat config_dir "agent-core-models-overlay.toml" in
   if not (Sys.file_exists overlay_dst) then
     let oc = open_out overlay_dst in
     Fun.protect
@@ -397,7 +397,7 @@ let with_server f =
     Unix.openfile log_file [Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC] 0o644
   in
   let env =
-    merge_env_overrides ~remove:[ "OAS_MODEL_CATALOG" ]
+    merge_env_overrides ~remove:[ "AGENT_CORE_MODEL_CATALOG" ]
       [
         ("MASC_BASE_PATH", base_path);
         ("MASC_BASE_PATH_INPUT", base_path);

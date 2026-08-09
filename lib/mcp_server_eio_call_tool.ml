@@ -151,7 +151,7 @@ let record_mcp_server_operation_duration result ~duration_ms =
 
 (** MCP tools/call [arguments] is optional (spec: "arguments?: object").
     Absence therefore means an empty object. An explicitly supplied [`Null]
-    is not absence and must remain [`Null] so OAS strict validation rejects it
+    is not absence and must remain [`Null] so AGENT_CORE strict validation rejects it
     instead of silently repairing an invalid wire value. *)
 let arguments_of_params = function
   | `Assoc fields ->
@@ -288,7 +288,7 @@ let runtime_mcp_keeper_tool_call_sse_payload
       [ ("error_text", `String (runtime_mcp_keeper_error_preview message)) ]
   in
   let io_fields =
-    Keeper_tools_oas_handler_telemetry.tool_io_preview_fields
+    Keeper_tools_agent_core_handler_telemetry.tool_io_preview_fields
       ~tool_name
       ~input:arguments
       ~output:message
@@ -483,7 +483,7 @@ let resolve_managed_agent_call ?mcp_session_id params =
   let identity =
     Client_registry_eio.get_or_create_identity ?mcp_session_id arguments
   in
-  Sdk_tool_contract.resolve_requested_tool_call
+  Agent_core_tool_contract.resolve_requested_tool_call
     ~agent_name:identity.Client_identity.agent_name
     ~requested_name ~arguments
 

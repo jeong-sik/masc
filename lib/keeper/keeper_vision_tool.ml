@@ -10,26 +10,26 @@ let vision_default_max_tokens = 1024
 
 let max_image_bytes () = Env_config_keeper.KeeperVision.max_image_bytes ()
 
-let truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool = function
-  | Agent_sdk.Types.MaxTokens -> true
+let truncated_of_stop_reason : Agent_core.Types.stop_reason -> bool = function
+  | Agent_core.Types.MaxTokens -> true
   (* ContentFilter is a policy terminal like Refusal, not a length cut.
      RepetitionTruncation is a provider repetition guard, not token-budget
      exhaustion; classifying it as truncated would prescribe the wrong
      larger-budget remediation.
-     UnmatchedToolCalls is OAS's internal fail-closed tool-turn shape;
+     UnmatchedToolCalls is AGENT_CORE's internal fail-closed tool-turn shape;
      vision runs with tool_choice = None so it cannot legitimately occur,
      and it carries no partial-extraction signal either way. *)
-  | Agent_sdk.Types.EndTurn
-  | Agent_sdk.Types.StopToolUse
-  | Agent_sdk.Types.StopSequence
-  | Agent_sdk.Types.Refusal
-  | Agent_sdk.Types.ContentFilter
-  | Agent_sdk.Types.RepetitionTruncation
-  | Agent_sdk.Types.PauseTurn
-  | Agent_sdk.Types.Compaction
-  | Agent_sdk.Types.ContextWindowExceeded
-  | Agent_sdk.Types.UnmatchedToolCalls
-  | Agent_sdk.Types.Unknown _ -> false
+  | Agent_core.Types.EndTurn
+  | Agent_core.Types.StopToolUse
+  | Agent_core.Types.StopSequence
+  | Agent_core.Types.Refusal
+  | Agent_core.Types.ContentFilter
+  | Agent_core.Types.RepetitionTruncation
+  | Agent_core.Types.PauseTurn
+  | Agent_core.Types.Compaction
+  | Agent_core.Types.ContextWindowExceeded
+  | Agent_core.Types.UnmatchedToolCalls
+  | Agent_core.Types.Unknown _ -> false
 
 let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   { provider_cfg with
@@ -46,7 +46,7 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   }
   |> Keeper_structured_output_schema.without_response_format
 
-let message_of_request (req : Va.request) : Agent_sdk.Types.message =
+let message_of_request (req : Va.request) : Agent_core.Types.message =
   let query =
     Printf.sprintf
       "Analyze the attached image for this request:\n\
@@ -55,11 +55,11 @@ let message_of_request (req : Va.request) : Agent_sdk.Types.message =
        not include markdown fences or prose outside the JSON object."
       req.Va.query
   in
-  Agent_sdk.Types.make_message
-    ~role:Agent_sdk.Types.User
-    [ Agent_sdk.Types.text_block query
-    ; Agent_sdk.Types.image_block
-        ~source_type:Agent_sdk.Types.Base64
+  Agent_core.Types.make_message
+    ~role:Agent_core.Types.User
+    [ Agent_core.Types.text_block query
+    ; Agent_core.Types.image_block
+        ~source_type:Agent_core.Types.Base64
         ~media_type:req.Va.image_media_type
         ~data:(Base64.encode_string req.Va.image_bytes)
         ()
@@ -251,15 +251,15 @@ let vision_text_of_json = function
   | _ -> Error "vision response must be a JSON object"
 ;;
 
-let vision_text_of_response (response : Agent_sdk.Types.api_response) =
+let vision_text_of_response (response : Agent_core.Types.api_response) =
   match
-    (Agent_sdk.Structured.response_json_extractor ()) response
+    (Agent_core.Structured.response_json_extractor ()) response
   with
   | Ok json -> vision_text_of_json json
   | Error msg -> Error ("vision response is not valid structured JSON: " ^ msg)
 ;;
 
-let outcome_of_response (response : Agent_sdk.Types.api_response) =
+let outcome_of_response (response : Agent_core.Types.api_response) =
   match vision_text_of_response response with
   | Error detail -> Vo_invalid_structured_response detail
   | Ok text ->

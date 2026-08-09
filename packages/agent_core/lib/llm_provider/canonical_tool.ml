@@ -1,4 +1,4 @@
-(** Canonical tool projections (RFC-OAS-024, WP8 Increments 1-2).
+(** Canonical tool projections (Agent Core contract, WP8 Increments 1-2).
 
     Increment 1 shipped the {e result} projection. Increment 2 adds the call
     projection plus structural reasoning-adjacency metadata for consumers that
@@ -9,11 +9,11 @@
     in-memory SSOT: [content_block] remains the canonical representation and the
     projected value is derived from it at the provider boundary. Depends only on
     provider-boundary types and references no execution, policy, or coordinator
-    concept (RFC-OAS-024 §1). Reasoning adjacency is purely structural: only
+    concept (Agent Core contract §1). Reasoning adjacency is purely structural: only
     contiguous reasoning blocks immediately before a ToolUse are linked.
 
     Lane A (Keystone K): no [id_origin]. [call_id] is the block's id verbatim,
-    already the native wire id or an opaque OAS allocation depending on the
+    already the native wire id or an opaque AGENT_CORE allocation depending on the
     provider parse path; ids are neither reallocated nor reclassified here. *)
 
 type provider_reasoning_kind =
@@ -47,7 +47,7 @@ type provider_tool_result =
   ; structured_content : Yojson.Safe.t option
     (** Projection of [ToolResult.json] (WP4 parsed payload), verbatim — not a
         fresh parse, and not the request-level structured-output contract
-        (RFC-OAS-024 D7). *)
+        (Agent Core contract D7). *)
   ; outcome : Types.tool_result_outcome
   }
 

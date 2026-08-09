@@ -1,4 +1,4 @@
-(** Document admission and per-wire media serialization (oas#2744).
+(** Document admission and per-wire media serialization (agent-core boundary).
 
     The OpenAI-compatible Chat Completions serializer used to emit a [Document]
     block as an [image_url] part: the same typed block reached the model as a

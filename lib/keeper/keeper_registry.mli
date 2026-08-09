@@ -199,7 +199,7 @@ val set_failure_reason : base_path:string -> string -> failure_reason option -> 
     outcomes are observable in status (surfaced as [last_compaction_decision]). *)
 val set_compaction_decision : base_path:string -> string -> string -> unit
 
-(** Store the OAS Event_bus [correlation_id] from the most recent turn. *)
+(** Store the AGENT_CORE Event_bus [correlation_id] from the most recent turn. *)
 val set_last_correlation_id : base_path:string -> string -> string -> unit
 
 (** Mark the beginning of a keeper turn. Installs a fresh
@@ -219,14 +219,14 @@ val record_turn_progress :
     telemetry only and has no timeout or lifecycle authority. *)
 val record_turn_tool_inflight : base_path:string -> string -> count:int -> unit
 
-(** Mark the beginning of an SDK turn within an existing keeper turn.
+(** Mark the beginning of an agent-core turn within an existing keeper turn.
 
-    The Agent SDK [run_loop] iterates N SDK turns inside a single MASC
-    keeper-turn window. Each SDK turn fires [before_turn_params] which
+    The Agent Core [run_loop] iterates N agent-core turns inside a single MASC
+    keeper-turn window. Each agent-core turn fires [before_turn_params] which
     leads to [prepare_agent_setup] writing
     [Decision_tool_policy_selected]/[Turn_prompting].
-    Without this boundary signal, the second-and-later SDK turn writes
-    transition from the previous SDK turn's terminal phase
+    Without this boundary signal, the second-and-later agent-core turn writes
+    transition from the previous agent-core turn's terminal phase
     ([Turn_finalizing]), which [validate_turn_phase_transition] rejects with
     [Turn_phase_transition_violation].
 
@@ -235,12 +235,12 @@ val record_turn_tool_inflight : base_path:string -> string -> count:int -> unit
     same way [mark_turn_started] bypasses the validator with a fresh
     install. [turn_id], [started_at], [selected_model], [measurement],
     [measurement_bind_count], and progress timestamp are preserved across
-    SDK turns inside one keeper turn (they are keeper-turn-scoped, not
-    SDK-turn-scoped).
+    agent-core turns inside one keeper turn (they are keeper-turn-scoped, not
+    agent-core-turn-scoped).
 
     No-op when [current_turn_observation = None] (defensive: should not
     happen in normal flow because [mark_turn_started] runs first). *)
-val mark_sdk_turn_started : base_path:string -> string -> unit
+val mark_agent_core_turn_started : base_path:string -> string -> unit
 
 (** Attach the most recent [Context_measured] snapshot to the live turn.
     No-op if no turn is active or no pending measurement exists. *)

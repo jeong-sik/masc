@@ -22,12 +22,12 @@ module Shrink_state = Masc.Keeper_context_overflow_shrink_state
 open Alcotest
 
 let context_overflow ?(limit = Some 32_768) () =
-  Agent_sdk.Error.Api
+  Agent_core.Error.Api
     (ContextOverflow { message = "exceeded"; limit })
 ;;
 
 let network_error () =
-  Agent_sdk.Error.Api
+  Agent_core.Error.Api
     (NetworkError
        { message = "Connection_reset"
        ; kind = Llm_provider.Http_client.Connection_refused
@@ -88,7 +88,7 @@ let test_stops_at_the_named_attempt_cap_then_falls_through () =
   in
   check bool "the last (unshrinkable) overflow is returned unchanged" true
     (match result with
-     | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow _)) -> true
+     | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) -> true
      | Error _ | Ok _ -> false);
   check int "exactly the named cap worth of shrink retries fired"
     Try_provider.For_testing.context_overflow_shrink_max_attempts
@@ -126,14 +126,14 @@ let test_non_overflow_error_never_shrinks () =
   check int "attempted exactly once" 1 !attempts;
   check bool "the network error propagates unchanged" true
     (match result with
-     | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.NetworkError _)) -> true
+     | Error (Agent_core.Error.Api (Agent_core.Retry.NetworkError _)) -> true
      | _ -> false)
 ;;
 
 let test_checkpoint_boundary_blocks_shrink_even_on_overflow () =
   (* Mirrors the exact same-run retry authority gate the declared-lane
      candidate walk applies via [same_run_retry_allowed] /
-     [checkpoint_stage_observed]: once OAS has mutated agent state at a
+     [checkpoint_stage_observed]: once AGENT_CORE has mutated agent state at a
      durable checkpoint stage, a same-run retry (shrink included) must not
      fire. *)
   let attempts = ref 0 in
@@ -153,7 +153,7 @@ let test_checkpoint_boundary_blocks_shrink_even_on_overflow () =
   check int "attempted exactly once" 1 !attempts;
   check bool "the overflow propagates unchanged" true
     (match result with
-     | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow _)) -> true
+     | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) -> true
      | _ -> false)
 ;;
 
@@ -165,7 +165,7 @@ let test_state_defaults_to_max_capacity_when_unseen () =
   Shrink_state.For_testing.reset ();
   check int "no memory yet: falls back to the declared cap" 1_048_576
     (Shrink_state.starting_capacity_bytes
-       ~keeper_name:"sangsu" ~runtime_id:"oas-primary" ~max_capacity_bytes:1_048_576)
+       ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
 ;;
 
 let test_state_remembers_last_success () =
@@ -173,10 +173,10 @@ let test_state_remembers_last_success () =
   @@ fun _env ->
   Shrink_state.For_testing.reset ();
   Shrink_state.record_success
-    ~keeper_name:"sangsu" ~runtime_id:"oas-primary" ~capacity_bytes:131_072;
+    ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~capacity_bytes:131_072;
   check int "next turn starts from the remembered capacity" 131_072
     (Shrink_state.starting_capacity_bytes
-       ~keeper_name:"sangsu" ~runtime_id:"oas-primary" ~max_capacity_bytes:1_048_576)
+       ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
 ;;
 
 let test_state_clamps_a_remembered_value_above_the_current_cap () =
@@ -184,11 +184,11 @@ let test_state_clamps_a_remembered_value_above_the_current_cap () =
   @@ fun _env ->
   Shrink_state.For_testing.reset ();
   Shrink_state.record_success
-    ~keeper_name:"sangsu" ~runtime_id:"oas-primary" ~capacity_bytes:2_097_152;
+    ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~capacity_bytes:2_097_152;
   check int "a stale remembered value never exceeds the current declared cap"
     1_048_576
     (Shrink_state.starting_capacity_bytes
-       ~keeper_name:"sangsu" ~runtime_id:"oas-primary" ~max_capacity_bytes:1_048_576)
+       ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
 ;;
 
 let test_state_is_keyed_per_keeper_and_runtime () =
@@ -196,13 +196,13 @@ let test_state_is_keyed_per_keeper_and_runtime () =
   @@ fun _env ->
   Shrink_state.For_testing.reset ();
   Shrink_state.record_success
-    ~keeper_name:"sangsu" ~runtime_id:"oas-primary" ~capacity_bytes:131_072;
+    ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~capacity_bytes:131_072;
   check int "a different runtime on the same keeper is unaffected" 1_048_576
     (Shrink_state.starting_capacity_bytes
-       ~keeper_name:"sangsu" ~runtime_id:"oas-fallback" ~max_capacity_bytes:1_048_576);
+       ~keeper_name:"sangsu" ~runtime_id:"agent_core-fallback" ~max_capacity_bytes:1_048_576);
   check int "the same runtime id on a different keeper is unaffected" 1_048_576
     (Shrink_state.starting_capacity_bytes
-       ~keeper_name:"analyst" ~runtime_id:"oas-primary" ~max_capacity_bytes:1_048_576)
+       ~keeper_name:"analyst" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
 ;;
 
 let () =

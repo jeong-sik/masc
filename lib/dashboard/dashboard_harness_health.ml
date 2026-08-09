@@ -36,7 +36,7 @@ type pre_compact_event = Keeper_compact_policy.pre_compact_event =
     owns; they do not claim to represent a provider-specific HTTP request body.
 
     [message_count] and [role_counts] include the synthesized user turn
-    that OAS will append from [~goal], matching the wire-level message
+    that AGENT_CORE will append from [~goal], matching the wire-level message
     list the LLM will receive. *)
 type wake_payload_event =
   { timestamp : float

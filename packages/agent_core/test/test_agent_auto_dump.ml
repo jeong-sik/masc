@@ -1,7 +1,7 @@
 (** Tests for Agent.save_journal and Builder.with_auto_dump_journal. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 let ts = 1711234567.0
 let append_ok journal event = Durable_event.append journal event |> Result.get_ok

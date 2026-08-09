@@ -70,7 +70,7 @@ type keeper_profile_defaults =
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
-  oas_env : (string * string) list;
+  agent_core_env : (string * string) list;
 }
 val empty_keeper_profile_defaults : keeper_profile_defaults
 val dedupe_keep_order : 'a list -> 'a list

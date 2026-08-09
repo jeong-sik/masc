@@ -2,7 +2,7 @@
 
     Targets 53 uncovered points in lib/trajectory.ml. *)
 
-open Agent_sdk
+open Agent_core
 
 let () = Printexc.record_backtrace true
 let tc name f = Alcotest.test_case name `Quick f

@@ -21,7 +21,7 @@
       skill_of_json with allowed_tools as non-list,
       of_json error paths *)
 
-open Agent_sdk
+open Agent_core
 
 (* ── Skill: parse_frontmatter edge cases ──────────────── *)
 
@@ -214,7 +214,7 @@ let test_replace_all_empty_text () =
 (* ── Skill: load_dir ──────────────────────────────────── *)
 
 let test_load_dir_real () =
-  let dir = Filename.temp_file "oas_skill_" "_dir" in
+  let dir = Filename.temp_file "agent_core_skill_" "_dir" in
   (* Remove the file and create a directory *)
   Sys.remove dir;
   Unix.mkdir dir 0o755;
@@ -247,7 +247,7 @@ let test_load_dir_real () =
 (* ── Skill: load success ──────────────────────────────── *)
 
 let test_load_success () =
-  let path = Filename.temp_file "oas_skill_" ".md" in
+  let path = Filename.temp_file "agent_core_skill_" ".md" in
   Fun.protect
     ~finally:(fun () ->
       try Sys.remove path with
@@ -266,7 +266,7 @@ let test_load_success () =
 ;;
 
 let test_load_with_scope () =
-  let path = Filename.temp_file "oas_skill_" ".md" in
+  let path = Filename.temp_file "agent_core_skill_" ".md" in
   Fun.protect
     ~finally:(fun () ->
       try Sys.remove path with
@@ -323,7 +323,7 @@ let test_skill_to_json_no_scope () =
 (* ── Skill_registry: load_from_dir success ────────────── *)
 
 let test_load_from_dir_success () =
-  let dir = Filename.temp_file "oas_reg_" "_dir" in
+  let dir = Filename.temp_file "agent_core_reg_" "_dir" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
   Fun.protect
@@ -351,7 +351,7 @@ let test_load_from_dir_success () =
 ;;
 
 let test_load_from_dir_with_scope () =
-  let dir = Filename.temp_file "oas_reg_" "_dir" in
+  let dir = Filename.temp_file "agent_core_reg_" "_dir" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
   Fun.protect

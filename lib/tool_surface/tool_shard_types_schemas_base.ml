@@ -56,11 +56,11 @@ let base_tools : Masc_domain.tool_schema list =
                 ; ( "limit"
                   , `Assoc
                       [ (* #18472 widening removed: a multi-type schema trips
-                           OAS #2343 fail-closed and crashes the keeper cycle, so
+                           agent-core boundary fail-closed and crashes the keeper cycle, so
                            [limit] stays a single scalar "integer". Wire contract:
                            Tool_input_validation rejects a string [limit] against
-                           this integer schema (OAS 0.212 strict typing) in
-                           keeper_tools_oas_handler, before Safe_ops.json_int would
+                           this integer schema (AGENT_CORE 0.212 strict typing) in
+                           keeper_tools_agent_core_handler, before Safe_ops.json_int would
                            coerce it, so the description must ask for a bare integer,
                            not a numeric string (codex #25274 P2). *)
                         ( "type", `String "integer" )

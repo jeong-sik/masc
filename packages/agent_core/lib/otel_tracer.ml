@@ -1,4 +1,4 @@
-(** OpenTelemetry-compatible tracer for Agent SDK.
+(** OpenTelemetry-compatible tracer for Agent Core.
     Implements Tracing.TRACER and exports spans as OTLP JSON.
 
     Self-contained: no external opentelemetry dependency.
@@ -648,8 +648,8 @@ let to_otlp_json (cfg : config) : Yojson.Safe.t =
             [ `Assoc
                 [ ( "scope"
                   , `Assoc
-                      [ "name", `String "agent_sdk.otel_tracer"
-                      ; "version", `String Sdk_version.version
+                      [ "name", `String "agent_core.otel_tracer"
+                      ; "version", `String Version.version
                       ] )
                 ; "spans", `List (List.map span_to_json spans)
                 ]
@@ -669,8 +669,8 @@ let to_otlp_json (cfg : config) : Yojson.Safe.t =
                 [ `Assoc
                     [ ( "scope"
                       , `Assoc
-                          [ "name", `String "agent_sdk.otel_tracer"
-                          ; "version", `String Sdk_version.version
+                          [ "name", `String "agent_core.otel_tracer"
+                          ; "version", `String Version.version
                           ] )
                     ; "metrics", `List (List.map metric_entry_to_json metrics)
                     ]

@@ -256,10 +256,10 @@ let lanes_of_decls ~(config_path : string)
        lane_decls)
 ;;
 
-(* Pure decision for the capability gate, separated from the global OAS catalog
-   lookup so it is unit-testable. [entries] is [(label, known_to_oas)] per runtime.
+(* Pure decision for the capability gate, separated from the global AGENT_CORE catalog
+   lookup so it is unit-testable. [entries] is [(label, known_to_agent_core)] per runtime.
 
-   An unknown model resolves to OAS [provider_default], whose guessed capabilities
+   An unknown model resolves to AGENT_CORE [provider_default], whose guessed capabilities
    (notably [thinking_control_format = No_thinking_control]) silently drop
    thinking/sampling control a binding may require. Reject such a binding at
    load instead of discovering corruption at runtime
@@ -278,9 +278,9 @@ let decide_capability_gate ~(config_path : string) (entries : (string * bool) li
   | _ ->
     Error
       (Printf.sprintf
-         "%s: %d runtime model(s) absent from the OAS capability catalog; they \
+         "%s: %d runtime model(s) absent from the AGENT_CORE capability catalog; they \
           would use provider_default and silently drop thinking/sampling control. \
-          Add deployment rows to oas-models-overlay.toml or update the OAS embedded catalog: %s"
+          Add deployment rows to agent-core-models-overlay.toml or update the AGENT_CORE embedded catalog: %s"
          config_path
          (List.length unknown)
          (String.concat ", " (List.map fst unknown)))
@@ -343,9 +343,9 @@ let missing_catalog_model_label (missing : missing_catalog_model) =
 
 let missing_catalog_report_to_string (report : missing_catalog_report) =
   Printf.sprintf
-    "%s: %d runtime model(s) absent from the OAS capability catalog; they \
+    "%s: %d runtime model(s) absent from the AGENT_CORE capability catalog; they \
      would use provider_default and silently drop thinking/sampling control. \
-     Add deployment rows to oas-models-overlay.toml or update the OAS embedded catalog: %s"
+     Add deployment rows to agent-core-models-overlay.toml or update the AGENT_CORE embedded catalog: %s"
     report.config_path
     (List.length report.missing_models)
     (String.concat ", " (List.map missing_catalog_model_label report.missing_models))
@@ -412,7 +412,7 @@ let startup_degradation_to_yojson = function
       ; "status", `String "degraded"
       ; "degraded", `Bool true
       ; "operator_action_required", `Bool true
-      ; "terminal_reason", `String "missing_oas_catalog_models"
+      ; "terminal_reason", `String "missing_agent_core_catalog_models"
       ; "message", `String (startup_degradation_to_string degradation)
       ; "config_path", `String degradation.report.config_path
       ; "configured_default_runtime_id"
@@ -438,7 +438,7 @@ let startup_degradation_to_yojson = function
       ; "dropped_lanes", `List (List.map dropped_lane_to_yojson degradation.dropped_lanes)
       ; ( "next_action"
         , `String
-            "Add deployment rows to oas-models-overlay.toml (or upstream OAS) or remove \
+            "Add deployment rows to agent-core-models-overlay.toml (or upstream AGENT_CORE) or remove \
              those runtime.toml bindings; uncatalogued runtimes are disabled \
              for this process." )
       ]
@@ -466,7 +466,7 @@ let max_context_source_to_string = function
 
 (* Effective input context window and the source that produced it.
    [None] means neither the runtime.toml [model.max-context] override nor the
-   OAS capability catalog declares a positive context window for this
+   AGENT_CORE capability catalog declares a positive context window for this
    binding — [validate_runtime_max_context] rejects such a runtime at load
    (fail-closed; Unknown->Permissive anti-pattern, not a silent default). *)
 let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option =
@@ -486,7 +486,7 @@ let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option 
 ;;
 
 (* Every materialized runtime must resolve a positive context window from the
-   runtime.toml override or the OAS capability catalog. A binding that leaves
+   runtime.toml override or the AGENT_CORE capability catalog. A binding that leaves
    both unset is a config error rejected here, not a runtime defaulted to a
    fallback window (RFC-0206 §2.1 no silent fallback). *)
 let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
@@ -502,7 +502,7 @@ let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
     Error
       (Printf.sprintf
          "%s: runtime %S (model=%s) has no [models.%s].max-context override \
-          and no OAS capability catalog max-context; set the override or add \
+          and no AGENT_CORE capability catalog max-context; set the override or add \
           the model to the capability catalog (no silent default — \
           RFC-0206 §2.1)"
          config_path
@@ -633,7 +633,7 @@ let validate_keeper_dispatch_request_caps
          runtime.binding.model_id)
 ;;
 
-(* Every runtime binding's provider/model pair must be known to the OAS
+(* Every runtime binding's provider/model pair must be known to the AGENT_CORE
    capability catalog. Use the materialized [Provider_config.t] so
    provider-qualified catalog rows are considered before bare model rows; this
    keeps overlapping ids such as native Kimi vs Ollama Cloud Kimi from requiring
@@ -722,7 +722,7 @@ let missing_reference_error
     match default_drop with
     | Some _ ->
       Printf.sprintf
-        "Configured %s=%S is absent from the OAS capability catalog; degraded \
+        "Configured %s=%S is absent from the AGENT_CORE capability catalog; degraded \
          boot will not select a different default runtime."
         runtime_default_route_name
         configured_default_runtime_id
@@ -736,7 +736,7 @@ let missing_reference_error
   Printf.sprintf
     "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
      are referenced by routing config: %s. %s Add catalog rows to \
-     oas-models-overlay.toml (or upstream OAS) or remove those routing references; MASC will not erase \
+     agent-core-models-overlay.toml (or upstream AGENT_CORE) or remove those routing references; MASC will not erase \
      explicit runtime intent into [runtime].default fallback."
     config_path
     (String.concat "; " references)
@@ -871,7 +871,7 @@ let degrade_loaded_for_missing_catalog
   | [] ->
     Error
       (Printf.sprintf
-         "%s: all configured runtime models are absent from the OAS capability \
+         "%s: all configured runtime models are absent from the AGENT_CORE capability \
           catalog; cannot degrade without dispatching through provider_default"
          report.config_path)
   | _ when has_routing_references ->
@@ -972,7 +972,7 @@ let materialize_config
     then validate_runtime_max_context ~config_path runtimes
     else Ok ()
   in
-  (* The OAS catalog membership gate is intentionally not called here:
+  (* The AGENT_CORE catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
      Startup callers choose fail-closed [init_default_strict] or server-visible
      degraded boot [init_default_degraded_report]. *)
@@ -1088,7 +1088,7 @@ let publish_exact_output_registry ~lanes resolver_snapshot =
 ;;
 
 (* Fail-closed startup entry point: [load_list] (RFC-0206 routing validation)
-   PLUS the OAS capability-catalog gate. Strict callers use this so an operator
+   PLUS the AGENT_CORE capability-catalog gate. Strict callers use this so an operator
    runtime.toml whose model is absent from the catalog is rejected before boot —
    the gate that load_list intentionally no longer applies, kept out of load_list
    so unit tests stay catalog-independent. *)
@@ -1170,7 +1170,7 @@ let runtimes_and_media_failover () =
 (* Keeper-to-runtime assignment is sourced from [[runtime.assignments]] in
    runtime.toml, not from keeper TOML. [None] = no explicit assignment; the caller falls back to
    {!get_default_runtime_id}. The returned id is opaque (masc never parses it;
-   only the OAS adapter resolves it to provider/model/spec). Reads
+   only the AGENT_CORE adapter resolves it to provider/model/spec). Reads
    [keeper_assignments_ref], never a module-level eager binding. *)
 let runtime_id_for_keeper (keeper_name : string) : string option =
   List.assoc_opt keeper_name (runtime_state ()).keeper_assignments
@@ -1267,12 +1267,12 @@ let max_context_of_runtime_id (id : string) : int option =
   | None -> None
 ;;
 
-(* The model's declared max output tokens (OAS capability catalog SSOT), or
+(* The model's declared max output tokens (AGENT_CORE capability catalog SSOT), or
    [None] when the runtime is unknown or the catalog row leaves it unset.
-   Mirrors [max_context_of_runtime_id] but projects the OAS-typed capability
+   Mirrors [max_context_of_runtime_id] but projects the AGENT_CORE-typed capability
    rather than the runtime.toml [model] record, because max output is owned by
    the provider/model catalog, not the per-binding runtime config. This is an
-   observable capability ceiling only. OAS owns request validation and clamp
+   observable capability ceiling only. AGENT_CORE owns request validation and clamp
    policy; MASC never turns this value into a request default. *)
 let max_output_tokens_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
@@ -1308,7 +1308,7 @@ let top_p_of_runtime_id (id : string) : float option =
 ;;
 
 let default_preserve_thinking_for_model (_rt : t) : bool option =
-  (* OAS owns provider/model capability truth and can preserve reasoning when
+  (* AGENT_CORE owns provider/model capability truth and can preserve reasoning when
      the provider contract requires it. MASC must not turn "request-side
      preserve is supported" into a fleet-wide replay policy; long-running
      keepers otherwise accumulate hidden reasoning across unrelated turns. *)

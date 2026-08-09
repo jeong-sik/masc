@@ -32,8 +32,8 @@ val decide_capability_gate :
 (** Pure capability-gate decision applied at startup by [init_default_strict]
     (not by [load_list], which keeps only RFC-0206 routing validation so unit
     tests stay catalog-independent), exposed for testing. [entries] is
-    [(label, known_to_oas_catalog)] per runtime binding. Returns [Error] when any
-    configured model is unknown to the OAS capability catalog: an unknown model
+    [(label, known_to_agent_core_catalog)] per runtime binding. Returns [Error] when any
+    configured model is unknown to the AGENT_CORE capability catalog: an unknown model
     resolves to [provider_default] and silently drops thinking/sampling control
     required by the binding. Empty entries are allowed for focused config
     probes. *)
@@ -44,8 +44,8 @@ type missing_catalog_model =
   ; provider_label : string
   ; model_id : string
   }
-(** Runtime binding whose concrete provider/model pair is absent from the OAS
-    capability catalog. [provider_label] is the exact OAS capability namespace
+(** Runtime binding whose concrete provider/model pair is absent from the AGENT_CORE
+    capability catalog. [provider_label] is the exact AGENT_CORE capability namespace
     used for lookup. *)
 
 type missing_catalog_report =
@@ -80,7 +80,7 @@ type startup_degradation =
   ; dropped_lanes : dropped_runtime_lane list
   }
 (** Operator-visible startup degradation. Missing-catalog runtime bindings are
-    removed from the active runtime set so requests never dispatch through OAS
+    removed from the active runtime set so requests never dispatch through AGENT_CORE
     [provider_default]. The server may continue only when at least one
     catalog-known runtime remains and no routing config references a disabled
     runtime id. *)
@@ -147,20 +147,20 @@ val validate_request_body_cap :
 
 val init_default : config_path:string -> (unit, string) result
 (** Parse + RFC-0206 routing validation + populate the singletons. Does NOT apply
-    the OAS capability-catalog gate (use {!init_default_strict} for fail-closed
+    the AGENT_CORE capability-catalog gate (use {!init_default_strict} for fail-closed
     callers or {!init_default_degraded_report} for server boot). Safe for tests
     with arbitrary-model runtime fixtures. *)
 
 val publish_exact_output_registry :
   lanes:Runtime_schema.exact_output_lane_decl list ->
-  Agent_sdk.Exact_output.resolver_snapshot ->
+  Agent_core.Exact_output.resolver_snapshot ->
   (Runtime_exact_output_registry.t, string) result
-(** Publish one immutable OAS resolver-and-lane snapshot and return that exact
+(** Publish one immutable AGENT_CORE resolver-and-lane snapshot and return that exact
     publication. Startup callers validate mandatory lanes against this value,
     so validation cannot observe a later global generation. *)
 
 val init_default_strict : config_path:string -> (unit, string) result
-(** Fail-closed startup entry point: {!init_default} PLUS the OAS
+(** Fail-closed startup entry point: {!init_default} PLUS the AGENT_CORE
     capability-catalog gate ({!decide_capability_gate}). Rejects ([Error]) a
     runtime whose model is absent from the catalog before boot. Used by strict
     validation callers such as fusion run. *)
@@ -172,7 +172,7 @@ val init_default_strict_report :
 
 val init_default_degraded_report :
   config_path:string -> (init_default_outcome, strict_init_error) result
-(** Server bootstrap entry point. Applies the strict OAS catalog gate, but when
+(** Server bootstrap entry point. Applies the strict AGENT_CORE catalog gate, but when
     only unreferenced catalog-membership rows fail it can remove uncatalogued
     runtimes from the active runtime set and continue in an operator-visible
     degraded mode. Routing/parse errors, all-missing runtime sets, and explicit
@@ -221,7 +221,7 @@ val runtime_id_for_keeper : string -> string option
 (** [runtime_id_for_keeper keeper_name] is the runtime id assigned to
     [keeper_name] in [\[runtime.assignments\]] (runtime.toml SSOT), or [None]
     when no explicit assignment exists (caller falls back to
-    {!get_default_runtime_id}). The id is opaque (only the OAS adapter parses
+    {!get_default_runtime_id}). The id is opaque (only the AGENT_CORE adapter parses
     it). Keeper-to-runtime assignment is not sourced from keeper TOML. *)
 
 val keeper_assignments : unit -> (string * string) list
@@ -286,9 +286,9 @@ val is_local_runtime_id : string -> bool option
 
 type max_context_source =
   | Override (** runtime.toml [model.max-context] override applies as-is. *)
-  | Capability (** no override configured; the OAS capability catalog cap applies. *)
+  | Capability (** no override configured; the AGENT_CORE capability catalog cap applies. *)
   | Override_clamped_by_capability
-      (** an override is configured but exceeds the OAS capability catalog
+      (** an override is configured but exceeds the AGENT_CORE capability catalog
           cap, so the cap wins. *)
 
 val max_context_source_to_string : max_context_source -> string
@@ -297,7 +297,7 @@ val max_context_source_to_string : max_context_source -> string
 
 val resolve_max_context_of_runtime : t -> (int * max_context_source) option
 (** Effective input context window and the source that produced it. [None]
-    when neither the runtime.toml [model.max-context] override nor the OAS
+    when neither the runtime.toml [model.max-context] override nor the AGENT_CORE
     capability catalog declares a positive context window for this binding;
     [materialize_config] rejects such a runtime at load (fail-closed), so a
     materialized [t] obtained from {!get_runtimes}/{!get_runtime_by_id} never
@@ -324,14 +324,14 @@ val max_context_of_runtime_id : string -> int option
 (** Effective input context window for the materialized runtime [id], or [None]
     when the id is not configured.  Budgeting callers use this to size a
     per-keeper routed turn against the same runtime that dispatch will use.
-    When the OAS provider capability catalog declares a context cap, the value
+    When the AGENT_CORE provider capability catalog declares a context cap, the value
     is clamped to [min runtime.toml max-context provider cap] so MASC cannot
     admit a prompt larger than the provider-owned window. *)
 
 val max_output_tokens_of_runtime_id : string -> int option
-(** Declared max output tokens (OAS capability catalog) for the model bound to
+(** Declared max output tokens (AGENT_CORE capability catalog) for the model bound to
     runtime [id], or [None] when the id is not configured or the catalog leaves
-    it unset. This is an observable capability ceiling only; OAS owns request
+    it unset. This is an observable capability ceiling only; AGENT_CORE owns request
     validation and clamp policy, and MASC never turns it into a request
     default. *)
 
@@ -350,21 +350,21 @@ val temperature_of_runtime_id : string -> float option
     for models that reject the default temperature (Kimi K2.7 accepts only 1.0). *)
 
 val top_p_of_runtime_id : string -> float option
-(** Request [top_p] from the materialized OAS provider config for runtime [id],
+(** Request [top_p] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when the runtime is not configured or no explicit value is
     declared.  This projects the Provider_config SSOT used for dispatch. *)
 
-(** Request [top_k] from the materialized OAS provider config for runtime [id],
+(** Request [top_k] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when absent. *)
 
-(** Request [min_p] from the materialized OAS provider config for runtime [id],
+(** Request [min_p] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when absent. *)
 
 val preserve_thinking_of_runtime_id : string -> bool option
 (** Explicit [preserve-thinking] for runtime [id]. [None] means unknown runtime,
     uninitialized cache, or no explicit TOML field.
 
-    OAS owns provider/model capability truth and applies provider-required
+    AGENT_CORE owns provider/model capability truth and applies provider-required
     reasoning replay internally. MASC does not promote a request-side preserve
     capability into default keeper policy. Consumed by
     {!Runtime_inference.for_runtime} without provider/model string matching. *)
@@ -441,7 +441,7 @@ val set_runtime_media_failover :
 
 val default_max_context : unit -> int
 (** Effective context-window budget of the default runtime's model (RFC-0206
-    single-binding), clamped by the OAS provider capability catalog when that
+    single-binding), clamped by the AGENT_CORE provider capability catalog when that
     cap is available. Replaces the deleted
     [Runtime_runtime.resolve_*_max_context] label scans. Falls back to
     [Runtime_constants.fallback_context_window] before {!init_default} runs. *)

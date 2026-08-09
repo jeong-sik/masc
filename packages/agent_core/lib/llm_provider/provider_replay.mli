@@ -43,7 +43,7 @@ val exact_object_fields
     @since 0.211.3 *)
 val encode_exact_next_block : payload:Yojson.Safe.t -> string
 
-(** Decode only the OAS replay envelope. Arbitrary provider-owned redacted
+(** Decode only the AGENT_CORE replay envelope. Arbitrary provider-owned redacted
     payloads return [Not_replay]; a recognized but invalid envelope returns a
     typed [Malformed_replay] result.
     @since 0.211.3 *)

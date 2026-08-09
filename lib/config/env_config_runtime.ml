@@ -322,12 +322,12 @@ module Worker = struct
     Sys.getenv_opt "MASC_LOCAL_RUNTIME_COOLDOWN_SEC" |> trim_opt
 end
 
-(** {1 OAS SSE Bridge Configuration} *)
+(** {1 AGENT_CORE SSE Bridge Configuration} *)
 
-module Oas_sse = struct
+module Agent_core_sse = struct
   (** SSE drain interval (seconds). Default: 2.0. *)
   let drain_interval_sec =
-    let v = get_float ~default:2.0 "MASC_OAS_SSE_DRAIN_INTERVAL_SEC" in
+    let v = get_float ~default:2.0 "MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC" in
     if v < 0.1 then 2.0 else v
 end
 

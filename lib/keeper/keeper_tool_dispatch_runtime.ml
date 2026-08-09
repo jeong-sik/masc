@@ -120,7 +120,7 @@ let execute_keeper_tool_call_with_outcome
                        ; turn_sandbox_factory
            ; (* RFC-0182 Phase 5 PR-A.2: Eio resources threaded from
                 caller via labeled ? params.  Callers without Eio
-                context (OAS handler, tests) leave them unset. *)
+                context (AGENT_CORE handler, tests) leave them unset. *)
              sw
            ; clock
            ; proc_mgr

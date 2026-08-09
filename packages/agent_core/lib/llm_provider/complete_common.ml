@@ -384,7 +384,7 @@ let validate_request_path (config : Provider_config.t) =
   | Error reason -> Error (Http_client.AcceptRejected { reason })
 ;;
 
-(* RFC-OAS-023 (capability axis) — fail loud when an explicit thinking-control
+(* Agent Core contract (capability axis) — fail loud when an explicit thinking-control
    request cannot be satisfied by the resolved typed capability contract.
 
    [No_thinking_control] and [supports_reasoning] are intentionally interpreted
@@ -493,7 +493,7 @@ let thinking_control_request_rejection
           (* backend_openai_request still encodes an explicit thinking toggle
              for rows whose preserve wire is a provider [thinking] object, even
              under [No_thinking_control]. Read from the typed capability, not
-             from a provider identity (RFC-OAS-029 S1.1). *)
+             from a provider identity (Agent Core contract S1.1). *)
           Capability_vocab.preserve_wire_owns_thinking_object
             caps.preserve_thinking_control_format
         in

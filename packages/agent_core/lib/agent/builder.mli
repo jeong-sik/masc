@@ -84,7 +84,7 @@ val without_event_bus : t -> t
     @since 0.176.0 *)
 val with_stream_idle_timeout : float -> t -> t
 
-(** RFC-OAS-037: set the dedicated time-to-first-event (TTFT / prefill)
+(** Agent Core contract: set the dedicated time-to-first-event (TTFT / prefill)
     deadline, distinct from [with_stream_idle_timeout]. It bounds only the
     wait for the FIRST streaming event; [stream_idle_timeout_s] arms for
     inter-token idle only after the first event arrives. A silent prefill
@@ -110,7 +110,7 @@ val with_elicitation : Hooks.elicitation_callback -> t -> t
 
 (** Configure the closed typed approval boundary used only by
     [Hooks.ElicitToolApproval] at [PreToolUse]. The callback settles
-    synchronously; OAS does not install a timeout or durable pause. *)
+    synchronously; AGENT_CORE does not install a timeout or durable pause. *)
 val with_tool_approval : Hooks.tool_approval_callback -> t -> t
 
 val with_description : string -> t -> t
@@ -172,7 +172,7 @@ val with_skills : Skill.t list -> t -> t
 
 val with_log_level : Log.level -> t -> t
 val with_log_sink : Log.sink -> t -> t
-(* with_event_targets removed — was a no-op.  See oas#669. *)
+(* with_event_targets removed — was a no-op.  See agent-core boundary. *)
 
 (** {3 Discovery / metadata skill registry}
 
@@ -222,4 +222,4 @@ val with_auto_dump_journal : path:string -> t -> t
 (** Build with provider-independent validation. Provider-specific wire
     combinations are validated at request construction, after the concrete
     provider/model catalog entry is known. *)
-val build_safe : t -> (Agent.t, Error.sdk_error) result
+val build_safe : t -> (Agent.t, Error.t) result

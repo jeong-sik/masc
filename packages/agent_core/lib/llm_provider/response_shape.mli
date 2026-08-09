@@ -43,7 +43,7 @@ val content_shape_to_string : content_shape -> string
 val has_deliverable_content : t -> bool
 
 (** [true] when the provider response ended normally without downstream-visible
-    content. This is the generic OAS-side primitive that consumers can map to
+    content. This is the generic AGENT_CORE-side primitive that consumers can map to
     their own accept/retry policy. *)
 val ended_without_deliverable_content : Types.api_response -> bool
 

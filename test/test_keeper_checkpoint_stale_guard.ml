@@ -1,9 +1,9 @@
-(** RFC-0225 §3.2: stale OAS checkpoint writes are a disk-SSOT no-op.
+(** RFC-0225 §3.2: stale AGENT_CORE checkpoint writes are a disk-SSOT no-op.
 
     Two writers for the same session are last-writer-wins on disk; the
     2026-06-10 voice incident had a stale lane (turn_count=1324) clobber
     the conversation the newer lane had just saved (turn_count=1355).
-    [Keeper_checkpoint_store.save_oas_classified] skips a save whose [turn_count] is older
+    [Keeper_checkpoint_store.save_agent_core_classified] skips a save whose [turn_count] is older
     than the canonical checkpoint observed inside the save transaction, without
     turning that watermark hit into keeper lifecycle failure.
 
@@ -42,19 +42,19 @@ let cleanup_dir dir =
 
 let make_checkpoint ~session_id ~turn_count ~marker =
   let messages = [
-    Agent_sdk.Types.{ role = User; content = [Text "hello"]; name = None;
+    Agent_core.Types.{ role = User; content = [Text "hello"]; name = None;
                       tool_call_id = None; metadata = [] };
-    Agent_sdk.Types.{ role = Assistant; content = [Text marker]; name = None;
+    Agent_core.Types.{ role = Assistant; content = [Text marker]; name = None;
                       tool_call_id = None; metadata = [] };
   ] in
-  Agent_sdk.Checkpoint.{
+  Agent_core.Checkpoint.{
     version = checkpoint_version;
     session_id;
     agent_name = "test-agent";
     model = "test-model";
     system_prompt = None;
     messages;
-    usage = Agent_sdk.Types.empty_usage;
+    usage = Agent_core.Types.empty_usage;
     turn_count;
     created_at = 1000.0;
     tools = [];
@@ -67,27 +67,27 @@ let make_checkpoint ~session_id ~turn_count ~marker =
     reasoning_effort = None;
     enable_thinking = None;
     preserve_thinking = None;
-    response_format = Agent_sdk.Types.Off;
+    response_format = Agent_core.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
 
-    context = Agent_sdk.Context.create_sync ();
+    context = Agent_core.Context.create_sync ();
     mcp_sessions = [];
     working_context = None;
   }
 
-let with_generation generation (checkpoint : Agent_sdk.Checkpoint.t) =
-  let context = Agent_sdk.Context.copy ~eio:false checkpoint.context in
-  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+let with_generation generation (checkpoint : Agent_core.Checkpoint.t) =
+  let context = Agent_core.Context.copy ~eio:false checkpoint.context in
+  Agent_core.Context.set_scoped context Agent_core.Context.Session
     Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
   { checkpoint with context }
 
 let save_ok ~session_dir ckpt label =
-  match Keeper_checkpoint_store.save_oas_classified ~session_dir ckpt with
+  match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ckpt with
   | Ok _ -> ()
   | Error e -> fail (label ^ " unexpectedly failed: " ^ e)
 
-let test_run_context_binds_generation_before_oas_checkpoint () =
+let test_run_context_binds_generation_before_agent_core_checkpoint () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -101,7 +101,7 @@ let test_run_context_binds_generation_before_oas_checkpoint () =
     | Ok meta -> meta
     | Error detail -> fail ("meta fixture failed: " ^ detail)
   in
-  let shared_context = Agent_sdk.Context.create () in
+  let shared_context = Agent_core.Context.create () in
   let run_context =
     Keeper_run_context.prepare_run_context
       ~config:(Workspace.default_config base_dir)
@@ -113,23 +113,23 @@ let test_run_context_binds_generation_before_oas_checkpoint () =
       ~generation:7
       ()
   in
-  check bool "caller-owned context remains the OAS context" true
+  check bool "caller-owned context remains the AGENT_CORE context" true
     (run_context.shared_context == shared_context);
   let agent =
-    Agent_sdk.Agent.create
+    Agent_core.Agent.create
       ~net:(Eio.Stdenv.net env)
-      ~config:(Agent_sdk.Types.default_config ~model:"test-model")
+      ~config:(Agent_core.Types.default_config ~model:"test-model")
       ~context:run_context.shared_context
       ()
   in
-  let checkpoint = Agent_sdk.Agent.checkpoint agent in
+  let checkpoint = Agent_core.Agent.checkpoint agent in
   match
-    Agent_sdk.Context.get_scoped checkpoint.context Agent_sdk.Context.Session
+    Agent_core.Context.get_scoped checkpoint.context Agent_core.Context.Session
       Keeper_checkpoint_store.keeper_generation_context_key
   with
   | Some (`Int generation) ->
-    check int "OAS checkpoint carries current keeper generation" 7 generation
-  | _ -> fail "OAS checkpoint omitted the bound keeper generation"
+    check int "AGENT_CORE checkpoint carries current keeper generation" 7 generation
+  | _ -> fail "AGENT_CORE checkpoint omitted the bound keeper generation"
 
 let test_forward_equal_and_stale () =
   Eio_main.run @@ fun env ->
@@ -144,7 +144,7 @@ let test_forward_equal_and_stale () =
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:6 ~marker:"v6b") "equal save";
     (* Stale write must be a nonfatal no-op and must not touch disk. *)
     (match
-       Keeper_checkpoint_store.save_oas_classified ~session_dir
+       Keeper_checkpoint_store.save_agent_core_classified ~session_dir
          (make_checkpoint ~session_id:sid ~turn_count:4 ~marker:"v4-stale")
      with
      | Ok (Keeper_checkpoint_store.Stale_noop
@@ -154,10 +154,10 @@ let test_forward_equal_and_stale () =
      | Ok (Keeper_checkpoint_store.Saved _) ->
        fail "stale save advanced the checkpoint"
      | Error e -> fail ("stale save returned lifecycle failure: " ^ e));
-    match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:sid with
+    match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:sid with
     | Ok on_disk ->
       check int "disk keeps the newest turn_count" 6
-        on_disk.Agent_sdk.Checkpoint.turn_count
+        on_disk.Agent_core.Checkpoint.turn_count
     | Error _ -> fail "load after rejection failed")
 
 (* The canonical checkpoint file is the only durable admission watermark
@@ -171,7 +171,7 @@ let test_disk_is_the_watermark_ssot () =
     let sid = "sess-cold" in
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:8 ~marker:"v8") "seed save";
     (match
-       Keeper_checkpoint_store.save_oas_classified ~session_dir
+       Keeper_checkpoint_store.save_agent_core_classified ~session_dir
          (make_checkpoint ~session_id:sid ~turn_count:3 ~marker:"v3-stale")
      with
      | Ok (Keeper_checkpoint_store.Stale_noop
@@ -189,16 +189,16 @@ let test_externally_replaced_canonical_is_the_watermark () =
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     let session_id = "sess-external-write" in
     let canonical_path =
-      Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id
+      Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id
     in
     save_ok ~session_dir
       (make_checkpoint ~session_id ~turn_count:5 ~marker:"v5")
       "seed save";
     Fs_compat.save_file canonical_path
       (make_checkpoint ~session_id ~turn_count:9 ~marker:"external-v9"
-       |> Agent_sdk.Checkpoint.to_string);
+       |> Agent_core.Checkpoint.to_string);
     match
-      Keeper_checkpoint_store.save_oas_classified ~session_dir
+      Keeper_checkpoint_store.save_agent_core_classified ~session_dir
         (make_checkpoint ~session_id ~turn_count:7 ~marker:"stale-v7")
     with
     | Ok
@@ -210,8 +210,8 @@ let test_externally_replaced_canonical_is_the_watermark () =
       fail "stale save ignored an externally replaced canonical checkpoint"
     | Error error -> fail ("external replacement classification failed: " ^ error))
 
-(* The OAS per-turn pipeline builds checkpoints with an empty session_id (the
-   OAS agent carries no session field). The keeper sink stamps a validated,
+(* The AGENT_CORE per-turn pipeline builds checkpoints with an empty session_id (the
+   AGENT_CORE agent carries no session field). The keeper sink stamps a validated,
    non-empty trace_id before persisting; the store fails loud on an empty
    session_id rather than letting the non-Eio fallback silently write
    "<session_dir>/.json" and drop the checkpoint. *)
@@ -222,7 +222,7 @@ let test_empty_session_id_rejected () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     (match
-       Keeper_checkpoint_store.save_oas_classified ~session_dir
+       Keeper_checkpoint_store.save_agent_core_classified ~session_dir
          (make_checkpoint ~session_id:"" ~turn_count:1 ~marker:"empty")
      with
      | Ok _ -> fail "checkpoint store accepted an empty session_id"
@@ -240,10 +240,10 @@ let test_empty_session_id_rejected () =
     save_ok ~session_dir
       (make_checkpoint ~session_id:"trace-1-0000a" ~turn_count:1 ~marker:"stamped")
       "stamped save";
-    match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:"trace-1-0000a" with
+    match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:"trace-1-0000a" with
     | Ok on_disk ->
       check string "round-trips the stamped session_id" "trace-1-0000a"
-        on_disk.Agent_sdk.Checkpoint.session_id
+        on_disk.Agent_core.Checkpoint.session_id
     | Error _ -> fail "load after stamped save failed")
 
 (* Issue #25077 item 1: [canonical_session_location] is the containment
@@ -319,7 +319,7 @@ let test_history_snapshot_id_containment () =
       Fs_compat.save_file outside "outside-session";
       let escape = "../victim.json" in
       (match
-         Keeper_checkpoint_store.delete_oas_history_files ~session_dir
+         Keeper_checkpoint_store.delete_agent_core_history_files ~session_dir
            ~snapshot_ids:[ escape ]
        with
        | [], [ missing ] ->
@@ -331,7 +331,7 @@ let test_history_snapshot_id_containment () =
       check bool "file outside the session dir survives" true
         (Sys.file_exists outside);
       match
-        Keeper_checkpoint_store.load_oas_history_file ~session_dir
+        Keeper_checkpoint_store.load_agent_core_history_file ~session_dir
           ~snapshot_id:escape
       with
       | Error Keeper_checkpoint_store.Not_found -> ()
@@ -344,12 +344,12 @@ let test_invalid_existing_checkpoint_fails_closed () =
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     let session_id = "sess-corrupt" in
     let path =
-      Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id
+      Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id
     in
     let corrupt = "{not-a-checkpoint" in
     Fs_compat.save_file path corrupt;
     (match
-       Keeper_checkpoint_store.save_oas_classified
+       Keeper_checkpoint_store.save_agent_core_classified
          ~session_dir
          (make_checkpoint ~session_id ~turn_count:9 ~marker:"must-not-write")
      with
@@ -360,11 +360,11 @@ let test_invalid_existing_checkpoint_fails_closed () =
     let mismatched =
       make_checkpoint ~session_id:"another-session" ~turn_count:10
         ~marker:"wrong-identity"
-      |> Agent_sdk.Checkpoint.to_string
+      |> Agent_core.Checkpoint.to_string
     in
     Fs_compat.save_file path mismatched;
     (match
-       Keeper_checkpoint_store.save_oas_classified
+       Keeper_checkpoint_store.save_agent_core_classified
          ~session_dir
          (make_checkpoint ~session_id ~turn_count:11 ~marker:"must-not-replace")
      with
@@ -390,7 +390,7 @@ let test_multi_domain_writers_leave_max_turn_on_disk () =
       while not (Atomic.get start) do
         Domain.cpu_relax ()
       done;
-      Keeper_checkpoint_store.save_oas_classified
+      Keeper_checkpoint_store.save_agent_core_classified
         ~session_dir
         (make_checkpoint
            ~session_id
@@ -409,11 +409,11 @@ let test_multi_domain_writers_leave_max_turn_on_disk () =
         | Error error -> fail ("concurrent checkpoint save failed: " ^ error))
       domains;
     let expected = List.fold_left max min_int turns in
-    match Keeper_checkpoint_store.load_oas ~session_dir ~session_id with
+    match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
     | Error _ -> fail "load after concurrent saves failed"
     | Ok checkpoint ->
       check int "canonical disk retains the maximum turn" expected
-        checkpoint.Agent_sdk.Checkpoint.turn_count)
+        checkpoint.Agent_core.Checkpoint.turn_count)
 
 (* The canonical checkpoint file is written compact (Yojson.Safe.to_string),
    not pretty-printed, to cut idle-CPU serialization cost. The read path is a
@@ -424,25 +424,25 @@ let test_canonical_checkpoint_is_written_compact () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
     let sid = "sess-compact" in
-    let path = Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:sid in
+    let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
     save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:7 ~marker:"compact-marker")
       "compact save";
     let raw = Fs_compat.load_file path in
     check bool "canonical checkpoint bytes are single-line (compact, not pretty)"
       true
       (not (String.contains raw '\n'));
-    match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:sid with
+    match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:sid with
     | Error _ -> fail "load after compact save failed"
     | Ok on_disk ->
       check string "session_id round-trips through compact encoding" sid
-        on_disk.Agent_sdk.Checkpoint.session_id;
+        on_disk.Agent_core.Checkpoint.session_id;
       check int "turn_count round-trips through compact encoding" 7
-        on_disk.Agent_sdk.Checkpoint.turn_count;
+        on_disk.Agent_core.Checkpoint.turn_count;
       let marker_present =
         List.exists
-          (fun (msg : Agent_sdk.Types.message) ->
-             String.equal (Agent_sdk.Types.text_of_message msg) "compact-marker")
-          on_disk.Agent_sdk.Checkpoint.messages
+          (fun (msg : Agent_core.Types.message) ->
+             String.equal (Agent_core.Types.text_of_message msg) "compact-marker")
+          on_disk.Agent_core.Checkpoint.messages
       in
       check bool "message content round-trips through compact encoding" true
         marker_present)
@@ -463,7 +463,7 @@ let test_ready_runtime_raw_domain_save () =
   let session_dir = Filename.concat base_dir "new-session" in
   let result =
     Domain.spawn (fun () ->
-      Keeper_checkpoint_store.save_oas_classified ~session_dir
+      Keeper_checkpoint_store.save_agent_core_classified ~session_dir
         (make_checkpoint ~session_id ~turn_count:11 ~marker:"raw-domain"))
     |> Domain.join
   in
@@ -475,7 +475,7 @@ let test_ready_runtime_raw_domain_save () =
     (Sys.file_exists session_dir);
   check bool "stable lock is outside removable session subtree" true
     (Sys.file_exists (session_dir ^ ".checkpoint.lock"));
-  match Keeper_checkpoint_store.load_oas ~session_dir ~session_id with
+  match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
   | Error _ -> fail "raw-domain checkpoint did not round-trip"
   | Ok checkpoint -> check int "raw-domain turn persisted" 11 checkpoint.turn_count
 
@@ -496,7 +496,7 @@ let with_exact_source_fixture ~session_id f =
       "exact source seed save";
     let source_ref =
       match
-        Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+        Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id
       with
       | Ok (_, reference) -> reference
       | Error _ -> fail "exact source load failed"
@@ -514,7 +514,7 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
       "CAS seed save";
     let source_ref =
       match
-        Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+        Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id
       with
       | Ok (_, reference) -> reference
       | Error _ -> fail "CAS source load failed"
@@ -524,7 +524,7 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
     let left_ref = Atomic.make None in
     let right_ref = Atomic.make None in
     let writer marker observed observed_ref =
-      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_observer
+      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_observer
         ~on_checkpoint_commit_observer:(fun installed_ref ->
           Atomic.incr observed;
           Atomic.set observed_ref (Some installed_ref))
@@ -560,7 +560,7 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
       1
       (Atomic.get left_observed + Atomic.get right_observed);
     match committed,
-      Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+      Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id
     with
     | [ (winner, committed_ref) ], Ok (checkpoint, disk_ref) ->
       let winner_observed, loser_observed, winner_ref =
@@ -581,8 +581,8 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
          | None -> false);
       check bool "installed payload belongs to the winning writer" true
         (List.exists
-           (fun (message : Agent_sdk.Types.message) ->
-             String.equal (Agent_sdk.Types.text_of_message message) winner)
+           (fun (message : Agent_core.Types.message) ->
+             String.equal (Agent_core.Types.text_of_message message) winner)
            checkpoint.messages)
     | _ -> fail "CAS winner did not round-trip")
 
@@ -596,7 +596,7 @@ let test_exact_source_cas_updates_canonical_watermark () =
       "CAS watermark seed save";
     let source_ref =
       match
-        Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+        Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id
       with
       | Ok (_, reference) -> reference
       | Error _ -> fail "CAS watermark source load failed"
@@ -614,7 +614,7 @@ let test_exact_source_cas_updates_canonical_watermark () =
     in
     let observer_count = ref 0 in
     (match
-       Keeper_checkpoint_store.For_testing.save_oas_if_source_with_release_failure
+       Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_release_failure
          ~release_failure
          ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
          ~session_dir
@@ -636,7 +636,7 @@ let test_exact_source_cas_updates_canonical_watermark () =
        ;
        let disk_ref =
          match
-           Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+           Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id
          with
          | Ok (_, reference) -> reference
          | Error _ -> fail "release-failure installed checkpoint was not readable"
@@ -648,7 +648,7 @@ let test_exact_source_cas_updates_canonical_watermark () =
      | Keeper_checkpoint_store.Not_installed _ ->
        fail "release failure downgraded the installed checkpoint");
     match
-      Keeper_checkpoint_store.save_oas_classified ~session_dir
+      Keeper_checkpoint_store.save_agent_core_classified ~session_dir
         (make_checkpoint ~session_id ~turn_count:8 ~marker:"stale!")
     with
     | Ok
@@ -676,7 +676,7 @@ let test_post_rename_durability_unknown_is_installed () =
       }
     in
     match
-      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_writer
+      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_writer
         ~write_checkpoint_bytes:
           (fun ~on_durable_commit:_ ~ownership_root:_ ~path ~bytes ->
              Fs_compat.save_file path bytes;
@@ -698,7 +698,7 @@ let test_post_rename_durability_unknown_is_installed () =
        | _ -> fail "post-rename durability auxiliary was not preserved");
       let disk_ref =
         match
-          Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+          Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id
         with
         | Ok (_, reference) -> reference
         | Error _ -> fail "post-rename candidate was not externally installed"
@@ -708,7 +708,7 @@ let test_post_rename_durability_unknown_is_installed () =
         true
         (Keeper_checkpoint_ref.equal installed.installed_ref disk_ref);
       match
-        Keeper_checkpoint_store.save_oas_if_source
+        Keeper_checkpoint_store.save_agent_core_if_source
           ~session_dir
           ~expected_source_ref:source_ref
           candidate
@@ -740,7 +740,7 @@ let test_pre_rename_write_failure_is_not_installed_and_retryable () =
     in
     let observer_count = ref 0 in
     match
-      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_writer
+      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_writer
         ~write_checkpoint_bytes:
           (fun ~on_durable_commit:_ ~ownership_root:_ ~path:_ ~bytes:_ ->
              Error write_error)
@@ -759,7 +759,7 @@ let test_pre_rename_write_failure_is_not_installed_and_retryable () =
         (error = write_error);
       check int "pre-rename failure emits no commit observer" 0 !observer_count;
       (match
-         Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+         Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id
        with
        | Ok (_, disk_ref) ->
          check bool
@@ -768,7 +768,7 @@ let test_pre_rename_write_failure_is_not_installed_and_retryable () =
            (Keeper_checkpoint_ref.equal source_ref disk_ref)
        | Error _ -> fail "pre-rename failure removed the canonical checkpoint");
       (match
-         Keeper_checkpoint_store.save_oas_if_source
+         Keeper_checkpoint_store.save_agent_core_if_source
            ~session_dir
            ~expected_source_ref:source_ref
            candidate
@@ -789,7 +789,7 @@ let test_release_failure_preserves_not_installed_cause () =
   with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
     let advanced =
       match
-        Keeper_checkpoint_store.save_oas_if_source
+        Keeper_checkpoint_store.save_agent_core_if_source
           ~session_dir
           ~expected_source_ref:source_ref
           (make_checkpoint ~session_id ~turn_count:9 ~marker:"advanced"
@@ -812,7 +812,7 @@ let test_release_failure_preserves_not_installed_cause () =
     in
     let observer_count = ref 0 in
     match
-      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_release_failure
+      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_release_failure
         ~release_failure
         ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
         ~session_dir
@@ -856,7 +856,7 @@ let test_acquire_failure_prevents_lock_body () =
     in
     let observer_count = ref 0 in
     match
-      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_acquire_failure
+      Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_acquire_failure
         ~acquire_failure
         ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
         ~session_dir
@@ -885,7 +885,7 @@ let test_commit_observer_failure_is_installed () =
   with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
     let outcome =
       with_recorded_backtraces (fun () ->
-        Keeper_checkpoint_store.For_testing.save_oas_if_source_with_observer
+        Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_observer
           ~on_checkpoint_commit_observer:(fun _ ->
             failwith "injected commit observer failure")
           ~session_dir
@@ -916,7 +916,7 @@ let test_post_commit_unwind_is_installed () =
   with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
     let outcome =
       with_recorded_backtraces (fun () ->
-        Keeper_checkpoint_store.For_testing.save_oas_if_source_with_post_commit_unwind
+        Keeper_checkpoint_store.For_testing.save_agent_core_if_source_with_post_commit_unwind
           ~post_commit_unwind:(fun () ->
             failwith "injected post-commit unwind")
           ~on_checkpoint_commit_observer:(fun _ -> ())
@@ -950,7 +950,7 @@ let test_checkpoint_ref_requires_generation () =
     save_ok ~session_dir
       (make_checkpoint ~session_id ~turn_count:1 ~marker:"missing-generation")
       "generation-less seed";
-    match Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id with
+    match Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id with
     | Error
         (Keeper_checkpoint_store.Ref_identity_invalid
            Keeper_checkpoint_store.Generation_missing) -> ()
@@ -972,7 +972,7 @@ let test_exact_snapshot_preserves_locked_canonical_bytes () =
     in
     Fs_compat.save_file canonical_path expected_bytes;
     match
-      Keeper_checkpoint_store.load_oas_exact_snapshot
+      Keeper_checkpoint_store.load_agent_core_exact_snapshot
         ~session_dir
         ~session_id
     with
@@ -1002,8 +1002,8 @@ let () =
     [
       ( "checkpoint transaction",
         [
-          test_case "run context binds generation before OAS checkpoint" `Quick
-            test_run_context_binds_generation_before_oas_checkpoint;
+          test_case "run context binds generation before AGENT_CORE checkpoint" `Quick
+            test_run_context_binds_generation_before_agent_core_checkpoint;
           test_case "forward and equal saves pass, stale save is no-op" `Quick
             test_forward_equal_and_stale;
           test_case "canonical disk is the watermark SSOT" `Quick

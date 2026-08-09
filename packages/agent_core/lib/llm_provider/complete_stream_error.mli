@@ -2,7 +2,7 @@
     from a wire failure: the response was structurally valid. *)
 val provider_reported_terminal_label : string
 
-(** Terminal telemetry label for a provider capability that OAS does not
+(** Terminal telemetry label for a provider capability that AGENT_CORE does not
     project. This is distinct from a malformed or unknown wire payload. *)
 val capability_mismatch_terminal_label : string
 

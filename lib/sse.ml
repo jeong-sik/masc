@@ -1270,5 +1270,5 @@ let cleanup_stale ?(max_age_s=1800.0) () =
   List.map fst stale
 
 let () =
-  Dashboard_oas_bridge.set_broadcast_hook (fun json ->
+  Dashboard_agent_core_bridge.set_broadcast_hook (fun json ->
     broadcast_to Observers json)

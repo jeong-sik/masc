@@ -16,32 +16,32 @@ let tool_call = testable
      && String.equal a.args b.args)
 
 let start ~index ~tool_id ~tool_name =
-  Agent_sdk.Types.ContentBlockStart
+  Agent_core.Types.ContentBlockStart
     { index; content_type = "tool_use"; tool_id; tool_name }
 
 let json_delta ~index fragment =
-  Agent_sdk.Types.ContentBlockDelta
-    { index; delta = Agent_sdk.Types.InputJsonDelta fragment }
+  Agent_core.Types.ContentBlockDelta
+    { index; delta = Agent_core.Types.InputJsonDelta fragment }
 
 let json_snapshot ~index snapshot =
-  Agent_sdk.Types.ContentBlockDelta
-    { index; delta = Agent_sdk.Types.InputJsonSnapshot snapshot }
+  Agent_core.Types.ContentBlockDelta
+    { index; delta = Agent_core.Types.InputJsonSnapshot snapshot }
 
-let stop ~index = Agent_sdk.Types.ContentBlockStop { index }
+let stop ~index = Agent_core.Types.ContentBlockStop { index }
 
 (* Unlike [start], this does not hardcode content_type = "tool_use" — it
    represents a genuinely non-tool content block (e.g. text/thinking), which
    carries no tool identity because it is not a tool block at all. *)
 let non_tool_start ~index ~content_type =
-  Agent_sdk.Types.ContentBlockStart
+  Agent_core.Types.ContentBlockStart
     { index; content_type; tool_id = None; tool_name = None }
 
 let media_delta ~index data =
-  Agent_sdk.Types.ContentBlockDelta
+  Agent_core.Types.ContentBlockDelta
     { index
     ; delta =
-        Agent_sdk.Types.MediaDelta
-          { media_type = "image/png"; source_type = Agent_sdk.Types.Base64; data }
+        Agent_core.Types.MediaDelta
+          { media_type = "image/png"; source_type = Agent_core.Types.Base64; data }
     }
 
 let test_fragments_concatenate_in_order () =
@@ -177,7 +177,7 @@ let test_message_stop_finalizes_open_blocks () =
   let t = A.create () in
   A.on_event t (start ~index:0 ~tool_id:(Some "call-3") ~tool_name:(Some "Read"));
   A.on_event t (json_delta ~index:0 "{\"path\":\"a.ml\"}");
-  A.on_event t Agent_sdk.Types.MessageStop;
+  A.on_event t Agent_core.Types.MessageStop;
   check (list tool_call) "open block finalized"
     [ { call_id = "call-3"; call_name = "Read"; args = "{\"path\":\"a.ml\"}" } ]
     (A.to_tool_calls t)
@@ -245,7 +245,7 @@ let test_invalid_tool_starts_are_ignored () =
   A.on_event t (json_delta ~index:0 "{\"path\":\"a.ml\"}");
   A.on_event t (stop ~index:0);
   (* Non-tool content type carrying identity *)
-  A.on_event t (Agent_sdk.Types.ContentBlockStart
+  A.on_event t (Agent_core.Types.ContentBlockStart
     { index = 1; content_type = "text"; tool_id = Some "call-x"; tool_name = Some "Read" });
   A.on_event t (json_delta ~index:1 "{\"path\":\"b.ml\"}");
   A.on_event t

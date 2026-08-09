@@ -1,6 +1,6 @@
-(** MASC-owned HITL domain judgment over the opaque-runtime OAS exact-output
+(** MASC-owned HITL domain judgment over the opaque-runtime AGENT_CORE exact-output
     flow. MASC freezes the request and domain schema, validates the returned
-    judgment, and owns approval queue durability. OAS alone owns candidate
+    judgment, and owns approval queue durability. AGENT_CORE alone owns candidate
     admission, attempt allocation, execution, failover, receipts, and
     provenance. *)
 
@@ -11,7 +11,7 @@ val lane_id : string
 
 val snapshot_topology_readiness : unit -> (unit, string) result
 (** Verify only prompt availability and that the registry-owned
-    [hitl_auto_judge] topology can be frozen as an OAS exact-output snapshot.
+    [hitl_auto_judge] topology can be frozen as an AGENT_CORE exact-output snapshot.
     This is not credential, wire, or output admission. *)
 
 exception Exact_terminalization_persistence_failed of string
@@ -37,7 +37,7 @@ val spawn
   -> on_finish:(finish_outcome -> unit)
   -> unit
   -> (spawn_outcome, string) result
-(** Freeze and admit the whole ordered flow before forking. The production OAS
+(** Freeze and admit the whole ordered flow before forking. The production AGENT_CORE
     callbacks bind/release the real candidate receipt in the durable approval
     queue. A summary reaches [on_summary] only after domain validation, exact
     receipt/provenance verification, and [Fsync_completed] completion.
@@ -145,7 +145,7 @@ module For_testing : sig
   (** Dependency injection over the same [spawn_with] lifecycle used by
       production [spawn]; the worker does not depend on test-only queue APIs. *)
 
-  val flow_evidence : prepared_flow -> Agent_sdk.Exact_output.flow_evidence
+  val flow_evidence : prepared_flow -> Agent_core.Exact_output.flow_evidence
 
   val summary_version : int
   val lane_id : string

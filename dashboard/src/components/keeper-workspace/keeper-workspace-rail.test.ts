@@ -77,7 +77,7 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
             input_components: [],
             request_runtime_profile: null,
             request_body_bytes: null,
-            runtime_profile: 'oas-seoul-1',
+            runtime_profile: 'agent-core-seoul-1',
             model: 'runtime',
             finish_reason: 'completed',
             input_tokens: 33000,
@@ -119,8 +119,8 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
           keeper_turn_id: 12,
           source: 'runtime_manifest',
           trigger: 'proactive(85%)',
-          runtime_id: 'oas-seoul-1',
-          display_runtime: 'oas-seoul-1',
+          runtime_id: 'agent-core-seoul-1',
+          display_runtime: 'agent-core-seoul-1',
           before_tokens: 210000,
           after_tokens: 120000,
           saved_tokens: 90000,
@@ -194,7 +194,7 @@ afterEach(() => {
 describe('KeeperWorkspaceRail', () => {
   const keeper = mkKeeper({
     active_model_label: 'sonnet-4.6',
-    runtime_canonical: 'oas·seoul-1',
+    runtime_canonical: 'agentCore·seoul-1',
     context_ratio: 0.62,
     context_tokens: 124000,
     context_max: 200000,
@@ -209,7 +209,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('런타임')
     expect(container.textContent).not.toContain('sonnet-4.6')
     expect(container.querySelector('.rtc-model')?.textContent).toContain('—')
-    expect(container.textContent).toContain('oas·seoul-1')
+    expect(container.textContent).toContain('agentCore·seoul-1')
   })
 
   function mkDrift(partial: Partial<KeeperRuntimeLensConfigDriftAxis>): KeeperRuntimeLensConfigDriftAxis {
@@ -220,8 +220,8 @@ describe('KeeperWorkspaceRail', () => {
       has_live_override: true,
       runtime_override: true,
       override_fields: ['model.runtime_id'],
-      default_runtime_id: 'oas·tokyo-2',
-      live_runtime_id: 'oas·seoul-1',
+      default_runtime_id: 'agentCore·tokyo-2',
+      live_runtime_id: 'agentCore·seoul-1',
       active_config_root: null,
       active_config_root_source: null,
       default_manifest_path: null,
@@ -236,14 +236,14 @@ describe('KeeperWorkspaceRail', () => {
     // Live runtime stays as the card's primary id; the pending assignment is
     // shown as a distinct drift line so a saved-but-not-adopted runtime is
     // visible instead of looking like the save did nothing.
-    expect(container.textContent).toContain('oas·seoul-1')
+    expect(container.textContent).toContain('agentCore·seoul-1')
     const drift = getByTestId('runtime-drift')
     expect(drift.textContent).toContain('지정됨')
-    expect(drift.textContent).toContain('oas·tokyo-2')
+    expect(drift.textContent).toContain('agentCore·tokyo-2')
   })
 
   it('does not render the drift line when assigned and live runtimes match', () => {
-    const noDrift = mkDrift({ runtime_override: false, default_runtime_id: 'oas·seoul-1' })
+    const noDrift = mkDrift({ runtime_override: false, default_runtime_id: 'agentCore·seoul-1' })
     const { container } = render(
       html`<${KeeperWorkspaceRail} keeper=${keeper} runtimeDrift=${noDrift} />`,
     )
@@ -344,7 +344,7 @@ describe('KeeperWorkspaceRail', () => {
             always_ignored_sampling_params: ['temperature'],
           },
           request_config: {
-            source: 'oas-provider-config',
+            source: 'agent-core-provider-config',
             provider_kind: 'openai_compat',
             request_path: '/chat/completions',
             request_path_targets_responses_api: false,
@@ -379,7 +379,7 @@ describe('KeeperWorkspaceRail', () => {
             connect_timeout_s: 120,
           },
           effective_capabilities: {
-            source: 'oas-provider-config-model',
+            source: 'agent-core-provider-config-model',
             max_context_tokens: 131072,
             max_output_tokens: 65536,
             supports_tools: true,
@@ -544,7 +544,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('wire:chat_template_kwargs · replay:preserve_always')
     expect(container.textContent).toContain('request')
     expect(container.textContent).toContain(
-      'kind:openai_compat · source:oas-provider-config · path:/chat/completions · out:65536 · ctx:131072',
+      'kind:openai_compat · source:agent-core-provider-config · path:/chat/completions · out:65536 · ctx:131072',
     )
     expect(container.textContent).toContain('system-prompt')
     expect(container.textContent).toContain('tool:required')
@@ -559,7 +559,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain(
       'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
-    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('source:agent-core-provider-config-model')
     expect(container.textContent).toContain('ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
     expect(container.textContent).toContain('ignored:temperature,top_p,presence_penalty,frequency_penalty')
     expect(container.textContent).toContain('input:multimodal,image,audio')
@@ -616,7 +616,7 @@ describe('KeeperWorkspaceRail', () => {
     // effort is likewise unknown, not the definitive "effort 제어 없음" claim that
     // the top-level thinking_control_format ('none', still set above to prove
     // it is ignored) would otherwise imply. The catalog entry exists, but its
-    // OAS-derived effective capabilities were not projected.
+    // Agent Core-derived effective capabilities were not projected.
     expect(container.textContent).toContain('유효 capability 미수신')
     expect(container.querySelector('[data-effort-status="unknown"]')).not.toBeNull()
     expect(container.textContent).not.toContain('카탈로그 미등재')
@@ -659,7 +659,7 @@ describe('KeeperWorkspaceRail', () => {
   it('renders the effort row from effective_capabilities even when capabilities_declared is false', async () => {
     // capabilities_declared gates the runtime.toml-derived multimodal flag,
     // NOT the effort row (fix design: "no capabilities_declared gating for
-    // effort"). The OAS catalog can know a model's reasoning wire even when
+    // effort"). The Agent Core catalog can know a model's reasoning wire even when
     // MASC's runtime.toml never declared a [models.<id>.capabilities] block
     // for it — the two sources are independent.
     vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({
@@ -673,7 +673,7 @@ describe('KeeperWorkspaceRail', () => {
           streaming: true,
           capabilities_declared: false,
           effective_capabilities: {
-            source: 'oas-provider-config-model',
+            source: 'agent-core-provider-config-model',
             supports_reasoning: true,
             supports_reasoning_budget: false,
             accepted_reasoning_efforts: null,
@@ -1017,8 +1017,8 @@ describe('KeeperWorkspaceRail', () => {
           keeper_turn_id: 13,
           source: 'runtime_manifest',
           trigger: 'provider_overflow',
-          runtime_id: 'oas-seoul-1',
-          display_runtime: 'oas-seoul-1',
+          runtime_id: 'agent-core-seoul-1',
+          display_runtime: 'agent-core-seoul-1',
           before_tokens: null,
           after_tokens: null,
           saved_tokens: null,

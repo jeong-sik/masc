@@ -1,7 +1,7 @@
 (** Tests for Journal_bridge — Durable_event → Event_bus projection. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 let append_ok journal event = Durable_event.append journal event |> Result.get_ok
 let ts = 1711234567.0

@@ -3,11 +3,11 @@
 Keeper is MASC's persistent autonomous agent unit. A Keeper has one canonical
 name, one complete `AGENT.md` prompt, and one operational TOML declaration.
 
-<!-- BEGIN GENERATED: oas-pin-manual -->
+<!-- BEGIN GENERATED: agent-core-pin-manual -->
 The typed agent engine is built from `packages/agent_core` as the internal
 `masc.agent_core` library. It has no external opam pin or separately released
 SDK version; the MASC commit and build identity are the source of truth.
-<!-- END GENERATED: oas-pin-manual -->
+<!-- END GENERATED: agent-core-pin-manual -->
 
 ## Configure a Keeper
 
@@ -37,7 +37,7 @@ failures, and report evidence with exact file paths and commands.
 ```
 
 The entire `AGENT.md` file becomes the Keeper's individual instructions. Do
-not copy tool descriptions into it: OAS attaches the current tool schemas to
+not copy tool descriptions into it: agent core attaches the current tool schemas to
 the turn independently.
 
 ## Create or update through MCP
@@ -75,7 +75,7 @@ Keeper TOML does not select a model or runtime. Assign the Keeper in
 reviewer = "coding"
 ```
 
-The runtime identifier is opaque to MASC; OAS resolves the provider/model
+The runtime identifier is opaque to MASC; agent core resolves the provider/model
 binding.
 
 ## Validation rules

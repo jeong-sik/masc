@@ -48,7 +48,7 @@ let timeout_command () =
   | Some _ as found -> found
   | None -> find_in_path "gtimeout"
 
-(* Each case launches the full OAS handler path in a fresh process and may pay
+(* Each case launches the full AGENT_CORE handler path in a fresh process and may pay
    sandbox/config cold-start cost. Keep the default conservative while allowing
    local tightening through KEEPER_TOOL_MATRIX_CASE_TIMEOUT_SEC. *)
 let default_tool_case_timeout_sec = 60
@@ -356,7 +356,7 @@ let test_masc_fusion_schema_declares_web_tools () =
          | Some (`String value) -> Some value
          | _ -> None)
 
-let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
+let test_keeper_agent_core_bundle_materializes_masc_fusion_tool () =
   let marker = Filename.temp_file "keeper-fusion-schema-" ".tmp" in
   Sys.remove marker;
   Unix.mkdir marker 0o700;
@@ -387,11 +387,11 @@ let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
           }
       in
       let tools =
-        Masc.Keeper_tools_oas_bundle.make_tools
+        Masc.Keeper_tools_agent_core_bundle.make_tools
           ~config ~meta ~publication_recovery ~ctx_snapshot ()
       in
       let names =
-        List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools
+        List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools
       in
       check bool "masc_fusion Tool.t is materialized" true
         (List.mem "masc_fusion" names))
@@ -437,8 +437,8 @@ let () =
             test_keeper_inventory_materializes_masc_fusion_schema;
           test_case "masc_fusion schema declares web_tools" `Quick
             test_masc_fusion_schema_declares_web_tools;
-          test_case "keeper OAS bundle materializes masc_fusion tool" `Quick
-            test_keeper_oas_bundle_materializes_masc_fusion_tool;
+          test_case "keeper AGENT_CORE bundle materializes masc_fusion tool" `Quick
+            test_keeper_agent_core_bundle_materializes_masc_fusion_tool;
         ] );
       ("matrix", matrix_cases);
     ]

@@ -17,13 +17,13 @@
 val validate_run_callbacks
   :  on_yield:'a option
   -> on_resume:'b option
-  -> (unit, Error.sdk_error) result
+  -> (unit, Error.t) result
 
 type outcome =
   | Completed of Types.api_response
   | Yielded of { turn : int }
   | Input_required of Error.input_required
-  | Failed of Error.sdk_error
+  | Failed of Error.t
 
 (** Wrap a run with [AgentStarted] and one typed invocation outcome.
 

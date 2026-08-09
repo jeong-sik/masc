@@ -69,7 +69,7 @@ type t =
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
-  | ToolsOasFailures
+  | ToolsAgent_coreFailures
   | TurnUpUpdateFailures
   | AgentToolDispatchRuntimeFailures
   | PromptFailures
@@ -89,14 +89,14 @@ type t =
   | UnexpectedToolPartialTolerance
   | ToolCallTotal
   | ProfileConfigConflicts
-  | OasTimeoutClassifications
+  | Agent_coreTimeoutClassifications
   | NoToolProvider
   | ProactiveOutcome
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures
   | DecisionAuditFlushFailures
-  | OasCancel
+  | Agent_coreCancel
   | ClaimAutoProvision
   | WorkspaceInitFailures
   | PresenceSyncFailures
@@ -107,7 +107,7 @@ type t =
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
-  | OasExecutionErrors
+  | Agent_coreExecutionErrors
   | MemoryOsLibrarianFailures
   | MemoryActivityEmitFailures
   | SupervisorSweepFailures
@@ -121,7 +121,7 @@ type t =
   | CheckpointFailures
   | DecisionAuditRingOverflows
   | HitlSummaryOutcomes
-  | OasEnvKeyRejections
+  | Agent_coreEnvKeyRejections
   | MemoryLaneUnitFailures
   | MemoryLaneSubmitted
   | MemoryLaneRanInline
@@ -138,7 +138,7 @@ type t =
   | PersonNoteStoreFailures
   | KeeperMaterializationFailures
   | ObservationQueryFailures
-  | OasOnStop
+  | Agent_coreOnStop
   | InvariantViolations
   | FsmEdgeTransitions
   | TurnFsmTransitions
@@ -154,7 +154,7 @@ type t =
   | UnsupportedStimulus
   | RestartAttempts
   | RestartOutcomes
-  | OasRunTimeout
+  | Agent_coreRunTimeout
   | RuntimeSelected
   | RuntimeRotation
   | ToolUseFailure

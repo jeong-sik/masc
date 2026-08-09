@@ -27,10 +27,10 @@
 
 ### LLM Provider Streaming Latency
 
-현재 MASC는 OAS provider의 **TTFRC**(Time To First Response Chunk)만 측정한다.
-OAS `Streaming_summary.ttft_ms`(Time To First Token)는 MASC가 직접 소비하지 않는다.
+현재 MASC는 agent core provider의 **TTFRC**(Time To First Response Chunk)만 측정한다.
+agent core `Streaming_summary.ttft_ms`(Time To First Token)는 MASC가 직접 소비하지 않는다.
 
-- `keeper_telemetry_consumer.ml`은 OAS telemetry event를 counter-only로 관찰하며,
+- `keeper_telemetry_consumer.ml`은 agent core telemetry event를 counter-only로 관찰하며,
   provider model-bearing payload는 역직렬화하지 않는다.
 - `llm_metric_bridge.ml`의 `on_streaming_first_chunk` 콜백은 response chunk가
   도착한 시점(`ttfrc_ms`)만 기록한다.
@@ -41,7 +41,7 @@ OAS `Streaming_summary.ttft_ms`(Time To First Token)는 MASC가 직접 소비하
 - `gen_ai.response.time_to_first_chunk` — OpenTelemetry GenAI semconv TTFRC
 
 **TTFT-to-client**(= provider TTFT + transport overhead)는 현재 측정되지 않는다.
-OAS RFC-OAS-020이 요구하는 consumer SLO를 추가하려면 OAS `Streaming_summary`를
+agent core RFC-agent core-020이 요구하는 consumer SLO를 추가하려면 agent core `Streaming_summary`를
 파싱하거나 `Metrics.t` 콜백 계약에 TTFT 필드를 추가해야 한다.
 
 ## 측정 방법

@@ -8,13 +8,13 @@ let stat_json_of_path (path : string) =
   | Unix.Unix_error _ -> `Null
 ;;
 
-let oas_checkpoint_summary_json
+let agent_core_checkpoint_summary_json
       ~(source_kind : string)
       ~(snapshot_id : string)
       ~(path : string)
       ~(is_current : bool)
       ~(fallback_generation : int)
-      (checkpoint : Agent_sdk.Checkpoint.t)
+      (checkpoint : Agent_core.Checkpoint.t)
   =
   let generation =
     Keeper_context_core.checkpoint_generation checkpoint ~fallback:fallback_generation
@@ -52,8 +52,8 @@ let checkpoint_load_error_fields
     | Store_error detail -> "unavailable", "store_error", `String detail
     | Parse_error detail -> "unavailable", "parse_error", `String detail
     | Io_error detail -> "unavailable", "io_error", `String detail
-    | Sdk_other_error detail ->
-      "unavailable", "sdk_other_error", `String detail
+    | Agent_core_error detail ->
+      "unavailable", "agent_core_error", `String detail
   in
   [ "status", `String status
   ; "error_kind", `String kind
@@ -78,8 +78,8 @@ let current_checkpoint_error_json
     `Assoc [ "kind", `String "parse_error"; "detail", `String detail ]
   | Io_error detail ->
     `Assoc [ "kind", `String "io_error"; "detail", `String detail ]
-  | Sdk_other_error detail ->
-    `Assoc [ "kind", `String "sdk_other_error"; "detail", `String detail ]
+  | Agent_core_error detail ->
+    `Assoc [ "kind", `String "agent_core_error"; "detail", `String detail ]
 ;;
 
 let checkpoint_load_failure_json
@@ -112,16 +112,16 @@ let inventory_json (config : Workspace.config) (name : string)
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
     let current_path =
-      Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:trace_id
+      Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id
     in
     let current_json, current_history_snapshot_id, current_status, current_error =
-      match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:trace_id with
+      match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id with
       | Ok checkpoint ->
         let current_history_snapshot_id =
-          Keeper_checkpoint_store.oas_history_snapshot_id_of_checkpoint checkpoint
+          Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint checkpoint
         in
-        oas_checkpoint_summary_json
-          ~source_kind:"oas_current"
+        agent_core_checkpoint_summary_json
+          ~source_kind:"agent_core_current"
           ~snapshot_id:(Filename.basename current_path)
           ~path:current_path
           ~is_current:true
@@ -132,26 +132,26 @@ let inventory_json (config : Workspace.config) (name : string)
         let status =
           match error with
           | Keeper_checkpoint_store.Not_found -> "missing"
-          | Store_error _ | Parse_error _ | Io_error _ | Sdk_other_error _ ->
+          | Store_error _ | Parse_error _ | Io_error _ | Agent_core_error _ ->
             "unavailable"
         in
         None, "", status, current_checkpoint_error_json error
     in
     let history_json, history_errors =
-      Keeper_checkpoint_store.list_oas_history_files ~session_dir
+      Keeper_checkpoint_store.list_agent_core_history_files ~session_dir
       |> List.filter (fun snapshot_id ->
         snapshot_id <> current_history_snapshot_id)
       |> List.fold_left
            (fun (available, failures) snapshot_id ->
              let path =
-               Keeper_checkpoint_store.oas_history_path ~session_dir ~snapshot_id
+               Keeper_checkpoint_store.agent_core_history_path ~session_dir ~snapshot_id
              in
              match
-               Keeper_checkpoint_store.load_oas_history_file ~session_dir ~snapshot_id
+               Keeper_checkpoint_store.load_agent_core_history_file ~session_dir ~snapshot_id
              with
              | Ok checkpoint ->
-               ( oas_checkpoint_summary_json
-                   ~source_kind:"oas_history"
+               ( agent_core_checkpoint_summary_json
+                   ~source_kind:"agent_core_history"
                    ~snapshot_id
                    ~path
                    ~is_current:false
@@ -162,7 +162,7 @@ let inventory_json (config : Workspace.config) (name : string)
              | Error error ->
                ( available
                , checkpoint_load_failure_json
-                   ~source_kind:"oas_history"
+                   ~source_kind:"agent_core_history"
                    ~snapshot_id
                    ~path
                    ~is_current:false
@@ -244,7 +244,7 @@ let checkpoint_load_error_to_string = function
   | Store_error detail -> "store error: " ^ detail
   | Parse_error detail -> "parse error: " ^ detail
   | Io_error detail -> "io error: " ^ detail
-  | Sdk_other_error detail -> "sdk error: " ^ detail
+  | Agent_core_error detail -> "agent core error: " ^ detail
 ;;
 
 let checkpoint_ref_create_error_to_string = function
@@ -410,7 +410,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
       let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
       (match
-         Keeper_checkpoint_store.load_oas_exact_snapshot
+         Keeper_checkpoint_store.load_agent_core_exact_snapshot
            ~session_dir
            ~session_id:trace_id
        with
@@ -425,11 +425,11 @@ let purge_current_unlocked config ~keeper_name ~apply =
          in
          let purge_result =
            Domain_pool_ref.submit_cpu_or_inline (fun () ->
-             match Agent_sdk.Checkpoint.of_string source_bytes with
+             match Agent_core.Checkpoint.of_string source_bytes with
              | Error error ->
                Error
                  (Purge_checkpoint_invalid
-                    (Agent_sdk.Error.to_string error))
+                    (Agent_core.Error.to_string error))
              | Ok checkpoint ->
                (match
                   Keeper_checkpoint_purge.purge
@@ -441,7 +441,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
                     (Purge_checkpoint_invalid
                        (checkpoint_purge_error_to_string error))
                 | Ok (purged, purge_report) ->
-                  let purged_bytes = Agent_sdk.Checkpoint.to_string purged in
+                  let purged_bytes = Agent_core.Checkpoint.to_string purged in
                   Ok (purged, purged_bytes, purge_report)))
          in
          (match purge_result with
@@ -497,7 +497,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
                | Error detail -> Error (Purge_backup_failed detail)
                | Ok backup_path ->
                  (match
-                    Keeper_checkpoint_store.save_oas_if_source
+                    Keeper_checkpoint_store.save_agent_core_if_source
                       ~session_dir
                       ~expected_source_ref:source_ref
                       purged

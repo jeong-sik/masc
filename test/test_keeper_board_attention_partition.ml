@@ -575,7 +575,7 @@ let test_existing_judgment_completion_is_atomic_and_restart_safe () =
     |> fsynced "record existing-judgment advancement fixture"
   in
   expect_error
-    "existing judgment cannot bypass OAS-selected advancement"
+    "existing judgment cannot bypass AGENT_CORE-selected advancement"
     (P.complete_existing_judgment
        ~now:16.0
        ~worker_epoch:owner
@@ -645,8 +645,8 @@ let test_before_advance_record_is_atomic_and_exact () =
       ~base_path
       ~partition:advancing
       ~provenance:next
-    |> ok "bind OAS-selected successor"
-    |> fsynced "bind OAS-selected successor"
+    |> ok "bind AGENT_CORE-selected successor"
+    |> fsynced "bind AGENT_CORE-selected successor"
   in
   expect_error
     "completion cannot use prior attempt provenance"
@@ -989,7 +989,7 @@ let test_invalid_or_mismatched_provenance_never_rewrites () =
   | _ -> Alcotest.fail "rejected completion mutated the durable binding"
 ;;
 
-let test_predispatch_rejection_chain_binds_oas_selected_third_slot () =
+let test_predispatch_rejection_chain_binds_agent_core_selected_third_slot () =
   with_temp_base "board-attention-partition-predispatch-chain" @@ fun base_path ->
   let pending = candidate ~id:"candidate-predispatch-chain" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
@@ -1033,7 +1033,7 @@ let test_predispatch_rejection_chain_binds_oas_selected_third_slot () =
        ; _
        } ->
      Alcotest.(check bool)
-       "latest rejected visit and OAS successor are durable"
+       "latest rejected visit and AGENT_CORE successor are durable"
        true
        (durable = second && durable_next = third)
    | _ -> Alcotest.fail "predispatch chain did not retain latest advancement");
@@ -1044,8 +1044,8 @@ let test_predispatch_rejection_chain_binds_oas_selected_third_slot () =
       ~base_path
       ~partition:after_second
       ~provenance:third_provenance
-    |> ok "bind OAS-selected third slot"
-    |> fsynced "bind OAS-selected third slot"
+    |> ok "bind AGENT_CORE-selected third slot"
+    |> fsynced "bind AGENT_CORE-selected third slot"
   in
   match rebound.state with
   | P.Running { progress = P.Bound durable; _ } ->
@@ -1053,7 +1053,7 @@ let test_predispatch_rejection_chain_binds_oas_selected_third_slot () =
       "third slot exact provenance is bound"
       true
       (durable = third_provenance)
-  | _ -> Alcotest.fail "third OAS-selected slot was not bindable"
+  | _ -> Alcotest.fail "third AGENT_CORE-selected slot was not bindable"
 ;;
 
 let () =
@@ -1085,9 +1085,9 @@ let () =
             `Quick
             test_before_advance_record_is_atomic_and_exact
         ; Alcotest.test_case
-            "predispatch rejection chain binds OAS-selected third slot"
+            "predispatch rejection chain binds AGENT_CORE-selected third slot"
             `Quick
-            test_predispatch_rejection_chain_binds_oas_selected_third_slot
+            test_predispatch_rejection_chain_binds_agent_core_selected_third_slot
         ; Alcotest.test_case
             "runtime transitions append then startup compacts"
             `Quick

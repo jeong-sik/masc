@@ -32,7 +32,7 @@ type payload =
   | AgentCompleted of
       { agent_name : string
       ; task_id : string
-      ; result : (api_response, Error.sdk_error) result
+      ; result : (api_response, Error.t) result
       ; elapsed : float
       }
   | AgentYielded of
@@ -50,7 +50,7 @@ type payload =
   | AgentFailed of
       { agent_name : string
       ; task_id : string
-      ; error : Error.sdk_error
+      ; error : Error.t
       ; elapsed : float
       }
   | ToolCalled of
@@ -123,7 +123,7 @@ type event =
 
 (* Stable snake_case event-type label.  Co-located with the [payload]
    variant: adding a new constructor in [payload] forces an update
-   here in the same patch under OAS's [warn-error +8] flag set, so
+   here in the same patch under AGENT_CORE's [warn-error +8] flag set, so
    downstream consumers can rely on the label being defined for every
    reachable variant.  Subscribers may persist or compare the
    returned strings — treat them as part of the public API. *)

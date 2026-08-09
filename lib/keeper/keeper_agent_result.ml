@@ -7,7 +7,7 @@ type tool_call_detail =
   { tool_name : string
   ; provider : string
   ; execution_outcome : Tool_result.tool_call_outcome
-      (** Typed [Tool_result.Ok]/[Error] truth captured at the OAS hook boundary.
+      (** Typed [Tool_result.Ok]/[Error] truth captured at the AGENT_CORE hook boundary.
           Turn-local only; durable audit is written by [Keeper_tool_call_log].
 
           A [string] rendering of this used to sit beside it, described as a
@@ -85,17 +85,17 @@ type run_result =
   ; ctx_composition : ctx_composition_metrics
   ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
-  ; final_oas_turn_ordinal : int
-  ; usage : Agent_sdk.Types.api_usage
+  ; final_agent_core_turn_ordinal : int
+  ; usage : Agent_core.Types.api_usage
   ; usage_reported : bool
   ; tool_calls : tool_call_detail list
   ; completion_contract_result : Keeper_execution_receipt.completion_contract_result
   ; operator_disposition : operator_disposition option
-  ; checkpoint : Agent_sdk.Checkpoint.t option
-  ; trace_ref : Agent_sdk.Raw_trace.run_ref option
-  ; run_validation : Agent_sdk.Raw_trace.run_validation option
+  ; checkpoint : Agent_core.Checkpoint.t option
+  ; trace_ref : Agent_core.Raw_trace.run_ref option
+  ; run_validation : Agent_core.Raw_trace.run_validation option
   ; stop_reason : Runtime_agent.stop_reason
-  ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
+  ; inference_telemetry : Agent_core.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
   }
 

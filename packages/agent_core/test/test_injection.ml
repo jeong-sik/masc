@@ -1,7 +1,7 @@
 (** Tests for context injection hooks. *)
 
 open Alcotest
-open Agent_sdk
+open Agent_core
 
 (* Test injection type construction *)
 let test_injection_type () =

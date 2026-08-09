@@ -788,7 +788,7 @@ let test_snapshot_has_expected_sections () =
       let inference = Yojson.Safe.Util.member "inference_inflight" json in
       Alcotest.(check bool) "inference observation present" true
         (inference <> `Null);
-      Alcotest.(check string) "inference boundary owner" "oas_runtime"
+      Alcotest.(check string) "inference boundary owner" "agent_core_runtime"
         Yojson.Safe.Util.(inference |> member "boundary_owner" |> to_string);
       Alcotest.(check int) "no inference active" 0
         Yojson.Safe.Util.(inference |> member "active" |> to_int);

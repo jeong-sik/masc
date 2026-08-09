@@ -6,7 +6,7 @@ open Masc
     1. The runtime schema-registry key set equals the tag-registry key set.
     2. Mandatory (core-always) tools are present in the tag/schema registries.
 
-    These invariants are foundational for the MASC/Keeper/OAS overhaul:
+    These invariants are foundational for the MASC/Keeper/AGENT_CORE overhaul:
     every tool that can be dispatched must have both a tag (for token
     validation) and a schema (for input validation). *)
 

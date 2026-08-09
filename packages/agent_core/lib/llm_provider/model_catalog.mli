@@ -90,7 +90,7 @@ type provider_entry = Model_provider_catalog.entry =
 type t
 
 (** Raised by {!global} when the build-time generated catalog violates the
-    catalog syntax or schema. The generated catalog is an OAS build invariant,
+    catalog syntax or schema. The generated catalog is an AGENT_CORE build invariant,
     so there is no empty-catalog fallback. *)
 exception Invalid_embedded_catalog of string
 
@@ -108,7 +108,7 @@ val load_file : string -> (t, string) result
 
 (** Load the build-time embedded default [models.toml].
 
-    The embedded value is generated directly from the OAS-owned root
+    The embedded value is generated directly from the AGENT_CORE-owned root
     [models.toml], so linked consumers do not depend on a working directory,
     installation prefix, or host filesystem layout. Returns [Error] when the
     embedded TOML cannot be parsed; callers that require catalog-backed
@@ -124,7 +124,7 @@ val lookup : t -> string -> model_entry option
     [provider_name] and the complete [model_id] must equal the row's declared
     [provider_name] and [id_prefix], respectively, after ASCII case-folding and
     trimming. There is no family/prefix match on the model identity. The
-    provider and model remain separate values; OAS never synthesizes slash,
+    provider and model remain separate values; AGENT_CORE never synthesizes slash,
     colon, or dot-qualified model ids.
 
     When no row matches the requested [provider_name] verbatim, the name is
@@ -147,7 +147,7 @@ val lookup_for_provider
   -> model_id:string
   -> model_entry option
 
-(** Row-level overlay merge (RFC-OAS-036). Rows in [overlay] replace rows in
+(** Row-level overlay merge (Agent Core contract). Rows in [overlay] replace rows in
     [base] with the same identity — [(provider_name, id_prefix)] for model
     rows (a bare row and a provider-scoped row with the same [id_prefix] are
     distinct), and [id] for provider entries, compared with lookup normalization —
@@ -186,12 +186,12 @@ val provider_label_for_endpoint
 
     Resolution order:
     - runtime override installed with {!set_global} (full replacement)
-    - build-time embedded OAS [models.toml], merged with the deployment
+    - build-time embedded AGENT_CORE [models.toml], merged with the deployment
       overlay installed with {!set_global_overlay} when one is present
 
     The embedded result and the merged result are cached after first
     computation. Invalid generated data raises {!Invalid_embedded_catalog}; it
-    never becomes [None] or an empty catalog. OAS does not inspect an
+    never becomes [None] or an empty catalog. AGENT_CORE does not inspect an
     environment variable for an alternate catalog. Callers that need a custom
     catalog must call {!load_file} and {!set_global} or {!set_global_overlay}
     explicitly.
@@ -205,7 +205,7 @@ val set_global : t -> unit
 (** Install a deployment overlay {!merge}d onto the embedded default catalog
     by {!global}. Unlike {!set_global}, embedded rows not shadowed by the
     overlay stay visible, so the overlay carries only deployment-local deltas
-    (RFC-OAS-036). A full {!set_global} override, when installed, takes
+    (Agent Core contract). A full {!set_global} override, when installed, takes
     precedence over the overlay. *)
 val set_global_overlay : t -> unit
 

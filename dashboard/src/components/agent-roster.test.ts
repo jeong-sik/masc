@@ -683,8 +683,8 @@ describe('fleetRuntimeEvidence', () => {
     expect(fleetRuntimeEvidence({
       name: 'sangsu',
       status: 'active',
-      runtime_canonical: 'oas.primary',
-    } as Keeper)).toEqual({ source: 'assigned', value: 'oas.primary' })
+      runtime_canonical: 'agentCore.primary',
+    } as Keeper)).toEqual({ source: 'assigned', value: 'agentCore.primary' })
   })
 
   it('returns an explicit unknown source when no assignment is projected', () => {
@@ -874,7 +874,7 @@ describe('AgentRoster live-only cards', () => {
   it('renders the exact inference observation from the live operator projection', async () => {
     operatorSnapshot.value = {
       inference_inflight: {
-        boundary_owner: 'oas_runtime',
+        boundary_owner: 'agent_core_runtime',
         active: 4,
       },
     } as any
@@ -885,7 +885,7 @@ describe('AgentRoster live-only cards', () => {
 
     const observation = container.querySelector('[data-testid="fleet-inference-inflight"]')
     expect(observation?.textContent).toContain('4')
-    expect(observation?.textContent).toContain('oas_runtime')
+    expect(observation?.textContent).toContain('agent_core_runtime')
   })
 
   it('owns the Keeper Fleet h1 when the generic monitoring header is absent', async () => {
@@ -1621,7 +1621,7 @@ describe('AgentRoster live-only cards', () => {
         name: 'sangsu',
         agent_name: 'keeper-sangsu-agent',
         status: 'active',
-        runtime_canonical: 'oas.primary',
+        runtime_canonical: 'agentCore.primary',
         active_model: 'claude-code:auto',
         model: 'claude',
         last_heartbeat: '2026-04-24T17:54:00Z',
@@ -1641,7 +1641,7 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('sangsu')
     expect(text).toContain('하트비트')
     expect(text).toContain('6분 전')
-    expect(text).toContain('oas.primary')
+    expect(text).toContain('agentCore.primary')
     expect(text).not.toContain('claude-code:auto')
     expect(text).not.toContain('마지막 행동 이후')
     expect(text).not.toContain('최근 모델claude')

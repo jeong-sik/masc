@@ -310,7 +310,7 @@ let emit_keeper_tool_exec config ~keeper_name ~tool_name ~success =
     ~typed_outcome:(Some Keeper_tool_outcome.Progress)
     ~provider:"in_process"
     ~keeper_turn_id:(Some 7)
-    ~oas_turn:2
+    ~agent_core_turn:2
     ~task_id:(Some "task-1")
     ()
 
@@ -333,8 +333,8 @@ let test_keeper_tool_exec_surfaces_in_timeline () =
           "keeper_in_turn" (ev_detail_str e "source");
         check int "absolute Keeper turn is projected" 7
           (ev_detail_int e "keeper_turn_id");
-        check int "OAS model step is projected separately" 2
-          (ev_detail_int e "oas_turn");
+        check int "AGENT_CORE model step is projected separately" 2
+          (ev_detail_int e "agent_core_turn");
         check string "task identity is not used as a turn id" "task-1"
           (ev_detail_str e "task_id")
       | events -> failf "expected one tool_call event, got %d" (List.length events))

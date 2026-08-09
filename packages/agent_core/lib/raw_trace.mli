@@ -112,12 +112,12 @@ type record =
 type t
 type active_run
 
-exception Trace_error of Error.sdk_error
+exception Trace_error of Error.t
 
 val safe_name : string -> string
 val record_type_to_string : record_type -> string
-val record_type_of_string : string -> (record_type, Error.sdk_error) result
-val record_of_json : Yojson.Safe.t -> (record, Error.sdk_error) result
+val record_type_of_string : string -> (record_type, Error.t) result
+val record_of_json : Yojson.Safe.t -> (record, Error.t) result
 val record_to_yojson : record -> Yojson.Safe.t
 val record_of_yojson : Yojson.Safe.t -> (record, string) result
 val trace_version : int
@@ -127,7 +127,7 @@ val create
   -> ?session_id:string
   -> path:string
   -> unit
-  -> (t, Error.sdk_error) result
+  -> (t, Error.t) result
 
 val create_for_session
   :  ?redact_secrets:bool
@@ -135,12 +135,12 @@ val create_for_session
   -> session_id:string
   -> agent_name:string
   -> unit
-  -> (t, Error.sdk_error) result
+  -> (t, Error.t) result
 
 val file_path : t -> string
 val session_id : t -> string option
 val last_run : t -> run_ref option
-val read_all : path:string -> unit -> (record list, Error.sdk_error) result
+val read_all : path:string -> unit -> (record list, Error.t) result
 val record_to_json : record -> Yojson.Safe.t
 
 (** Internal append helpers used by the direct Agent loop. *)
@@ -155,20 +155,20 @@ val start_run
   -> ?thinking_budget:int
   -> ?reasoning_effort:string
   -> unit
-  -> (active_run, Error.sdk_error) result
+  -> (active_run, Error.t) result
 
 val record_assistant_block
   :  active_run
   -> block_index:int
   -> Types.content_block
-  -> (unit, Error.sdk_error) result
+  -> (unit, Error.t) result
 
 val record_tool_execution_started
   :  active_run
   -> invocation:Tool_contract.Invocation.t
   -> tool_name:string
   -> tool_input:Yojson.Safe.t
-  -> (unit, Error.sdk_error) result
+  -> (unit, Error.t) result
 
 val record_tool_execution_finished
   :  active_run
@@ -177,7 +177,7 @@ val record_tool_execution_finished
   -> tool_result:string
   -> tool_error:bool
   -> unit
-  -> (unit, Error.sdk_error) result
+  -> (unit, Error.t) result
 
 val record_hook_invoked
   :  active_run
@@ -186,14 +186,14 @@ val record_hook_invoked
   -> hook_decision:string
   -> ?hook_detail:string
   -> unit
-  -> (unit, Error.sdk_error) result
+  -> (unit, Error.t) result
 
 val finish_run
   :  active_run
   -> final_text:string option
   -> stop_reason:string option
   -> error:string option
-  -> (run_ref, Error.sdk_error) result
+  -> (run_ref, Error.t) result
 
-val raise_if_error : ('a, Error.sdk_error) result -> unit
+val raise_if_error : ('a, Error.t) result -> unit
 val active_run_id : active_run -> string

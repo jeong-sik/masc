@@ -28,7 +28,7 @@ type turn_outcome =
   | Complete of Types.api_response
   | ToolsExecuted
 
-let hook_failed_sdk_error
+let hook_failed_core_error
       ~tool_name
       ~tool_use_id
       ~hook_name
@@ -45,8 +45,8 @@ let hook_failed_sdk_error
        })
 ;;
 
-let illegal_hook_decision_sdk_error ~hook_name ~stage ~decision =
-  hook_failed_sdk_error
+let illegal_hook_decision_core_error ~hook_name ~stage ~decision =
+  hook_failed_core_error
     ~hook_name
     ~stage
     ~tool_name:None

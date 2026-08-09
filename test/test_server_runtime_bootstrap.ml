@@ -191,9 +191,9 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   write_file
-    (Filename.concat config "oas-models-overlay.toml")
+    (Filename.concat config "agent-core-models-overlay.toml")
     repo_model_catalog_overlay_toml;
-  write_file (Filename.concat root "oas-models.toml") "legacy full catalog must be ignored";
+  write_file (Filename.concat root "agent-core-models.toml") "legacy full catalog must be ignored";
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "prompts/keeper.md") "prompt";
   write_file
@@ -203,13 +203,13 @@ let make_config_root root =
 
 let test_model_catalog_configuration_installs_explicit_env_override () =
   let env = function
-    | "OAS_MODEL_CATALOG" -> Some "/explicit/oas-models.toml"
+    | "AGENT_CORE_MODEL_CATALOG" -> Some "/explicit/agent-core-models.toml"
     | _ -> None
   in
   let load_calls = ref [] in
   let set_calls = ref 0 in
   let result =
-    Server_runtime_bootstrap.configure_oas_model_catalog_env
+    Server_runtime_bootstrap.configure_agent_core_model_catalog_env
       ~env
       ~load_catalog:(fun path ->
         load_calls := path :: !load_calls;
@@ -219,11 +219,11 @@ let test_model_catalog_configuration_installs_explicit_env_override () =
   in
   Alcotest.(check (option string))
     "explicit override path"
-    (Some "/explicit/oas-models.toml")
+    (Some "/explicit/agent-core-models.toml")
     result;
   Alcotest.(check (list string))
     "load explicit catalog"
-    [ "/explicit/oas-models.toml" ]
+    [ "/explicit/agent-core-models.toml" ]
     (List.rev !load_calls);
   Alcotest.(check int) "set catalog override" 1 !set_calls
 
@@ -236,9 +236,9 @@ let test_model_catalog_configuration_ignores_legacy_discovery_inputs () =
     | _ -> None
   in
   let result =
-    Server_runtime_bootstrap.configure_oas_model_catalog_env
+    Server_runtime_bootstrap.configure_agent_core_model_catalog_env
       ~env
-      ~agent_sdk_catalog:(fun () ->
+      ~agent_core_catalog:(fun () ->
         incr catalog_calls;
         Some Llm_provider.Model_catalog.empty)
       ~load_catalog:(fun (_ : string) ->
@@ -255,13 +255,13 @@ let test_model_catalog_configuration_ignores_legacy_discovery_inputs () =
 let test_model_catalog_overlay_installs_config_root_overlay () =
   with_temp_dir "model-catalog-overlay-install" (fun dir ->
     let config_root = Filename.concat dir "config-root" in
-    let overlay = Filename.concat config_root "oas-models-overlay.toml" in
+    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
     mkdir_p config_root;
     write_file overlay "[[models]]\nid_prefix = \"deployment-delta\"\n";
     let load_calls = ref [] in
     let set_overlay_calls = ref 0 in
     let result =
-      Server_runtime_bootstrap.configure_oas_model_catalog_overlay
+      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
         ~config_root
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
@@ -283,7 +283,7 @@ let test_model_catalog_overlay_absent_is_noop () =
     let load_calls = ref [] in
     let set_overlay_calls = ref 0 in
     let result =
-      Server_runtime_bootstrap.configure_oas_model_catalog_overlay
+      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
         ~config_root
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
@@ -298,12 +298,12 @@ let test_model_catalog_overlay_absent_is_noop () =
 let test_model_catalog_overlay_invalid_fails_loud () =
   with_temp_dir "model-catalog-overlay-invalid" (fun dir ->
     let config_root = Filename.concat dir "config-root" in
-    let overlay = Filename.concat config_root "oas-models-overlay.toml" in
+    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
     mkdir_p config_root;
     write_file overlay "not toml";
     let set_overlay_calls = ref 0 in
     match
-      Server_runtime_bootstrap.configure_oas_model_catalog_overlay
+      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
         ~config_root
         ~load_catalog:(fun (_ : string) -> Error "parse failed")
         ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
@@ -315,12 +315,12 @@ let test_model_catalog_overlay_invalid_fails_loud () =
       Alcotest.(check bool)
         "error names overlay path"
         true
-        (contains_substring message "oas-models-overlay.toml");
+        (contains_substring message "agent-core-models-overlay.toml");
       Alcotest.(check int) "no install" 0 !set_overlay_calls)
 
 let test_explicit_model_catalog_replacement_precedes_overlay () =
   with_temp_dir "model-catalog-explicit-precedence" (fun config_root ->
-    let overlay_path = Filename.concat config_root "oas-models-overlay.toml" in
+    let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
     write_file overlay_path "overlay fixture";
     let parse source toml =
       match Llm_provider.Model_catalog.of_toml_string ~source toml with
@@ -346,14 +346,14 @@ let test_explicit_model_catalog_replacement_precedes_overlay () =
       (fun () ->
         Llm_provider.Model_catalog.clear_global ();
         ignore
-          (Server_runtime_bootstrap.configure_oas_model_catalog_env
+          (Server_runtime_bootstrap.configure_agent_core_model_catalog_env
              ~env:(function
-               | "OAS_MODEL_CATALOG" -> Some "/explicit/catalog.toml"
+               | "AGENT_CORE_MODEL_CATALOG" -> Some "/explicit/catalog.toml"
                | _ -> None)
              ~load_catalog:(fun _ -> Ok explicit)
              ());
         ignore
-          (Server_runtime_bootstrap.configure_oas_model_catalog_overlay
+          (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
              ~config_root
              ~load_catalog:(fun _ -> Ok overlay)
              ());
@@ -371,12 +371,12 @@ let test_explicit_model_catalog_replacement_precedes_overlay () =
             (Option.is_none
                (Llm_provider.Model_catalog.lookup effective "overlay-model"))))
 
-let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
+let test_model_catalog_configuration_delegates_to_agent_core_ambient () =
   let env _ = None in
   let result =
-    Server_runtime_bootstrap.configure_oas_model_catalog_env
+    Server_runtime_bootstrap.configure_agent_core_model_catalog_env
       ~env
-      ~agent_sdk_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
+      ~agent_core_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
       ()
   in
   Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result)
@@ -856,11 +856,11 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check string)
         "model catalog overlay copied"
         repo_model_catalog_overlay_toml
-        (read_file (Filename.concat config_root "oas-models-overlay.toml"));
+        (read_file (Filename.concat config_root "agent-core-models-overlay.toml"));
       Alcotest.(check bool)
         "legacy full model catalog not copied"
         false
-        (Sys.file_exists (Filename.concat config_root "oas-models.toml"));
+        (Sys.file_exists (Filename.concat config_root "agent-core-models.toml"));
       Alcotest.(check bool) "prompt copied" true
         (Sys.file_exists
            (Filename.concat config_root "prompts/keeper.md"));
@@ -897,11 +897,11 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay (
       Alcotest.(check string)
         "model catalog overlay backfilled"
         repo_model_catalog_overlay_toml
-        (read_file (Filename.concat config_root "oas-models-overlay.toml"));
+        (read_file (Filename.concat config_root "agent-core-models-overlay.toml"));
       Alcotest.(check bool)
         "legacy full model catalog not backfilled"
         false
-        (Sys.file_exists (Filename.concat config_root "oas-models.toml"));
+        (Sys.file_exists (Filename.concat config_root "agent-core-models.toml"));
       ())
 
 let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
@@ -4173,7 +4173,7 @@ let test_create_server_state_records_runtime_resolution () =
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
       ignore (make_config_root repo);
-      with_env "OAS_MODEL_CATALOG" None @@ fun () ->
+      with_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
       Eio_main.run @@ fun env ->
@@ -4204,7 +4204,7 @@ let test_create_server_state_preserves_raw_input_base_path () =
       mkdir_p repo;
       mkdir_p raw_input;
       ignore (make_config_root repo);
-      with_env "OAS_MODEL_CATALOG" None @@ fun () ->
+      with_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_env "MASC_BASE_PATH" None @@ fun () ->
       with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
@@ -4600,7 +4600,7 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
 
 let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
   with_temp_dir "startup-keeper-credential-sync" (fun dir ->
-      with_env "OAS_MODEL_CATALOG" None @@ fun () ->
+      with_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
@@ -4652,7 +4652,7 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
 
 let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
   with_temp_dir "startup-keeper-credential-rotate" (fun dir ->
-      with_env "OAS_MODEL_CATALOG" None @@ fun () ->
+      with_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
@@ -5085,9 +5085,9 @@ let () =
             "explicit model catalog replacement precedes overlay"
             `Quick test_explicit_model_catalog_replacement_precedes_overlay;
           Alcotest.test_case
-            "model catalog configuration delegates to agent_sdk ambient catalog"
+            "model catalog configuration delegates to agent_core ambient catalog"
             `Quick
-            test_model_catalog_configuration_delegates_to_agent_sdk_ambient;
+            test_model_catalog_configuration_delegates_to_agent_core_ambient;
           Alcotest.test_case
             "bootstrap base-path config copies shared seed only"
             `Quick

@@ -305,10 +305,10 @@ function modelFromDocument(document: TomlDocument, id: string): RuntimeTomlModel
   // reader looked for a `json-support` key on the top-level model table, which
   // never exists in the SSOT config, so JSON-lane validation never fired.
   const caps = sectionValues(document, `models.${id}.capabilities`)
-  // thinking-control-format is intentionally NOT read here: OAS
+  // thinking-control-format is intentionally NOT read here: Agent Core
   // request-building never consumes runtime.toml's [models.<id>.capabilities]
-  // thinking-control-format key (masc #21521 / oas models.toml) — it is the
-  // OAS catalog's effective_capabilities.thinking_control_format that governs
+  // thinking-control-format key (masc #21521 / agentCore models.toml) — it is the
+  // Agent Core catalog's effective_capabilities.thinking_control_format that governs
   // the actual request wire. Re-adding a client-side reader for this key
   // would resurrect the inert-config-editing UX this removal fixed.
   const multimodalCap = caps['supports-multimodal-inputs']

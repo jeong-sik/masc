@@ -67,9 +67,9 @@ let finalize
    | Error err ->
      let status, exception_kind =
        match err with
-       | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
-         "timeout", Some "outer_oas_timeout"
-       | _ -> "error", Some "outer_oas_error"
+       | Agent_core.Error.Api (Llm_provider.Retry.Timeout _) ->
+         "timeout", Some "outer_agent_core_timeout"
+       | _ -> "error", Some "outer_agent_core_error"
      in
      Keeper_runtime_manifest
        .append_unfinished_provider_attempt_finished_best_effort
@@ -77,7 +77,7 @@ let finalize
          config
          runtime_manifest_context
          ~status
-         ~error:(Agent_sdk.Error.to_string err)
+         ~error:(Agent_core.Error.to_string err)
          ?exception_kind
          ());
   let receipt_ended_at = Masc_domain.now_iso () in
@@ -86,9 +86,9 @@ let finalize
     | Ok _ -> None, None
     | Error err ->
       ( Some
-          (Agent_sdk.Error.(category err |> category_label)
+          (Agent_core.Error.(category err |> category_label)
            |> Keeper_execution_receipt.error_kind_of_string)
-      , Some (Agent_sdk.Error.to_string err) )
+      , Some (Agent_core.Error.to_string err) )
   in
   let completion_contract_result
       : Keeper_execution_receipt.completion_contract_result =
@@ -104,7 +104,7 @@ let finalize
        | None ->
          Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success)
     | Error err ->
-      Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err
+      Keeper_agent_error.terminal_reason_code_of_core_error_typed err
       |> Keeper_turn_terminal_code.to_wire
   in
   let runtime_observation : Runtime_observation.runtime_observation option =
@@ -112,7 +112,7 @@ let finalize
   in
   (* #20936: the before_turn_params hook snapshots the final injected
      extra_system_context (digest + byte size) into the accumulator each
-     SDK turn; the receipt reports the last SDK turn's values. The SDK
+     agent-core turn; the receipt reports the last agent-core turn's values. Agent Core
      injects the assembled string verbatim, so computed and injected
      sizes coincide — they diverge only if an injection-side truncation
      layer ever appears. *)
@@ -131,9 +131,9 @@ let finalize
     ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
     ; generation
     ; turn_count = !receipt_turn_count_ref
-    ; oas_turn_count = !receipt_turn_count_ref
-    ; oas_dispatch_mode = Some "single_provider_agent_run"
-    ; oas_internal_runtime_disabled = true
+    ; agent_core_turn_count = !receipt_turn_count_ref
+    ; agent_core_dispatch_mode = Some "single_provider_agent_run"
+    ; agent_core_internal_runtime_disabled = true
     ; current_task_id =
         Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
     ; goal_ids = meta.active_goal_ids
@@ -141,7 +141,7 @@ let finalize
         (match turn_result with
          | Ok _ -> `Ok
          | Error err ->
-           Keeper_agent_error.receipt_outcome_kind_of_sdk_error err)
+           Keeper_agent_error.receipt_outcome_kind_of_core_error err)
     ; terminal_reason_code
     ; response_text_present = !receipt_response_text_present_ref
     ; model_used = !receipt_model_used_ref
@@ -165,9 +165,9 @@ let finalize
          | None -> false)
     ; runtime_outcome =
         Keeper_agent_error.runtime_outcome_of_observation runtime_observation
-    ; oas_internal_runtime_allowed =
+    ; agent_core_internal_runtime_allowed =
         (match runtime_observation with
-         | Some obs -> obs.oas_internal_runtime_allowed
+         | Some obs -> obs.agent_core_internal_runtime_allowed
          | None -> false)
     ; degraded_retry_applied
     ; degraded_retry_runtime =
@@ -220,7 +220,7 @@ let finalize
       ]
   in
   let append_receipt_manifest ?status ?decision ~site event =
-    let oas_turn_count = receipt.turn_count in
+    let agent_core_turn_count = receipt.turn_count in
     let status =
       match status with
       | Some status -> status
@@ -248,7 +248,7 @@ let finalize
       ~keeper_name:receipt.keeper_name ~agent_name:receipt.agent_name
       ~trace_id:receipt.trace_id ~generation:receipt.generation
       ~keeper_turn_id:manifest_keeper_turn_id ~event
-      ?oas_turn_count
+      ?agent_core_turn_count
       ~runtime_id:(receipt.runtime_id)
       ~status ~decision ~receipt_path ?tool_call_log_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
@@ -271,7 +271,7 @@ let finalize
     | Ok _, Ok () -> turn_result_with_operator_disposition
     | Ok _, Error err_msg ->
       Error
-        (Keeper_internal_error.sdk_error_of_masc_internal_error
+        (Keeper_internal_error.core_error_of_masc_internal_error
            (Keeper_internal_error.Receipt_persistence_failed
               { detail = err_msg }))
   in

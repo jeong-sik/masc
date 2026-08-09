@@ -528,6 +528,15 @@ let test_shared_mcp_protocol_is_negotiated () =
        |> member "result"
        |> member "protocolVersion"
        |> to_string);
+    check string
+      "MCP server version uses the canonical build owner"
+      Version.version
+      (dispatch.response
+       |> Option.get
+       |> member "result"
+       |> member "serverInfo"
+       |> member "version"
+       |> to_string);
     (match
        handle (initialize "2099-01-01")
      with

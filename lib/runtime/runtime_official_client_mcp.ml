@@ -173,7 +173,7 @@ let initialize ~server_name ~id ~params =
           ; ( "serverInfo"
             , `Assoc
                 [ "name", `String server_name
-                ; "version", `String Version.version
+                ; "version", `String Runtime_build_version.current
                 ] )
           ]))
 ;;

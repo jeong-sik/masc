@@ -30,6 +30,7 @@ let process_termination_grace_s = 2.0
 let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 8192
 let max_wire_line_bytes = 8 * 1024 * 1024
+let max_probe_output_bytes = 256 * 1024
 
 let default_config ~cwd ~model =
   { cli_path = "agy"
@@ -67,6 +68,16 @@ type turn_result =
   ; tool_errors : int
   ; resumed : bool
   ; wall_duration_s : float
+  }
+
+type available_model =
+  { id : string
+  ; display_name : string
+  }
+
+type login_probe =
+  { client_version : string
+  ; available_models : available_model list
   }
 
 type error =
@@ -263,15 +274,20 @@ let execution_mode_to_string = function
   | Accept_edits -> "accept-edits"
 ;;
 
-let validate_config config ~conversation_mode ~prompt =
+let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
   else if String.trim config.cwd = "" || Filename.is_relative config.cwd
   then Error (Invalid_config "cwd must be an absolute path")
-  else if String.trim config.model = ""
-  then Error (Invalid_config "model must not be empty")
   else if not (Float.is_finite config.timeout_s) || config.timeout_s <= 0.0
   then Error (Invalid_config "timeout_s must be positive and finite")
+  else Ok ()
+;;
+
+let validate_config config ~conversation_mode ~prompt =
+  let* () = validate_process_config config in
+  if String.trim config.model = ""
+  then Error (Invalid_config "model must not be empty")
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
   else
@@ -572,6 +588,136 @@ let run_spawned ~mgr ~clock ~cwd config ~conversation_mode ~prompt ~on_conversat
         let status = Eio.Process.await proc in
         process_status := Some status;
         status, !state, String.trim !stderr_tail))
+;;
+
+let run_probe_process ~mgr ~clock ~cwd config arguments =
+  Eio.Switch.run (fun sw ->
+    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
+    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
+    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
+    let stderr_tail = ref "" in
+    let proc =
+      Eio.Process.spawn
+        ~sw
+        mgr
+        ~cwd
+        ~env:(official_client_environment ())
+        ~stdin:stdin_r
+        ~stdout:stdout_w
+        ~stderr:stderr_w
+        (config.cli_path :: arguments)
+    in
+    Eio.Flow.close stdin_r;
+    Eio.Flow.close stdin_w;
+    Eio.Flow.close stdout_w;
+    Eio.Flow.close stderr_w;
+    Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
+    let process_status = ref None in
+    Fun.protect
+      ~finally:(fun () ->
+        match !process_status with
+        | Some _ -> ()
+        | None -> terminate_spawned_process ~clock proc stdin_w)
+      (fun () ->
+        let stdout =
+          try
+            Eio.Buf_read.of_flow ~max_size:max_probe_output_bytes stdout_r
+            |> Eio.Buf_read.take_all
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            raise
+              (Runtime_error
+                 (Protocol_error
+                    { stage = "login probe stdout"; detail = Printexc.to_string exn }))
+        in
+        let status = Eio.Process.await proc in
+        process_status := Some status;
+        status, String.trim stdout, String.trim !stderr_tail))
+;;
+
+let probe_process_error command status stderr =
+  let exit = status_to_string status in
+  let detail = if stderr = "" then exit else exit ^ ": " ^ stderr in
+  Process_exited (Printf.sprintf "%s failed: %s" command detail)
+;;
+
+let parse_available_models output =
+  let lines =
+    output
+    |> String.split_on_char '\n'
+    |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
+  in
+  let rec loop seen models = function
+    | [] ->
+      if models = []
+      then protocol_error "models probe" "agy models returned no models"
+      else Ok (List.rev models)
+    | line :: rest ->
+      (match String.index_opt line '\t' with
+       | None ->
+         protocol_error
+           "models probe"
+           "expected each model line to contain id and display name separated by a tab"
+       | Some separator ->
+         let id = String.sub line 0 separator |> String.trim in
+         let display_name =
+           String.sub line (separator + 1) (String.length line - separator - 1)
+           |> String.trim
+         in
+         if id = "" || display_name = ""
+         then protocol_error "models probe" "model id and display name must not be empty"
+         else if List.mem id seen
+         then
+           protocol_error
+             "models probe"
+             (Printf.sprintf "duplicate model id %S" id)
+         else loop (id :: seen) ({ id; display_name } :: models) rest)
+  in
+  loop [] [] lines
+;;
+
+let parse_client_version output =
+  match
+    output
+    |> String.split_on_char '\n'
+    |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
+  with
+  | [ version ] -> Ok version
+  | [] -> protocol_error "version probe" "agy --version returned no version"
+  | _ -> protocol_error "version probe" "agy --version returned more than one line"
+;;
+
+let probe_login ~mgr ~clock ~cwd config =
+  let* () = validate_process_config config in
+  try
+    Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+      let models_status, models_stdout, models_stderr =
+        run_probe_process ~mgr ~clock ~cwd config [ "models" ]
+      in
+      let* available_models =
+        match models_status with
+        | `Exited 0 -> parse_available_models models_stdout
+        | (`Exited _ | `Signaled _) as status ->
+          Error (probe_process_error "agy models" status models_stderr)
+      in
+      let version_status, version_stdout, version_stderr =
+        run_probe_process ~mgr ~clock ~cwd config [ "--version" ]
+      in
+      let* client_version =
+        match version_status with
+        | `Exited 0 -> parse_client_version version_stdout
+        | (`Exited _ | `Signaled _) as status ->
+          Error (probe_process_error "agy --version" status version_stderr)
+      in
+      Ok { client_version; available_models })
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+  | Runtime_error error -> Error error
+  | exn -> Error (Spawn_failed (Printexc.to_string exn))
 ;;
 
 let run_turn ?(conversation_mode = Start) ~mgr ~clock ~cwd

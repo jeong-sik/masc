@@ -290,7 +290,15 @@ let broadcast_failed_authorization_audits ~keeper_name ~source receipts =
                         ] )
                   ])
           with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | Eio.Cancel.Cancelled _ as exn ->
+            (* Authorization is already committed.  This observation lane must
+               not turn cancellation into a lost [Allow] or consume a one-shot
+               grant without giving the caller its authorization. *)
+            Log.Keeper.warn
+              ~keeper_name
+              "approval audit failure SSE publish cancelled event=%s err=%s"
+              (Keeper_approval.Audit.event_to_string receipt.event_type)
+              (Printexc.to_string exn)
           | exn ->
             Log.Keeper.warn
               ~keeper_name
@@ -335,6 +343,18 @@ let decision_to_yojson = function
       [ "decision", `String "unavailable"
       ; "reason", `String (unavailable_reason_to_string reason)
       ]
+;;
+
+let authorization_metadata ?producer_metadata authorization =
+  let fields =
+    [ "gate", decision_to_yojson (Allow authorization) ]
+  in
+  `Assoc
+    (fields
+     @ Option.fold
+         ~none:[]
+         ~some:(fun metadata -> [ "producer", metadata ])
+         producer_metadata)
 ;;
 
 (* The Gate's own [authorization_source] carries the identifier it resolved

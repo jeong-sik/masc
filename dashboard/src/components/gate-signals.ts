@@ -46,7 +46,7 @@ export function observeGateAuditReceipts(
   let notices = gateAuditWriteFailures.value
   for (const receipt of receipts) {
     if (receipt.recorded) continue
-    const duplicate = notices.some(notice =>
+    const duplicate = context.id !== null && notices.some(notice =>
       notice.id === context.id
       && notice.receipt.event === receipt.event
       && notice.receipt.stage === receipt.stage

@@ -515,6 +515,16 @@ function decodeResolveGateApprovalResponse(
   if (auditReceipts.some(receipt => receipt === null)) {
     return gateMutationProtocolDrift(path, 'audit_receipts contains an invalid receipt')
   }
+  const actualEvents = (auditReceipts as KeeperApprovalAuditReceipt[])
+    .map(receipt => receipt.event)
+  const isResolutionOnly = actualEvents.length === 1 && actualEvents[0] === 'resolved'
+  const isRuleCreationAndResolution = ruleId !== null
+    && actualEvents.length === 2
+    && actualEvents[0] === 'rule_created'
+    && actualEvents[1] === 'resolved'
+  if (!isResolutionOnly && !isRuleCreationAndResolution) {
+    return gateMutationProtocolDrift(path, 'audit_receipts do not match the committed mutation')
+  }
   return {
     ok: true,
     id: requestedId,
@@ -533,7 +543,12 @@ function decodeDeleteGateApprovalRuleResponse(
     return gateMutationProtocolDrift(path, 'fields must be exact')
   }
   const audit = normalizeKeeperApprovalAuditReceipt(raw.audit)
-  if (raw.ok !== true || raw.id !== requestedId || audit === null) {
+  if (
+    raw.ok !== true
+    || raw.id !== requestedId
+    || audit === null
+    || audit.event !== 'rule_deleted'
+  ) {
     return gateMutationProtocolDrift(path, 'committed identity or audit receipt is invalid')
   }
   return { ok: true, id: raw.id, audit }

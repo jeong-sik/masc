@@ -95,6 +95,7 @@ type failure_payload =
   { class_ : tool_failure_class
   ; message : string
   ; data : Yojson.Safe.t
+  ; metadata : Yojson.Safe.t option
   ; tool_name : string
   ; duration_ms : float
   }
@@ -120,6 +121,10 @@ val duration_ms : result -> float
 val data : result -> Yojson.Safe.t
 
 val metadata : result -> Yojson.Safe.t option
+
+(** Attach an opaque one-way projection without changing the authoritative
+    disposition or payload. *)
+val with_metadata : Yojson.Safe.t -> result -> result
 
 (** Explicit predicates.  Use all three when recording or serializing an
     outcome; do not collapse {!Deferred} into a success boolean inside MASC. *)
@@ -186,6 +191,7 @@ val make_err
   -> class_:tool_failure_class
   -> start_time:float
   -> ?data:Yojson.Safe.t
+  -> ?metadata:Yojson.Safe.t
   -> string
   -> result
 

@@ -682,7 +682,15 @@ export function routeServerPushEvent(event: SSEEvent): void {
     && isRecord(event.payload)
   ) {
     const receipt = normalizeKeeperApprovalAuditReceipt(event.payload.audit)
-    if (receipt !== null) {
+    const receiptMatchesEnvelope = receipt !== null && (
+      (event.type === SSE_APPROVAL_PENDING_EVENT && receipt.event === 'pending')
+      || (event.type === SSE_APPROVAL_RESOLVED_EVENT && receipt.event === 'resolved')
+      || (
+        event.type === SSE_APPROVAL_AUDIT_EVENT
+        && (receipt.event === 'grant_consumed' || receipt.event === 'gate_allowed')
+      )
+    )
+    if (receipt !== null && receiptMatchesEnvelope) {
       const id = typeof event.payload.id === 'string' && event.payload.id.trim() !== ''
         ? event.payload.id
         : null

@@ -329,6 +329,22 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshGate).not.toHaveBeenCalled()
   })
 
+  it('rejects an audit receipt that does not match its SSE envelope', async () => {
+    const { sseStore } = await loadSseStore()
+    const observe = vi.fn()
+    sseStore.registerGateAuditReceiptObserver(observe)
+
+    sseStore.routeServerPushEvent({
+      type: 'approval:pending',
+      payload: {
+        id: 'appr-mismatch',
+        audit: { event: 'resolved', recorded: true },
+      },
+    })
+
+    expect(observe).not.toHaveBeenCalled()
+  })
+
   it('routes an approval:summary_updated SSE event to the Gate refresh (Auto Judge verdict contract)', async () => {
     const { sseStore } = await loadSseStore()
     const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()

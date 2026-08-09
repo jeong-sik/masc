@@ -178,6 +178,14 @@ val deferred_reason_to_string : deferred_reason -> string
 val unavailable_reason_to_string : unavailable_reason -> string
 val decision_to_yojson : decision -> Yojson.Safe.t
 
+(** One-way tool-result projection for an already committed authorization.
+    Existing producer metadata is preserved under [producer]; consumers must
+    keep using the typed decision as the authorization authority. *)
+val authorization_metadata
+  :  ?producer_metadata:Yojson.Safe.t
+  -> authorization
+  -> Yojson.Safe.t
+
 module For_testing : sig
   type exact_completion =
     id:string ->

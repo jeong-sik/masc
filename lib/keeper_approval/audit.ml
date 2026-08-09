@@ -215,11 +215,18 @@ let receipt_to_yojson receipt =
        @ fields)
 ;;
 
-let sanitized_write_failure_detail detail =
-  detail
-  |> Safe_ops.sanitize_text_utf8
-  |> String_util.utf8_safe ~max_bytes:1000 ~suffix:"..."
-  |> String_util.to_string
+let sanitized_write_failure_detail = function
+  | Unix.Unix_error (error, operation, _) ->
+    let operation =
+      operation
+      |> Safe_ops.sanitize_text_utf8
+      |> String_util.utf8_safe ~max_bytes:80 ~suffix:"..."
+      |> String_util.to_string
+    in
+    Printf.sprintf "%s failed: %s" operation (Unix.error_message error)
+  | Sys_error _ -> "approval audit filesystem operation failed"
+  | Eio.Io _ -> "approval audit I/O failed"
+  | _ -> "approval audit write failed"
 ;;
 
 (* The [decision_kind] axis of a resolved approval record. The queue derives it
@@ -278,7 +285,7 @@ let get_audit_store ~base_path () =
     Log.Keeper.warn
       "approval_queue: audit store creation failed: %s"
       (Printexc.to_string exn);
-    Error (sanitized_write_failure_detail (Printexc.to_string exn))
+    Error (sanitized_write_failure_detail exn)
   in
   try
     match
@@ -420,7 +427,7 @@ let record
         ; write_result =
             Error
               { stage = Append
-              ; detail = sanitized_write_failure_detail (Printexc.to_string exn)
+              ; detail = sanitized_write_failure_detail exn
               }
         })
 ;;

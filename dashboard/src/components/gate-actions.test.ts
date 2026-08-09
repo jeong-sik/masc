@@ -35,6 +35,7 @@ import {
   gateApprovalActing,
   gateAuditWriteFailures,
   gateError,
+  observeGateAuditReceipts,
 } from './gate-signals'
 
 const baseResponse = {
@@ -112,6 +113,19 @@ describe('committed Gate mutation audit degradation', () => {
       id: 'rule-audit',
       receipt: { event: 'rule_deleted', stage: 'store_create' },
     })
+  })
+
+  it('does not collapse distinct uncorrelated authorization failures', () => {
+    const receipt = {
+      event: 'gate_allowed' as const,
+      recorded: false as const,
+      stage: 'append' as const,
+      detail: 'approval audit write failed',
+    }
+    observeGateAuditReceipts([receipt], { id: null, transport: 'sse' })
+    observeGateAuditReceipts([receipt], { id: null, transport: 'sse' })
+
+    expect(gateAuditWriteFailures.value).toHaveLength(2)
   })
 })
 

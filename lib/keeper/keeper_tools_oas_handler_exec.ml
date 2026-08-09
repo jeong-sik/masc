@@ -70,6 +70,7 @@ let execute_with_observers
           ~class_:failure_class
           ~start_time:t0
           ~data:(producer_payload ~raw:raw_result producer_data)
+          ?metadata:producer_metadata
           raw_result
       in
       Keeper_registry.record_tool_use

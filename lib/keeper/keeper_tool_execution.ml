@@ -81,6 +81,16 @@ let failure_data
   }
 ;;
 
+let with_gate_authorization authorization result =
+  { result with
+    metadata =
+      Some
+        (Keeper_gate.authorization_metadata
+           ?producer_metadata:result.metadata
+           authorization)
+  }
+;;
+
 let of_tool_result (result : Tool_result.result) =
   let raw_output = Tool_result.message result in
   let data = Some (Tool_result.data result) in
@@ -104,7 +114,7 @@ let of_tool_result (result : Tool_result.result) =
   | Tool_result.Failed { class_; _ } ->
     { raw_output
     ; data
-    ; metadata = None
+    ; metadata = Tool_result.metadata result
     ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
     ; disposition = Tool_result.Failed class_
     ; deferred_kind = None

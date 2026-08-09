@@ -2242,6 +2242,36 @@ describe('Gate mutation audit receipts', () => {
       audit: { recorded: false, stage: 'store_create' },
     })
   })
+
+  it('rejects a resolution receipt for an unrelated mutation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'appr-audit',
+        decision: 'approve',
+        rule_id: null,
+        audit_receipts: [{ event: 'pending', recorded: true }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    await expect(resolveGateApproval('appr-audit', {
+      decision: 'approve',
+      rememberRule: false,
+    })).rejects.toMatchObject({ errorCode: 'protocol_drift' })
+  })
+
+  it('rejects a rule deletion receipt for an unrelated mutation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'rule-audit',
+        audit: { event: 'resolved', recorded: true },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    await expect(deleteGateApprovalRule('rule-audit'))
+      .rejects.toMatchObject({ errorCode: 'protocol_drift' })
+  })
 })
 
 describe('setGateMode', () => {

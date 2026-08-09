@@ -3728,7 +3728,9 @@ let test_audit_store_failure_keeps_defer_committed_and_visible () =
        Keeper_approval.Audit.For_testing.reset_store ();
        ignore (install_exn ~base_path);
        Keeper_approval.Audit.For_testing.set_store_create_probe
-         (fun ~base_path:_ -> failwith "deterministic audit store failure");
+         (fun ~base_path:_ ->
+           failwith
+             "deterministic audit store failure /private/operator/.ssh/id_ed25519");
        let request : Gate.request =
          { keeper_name
          ; operation = "external-effect"
@@ -3746,6 +3748,13 @@ let test_audit_store_failure_keeps_defer_committed_and_visible () =
            ~event_type:Keeper_approval.Audit.Pending
            ~stage:Keeper_approval.Audit.Store_create
            receipt;
+         (match receipt.write_result with
+          | Ok () -> Alcotest.fail "audit failure was reported as recorded"
+          | Error failure ->
+            Alcotest.(check bool)
+              "audit receipt omits exception paths"
+              false
+              (String.contains failure.detail '/'));
          (match AQ.For_testing.get_pending_entry_unchecked ~id:approval_id with
           | Some _ -> ()
           | None ->
@@ -3904,6 +3913,69 @@ let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
           Alcotest.fail "consumed grant became authorizable again"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
        drop_resolution ~base_path ~keeper_name durable_resolution)
+;;
+
+let test_cancelled_audit_observation_preserves_committed_allow () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-audit-cancelled-observer" in
+  let subscriber_id = "approval-audit-cancelled-observer" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Sse.unsubscribe_external subscriber_id;
+      Keeper_approval.Audit.For_testing.reset_store ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Keeper_approval.Audit.For_testing.reset_store ();
+       ignore (install_exn ~base_path);
+       Keeper_approval.Audit.For_testing.set_append_jsonl
+         (fun _path _json -> failwith "deterministic audit append failure");
+       Masc.Sse.subscribe_external
+         ~id:subscriber_id
+         ~callback:(fun _ ->
+           raise
+             (Eio.Cancel.Cancelled
+                (Failure "cancelled approval audit observation")))
+         ();
+       let request : Gate.request =
+         { keeper_name
+         ; operation = "external-effect"
+         ; input = `Assoc [ "target", `String "cancelled-observer" ]
+         ; base_path
+         ; causal_context = None
+         ; task_id = None
+         ; goal_ids = []
+         ; continuation_channel = None
+         }
+       in
+       let authorization =
+         match Gate.decide ~keeper_always_allow:true request with
+         | Gate.Allow authorization -> authorization
+         | Gate.Deferred _ -> Alcotest.fail "Always Allow unexpectedly deferred"
+         | Gate.Unavailable reason ->
+           Alcotest.fail (Gate.unavailable_reason_to_string reason)
+       in
+       (match authorization.audit_receipts with
+        | [ receipt ] -> check_append_failure Keeper_approval.Audit.Gate_allowed receipt
+        | _ -> Alcotest.fail "Always Allow did not retain its exact audit receipt");
+       let execution =
+         Keeper_tool_execution.failure "effect failed after authorization"
+         |> Keeper_tool_execution.with_gate_authorization authorization
+       in
+       let metadata =
+         execution.metadata
+         |> require_some "failed tool execution discarded Gate authorization metadata"
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "failed tool result keeps the committed Gate decision"
+         "allow"
+         (metadata |> member "gate" |> member "decision" |> to_string);
+       Alcotest.(check int)
+         "failed tool result keeps the audit receipt"
+         1
+         (metadata |> member "gate" |> member "audit_receipts" |> to_list |> List.length))
 ;;
 
 let test_http_success_exposes_failed_resolution_and_rule_delete_audit () =
@@ -4183,6 +4255,10 @@ let () =
             "audit append failure keeps authority mutations committed"
             `Quick
             test_audit_append_failure_keeps_resolution_rule_and_grant_committed
+        ; Alcotest.test_case
+            "cancelled audit observation preserves committed Allow"
+            `Quick
+            test_cancelled_audit_observation_preserves_committed_allow
         ; Alcotest.test_case
             "HTTP success exposes failed resolution and rule audit"
             `Quick

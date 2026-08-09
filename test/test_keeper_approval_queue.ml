@@ -137,7 +137,7 @@ let submit_with_context
       ?continuation_channel
       ()
   with
-  | Ok id -> id
+  | Ok submission -> submission.approval_id
   | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
 ;;
 
@@ -155,6 +155,28 @@ let install_exn ~base_path =
   match AQ.install_persistence ~base_path with
   | Ok report -> report
   | Error error -> Alcotest.fail (AQ.install_error_to_string error)
+;;
+
+let check_failed_audit_receipt ~event_type ~stage receipt =
+  Alcotest.(check bool)
+    "audit event is exact"
+    true
+    (receipt.Keeper_approval.Audit.event_type = event_type);
+  match receipt.write_result with
+  | Ok () -> Alcotest.fail "audit failure was reported as recorded"
+  | Error failure ->
+    Alcotest.(check bool) "audit failure stage is exact" true (failure.stage = stage);
+    Alcotest.(check bool)
+      "audit failure detail is visible"
+      true
+      (String.trim failure.detail <> "")
+;;
+
+let check_append_failure event_type receipt =
+  check_failed_audit_receipt
+    ~event_type
+    ~stage:Keeper_approval.Audit.Append
+    receipt
 ;;
 
 let test_pending_store_lock_serializes_eio_fibers () =
@@ -1062,7 +1084,7 @@ let test_resolution_is_durable_and_origin_scoped () =
             ~input:(`Assoc [ "target", `String "other" ])
         with
         | Ok AQ.Consumption_not_matching -> ()
-        | Ok (AQ.Consumption_committed | AQ.Consumption_already_committed) ->
+        | Ok (AQ.Consumption_committed _ | AQ.Consumption_already_committed) ->
           Alcotest.fail "changed input consumed the exact grant"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
        (match
@@ -1073,7 +1095,7 @@ let test_resolution_is_durable_and_origin_scoped () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok AQ.Consumption_committed -> ()
+        | Ok (AQ.Consumption_committed _) -> ()
         | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
           Alcotest.fail "exact request did not consume its grant"
        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
@@ -1388,7 +1410,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          }
        in
        let source_of = function
-         | Gate.Allow { source } -> source
+         | Gate.Allow { source; _ } -> source
          | Gate.Deferred _ -> Alcotest.fail "keeper Always Allow unexpectedly deferred"
          | Gate.Unavailable reason ->
            Alcotest.fail (Gate.unavailable_reason_to_string reason)
@@ -3112,7 +3134,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok AQ.Consumption_committed -> ()
+        | Ok (AQ.Consumption_committed _) -> ()
         | Ok _ ->
           Alcotest.fail "projection error blocked exact grant consumption"
         | Error error ->
@@ -3215,7 +3237,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
             ~tool_name:"external-effect"
             ~input:(`Assoc [ "target", `String "replay" ])
         with
-        | Ok AQ.Consumption_committed -> ()
+        | Ok (AQ.Consumption_committed _) -> ()
         | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
           Alcotest.fail "replayed exact grant was not consumed"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
@@ -3338,7 +3360,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok AQ.Consumption_committed -> ()
+        | Ok (AQ.Consumption_committed _) -> ()
         | Ok
             ( AQ.Consumption_already_committed
             | AQ.Consumption_not_matching ) ->
@@ -3481,7 +3503,8 @@ let test_default_auto_judge_defers_without_blocking () =
          }
        in
        match Gate.decide ~keeper_always_allow:false request with
-       | Gate.Deferred { approval_id; reason = Gate.Auto_judge_unavailable detail } ->
+       | Gate.Deferred
+           { approval_id; reason = Gate.Auto_judge_unavailable detail; _ } ->
          Alcotest.(check bool) "unavailable reason is explicit" true
            (String.length detail > 0);
          (match AQ.For_testing.get_pending_entry_unchecked ~id:approval_id with
@@ -3562,7 +3585,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
           Alcotest.fail "unexpected unavailable reason for unreadable grant");
        ignore (install_exn ~base_path);
        (match Gate.decide ~cycle_grant:grant ~keeper_always_allow:false request with
-        | Gate.Allow { source = Gate.One_shot_resolution actual } ->
+        | Gate.Allow { source = Gate.One_shot_resolution actual; _ } ->
           Alcotest.(check string) "grant remains unconsumed" approval_id actual
         | Gate.Allow _ -> Alcotest.fail "restored exact grant used the wrong source"
         | Gate.Deferred _ -> Alcotest.fail "restored exact grant did not authorize"
@@ -3611,6 +3634,218 @@ let test_nonapproved_resolution_payload_is_delivered () =
          true
          (Option.is_none (Gate.cycle_grant_of_resolution rejected));
        drop_resolution ~base_path ~keeper_name rejected)
+;;
+
+let test_audit_store_failure_keeps_defer_committed_and_visible () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-audit-store-failure" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Keeper_approval.Audit.For_testing.reset_store ();
+       ignore (install_exn ~base_path);
+       Keeper_approval.Audit.For_testing.set_store_create_probe
+         (fun ~base_path:_ -> failwith "deterministic audit store failure");
+       let request : Gate.request =
+         { keeper_name
+         ; operation = "external-effect"
+         ; input = `Assoc [ "target", `String "store-create" ]
+         ; base_path
+         ; causal_context = None
+         ; task_id = None
+         ; goal_ids = []
+         ; continuation_channel = None
+         }
+       in
+       match Gate.decide ~keeper_always_allow:false request with
+       | Gate.Deferred { approval_id; audit_receipts = [ receipt ]; _ } ->
+         check_failed_audit_receipt
+           ~event_type:Keeper_approval.Audit.Pending
+           ~stage:Keeper_approval.Audit.Store_create
+           receipt;
+         (match AQ.For_testing.get_pending_entry_unchecked ~id:approval_id with
+          | Some _ -> ()
+          | None ->
+            Alcotest.fail
+              "audit store failure rolled back the durable pending mutation")
+       | Gate.Deferred _ -> Alcotest.fail "defer returned a non-canonical audit receipt set"
+       | Gate.Allow _ -> Alcotest.fail "unapproved request bypassed Gate"
+       | Gate.Unavailable reason ->
+         Alcotest.fail (Gate.unavailable_reason_to_string reason))
+;;
+
+let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-audit-append-failure" in
+  let input = `Assoc [ "target", `String "append" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Keeper_approval.Audit.For_testing.reset_store ();
+       ignore (install_exn ~base_path);
+       let approval_id = submit ~base_path ~keeper_name ~input in
+       Keeper_approval.Audit.For_testing.set_append_jsonl
+         (fun _path _json -> failwith "deterministic audit append failure");
+       let resolution =
+         match
+           AQ.resolve_with_policy
+             ~base_path
+             ~id:approval_id
+             ~decision:Rule_types.Decision.Approve
+             ~remember_rule:true
+             ~created_by:"test-operator"
+             ()
+         with
+         | Ok result -> result
+         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
+       in
+       (match resolution.audit_receipts with
+        | [ rule_receipt; resolved_receipt ] ->
+          check_append_failure Keeper_approval.Audit.Rule_created rule_receipt;
+          check_append_failure Keeper_approval.Audit.Resolved resolved_receipt
+        | _ -> Alcotest.fail "resolution did not return both mutation receipts");
+       (match
+          Rules.find_matching_rule
+            ~base_path
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+            ()
+        with
+        | Ok (Rule_types.Rule_match_active _) -> ()
+        | Ok (Rule_types.Rule_match_expired _ | Rule_types.Rule_match_absent) ->
+          Alcotest.fail "audit append failure rolled back the remembered rule"
+        | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error));
+       Alcotest.(check int)
+         "resolved request left pending queue"
+         0
+         (match AQ.list_pending_entries_for_workspace ~base_path with
+          | Ok entries -> List.length entries
+          | Error error -> Alcotest.fail (AQ.storage_error_to_string error));
+       let durable_resolution =
+         durable_resolution_opt ~base_path ~keeper_name ~approval_id
+         |> require_some "approved resolution was not delivered"
+       in
+       let cycle_grant =
+         Gate.cycle_grant_of_resolution durable_resolution
+         |> require_some "approved resolution lacked its one-shot grant"
+       in
+       let request : Gate.request =
+         { keeper_name
+         ; operation = "external-effect"
+         ; input
+         ; base_path
+         ; causal_context = None
+         ; task_id = None
+         ; goal_ids = []
+         ; continuation_channel = None
+         }
+       in
+       (match Gate.decide ~cycle_grant ~keeper_always_allow:false request with
+        | Gate.Allow
+            { source = Gate.One_shot_resolution actual
+            ; audit_receipts = [ consumed_receipt; allowed_receipt ]
+            } ->
+          Alcotest.(check string) "exact grant id" approval_id actual;
+          check_append_failure Keeper_approval.Audit.Grant_consumed consumed_receipt;
+          check_append_failure Keeper_approval.Audit.Gate_allowed allowed_receipt
+        | Gate.Allow _ -> Alcotest.fail "one-shot authorization receipts were incomplete"
+        | Gate.Deferred _ -> Alcotest.fail "committed grant did not authorize"
+        | Gate.Unavailable reason ->
+          Alcotest.fail (Gate.unavailable_reason_to_string reason));
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id:approval_id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok AQ.Consumption_already_committed -> ()
+        | Ok (AQ.Consumption_committed _ | AQ.Consumption_not_matching) ->
+          Alcotest.fail "consumed grant became authorizable again"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       drop_resolution ~base_path ~keeper_name durable_resolution)
+;;
+
+let test_http_success_exposes_failed_resolution_and_rule_delete_audit () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-audit-http-failure" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Keeper_approval.Audit.For_testing.reset_store ();
+       ignore (install_exn ~base_path);
+       let approval_id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "http" ])
+       in
+       Keeper_approval.Audit.For_testing.set_append_jsonl
+         (fun _path _json -> failwith "deterministic HTTP audit append failure");
+       let response =
+         match
+           Server_dashboard_http.dashboard_gate_resolve_http_json
+             ~base_path
+             ~created_by:"http-test-operator"
+             ~args:
+               (`Assoc
+                  [ "id", `String approval_id
+                  ; "decision", `String "approve"
+                  ; "remember_rule", `Bool true
+                  ])
+         with
+         | Ok json -> json
+         | Error error ->
+           Alcotest.fail
+             (Server_dashboard_http.approval_resolve_http_error_to_string error)
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.(check bool) "HTTP mutation stayed successful" true
+         (response |> member "ok" |> to_bool);
+       let rule_id = response |> member "rule_id" |> to_string in
+       let receipts = response |> member "audit_receipts" |> to_list in
+       Alcotest.(check int) "HTTP exposes rule and resolution receipts" 2
+         (List.length receipts);
+       List.iter
+         (fun receipt ->
+            Alcotest.(check bool) "HTTP receipt reports missing audit" false
+              (receipt |> member "recorded" |> to_bool);
+            Alcotest.(check string) "HTTP receipt carries exact append stage" "append"
+              (receipt |> member "stage" |> to_string))
+         receipts;
+       let delete_response =
+         match
+           Server_dashboard_http.dashboard_gate_rule_delete_http_json
+             ~base_path
+             ~args:(`Assoc [ "id", `String rule_id ])
+         with
+         | Ok json -> json
+         | Error error -> Alcotest.fail error
+       in
+       Alcotest.(check bool) "HTTP rule delete stayed successful" true
+         (delete_response |> member "ok" |> to_bool);
+       let delete_receipt = delete_response |> member "audit" in
+       Alcotest.(check yojson) "delete receipt event"
+         (`String "rule_deleted")
+         (delete_receipt |> member "event");
+       Alcotest.(check bool) "delete receipt reports missing audit" false
+         (delete_receipt |> member "recorded" |> to_bool);
+       Alcotest.(check string) "delete receipt carries exact append stage" "append"
+         (delete_receipt |> member "stage" |> to_string))
 ;;
 
 (* #26126: resolution writes the judge evidence the entry carried onto the
@@ -3810,6 +4045,18 @@ let () =
             "non-approved resolution payload is delivered"
             `Quick
             test_nonapproved_resolution_payload_is_delivered
+        ; Alcotest.test_case
+            "audit store failure keeps defer committed and visible"
+            `Quick
+            test_audit_store_failure_keeps_defer_committed_and_visible
+        ; Alcotest.test_case
+            "audit append failure keeps authority mutations committed"
+            `Quick
+            test_audit_append_failure_keeps_resolution_rule_and_grant_committed
+        ; Alcotest.test_case
+            "HTTP success exposes failed resolution and rule audit"
+            `Quick
+            test_http_success_exposes_failed_resolution_and_rule_delete_audit
         ; Alcotest.test_case
             "delivery wire shape drops the request context"
             `Quick

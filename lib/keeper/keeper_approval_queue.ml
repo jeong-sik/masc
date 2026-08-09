@@ -93,9 +93,14 @@ type approved_resolution_delivery =
   }
 
 type grant_consumption =
-  | Consumption_committed
+  | Consumption_committed of Keeper_approval.Audit.receipt
   | Consumption_already_committed
   | Consumption_not_matching
+
+type pending_submission =
+  { approval_id : string
+  ; audit_receipt : Keeper_approval.Audit.receipt
+  }
 
 type replay_recording =
   | Replay_recorded
@@ -114,6 +119,11 @@ type install_report =
   }
 
 type install_error = Install_storage_failed of storage_error
+
+type resolution_result =
+  { remembered_rule : approval_rule option
+  ; audit_receipts : Keeper_approval.Audit.receipt list
+  }
 
 type persisted_delivery =
   { entry : pending_approval
@@ -1728,21 +1738,23 @@ let consume_approved_resolution
   | Ok (Consumption_without_audit consumption) -> Ok consumption
   | Ok (Consumption_with_audit delivery) ->
     let entry = delivery.entry in
-    Keeper_approval.Audit.record
-      ~base_path
-      ~event_type:Keeper_approval.Audit.Grant_consumed
-      ~id
-      ~keeper_name:entry.keeper_name
-      ~tool_name:entry.tool_name
-      ?turn_id:entry.turn_id
-      ?task_id:entry.task_id
-      ?goal_id:entry.goal_id
-      ~goal_ids:entry.goal_ids
-      ~source_approval_id:id
-      ~decision_source:delivery.source
-      ~decision:Decision.Approve
-      ();
-    Ok Consumption_committed
+    let audit_receipt =
+      Keeper_approval.Audit.record
+        ~base_path
+        ~event_type:Keeper_approval.Audit.Grant_consumed
+        ~id
+        ~keeper_name:entry.keeper_name
+        ~tool_name:entry.tool_name
+        ?turn_id:entry.turn_id
+        ?task_id:entry.task_id
+        ?goal_id:entry.goal_id
+        ~goal_ids:entry.goal_ids
+        ~source_approval_id:id
+        ~decision_source:delivery.source
+        ~decision:Decision.Approve
+        ()
+    in
+    Ok (Consumption_committed audit_receipt)
 ;;
 
 let input_preview_of_json (json : Yojson.Safe.t) =
@@ -1823,7 +1835,7 @@ let pending_entry_json_fields
       ]
 ;;
 
-let broadcast_pending entry =
+let broadcast_pending entry audit_receipt =
   try
     Sse.broadcast
       (`Assoc
@@ -1832,7 +1844,8 @@ let broadcast_pending entry =
             , `Assoc
                 (pending_entry_json_fields
                    ~include_input:true
-                   entry) )
+                   entry
+                 @ [ "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt ]) )
           ])
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -1852,18 +1865,21 @@ let record_pending (entry : pending_approval) =
     entry.sequence
     entry.keeper_name
     entry.tool_name;
-  Keeper_approval.Audit.record
-    ~base_path:entry.audit_base_path
-    ~event_type:Keeper_approval.Audit.Pending
-    ~id:entry.id
-    ~keeper_name:entry.keeper_name
-    ~tool_name:entry.tool_name
-    ?turn_id:entry.turn_id
-    ?task_id:entry.task_id
-    ?goal_id:entry.goal_id
-    ~goal_ids:entry.goal_ids
-    ();
-  broadcast_pending entry
+  let audit_receipt =
+    Keeper_approval.Audit.record
+      ~base_path:entry.audit_base_path
+      ~event_type:Keeper_approval.Audit.Pending
+      ~id:entry.id
+      ~keeper_name:entry.keeper_name
+      ~tool_name:entry.tool_name
+      ?turn_id:entry.turn_id
+      ?task_id:entry.task_id
+      ?goal_id:entry.goal_id
+      ~goal_ids:entry.goal_ids
+      ()
+  in
+  broadcast_pending entry audit_receipt;
+  audit_receipt
 ;;
 
 let summary_audit_extras (entry : pending_approval) : (string * Yojson.Safe.t) list =
@@ -1879,18 +1895,19 @@ let record_summary_updated ~now (entry : pending_approval) =
     | Summary_available summary -> summary.generated_at
     | Summary_not_requested | Summary_pending | Summary_failed _ -> now
   in
-  Keeper_approval.Audit.record
-    ~base_path:entry.audit_base_path
-    ~event_type:Keeper_approval.Audit.Summary_updated
-    ~id:entry.id
-    ~keeper_name:entry.keeper_name
-    ~tool_name:entry.tool_name
-    ~summary_status:entry.summary_status
-    ~exact_attempt:entry.exact_attempt
-    ~summary_attempt_disposition:entry.summary_attempt_disposition
-    ~timestamp:event_ts
-    ~extra_fields:(summary_audit_extras entry)
-    ();
+  ignore
+    (Keeper_approval.Audit.record
+       ~base_path:entry.audit_base_path
+       ~event_type:Keeper_approval.Audit.Summary_updated
+       ~id:entry.id
+       ~keeper_name:entry.keeper_name
+       ~tool_name:entry.tool_name
+       ~summary_status:entry.summary_status
+       ~exact_attempt:entry.exact_attempt
+       ~summary_attempt_disposition:entry.summary_attempt_disposition
+       ~timestamp:event_ts
+       ~extra_fields:(summary_audit_extras entry)
+       ());
   try
     Sse.broadcast
       (`Assoc
@@ -2826,6 +2843,7 @@ let resolve_entry
       ~base_path
       (entry : pending_approval)
       ~(source : decision_source)
+      ?actor
       (decision : decision)
   =
   let decision_str = approval_decision_to_string decision in
@@ -2835,43 +2853,48 @@ let resolve_entry
     entry.keeper_name
     entry.tool_name
     decision_str;
-  Keeper_approval.Audit.record
-    ~base_path:base_path
-    ~event_type:Keeper_approval.Audit.Resolved
-    ~id:entry.id
-    ~keeper_name:entry.keeper_name
-    ~tool_name:entry.tool_name
-    ?turn_id:entry.turn_id
-    ?task_id:entry.task_id
-    ?goal_id:entry.goal_id
-    ~goal_ids:entry.goal_ids
-    ~decision_source:source
-    ~decision
-    ~summary_status:entry.summary_status
-    ~exact_attempt:entry.exact_attempt
-    ();
-  before_terminal_publish ();
-  try
-    Sse.broadcast
-      (`Assoc
-          [ "type", `String approval_sse_resolved_event
-          ; ( "payload"
-            , `Assoc
-                [ "id", `String entry.id
-                ; "keeper_name", `String entry.keeper_name
-                ; "tool_name", `String entry.tool_name
-                ; "decision", `String decision_str
-                ] )
-          ])
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    record_queue_failure
-      ~keeper_name:entry.keeper_name
-      ~site:"broadcast_resolved"
+  let audit_receipt =
+    Keeper_approval.Audit.record
+      ~base_path
+      ~event_type:Keeper_approval.Audit.Resolved
       ~id:entry.id
-      ~event_type:(Keeper_approval.Audit.event_to_string Keeper_approval.Audit.Resolved)
-      exn
+      ~keeper_name:entry.keeper_name
+      ~tool_name:entry.tool_name
+      ?turn_id:entry.turn_id
+      ?task_id:entry.task_id
+      ?goal_id:entry.goal_id
+      ~goal_ids:entry.goal_ids
+      ?actor
+      ~decision_source:source
+      ~decision
+      ~summary_status:entry.summary_status
+      ~exact_attempt:entry.exact_attempt
+      ()
+  in
+  before_terminal_publish ();
+  (try
+     Sse.broadcast
+       (`Assoc
+           [ "type", `String approval_sse_resolved_event
+           ; ( "payload"
+             , `Assoc
+                 [ "id", `String entry.id
+                 ; "keeper_name", `String entry.keeper_name
+                 ; "tool_name", `String entry.tool_name
+                 ; "decision", `String decision_str
+                 ; "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt
+                 ] )
+           ])
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     record_queue_failure
+       ~keeper_name:entry.keeper_name
+       ~site:"broadcast_resolved"
+       ~id:entry.id
+       ~event_type:(Keeper_approval.Audit.event_to_string Keeper_approval.Audit.Resolved)
+       exn);
+  audit_receipt
 ;;
 
 let pending_entry_matches
@@ -2948,7 +2971,7 @@ let submit_pending
       ?(goal_ids = [])
       ?continuation_channel
       ()
-  : (string, storage_error) result
+  : (pending_submission, storage_error) result
   =
   let input_hash = normalized_input_hash input in
   let continuation_channel =
@@ -2979,7 +3002,7 @@ let submit_pending
              ~goal_ids
              ~continuation_channel
          with
-         | Some id -> Ok (id, None)
+         | Some id -> Ok (id, SMap.find id map)
          | None ->
            let id = generate_id () in
            if sequence = max_int
@@ -3020,14 +3043,13 @@ let submit_pending
              Atomic.set
                next_sequences
                (SMap.add base_path following_sequence (Atomic.get next_sequences));
-             Ok (id, Some entry))))
+             Ok (id, entry))))
   in
   match stored with
   | Error _ as error -> error
-  | Ok (id, None) -> Ok id
-  | Ok (id, Some entry) ->
-    record_pending entry;
-    Ok id
+  | Ok (approval_id, entry) ->
+    let audit_receipt = record_pending entry in
+    Ok { approval_id; audit_receipt }
 ;;
 
 (* ── Resolve (operator action) ────────────────────────────── *)
@@ -3167,13 +3189,17 @@ let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pen
         ()
     with
     | Ok (rule, created) ->
-      if created
-      then
-        Keeper_approval.Audit.record_rule
-          ~base_path
-          ~event_type:Keeper_approval.Audit.Rule_created
-          rule;
-      Ok rule
+      let audit_receipts =
+        if created
+        then
+          [ Keeper_approval.Audit.record_rule
+              ~base_path
+              ~event_type:Keeper_approval.Audit.Rule_created
+              rule
+          ]
+        else []
+      in
+      Ok (rule, audit_receipts)
     | Error reason -> Error reason
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -3207,7 +3233,7 @@ let remember_rule_for_delivery delivery =
          ?rule_expires_at:delivery.rule_expires_at
          delivery.entry
      with
-     | Ok rule -> Ok (Some rule)
+     | Ok (rule, audit_receipts) -> Ok (Some rule, audit_receipts)
      | Error rule_error ->
        Error
          { path = rule_error.path
@@ -3215,8 +3241,8 @@ let remember_rule_for_delivery delivery =
          })
   | (Decision.Approve | Decision.Reject _),
     false ->
-    Ok None
-  | Decision.Reject _, true -> Ok None
+    Ok (None, [])
+  | Decision.Reject _, true -> Ok (None, [])
 ;;
 
 let complete_delivery delivery =
@@ -3226,7 +3252,7 @@ let complete_delivery delivery =
   | Error _ as error -> error
   | Ok () ->
     if delivery.grant_consumed
-    then Ok { remembered_rule = None }
+    then Ok { remembered_rule = None; audit_receipts = [] }
     else
       (match deliver_resolution ~base_path delivery.entry delivery.decision with
        | Error reason -> Error (Delivery_failed { approval_id = id; reason })
@@ -3234,18 +3260,30 @@ let complete_delivery delivery =
          (match remember_rule_for_delivery delivery with
           | Error storage_error ->
             Error (Persistence_failed { approval_id = id; storage_error })
-          | Ok remembered_rule ->
+          | Ok (remembered_rule, rule_audit_receipts) ->
             let finish () =
-              resolve_entry
-                ~base_path
-                delivery.entry
-                ~source:delivery.source
-                delivery.decision;
+              let actor =
+                match delivery.created_by with
+                | Some actor when String.trim actor <> "" -> Some actor
+                | Some _ | None -> None
+              in
+              let resolution_audit_receipt =
+                resolve_entry
+                  ~base_path
+                  delivery.entry
+                  ~source:delivery.source
+                  ?actor
+                  delivery.decision
+              in
               signal_resolution_after_commit
                 ~base_path
                 ~keeper_name:delivery.entry.keeper_name
                 ~approval_id:id;
-              Ok { remembered_rule }
+              Ok
+                { remembered_rule
+                ; audit_receipts =
+                    rule_audit_receipts @ [ resolution_audit_receipt ]
+                }
             in
             (match delivery.decision with
              | Decision.Approve ->

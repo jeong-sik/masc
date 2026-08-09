@@ -41,12 +41,46 @@ import {
   gateError,
   gateLoading,
   gateApprovalActing,
+  gateAuditWriteFailures,
+  clearGateAuditWriteFailures,
   deleteKeeperApprovalRule,
   refreshGate,
   respondToKeeperApproval,
   retryKeeperAutoJudge,
   setKeeperGateMode,
 } from '../gate-store'
+
+function ApprovalAuditWriteFailureAlert() {
+  const notices = gateAuditWriteFailures.value
+  if (notices.length === 0) return null
+  return html`
+    <section
+      class="ap-error ap-audit-write-alert sev-bad"
+      role="alert"
+      data-testid="approval-audit-write-unavailable"
+    >
+      <strong><span aria-hidden="true">!</span> 권한 변경은 커밋됐지만 감사 기록은 저장되지 않았습니다</strong>
+      <span>재실행하지 마세요. 아래 receipt는 실제 변경 성공과 감사 저장 실패를 함께 증명합니다.</span>
+      ${notices.map(notice => html`
+        <div class="ap-audit-failure" key=${`${notice.id ?? '-'}:${notice.receipt.event}:${notice.observed_at}`}>
+          <span class="mono">
+            ${notice.receipt.event} · ${notice.receipt.stage} ·
+            ${notice.id ?? 'id 없음'} · ${notice.transport.toUpperCase()} ·
+            관측 ${formatDateTimeKo(notice.observed_at)}
+          </span>
+          <span>${notice.receipt.detail}</span>
+          <details>
+            <summary>RAW receipt</summary>
+            <pre data-testid="approval-audit-write-raw">${JSON.stringify(notice.receipt, null, 2)}</pre>
+          </details>
+        </div>
+      `)}
+      <button type="button" class="ap-viewbtn" onClick=${clearGateAuditWriteFailures}>
+        확인 후 숨기기
+      </button>
+    </section>
+  `
+}
 
 type ApprovalsView = 'queue' | 'history'
 type ApprovalHistoryFilter = 'all' | KeeperResolvedApprovalDecision
@@ -273,10 +307,10 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
       : item.exact_attempt.state
   return [
     { label: '키퍼', value: item.keeper_name },
-    { label: '작업', value: item.tool_name },
+    { label: '도구', value: item.tool_name },
     { label: '상태', value: 'Human 판단 대기 · Keeper lane nonblocking' },
     { label: '대기', value: apAge(item.waiting_s) },
-    { label: '작업', value: approvalWorkSummary(item) },
+    { label: '연결 작업', value: approvalWorkSummary(item) },
     { label: '턴', value: typeof item.turn_id === 'number' ? `turn ${item.turn_id}` : null },
     { label: '요청시각', value: compactText(item.requested_at) },
     { label: '입력', value: compactText(item.input_preview) || '입력 미리보기 없음' },
@@ -809,6 +843,7 @@ export function ApprovalsSurface() {
         </header>
 
         ${error ? html`<div class="ap-error" role="alert" data-testid="approvals-error">${error}</div>` : null}
+        <${ApprovalAuditWriteFailureAlert} />
         ${resolvedUnavailable
           ? html`
               <div class="ap-error sev-bad" role="alert" data-testid="approvals-history-unavailable">

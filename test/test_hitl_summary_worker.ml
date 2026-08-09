@@ -97,7 +97,7 @@ let pending_entry
           (if include_request_context then Some request_context else None)
         ()
     with
-    | Ok id -> id
+    | Ok submission -> submission.approval_id
     | Error error -> fail (Q.storage_error_to_string error)
   in
   (match Q.mark_summary_pending ~id with

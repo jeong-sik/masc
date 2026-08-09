@@ -28,7 +28,10 @@ type authorization_source =
   | Keeper_always_allow
   | Workspace_always_allow
 
-type authorization = { source : authorization_source }
+type authorization =
+  { source : authorization_source
+  ; audit_receipts : Keeper_approval.Audit.receipt list
+  }
 
 type deferred_reason =
   | Human_requested
@@ -46,6 +49,7 @@ type decision =
   | Deferred of
       { approval_id : string
       ; reason : deferred_reason
+      ; audit_receipts : Keeper_approval.Audit.receipt list
       }
   | Unavailable of unavailable_reason
 

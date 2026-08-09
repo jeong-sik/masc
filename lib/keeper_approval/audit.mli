@@ -32,6 +32,23 @@ type event =
 val event_to_string : event -> string
 val event_of_string : string -> event option
 
+type write_stage =
+  | Store_create
+  | Append
+
+type write_failure =
+  { stage : write_stage
+  ; detail : string
+  }
+
+type receipt =
+  { event_type : event
+  ; write_result : (unit, write_failure) result
+  }
+
+val write_stage_to_string : write_stage -> string
+val receipt_to_yojson : receipt -> Yojson.Safe.t
+
 type decision_kind =
   | Decision_approve
   | Decision_reject
@@ -61,9 +78,9 @@ val record :
   ?timestamp:float ->
   ?extra_fields:(string * Yojson.Safe.t) list ->
   unit ->
-  unit
+  receipt
 
-val record_rule : base_path:string -> event_type:event -> approval_rule -> unit
+val record_rule : base_path:string -> event_type:event -> approval_rule -> receipt
 
 val recent_resolved_history_limit : int
 val recent_resolved_max_limit : int
@@ -98,4 +115,6 @@ val list_recent_resolved :
 
 module For_testing : sig
   val reset_store : unit -> unit
+  val set_store_create_probe : (base_path:string -> unit) -> unit
+  val set_append_jsonl : (string -> Yojson.Safe.t -> unit) -> unit
 end

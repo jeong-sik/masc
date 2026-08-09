@@ -50,6 +50,8 @@ import {
   fetchTlcResults,
   fetchToolQuality,
   setGateMode,
+  resolveGateApproval,
+  deleteGateApprovalRule,
 } from './dashboard'
 import { fetchDashboardShell as fetchDashboardShellHot } from './dashboard-hot'
 import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
@@ -2164,6 +2166,81 @@ describe('fetchDashboardGate', () => {
       slots: [],
     })))
     await expect(fetchDashboardGate()).rejects.toThrow('hitl.judge_lane.slots is invalid')
+  })
+})
+
+describe('Gate mutation audit receipts', () => {
+  it('keeps a committed resolution successful while decoding failed audit writes', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'appr-audit',
+        decision: 'approve',
+        rule_id: null,
+        audit_receipts: [{
+          event: 'resolved',
+          recorded: false,
+          stage: 'append',
+          detail: 'audit append unavailable',
+        }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(resolveGateApproval('appr-audit', {
+      decision: 'approve',
+      rememberRule: false,
+    })).resolves.toMatchObject({
+      ok: true,
+      audit_receipts: [{ recorded: false, stage: 'append' }],
+    })
+  })
+
+  it('rejects a committed resolution response that hides its audit receipt', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'appr-audit',
+        decision: 'approve',
+        rule_id: null,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(resolveGateApproval('appr-audit', {
+      decision: 'approve',
+      rememberRule: false,
+    })).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      errorCode: 'protocol_drift',
+    })
+  })
+
+  it('decodes a committed rule deletion with its exact failed audit stage', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'rule-audit',
+        audit: {
+          event: 'rule_deleted',
+          recorded: false,
+          stage: 'store_create',
+          detail: 'audit store unavailable',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(deleteGateApprovalRule('rule-audit')).resolves.toMatchObject({
+      ok: true,
+      audit: { recorded: false, stage: 'store_create' },
+    })
   })
 })
 

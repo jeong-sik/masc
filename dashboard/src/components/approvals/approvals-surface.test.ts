@@ -152,12 +152,16 @@ async function loadSurface(
       id: 'appr-1',
       decision: 'approve',
       rule_id: null,
-      rule_error: null,
+      audit_receipts: [{ event: 'resolved', recorded: true }],
     })
   const retryGateAutoJudge = vi
     .fn()
     .mockResolvedValue({ ok: true, id: 'appr-1' })
-  const deleteGateApprovalRule = vi.fn().mockResolvedValue({ ok: true, id: 'rule-1' })
+  const deleteGateApprovalRule = vi.fn().mockResolvedValue({
+    ok: true,
+    id: 'rule-1',
+    audit: { event: 'rule_deleted', recorded: true },
+  })
   const setGateMode = vi
     .fn()
     .mockResolvedValue({
@@ -205,7 +209,10 @@ async function loadSurface(
   })
   vi.doMock('../../api', apiMock)
   vi.doMock('../../api/dashboard-gate', apiMock)
-  vi.doMock('../../sse-store', () => ({ registerGateRefresh: vi.fn() }))
+  vi.doMock('../../sse-store', () => ({
+    registerGateRefresh: vi.fn(),
+    registerGateAuditReceiptObserver: vi.fn(),
+  }))
   // Preserve the real router (route signal etc.) but capture navigate() so the
   // "open keeper conversation" wiring can be asserted without a real route change.
   const navigate = vi.fn()
@@ -214,6 +221,8 @@ async function loadSurface(
     navigate,
   }))
   const mod = await import('./approvals-surface')
+  const gateSignals = await import('../gate-signals')
+  gateSignals.clearGateAuditWriteFailures()
   return {
     ApprovalsSurface: mod.ApprovalsSurface,
     resolveGateApproval,
@@ -221,6 +230,7 @@ async function loadSurface(
     deleteGateApprovalRule,
     setGateMode,
     navigate,
+    gateSignals,
   }
 }
 
@@ -1081,7 +1091,10 @@ describe('ApprovalsSurface', () => {
       deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
-    vi.doMock('../../sse-store', () => ({ registerGateRefresh: vi.fn() }))
+    vi.doMock('../../sse-store', () => ({
+      registerGateRefresh: vi.fn(),
+      registerGateAuditReceiptObserver: vi.fn(),
+    }))
     const { ApprovalsSurface } = await import('./approvals-surface')
 
     render(html`<${ApprovalsSurface} />`, container)
@@ -1121,7 +1134,10 @@ describe('ApprovalsSurface', () => {
       deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
-    vi.doMock('../../sse-store', () => ({ registerGateRefresh: vi.fn() }))
+    vi.doMock('../../sse-store', () => ({
+      registerGateRefresh: vi.fn(),
+      registerGateAuditReceiptObserver: vi.fn(),
+    }))
     const { ApprovalsSurface } = await import('./approvals-surface')
 
     render(html`<${ApprovalsSurface} />`, container)
@@ -1166,6 +1182,37 @@ describe('ApprovalsSurface', () => {
       'appr-9',
       { decision: 'approve', rememberRule: false },
     )
+  })
+
+  it('renders committed-but-unaudited HTTP success with a distinct RAW receipt', async () => {
+    const { ApprovalsSurface, resolveGateApproval } = await loadSurface([
+      queueItem({ id: 'appr-audit', keeper_name: 'masc-improver' }),
+    ])
+    resolveGateApproval.mockResolvedValueOnce({
+      ok: true,
+      id: 'appr-audit',
+      decision: 'approve',
+      rule_id: null,
+      audit_receipts: [{
+        event: 'resolved',
+        recorded: false,
+        stage: 'append',
+        detail: 'audit append unavailable',
+      }],
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+    container.querySelector<HTMLButtonElement>('.ap-card .ap-act.approve')?.click()
+    await flushUi()
+
+    const alert = container.querySelector('[data-testid="approval-audit-write-unavailable"]')
+    expect(alert?.textContent).toContain('권한 변경은 커밋됐지만 감사 기록은 저장되지 않았습니다')
+    expect(alert?.textContent).toContain('resolved · append')
+    expect(alert?.textContent).toContain('appr-audit · HTTP')
+    const raw = container.querySelector('[data-testid="approval-audit-write-raw"]')
+    expect(raw?.textContent).toContain('"recorded": false')
+    expect(raw?.textContent).toContain('"detail": "audit append unavailable"')
   })
 
   it('routes the 거부 action through resolveGateApproval with the reject decision', async () => {

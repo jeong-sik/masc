@@ -2,6 +2,7 @@ type t =
   { operation : string
   ; approval_id : string
   ; reason : Keeper_gate.deferred_reason
+  ; audit_receipts : Keeper_approval.Audit.receipt list
   ; context : Yojson.Safe.t option
   }
 
@@ -9,13 +10,17 @@ let message =
   "External effect deferred without blocking this Keeper. Continue other work; the originating Keeper will wake after resolution."
 ;;
 
-let create ~operation ~approval_id ~reason ?context () =
-  { operation; approval_id; reason; context }
+let create ~operation ~approval_id ~reason ~audit_receipts ?context () =
+  { operation; approval_id; reason; audit_receipts; context }
 ;;
 
 let gate_json t =
   Keeper_gate.decision_to_yojson
-    (Keeper_gate.Deferred { approval_id = t.approval_id; reason = t.reason })
+    (Keeper_gate.Deferred
+       { approval_id = t.approval_id
+       ; reason = t.reason
+       ; audit_receipts = t.audit_receipts
+       })
 ;;
 
 let data t =

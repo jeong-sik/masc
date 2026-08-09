@@ -1,5 +1,9 @@
 import { signal, computed } from '@preact/signals'
-import type { DashboardGateResponse } from '../types'
+import type {
+  DashboardGateResponse,
+  KeeperApprovalAuditFailureNotice,
+  KeeperApprovalAuditReceipt,
+} from '../types'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { gateObservationErrorState } from '../lib/gate-observation-state'
 
@@ -31,6 +35,35 @@ export function gateObservationErrorSnapshot(operatorDetail: string): DashboardG
 export const gateLoading = computed(() => gateResource.state.value.loading)
 export const gateError = signal('')
 export const gateData = computed(() => gateResource.state.value.data)
+
+export const gateAuditWriteFailures = signal<KeeperApprovalAuditFailureNotice[]>([])
+
+export function observeGateAuditReceipts(
+  receipts: KeeperApprovalAuditReceipt[],
+  context: { id: string | null; transport: 'http' | 'sse' },
+): void {
+  const observedAt = new Date().toISOString()
+  let notices = gateAuditWriteFailures.value
+  for (const receipt of receipts) {
+    if (receipt.recorded) continue
+    const duplicate = notices.some(notice =>
+      notice.id === context.id
+      && notice.receipt.event === receipt.event
+      && notice.receipt.stage === receipt.stage
+      && notice.receipt.detail === receipt.detail)
+    if (!duplicate) {
+      notices = [
+        { ...context, observed_at: observedAt, receipt },
+        ...notices,
+      ].slice(0, 20)
+    }
+  }
+  gateAuditWriteFailures.value = notices
+}
+
+export function clearGateAuditWriteFailures(): void {
+  gateAuditWriteFailures.value = []
+}
 
 // ── Action-specific loading flag (not a data-fetch trio) ──
 export const gateApprovalActing = signal<string | null>(null)

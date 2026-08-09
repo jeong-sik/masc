@@ -353,11 +353,12 @@ let handle_tool_execute_typed
         (match
            gate_decision
          with
-         | Keeper_gate.Deferred { approval_id; reason } ->
+         | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
            Keeper_gate_deferred_payload.create
              ~operation:gate_operation
              ~approval_id
              ~reason
+             ~audit_receipts
              ~context:(`Assoc typed_context_fields)
              ()
            |> Keeper_gate_deferred_payload.to_execution

@@ -4,6 +4,8 @@ export {
   gateApprovalActing,
   gateError,
   gateData,
+  gateAuditWriteFailures,
+  clearGateAuditWriteFailures,
 } from './gate-signals'
 export {
   refreshGate,

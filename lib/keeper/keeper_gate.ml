@@ -20,7 +20,10 @@ type authorization_source =
   | Keeper_always_allow
   | Workspace_always_allow
 
-type authorization = { source : authorization_source }
+type authorization =
+  { source : authorization_source
+  ; audit_receipts : Keeper_approval.Audit.receipt list
+  }
 
 type deferred_reason =
   | Human_requested
@@ -38,6 +41,7 @@ type decision =
   | Deferred of
       { approval_id : string
       ; reason : deferred_reason
+      ; audit_receipts : Keeper_approval.Audit.receipt list
       }
   | Unavailable of unavailable_reason
 
@@ -157,7 +161,7 @@ type cycle_grant_state =
 type cycle_grant = cycle_grant_state Atomic.t
 
 type cycle_grant_take_result =
-  | Cycle_grant_authorized of string
+  | Cycle_grant_authorized of string * Keeper_approval.Audit.receipt
   | Cycle_grant_not_applicable
   | Cycle_grant_temporarily_unavailable of string * unavailable_reason
 
@@ -199,9 +203,9 @@ let rec take_matching_cycle_grant grant request =
       | Ok Keeper_approval_queue.Consumption_already_committed ->
         Atomic.set grant Cycle_grant_consumed;
         Cycle_grant_not_applicable
-      | Ok Keeper_approval_queue.Consumption_committed ->
+      | Ok (Keeper_approval_queue.Consumption_committed audit_receipt) ->
         Atomic.set grant Cycle_grant_consumed;
-        Cycle_grant_authorized entry.approval_id)
+        Cycle_grant_authorized (entry.approval_id, audit_receipt))
     else take_matching_cycle_grant grant request
 ;;
 
@@ -251,10 +255,18 @@ let request_turn_id request =
   Option.bind request.causal_context (fun context -> context.turn_id)
 ;;
 
+let audit_receipts_to_yojson receipts =
+  `List (List.map Keeper_approval.Audit.receipt_to_yojson receipts)
+;;
+
 let decision_to_yojson = function
   | Allow authorization ->
-    `Assoc ([ "decision", `String "allow" ] @ source_fields authorization.source)
-  | Deferred { approval_id; reason } ->
+    `Assoc
+      ([ "decision", `String "allow"
+       ; "audit_receipts", audit_receipts_to_yojson authorization.audit_receipts
+       ]
+       @ source_fields authorization.source)
+  | Deferred { approval_id; reason; audit_receipts } ->
     let detail =
       match reason with
       | Mode_state_invalid detail -> [ "mode_read_error", `String detail ]
@@ -266,6 +278,7 @@ let decision_to_yojson = function
       ([ "decision", `String "deferred"
        ; "approval_id", `String approval_id
        ; "reason", `String (deferred_reason_to_string reason)
+       ; "audit_receipts", audit_receipts_to_yojson audit_receipts
        ]
        @ detail)
   | Unavailable reason ->
@@ -1127,17 +1140,18 @@ let observe_recovered_work kind (entry : Keeper_approval_queue_rules_types.pendi
     Keeper_metrics.(to_string HitlSummaryOutcomes)
     ~labels:[ "outcome", outcome ]
     ();
-  Keeper_approval.Audit.record
-    ~base_path:entry.audit_base_path
-    ~event_type
-    ~id:entry.id
-    ~keeper_name:entry.keeper_name
-    ~tool_name:entry.tool_name
-    ?turn_id:entry.turn_id
-    ?task_id:entry.task_id
-    ?goal_id:entry.goal_id
-    ~goal_ids:entry.goal_ids
-    ()
+  ignore
+    (Keeper_approval.Audit.record
+       ~base_path:entry.audit_base_path
+       ~event_type
+       ~id:entry.id
+       ~keeper_name:entry.keeper_name
+       ~tool_name:entry.tool_name
+       ?turn_id:entry.turn_id
+       ?task_id:entry.task_id
+       ?goal_id:entry.goal_id
+       ~goal_ids:entry.goal_ids
+       ())
 ;;
 
 let retry_blocked_auto_judge
@@ -1188,18 +1202,19 @@ let retry_blocked_auto_judge
             Keeper_metrics.(to_string HitlSummaryOutcomes)
             ~labels:[ "outcome", "operator_retry_started" ]
             ();
-       Keeper_approval.Audit.record
-         ~base_path:entry.audit_base_path
-         ~event_type:Keeper_approval.Audit.Auto_judge_operator_retry_started
-         ~id:entry.id
-         ~keeper_name:entry.keeper_name
-         ~tool_name:entry.tool_name
-         ?turn_id:entry.turn_id
-         ?task_id:entry.task_id
-         ?goal_id:entry.goal_id
-         ~goal_ids:entry.goal_ids
-       ~actor:requested_by
-       ();
+       ignore
+         (Keeper_approval.Audit.record
+            ~base_path:entry.audit_base_path
+            ~event_type:Keeper_approval.Audit.Auto_judge_operator_retry_started
+            ~id:entry.id
+            ~keeper_name:entry.keeper_name
+            ~tool_name:entry.tool_name
+            ?turn_id:entry.turn_id
+            ?task_id:entry.task_id
+            ?goal_id:entry.goal_id
+            ~goal_ids:entry.goal_ids
+            ~actor:requested_by
+            ());
        Ok ()))
 ;;
 
@@ -1381,7 +1396,9 @@ let request_operator_auto_judge_recovery ~base_path =
 let defer request reason =
   match submit request with
   | Error error -> Unavailable (Queue_storage_unavailable error)
-  | Ok approval_id ->
+  | Ok submission ->
+    let approval_id = submission.approval_id in
+    let audit_receipts = [ submission.audit_receipt ] in
     let reason =
       match reason with
       | Judge_requested ->
@@ -1422,13 +1439,15 @@ let defer request reason =
          | Error (Keeper_approval_queue.Exact_attempt_storage_error error) ->
            Error error
          | Error (Keeper_approval_queue.Exact_attempt_rejected rejection) ->
-           Keeper_approval.Audit.record
-             ~base_path:request.base_path
-             ~event_type:Keeper_approval.Audit.Auto_judge_block_observation_superseded
-             ~id:approval_id
-             ~keeper_name:request.keeper_name
-             ~tool_name:request.operation
-             ();
+           ignore
+             (Keeper_approval.Audit.record
+                ~base_path:request.base_path
+                ~event_type:
+                  Keeper_approval.Audit.Auto_judge_block_observation_superseded
+                ~id:approval_id
+                ~keeper_name:request.keeper_name
+                ~tool_name:request.operation
+                ());
            Log.Keeper.warn
              ~keeper_name:request.keeper_name
              "Auto Judge pre-worker block observation superseded approval=%s \
@@ -1449,7 +1468,7 @@ let defer request reason =
               Keeper_approval_queue_rules_types.Summary_pre_worker_mode_state_invalid
             detail
         with
-        | Ok () -> Deferred { approval_id; reason }
+        | Ok () -> Deferred { approval_id; reason; audit_receipts }
         | Error error -> Unavailable (Queue_storage_unavailable error))
      | Auto_judge_unavailable detail ->
        (match
@@ -1458,9 +1477,10 @@ let defer request reason =
               Keeper_approval_queue_rules_types.Summary_pre_worker_auto_judge_unavailable
             detail
         with
-        | Ok () -> Deferred { approval_id; reason }
+        | Ok () -> Deferred { approval_id; reason; audit_receipts }
         | Error error -> Unavailable (Queue_storage_unavailable error))
-     | Human_requested | Judge_requested -> Deferred { approval_id; reason })
+     | Human_requested | Judge_requested ->
+       Deferred { approval_id; reason; audit_receipts })
 ;;
 
 let observe_exact_rule_store_degraded (request : request) error =
@@ -1474,16 +1494,17 @@ let observe_exact_rule_store_degraded (request : request) error =
     Keeper_metrics.(to_string ApprovalQueueFailures)
     ~labels:[ "keeper", request.keeper_name; "site", "exact_rule_lookup" ]
     ();
-  Keeper_approval.Audit.record
-    ~base_path:request.base_path
-    ~event_type:Keeper_approval.Audit.Gate_exact_rule_store_degraded
-    ~id:(Keeper_approval_queue.generate_id ())
-    ~keeper_name:request.keeper_name
-    ~tool_name:request.operation
-    ?turn_id:(request_turn_id request)
-    ?task_id:request.task_id
-    ~goal_ids:request.goal_ids
-    ()
+  ignore
+    (Keeper_approval.Audit.record
+       ~base_path:request.base_path
+       ~event_type:Keeper_approval.Audit.Gate_exact_rule_store_degraded
+       ~id:(Keeper_approval_queue.generate_id ())
+       ~keeper_name:request.keeper_name
+       ~tool_name:request.operation
+       ?turn_id:(request_turn_id request)
+       ?task_id:request.task_id
+       ~goal_ids:request.goal_ids
+       ())
 ;;
 
 let observe_exact_rule_expired
@@ -1495,17 +1516,18 @@ let observe_exact_rule_expired
     "exact Always Allowed rule %s expired operation=%s; continuing configured Gate mode"
     rule_match.rule_id
     request.operation;
-  Keeper_approval.Audit.record
-    ~base_path:request.base_path
-    ~event_type:Keeper_approval.Audit.Gate_exact_rule_expired
-    ~id:(Keeper_approval_queue.generate_id ())
-    ~keeper_name:request.keeper_name
-    ~tool_name:request.operation
-    ?turn_id:(request_turn_id request)
-    ?task_id:request.task_id
-    ~goal_ids:request.goal_ids
-    ~rule_match
-    ()
+  ignore
+    (Keeper_approval.Audit.record
+       ~base_path:request.base_path
+       ~event_type:Keeper_approval.Audit.Gate_exact_rule_expired
+       ~id:(Keeper_approval_queue.generate_id ())
+       ~keeper_name:request.keeper_name
+       ~tool_name:request.operation
+       ?turn_id:(request_turn_id request)
+       ?task_id:request.task_id
+       ~goal_ids:request.goal_ids
+       ~rule_match
+       ())
 ;;
 
 let decide_from_selected_mode request = function
@@ -1514,32 +1536,38 @@ let decide_from_selected_mode request = function
   | Ok Keeper_gate_mode.Auto_judge -> defer request Judge_requested
   | Ok Keeper_gate_mode.Always_allow ->
     let source = Workspace_always_allow in
-    audit_allow
-      request
-      ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
-      source;
-    Allow { source }
+    let audit_receipt =
+      audit_allow
+        request
+        ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+        source
+    in
+    Allow { source; audit_receipts = [ audit_receipt ] }
 ;;
 
 let decide_without_cycle_grant ~keeper_always_allow request =
   if keeper_always_allow
   then (
     let source = Keeper_always_allow in
-    audit_allow
-      request
-      ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
-      source;
-    Allow { source })
+    let audit_receipt =
+      audit_allow
+        request
+        ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+        source
+    in
+    Allow { source; audit_receipts = [ audit_receipt ] })
   else
     let mode = Keeper_gate_mode.read ~base_path:request.base_path in
     (match mode with
      | Ok Keeper_gate_mode.Always_allow ->
        let source = Workspace_always_allow in
-       audit_allow
-         request
-         ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
-         source;
-       Allow { source }
+       let audit_receipt =
+         audit_allow
+           request
+           ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+           source
+       in
+       Allow { source; audit_receipts = [ audit_receipt ] }
      | Error _ | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Auto_judge) ->
        (match
           Keeper_approval_queue_rules.find_matching_rule
@@ -1554,12 +1582,14 @@ let decide_without_cycle_grant ~keeper_always_allow request =
           decide_from_selected_mode request mode
         | Ok (Keeper_approval_queue_rules_types.Rule_match_active rule_match) ->
           let source = Exact_always_rule rule_match.rule_id in
-          audit_allow
-            request
-            ~rule_match
-            ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
-            source;
-          Allow { source }
+          let audit_receipt =
+            audit_allow
+              request
+              ~rule_match
+              ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+              source
+          in
+          Allow { source; audit_receipts = [ audit_receipt ] }
         | Ok (Keeper_approval_queue_rules_types.Rule_match_expired rule_match) ->
           observe_exact_rule_expired request rule_match;
           decide_from_selected_mode request mode
@@ -1574,10 +1604,15 @@ let decide ?cycle_grant ~keeper_always_allow request =
     | Some grant -> take_matching_cycle_grant grant request
   in
   match grant_result with
-  | Cycle_grant_authorized approval_id ->
+  | Cycle_grant_authorized (approval_id, grant_audit_receipt) ->
     let source = One_shot_resolution approval_id in
-    audit_allow request ~source_approval_id:approval_id source;
-    Allow { source }
+    let gate_audit_receipt =
+      audit_allow request ~source_approval_id:approval_id source
+    in
+    Allow
+      { source
+      ; audit_receipts = [ grant_audit_receipt; gate_audit_receipt ]
+      }
   | Cycle_grant_not_applicable ->
     decide_without_cycle_grant ~keeper_always_allow request
   | Cycle_grant_temporarily_unavailable (approval_id, reason) ->
@@ -1586,17 +1621,18 @@ let decide ?cycle_grant ~keeper_always_allow request =
       "one-shot Gate grant unavailable; preserving the unconsumed grant operation=%s reason=%s"
       request.operation
       (unavailable_reason_to_string reason);
-    Keeper_approval.Audit.record
-      ~base_path:request.base_path
-      ~event_type:Keeper_approval.Audit.Gate_grant_unavailable
-      ~id:approval_id
-      ~keeper_name:request.keeper_name
-      ~tool_name:request.operation
-      ?turn_id:(request_turn_id request)
-      ?task_id:request.task_id
-      ~goal_ids:request.goal_ids
-      ~source_approval_id:approval_id
-      ();
+    ignore
+      (Keeper_approval.Audit.record
+         ~base_path:request.base_path
+         ~event_type:Keeper_approval.Audit.Gate_grant_unavailable
+         ~id:approval_id
+         ~keeper_name:request.keeper_name
+         ~tool_name:request.operation
+         ?turn_id:(request_turn_id request)
+         ?task_id:request.task_id
+         ~goal_ids:request.goal_ids
+         ~source_approval_id:approval_id
+         ());
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels:[ "keeper", request.keeper_name; "site", "cycle_grant_lookup" ]

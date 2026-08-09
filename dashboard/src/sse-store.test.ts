@@ -268,6 +268,35 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshGate).toHaveBeenCalledWith({ force: true })
   })
 
+  it('projects a failed approval audit receipt from SSE without changing the committed event', async () => {
+    const { sseStore } = await loadSseStore()
+    const observe = vi.fn()
+    sseStore.registerGateAuditReceiptObserver(observe)
+
+    sseStore.routeServerPushEvent({
+      type: 'approval:resolved',
+      payload: {
+        id: 'appr-sse-audit',
+        audit: {
+          event: 'resolved',
+          recorded: false,
+          stage: 'append',
+          detail: 'audit append unavailable',
+        },
+      },
+    })
+
+    expect(observe).toHaveBeenCalledWith(
+      [{
+        event: 'resolved',
+        recorded: false,
+        stage: 'append',
+        detail: 'audit append unavailable',
+      }],
+      { id: 'appr-sse-audit', transport: 'sse' },
+    )
+  })
+
   it('routes an approval:summary_updated SSE event to the Gate refresh (Auto Judge verdict contract)', async () => {
     const { sseStore } = await loadSseStore()
     const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()

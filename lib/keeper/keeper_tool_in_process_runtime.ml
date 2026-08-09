@@ -53,13 +53,14 @@ let external_gate_decision
       ; continuation_channel
       }
   with
-  | Keeper_gate.Deferred { approval_id; reason } ->
+  | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
     Error
       (Gate_deferred
          (Keeper_gate_deferred_payload.create
             ~operation
             ~approval_id
             ~reason
+            ~audit_receipts
             ()))
   | Keeper_gate.Unavailable reason ->
     Error

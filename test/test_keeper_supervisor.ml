@@ -377,7 +377,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
               ~base_path:config.base_path
               ()
           with
-          | Ok id -> id
+          | Ok submission -> submission.approval_id
           | Error error -> fail (AQ.storage_error_to_string error)
         in
         approval_ids := id :: !approval_ids
@@ -1116,7 +1116,7 @@ let test_sweep_reports_pending_hitl_approval () =
             ~base_path:config.base_path
             ()
         with
-        | Ok id -> id
+        | Ok submission -> submission.approval_id
         | Error error -> fail (AQ.storage_error_to_string error)
       in
       approval_id := Some id;

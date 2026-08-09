@@ -1836,7 +1836,7 @@ let approved_grant_fixture ~base_path ~keeper_name ~input =
         ~base_path
         ()
     with
-    | Ok id -> id
+    | Ok submission -> submission.approval_id
     | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
   in
   (match
@@ -1887,7 +1887,7 @@ let test_consumed_grant_without_outcome_stays_actionable () =
        ~tool_name:"external-effect"
        ~input
    with
-   | Ok Keeper_approval_queue.Consumption_committed -> ()
+   | Ok (Keeper_approval_queue.Consumption_committed _) -> ()
    | Ok Keeper_approval_queue.Consumption_already_committed ->
      fail "grant was already consumed before the test consumed it"
    | Ok Keeper_approval_queue.Consumption_not_matching ->
@@ -1925,7 +1925,7 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
        ~tool_name:"external-effect"
        ~input
    with
-   | Ok Keeper_approval_queue.Consumption_committed -> ()
+   | Ok (Keeper_approval_queue.Consumption_committed _) -> ()
    | Ok Keeper_approval_queue.Consumption_already_committed ->
      fail "grant was already consumed before the test consumed it"
    | Ok Keeper_approval_queue.Consumption_not_matching ->

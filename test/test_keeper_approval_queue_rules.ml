@@ -157,7 +157,7 @@ let test_gate_allows_only_the_exact_persisted_rule () =
          }
        in
        match Gate.decide ~keeper_always_allow:false request with
-       | Gate.Allow { source = Gate.Exact_always_rule rule_id } ->
+       | Gate.Allow { source = Gate.Exact_always_rule rule_id; _ } ->
          check string "exact rule id" rule.id rule_id
        | Gate.Allow _ -> fail "Gate used a broader Always Allowed source"
        | Gate.Deferred _ -> fail "exact Always Allowed rule unexpectedly deferred"
@@ -402,7 +402,7 @@ let submit_eligibility_entry ~base_path ~keeper_name label =
       ~base_path
       ()
   with
-  | Ok id -> approval_entry_exn id
+  | Ok submission -> approval_entry_exn submission.approval_id
   | Error error -> fail (AQ.storage_error_to_string error)
 ;;
 
@@ -709,7 +709,7 @@ let test_gate_allows_unexpired_exact_rule () =
       ~expires_at:(Unix.gettimeofday () +. 3600.0)
   in
   match Gate.decide ~keeper_always_allow:false (gate_request ~base_path) with
-  | Gate.Allow { source = Gate.Exact_always_rule rule_id } ->
+  | Gate.Allow { source = Gate.Exact_always_rule rule_id; _ } ->
     check string "unexpired exact rule id" rule.id rule_id
   | Gate.Allow _ -> fail "Gate used a broader Always Allowed source"
   | Gate.Deferred _ -> fail "unexpired exact rule unexpectedly deferred"
@@ -761,7 +761,7 @@ let test_keeper_always_allow_does_not_depend_on_rule_store () =
     (fun () ->
        write_rules ~base_path (`Assoc [ "invalid", `Bool true ]);
        match Gate.decide ~keeper_always_allow:true (gate_request ~base_path) with
-       | Gate.Allow { source = Gate.Keeper_always_allow } -> ()
+       | Gate.Allow { source = Gate.Keeper_always_allow; _ } -> ()
        | Gate.Allow _ -> fail "unexpected Always Allowed source"
        | Gate.Deferred _ -> fail "Keeper Always Allowed unexpectedly deferred"
        | Gate.Unavailable reason -> fail (Gate.unavailable_reason_to_string reason))
@@ -778,7 +778,7 @@ let test_workspace_always_allow_does_not_depend_on_rule_store () =
         | Error reason -> fail reason);
        write_rules ~base_path (`Assoc [ "invalid", `Bool true ]);
        match Gate.decide ~keeper_always_allow:false (gate_request ~base_path) with
-       | Gate.Allow { source = Gate.Workspace_always_allow } -> ()
+       | Gate.Allow { source = Gate.Workspace_always_allow; _ } -> ()
        | Gate.Allow _ -> fail "unexpected Always Allowed source"
        | Gate.Deferred _ -> fail "workspace Always Allowed unexpectedly deferred"
        | Gate.Unavailable reason -> fail (Gate.unavailable_reason_to_string reason))

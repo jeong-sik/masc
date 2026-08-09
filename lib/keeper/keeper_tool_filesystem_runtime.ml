@@ -2000,13 +2000,14 @@ let handle_file_write_with_outcome
           ~input
           ()
       with
-      | Keeper_gate.Deferred { approval_id; reason } ->
+      | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
         Ok
           (Write_deferred
              (Keeper_gate_deferred_payload.create
                 ~operation:gate_operation
                 ~approval_id
                 ~reason
+                ~audit_receipts
                 ~context:(`Assoc [ "path", `String target ])
                 ()))
       | Keeper_gate.Unavailable reason ->

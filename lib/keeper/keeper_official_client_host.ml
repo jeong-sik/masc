@@ -98,7 +98,7 @@ let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
     Error
       (config_error
          ~field:"enable_thinking"
-         "official-client runtimes require an explicit reasoning_effort; +          enable_thinking is not projected")
+         "official-client runtimes do not project enable_thinking; use reasoning_effort for explicit control")
   | None -> Ok reasoning_effort
 ;;
 

@@ -200,7 +200,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     match turn_params.tool_choice with
     | None | Some Auto -> Ok tools
     | Some None_ -> Ok []
-    | Some (Any | Tool _) as choice ->
+    | Some ((Any | Tool _) as choice) ->
       Error
         (config_error
            ~field:"tool_choice"
@@ -208,7 +208,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
               "%s official-client tools do not support forced tool choice %s"
               runtime_label
               (Yojson.Safe.to_string
-                 (Agent_sdk.Types.tool_choice_to_json (Option.get choice)))))
+                 (Agent_sdk.Types.tool_choice_to_json choice))))
   in
   Ok { messages; system_prompt; tools; reasoning_effort }
 ;;

@@ -62,8 +62,6 @@ val prepare_turn :
   enable_thinking:bool option ->
   (prepared_turn, Agent_sdk.Error.sdk_error) result
 
-val record_terminal_error : string option ref -> string -> unit
-
 val dynamic_tools :
   runtime_label:string ->
   keeper_name:string ->

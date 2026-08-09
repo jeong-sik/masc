@@ -141,9 +141,12 @@ let chat_yield_request ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
   | Some _ ->
-    if Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
-    then Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
-    else Ok None
+    (match Keeper_owner_registry.operation_projection ~base_path ~keeper_name with
+     | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
+     | Ok operations ->
+       if operations.Keeper_owner.queued_count > 0
+       then Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
+       else Ok None)
 ;;
 
 let autonomous_yield_request ~base_path ~keeper_name =

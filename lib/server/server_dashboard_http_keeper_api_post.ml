@@ -1289,38 +1289,35 @@ let resume_result_json ~name
 let run_resume_owner config ~name request =
   Keeper_paused_work_resume_transaction.resume config ~keeper_name:name request
 
-let persist_directive_pause ~config ~name
-    (meta : Keeper_meta_contract.keeper_meta) =
-  let updated_meta =
-    { meta with
-      paused = true
-    ; runtime = { meta.runtime with last_blocker = None }
-    ; updated_at = Keeper_meta_contract.now_iso ()
-    }
-  in
-  (* Pause toggle via CAS merge: do not rewind a concurrent turn's cumulative
-     usage counters. Resume is owned exclusively by the receipt transaction. *)
+let persist_directive_pause ~config ~name =
   match
-       Keeper_meta_store.write_meta_with_merge
-         ~merge:Keeper_meta_merge.monotonic_usage_counters
-         config
-         updated_meta
+    Keeper_owner_registry.apply_meta
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:name
+      (Keeper_owner_reducer.Pause
+         { reason =
+             Keeper_latched_reason.Operator_paused
+               { operator_actor = Keeper_latched_reason.Grpc_directive }
+         ; updated_at = Keeper_meta_contract.now_iso ()
+         })
   with
-  | Ok () -> Ok ()
-  | Error err ->
+  | Ok (Some _) -> Ok ()
+  | Ok None -> Error "owner removed Keeper metadata during pause"
+  | Error error ->
+    let detail = Keeper_owner_registry.command_error_to_string error in
     Log.Keeper.warn
-      "directive pause: write_meta failed for %s: %s"
+      "directive pause: owner command failed for %s: %s"
       name
-      (Keeper_meta_store.write_meta_error_to_string err);
+      detail;
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string PausedStatePersistErrors)
       ~labels:
         [ ( "phase"
           , Keeper_paused_state_persist_phase.(to_label Directive) )
-        ; "reason", "write_meta_error"
+        ; "reason", "owner_command_error"
         ]
       ();
-    Error err
+    Error detail
 
 let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
   let req_path = Http.Request.path req in
@@ -1396,8 +1393,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
       let proceed meta_opt =
         let persist_result =
           match plain_directive, meta_opt with
-          | Plain_pause, Some meta ->
-            persist_directive_pause ~config ~name meta
+          | Plain_pause, Some _ -> persist_directive_pause ~config ~name
           | Plain_pause, None | Plain_wakeup, _ -> Ok ()
         in
         match persist_result with
@@ -1410,14 +1406,15 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
                ; "action", `String action_str
                ; "name", `String name
                ; ( "error"
-                 , `String (Keeper_meta_store.write_meta_error_to_string error) )
+                 , `String error )
                ])
             reqd
         | Ok () ->
           let resolved_agent_name =
             match Keeper_registry_lookup.find_by_name name, meta_opt with
             | Some entry, _ -> entry.meta.agent_name
-            | None, Some meta -> meta.agent_name
+            | None, Some (meta : Keeper_meta_contract.keeper_meta) ->
+              meta.agent_name
             | None, None -> Keeper_identity.keeper_agent_name name
           in
           Keeper_keepalive.process_directive
@@ -1557,8 +1554,7 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
               in
               let persist_result =
                 match plain_directive, meta_opt with
-                | Plain_pause, Some meta ->
-                  persist_directive_pause ~config ~name meta
+                | Plain_pause, Some _ -> persist_directive_pause ~config ~name
                 | Plain_pause, None | Plain_wakeup, _ -> Ok ()
               in
               (match persist_result with
@@ -1567,13 +1563,14 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
                    [ "name", `String name
                    ; "ok", `Bool false
                    ; ( "error"
-                     , `String (Keeper_meta_store.write_meta_error_to_string error) )
+                     , `String error )
                    ]
                | Ok () ->
                  let resolved_agent_name =
                    match Keeper_registry_lookup.find_by_name name, meta_opt with
                    | Some entry, _ -> entry.meta.agent_name
-                   | None, Some meta -> meta.agent_name
+                   | None, Some (meta : Keeper_meta_contract.keeper_meta) ->
+                     meta.agent_name
                    | None, None -> Keeper_identity.keeper_agent_name name
                  in
                  Keeper_keepalive.process_directive

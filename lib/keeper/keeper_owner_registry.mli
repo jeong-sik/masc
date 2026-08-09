@@ -18,6 +18,7 @@ type lookup_error =
 
 type command_error =
   | Command_lookup_failed of lookup_error
+  | Command_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Command_rejected of Keeper_owner.error
 
 exception Install_failed of install_error
@@ -42,12 +43,14 @@ val get
   -> (Keeper_owner.t, lookup_error) result
 
 val apply_meta
-  :  base_path:string
+  :  ?lifecycle_token:Keeper_lifecycle_reservation.token
+  -> base_path:string
   -> keeper_name:string
   -> Keeper_owner_reducer.meta_command
   -> (Keeper_meta_contract.keeper_meta option, command_error) result
 (** Mailbox-linearized metadata mutation.  Registry metadata is refreshed only
-    from the committed owner projection. *)
+    from the committed owner projection.  The existing lifecycle reservation
+    remains the admission authority through the owner commit. *)
 
 val all_projections
   :  base_path:string

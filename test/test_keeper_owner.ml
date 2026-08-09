@@ -401,8 +401,8 @@ let test_child_cancellation_releases_slot () =
   let handle =
     match
       owner_ok
-        (Owner.start_turn owner ~operation_id:"cancelled" ~run:(fun turn_sw ->
-           Eio.Switch.fail turn_sw Synthetic_child_cancel))
+        (Owner.start_turn owner ~operation_id:"cancelled" ~run:(fun _ ->
+           raise (Eio.Cancel.Cancelled Synthetic_child_cancel)))
     with
     | Started handle -> handle
     | Busy _ -> fail "cancellation test owner was busy"
@@ -524,7 +524,7 @@ let rec remove_tree path =
 
 let test_root_inventory_loads_and_extends_exactly_once () =
   Eio_main.run @@ fun env ->
-  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> remove_tree base_path)
@@ -533,7 +533,7 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "owner-test"));
        let first = make_meta "inventory-first" in
-       (match Keeper_meta_store.persist_meta config first.name first with
+       (match Keeper_meta_store.write_meta config first with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed owner meta: " ^ detail));
        (match Owner_registry.install_from_store ~sw config with
@@ -579,7 +579,7 @@ let test_root_inventory_loads_and_extends_exactly_once () =
 
 let test_lifecycle_reservation_remains_owner_admission_authority () =
   Eio_main.run @@ fun env ->
-  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> remove_tree base_path)
@@ -588,7 +588,7 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "owner-reservation-test"));
        let meta = make_meta "inventory-reserved" in
-       (match Keeper_meta_store.persist_meta config meta.name meta with
+       (match Keeper_meta_store.write_meta config meta with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed reserved owner meta: " ^ detail));
        (match Owner_registry.install_from_store ~sw config with
@@ -635,7 +635,7 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
 
 let test_create_waits_for_lifecycle_admission_before_installing_owner () =
   Eio_main.run @@ fun env ->
-  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> remove_tree base_path)

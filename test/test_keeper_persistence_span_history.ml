@@ -72,6 +72,13 @@ let turn_row ts = `Assoc [ ("channel", `String "turn"); ("ts_unix", `Float ts) ]
 let heartbeat_row ts =
   `Assoc [ ("channel", `String "heartbeat"); ("ts_unix", `Float ts) ]
 
+let oversized_heartbeat_row ts =
+  `Assoc
+    [ ("channel", `String "heartbeat")
+    ; ("ts_unix", `Float ts)
+    ; ("detail", `String (String.make (600 * 1024) 'x'))
+    ]
+
 let evidence ~now ~base ~keeper =
   let config = Workspace.default_config base in
   let stat = Proof.turn_span_stats ~config keeper in
@@ -185,6 +192,30 @@ let no_turn_rows_is_explicit () =
         (Proof.has_persistent_turn_span ~now stat);
       check string "absence is named, not defaulted" "none" (origin_segment json))
 
+(* A bounded head read is allowed, but exhausting that budget is not evidence
+   that history contains no turn rows. Keep the unknown suffix visible so the
+   proof fails closed without fabricating absence. *)
+let head_budget_exhaustion_is_explicit () =
+  let base = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base)
+    (fun () ->
+      let now = 1_700_000_000.0 in
+      write_segment base ~keeper:"bounded" ~rotation:None
+        [ oversized_heartbeat_row (now -. (48.0 *. hour))
+        ; turn_row (now -. (30.0 *. hour))
+        ; turn_row (now -. 60.0)
+        ];
+      let stat, json = evidence ~now ~base ~keeper:"bounded" in
+      check bool "an unscanned suffix cannot satisfy the gate" false
+        (Proof.has_persistent_turn_span ~now stat);
+      check string "budget exhaustion is not collapsed into absence"
+        "scan_exhausted" (origin_segment json);
+      check (option int) "recent turns remain visible" (Some 2)
+        (match json_field "recent_interaction_count" json with
+         | Some (`Int n) -> Some n
+         | _ -> None))
+
 let () =
   run "keeper persistence span history"
     [ ( "turn span"
@@ -192,5 +223,7 @@ let () =
         ; test_case "control: single segment" `Quick single_segment_control
         ; test_case "stale latest turn fails" `Quick stale_latest_turn_fails
         ; test_case "no turn rows is explicit" `Quick no_turn_rows_is_explicit
+        ; test_case "head budget exhaustion is explicit" `Quick
+            head_budget_exhaustion_is_explicit
         ] )
     ]

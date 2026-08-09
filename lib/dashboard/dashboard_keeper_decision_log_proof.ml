@@ -15,8 +15,11 @@ type first_ts_origin =
       (** Earliest turn row located in the head of the oldest surviving
           decision-log segment. Carries that segment's rotation index;
           [None] denotes the unrotated current segment. *)
+  | History_scan_exhausted of int option
+      (** The segment head budget ended before a turn row was found. Carries
+          the segment whose unscanned suffix may contain the earliest row. *)
   | No_turn_row_in_history
-      (** No turn-exchange row inside the scanned head of any segment. *)
+      (** Every surviving segment was scanned to EOF without a turn row. *)
 
 type turn_span_stat = {
   recent_interaction_count : int;
@@ -172,10 +175,14 @@ let decision_log_segments ~config keeper_name =
 (** Earliest turn row inside the head budget of one segment. A head slice can
     end mid-row; unparseable lines are skipped exactly as on the tail path, so
     a truncated final line cannot fabricate a timestamp. *)
+type segment_head_scan =
+  | Turn_found of float
+  | Complete_without_turn
+  | Scan_exhausted
+
 let earliest_turn_ts_in_segment path =
   let slice = Fs_compat.read_slice ~path ~from:0 ~len:decision_head_max_bytes in
-  if String.equal slice "" then None
-  else
+  let turn =
     String.split_on_char '\n' slice
     |> List.find_map (fun line ->
       let line = String.trim line in
@@ -187,14 +194,22 @@ let earliest_turn_ts_in_segment path =
           if is_turn_exchange_channel (Safe_ops.json_string_opt "channel" json)
           then decision_ts_unix json
           else None)
+  in
+  match turn with
+  | Some ts -> Turn_found ts
+  | None ->
+    (match Fs_compat.file_size path with
+     | Some size when size <= String.length slice -> Complete_without_turn
+     | Some _ | None -> Scan_exhausted)
 
 let earliest_turn_ts segments =
   let rec scan = function
     | [] -> None, No_turn_row_in_history
     | (rotation, path) :: rest ->
       (match earliest_turn_ts_in_segment path with
-       | Some ts -> Some ts, History_head rotation
-       | None -> scan rest)
+       | Turn_found ts -> Some ts, History_head rotation
+       | Complete_without_turn -> scan rest
+       | Scan_exhausted -> None, History_scan_exhausted rotation)
   in
   scan segments
 
@@ -243,6 +258,12 @@ let first_ts_origin_json = function
     `Assoc [ ("segment", `String "current"); ("rotation", `Null) ]
   | History_head (Some rotation) ->
     `Assoc [ ("segment", `String "rotated"); ("rotation", `Int rotation) ]
+  | History_scan_exhausted rotation ->
+    `Assoc
+      [ ("segment", `String "scan_exhausted")
+      ; ( "rotation"
+        , Option.fold ~none:`Null ~some:(fun value -> `Int value) rotation )
+      ]
   | No_turn_row_in_history ->
     `Assoc [ ("segment", `String "none"); ("rotation", `Null) ]
 

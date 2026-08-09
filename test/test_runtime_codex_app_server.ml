@@ -23,6 +23,10 @@ let turn_completed =
   {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[{"type":"agentMessage","id":"message-1","text":"MASC_SUBSCRIPTION_OK","phase":"final_answer"}],"status":"completed"}}}|}
 ;;
 
+let turn_failed =
+  {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"fixture provider rejection"}}}}|}
+;;
+
 let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
 
 let resumed_item_completed =
@@ -818,17 +822,16 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        with_fixture
-         [ "not-json"
+         [ init_result
          ; account_chatgpt
          ; thread_result
          ; turn_result
-         ; item_completed
-         ; turn_completed
+         ; turn_failed
          ]
          (fun cli_path ->
             match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
             | Error _ -> ()
-            | Ok _ -> fail "malformed official-client response completed the Keeper turn");
+            | Ok _ -> fail "provider-rejected official-client turn completed");
        let recovery =
          match Keeper_official_client_session_store.load ~base_path ~keeper_name with
          | Error detail -> fail detail
@@ -837,7 +840,20 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
        in
        let recovery_id =
          match recovery.phase with
-         | Recovery_required required -> required.recovery_id
+         | Recovery_required required ->
+           check bool
+             "recovery follows provider rejection"
+             true
+             (required.failure = Provider_rejected);
+           check (option string)
+             "recovery observed exact session"
+             (Some "thread-1")
+             required.observed_session_id;
+           check (option string)
+             "recovery observed exact turn"
+             (Some "turn-1")
+             required.observed_turn_id;
+           required.recovery_id
          | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
            fail "dashboard recovery fixture was not recovery-required"
        in
@@ -866,6 +882,28 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
           |> member "phase"
           |> member "recovery_id"
           |> to_string);
+       let retry_body =
+         `Assoc
+           [ "keeper_name", `String keeper_name
+           ; "recovery_id", `String recovery_id
+           ; "resolution", `String "retry_previous"
+           ]
+         |> Yojson.Safe.to_string
+       in
+       (match
+          Server_dashboard_official_client_session.resolve_body
+            ~base_path
+            ~actor:"dashboard-admin"
+            ~body:retry_body
+        with
+        | Error { kind = Conflict; code = "retry_previous_unavailable"; _ } -> ()
+        | Error error ->
+          fail
+            (Printf.sprintf
+               "retry_previous had wrong rejection: %s: %s"
+               error.code
+               error.message)
+        | Ok _ -> fail "retry_previous silently restarted a fresh session");
        let body =
          `Assoc
            [ "keeper_name", `String keeper_name

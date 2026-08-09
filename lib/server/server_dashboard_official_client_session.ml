@@ -235,11 +235,11 @@ let resolve_body ~base_path ~actor ~body =
         "Keeper has no durable official-client session"
     | Some current -> Ok current
   in
-  let* () =
+  let* recovery =
     match current.phase with
     | Keeper_official_client_session_store.Recovery_required recovery
       when String.equal recovery.recovery_id request.recovery_id ->
-      Ok ()
+      Ok recovery
     | Recovery_required _ ->
       conflict
         "recovery_id_changed"
@@ -248,6 +248,14 @@ let resolve_body ~base_path ~actor ~body =
       conflict
         "recovery_not_required"
         "official-client session is not awaiting recovery"
+  in
+  let* () =
+    match request.resolution, recovery.previous_settlement with
+    | Keeper_official_client_session_store.Retry_previous, None ->
+      conflict
+        "retry_previous_unavailable"
+        "official-client recovery has no exact previous settlement to retry"
+    | Retry_previous, Some _ | Restart_fresh, _ -> Ok ()
   in
   match
     Keeper_official_client_session_store.resolve_recovery

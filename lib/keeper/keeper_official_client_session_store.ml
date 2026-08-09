@@ -966,11 +966,11 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
   let* phase, turn_count =
     match resolution with
     | Retry_previous ->
-      Ok
-        ( (match recovery.previous_settlement with
-           | None -> Ready
-           | Some settlement -> Settled settlement)
-        , completed_turn_count )
+      (match recovery.previous_settlement with
+       | None ->
+         Error
+           "retry_previous requires an exact previous official-client settlement"
+       | Some settlement -> Ok (Settled settlement, completed_turn_count))
     | Restart_fresh -> Ok (Ready, completed_turn_count)
   in
   let* resolved =

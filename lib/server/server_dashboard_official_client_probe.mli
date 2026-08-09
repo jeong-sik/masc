@@ -1,6 +1,7 @@
 (** Explicit, no-model-call login probes for configured official-client
     runtimes. Operational negative results are returned as measured payloads;
-    malformed or non-official runtime requests are typed request errors. *)
+    malformed requests, non-official runtimes, and official clients without a
+    typed login probe are distinct request errors. *)
 
 type error_kind =
   | Bad_request

@@ -87,7 +87,8 @@ let claude_failure_status = function
   | Subscription_required _ -> "login_required"
   | Timeout _ -> "timeout"
   | Protocol_error _ | Unsupported_control_request _ -> "protocol_error"
-  | Turn_failed _ | Quota_blocked _ -> "probe_contract_error"
+  | Turn_transport_interrupted _ | Turn_failed _ | Quota_blocked _ ->
+    "probe_contract_error"
 ;;
 
 let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
@@ -224,6 +225,13 @@ let probe_body ~base_path ~body =
          ~runtime_id
          ~model
          config)
+  | Runtime_execution.Antigravity_cli _ ->
+    error
+      Bad_request
+      "login_probe_unsupported"
+      (Printf.sprintf
+         "official-client runtime %S does not expose a login probe"
+         runtime_id)
   | Runtime_execution.Agent_core _ ->
     error
       Bad_request

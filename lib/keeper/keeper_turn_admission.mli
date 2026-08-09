@@ -1,22 +1,10 @@
-(** Keeper_turn_admission — per-keeper turn single-flight gate (RFC-0225 §3.1).
-
-    Every keeper-turn entry path must pass this gate before reaching
-    [Keeper_agent_run.run_turn]:
-
-    - the chat lane ([Keeper_turn.handle_keeper_msg]; every transport —
-      dashboard stream route, async [Keeper_msg_async] dispatch, direct
-      [masc_keeper_msg_stream]) admits with [run_serialized];
-    - the autonomous lane ([Keeper_heartbeat_loop_cycle.run_keeper_cycle])
-      admits with [run_if_free].
-
-    Without the gate the two lanes execute turns concurrently for the same
-    keeper. Measured corruption (2026-06-10 voice-repeat RCA): checkpoint
-    last-writer-wins clobber, [total_turns] regression 385→370, and
-    tool_calls cross-attribution. *)
+(** Temporary per-Keeper turn/shutdown fence. Keeper Owner is the sole live
+    scheduling authority; this module retains the non-waiting execution fence
+    until shutdown and durable-intake ownership are split out. *)
 
 type lane =
   | Autonomous (** heartbeat-scheduled cycle; skips when the slot is busy *)
-  | Chat (** operator/connector message turn; queues when the slot is busy *)
+  | Chat (** diagnostic projection of an Owner-run chat operation *)
 
 type slot_transition =
   | Turn_released
@@ -48,18 +36,9 @@ val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
 (** Canonical typed projections for admission diagnostics. Consumers must not
     recover block detail by parsing prose. *)
 
-type rejection =
-  { waiting : int (** chat requests already waiting on this keeper's slot *)
-  ; in_flight : in_flight_info option
-    (** the turn holding the slot, if observable at rejection time *)
-  ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
-    (** [Some id] when admission is fenced by a durable shutdown operation. *)
-  }
-
 type shutdown_reservation =
   { operation_id : Keeper_shutdown_types.Operation_id.t
   ; in_flight : in_flight_info option
-  ; waiting : int
   }
 
 type begin_shutdown_result =
@@ -102,15 +81,11 @@ type slot_snapshot =
   { snapshot_keeper_name : string
   ; snapshot_slot_created : bool
   ; snapshot_in_flight : in_flight_info option
-  ; snapshot_waiting : int
-  ; snapshot_waiting_since : float option
   ; snapshot_shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
 type fleet_snapshot =
   { fleet_keeper_count : int
-  ; fleet_waiting_keeper_count : int
-  ; fleet_waiting_total : int
   ; fleet_in_flight_keeper_count : int
   ; fleet_shutdown_keeper_count : int
   ; fleet_slots : slot_snapshot list
@@ -154,68 +129,14 @@ val run_if_free
     [`Busy (Shutdown_requested id)] means a durable shutdown reservation owns
     admission; no slot is acquired and no turn body runs.
     Exceptions from [f] (including [Eio.Cancel.Cancelled]) release the slot and
-    re-raise.
-
-    A queued chat observes its receipt while it is [Pending], then enters
-    [run_serialized] before leasing it at the admitted execution boundary.
-    Once parked, Eio.Mutex transfers a released slot directly to that waiter;
-    [try_lock] therefore cannot overtake it. The mutex is the only live turn
-    admission authority. Queue persistence errors remain explicit at the chat
-    consumer boundary and never fence this independent autonomous lane. *)
-
-val chat_waiting : base_path:string -> keeper_name:string -> bool
-(** [true] when at least one chat request is parked on this keeper's slot
-    (waiting in [run_serialized] for an in-flight turn to release). Read
-    under the slot's state mutex; [false] for an unknown keeper (no slot,
-    hence no waiters). The autonomous lane feeds this into the AGENT_CORE agent
-    loop's exit condition: an idle-filler turn that observes a parked chat
-    stops at the next turn boundary so the slot releases and the chat admits
-    via direct handoff, instead of the chat starving behind the autonomous
-    turn's longer budget. Only counts *parked* waiters, never an already
-    admitted (in-flight) turn — an admitted chat holds the slot and is no
-    longer waiting. *)
-
-val chat_waiting_since : base_path:string -> keeper_name:string -> float option
-(** Unix epoch seconds for the oldest currently parked chat waiter on this
-    keeper's slot, or [None] when no chat request is waiting or the keeper slot
-    is unknown. *)
-
-val run_serialized
-  :  base_path:string
-  -> keeper_name:string
-  -> (unit -> 'a)
-  -> [ `Ran of 'a | `Rejected of rejection ]
-(** Run [f] holding the keeper's turn slot, waiting (fiber-cooperatively, in
-    Eio.Mutex wakeup order) while another turn is in flight. The chat lane
-    uses this: dashboard/connector messages queue rather than error. Returns
-    [`Rejected] only when [shutdown_operation_id] names the durable operation
-    that fenced admission. Cancellation while waiting leaves the queue;
-    exceptions from [f] release the slot and re-raise.
-
-    Caller contract: a synchronous self-targeted call from inside the same
-    keeper's admitted turn waits for its own turn to finish and is bounded
-    only by the caller's turn budget — do not call this from within an
-    admitted turn of the same keeper. *)
-
-val run_serialized_with_token
-  :  base_path:string
-  -> keeper_name:string
-  -> (token -> 'a)
-  -> [ `Ran of 'a | `Rejected of rejection ]
-(** Token-bearing form used by the Keeper Owner operation child. The callback
-    runs at the same FIFO admission boundary as [run_serialized]; claiming the
-    durable operation and reading its latest input must happen inside it. *)
+    re-raise. This module never parks or queues callers. *)
 
 val in_flight
   :  base_path:string
   -> keeper_name:string
   -> in_flight_info option
 (** Read-only snapshot of the turn currently holding the keeper's slot,
-    or [None] when the slot is free or the keeper is unknown. Gating
-    callers (e.g. the chat consumer leaving queued messages to coalesce
-    while a turn runs) tolerate the narrow window where a holder has
-    locked the slot but not yet published its info — a turn forked on a
-    stale [None] simply waits at the slot. *)
+    or [None] when the slot is free or the keeper is unknown. *)
 
 (** Atomically close admission for [keeper_name] and snapshot the turn that
     already owns the slot. New autonomous/chat turns receive the typed
@@ -331,9 +252,8 @@ val slot_snapshot_to_yojson : slot_snapshot -> Yojson.Safe.t
 
 val fleet_health_json :
   base_path:string -> keeper_names:string list -> Yojson.Safe.t
-(** Health component for [/health] and dashboard runtime resolution. Waiting
-    work is exposed as raw per-Keeper counts only. It is not converted into a
-    policy threshold, rejection, fleet degradation, or operator requirement. *)
+(** Health component for [/health] and dashboard runtime resolution. Durable
+    queued work is reported by the Keeper Owner operation projection. *)
 
 module For_testing : sig
   val reset : unit -> unit
@@ -345,6 +265,7 @@ module For_testing : sig
   val peek
     :  base_path:string
     -> keeper_name:string
-    -> (in_flight_info option * int) option
-  (** [(info, waiting)] for the keeper's slot, or [None] if never created. *)
+    -> in_flight_info option option
+  (** [Some info] for an occupied slot, [Some None] for a created idle slot,
+      or [None] if never created. *)
 end

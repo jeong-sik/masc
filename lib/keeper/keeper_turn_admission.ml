@@ -23,16 +23,9 @@ type autonomous_block =
   | Turn_busy of in_flight_info option
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
-type rejection =
-  { waiting : int
-  ; in_flight : in_flight_info option
-  ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
-  }
-
 type shutdown_reservation =
   { operation_id : Keeper_shutdown_types.Operation_id.t
   ; in_flight : in_flight_info option
-  ; waiting : int
   }
 
 type begin_shutdown_result =
@@ -62,15 +55,11 @@ type slot_snapshot =
   { snapshot_keeper_name : string
   ; snapshot_slot_created : bool
   ; snapshot_in_flight : in_flight_info option
-  ; snapshot_waiting : int
-  ; snapshot_waiting_since : float option
   ; snapshot_shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
 type fleet_snapshot =
   { fleet_keeper_count : int
-  ; fleet_waiting_keeper_count : int
-  ; fleet_waiting_total : int
   ; fleet_in_flight_keeper_count : int
   ; fleet_shutdown_keeper_count : int
   ; fleet_slots : slot_snapshot list
@@ -131,12 +120,9 @@ type slot =
     (* Serializes durable external intake with shutdown join. Unlike
        [state_mu], callers may suspend while holding this cooperative mutex. *)
   ; state_mu : Stdlib.Mutex.t
-    (* Guards [info]/[waiting]. Critical sections never yield, so the
+    (* Guards [info]/[shutdown_operation_id]. Critical sections never yield, so the
        non-cooperative mutex is the right choice here. *)
   ; mutable info : in_flight_info option
-  ; mutable waiting : int
-  ; mutable waiting_entries : (int * float) list
-  ; mutable next_waiter_id : int
   ; mutable shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
 
@@ -214,9 +200,6 @@ let slot_for ~base_path ~keeper_name =
         ; intake_mu = Eio.Mutex.create ()
         ; state_mu = Stdlib.Mutex.create ()
         ; info = None
-        ; waiting = 0
-        ; waiting_entries = []
-        ; next_waiter_id = 0
         ; shutdown_operation_id = None
         }
       in
@@ -264,29 +247,6 @@ let run_locked_with_token slot ~lane f =
        raise exn)
 ;;
 
-let waiting_count slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting)
-
-let oldest_waiting_since entries =
-  List.fold_left
-    (fun oldest (_waiter_id, since) ->
-       match oldest with
-       | None -> Some since
-       | Some current -> Some (min current since))
-    None
-    entries
-;;
-
-(* Preserve the operation that actually rejected admission even if lifecycle
-   rollback clears the live fence before the caller renders the result. The
-   waiting/in-flight fields are still sampled together under [state_mu]. *)
-let shutdown_rejection_snapshot slot operation_id =
-  Stdlib.Mutex.protect slot.state_mu (fun () ->
-    { waiting = slot.waiting
-    ; in_flight = slot.info
-    ; shutdown_operation_id = Some operation_id
-    })
-;;
-
 let run_if_free_with_token ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
   match peek_shutdown slot with
@@ -308,48 +268,6 @@ let run_if_free ~base_path ~keeper_name f =
     (fun _token -> f ())
 ;;
 
-let run_serialized_with_token ~base_path ~keeper_name f =
-  let slot = slot_for ~base_path ~keeper_name in
-  let waiter_id =
-    Stdlib.Mutex.protect slot.state_mu (fun () ->
-      match slot.shutdown_operation_id with
-      | Some operation_id -> `Shutdown_requested operation_id
-      | None ->
-        let waiter_id = slot.next_waiter_id in
-        slot.next_waiter_id <- slot.next_waiter_id + 1;
-        (* NDT-OK: waiter age timestamp for observability only. *)
-        slot.waiting_entries <- (waiter_id, Unix.gettimeofday ()) :: slot.waiting_entries;
-        slot.waiting <- slot.waiting + 1;
-        `Waiting waiter_id)
-  in
-  match waiter_id with
-  | `Shutdown_requested operation_id ->
-    `Rejected (shutdown_rejection_snapshot slot operation_id)
-  | `Waiting waiter_id ->
-    (* [Fun.protect] rather than [Switch.on_release]: there is no ambient
-       switch here, the finally never raises and never yields, and the only
-       suspension point it covers is the cancellable [Eio.Mutex.lock] wait
-       itself — a cancelled waiter leaves the queue, a successful one stops
-       counting as waiting once it holds the slot. *)
-    Fun.protect
-      ~finally:(fun () ->
-        Stdlib.Mutex.protect slot.state_mu (fun () ->
-          slot.waiting <- max 0 (slot.waiting - 1);
-          slot.waiting_entries
-          <- List.filter
-               (fun (entry_waiter_id, _since) -> entry_waiter_id <> waiter_id)
-               slot.waiting_entries))
-      (fun () -> Eio.Mutex.lock slot.turn_mu);
-    (match run_locked_with_token slot ~lane:Chat f with
-     | `Ran value -> `Ran value
-     | `Shutdown_requested operation_id ->
-       `Rejected (shutdown_rejection_snapshot slot operation_id))
-;;
-
-let run_serialized ~base_path ~keeper_name f =
-  run_serialized_with_token ~base_path ~keeper_name (fun _token -> f ())
-;;
-
 let in_flight ~base_path ~keeper_name =
   let key = Keeper_registry_types.registry_key ~base_path keeper_name in
   match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
@@ -357,9 +275,7 @@ let in_flight ~base_path ~keeper_name =
   | Some slot -> peek_info slot
 ;;
 
-let reservation_of_slot slot operation_id =
-  { operation_id; in_flight = slot.info; waiting = slot.waiting }
-;;
+let reservation_of_slot slot operation_id = { operation_id; in_flight = slot.info }
 
 let begin_shutdown ~base_path ~keeper_name ~operation_id =
   let slot = slot_for ~base_path ~keeper_name in
@@ -562,28 +478,10 @@ let await_idle_after_shutdown ~base_path ~keeper_name =
   Eio.Mutex.unlock slot.intake_mu
 ;;
 
-let chat_waiting ~base_path ~keeper_name =
-  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
-  match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
-  | None -> false (* no slot yet ⇒ no turn ran ⇒ no chat can be waiting *)
-  | Some slot -> waiting_count slot > 0
-;;
-
-let chat_waiting_since ~base_path ~keeper_name =
-  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
-  match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
-  | None -> None
-  | Some slot ->
-    Stdlib.Mutex.protect slot.state_mu (fun () ->
-      oldest_waiting_since slot.waiting_entries)
-;;
-
 let zero_snapshot ~keeper_name =
   { snapshot_keeper_name = keeper_name
   ; snapshot_slot_created = false
   ; snapshot_in_flight = None
-  ; snapshot_waiting = 0
-  ; snapshot_waiting_since = None
   ; snapshot_shutdown_operation_id = None
   }
 ;;
@@ -593,8 +491,6 @@ let snapshot_of_slot slot =
     { snapshot_keeper_name = slot.keeper_name
     ; snapshot_slot_created = true
     ; snapshot_in_flight = slot.info
-    ; snapshot_waiting = slot.waiting
-    ; snapshot_waiting_since = oldest_waiting_since slot.waiting_entries
     ; snapshot_shutdown_operation_id = slot.shutdown_operation_id
     })
 ;;
@@ -623,18 +519,6 @@ let fleet_snapshot ~base_path ~keeper_names =
   let fleet_slots =
     List.map (fun keeper_name -> snapshot_for ~base_path ~keeper_name) keeper_names
   in
-  let fleet_waiting_keeper_count =
-    List.fold_left
-      (fun acc slot -> if slot.snapshot_waiting > 0 then acc + 1 else acc)
-      0
-      fleet_slots
-  in
-  let fleet_waiting_total =
-    List.fold_left
-      (fun acc slot -> acc + slot.snapshot_waiting)
-      0
-      fleet_slots
-  in
   let fleet_in_flight_keeper_count =
     List.fold_left
       (fun acc slot ->
@@ -654,8 +538,6 @@ let fleet_snapshot ~base_path ~keeper_names =
       fleet_slots
   in
   { fleet_keeper_count = List.length keeper_names
-  ; fleet_waiting_keeper_count
-  ; fleet_waiting_total
   ; fleet_in_flight_keeper_count
   ; fleet_shutdown_keeper_count
   ; fleet_slots
@@ -676,7 +558,6 @@ let slot_snapshot_to_yojson slot =
     [ "keeper_name", `String slot.snapshot_keeper_name
     ; "slot_created", `Bool slot.snapshot_slot_created
     ; "in_flight", in_flight_to_yojson slot.snapshot_in_flight
-    ; "chat_waiting_count", `Int slot.snapshot_waiting
     ; ( "shutdown_operation_id"
       , match slot.snapshot_shutdown_operation_id with
         | None -> `Null
@@ -698,8 +579,6 @@ let fleet_health_json ~base_path ~keeper_names =
           (List.map
              (fun slot -> `String slot.snapshot_keeper_name)
              snapshot.fleet_slots) )
-    ; "chat_waiting_keeper_count", `Int snapshot.fleet_waiting_keeper_count
-    ; "chat_waiting_total_count", `Int snapshot.fleet_waiting_total
     ; "in_flight_keeper_count", `Int snapshot.fleet_in_flight_keeper_count
     ; "shutdown_keeper_count", `Int snapshot.fleet_shutdown_keeper_count
     ; "keepers", `List (List.map slot_snapshot_to_yojson snapshot.fleet_slots)
@@ -715,6 +594,6 @@ module For_testing = struct
     let key = Keeper_registry_types.registry_key ~base_path keeper_name in
     Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key)
     |> Option.map (fun slot ->
-      Stdlib.Mutex.protect slot.state_mu (fun () -> slot.info, slot.waiting))
+      Stdlib.Mutex.protect slot.state_mu (fun () -> slot.info))
   ;;
 end

@@ -6,7 +6,6 @@ type waiting_source =
   | External_attention
   | Fusion_running
   | Schedule_waiting
-  | Turn_admission_waiting
   | Turn_admission_shutdown
   | Operator_pending_confirm
   | Read_error
@@ -58,7 +57,6 @@ let source_to_string = function
   | External_attention -> "external_attention"
   | Fusion_running -> "fusion_running"
   | Schedule_waiting -> "schedule_waiting"
-  | Turn_admission_waiting -> "turn_admission_waiting"
   | Turn_admission_shutdown -> "turn_admission_shutdown"
   | Operator_pending_confirm -> "operator_pending_confirm"
   | Read_error -> "read_error"
@@ -72,7 +70,6 @@ let all_waiting_sources =
   ; External_attention
   ; Fusion_running
   ; Schedule_waiting
-  ; Turn_admission_waiting
   ; Turn_admission_shutdown
   ; Operator_pending_confirm
   ; Read_error
@@ -318,35 +315,12 @@ let turn_admission_rows ~base_path keeper_name =
                 , `String
                     (Keeper_shutdown_types.Operation_id.to_string operation_id) )
               ; "admission_fenced", `Bool true
-              ; "chat_waiting_count", `Int snapshot.snapshot_waiting
               ; "in_flight", in_flight_detail
               ]
         }
       ]
   in
-  let waiting_rows =
-    if snapshot.snapshot_waiting <= 0
-    then []
-    else
-      [ { keeper_name = Some keeper_name
-      ; source = Turn_admission_waiting
-      ; waiting_on = "chat"
-      ; wake_producer = Keeper_turn_admission
-      ; since = snapshot.snapshot_waiting_since
-      ; due_at = None
-      ; next_action = "turn_slot_release"
-      ; detail =
-          `Assoc
-            [ "waiting_lane", `String "chat"
-            ; "waiting_since", float_json snapshot.snapshot_waiting_since
-            ; "waiting_since_iso", unix_iso_json snapshot.snapshot_waiting_since
-            ; "chat_waiting_count", `Int snapshot.snapshot_waiting
-            ; "in_flight", in_flight_detail
-            ]
-      }
-      ]
-  in
-  shutdown_rows @ waiting_rows
+  shutdown_rows
 ;;
 
 let hitl_rows keeper_name pending =

@@ -36,8 +36,6 @@ let keeper_turn_admission_health_json () =
       ; "status_reasons", `List []
       ; "keeper_count", `Int 0
       ; "keeper_names", `List []
-      ; "chat_waiting_keeper_count", `Int 0
-      ; "chat_waiting_total_count", `Int 0
       ; "in_flight_keeper_count", `Int 0
       ; "shutdown_keeper_count", `Int 0
       ; "keepers", `List []

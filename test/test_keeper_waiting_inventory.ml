@@ -310,74 +310,21 @@ let test_manual_compaction_waiting_row_has_typed_producer () =
        failf "expected one manual compaction waiting row, got %d" (List.length rows))
 ;;
 
-let test_turn_admission_waiting_row_is_visible () =
+let test_turn_admission_waiter_row_is_absent () =
   with_workspace
   @@ fun config ->
-  let keeper_name = "admission-waiting-keeper" in
+  let keeper_name = "admission-no-waiter-keeper" in
   ensure_keeper config keeper_name;
   Keeper_turn_admission.For_testing.reset ();
   Fun.protect
     ~finally:(fun () -> Keeper_turn_admission.For_testing.reset ())
     (fun () ->
-      Eio.Switch.run
-      @@ fun sw ->
-      let autonomous_started, set_autonomous_started = Eio.Promise.create () in
-      let release_autonomous, set_release_autonomous = Eio.Promise.create () in
-      Eio.Fiber.fork ~sw (fun () ->
-        match
-          Keeper_turn_admission.run_if_free
-            ~base_path:config.Workspace_utils_backend_setup.base_path
-            ~keeper_name
-            (fun () ->
-               Eio.Promise.resolve set_autonomous_started ();
-               Eio.Promise.await release_autonomous)
-        with
-        | `Ran () -> ()
-        | `Busy _ -> fail "autonomous holder must admit on a free slot");
-      Eio.Promise.await autonomous_started;
-      Eio.Fiber.fork ~sw (fun () ->
-        match
-          Keeper_turn_admission.run_serialized
-            ~base_path:config.Workspace_utils_backend_setup.base_path
-            ~keeper_name
-            (fun () -> ())
-        with
-        | `Ran () -> ()
-        | `Rejected _ -> fail "parked chat must not reject below the cap");
-      Eio.Fiber.yield ();
       let json = Server_keeper_waiting_inventory.dashboard_json config in
-      check_metric_float "turn admission waiting metric"
-        Otel_metric_store.metric_keeper_waiting_count
-        ~labels:[ "scope", "keeper"; "source", "turn_admission_waiting" ]
-        1.0;
-      check int "one keeper row" 1 (json_int_member "row_count" json);
       (match find_keeper json keeper_name with
        | None -> fail "keeper row missing"
        | Some keeper ->
-         check string "keeper state" "waiting" (json_string_member "state" keeper);
-         check int "keeper waiting count" 1 (json_int_member "waiting_count" keeper);
-         check int "turn admission source" 1
-           U.(keeper |> member "sources" |> member "turn_admission_waiting" |> to_int);
-         (match U.(keeper |> member "waiting_on" |> to_list) with
-          | [ row ] ->
-            check string "turn admission row source" "turn_admission_waiting"
-              (json_string_member "source" row);
-            check string "turn admission wake producer" "keeper_turn_admission"
-              (json_string_member "wake_producer" row);
-            check string "turn admission next action" "turn_slot_release"
-              (json_string_member "next_action" row);
-            check string "turn admission waiting_on" "chat"
-              (json_string_member "waiting_on" row);
-            check bool "turn admission since is recorded" true
-              (U.(row |> member "since" |> to_float) > 0.0);
-            check string "waiting lane" "chat"
-              U.(row |> member "detail" |> member "waiting_lane" |> to_string);
-            check bool "detail waiting_since is recorded" true
-              (U.(row |> member "detail" |> member "waiting_since" |> to_float) > 0.0);
-            check string "in-flight lane" "autonomous"
-              U.(row |> member "detail" |> member "in_flight" |> member "lane" |> to_string)
-          | rows -> failf "expected one turn admission row, got %d" (List.length rows)));
-      Eio.Promise.resolve set_release_autonomous ())
+         check string "keeper state" "idle" (json_string_member "state" keeper);
+         check int "keeper waiting count" 0 (json_int_member "waiting_count" keeper))
 ;;
 
 let test_turn_admission_shutdown_row_is_deferred () =
@@ -438,8 +385,8 @@ let test_turn_admission_shutdown_row_is_deferred () =
                 |> to_string);
             check bool "admission fence is explicit" true
               U.(row |> member "detail" |> member "admission_fenced" |> to_bool);
-            check int "shutdown has no waiting chat" 0
-              U.(row |> member "detail" |> member "chat_waiting_count" |> to_int);
+            check bool "shutdown has no chat waiter field" true
+              U.(row |> member "detail" |> member "chat_waiting_count" = `Null);
             check bool "shutdown has no in-flight turn" true
               U.(row |> member "detail" |> member "in_flight" = `Null)
           | rows -> failf "expected one shutdown row, got %d" (List.length rows)));
@@ -818,8 +765,8 @@ let () =
             test_manual_compaction_waiting_row_has_typed_producer
         ; test_case "keeper-scoped projection excludes other keepers" `Quick
             test_keeper_scoped_projection_excludes_other_keepers
-        ; test_case "turn admission waiting row is visible" `Quick
-            test_turn_admission_waiting_row_is_visible
+        ; test_case "turn admission waiter row is absent" `Quick
+            test_turn_admission_waiter_row_is_absent
         ; test_case "turn admission shutdown row is deferred" `Quick
             test_turn_admission_shutdown_row_is_deferred
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick

@@ -1502,7 +1502,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
 
-let test_health_json_observes_keeper_turn_admission_work () =
+let test_health_json_observes_non_waiting_turn_fence () =
   with_temp_dir "health-turn-admission-work" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
@@ -1522,34 +1522,32 @@ let test_health_json_observes_keeper_turn_admission_work () =
           let started, set_started = Eio.Promise.create () in
           let release, set_release = Eio.Promise.create () in
           Eio.Fiber.fork ~sw (fun () ->
-            ignore
-              (Keeper_turn_admission.run_serialized
-                 ~base_path:dir
-                 ~keeper_name
-                 (fun () ->
+            match
+              Keeper_turn_admission.run_if_free
+                ~base_path:dir
+                ~keeper_name
+                (fun () ->
                    Eio.Promise.resolve set_started ();
-                   Eio.Promise.await release)));
+                   Eio.Promise.await release)
+            with
+            | `Ran () -> ()
+            | `Busy _ -> Alcotest.fail "free turn fence must admit");
           Eio.Promise.await started;
-          for _ = 1 to 2 do
-            Eio.Fiber.fork ~sw (fun () ->
-              ignore
-                (Keeper_turn_admission.run_serialized
-                   ~base_path:dir
-                   ~keeper_name
-                   (fun () -> ())))
-          done;
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
           let admission = json |> member "keeper_turn_admission" in
-          Alcotest.(check string) "waiting work is not health degradation"
+          Alcotest.(check string) "in-flight fence is not health degradation"
             "ok"
             (admission |> member "status" |> to_string);
-          Alcotest.(check int) "turn admission exposes raw waiting count"
-            2
-            (admission |> member "chat_waiting_total_count" |> to_int);
+          Alcotest.(check int) "turn admission exposes one in-flight Keeper"
+            1
+            (admission |> member "in_flight_keeper_count" |> to_int);
+          Alcotest.(check bool) "turn admission has no waiter contract"
+            true
+            (admission |> member "chat_waiting_total_count" = `Null);
           Alcotest.(check bool)
-            "waiting work does not require an operator"
+            "in-flight work does not require an operator"
             false
             (admission |> member "operator_action_required" |> to_bool);
           let runtime_resolution =
@@ -1559,10 +1557,10 @@ let test_health_json_observes_keeper_turn_admission_work () =
           let runtime_admission =
             runtime_resolution |> member "keeper_turn_admission"
           in
-          Alcotest.(check int)
-            "runtime resolution exposes raw waiting count"
-            2
-            (runtime_admission |> member "chat_waiting_total_count" |> to_int);
+          Alcotest.(check bool)
+            "runtime resolution has no waiter contract"
+            true
+            (runtime_admission |> member "chat_waiting_total_count" = `Null);
           let light_runtime_resolution =
             `Assoc
               (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ())
@@ -1570,10 +1568,10 @@ let test_health_json_observes_keeper_turn_admission_work () =
           let light_runtime_admission =
             light_runtime_resolution |> member "keeper_turn_admission"
           in
-          Alcotest.(check int)
-            "light runtime resolution exposes raw waiting count"
-            2
-            (light_runtime_admission |> member "chat_waiting_total_count" |> to_int);
+          Alcotest.(check bool)
+            "light runtime resolution has no waiter contract"
+            true
+            (light_runtime_admission |> member "chat_waiting_total_count" = `Null);
           Eio.Promise.resolve set_release ())))
 
 let test_health_json_surfaces_board_event_collection_failure () =
@@ -5144,8 +5142,8 @@ let () =
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
           Alcotest.test_case
-            "health json surfaces turn admission pressure"
-            `Quick test_health_json_observes_keeper_turn_admission_work;
+            "health json surfaces non-waiting turn fence"
+            `Quick test_health_json_observes_non_waiting_turn_fence;
           Alcotest.test_case
             "health json surfaces board event collection failure"
             `Quick test_health_json_surfaces_board_event_collection_failure;

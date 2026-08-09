@@ -33,19 +33,18 @@ val control_schema : control_operation -> Masc_domain.tool_schema
 (** Canonical generated schema for a control operation. *)
 
 val control_schemas : Masc_domain.tool_schema list
-(** Canonical control schemas used by registration. These schemas are
-    intentionally excluded from {!schemas} and the Config front-door inventory. *)
+(** Canonical control schemas used by registration. *)
+
+val web_search_schema : Masc_domain.tool_schema
+val web_fetch_schema : Masc_domain.tool_schema
+val web_schemas : Masc_domain.tool_schema list
+(** Canonical input schemas owned by the Tool_misc web handlers. *)
 
 val schemas : Masc_domain.tool_schema list
 (** [schemas] is the generated [Masc_domain.tool_schema list] for misc tools.
-    Operator controls are intentionally available only through
-    {!control_schemas}; they do not enter the Config front-door inventory.
-    Descriptor-owned web backend names ([masc_web_search] / [masc_web_fetch])
-    are intentionally projected into {!Config.raw_all_tool_schemas} from
-    [Keeper_tool_descriptor.public_descriptors] instead of duplicated here.
-    Public-surface exclusion is enforced downstream by
-    {!Tool_catalog.is_public_mcp} / [public_mcp_surface_tools], not by trimming
-    the raw inventory. The schema [enum] fields derive from
+    Operator controls are available through {!control_schemas}. Public-surface
+    exclusion is enforced downstream by {!Tool_catalog.is_public_mcp} and
+    [public_mcp_surface_tools]. The schema [enum] fields derive from
     [Tool_schemas_specs_types.config_category_enum_strings] so
     adding a value updates the schema automatically.
 

@@ -5,12 +5,10 @@ open Masc
     Asserts that:
     1. The runtime schema-registry key set equals the tag-registry key set.
     2. Mandatory (core-always) tools are present in the tag/schema registries.
-    3. Retired tool names are absent from the tag/schema/handler registries.
 
     These invariants are foundational for the MASC/Keeper/OAS overhaul:
     every tool that can be dispatched must have both a tag (for token
-    validation) and a schema (for input validation), and retired surfaces
-    must not leak back into the runtime registry. *)
+    validation) and a schema (for input validation). *)
 
 let init () = Masc_test_deps.init_unified_tool_registry ()
 
@@ -97,6 +95,21 @@ let test_schema_inventory_matches_dispatch_validation_registry () =
           (canonical_json_string schema.input_schema)
           (canonical_json_string registered_schema))
     Config.raw_all_tool_schemas
+;;
+
+let test_every_descriptor_has_exact_runtime_schema () =
+  let missing =
+    Keeper_tool_descriptor.all_descriptors ()
+    |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->
+      match Unified_tool_registry.runtime_schema_for_descriptor descriptor with
+      | Some _ -> None
+      | None -> Some descriptor.internal_name)
+    |> sorted_set
+  in
+  Alcotest.(check (list string))
+    "every descriptor internal handler has an exact runtime schema"
+    []
+    missing
 ;;
 
 let schema_property_names schema =
@@ -298,6 +311,10 @@ let () =
             "schema inventory matches dispatch validation registry"
             `Quick
             test_schema_inventory_matches_dispatch_validation_registry
+        ; test_case
+            "every descriptor has an exact runtime schema"
+            `Quick
+            test_every_descriptor_has_exact_runtime_schema
         ; test_case
             "translated descriptors keep distinct runtime schemas"
             `Quick

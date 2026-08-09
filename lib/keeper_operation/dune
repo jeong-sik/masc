@@ -1,0 +1,20 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_operation)
+ (public_name masc.keeper_operation)
+ (wrapped false)
+ (modules
+  keeper_operation_id
+  keeper_operation_request
+  keeper_operation_blob_store
+  keeper_operation_store)
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ (libraries
+  digestif
+  masc.fs_compat
+  masc.masc_random_id
+  sqlite3
+  unix
+  yojson))

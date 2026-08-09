@@ -750,7 +750,10 @@ module For_testing = struct
       (fun () ->
          List.iter
            (fun (tool : Agent_sdk.Tool.t) ->
-              ignore (Agent_sdk.Tool.execute tool `Null : Agent_sdk.Types.tool_result))
+              let _result : Agent_sdk.Types.tool_result =
+                Agent_sdk.Tool.execute tool `Null
+              in
+              ())
            bundle.tools;
          let snapshot = Keeper_gate_causal_context.snapshot gate_context in
          match snapshot.snapshot with

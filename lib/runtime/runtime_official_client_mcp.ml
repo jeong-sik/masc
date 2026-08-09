@@ -1,5 +1,10 @@
+type error_kind =
+  | Json_parse
+  | Protocol
+
 type error =
-  { stage : string
+  { kind : error_kind
+  ; stage : string
   ; detail : string
   }
 
@@ -20,7 +25,8 @@ type message =
   }
 
 let ( let* ) = Result.bind
-let error stage detail = Error { stage; detail }
+let error stage detail = Error { kind = Protocol; stage; detail }
+let json_parse_error stage detail = Error { kind = Json_parse; stage; detail }
 
 let rec validate_message_value ~stage ~path = function
   | `Assoc fields ->
@@ -64,9 +70,9 @@ let reject_unknown_fields ~stage ~allowed fields =
 
 let parse_message stage raw_message =
   try Ok (Yojson.Safe.from_string raw_message) with
-  | Yojson.Json_error detail -> error stage ("invalid JSON: " ^ detail)
-  | Stack_overflow -> error stage "JSON nesting exceeds parser limits"
-  | Failure detail -> error stage ("invalid JSON: " ^ detail)
+  | Yojson.Json_error detail -> json_parse_error stage ("invalid JSON: " ^ detail)
+  | Stack_overflow -> json_parse_error stage "JSON nesting exceeds parser limits"
+  | Failure detail -> json_parse_error stage ("invalid JSON: " ^ detail)
 ;;
 
 let assoc_at stage = function

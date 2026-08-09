@@ -5,8 +5,13 @@
     tools/list, tools/call, notification no-response semantics, and typed
     protocol failures. *)
 
+type error_kind =
+  | Json_parse
+  | Protocol
+
 type error =
-  { stage : string
+  { kind : error_kind
+  ; stage : string
   ; detail : string
   }
 

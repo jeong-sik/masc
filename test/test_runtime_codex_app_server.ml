@@ -53,17 +53,23 @@ let rec drop count values =
 let fixture_script ?capture_path lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
-  let read_request () =
-    output_string output "IFS= read -r ignored\n";
+  let read_request ?(expect_version = false) () =
+    output_string output "IFS= read -r request\n";
+    if expect_version
+    then
+      output_string output
+        (Printf.sprintf
+           "printf '%%s' \"$request\" | grep -F %s >/dev/null || exit 97\n"
+           (shell_quote (Printf.sprintf {|"version":"%s"|} Version.version)));
     Option.iter
       (fun capture_path ->
          output_string
            output
-           ("printf '%s\\n' \"$ignored\" >> " ^ shell_quote capture_path ^ "\n"))
+           ("printf '%s\\n' \"$request\" >> " ^ shell_quote capture_path ^ "\n"))
       capture_path
   in
   output_string output "#!/bin/sh\n";
-  read_request ();
+  read_request ~expect_version:true ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 0) ^ "\n");
   read_request ();
   read_request ();

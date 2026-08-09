@@ -202,6 +202,37 @@ let test_chatgpt_subscription_turn () =
         check bool "new thread" false result.resumed)
 ;;
 
+let test_subscription_probe_stops_before_thread () =
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+      let outcome =
+        Eio_main.run (fun env ->
+          let config =
+            { (Runtime_codex_app_server.default_config ~cwd:"/tmp") with
+              cli_path = path
+            ; timeout_s = 2.0
+            }
+          in
+          Runtime_codex_app_server.probe_subscription
+            ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            config)
+      in
+      match outcome with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok probe ->
+        check string "plan" "pro" probe.subscription.plan_type;
+        check (option string) "user agent" (Some "fixture/0.147.0") probe.user_agent)
+;;
+
 let test_thread_resume_skips_history_injection () =
   let history =
     [ { Runtime_codex_app_server.role = User; text = "already in official thread" } ]
@@ -1881,6 +1912,10 @@ let () =
   run "runtime codex app-server"
     [ ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
+        ; test_case
+            "probe stops before thread"
+            `Quick
+            test_subscription_probe_stops_before_thread
         ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn
         ; test_case
             "protocol and spawn share cwd authority"

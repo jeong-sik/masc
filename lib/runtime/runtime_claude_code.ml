@@ -1043,9 +1043,14 @@ let validate_turn ?(dynamic_tools = []) ?(session_mode = Start) config ~prompt =
   validate_dynamic_tools dynamic_tools
 ;;
 
-let probe_subscription ~mgr ~cwd config =
+let probe_subscription ~mgr ~clock ~cwd config =
   let* () = validate_process_config config in
-  read_subscription ~mgr ~cwd config
+  try
+    Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+      read_subscription ~mgr ~cwd config)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
@@ -1060,7 +1065,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     let* subscription =
       match admitted_subscription with
       | Some subscription -> Ok subscription
-      | None -> probe_subscription ~mgr ~cwd config
+      | None -> probe_subscription ~mgr ~clock ~cwd config
     in
     let session_id =
       match session_mode with

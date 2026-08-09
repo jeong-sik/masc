@@ -9,6 +9,11 @@ type subscription =
   ; email : string option
   }
 
+type probe_result =
+  { subscription : subscription
+  ; user_agent : string option
+  }
+
 type config =
   { cli_path : string
   ; model : string option
@@ -386,6 +391,34 @@ let parse_subscription result =
       let* email = optional_string stage "email" account_fields in
       Ok { plan_type; email }
   | _ -> protocol_error stage "account must be an object or null"
+;;
+
+let probe_protocol io =
+  send_request
+    io
+    ~id:1
+    ~method_:"initialize"
+    ~params:
+      (`Assoc
+         [ ( "clientInfo"
+           , `Assoc
+               [ "name", `String "masc"
+               ; "title", `String "MASC"
+               ; "version", `String Version.version
+               ] )
+         ; "capabilities", `Assoc [ "experimentalApi", `Bool true ]
+         ]);
+  let* initialize = await_response io ~id:1 ~method_:"initialize" in
+  let* user_agent = parse_initialize initialize in
+  send_notification io "initialized";
+  send_request
+    io
+    ~id:2
+    ~method_:"account/read"
+    ~params:(`Assoc [ "refreshToken", `Bool false ]);
+  let* account = await_response io ~id:2 ~method_:"account/read" in
+  let* subscription = parse_subscription account in
+  Ok { subscription; user_agent }
 ;;
 
 let parse_thread_response ~stage result =
@@ -860,8 +893,7 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
-let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools ~reasoning_effort
-    ~thread_mode ~history ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_started =
+let with_spawned_client ~mgr ~clock ~cwd config run =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -898,18 +930,25 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools ~reasoning_
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->
         Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
-          run_protocol
-            { send; receive }
-            config
-            ~protocol_cwd
-            ~dynamic_tools
-            ~reasoning_effort
-            ~thread_mode
-            ~history
-            ~prompt
-            ~on_thread_ready
-            ~on_turn_starting
-            ~on_turn_started)))
+          run { send; receive })))
+;;
+
+let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
+    ~reasoning_effort ~thread_mode ~history ~prompt ~on_thread_ready
+    ~on_turn_starting ~on_turn_started =
+  with_spawned_client ~mgr ~clock ~cwd config (fun io ->
+    run_protocol
+      io
+      config
+      ~protocol_cwd
+      ~dynamic_tools
+      ~reasoning_effort
+      ~thread_mode
+      ~history
+      ~prompt
+      ~on_thread_ready
+      ~on_turn_starting
+      ~on_turn_started)
 ;;
 
 let native_cwd cwd =
@@ -925,12 +964,17 @@ let native_cwd cwd =
          ("cwd must be a native filesystem path: " ^ Printexc.to_string exn))
 ;;
 
-let validate_config config ~cwd ~thread_mode ~prompt =
+let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
   else if not (Float.is_finite config.timeout_s) || config.timeout_s <= 0.0
   then Error (Invalid_config "timeout_s must be positive and finite")
-  else if String.trim prompt = ""
+  else Ok ()
+;;
+
+let validate_config config ~cwd ~thread_mode ~prompt =
+  let* () = validate_process_config config in
+  if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
   else
     let* cwd = native_cwd cwd in
@@ -966,6 +1010,24 @@ let validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt =
 let validate_turn ?(dynamic_tools = []) ?(thread_mode = Start) ~cwd config ~prompt =
   validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt
   |> Result.map (fun _ -> ())
+;;
+
+let probe_subscription ~mgr ~clock ~cwd config =
+  let result =
+    let* () = validate_process_config config in
+    let* _ = native_cwd cwd in
+    try with_spawned_client ~mgr ~clock ~cwd config probe_protocol with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+    | exn -> Error (Spawn_failed (Printexc.to_string exn))
+  in
+  (match result with
+   | Ok _ -> Log.Runtime_agent.info "Codex app-server subscription probe completed"
+   | Error error ->
+     Log.Runtime_agent.warn
+       "Codex app-server subscription probe failed (kind=%s)"
+       (error_kind error));
+  result
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd

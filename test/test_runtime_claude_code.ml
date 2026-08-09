@@ -184,6 +184,7 @@ let test_missing_cli_is_not_reported_as_logout () =
       in
       Runtime_claude_code.probe_subscription
         ~mgr:(Eio.Stdenv.process_mgr env)
+        ~clock:(Eio.Stdenv.clock env)
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
         config)
   in

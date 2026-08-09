@@ -23,13 +23,117 @@ let control_schema = function
 
 let control_schemas = List.map control_schema control_operations
 
-(* [schemas] is the generated public misc schema set. Operator control schemas
-   use the dedicated typed projection above so they remain registered without
-   entering Config's public/front-door inventory. Descriptor-owned web backend
-   names (masc_web_search / masc_web_fetch) are intentionally not generated
-   here; [Config.raw_all_tool_schemas] projects them from
-   [Keeper_tool_descriptor.public_descriptors] so the keeper universe still
-   knows they exist without duplicating their schema ownership. *)
+let web_search_schema : tool_schema =
+  { name = "masc_web_search"
+  ; description =
+      "Search the public web. Use exact tool name WebSearch. Example input: \
+       {\"query\":\"OCaml 5.2 release date\",\"limit\":5,\"includeContent\":true}. \
+       Returns result.results with title, url, snippet. With includeContent:true \
+       each result also has page_content and the response has a human-readable \
+       content_text summary. Do not use snake_case names like web_search."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; ( "properties"
+          , `Assoc
+              [ ( "query"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String
+                          "Plain-text search query. Example: \"OCaml 5.2 release date\"." )
+                    ] )
+              ; ( "limit"
+                , `Assoc
+                    [ "type", `String "integer"
+                    ; ( "description"
+                      , `String "Maximum number of results to return (1-10, default 5)." )
+                    ] )
+              ; ( "includeContent"
+                , `Assoc
+                    [ "type", `String "boolean"
+                    ; ( "description"
+                      , `String
+                          "When true, also fetch each result page and add raw page_content plus a human-readable content_text summary. Recommended for research." )
+                    ] )
+              ; ( "contentMaxChars"
+                , `Assoc
+                    [ "type", `String "integer"
+                    ; "description", `String "Maximum raw page_content characters per result."
+                    ; "minimum", `Int 100
+                    ; "maximum", `Int 20000
+                    ; "default", `Int 4000
+                    ] )
+              ; ( "contentTimeout"
+                , `Assoc
+                    [ "type", `String "integer"
+                    ; "description", `String "Per-result content fetch timeout in seconds."
+                    ; "minimum", `Int 1
+                    ; "maximum", `Int 60
+                    ; "default", `Int 15
+                    ] )
+              ] )
+        ; "required", `List [ `String "query" ]
+        ; "additionalProperties", `Bool false
+        ]
+  }
+;;
+
+let web_fetch_schema : tool_schema =
+  { name = "masc_web_fetch"
+  ; description =
+      "Fetch one web page for deeper reading. Use exact tool name WebFetch. \
+       Example input: {\"url\":\"https://ocaml.org/news\",\"extractMode\":\"markdown\",\"maxChars\":5000}. \
+       Returns text, title, final_url, http_status, truncated. Use after WebSearch \
+       when you need a citation or full article text. Do not use snake_case names \
+       like web_fetch."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; ( "properties"
+          , `Assoc
+              [ ( "url"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String "Full URL to fetch. Example: \"https://ocaml.org/news\"." )
+                    ] )
+              ; ( "timeout"
+                , `Assoc
+                    [ "type", `String "integer"
+                    ; "description", `String "Request timeout in seconds."
+                    ; "minimum", `Int 1
+                    ; "maximum", `Int 60
+                    ; "default", `Int 15
+                    ] )
+              ; ( "extractMode"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "enum", `List [ `String "markdown"; `String "text" ]
+                    ; ( "description"
+                      , `String
+                          "Output extraction mode. markdown (default) preserves headings/lists/links; text returns flattened plain text." )
+                    ; "default", `String "markdown"
+                    ] )
+              ; ( "maxChars"
+                , `Assoc
+                    [ "type", `String "integer"
+                    ; "description", `String "Maximum extracted content characters to return."
+                    ; "minimum", `Int 1
+                    ; "maximum", `Int 100000
+                    ; "default", `Int 50000
+                    ] )
+              ] )
+        ; "required", `List [ `String "url" ]
+        ; "additionalProperties", `Bool false
+        ]
+  }
+;;
+
+let web_schemas = [ web_search_schema; web_fetch_schema ]
+
+(* [schemas] is the generated public misc schema set. Operator control and web
+   runtime schemas use the dedicated projections above. *)
 let schemas : tool_schema list = Tool_descriptors_gen.schemas
 
 type mcp_runtime_operation =

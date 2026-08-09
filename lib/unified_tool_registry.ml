@@ -52,6 +52,14 @@ let inline_runtime_tool_names =
 
 let is_inline_runtime_tool_name name = List.mem name inline_runtime_tool_names
 
+let control_tool_names =
+  List.map
+    (fun (schema : Masc_domain.tool_schema) -> schema.name)
+    Tool_schemas_misc.control_schemas
+;;
+
+let is_control_tool_name name = List.mem name control_tool_names
+
 (** Exact dispatch tag for one typed descriptor handler. *)
 let tag_of_runtime_handler
       (handler : Keeper_tool_descriptor.runtime_handler)
@@ -101,6 +109,7 @@ let tag_of_name name : TD.module_tag option =
   if is_workspace_state_tool_name name then Some TD.Mod_state
   else if is_keeper_task_tool_name name then Some TD.Mod_keeper_task
   else if is_inline_runtime_tool_name name then Some TD.Mod_inline
+  else if is_control_tool_name name then Some TD.Mod_control
   else
     match Keeper_tool_descriptor.descriptors_for_internal name with
     | [ descriptor ] -> Some (tag_of_runtime_handler descriptor.runtime_handler)
@@ -132,19 +141,34 @@ let register_visible_raw_schemas () =
            invalid_arg
              ("visible tool schema has no exact dispatch owner: " ^ schema.name))
 
+(** Resolve a descriptor's validation schema from its runtime owner. Control
+    schemas stay outside the Config front-door inventory and are registered by
+    [Tool_control]; every other descriptor handler resolves through the raw
+    runtime inventory. *)
+let runtime_schema_for_descriptor
+      (descriptor : Keeper_tool_descriptor.t)
+  : Masc_domain.tool_schema option
+  =
+  let inventory =
+    match descriptor.runtime_handler with
+    | Keeper_tool_descriptor.Tool_masc_control_dispatch ->
+      Tool_schemas_misc.control_schemas
+    | _ -> Config.raw_all_tool_schemas
+  in
+  List.find_opt
+    (fun (schema : Masc_domain.tool_schema) ->
+       String.equal schema.name descriptor.internal_name)
+    inventory
+;;
+
 (** 2. Register each descriptor's internal handler name with its exact runtime
-    schema.  [Config.raw_all_tool_schemas] owns translated runtime shapes;
-    descriptor schemas remain the model-facing, pre-translation contract. *)
+    schema. Descriptor schemas remain the model-facing, pre-translation
+    contract. *)
 let register_descriptor_handlers () =
   Keeper_tool_descriptor.all_descriptors ()
   |> List.iter (fun (descriptor : Keeper_tool_descriptor.t) ->
          let schema =
-           match
-             List.find_opt
-               (fun (schema : Masc_domain.tool_schema) ->
-                  String.equal schema.name descriptor.internal_name)
-               Config.raw_all_tool_schemas
-           with
+           match runtime_schema_for_descriptor descriptor with
            | Some schema -> schema
            | None ->
              invalid_arg

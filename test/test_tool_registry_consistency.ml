@@ -98,13 +98,12 @@ let test_schema_inventory_matches_dispatch_validation_registry () =
 ;;
 
 let test_every_descriptor_has_exact_runtime_schema () =
-  let inventory_names = schema_inventory_names () in
   let missing =
     Keeper_tool_descriptor.all_descriptors ()
     |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->
-      if List.mem descriptor.internal_name inventory_names
-      then None
-      else Some descriptor.internal_name)
+      match Unified_tool_registry.runtime_schema_for_descriptor descriptor with
+      | Some _ -> None
+      | None -> Some descriptor.internal_name)
     |> sorted_set
   in
   Alcotest.(check (list string))

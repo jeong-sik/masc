@@ -384,73 +384,6 @@ let search_files_schema =
     ]
 ;;
 
-let search_web_schema =
-  object_schema
-    ~required:[ "query" ]
-    [ property "query" "string" "Plain-text search query. Example: \"OCaml 5.2 release date\"."
-    ; property "limit" "integer" "Maximum number of results to return (1-10, default 5)."
-    ; property
-        "includeContent"
-        "boolean"
-        "When true, also fetch each result page and add raw page_content plus a human-readable content_text summary. Recommended for research."
-    ; ( "contentMaxChars",
-        `Assoc
-          [ "type", `String "integer"
-          ; "description",
-            `String "Maximum raw page_content characters per result."
-          ; "minimum", `Int 100
-          ; "maximum", `Int 20000
-          ; "default", `Int 4000
-          ] )
-    ; ( "contentTimeout",
-        `Assoc
-          [ "type", `String "integer"
-          ; "description", `String "Per-result content fetch timeout in seconds."
-          ; "minimum", `Int 1
-          ; "maximum", `Int 60
-          ; "default", `Int 15
-          ] )
-    ]
-;;
-
-let fetch_web_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties",
-        `Assoc
-          [ property "url" "string" "Full URL to fetch. Example: \"https://ocaml.org/news\"."
-          ; ( "timeout",
-              `Assoc
-                [ "type", `String "integer"
-                ; "description", `String "Request timeout in seconds."
-                ; "minimum", `Int 1
-                ; "maximum", `Int 60
-                ; "default", `Int 15
-                ] )
-          ; ( "extractMode",
-              `Assoc
-                [ "type", `String "string"
-                ; "enum", `List [ `String "markdown"; `String "text" ]
-                ; "description",
-                  `String
-                    "Output extraction mode. markdown (default) preserves headings/lists/links; \
-                     text returns flattened plain text."
-                ; "default", `String "markdown"
-                ] )
-          ; ( "maxChars",
-              `Assoc
-                [ "type", `String "integer"
-                ; "description", `String "Maximum extracted content characters to return."
-                ; "minimum", `Int 1
-                ; "maximum", `Int 100000
-                ; "default", `Int 50000
-                ] )
-          ] )
-    ; "required", `List [ `String "url" ]
-    ; "additionalProperties", `Bool false
-    ]
-;;
-
 (* [offset]/[limit] pass through as LINE coordinates — the runtime owns the
    line-window contract (keeper_tool_filesystem_runtime.slice_read_window).
    [limit] used to be renamed to [max_bytes] here, which silently turned "200
@@ -781,17 +714,12 @@ let public_descriptors =
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
-      ~input_schema_source:Descriptor_owned
+      ~input_schema_source:Canonical_registry
       ~id:"agent.search_web"
       ~public_name:"WebSearch"
-      ~internal_name:"masc_web_search"
-      ~description:
-        "Search the public web. Use exact tool name WebSearch. Example input: \
-         {\"query\":\"OCaml 5.2 release date\",\"limit\":5,\"includeContent\":true}. \
-         Returns result.results with title, url, snippet. With includeContent:true \
-         each result also has page_content and the response has a human-readable \
-         content_text summary. Do not use snake_case names like web_search."
-      ~input_schema:search_web_schema
+      ~internal_name:Tool_schemas_misc.web_search_schema.name
+      ~description:Tool_schemas_misc.web_search_schema.description
+      ~input_schema:Tool_schemas_misc.web_search_schema.input_schema
       ~policy:
         (policy
            ~readonly:true
@@ -806,17 +734,12 @@ let public_descriptors =
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
-      ~input_schema_source:Descriptor_owned
+      ~input_schema_source:Canonical_registry
       ~id:"agent.fetch_web"
       ~public_name:"WebFetch"
-      ~internal_name:"masc_web_fetch"
-      ~description:
-        "Fetch one web page for deeper reading. Use exact tool name WebFetch. \
-         Example input: {\"url\":\"https://ocaml.org/news\",\"extractMode\":\"markdown\",\"maxChars\":5000}. \
-         Returns text, title, final_url, http_status, truncated. Use after WebSearch \
-         when you need a citation or full article text. Do not use snake_case names \
-         like web_fetch."
-      ~input_schema:fetch_web_schema
+      ~internal_name:Tool_schemas_misc.web_fetch_schema.name
+      ~description:Tool_schemas_misc.web_fetch_schema.description
+      ~input_schema:Tool_schemas_misc.web_fetch_schema.input_schema
       ~policy:
         (policy
            ~readonly:true
@@ -928,41 +851,6 @@ let base_schema_input name =
     Canonical_registry, schema.input_schema
   | None -> invalid_arg ("missing base tool schema for " ^ name)
 
-let artifact_read_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc
-          [ ( "sha256"
-            , `Assoc
-                [ "type", `String "string"
-                ; ( "description"
-                  , `String "Exact sha256 from a [masc:blob ...] ToolResult." )
-                ] )
-          ; ( "offset"
-            , `Assoc
-                [ "type", `String "integer"
-                ; "minimum", `Int 0
-                ; "default", `Int 0
-                ; "description", `String "Byte offset to read from."
-                ] )
-          ; ( "max_bytes"
-            , `Assoc
-                [ "type", `String "integer"
-                ; "minimum", `Int Keeper_artifact_read.minimum_max_bytes
-                ; "maximum", `Int Keeper_artifact_read.maximum_max_bytes
-                ; "default", `Int Keeper_artifact_read.default_max_bytes
-                ; ( "description"
-                  , `String
-                      "Maximum source bytes to expose in this model-visible \
-                       page." )
-                ] )
-          ] )
-    ; "required", `List [ `String "sha256" ]
-    ; "additionalProperties", `Bool false
-    ]
-;;
-
 let library_search_schema =
   object_schema
     [ property
@@ -1073,82 +961,6 @@ let memory_write_schema_source, memory_write_schema =
 
 let ide_annotate_schema_source, ide_annotate_schema =
   base_schema_input "keeper_ide_annotate"
-;;
-
-let masc_fusion_schema =
-  object_schema
-    ~required:[ "prompt" ]
-    [ property
-        "prompt"
-        "string"
-        "Question or task to deliberate. A panel of models answers \
-         independently, then a judge synthesises consensus, contradictions, \
-         partial coverage, unique insights, and blind spots. Out-of-band: the \
-         synthesis arrives asynchronously on this keeper's chat lane, not \
-         inline in this turn."
-    ; property
-        "preset"
-        "string"
-        "Panel preset name from runtime.toml [fusion.presets]. Omitted uses \
-         the configured default_preset."
-    ; property
-        "web_tools"
-        "boolean"
-        "When true, the panel and judge agents are given web_search / \
-         web_fetch tools to ground their answers. Defaults to false; the \
-         selected preset may also enable web tools on its own (the effective \
-         setting is this flag OR the preset's)."
-    ; property
-        "topology"
-        "string"
-        "How to reduce the panel answers. \"simple\" (default): panel -> one \
-         judge -> result. \"refine\": panel -> judge -> a second judge that \
-         critically reviews and improves the first synthesis against the panel \
-         evidence -> result (deeper, two judge passes). \"conditional\": like \
-         simple, but escalates to a second (refine) judge only when the first \
-         judge could not decide (verdict insufficient); otherwise returns the \
-         first synthesis. \"judge_of_judges\": several distinct judges each \
-         synthesise the panel independently and a meta-judge reconciles them \
-         (requires the preset to configure >= 2 judges). \
-         \"staged_judge_of_judges\": first judges are grouped by \
-         [fusion].staged_judge_group_size, each group is reconciled by a \
-         stage meta-judge, then a final meta-judge reconciles the stage \
-         results (requires at least two exact groups; ragged counts are \
-         rejected). Unknown values are rejected."
-    ]
-;;
-
-let masc_fusion_status_schema =
-  object_schema
-    [ property
-        "run_id"
-        "string"
-        "Optional fusion run id (the run_id returned by masc_fusion). When \
-         given, returns that single run's status; when omitted, lists every \
-         tracked run (in-progress and recently completed)."
-    ]
-;;
-
-let analyze_image_schema =
-  object_schema
-    ~required:[ "artifact"; "query" ]
-    [ property
-        "artifact"
-        "string"
-        "Handle of a stored image artifact (the content-addressed id returned \
-         when the image was stored). The raw image is read in a vision sub-call \
-         and never enters this conversation."
-    ; property
-        "query"
-        "string"
-        "What to ask about the image, e.g. \"describe the chart\" or \
-         \"transcribe the text\"."
-    ; string_enum_property
-        "media_type"
-        Keeper_vision_tool.supported_image_media_types
-        "Optional image MIME type override (e.g. image/png, image/jpeg). \
-         Sniffed from the bytes when omitted."
-    ]
 ;;
 
 let read_only_in_process_policy ?(polling_read = false) () =
@@ -1586,19 +1398,18 @@ let internal_descriptors : t list =
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_context_status
-  ; in_process_descriptor
+  ; (in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
       ~id:"keeper.artifact.read"
-      ~name:"keeper_artifact_read"
-      ~description:
-        "Read an explicit byte range from a [masc:blob ...] ToolResult. Use \
-         the marker's sha256, then continue with the returned next_offset. \
-         Text pages use UTF-8; arbitrary bytes use base64. The full artifact \
-         is never restored into model history."
-      ~input_schema:artifact_read_schema
+      ~name:Keeper_tool_runtime_schemas.artifact_read.name
+      ~description:Keeper_tool_runtime_schemas.artifact_read.description
+      ~input_schema:Keeper_tool_runtime_schemas.artifact_read.input_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_artifact_read
-    |> with_model_output_projection Tool_output.bounded_inline_model_projection
+      ()
+    |> with_model_output_projection Tool_output.bounded_inline_model_projection)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
@@ -1687,64 +1498,44 @@ let internal_descriptors : t list =
       ~handler:Tool_ide_annotate
       ()
     (* ── fusion deliberation (RFC-0252) ───────────────────────── *)
-  ; in_process_descriptor
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
       ~id:"masc.fusion.deliberate"
-      ~name:"masc_fusion"
-      ~description:
-        "Run an out-of-band panel+judge deliberation. A panel of models from \
-         the configured preset answers the prompt independently; a judge model \
-         synthesises consensus, contradictions, partial coverage, unique \
-         insights, and blind spots. Advisory only: this keeper turn continues \
-         immediately; when the deliberation completes you are WOKEN with the \
-         result, and the conclusion (or the failure reason) is appended to \
-         your chat lane (also visible in the dashboard) — do not poll \
-         masc_fusion_status while waiting. Returns a status with a run_id. \
-         Panels answer from their own knowledge only: they cannot see your \
-         files, tasks, or conversation, so phrase the prompt \
-         self-contained. Set web_tools=true to let the panel and judge ground \
-         their answers with web_search / web_fetch. Gated by runtime.toml \
-         [fusion] (disabled by default)."
-      ~input_schema:masc_fusion_schema
+      ~name:Keeper_tool_runtime_schemas.fusion.name
+      ~description:Keeper_tool_runtime_schemas.fusion.description
+      ~input_schema:Keeper_tool_runtime_schemas.fusion.input_schema
       (* The explicit [Internal_name] projection makes Fusion available. *)
       ~policy:(write_in_process_policy ())
       ~handler:Tool_masc_fusion_dispatch
+      ()
     (* ── fusion status (RFC-0266 §7 Phase 3) ──────────────────── *)
-  ; in_process_descriptor
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
       ~id:"masc.fusion.status"
-      ~name:"masc_fusion_status"
-      ~description:
-        "Read the status of out-of-band fusion deliberations started by \
-         masc_fusion. With no argument, lists tracked runs (in-progress and \
-         recently completed); with a run_id, returns that single run. Each run \
-         reports keeper, preset, started_at (unix seconds), and status \
-         (running | completed | failed); failed runs also carry error and \
-         failure_code. Prefer waiting for the completion wake over polling \
-         this tool — the result reaches you without it. Read-only — does not \
-         start a deliberation. In-memory and server-lifetime: runs do not \
-         survive a restart."
-      ~input_schema:masc_fusion_status_schema
+      ~name:Keeper_tool_runtime_schemas.fusion_status.name
+      ~description:Keeper_tool_runtime_schemas.fusion_status.description
+      ~input_schema:Keeper_tool_runtime_schemas.fusion_status.input_schema
       (* [Internal_name] is the model exposure authority. *)
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_masc_fusion_status
+      ()
     (* ── vision delegation (RFC-keeper-vision-delegation-tool §2.6) ─ *)
-  ; in_process_descriptor
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
       ~id:"keeper.vision.analyze_image"
-      ~name:"analyze_image"
-      ~description:
-         "Read a stored image artifact and return a text description or answer. \
-         Delegates to a vision model in a sub-call; the image is never added to \
-         this conversation. Returns the extracted text, or a typed error \
-         (invalid_args | eio_context_unavailable | artifact_load_failed | \
-         invalid_timeout | image_too_large | invalid_media_type | \
-         invalid_request | no_capable_runtime | empty_extraction | \
-         truncated_extraction | timeout | provider_error)."
-      ~input_schema:analyze_image_schema
+      ~name:Keeper_tool_runtime_schemas.analyze_image.name
+      ~description:Keeper_tool_runtime_schemas.analyze_image.description
+      ~input_schema:Keeper_tool_runtime_schemas.analyze_image.input_schema
       (* [Internal_name] keeps the read-only vision sub-call model-visible. *)
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_analyze_image
+      ()
     (* ── voice cluster (RFC-0179 PR-3, 6 tools) ───────────────── *)
   ; voice_descriptor
       "keeper_voice_speak"

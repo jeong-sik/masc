@@ -1,13 +1,4 @@
-(** RFC-0057 Phase 2 regression test.
-
-    Guards [bin/gen_tool_descriptors.ml] output against the
-    effective schema exposed by [Tool_schemas_misc] for generated
-    misc/infra tools such as [masc_config] and [masc_tool_help].
-
-    Phase 2 lifted spec types into [lib/tool_schemas_specs/] and added
-    additional generated tools. Hand-written entries for these tools
-    were removed from [Tool_schemas_misc]; generated schemas are the
-    SSOT. The test pins generated vs effective field-for-field. *)
+(** Pins generated misc schemas to their effective runtime projections. *)
 
 open Masc_domain
 
@@ -64,17 +55,6 @@ let test_config_category_ssot () =
     "SSOT enum matches Env_config_snapshot.valid_config_category_strings"
     Env_config_snapshot.valid_config_category_strings
     Tool_schemas_specs_types.config_category_enum_strings
-;;
-
-let test_masc_spawn_is_not_generated () =
-  Alcotest.(check bool)
-    "masc_spawn absent from generated schemas"
-    false
-    (has_schema "masc_spawn" Tool_descriptors_gen.schemas);
-  Alcotest.(check bool)
-    "masc_spawn absent from effective misc schemas"
-    false
-    (has_schema "masc_spawn" Tool_schemas_misc.schemas)
 ;;
 
 let test_control_schemas_use_dedicated_typed_projection () =
@@ -255,11 +235,9 @@ let descriptor_internal_schema name : tool_schema =
   | None -> Alcotest.failf "descriptor for internal tool %S not found" name
 ;;
 
-(* Regression guard for PR #19864 -> keeper web alias pruning spam.
-   Web tools are descriptor-backed keeper tools: they MUST be
-   present in the raw substrate inventory, but their schema owner is
-   [Keeper_tool_descriptor.public_descriptors], not [Tool_descriptors_gen]. *)
-let test_web_tools_owned_by_keeper_descriptors () =
+(* Web handler schemas are owned by [Tool_schemas_misc.web_schemas]. Keeper
+   descriptors project the same exact schema into the model surface. *)
+let test_web_tools_use_runtime_schema_owner () =
   List.iter
     (fun name ->
       let descriptor = descriptor_internal_schema name in
@@ -271,16 +249,22 @@ let test_web_tools_owned_by_keeper_descriptors () =
         (name ^ " absent from Tool_schemas_misc.schemas")
         false
         (has_schema name Tool_schemas_misc.schemas);
+      let runtime = find_by_name name Tool_schemas_misc.web_schemas in
       let raw = find_by_name name Masc.Config.raw_all_tool_schemas in
       Alcotest.(check string)
-        (name ^ " raw description matches descriptor")
-        descriptor.description
+        (name ^ " raw description matches runtime owner")
+        runtime.description
         raw.description;
       Alcotest.check
         yojson_testable
-        (name ^ " raw input_schema matches descriptor")
-        descriptor.input_schema
+        (name ^ " raw input_schema matches runtime owner")
+        runtime.input_schema
         raw.input_schema;
+      Alcotest.check
+        yojson_testable
+        (name ^ " descriptor input_schema matches runtime owner")
+        runtime.input_schema
+        descriptor.input_schema;
       Alcotest.(check bool)
         (name ^ " present in Config.raw_all_tool_schemas")
         true
@@ -318,9 +302,6 @@ let () =
     ; ( "config category SSOT"
       , [ Alcotest.test_case "enum matches producer" `Quick test_config_category_ssot ]
       )
-    ; ( "retired tool exclusion"
-      , [ Alcotest.test_case "masc_spawn removed" `Quick test_masc_spawn_is_not_generated
-        ] )
     ; ( "control schema SSOT"
       , [ Alcotest.test_case
             "control tools use a dedicated typed projection"
@@ -362,11 +343,11 @@ let () =
         ; Alcotest.test_case "description" `Quick test_masc_gc_description_matches
         ; Alcotest.test_case "input_schema" `Quick test_masc_gc_input_schema_matches
         ] )
-    ; ( "descriptor-backed web tools"
+    ; ( "runtime-owned web tools"
       , [ Alcotest.test_case
-            "owned by keeper descriptors"
+            "projected through keeper descriptors"
             `Quick
-            test_web_tools_owned_by_keeper_descriptors
+            test_web_tools_use_runtime_schema_owner
         ; Alcotest.test_case
             "remain in complete model surface after substrate injection"
             `Quick

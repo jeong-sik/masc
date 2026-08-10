@@ -846,6 +846,7 @@ let run_named
         selected_runtime_result runtime antigravity_result, None
       | Runtime_execution.Claude_code config ->
         let run_claude ~initial_messages () =
+          let tools = if runtime.model.tools_support then tools else [] in
           Keeper_claude_code_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name

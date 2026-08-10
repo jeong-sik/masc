@@ -16,21 +16,29 @@
     cache-key/TTL machinery with the per-surface attempt/success/
     error tracking. *)
 
-type cached_surface = {
-  mutable json : Yojson.Safe.t;
-  mutable last_success_at : string option;
-  mutable last_success_unix : float option;
-  mutable last_attempt_at : string option;
-  mutable last_attempt_unix : float option;
-  mutable last_error : string option;
-  mutable last_error_at : string option;
-  mutable last_error_unix : float option;
+type surface_snapshot = {
+  json : Yojson.Safe.t;
+  last_success_at : string option;
+  last_success_unix : float option;
+  last_attempt_at : string option;
+  last_attempt_unix : float option;
+  last_error : string option;
+  last_error_at : string option;
+  last_error_unix : float option;
 }
-(** Concrete record because dashboard tests mutate it directly
-    ({!Test_dashboard_namespace_truth}, {!Test_dashboard_execution})
-    via {!mark_cached_surface_success} / {!invalidate_cached_surface}.
-    The three timestamp triples are paired (ISO + Unix) so callers
-    do not have to re-format on every render. *)
+(** One consistent view of a surface. The three timestamp triples are paired
+    (ISO + Unix) so callers do not have to re-format on every render. *)
+
+type cached_surface = { mutable current : surface_snapshot }
+(** The cell that holds the current {!surface_snapshot}. Concrete because
+    dashboard tests construct and read surfaces directly
+    ({!Test_dashboard_namespace_truth}, {!Test_dashboard_http_core}).
+    Every mutator replaces the whole snapshot in one write, so a reader can
+    never observe a half-applied update. *)
+
+val snapshot : cached_surface -> surface_snapshot
+(** [snapshot s] reads the current view. Bind it once and read fields off the
+    result rather than re-reading [s] per field. *)
 
 val create_cached_surface : Yojson.Safe.t -> cached_surface
 (** [create_cached_surface json] returns a fresh surface seeded

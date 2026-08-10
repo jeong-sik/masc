@@ -181,7 +181,8 @@ let clear_execution_default_light_http_body () =
 ;;
 
 let execution_surface_has_fresh_success () =
-  match execution_cache.last_success_unix, execution_cache.last_error_unix with
+  let execution_snapshot = Server_dashboard_http_cache.snapshot execution_cache in
+  match execution_snapshot.last_success_unix, execution_snapshot.last_error_unix with
   | Some success_ts, Some error_ts when error_ts > success_ts -> false
   | Some _, _ -> true
   | None, _ -> false
@@ -788,7 +789,7 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
 
 let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
   clear_execution_default_light_http_body ();
-  match execution_cache.json with
+  match (Server_dashboard_http_cache.snapshot execution_cache).json with
   | `Assoc fields ->
     (match List.assoc_opt "keepers" fields with
      | Some (`List rows) ->
@@ -797,13 +798,16 @@ let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
        in
        if keeper_rows <> rows
        then
-         execution_cache.json
-         <- `Assoc
-              (replace_keeper_rows_and_rebuild_briefs
-                 ~now_ts:(Time_compat.now ())
-                 ~keeper_rows
-                 ~keepers_json:(`List keeper_rows)
-                 fields)
+         execution_cache.Server_dashboard_http_cache.current
+         <- { (Server_dashboard_http_cache.snapshot execution_cache) with
+              json =
+                `Assoc
+                  (replace_keeper_rows_and_rebuild_briefs
+                     ~now_ts:(Time_compat.now ())
+                     ~keeper_rows
+                     ~keepers_json:(`List keeper_rows)
+                     fields)
+            }
      | Some _ -> ()
      | None -> ())
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()

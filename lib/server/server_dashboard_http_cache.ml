@@ -1,26 +1,33 @@
 (** Server_dashboard_http_cache — cached_surface type and cache lifecycle. *)
 
-type cached_surface = {
-  mutable json : Yojson.Safe.t;
-  mutable last_success_at : string option;
-  mutable last_success_unix : float option;
-  mutable last_attempt_at : string option;
-  mutable last_attempt_unix : float option;
-  mutable last_error : string option;
-  mutable last_error_at : string option;
-  mutable last_error_unix : float option;
+type surface_snapshot = {
+  json : Yojson.Safe.t;
+  last_success_at : string option;
+  last_success_unix : float option;
+  last_attempt_at : string option;
+  last_attempt_unix : float option;
+  last_error : string option;
+  last_error_at : string option;
+  last_error_unix : float option;
 }
+
+type cached_surface = { mutable current : surface_snapshot }
+
+let snapshot surface = surface.current
 
 let create_cached_surface json =
   {
-    json;
-    last_success_at = None;
-    last_success_unix = None;
-    last_attempt_at = None;
-    last_attempt_unix = None;
-    last_error = None;
-    last_error_at = None;
-    last_error_unix = None;
+    current =
+      {
+        json;
+        last_success_at = None;
+        last_success_unix = None;
+        last_attempt_at = None;
+        last_attempt_unix = None;
+        last_error = None;
+        last_error_at = None;
+        last_error_unix = None;
+      };
   }
 
 let now_cache_stamp () =
@@ -28,34 +35,47 @@ let now_cache_stamp () =
   (ts, Masc_domain.now_iso ())
 
 
+(* Each mutator swaps a whole snapshot in one write. The previous form wrote
+   the fields one at a time and was only free of torn reads because nothing
+   between the writes could yield; a log call or a move onto a worker domain
+   would have broken that silently. *)
 let mark_cached_surface_attempt surface =
   let ts, iso = now_cache_stamp () in
-  surface.last_attempt_unix <- Some ts;
-  surface.last_attempt_at <- Some iso
+  surface.current <-
+    { surface.current with last_attempt_unix = Some ts; last_attempt_at = Some iso }
 
 let mark_cached_surface_success surface json =
   let ts, iso = now_cache_stamp () in
-  surface.json <- json;
-  surface.last_success_unix <- Some ts;
-  surface.last_success_at <- Some iso;
-  surface.last_error <- None;
-  surface.last_error_at <- None;
-  surface.last_error_unix <- None
+  surface.current <-
+    { surface.current with
+      json
+    ; last_success_unix = Some ts
+    ; last_success_at = Some iso
+    ; last_error = None
+    ; last_error_at = None
+    ; last_error_unix = None
+    }
 
 let mark_cached_surface_error surface exn =
   let ts, iso = now_cache_stamp () in
-  surface.last_error <- Some (Printexc.to_string exn);
-  surface.last_error_at <- Some iso;
-  surface.last_error_unix <- Some ts
+  surface.current <-
+    { surface.current with
+      last_error = Some (Printexc.to_string exn)
+    ; last_error_at = Some iso
+    ; last_error_unix = Some ts
+    }
 
 let invalidate_cached_surface surface =
-  surface.last_success_at <- None;
-  surface.last_success_unix <- None;
-  surface.last_attempt_at <- None;
-  surface.last_attempt_unix <- None;
-  surface.last_error <- None;
-  surface.last_error_at <- None;
-  surface.last_error_unix <- None
+  surface.current <-
+    { surface.current with
+      last_success_at = None
+    ; last_success_unix = None
+    ; last_attempt_at = None
+    ; last_attempt_unix = None
+    ; last_error = None
+    ; last_error_at = None
+    ; last_error_unix = None
+    }
 
 let upsert_assoc_field key value fields =
   (key, value) :: List.remove_assoc key fields
@@ -89,7 +109,9 @@ let extend_projection_diagnostics json extra_fields =
            (List.remove_assoc "projection_diagnostics" fields))
   | other -> other
 
-let cached_surface_json surface =
+let cached_surface_json cache =
+  (* One read of the cell, so every field below comes from the same view. *)
+  let surface = snapshot cache in
   let now_ts = Unix.gettimeofday () in
   let cache_state, stale_reason, stale_age_ms =
     match surface.last_success_unix, surface.last_error_unix with
@@ -110,8 +132,8 @@ let cached_surface_json surface =
       ( "stale_age_ms", Json_util.int_opt_to_json stale_age_ms );
     ]
 
-let cached_surface_has_success surface =
-  Option.is_some surface.last_success_unix
+let cached_surface_has_success cache =
+  Option.is_some (snapshot cache).last_success_unix
 
 let cached_surface_or_first_success_json surface ~cache_key ~ttl ~clock
     ~timeout_sec compute =

@@ -110,12 +110,18 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
   let proactive_first_cycle_pending =
     not (cached_surface_has_success Execution_surfaces.execution_cache)
     &&
-    match Execution_surfaces.execution_cache.last_attempt_unix with
+    match
+      (Server_dashboard_http_cache.snapshot Execution_surfaces.execution_cache)
+        .last_attempt_unix
+    with
     | None -> true
     | Some attempt_ts ->
         let elapsed = Time_compat.now () -. attempt_ts in
         elapsed < warm_escape_s
-        && Option.is_none Execution_surfaces.execution_cache.last_error_unix
+        && Option.is_none
+             (Server_dashboard_http_cache.snapshot
+                Execution_surfaces.execution_cache)
+               .last_error_unix
   in
   if proactive_first_cycle_pending then
     Namespace_truth_support.compose_namespace_truth_initializing ~config
@@ -254,7 +260,9 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
          composed snapshot. The HTTP path
          ([dashboard_namespace_truth_http_json]) keeps [cached_surface_json]
          where clients render cache_state/stale_age_ms. *)
-      Server_dashboard_http_execution_surfaces.execution_cache.json
+      (Server_dashboard_http_cache.snapshot
+         Server_dashboard_http_execution_surfaces.execution_cache)
+        .json
     in
     Some
       (Namespace_truth_support.compose_namespace_truth_snapshot ~config

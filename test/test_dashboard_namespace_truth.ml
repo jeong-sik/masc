@@ -124,8 +124,11 @@ let expire_execution_warmup () =
   let surface = Server_dashboard_http.execution_cache in
   Server_dashboard_http_cache.invalidate_cached_surface surface;
   let stale_attempt_ts = Unix.gettimeofday () -. 120.0 in
-  surface.last_attempt_unix <- Some stale_attempt_ts;
-  surface.last_attempt_at <- Some "stale_attempt_for_test"
+  surface.Server_dashboard_http_cache.current <-
+    { (Server_dashboard_http_cache.snapshot surface) with
+      last_attempt_unix = Some stale_attempt_ts
+    ; last_attempt_at = Some "stale_attempt_for_test"
+    }
 
 let create_keeper env sw state name =
   let workspace_scope = Lib.Mcp_server.workspace_scope state in

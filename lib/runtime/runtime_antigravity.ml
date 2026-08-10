@@ -31,6 +31,12 @@ let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 8192
 let max_wire_line_bytes = 8 * 1024 * 1024
 
+(* [agy --print] accepts the prompt only as one argv member. Linux caps one
+   member below ARG_MAX and macOS charges it against the whole argv+environment
+   block, so a provider request-body budget cannot protect this spawn boundary.
+   Keep one cross-platform limit below both kernels and reject before execve. *)
+let max_prompt_bytes = 120 * 1024
+
 let default_config ~cwd ~model =
   { cli_path = "agy"
   ; cwd
@@ -56,9 +62,16 @@ type usage =
   ; total_tokens : int
   }
 
+(* Nothing in this tree branches on [permission_mode]: the only read of the
+   field is its own parse site. It was closed, and the one member the CLI added
+   ended a turn, parked the official-client session, and stopped the keeper --
+   taskmaster, 110 turns in one hour (#28008). Adding that member leaves the
+   next one to do it again, so an unseen mode is carried rather than rejected.
+   [step_type] took the same route in #28027. *)
 type permission_mode =
   | Always_proceed
   | Request_review
+  | Unrecognized_permission_mode of string
 
 type turn_result =
   { conversation_id : string
@@ -75,6 +88,10 @@ type turn_result =
 
 type error =
   | Invalid_config of string
+  | Prompt_too_large of
+      { bytes : int
+      ; limit : int
+      }
   | Spawn_failed of string
   | Protocol_error of
       { stage : string
@@ -89,6 +106,11 @@ exception Runtime_error of error
 
 let error_to_string = function
   | Invalid_config detail -> "invalid Antigravity CLI config: " ^ detail
+  | Prompt_too_large { bytes; limit } ->
+    Printf.sprintf
+      "Antigravity prompt is %d bytes; the CLI argv boundary admits at most %d"
+      bytes
+      limit
   | Spawn_failed detail -> "failed to start Antigravity CLI: " ^ detail
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Antigravity stream-json protocol error during %s: %s" stage detail
@@ -216,6 +238,7 @@ and step_type =
   | User_input
   | Internal
   | Checkpoint
+  | Unrecognized of string
 
 and result_status =
   | Success
@@ -228,15 +251,12 @@ let closed_string stage name parse value =
     protocol_error stage (Printf.sprintf "unsupported field %S value %S" name value)
 ;;
 
-let parse_permission_mode stage value =
-  closed_string
-    stage
-    "permission_mode"
-    (function
-      | "always-proceed" -> Some Always_proceed
-      | "request-review" -> Some Request_review
-      | _ -> None)
-    value
+let parse_permission_mode _stage value =
+  Ok
+    (match value with
+     | "always-proceed" -> Always_proceed
+     | "request-review" -> Request_review
+     | other -> Unrecognized_permission_mode other)
 ;;
 
 let parse_step_state stage value =
@@ -251,19 +271,37 @@ let parse_step_state stage value =
     value
 ;;
 
-let parse_step_type stage value =
-  closed_string
-    stage
-    "step_type"
-    (function
-      | "agent_response" -> Some Agent_response
-      | "system_message" -> Some System_message
-      | "tool" -> Some Tool
-      | "user_input" -> Some User_input
-      | "unknown" -> Some Internal
-      | "checkpoint" -> Some Checkpoint
-      | _ -> None)
-    value
+(* [step_type] decides one thing: whether this step is a tool step, for the two
+   tool counters. Every non-[Tool] value is behaviourally identical, so a value
+   we have not seen carries no decision we could get wrong -- but rejecting it
+   ends the turn and parks the session, which blocks every later turn for that
+   Keeper. Live 2026-08-10: Antigravity began emitting "system_message" and
+   taskmaster stopped (#28027).
+
+   #28029 opened this with [Unrecognized]; #28037 closed it again and named
+   [System_message] instead. Naming the member that stalled a keeper leaves the
+   next one to stall it again, and nothing branches on [System_message] -- it
+   appears at its declaration and at this parse site only. Both are kept here:
+   the known member keeps its name, and anything else is carried rather than
+   rejected.
+
+   [Unrecognized] carries the value rather than folding it into [Internal] so a
+   later consumer cannot read an unseen step as a known one. It does not make
+   the drift observable: [step_type] never reaches [turn_result], so nothing
+   renders it today.
+
+   [state] and [status] stay closed: each of those does decide something.
+   [permission_mode] does not, and is open for the same reason as this one. *)
+let parse_step_type _stage value =
+  Ok
+    (match value with
+     | "agent_response" -> Agent_response
+     | "system_message" -> System_message
+     | "tool" -> Tool
+     | "user_input" -> User_input
+     | "unknown" -> Internal
+     | "checkpoint" -> Checkpoint
+     | other -> Unrecognized other)
 ;;
 
 let parse_result_status stage value =
@@ -357,6 +395,10 @@ let validate_config config ~conversation_mode ~prompt =
   then Error (Invalid_config "timeout_s must be positive and finite")
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
+  else if String.length prompt > max_prompt_bytes
+  then
+    Error
+      (Prompt_too_large { bytes = String.length prompt; limit = max_prompt_bytes })
   else
     match config.agent, conversation_mode with
     | Some agent, _ when String.trim agent = "" ->
@@ -454,7 +496,7 @@ let argv config ~conversation_mode ~prompt =
     if config.disable_slash_commands then values @ [ "--disable-slash-commands" ] else values)
   |> (fun values ->
     match conversation_mode with
-    | Start -> values
+    | Start -> values @ [ "--new-project" ]
     | Resume { conversation_id } -> values @ [ "--conversation"; conversation_id ])
 ;;
 

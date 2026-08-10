@@ -27,9 +27,17 @@ type config =
 
 val default_config : cwd:string -> model:string -> config
 
+val max_prompt_bytes : int
+(** Largest prompt accepted by the spawn boundary. [agy] exposes no stdin or
+    prompt-file form, so the prompt is one argv member and must fit the kernel
+    limit before [execve]. *)
+
 type conversation_mode =
   | Start
   | Resume of { conversation_id : string }
+(** [Start] asks the official client to create a new project so cached
+    workspace state cannot select an earlier conversation. [Resume] names the
+    exact durable conversation and never creates a project. *)
 
 type usage =
   { input_tokens : int
@@ -42,6 +50,10 @@ type usage =
 type permission_mode =
   | Always_proceed
   | Request_review
+  | Unrecognized_permission_mode of string
+      (** A mode the CLI announced that this tree does not model. Nothing
+          branches on [permission_mode], so an unseen member is carried rather
+          than rejected: rejecting it ended the turn and parked the session. *)
 
 type turn_result =
   { conversation_id : string
@@ -58,6 +70,10 @@ type turn_result =
 
 type error =
   | Invalid_config of string
+  | Prompt_too_large of
+      { bytes : int
+      ; limit : int
+      }
   | Spawn_failed of string
   | Protocol_error of
       { stage : string

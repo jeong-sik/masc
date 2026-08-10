@@ -119,7 +119,15 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       true
 
   | `GET, "/api/v1/board/hearths" ->
-      let hearths = Board_dispatch.list_hearths () in
+      let exclude_system =
+        bool_query_param httpun_request "exclude_system" ~default:false
+      in
+      let exclude_automation =
+        bool_query_param httpun_request "exclude_automation" ~default:false
+      in
+      let hearths =
+        Board_dispatch.list_hearths ~exclude_system ~exclude_automation ()
+      in
       let json = `Assoc [
         ("hearths", `List (List.map (fun (name, count) ->
           `Assoc [("name", `String name); ("count", `Int count)]

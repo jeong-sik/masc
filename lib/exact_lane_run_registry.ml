@@ -174,7 +174,7 @@ module Store = Run_registry_core.Make (Payload)
 
 type t = Store.t
 
-let storage_filename = "exact-lane-runs-v2.jsonl"
+let storage_filename = "exact-lane-runs-v3.jsonl"
 
 let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
 

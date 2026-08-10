@@ -772,11 +772,17 @@ describe('fetchBoardHearths', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(fetchBoardHearths()).resolves.toEqual([
+    await expect(fetchBoardHearths({
+      excludeSystem: true,
+      excludeAutomation: true,
+    })).resolves.toEqual([
       { name: 'ops', count: 3 },
       { name: 'research', count: 0 },
     ])
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/board/hearths', expect.any(Object))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/board/hearths?exclude_system=true&exclude_automation=true',
+      expect.any(Object),
+    )
   })
 })
 

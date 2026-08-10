@@ -338,7 +338,13 @@ val get_agent_karma : agent_name:string -> int
 
 (** {1 Aggregates} *)
 
-val list_hearths : unit -> (string * int) list
+val list_hearths
+  :  ?exclude_system:bool
+  -> ?exclude_automation:bool
+  -> unit
+  -> (string * int) list
+(** Aggregates hearth counts over the same typed post-kind filter axis used by
+    [list_posts]. Omitted filters preserve the complete Board aggregate. *)
 
 val stats : unit -> Yojson.Safe.t
 (** Board snapshot ([post_count] / [comment_count] / per-author /

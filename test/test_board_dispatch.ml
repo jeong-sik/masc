@@ -1610,8 +1610,23 @@ let test_search () =
 let test_hearths () =
   ignore (Board_dispatch.create_post ~author:"hearth-test" ~content:"fire topic"
     ~hearth:"test-hearth" ~post_kind:Board.Human_post ());
+  ignore (Board_dispatch.create_post ~author:"hearth-system" ~content:"system topic"
+    ~hearth:"system-hearth" ~post_kind:Board.System_post ());
+  ignore (Board_dispatch.create_post ~author:"hearth-automation" ~content:"automation topic"
+    ~hearth:"automation-hearth" ~post_kind:Board.Automation_post ());
   let hearths = Board_dispatch.list_hearths () in
-  Alcotest.(check bool) "has hearths" true (List.length hearths >= 1)
+  let count name rows = List.assoc_opt name rows |> Option.value ~default:0 in
+  Alcotest.(check bool) "has hearths" true (List.length hearths >= 3);
+  Alcotest.(check int) "unfiltered system count" 1 (count "system-hearth" hearths);
+  Alcotest.(check int) "unfiltered automation count" 1 (count "automation-hearth" hearths);
+  let without_system = Board_dispatch.list_hearths ~exclude_system:true () in
+  Alcotest.(check int) "system excluded" 0 (count "system-hearth" without_system);
+  Alcotest.(check int) "automation retained" 1 (count "automation-hearth" without_system);
+  let direct_only =
+    Board_dispatch.list_hearths ~exclude_system:true ~exclude_automation:true ()
+  in
+  Alcotest.(check int) "automation excluded" 0 (count "automation-hearth" direct_only);
+  Alcotest.(check int) "human retained" 1 (count "test-hearth" direct_only)
 
 let test_set_thread_id () =
   match

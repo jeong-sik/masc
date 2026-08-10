@@ -134,6 +134,12 @@ max-concurrent = 1
 max-request-body-bytes = 65536
 |}
 
+(* Both lane candidates are official-client: [Runtime.validate_lanes] refuses a
+   lane whose candidates disagree on checkpoint ownership, because a turn that
+   fails over across that boundary is rejected at finalization after the answer
+   was produced. The tests below assert only on the codex attempt's manifest
+   rows, so the second candidate's owner was incidental — it is pinned here so
+   the fixture keeps loading and keeps meaning "failover lane". *)
 let runtime_toml_checkpoint_lane =
   {|
 [runtime]
@@ -141,7 +147,7 @@ default = "codex.codex"
 
 [runtime.lanes.checkpoint_lane]
 strategy = "ordered"
-candidates = [ "codex.codex", "primary.test_model" ]
+candidates = [ "codex.codex", "codex.codex_standby" ]
 
 [providers.codex]
 protocol = "codex-app-server"
@@ -152,7 +158,13 @@ is-non-interactive = true
 api-name = "gpt-fixture"
 max-context = 400000
 
+[models.codex_standby]
+api-name = "gpt-fixture-standby"
+max-context = 400000
+
 [codex.codex]
+
+[codex.codex_standby]
 
 [providers.primary]
 display-name = "Primary Provider"

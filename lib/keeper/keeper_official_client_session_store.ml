@@ -744,16 +744,7 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       Error "official-client session has an active unsettled attempt; refusing duplicate execution"
     | Some { phase = Turn_inflight _; _ } ->
       Error "official-client session has an in-flight turn; refusing duplicate execution"
-    | Some
-        { phase = Recovery_required recovery
-        ; turn_count
-        ; tool_surface_sha256
-        ; _
-        } ->
-      Ok
-        ( recovery.previous_settlement
-        , turn_count
-        , Option.map (fun _ -> tool_surface_sha256) recovery.previous_settlement )
+    | Some { phase = Recovery_required _; _ } -> Ok (None, 1, None)
   in
   Ok { previous_settlement; turn_count; required_tool_surface_sha256 }
 ;;
@@ -806,7 +797,7 @@ let claim ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_i
    | Some { phase = Recovery_required recovery; _ } ->
      Log.Keeper.info
        ~keeper_name
-       "auto-superseded official-client recovery=%s failure=%s owner_epoch=%s"
+       "auto-superseded official-client recovery=%s failure=%s with a fresh session owner_epoch=%s"
        recovery.recovery_id
        (recovery_failure_to_string recovery.failure)
        owner_epoch
@@ -849,7 +840,7 @@ let mark_turn_starting ~base_path ~keeper_name ~expected ~session_id ~updated_at
 ;;
 
 let mark_turn_started ~base_path ~keeper_name ~expected ~session_id ~turn_id
-    ~updated_at =
+    ~turn_count ~updated_at =
   match expected.phase with
   | Turn_inflight
       { owner_epoch
@@ -858,20 +849,24 @@ let mark_turn_started ~base_path ~keeper_name ~expected ~session_id ~turn_id
       ; previous_settlement
       }
     when String.equal inflight_session_id session_id ->
-    transition
-      ~base_path
-      ~keeper_name
-      ~expected:(Some expected)
-      { expected with
-        phase =
-          Turn_inflight
-            { owner_epoch
-            ; session_id
-            ; turn_id = Some turn_id
-            ; previous_settlement
-            }
-      ; updated_at
-      }
+    if turn_count < expected.turn_count
+    then Error "official-client observed turn count regressed after turn start"
+    else
+      transition
+        ~base_path
+        ~keeper_name
+        ~expected:(Some expected)
+        { expected with
+          phase =
+            Turn_inflight
+              { owner_epoch
+              ; session_id
+              ; turn_id = Some turn_id
+              ; previous_settlement
+              }
+        ; turn_count
+        ; updated_at
+        }
   | Turn_inflight { turn_id = None; _ } ->
     Error "official-client in-flight session identity changed after turn start"
   | Turn_inflight { turn_id = Some _; _ } ->

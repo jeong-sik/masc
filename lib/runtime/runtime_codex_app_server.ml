@@ -495,14 +495,32 @@ let turn_error_message fields =
         String.trim message
       | _ -> "turn failed without a typed error message"
     in
-    let scalar name =
-      match List.assoc_opt name error_fields with
-      | Some (`String value) when String.trim value <> "" ->
-        Some (name ^ "=" ^ String.trim value)
-      | Some (`Int value) -> Some (name ^ "=" ^ string_of_int value)
-      | _ -> None
+    (* Carrying only [code] and [type] cannot answer what the server sends,
+       because a name that is absent and a name that was never looked for
+       produce the same empty annotation. Measured 2026-08-11 on live sangsu
+       (codex_subscription.gpt-5.3-codex-spark): the deployed narrow form
+       printed the overflow sentence with no annotation, which left "the error
+       object carries no scalar" and "the scalar is called something else"
+       indistinguishable. Every scalar except [message] is carried, so the
+       empty case now means exactly one thing.
+
+       Nested objects and arrays are skipped: this string is read by an
+       operator and joined into one line, and the fields a classification
+       would key on are scalars. *)
+    let annotation (name, value) =
+      if String.equal name "message"
+      then None
+      else (
+        match value with
+        | `String value when String.trim value <> "" ->
+          Some (name ^ "=" ^ String.trim value)
+        | `Int value -> Some (name ^ "=" ^ string_of_int value)
+        | `Intlit value -> Some (name ^ "=" ^ value)
+        | `Bool value -> Some (name ^ "=" ^ string_of_bool value)
+        | `Float value -> Some (name ^ "=" ^ Printf.sprintf "%g" value)
+        | `String _ | `Null | `Assoc _ | `List _ | `Tuple _ | `Variant _ -> None)
     in
-    (match List.filter_map scalar [ "code"; "type" ] with
+    (match List.filter_map annotation error_fields with
      | [] -> message
      | annotations -> message ^ " (" ^ String.concat " " annotations ^ ")")
   | _ -> "turn failed without an error object"

@@ -431,6 +431,56 @@ let test_failed_turn_keeps_typed_error_fields () =
       | Ok _ -> fail "failed turn incorrectly reported as completed")
 ;;
 
+(* The named-field form could not distinguish "the server sent no scalar" from
+   "the scalar is called something else": both printed the sentence with no
+   annotation. That is what live sangsu produced on 2026-08-11 after the narrow
+   form deployed. This fixture carries no [code] and no [type], so it renders
+   the sentence unannotated under the named form and fails there. The
+   expectations are literals rather than a re-render of the function, and one
+   of them asserts [message] is *not* repeated as an annotation. *)
+let test_failed_turn_keeps_unnamed_error_scalars () =
+  let failed =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"ran out of room in the model's context window","kind":"context_length","http_status":400,"retryable":false,"details":{"nested":"skipped"}}}}}|}
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; failed ]
+    (fun path ->
+      match run_fixture path with
+      | Error (Runtime_codex_app_server.Turn_failed detail) ->
+        check
+          bool
+          "provider sentence survives"
+          true
+          (Astring.String.is_infix ~affix:"ran out of room" detail);
+        check
+          bool
+          "string scalar outside the named list survives"
+          true
+          (Astring.String.is_infix ~affix:"kind=context_length" detail);
+        check
+          bool
+          "int scalar survives"
+          true
+          (Astring.String.is_infix ~affix:"http_status=400" detail);
+        check
+          bool
+          "bool scalar survives"
+          true
+          (Astring.String.is_infix ~affix:"retryable=false" detail);
+        check
+          bool
+          "nested object is skipped"
+          false
+          (Astring.String.is_infix ~affix:"details=" detail);
+        check
+          bool
+          "message is not repeated as an annotation"
+          false
+          (Astring.String.is_infix ~affix:"message=" detail)
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "failed turn incorrectly reported as completed")
+;;
+
 let test_failed_turn_is_not_completion () =
   let failed =
     {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"fixture failure"}}}}|}
@@ -2183,6 +2233,8 @@ let () =
         ; test_case "server request fails closed" `Quick test_server_request_fails_closed
         ; test_case "failed turn keeps typed error fields" `Quick
             test_failed_turn_keeps_typed_error_fields
+        ; test_case "failed turn keeps unnamed error scalars" `Quick
+            test_failed_turn_keeps_unnamed_error_scalars
         ; test_case "failed turn stays failed" `Quick test_failed_turn_is_not_completion
         ; test_case
             "retry notifications are observational"

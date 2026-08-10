@@ -47,6 +47,7 @@ supports_reasoning = true
 supports_extended_thinking = true
 supports_response_format_json = true
 supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
 input_per_million = 0.6
 output_per_million = 2.2
 cache_write_multiplier = 1.0
@@ -261,6 +262,7 @@ supports_reasoning = true
 supports_extended_thinking = true
 supports_response_format_json = true
 supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
 
 # Opaque exact-output slot bindings. MASC routes only by [id]; AGENT_CORE owns the
 # provider/model join, capability admission, and wire materialization.

@@ -404,6 +404,54 @@ let user_text_of_messages messages =
   |> String.concat "\n"
 ;;
 
+let test_prompt_input_and_rendered_prompt_share_the_same_window () =
+  let max_messages = Runtime.prompt_max_messages () in
+  check bool "configured prompt window is positive" true (max_messages > 0);
+  let total = max_messages + 3 in
+  let messages =
+    List.init total (fun index ->
+      Agent_core.Types.make_message
+        ~role:Agent_core.Types.User
+        [ Agent_core.Types.Text (Printf.sprintf "history-%04d" index) ])
+  in
+  let original = { (input ()) with messages } in
+  let projected = Runtime.prompt_input_for_librarian original in
+  check int
+    "registry/provider input uses configured history window"
+    max_messages
+    (List.length projected.messages);
+  let projected_text = user_text_of_messages projected.messages in
+  check bool
+    "discarded head is absent from projected input"
+    false
+    (String_util.contains_substring projected_text "history-0000");
+  check bool
+    "first retained message is present in projected input"
+    true
+    (String_util.contains_substring projected_text "history-0003");
+  let last = Printf.sprintf "history-%04d" (total - 1) in
+  check bool
+    "latest message is present in projected input"
+    true
+    (String_util.contains_substring projected_text last);
+  match Runtime.messages_for_librarian original with
+  | Error detail -> failf "librarian render failed: %s" detail
+  | Ok rendered_messages ->
+    let rendered = user_text_of_messages rendered_messages in
+    check bool
+      "rendered prompt omits the same discarded head"
+      false
+      (String_util.contains_substring rendered "history-0000");
+    check bool
+      "rendered prompt carries the same first retained message"
+      true
+      (String_util.contains_substring rendered "history-0003");
+    check bool
+      "rendered prompt carries the latest message"
+      true
+      (String_util.contains_substring rendered last)
+;;
+
 let test_prompt_carries_recall_fact_byte_budget () =
   let constrained = { (input ()) with max_recall_fact_bytes = 12_345 } in
   check string "budget variable is exact"
@@ -629,6 +677,10 @@ let () =
             test_prompt_carries_recall_fact_byte_budget
         ; test_case "prompt omits tool payload and stays single-message" `Quick
             test_prompt_omits_tool_result_payload_and_has_one_message
+        ; test_case
+            "prompt input and rendered prompt share history window"
+            `Quick
+            test_prompt_input_and_rendered_prompt_share_the_same_window
         ; test_case "repo template renders Keeper instructions" `Quick
             test_repo_template_renders_keeper_instructions
         ; test_case "constraint category excludes self-imposed scope" `Quick

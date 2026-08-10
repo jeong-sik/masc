@@ -510,6 +510,7 @@ let publish_open_journal writer journal =
        reopen follows an open that a waiter had already observed. The promise
        carries the first outcome and later publishes are the same fact, so the
        flag has no consumer here. *)
+    (* fire-and-forget: [false] only means the promise already holds an outcome. *)
     ignore (Eio.Promise.try_resolve writer.resolve_ready (Ok ()) : bool))
 ;;
 
@@ -626,7 +627,9 @@ let complete_actor writer =
          promise may be resolved from an earlier ready publish or a concurrent
          closer, and both mean the waiter has its answer, so [false] is not a
          failure to report. *)
+      (* fire-and-forget: [false] only means the promise already holds an outcome. *)
       ignore (Eio.Promise.try_resolve writer.resolve_ready (Ok ()) : bool);
+      (* fire-and-forget: [false] only means the promise already holds an outcome. *)
       ignore (Eio.Promise.try_resolve writer.resolve_closed (Ok ()) : bool)))
 ;;
 
@@ -669,6 +672,7 @@ let fail_actor writer failure =
       (* A waiter that already holds a readiness outcome keeps it: the failure
          it would learn here reaches it through its own command settlement
          below, which is the path that carries the per-command error. *)
+      (* fire-and-forget: [false] only means the promise already holds an outcome. *)
       ignore (Eio.Promise.try_resolve writer.resolve_ready (Error failure) : bool);
       let rec settle_all count = function
         | [] -> count
@@ -681,6 +685,7 @@ let fail_actor writer failure =
       record_settled writer newly_settled;
       (* Same as the readiness promise above: closure is announced once, and a
          second announcement of the same failure is redundant rather than lost. *)
+      (* fire-and-forget: [false] only means the promise already holds an outcome. *)
       ignore (Eio.Promise.try_resolve writer.resolve_closed (Error failure) : bool))
 ;;
 

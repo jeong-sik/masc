@@ -92,16 +92,7 @@ export const boardComposerDraft = signal('')
 
 // ── Pagination ─────────────────────────────────────────────────────
 export const PAGE_SIZE = 20
-export const visibleLimit = signal(PAGE_SIZE)
-export const automationVisibleLimit = signal(PAGE_SIZE)
-export const systemVisibleLimit = signal(PAGE_SIZE)
-/** Per-category pagination limits */
-export const categoryVisibleLimits = signal<Record<string, number>>({
-  article: PAGE_SIZE,
-  review: PAGE_SIZE,
-  notice: PAGE_SIZE,
-  system: PAGE_SIZE,
-})
+export const feedVisibleLimit = signal(PAGE_SIZE)
 
 // ── Selection / bulk delete ────────────────────────────────────────
 export const deletingPostId = signal<string | null>(null)

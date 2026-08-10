@@ -27,21 +27,6 @@ let temp_dir () =
   path
 ;;
 
-let rm_rf dir =
-  let rec rm path =
-    if Sys.file_exists path
-    then
-      if Sys.is_directory path
-      then (
-        Sys.readdir path |> Array.iter (fun entry -> rm (Filename.concat path entry));
-        Unix.rmdir path)
-      else Sys.remove path
-  in
-  match rm dir with
-  | () -> ()
-  | exception Sys_error msg -> fail ("rm_rf failed: " ^ msg)
-;;
-
 let with_workspace f =
   Eio_main.run
   @@ fun env ->
@@ -49,7 +34,12 @@ let with_workspace f =
   let dir = temp_dir () in
   Eio.Switch.run
   @@ fun sw ->
-  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  (* Masc_test_deps.cleanup_test_workspace, not a local rm_rf: it stats with
+     Unix.lstat, so a symlink is unlinked rather than followed. A local rm_rf
+     built on Sys.file_exists reads a dangling link as absent, skips it, and
+     leaves the parent non-empty for rmdir (#26648, fixed for the shared
+     helper by #26652). *)
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
   (match Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with

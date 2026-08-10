@@ -14,6 +14,10 @@ let internal_error detail = Agent_core.Error.Internal detail
 let runtime_error_to_core_error = function
   | Runtime_antigravity.Invalid_config detail ->
     config_error ~field:"antigravity_cli" detail
+  | Runtime_antigravity.Prompt_too_large { bytes; limit } ->
+    config_error
+      ~field:"antigravity_cli.prompt"
+      (Printf.sprintf "prompt bytes=%d exceed argv limit=%d" bytes limit)
   | Runtime_antigravity.Turn_failed detail ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
@@ -44,6 +48,7 @@ let recovery_failure_of_runtime_error = function
   | Runtime_antigravity.Process_exited _ | Runtime_antigravity.Timeout _ ->
     Session_store.Transport_interrupted
   | Runtime_antigravity.Invalid_config _
+  | Runtime_antigravity.Prompt_too_large _
   | Runtime_antigravity.Protocol_error _ ->
     Session_store.Protocol_failed
   | Runtime_antigravity.State_callback_failed _ ->
@@ -60,35 +65,70 @@ let home_error_to_core_error error =
 let render_message (message : Agent_core.Types.message) =
   let text = Host.encode_history_message message in
   match message.role with
-  | Agent_core.Types.System -> Ok ("SYSTEM:\n" ^ text)
-  | Agent_core.Types.User -> Ok ("USER:\n" ^ text)
-  | Agent_core.Types.Assistant -> Ok ("ASSISTANT:\n" ^ text)
-  | Agent_core.Types.Tool -> Ok ("TOOL:\n" ^ text)
+  | Agent_core.Types.System -> "SYSTEM:\n" ^ text
+  | Agent_core.Types.User -> "USER:\n" ^ text
+  | Agent_core.Types.Assistant -> "ASSISTANT:\n" ^ text
+  | Agent_core.Types.Tool -> "TOOL:\n" ^ text
 ;;
 
+let section_separator = "\n\n"
+
 let render_messages messages =
-  let rec loop rendered = function
-    | [] -> Ok (String.concat "\n\n" (List.rev rendered))
-    | message :: rest ->
-      let* rendered_message = render_message message in
-      loop (rendered_message :: rendered) rest
-  in
-  loop [] messages
+  messages
+  |> List.map render_message
+  |> String.concat section_separator
 ;;
+
+type prompt_projection =
+  { prompt : string
+  ; kept_messages : int
+  ; dropped_atoms : int
+  }
 
 let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
   if is_resume
-  then Ok goal
+  then Ok { prompt = goal; kept_messages = 0; dropped_atoms = 0 }
   else
-    let* history = render_messages prepared.messages in
+    let system =
+      String_util.trim_to_option prepared.system_prompt
+      |> Option.map (fun value -> "SYSTEM INSTRUCTIONS:\n" ^ value)
+    in
+    let current_goal = "CURRENT GOAL:\n" ^ goal in
+    let reserved_bytes =
+      Option.fold ~none:0 ~some:String.length system
+      + String.length current_goal
+      + (2 * String.length section_separator)
+    in
+    let measure_message_bytes message =
+      render_message message
+      |> String.length
+      |> ( + ) (String.length section_separator)
+    in
+    let* projection =
+      Runtime_model_input_tail_window.project_with_drop
+        ~measure_message_bytes
+        ~capacity_bytes:Runtime_antigravity.max_prompt_bytes
+        ~reserved_bytes
+        prepared.messages
+      |> Result.map_error (fun error ->
+        config_error
+          ~field:"antigravity_cli.prompt"
+          (Runtime_model_input_tail_window.budget_error_to_string error))
+    in
+    let history = render_messages projection.messages in
+    let prompt =
+      [ system
+      ; String_util.trim_to_option history
+      ; Some current_goal
+      ]
+      |> List.filter_map Fun.id
+      |> String.concat section_separator
+    in
     Ok
-      ([ String_util.trim_to_option prepared.system_prompt
-         |> Option.map (fun value -> "SYSTEM INSTRUCTIONS:\n" ^ value)
-       ; String_util.trim_to_option history
-       ; Some ("CURRENT GOAL:\n" ^ goal)
-       ]
-       |> List.filter_map Fun.id
-       |> String.concat "\n\n")
+      { prompt
+      ; kept_messages = List.length projection.messages
+      ; dropped_atoms = projection.dropped_atoms
+      }
 ;;
 
 let tool_spec (tool : Host.dynamic_tool) =
@@ -206,7 +246,17 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       | None -> Ok goal
       | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
     in
-    let* prompt = prompt_for_turn ~is_resume ~goal prepared in
+    let* prompt_projection = prompt_for_turn ~is_resume ~goal prepared in
+    let prompt = prompt_projection.prompt in
+    if prompt_projection.dropped_atoms > 0
+    then
+      Log.Keeper.warn
+        ~keeper_name
+        "Antigravity fresh prompt kept %d history message(s) after dropping %d \
+         complete atom(s) to fit the %d-byte argv boundary"
+        prompt_projection.kept_messages
+        prompt_projection.dropped_atoms
+        Runtime_antigravity.max_prompt_bytes;
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools
@@ -418,17 +468,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             then Ok ()
             else Error (internal_error "Antigravity resumed flag differs from durable plan")
           in
-          let* () =
-            if turn.num_turns = turn_count
-            then Ok ()
-            else
-              Error
-                (internal_error
-                   (Printf.sprintf
-                      "Antigravity reported turn %d; durable session expected %d"
-                      turn.num_turns
-                      turn_count))
-          in
           let turn_id =
             provider_turn_identity
               ~conversation_id:turn.conversation_id
@@ -442,6 +481,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                 ~expected
                 ~session_id:turn.conversation_id
                 ~turn_id
+                ~turn_count:turn.num_turns
                 ~updated_at:(Time_compat.now ()))
             |> Result.map_error internal_error
           in
@@ -478,10 +518,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             match
               Host.invoke_turn_hook
                 ~keeper_name
-                ~turn_count
+                ~turn_count:turn.num_turns
                 ~hook_name:"after_turn"
                 hooks.after_turn
-                (Agent_core.Hooks.AfterTurn { turn = turn_count; response })
+                (Agent_core.Hooks.AfterTurn { turn = turn.num_turns; response })
             with
             | Continue -> Ok ()
             | HookFailed { stage; detail } ->
@@ -493,7 +533,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             match
               Host.invoke_turn_hook
                 ~keeper_name
-                ~turn_count
+                ~turn_count:turn.num_turns
                 ~hook_name:"on_stop"
                 hooks.on_stop
                 (Agent_core.Hooks.OnStop { reason = response.stop_reason; response })
@@ -549,7 +589,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             { Runtime_agent.response
             ; checkpoint = None
             ; session_id = turn.conversation_id
-            ; turns = turn_count
+            ; turns = turn.num_turns
             ; trace_ref = None
             ; run_validation = None
             ; runtime_observation = Some runtime_observation

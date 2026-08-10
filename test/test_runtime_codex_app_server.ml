@@ -1174,9 +1174,16 @@ let test_keeper_protocol_failure_enters_recovery () =
               |> Result.get_ok
             in
             check int
-              "failed turn ordinal is reused without an operator gate"
-              recovery.turn_count
-              next_claim.turn_count))
+              "failed provider session is superseded at a fresh ordinal"
+              1
+              next_claim.turn_count;
+            check
+              (option string)
+              "failed provider session is not resumed"
+              None
+              (Option.map
+                 (fun settlement -> settlement.session_id)
+                 next_claim.previous_settlement)))
 ;;
 
 let test_dashboard_official_client_recovery_projection_and_resolution () =

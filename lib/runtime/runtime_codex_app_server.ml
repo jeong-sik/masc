@@ -105,6 +105,7 @@ type error =
       }
   | Subscription_required of string
   | Unsupported_server_request of string
+  | Context_window_exceeded of { message : string }
   | Turn_failed of string
   | Turn_interrupted
   | Process_exited of string
@@ -122,6 +123,8 @@ let error_to_string = function
     "Codex ChatGPT subscription login required: " ^ detail
   | Unsupported_server_request method_ ->
     "Codex app-server requested unsupported host action: " ^ method_
+  | Context_window_exceeded { message } ->
+    "Codex app-server context window exceeded: " ^ message
   | Turn_failed detail -> "Codex app-server turn failed: " ^ detail
   | Turn_interrupted -> "Codex app-server turn was interrupted"
   | Process_exited detail -> "Codex app-server exited before completion: " ^ detail
@@ -136,6 +139,7 @@ let error_kind = function
   | Rpc_error _ -> "rpc_error"
   | Subscription_required _ -> "subscription_required"
   | Unsupported_server_request _ -> "unsupported_server_request"
+  | Context_window_exceeded _ -> "context_window_exceeded"
   | Turn_failed _ -> "turn_failed"
   | Turn_interrupted -> "turn_interrupted"
   | Process_exited _ -> "process_exited"
@@ -492,16 +496,36 @@ let messages_of_items ~stage = function
   | _ -> protocol_error stage "turn items must be an array"
 ;;
 
-(* Only [message] used to survive this function, so a live keeper failing every
-   turn on "Codex ran out of room in the model's context window" carried no
-   machine-readable trace of what kind of failure that was (#28071). Whatever
-   else the server put on the error object is kept here as well: a later change
-   that wants to route context overflow to the shrink retry needs a typed field
-   to key on, and it cannot recover one that was discarded at parse time.
+(* [CodexErrorInfo] is part of Codex app-server's generated protocol schema.
+   The exact [contextWindowExceeded] enum is the provider-owned classification;
+   human prose and ad-hoc scalar fields remain observational detail only. *)
+let turn_error_detail ~message error_fields =
+  let annotation (name, value) =
+    if String.equal name "message"
+    then None
+    else (
+      match value with
+      | `String value when String.trim value <> "" ->
+        Some (name ^ "=" ^ String.trim value)
+      | `Int value -> Some (name ^ "=" ^ string_of_int value)
+      | `Intlit value -> Some (name ^ "=" ^ value)
+      | `Bool value -> Some (name ^ "=" ^ string_of_bool value)
+      | `Float value -> Some (name ^ "=" ^ Printf.sprintf "%g" value)
+      | `String _ | `Null | `Assoc _ | `List _ | `Tuple _ | `Variant _ -> None)
+  in
+  match List.filter_map annotation error_fields with
+  | [] -> message
+  | annotations -> message ^ " (" ^ String.concat " " annotations ^ ")"
+;;
 
-   This does not classify anything. It stops throwing away the input a
-   classification would need. *)
-let turn_error_message fields =
+let turn_error_of_fields ~message error_fields =
+  match List.assoc_opt "codexErrorInfo" error_fields with
+  | Some (`String "contextWindowExceeded") ->
+    Context_window_exceeded { message }
+  | Some _ | None -> Turn_failed (turn_error_detail ~message error_fields)
+;;
+
+let turn_error fields =
   match List.assoc_opt "error" fields with
   | Some (`Assoc error_fields) ->
     let message =
@@ -510,35 +534,8 @@ let turn_error_message fields =
         String.trim message
       | _ -> "turn failed without a typed error message"
     in
-    (* Carrying only [code] and [type] cannot answer what the server sends,
-       because a name that is absent and a name that was never looked for
-       produce the same empty annotation. Measured 2026-08-11 on live sangsu
-       (codex_subscription.gpt-5.3-codex-spark): the deployed narrow form
-       printed the overflow sentence with no annotation, which left "the error
-       object carries no scalar" and "the scalar is called something else"
-       indistinguishable. Every scalar except [message] is carried, so the
-       empty case now means exactly one thing.
-
-       Nested objects and arrays are skipped: this string is read by an
-       operator and joined into one line, and the fields a classification
-       would key on are scalars. *)
-    let annotation (name, value) =
-      if String.equal name "message"
-      then None
-      else (
-        match value with
-        | `String value when String.trim value <> "" ->
-          Some (name ^ "=" ^ String.trim value)
-        | `Int value -> Some (name ^ "=" ^ string_of_int value)
-        | `Intlit value -> Some (name ^ "=" ^ value)
-        | `Bool value -> Some (name ^ "=" ^ string_of_bool value)
-        | `Float value -> Some (name ^ "=" ^ Printf.sprintf "%g" value)
-        | `String _ | `Null | `Assoc _ | `List _ | `Tuple _ | `Variant _ -> None)
-    in
-    (match List.filter_map annotation error_fields with
-     | [] -> message
-     | annotations -> message ^ " (" ^ String.concat " " annotations ^ ")")
-  | _ -> "turn failed without an error object"
+    turn_error_of_fields ~message error_fields
+  | Some _ | None -> Turn_failed "turn failed without an error object"
 ;;
 
 let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params =
@@ -556,7 +553,7 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params =
     else
       let* status = required_string stage "status" turn_fields in
       match status with
-      | "failed" -> Error (Turn_failed (turn_error_message turn_fields))
+      | "failed" -> Error (turn_error turn_fields)
       | "interrupted" -> Error Turn_interrupted
       | "inProgress" -> protocol_error stage "terminal notification carried inProgress status"
       | "completed" ->
@@ -697,7 +694,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       let* error_json = required_member stage "error" fields in
       let* error_fields = assoc_at stage error_json in
       let* message = required_string stage "message" error_fields in
-      Error (Turn_failed message)
+      Error (turn_error_of_fields ~message error_fields)
   | Notification { method_ = "turn/completed"; params } ->
     terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params
   (* App-server progress and account notifications are observational. Protocol

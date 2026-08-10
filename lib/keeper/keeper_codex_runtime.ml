@@ -98,6 +98,9 @@ let codex_error_to_core_error = function
     config_error ~field:"codex_app_server" detail
   | Runtime_codex_app_server.Subscription_required detail ->
     config_error ~field:"codex_subscription" detail
+  | Runtime_codex_app_server.Context_window_exceeded { message } ->
+    Agent_core.Error.Api
+      (Llm_provider.Retry.ContextOverflow { message; limit = None })
   | error -> Agent_core.Error.Internal (Runtime_codex_app_server.error_to_string error)
 ;;
 
@@ -114,6 +117,7 @@ let recovery_failure_of_client_error = function
   | Runtime_codex_app_server.Unsupported_server_request _ ->
     Keeper_official_client_session_store.Protocol_failed
   | Runtime_codex_app_server.Subscription_required _
+  | Runtime_codex_app_server.Context_window_exceeded _
   | Runtime_codex_app_server.Turn_failed _ ->
     Keeper_official_client_session_store.Provider_rejected
 ;;

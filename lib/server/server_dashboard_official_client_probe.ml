@@ -78,7 +78,8 @@ let codex_failure_status = function
   | Timeout _ -> "timeout"
   | Protocol_error _ | Rpc_error _ | Unsupported_server_request _ ->
     "protocol_error"
-  | Turn_failed _ | Turn_interrupted -> "probe_contract_error"
+  | Context_window_exceeded _ | Turn_failed _ | Turn_interrupted ->
+    "probe_contract_error"
 ;;
 
 let claude_failure_status = function

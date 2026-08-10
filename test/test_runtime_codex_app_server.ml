@@ -431,6 +431,25 @@ let test_failed_turn_keeps_typed_error_fields () =
       | Ok _ -> fail "failed turn incorrectly reported as completed")
 ;;
 
+let test_failed_turn_uses_official_context_error_enum () =
+  let failed =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"ran out of room in the model's context window","codexErrorInfo":"contextWindowExceeded"}}}}|}
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; failed ]
+    (fun path ->
+      match run_fixture path with
+      | Error
+          (Runtime_codex_app_server.Context_window_exceeded { message }) ->
+        check
+          string
+          "provider message"
+          "ran out of room in the model's context window"
+          message
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "typed context overflow incorrectly reported as completed")
+;;
+
 (* The named-field form could not distinguish "the server sent no scalar" from
    "the scalar is called something else": both printed the sentence with no
    annotation. That is what live sangsu produced on 2026-08-11 after the narrow
@@ -578,6 +597,22 @@ let test_retry_notifications_are_observational () =
        | Error (Runtime_codex_app_server.Turn_failed "provider gave up") -> ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "terminal error notification did not fail the turn")
+;;
+
+let test_terminal_error_notification_uses_official_context_error_enum () =
+  let terminal =
+    {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; terminal ]
+    (fun path ->
+       match run_fixture path with
+       | Error
+           (Runtime_codex_app_server.Context_window_exceeded
+              { message = "context is full" }) ->
+         ()
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "typed terminal context overflow did not fail the turn")
 ;;
 
 let test_nonterminal_notifications_do_not_preempt_completion () =
@@ -1055,6 +1090,23 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ()
                     |> Result.map (fun selected ->
                       selected.Keeper_turn_driver.run_result))))))
+;;
+
+let test_keeper_maps_official_context_error_to_typed_core_error () =
+  let failed =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; failed ]
+    (fun cli_path ->
+       match run_keeper_turn ~cli_path ~model:"gpt-fixture" () with
+       | Error
+           (Agent_core.Error.Api
+              (Agent_core.Retry.ContextOverflow
+                 { message = "context is full"; limit = None })) ->
+         ()
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ -> fail "Keeper erased the typed Codex context overflow")
 ;;
 
 let test_keeper_dispatches_codex_turn_runtime () =
@@ -2292,6 +2344,8 @@ let () =
         ; test_case "server request fails closed" `Quick test_server_request_fails_closed
         ; test_case "failed turn keeps typed error fields" `Quick
             test_failed_turn_keeps_typed_error_fields
+        ; test_case "failed turn uses official context error enum" `Quick
+            test_failed_turn_uses_official_context_error_enum
         ; test_case "failed turn keeps unnamed error scalars" `Quick
             test_failed_turn_keeps_unnamed_error_scalars
         ; test_case "history bytes sum text only" `Quick
@@ -2303,6 +2357,10 @@ let () =
             "retry notifications are observational"
             `Quick
             test_retry_notifications_are_observational
+        ; test_case
+            "terminal error notification uses official context error enum"
+            `Quick
+            test_terminal_error_notification_uses_official_context_error_enum
          ; test_case
              "nonterminal notifications do not preempt completion"
              `Quick
@@ -2337,6 +2395,10 @@ let () =
             "Keeper dispatches Codex runtime"
             `Quick
             test_keeper_dispatches_codex_turn_runtime
+        ; test_case
+            "Keeper maps official context error to typed core error"
+            `Quick
+            test_keeper_maps_official_context_error_to_typed_core_error
         ; test_case
             "Keeper preserves typed history on Codex wire"
             `Quick

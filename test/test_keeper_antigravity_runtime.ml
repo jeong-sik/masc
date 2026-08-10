@@ -350,11 +350,17 @@ let test_keeper_projects_mcp_tool_and_settles () =
                     with
                     | Error error -> fail (Agent_core.Error.to_string error)
                     | Ok resumed ->
-                      observed_trace_ref := resumed.trace_ref;
+                      (* #28049 made run_named return named_run_result, which
+                         carries the turn's run_result plus the runtime that
+                         actually executed it. #28062 was written against the
+                         previous bare run_result and the two merged in that
+                         order, so these two reads have to go through the
+                         nested field. *)
+                      observed_trace_ref := resumed.run_result.trace_ref;
                       check int
                         "provider cumulative turn count"
                         73
-                        resumed.turns))));
+                        resumed.run_result.turns))));
       check string
         "tool arguments"
         {|{"marker":"from-antigravity"}|}

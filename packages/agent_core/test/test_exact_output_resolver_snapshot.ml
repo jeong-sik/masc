@@ -927,14 +927,24 @@ let test_old_and_new_whole_tuples_never_mix_across_domains_and_fibers () =
   check bool "A and B whole tuples differ" true (old_observation <> new_observation)
 ;;
 
-let expect_endpoint_error label expected_cause contents =
+let expect_endpoint_exclusion label expected_cause contents =
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
   let overlay : EO.catalog_document = { source = label; contents } in
   match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay overlay) () with
-  | Error (EO.Target_endpoint_invalid { cause; _ }) ->
-    check bool (label ^ " exact typed cause") true (cause = expected_cause)
-  | Error _ -> fail (label ^ " returned the wrong resolver error class")
-  | Ok _ -> fail (label ^ " must fail closed")
+  | Error _ -> fail (label ^ " must load; an endpoint violation excludes the target")
+  | Ok snapshot ->
+    (match EO.resolver_excluded_targets snapshot with
+     | [ { excluded_target_ref
+         ; exclusion_reason = EO.Excluded_endpoint_invalid { cause }
+         } ] ->
+       check string (label ^ " excluded target ref") "snapshot-target" excluded_target_ref;
+       check bool (label ^ " exact typed cause") true (cause = expected_cause);
+       (match EO.admit_target_ref snapshot "snapshot-target" with
+        | Error (EO.Target_not_in_catalog _) -> ()
+        | Ok _ -> fail (label ^ " excluded target must not be admitted")
+        | Error _ -> fail (label ^ " admission failed for the wrong reason"))
+     | [] -> fail (label ^ " did not exclude the invalid target")
+     | _ -> fail (label ^ " exclusion list has an unexpected shape"))
 ;;
 
 let test_endpoint_error_cause_table () =
@@ -982,8 +992,48 @@ let test_endpoint_error_cause_table () =
     ]
   in
   List.iter
-    (fun (label, cause, contents) -> expect_endpoint_error label cause contents)
+    (fun (label, cause, contents) -> expect_endpoint_exclusion label cause contents)
     cases
+;;
+
+let test_unbound_declaration_is_excluded_not_fatal () =
+  (* Live incident 2026-08-10: an operator overlay carried a target row whose
+     model id was absent from the merged catalog, and no lane referenced it —
+     the snapshot load still failed the whole boot. The declaration must be
+     excluded while every other target stays admitted. *)
+  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+  let valid = target_catalog () in
+  let unbound =
+    String.concat
+      "\n"
+      [ "[[targets]]"
+      ; {|id = "carried-over-target"|}
+      ; {|provider_ref = "snapshot-fixture"|}
+      ; {|model_id = "model-absent-from-catalog"|}
+      ]
+  in
+  let overlay : EO.catalog_document =
+    { source = "unbound declaration fixture"
+    ; contents = valid ^ "\n" ^ unbound
+    }
+  in
+  match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay overlay) () with
+  | Error _ -> fail "an unbound declaration must not fail the snapshot load"
+  | Ok snapshot ->
+    (match EO.resolver_excluded_targets snapshot with
+     | [ { excluded_target_ref
+         ; exclusion_reason =
+             EO.Excluded_binding_missing { component = EO.Target_model }
+         } ] ->
+       check string "excluded target ref" "carried-over-target" excluded_target_ref
+     | _ -> fail "expected exactly the unbound declaration to be excluded");
+    (match EO.admit_target_ref snapshot "snapshot-target" with
+     | Ok _ -> ()
+     | Error _ -> fail "the bound sibling target must stay admitted");
+    (match EO.admit_target_ref snapshot "carried-over-target" with
+     | Error (EO.Target_not_in_catalog _) -> ()
+     | Ok _ -> fail "the unbound declaration must not be admitted"
+     | Error _ -> fail "admission failed for the wrong reason")
 ;;
 
 let test_caller_headers_fail_closed () =
@@ -1091,6 +1141,10 @@ let () =
             `Quick
             test_old_and_new_whole_tuples_never_mix_across_domains_and_fibers
         ; test_case "endpoint exact-cause table" `Quick test_endpoint_error_cause_table
+        ; test_case
+            "unbound declaration is excluded not fatal"
+            `Quick
+            test_unbound_declaration_is_excluded_not_fatal
         ; test_case "caller headers rejected" `Quick test_caller_headers_fail_closed
         ; test_case
             "collision and input hardening"

@@ -2070,11 +2070,20 @@ let test_gemini_nonempty_request_path_rejected_before_resolution () =
     }
   in
   match EO.load_resolver_snapshot ~io ~catalog:(EO.Embedded_with_overlay overlay) () with
-  | Error
-      (EO.Target_endpoint_invalid
-         { target_ref; cause = EO.Unsupported_gemini_request_path }) ->
-    check string "rejected Gemini target" id target_ref
-  | Ok _ | Error _ -> fail "nonempty Gemini request_path must fail before resolution"
+  | Error _ ->
+    fail "nonempty Gemini request_path must exclude the target, not fail the load"
+  | Ok snapshot ->
+    (match EO.resolver_excluded_targets snapshot with
+     | [ { excluded_target_ref
+         ; exclusion_reason =
+             EO.Excluded_endpoint_invalid
+               { cause = EO.Unsupported_gemini_request_path }
+         } ] -> check string "rejected Gemini target" id excluded_target_ref
+     | _ -> fail "expected exactly the Gemini target to be excluded");
+    (match EO.admit_target_ref snapshot id with
+     | Error (EO.Target_not_in_catalog _) -> ()
+     | Ok _ -> fail "excluded Gemini target must not be admitted"
+     | Error _ -> fail "admission failed for the wrong reason")
 ;;
 
 let () =

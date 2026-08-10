@@ -161,10 +161,19 @@ let with_catalog ?(getenv = fun _ -> Ok None) entries f =
     failf "outer-flow catalog rejected by the resolver: %s" detail
   | Error (EO.Catalog_parse_failed { detail; _ }) ->
     failf "outer-flow catalog did not parse: %s" detail
-  | Error (EO.Target_binding_missing { target_ref; _ }) ->
-    failf "outer-flow catalog target %s has an unbound component" target_ref
   | Error _ -> fail "outer-flow resolver snapshot should load"
-  | Ok snapshot -> f snapshot
+  | Ok snapshot ->
+    (match EO.resolver_excluded_targets snapshot with
+     | [] -> f snapshot
+     | excluded ->
+       failf
+         "outer-flow catalog excluded %d target(s): %s"
+         (List.length excluded)
+         (String.concat
+            ", "
+            (List.map
+               (fun (entry : EO.excluded_target) -> entry.excluded_target_ref)
+               excluded)))
 ;;
 
 let admitted_target snapshot selector =

@@ -69,15 +69,23 @@ type resolver_snapshot_error =
       ; detail : string
       }
   | Catalog_collision of resolver_collision
-  | Target_binding_missing of
-      { target_ref : string
-      ; component : resolver_binding_component
-      }
-  | Target_endpoint_invalid of
-      { target_ref : string
-      ; cause : resolver_endpoint_error
-      }
-  | Environment_read_failed of { environment_variable : string }
+
+(** A declared target that cannot become a routable frozen target is excluded
+    from the snapshot instead of failing the whole load. Excluded targets are
+    absent from the frozen catalog: [admit_target_ref] answers
+    [Target_not_in_catalog], lanes referencing them reject that slot, and
+    mandatory-lane enforcement still refuses to publish. Catalog-level
+    [resolver_snapshot_error] cases above stay fail-closed because no coherent
+    catalog exists to exclude from. *)
+type target_exclusion_reason =
+  | Excluded_binding_missing of { component : resolver_binding_component }
+  | Excluded_endpoint_invalid of { cause : resolver_endpoint_error }
+  | Excluded_environment_unreadable of { environment_variable : string }
+
+type excluded_target =
+  { excluded_target_ref : string
+  ; exclusion_reason : target_exclusion_reason
+  }
 
 type selected_target = private
   { config : Provider_config.t
@@ -111,6 +119,10 @@ val catalog_generation_fingerprint : catalog_generation -> string
 val catalog_evidence_sha256 : catalog_evidence -> string
 val resolver_catalog_generation : resolver_snapshot -> catalog_generation
 val resolver_catalog_evidence : resolver_snapshot -> catalog_evidence
+
+(** Declared targets excluded from the frozen catalog, in declaration order:
+    binding-missing exclusions first, then endpoint/environment exclusions. *)
+val resolver_excluded_targets : resolver_snapshot -> excluded_target list
 val target_identity_fingerprint : target_identity -> string
 val admitted_target_identity : admitted_target -> target_identity
 val admitted_target_catalog_generation : admitted_target -> catalog_generation

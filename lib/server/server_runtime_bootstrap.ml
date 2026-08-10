@@ -168,18 +168,28 @@ let exact_output_snapshot_error_to_string = function
       detail
   | Exact_output.Catalog_collision collision ->
     exact_output_collision_to_string collision
-  | Exact_output.Target_binding_missing { target_ref; component } ->
+;;
+
+let exact_output_exclusion_reason_to_string = function
+  | Exact_output.Excluded_binding_missing { component } ->
     Printf.sprintf
-      "target %S is missing its %s binding"
-      target_ref
+      "missing %s binding"
       (exact_output_binding_component_to_string component)
-  | Exact_output.Target_endpoint_invalid { target_ref; cause } ->
-    Printf.sprintf
-      "target %S endpoint is invalid: %s"
-      target_ref
-      (exact_output_endpoint_error_to_string cause)
-  | Exact_output.Environment_read_failed { environment_variable } ->
-    Printf.sprintf "failed to read environment variable %s" environment_variable
+  | Exact_output.Excluded_endpoint_invalid { cause } ->
+    Printf.sprintf "invalid endpoint: %s" (exact_output_endpoint_error_to_string cause)
+  | Exact_output.Excluded_environment_unreadable { environment_variable } ->
+    Printf.sprintf "environment variable %s is unreadable" environment_variable
+;;
+
+let warn_excluded_exact_output_targets resolver_snapshot =
+  List.iter
+    (fun (excluded : Exact_output.excluded_target) ->
+       Log.Server.warn
+         "exact_output: target %S excluded from the frozen catalog (%s); lanes \
+          referencing it reject that slot"
+         excluded.excluded_target_ref
+         (exact_output_exclusion_reason_to_string excluded.exclusion_reason))
+    (Exact_output.resolver_excluded_targets resolver_snapshot)
 ;;
 
 let read_exact_output_overlay path =
@@ -318,6 +328,7 @@ let configure_exact_output_registry ?config_root () =
          ("exact-output resolver snapshot: "
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
+    warn_excluded_exact_output_targets resolver_snapshot;
     (match
        Runtime.publish_exact_output_registry
          ~required_lane_ids:mandatory_exact_output_lane_ids

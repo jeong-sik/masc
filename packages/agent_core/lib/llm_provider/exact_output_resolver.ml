@@ -74,15 +74,24 @@ type resolver_snapshot_error =
       ; detail : string
       }
   | Catalog_collision of resolver_collision
-  | Target_binding_missing of
-      { target_ref : string
-      ; component : resolver_binding_component
-      }
-  | Target_endpoint_invalid of
-      { target_ref : string
-      ; cause : resolver_endpoint_error
-      }
-  | Environment_read_failed of { environment_variable : string }
+
+(* A declared target that cannot become a routable frozen target is excluded
+   from the snapshot instead of failing the whole load. Exclusion keeps the
+   target out of the frozen catalog, so admission answers Target_not_in_catalog,
+   lanes referencing it reject that slot, and mandatory-lane enforcement still
+   refuses to publish — while unrelated declarations (including operator
+   overlay rows nothing references) keep the process bootable. Catalog-level
+   failures above stay fail-closed because no coherent catalog exists to
+   exclude from. *)
+type target_exclusion_reason =
+  | Excluded_binding_missing of { component : resolver_binding_component }
+  | Excluded_endpoint_invalid of { cause : resolver_endpoint_error }
+  | Excluded_environment_unreadable of { environment_variable : string }
+
+type excluded_target =
+  { excluded_target_ref : string
+  ; exclusion_reason : target_exclusion_reason
+  }
 
 type target_declaration =
   { target_ref : target_ref
@@ -112,6 +121,7 @@ type frozen_target =
 
 type resolver_snapshot =
   { targets : frozen_target String_map.t
+  ; excluded_targets : excluded_target list
   ; generation : catalog_generation
   ; evidence : catalog_evidence
   }
@@ -194,6 +204,10 @@ let catalog_generation_fingerprint (Catalog_generation value) = value
 let catalog_evidence_sha256 (Catalog_evidence value) = value
 let resolver_catalog_generation (snapshot : resolver_snapshot) = snapshot.generation
 let resolver_catalog_evidence (snapshot : resolver_snapshot) = snapshot.evidence
+
+let resolver_excluded_targets (snapshot : resolver_snapshot) =
+  snapshot.excluded_targets
+;;
 let target_identity_fingerprint identity = identity.fingerprint
 let selected_target_identity (target : selected_target) = target.identity
 let selected_target_catalog_generation (target : selected_target) = target.generation
@@ -529,21 +543,18 @@ let%test "case-only target overlay shadow fails closed" =
   | None, _ | _, None -> false
 ;;
 
-let endpoint_result ~target_ref =
-  Result.map_error (fun cause ->
-    Target_endpoint_invalid { target_ref = target_ref_id target_ref; cause })
+let endpoint_result result =
+  Result.map_error (fun cause -> Excluded_endpoint_invalid { cause }) result
 ;;
 
-let validate_base_url ~target_ref value =
-  Binding.validate_base_url value |> endpoint_result ~target_ref
+let validate_base_url value = Binding.validate_base_url value |> endpoint_result
+
+let validate_request_path ~kind value =
+  Binding.validate_request_path ~kind value |> endpoint_result
 ;;
 
-let validate_request_path ~target_ref ~kind value =
-  Binding.validate_request_path ~kind value |> endpoint_result ~target_ref
-;;
-
-let validate_model_path ~target_ref kind model_id =
-  Binding.validate_model_path kind model_id |> endpoint_result ~target_ref
+let validate_model_path kind model_id =
+  Binding.validate_model_path kind model_id |> endpoint_result
 ;;
 
 let option_float = function
@@ -724,10 +735,16 @@ let load_resolver_snapshot ~io ?(catalog = Embedded_default) () =
         , merge_target_declarations ~base:base_targets ~overlay:overlay_targets )
   in
   let catalog, model_entries, target_declarations = catalog_models_and_targets in
-  let* structural =
+  let structural_rev, excluded_binding_rev =
     List.fold_left
-      (fun result (target : target_declaration) ->
-         let* bindings = result in
+      (fun (bindings, excluded) (target : target_declaration) ->
+         let exclude component =
+           ( bindings
+           , { excluded_target_ref = target_ref_id target.target_ref
+             ; exclusion_reason = Excluded_binding_missing { component }
+             }
+             :: excluded )
+         in
          match
            Binding.resolve_exact
              ~catalog
@@ -735,20 +752,13 @@ let load_resolver_snapshot ~io ?(catalog = Embedded_default) () =
              ~provider_ref:target.provider_ref
              ~model_id:target.model_id
          with
-         | Error Binding.Provider_missing ->
-           Error
-             (Target_binding_missing
-                { target_ref = target_ref_id target.target_ref
-                ; component = Target_provider
-                })
-         | Error Binding.Model_missing ->
-           Error
-             (Target_binding_missing
-                { target_ref = target_ref_id target.target_ref; component = Target_model })
-         | Ok (provider, model) -> Ok ((target, provider, model) :: bindings))
-      (Ok [])
+         | Error Binding.Provider_missing -> exclude Target_provider
+         | Error Binding.Model_missing -> exclude Target_model
+         | Ok (provider, model) -> (target, provider, model) :: bindings, excluded)
+      ([], [])
       target_declarations
   in
+  let structural = List.rev structural_rev in
   let environment_names =
     List.fold_left
       (fun names
@@ -775,38 +785,29 @@ let load_resolver_snapshot ~io ?(catalog = Embedded_default) () =
     | Ok value -> value
     | Error () -> None
   in
-  let* targets =
-    List.fold_left
-      (fun result
-        ( (target : target_declaration)
-        , (provider : Model_catalog.provider_entry)
-        , (model : Model_catalog.model_entry) ) ->
-         let* targets = result in
-         let capabilities = Binding.capabilities_of_catalog_binding provider model in
-         let anthropic_thinking_control =
-           Binding.anthropic_thinking_control_of_model model
-         in
-         let* () =
-           match provider.base_url_env with
-           | Some name when name <> "" ->
-             (match observed_environment name with
-              | Ok _ -> Ok ()
-              | Error () ->
-                Error (Environment_read_failed { environment_variable = name }))
-           | Some _ | None -> Ok ()
-         in
-         let base_url = Model_provider_catalog.resolved_base_url ~getenv provider in
-         let* () = validate_base_url ~target_ref:target.target_ref base_url in
-         let* () =
-           validate_request_path
-             ~target_ref:target.target_ref
-             ~kind:provider.kind
-             provider.request_path
-         in
-         let* () =
-           validate_model_path ~target_ref:target.target_ref provider.kind target.model_id
-         in
-         let projection_config =
+  let freeze_target
+        (target : target_declaration)
+        (provider : Model_catalog.provider_entry)
+        (model : Model_catalog.model_entry)
+    =
+    let capabilities = Binding.capabilities_of_catalog_binding provider model in
+    let anthropic_thinking_control =
+      Binding.anthropic_thinking_control_of_model model
+    in
+    let* () =
+      match provider.base_url_env with
+      | Some name when name <> "" ->
+        (match observed_environment name with
+         | Ok _ -> Ok ()
+         | Error () ->
+           Error (Excluded_environment_unreadable { environment_variable = name }))
+      | Some _ | None -> Ok ()
+    in
+    let base_url = Model_provider_catalog.resolved_base_url ~getenv provider in
+    let* () = validate_base_url base_url in
+    let* () = validate_request_path ~kind:provider.kind provider.request_path in
+    let* () = validate_model_path provider.kind target.model_id in
+    let projection_config =
            PC.make
              ~kind:provider.kind
              ~provider_id:provider.id
@@ -871,20 +872,35 @@ let load_resolver_snapshot ~io ?(catalog = Embedded_default) () =
                 | None -> Credential_missing provider.api_key_env)
              | Ok None -> Credential_missing provider.api_key_env)
          in
-         let target_id = target_ref_id target.target_ref in
-         Ok
-           (String_map.add
-              target_id
-              { config = projection_config
-              ; capabilities
-              ; anthropic_thinking_control
-              ; body_timeout_s = target.body_timeout_s
-              ; credential
-              ; identity
-              }
-              targets))
-      (Ok String_map.empty)
+    Ok
+      { config = projection_config
+      ; capabilities
+      ; anthropic_thinking_control
+      ; body_timeout_s = target.body_timeout_s
+      ; credential
+      ; identity
+      }
+  in
+  let targets, excluded_frozen_rev =
+    List.fold_left
+      (fun (targets, excluded)
+        ( (target : target_declaration)
+        , (provider : Model_catalog.provider_entry)
+        , (model : Model_catalog.model_entry) ) ->
+         match freeze_target target provider model with
+         | Ok frozen ->
+           String_map.add (target_ref_id target.target_ref) frozen targets, excluded
+         | Error exclusion_reason ->
+           ( targets
+           , { excluded_target_ref = target_ref_id target.target_ref
+             ; exclusion_reason
+             }
+             :: excluded ))
+      (String_map.empty, [])
       structural
+  in
+  let excluded_targets =
+    List.rev excluded_binding_rev @ List.rev excluded_frozen_rev
   in
   let generation =
     String_map.bindings targets
@@ -897,7 +913,7 @@ let load_resolver_snapshot ~io ?(catalog = Embedded_default) () =
     canonical_catalog_evidence catalog model_entries target_declarations
   in
   let evidence = Catalog_evidence (hash_parts evidence_material) in
-  Ok { targets; generation; evidence }
+  Ok { targets; excluded_targets; generation; evidence }
 ;;
 
 let admit_target_ref snapshot value =

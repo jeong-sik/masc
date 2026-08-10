@@ -256,6 +256,62 @@ let test_history_summary_decodes_content_blocks () =
             content
       | _ -> fail "expected non-empty conversation list")
 
+
+(* [generation_stats] rows are values held in a table: each turn rebinds the
+   entry rather than writing through a shared record. Two turns in the same
+   generation must still accumulate, a second generation must not inherit the
+   first one's totals, and the per-generation tool table must survive the
+   rebinding. *)
+let test_generation_equipment_accumulates_across_rebinds () =
+  let turn ~generation ~ts_unix tools =
+    match metric tools with
+    | `Assoc fields ->
+        `Assoc
+          (("generation", `Int generation)
+          :: ("ts_unix", `Float ts_unix)
+          :: List.filter
+               (fun (key, _) -> key <> "generation" && key <> "ts_unix")
+               fields)
+    | other -> other
+  in
+  let _, summary, _ =
+    Detail.compute_metrics_window
+      ~parsed_metrics:
+        [
+          turn ~generation:1 ~ts_unix:10.0 [ "tool_execute" ];
+          turn ~generation:1 ~ts_unix:30.0 [ "tool_execute" ];
+          turn ~generation:2 ~ts_unix:50.0 [ "tool_read" ];
+        ]
+      ~compact:false
+      ~series_points:80
+  in
+  let open Yojson.Safe.Util in
+  let equipment = summary |> member "generation_equipment" |> to_list in
+  check int "one entry per generation" 2 (List.length equipment);
+  let entry generation =
+    match
+      List.find_opt
+        (fun row -> row |> member "generation" |> to_int = generation)
+        equipment
+    with
+    | Some row -> row
+    | None -> fail (Printf.sprintf "generation %d missing" generation)
+  in
+  let first = entry 1 in
+  check int "same generation accumulates turns" 2 (first |> member "turns" |> to_int);
+  check (float 0.001) "earliest ts retained" 10.0
+    (first |> member "first_ts_unix" |> to_float);
+  check (float 0.001) "latest ts retained" 30.0
+    (first |> member "last_ts_unix" |> to_float);
+  check int "tool table survives the rebind" 2
+    (first |> member "top_tool" |> member "count" |> to_int);
+  let second = entry 2 in
+  check int "a new generation starts from zero" 1
+    (second |> member "turns" |> to_int);
+  check (float 0.001) "new generation keeps its own first ts" 50.0
+    (second |> member "first_ts_unix" |> to_float)
+;;
+
 let () =
   run "dashboard_keeper_metrics_10286"
     [
@@ -270,6 +326,8 @@ let () =
             test_metrics_window_does_not_classify_execute_as_pr_work;
           test_case "preserves current turn telemetry" `Quick
             test_metrics_series_preserves_current_turn_telemetry;
+          test_case "generation equipment accumulates across rebinds" `Quick
+            test_generation_equipment_accumulates_across_rebinds;
           test_case "omits retired model and handoff labels" `Quick
             test_metrics_window_omits_retired_model_and_handoff_labels;
         ] );

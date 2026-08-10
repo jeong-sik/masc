@@ -58,21 +58,12 @@ let home_error_to_core_error error =
 ;;
 
 let render_message (message : Agent_core.Types.message) =
-  let* text =
-    Host.text_of_blocks
-      ~runtime_label
-      ~field:"initial_messages"
-      message.content
-  in
+  let text = Host.encode_history_message message in
   match message.role with
   | Agent_core.Types.System -> Ok ("SYSTEM:\n" ^ text)
   | Agent_core.Types.User -> Ok ("USER:\n" ^ text)
   | Agent_core.Types.Assistant -> Ok ("ASSISTANT:\n" ^ text)
-  | Agent_core.Types.Tool ->
-    Error
-      (config_error
-         ~field:"initial_messages"
-         "Antigravity history projection does not admit tool-role messages")
+  | Agent_core.Types.Tool -> Ok ("TOOL:\n" ^ text)
 ;;
 
 let render_messages messages =

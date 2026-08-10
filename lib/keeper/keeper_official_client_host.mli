@@ -78,23 +78,12 @@ val text_of_blocks :
   Agent_core.Types.content_block list ->
   (string, Agent_core.Error.t) result
 
-type history_projection =
-  { messages : Agent_core.Types.message list
-  ; dropped_tool_messages : int
-  ; dropped_messages : int
-  ; dropped_blocks : int
-  }
-
-(** Project canonical history onto the official-client wire, which admits
-    text-only user/assistant items. Tool-role messages are dropped whole,
-    non-text blocks are stripped from kept messages, and a message left
-    without any text is dropped; every drop is counted. The representable
-    remainder keeps its original order (masc#27812). *)
-val project_official_history :
-  Agent_core.Types.message list -> history_projection
-
-(** [true] when the projection dropped nothing. *)
-val history_projection_lossless : history_projection -> bool
+val encode_history_message : Agent_core.Types.message -> string
+(** Preserve one canonical message on a text-only official-client wire.
+    Text-only non-tool messages remain plain text. Tool-role messages and any
+    message containing typed blocks are encoded as the canonical message JSON
+    inside a versioned envelope, so role, block payloads, tool identities, and
+    metadata remain visible instead of being discarded. *)
 
 val hook_error :
   runtime_label:string ->

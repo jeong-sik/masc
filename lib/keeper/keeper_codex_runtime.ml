@@ -60,12 +60,7 @@ let project_messages messages =
   let rec loop developer history = function
     | [] -> Ok (List.rev developer, List.rev history)
     | (message : Agent_core.Types.message) :: rest ->
-      let* text =
-        Host.text_of_blocks
-          ~runtime_label
-          ~field:"initial_messages"
-          message.content
-      in
+      let text = Host.encode_history_message message in
       (match message.role with
        | Agent_core.Types.System -> loop (text :: developer) history rest
        | Agent_core.Types.User ->
@@ -77,10 +72,9 @@ let project_messages messages =
            ({ Runtime_codex_app_server.role = Assistant; text } :: history)
            rest
        | Agent_core.Types.Tool ->
-         Error
-           (config_error
-              ~field:"initial_messages"
-              "codex-app-server history injection does not admit AGENT_CORE tool messages"))
+         loop developer
+           ({ Runtime_codex_app_server.role = User; text } :: history)
+           rest)
   in
   loop [] [] messages
 ;;

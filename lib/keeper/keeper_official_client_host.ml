@@ -19,55 +19,28 @@ let text_of_blocks ~runtime_label ~field blocks =
   loop [] blocks
 ;;
 
-type history_projection =
-  { messages : Agent_core.Types.message list
-  ; dropped_tool_messages : int
-  ; dropped_messages : int
-  ; dropped_blocks : int
-  }
-
-(* The official-client wire admits text-only user/assistant history
-   ([text_of_blocks] rejects every other block, and Tool-role messages are not
-   representable at all). Project the representable subset instead of erasing
-   the whole history, and account for every dropped part so the caller can
-   surface the loss (masc#27812). *)
-let project_official_history messages =
-  let project
-      (kept, dropped_tool, dropped_msgs, dropped_blocks)
-      (message : Agent_core.Types.message) =
-    match message.role with
-    | Tool -> kept, dropped_tool + 1, dropped_msgs, dropped_blocks
-    | System | User | Assistant ->
-      let text_blocks, other_blocks =
-        List.partition
-          (function
-            | Agent_core.Types.Text _ -> true
-            | _ -> false)
-          message.content
-      in
-      let dropped_blocks = dropped_blocks + List.length other_blocks in
-      (match text_blocks, message.content with
-       | [], _ :: _ -> kept, dropped_tool, dropped_msgs + 1, dropped_blocks
-       | _, _ ->
-         ( { message with content = text_blocks } :: kept
-         , dropped_tool
-         , dropped_msgs
-         , dropped_blocks ))
+let encode_history_message (message : Agent_core.Types.message) =
+  let text_only =
+    message.role <> Tool
+    && List.for_all
+         (function
+           | Agent_core.Types.Text _ -> true
+           | _ -> false)
+         message.content
   in
-  let kept, dropped_tool_messages, dropped_messages, dropped_blocks =
-    List.fold_left project ([], 0, 0, 0) messages
-  in
-  { messages = List.rev kept
-  ; dropped_tool_messages
-  ; dropped_messages
-  ; dropped_blocks
-  }
-;;
-
-let history_projection_lossless projection =
-  projection.dropped_tool_messages = 0
-  && projection.dropped_messages = 0
-  && projection.dropped_blocks = 0
+  if text_only
+  then
+    message.content
+    |> List.filter_map (function
+      | Agent_core.Types.Text text -> Some text
+      | _ -> None)
+    |> String.concat "\n"
+  else
+    `Assoc
+      [ "schema", `String "masc.official-client-context-message.v1"
+      ; "message", Keeper_context_core.message_to_json message
+      ]
+    |> Yojson.Safe.to_string
 ;;
 
 let user_message text : Agent_core.Types.message =

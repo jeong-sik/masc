@@ -741,46 +741,7 @@ let run_named
                      ])
                  Keeper_runtime_manifest.Runtime_routed
              | None -> ());
-            let ({ Keeper_official_client_host.messages = projected_history
-                 ; dropped_tool_messages
-                 ; dropped_messages
-                 ; dropped_blocks
-                 } as projection)
-              =
-              Keeper_official_client_host.project_official_history
-                initial_messages
-            in
-            if
-              not
-                (Keeper_official_client_host.history_projection_lossless
-                   projection)
-            then (
-              Log.Keeper.warn
-                "%s: official-client runtime %s history projection dropped %d \
-                 tool message(s), %d unrepresentable message(s), %d non-text \
-                 block(s); the text-only remainder is preserved"
-                keeper_name
-                attempt_runtime_id
-                dropped_tool_messages
-                dropped_messages
-                dropped_blocks;
-              emit_runtime_manifest
-                ~status:"degraded"
-                ~decision:
-                  (`Assoc
-                    [ ( "routing_action"
-                      , `String "official_client_history_projected" )
-                    ; ( "routing_reason"
-                      , `String "official_client_wire_admits_text_only_history"
-                      )
-                    ; ( "history_kept_messages"
-                      , `Int (List.length projected_history) )
-                    ; ("history_dropped_tool_messages", `Int dropped_tool_messages)
-                    ; ("history_dropped_messages", `Int dropped_messages)
-                    ; ("history_dropped_blocks", `Int dropped_blocks)
-                    ])
-                Keeper_runtime_manifest.Runtime_routed);
-            run_codex ~initial_messages:projected_history ()
+            run_codex ~initial_messages ()
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let codex_result =
@@ -816,43 +777,8 @@ let run_named
             ~raw_trace
             ~config
         in
-        let run_projected_antigravity () =
-          let ({ Keeper_official_client_host.messages = projected_history
-               ; dropped_tool_messages
-               ; dropped_messages
-               ; dropped_blocks
-               } as projection)
-            =
-            Keeper_official_client_host.project_official_history initial_messages
-          in
-          if
-            not
-              (Keeper_official_client_host.history_projection_lossless projection)
-          then (
-            Log.Keeper.warn
-              "%s: official-client runtime %s history projection dropped %d \
-               tool message(s), %d unrepresentable message(s), %d non-text \
-               block(s); the text-only remainder is preserved"
-              keeper_name
-              attempt_runtime_id
-              dropped_tool_messages
-              dropped_messages
-              dropped_blocks;
-            emit_runtime_manifest
-              ~status:"degraded"
-              ~decision:
-                (`Assoc
-                  [ ( "routing_action"
-                    , `String "official_client_history_projected" )
-                  ; ( "routing_reason"
-                    , `String "official_client_wire_admits_text_only_history" )
-                  ; "history_kept_messages", `Int (List.length projected_history)
-                  ; "history_dropped_tool_messages", `Int dropped_tool_messages
-                  ; "history_dropped_messages", `Int dropped_messages
-                  ; "history_dropped_blocks", `Int dropped_blocks
-                  ])
-              Keeper_runtime_manifest.Runtime_routed);
-          run_antigravity ~initial_messages:projected_history ()
+        let run_antigravity_with_history () =
+          run_antigravity ~initial_messages ()
         in
         let antigravity_result =
           match provider_config_transform, agent_core_checkpoint with
@@ -881,8 +807,8 @@ let run_named
                     , `String "official_client_session_store_owns_resume" )
                   ])
               Keeper_runtime_manifest.Runtime_routed;
-            run_projected_antigravity ()
-          | None, None -> run_projected_antigravity ()
+            run_antigravity_with_history ()
+          | None, None -> run_antigravity_with_history ()
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let antigravity_result =

@@ -56,7 +56,20 @@ type usage =
   ; total_tokens : int
   }
 
-type permission_mode = Always_proceed
+(* The modes the CLI has been observed to announce. [Request_review] arrived
+   from a live init event and was not modelled, so the parse failed, the turn
+   ended as a protocol error, and the official-client session went to
+   Recovery_required -- which blocked every later turn for that keeper until an
+   operator resolved it (taskmaster, 110 turns in one hour).
+
+   Nothing in this tree branches on the value: it is parsed, carried through
+   [state.init] into [turn_result], and never matched. A closed vocabulary over
+   a field the provider owns and we do not read costs a session each time the
+   provider adds a member. Kept closed for now because guessing members is
+   worse than failing loudly, but see #28008. *)
+type permission_mode =
+  | Always_proceed
+  | Request_review
 
 type turn_result =
   { conversation_id : string
@@ -231,6 +244,7 @@ let parse_permission_mode stage value =
     "permission_mode"
     (function
       | "always-proceed" -> Some Always_proceed
+      | "request-review" -> Some Request_review
       | _ -> None)
     value
 ;;

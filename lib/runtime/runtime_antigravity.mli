@@ -39,7 +39,9 @@ type usage =
   ; total_tokens : int
   }
 
-type permission_mode = Always_proceed
+type permission_mode =
+  | Always_proceed
+  | Request_review
 
 type turn_result =
   { conversation_id : string

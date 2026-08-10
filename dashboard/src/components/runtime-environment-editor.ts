@@ -20,6 +20,7 @@ import {
 import {
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
+  enabledRuntimeIds,
   parseRuntimeTomlEnvironment,
   type RuntimeTomlCredentialType,
   type RuntimeTomlEnvironment,
@@ -38,7 +39,7 @@ export type RuntimeStructuredSection =
   | 'bindings'
   | 'assignments'
 
-export type RuntimeBindingEditableField = 'max-concurrent' | 'keep-alive' | 'num-ctx'
+export type RuntimeBindingEditableField = 'enabled' | 'max-concurrent' | 'keep-alive' | 'num-ctx'
 export type RuntimeProviderTransportEditableField = 'endpoint' | 'command'
 
 // Basic-field-only payloads (RFC-0273 §3.2 reuse boundary). Per-model
@@ -85,7 +86,7 @@ interface RuntimeEnvironmentEditorProps {
   onBindingFieldChange: (
     runtimeId: string,
     field: RuntimeBindingEditableField,
-    value: string | number | null,
+    value: string | number | boolean | null,
   ) => void
   onAddProvider: (input: NewRuntimeProviderInput) => void
   onAddModel: (input: NewRuntimeModelInput) => void
@@ -96,6 +97,7 @@ interface RuntimeEnvironmentEditorProps {
     field: RuntimeProviderTransportEditableField,
     value: string,
   ) => void
+  onProviderEnabledChange: (providerId: string, enabled: boolean) => void
   onProviderCredentialChange: (
     providerId: string,
     credentialType: RuntimeTomlCredentialType,
@@ -103,12 +105,8 @@ interface RuntimeEnvironmentEditorProps {
   ) => void
 }
 
-function firstId<T extends { id: string }>(items: T[]): string {
-  return items[0]?.id ?? ''
-}
-
 function runtimeOptions(environment: RuntimeTomlEnvironment): string[] {
-  return environment.bindings.map(binding => binding.id)
+  return enabledRuntimeIds(environment)
 }
 
 function credentialValue(provider: RuntimeTomlProvider): string {
@@ -290,6 +288,7 @@ export function RuntimeEnvironmentEditor({
   onAddBinding,
   onDeleteProvider,
   onProviderTransportChange,
+  onProviderEnabledChange,
   onProviderCredentialChange,
 }: RuntimeEnvironmentEditorProps) {
   const defaultProviderProtocol = providerProtocols[0]
@@ -622,7 +621,7 @@ export function RuntimeEnvironmentEditor({
           'default',
           '기본 런타임',
           '[runtime].default — 배정 없는 keeper가 사용',
-          environment.defaultRuntimeId || firstId(environment.bindings),
+          environment.defaultRuntimeId || runtimeIds[0] || '',
           updateDefault,
         )}
         ${laneRow(
@@ -658,6 +657,22 @@ export function RuntimeEnvironmentEditor({
                 <span class="rt-card-id mono">${provider.id}</span>
                 <span class="rt-card-name">${provider.displayName}</span>
                 <span class="rt-proto mono">${provider.protocol || '—'}</span>
+                <label class="rt-mini">
+                  <span>enabled</span>
+                  <input
+                    type="checkbox"
+                    checked=${provider.enabled}
+                    disabled=${isDisabled}
+                    aria-label=${`${provider.id} provider enabled`}
+                    data-testid=${`runtime-provider-${provider.id}-enabled`}
+                    onChange=${(event: Event) => {
+                      onProviderEnabledChange(
+                        provider.id,
+                        (event.currentTarget as HTMLInputElement).checked,
+                      )
+                    }}
+                  />
+                </label>
                 ${officialClient ? html`<span class="rt-assign-tag pin mono">구독 CLI</span>` : null}
                 <button
                   type="button"
@@ -1070,6 +1085,10 @@ export function RuntimeEnvironmentEditor({
           ${environment.bindings.map(binding => {
             const isDefault = binding.id === environment.defaultRuntimeId || binding.isDefault
             const model = environment.models.find(m => m.id === binding.modelId) ?? null
+            const providerEnabled = environment.providers.find(
+              provider => provider.id === binding.providerId,
+            )?.enabled === true
+            const effectiveEnabled = binding.enabled && providerEnabled
             return html`
               <div key=${binding.id} class="rt-bind ${isDefault ? 'is-default' : ''}">
                 <button
@@ -1084,6 +1103,7 @@ export function RuntimeEnvironmentEditor({
                 <div class="rt-bind-main">
                   <div class="rt-bind-key mono">
                     ${binding.id}${isDefault ? html`<span class="rt-default-tag">default</span>` : null}
+                    ${effectiveEnabled ? null : html`<span class="rt-default-tag">disabled</span>`}
                   </div>
                   <div class="rt-bind-sub mono">
                     ${protoContext(model?.maxContext ?? null)}${binding.priceInput != null
@@ -1093,6 +1113,23 @@ export function RuntimeEnvironmentEditor({
                   <${RuntimeBindingCatalogSpec} runtimeId=${binding.id} />
                 </div>
                 <div class="rt-bind-fields">
+                  <label class="rt-mini">
+                    <span>enabled</span>
+                    <input
+                      type="checkbox"
+                      checked=${binding.enabled}
+                      disabled=${isDisabled}
+                      aria-label=${`${binding.id} enabled`}
+                      data-testid=${`runtime-binding-${binding.id}-enabled`}
+                      onChange=${(event: Event) => {
+                        onBindingFieldChange(
+                          binding.id,
+                          'enabled',
+                          (event.currentTarget as HTMLInputElement).checked,
+                        )
+                      }}
+                    />
+                  </label>
                   <label class="rt-mini">
                     <span>max-conc</span>
                     <input

@@ -1033,7 +1033,7 @@ let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)
   let bindings =
     List.filter
       (fun (binding : Runtime_schema.binding) ->
-         String.equal binding.provider_id provider.id)
+         binding.enabled && String.equal binding.provider_id provider.id)
       cfg.bindings
   in
   match bindings with
@@ -1106,7 +1106,10 @@ let runtime_wizard_catalog_records (cfg : Runtime_schema.config) =
          | Error _ as err -> err
          | Ok record -> provider_records (record :: acc) rest)
   in
-  match provider_records [] cfg.providers with
+  let enabled_providers =
+    List.filter (fun (provider : Runtime_schema.provider) -> provider.enabled) cfg.providers
+  in
+  match provider_records [] enabled_providers with
   | Error _ as err -> err
   | Ok records ->
       (match runtime_wizard_default_record cfg with

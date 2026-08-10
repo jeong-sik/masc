@@ -307,6 +307,37 @@ describe('RuntimeTomlEditor', () => {
     expect(apiMocks.patchRuntimeAssignment).not.toHaveBeenCalled()
   })
 
+  it('disables providers and individual bindings through typed draft controls', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(
+      container.querySelector('[data-testid="runtime-provider-runpod_mtp-enabled"]') as HTMLInputElement,
+    )
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+    fireEvent.click(
+      container.querySelector('[data-testid="runtime-binding-runpod_mtp.qwen-enabled"]') as HTMLInputElement,
+    )
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source.match(/^enabled = false$/gm)).toHaveLength(2)
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const savedSource = apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0] as string
+      expect(savedSource.match(/^enabled = false$/gm)).toHaveLength(2)
+    })
+  })
+
   it('edits binding runtime knobs as a draft and applies them through the existing save path', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)

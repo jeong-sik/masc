@@ -285,6 +285,12 @@ instructions = """
 
 Keeper → runtime assignment is done in `runtime.toml` (the keeper toml does not hold model/runtime directly):
 
+Provider and binding tables accept `enabled = false`. Disabling a
+`[providers.<id>]` table excludes all of its bindings; disabling a
+`[<provider>.<model>]` table excludes only that runtime. Disabled runtime IDs
+must not remain selected by `[runtime].default`, lanes, assignments, or
+failover lists.
+
 ```toml
 [runtime.assignments]
 albini = "<provider>.<model>"   # replace with an id from config/runtime.toml

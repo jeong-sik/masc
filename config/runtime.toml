@@ -18,6 +18,10 @@ cross_verifier = "deepseek.deepseek-v4-pro"
 
 # Existing workspaces are not overwritten by this seed. Copy the required lane
 # declarations into the live runtime.toml before enabling their consumers.
+# Providers and individual provider.model bindings default to `enabled = true`.
+# Set `enabled = false` in either table to keep the catalog example while
+# excluding it from the executable runtime inventory. A disabled runtime cannot
+# remain referenced by [runtime].default, lanes, assignments, or failover lists.
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
 

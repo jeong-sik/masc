@@ -62,6 +62,9 @@ type antigravity_cli_options =
 
 type provider =
   { id : string
+  ; enabled : bool
+    (** Whether bindings owned by this provider may be materialized. Omitted
+        [enabled] in TOML defaults to [true]. *)
   ; display_name : string
   ; protocol : string
   ; api_format : api_format
@@ -237,6 +240,9 @@ type model_spec =
 type binding =
   { provider_id : string
   ; model_id : string
+  ; enabled : bool
+    (** Whether this provider x model binding may be materialized. Omitted
+        [enabled] in TOML defaults to [true]. *)
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option

@@ -34,12 +34,17 @@ let id_of_binding (b : binding) : string = binding_key b
     task-route / lane 검증이 "not found" 대신 근본 원인을 표면화하는 데 쓰인다
     (Unknown→silent-drop 안티패턴 차단). *)
 let of_binding_result (cfg : config) (b : binding) : (t, string) result =
-  match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
+  if not b.enabled
+  then Error "binding is disabled by runtime.toml"
+  else match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
   | Some provider, Some model ->
-    (match Runtime_adapter.binding_to_execution cfg b with
-     | Ok execution ->
-       Ok { id = id_of_binding b; provider; model; binding = b; execution }
-     | Error reason -> Error reason)
+    if not provider.enabled
+    then Error (Printf.sprintf "provider %S is disabled by runtime.toml" provider.id)
+    else
+      (match Runtime_adapter.binding_to_execution cfg b with
+       | Ok execution ->
+         Ok { id = id_of_binding b; provider; model; binding = b; execution }
+       | Error reason -> Error reason)
   | None, _ -> Error (Printf.sprintf "provider not found: %s" b.provider_id)
   | Some _, None -> Error (Printf.sprintf "model not found: %s" b.model_id)
 ;;

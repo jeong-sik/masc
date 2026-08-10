@@ -173,6 +173,29 @@ let test_subscription_turn_and_env_scrub () =
       check bool "no usage block yields none" true (Option.is_none turn.usage))
 ;;
 
+(* [dynamic_tool_bytes] measures what the tool declarations add to a request.
+   The request-side check #27427 needs is a comparison against a declared
+   window, and a size that silently ignores part of what it sends is what made
+   the old system_and_user_bytes report 6,971 bytes for a turn the provider
+   refused as full. Each field the request carries has to be in the sum. *)
+let test_dynamic_tool_bytes_counts_every_field () =
+  let tool =
+    { Runtime_claude_code.name = "ab"
+    ; description = "cde"
+    ; input_schema = `Assoc [ "f", `String "g" ]
+    ; call = (fun ~call_id:_ _ -> { Runtime_claude_code.success = true; content = "" })
+    }
+  in
+  let schema_bytes = String.length (Yojson.Safe.to_string tool.Runtime_claude_code.input_schema) in
+  check int "single tool sums name, description and schema"
+    (2 + 3 + schema_bytes)
+    (Runtime_claude_code.dynamic_tool_bytes [ tool ]);
+  check int "empty list is zero" 0 (Runtime_claude_code.dynamic_tool_bytes []);
+  check int "two tools sum"
+    (2 * (2 + 3 + schema_bytes))
+    (Runtime_claude_code.dynamic_tool_bytes [ tool; tool ])
+;;
+
 (* The keeper side of this runtime hardcoded [usage = None] while the
    antigravity runtime fills the same slot from its CLI stream, which is why
    official-client turns carry no input_tokens (#28023). Reading it here is what
@@ -877,6 +900,10 @@ let () =
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case "duplicate keys fail closed" `Quick test_duplicate_keys_fail_closed
         ; test_case "result usage is carried" `Quick test_result_usage_is_carried
+        ; test_case
+            "dynamic tool bytes counts every field"
+            `Quick
+            test_dynamic_tool_bytes_counts_every_field
         ; test_case
             "partial usage does not fail the turn"
             `Quick

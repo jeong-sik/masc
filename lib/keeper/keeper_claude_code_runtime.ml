@@ -370,6 +370,29 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             | Error detail -> Error detail))
       | Ambiguous | Fatal -> require_recovery detail
     in
+    (* Same gap #28101 closed for Codex, on the other official-client path. A
+       claude_code turn resumes a server-side session, so the accumulated
+       conversation is not held here and cannot be measured from this process.
+       What this process does send every turn - the prompt, the system prompt
+       and the tool declarations - is measurable, and a live refusal says that
+       part alone is the problem: analyst was told the request is ~2,226,104
+       tokens against a 1,000,000 limit while "this conversation is only
+       ~1,094,432 tokens - the rest is system prompt, tool definitions, and
+       attachment content" (#27427). Recording the half this process controls
+       is what lets that sentence be checked against a number rather than
+       believed. Sizes are bytes this process holds, not provider tokens. *)
+    Log.Keeper.info
+      ~keeper_name
+      "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d \
+       tools=%d tool_surface_bytes=%d"
+      runtime_label
+      (match session_mode with
+       | Runtime_claude_code.Start -> "start"
+       | Runtime_claude_code.Resume _ -> "resume")
+      (String.length prompt)
+      (Option.fold ~none:0 ~some:String.length client_config.Runtime_claude_code.system_prompt)
+      (List.length dynamic_tools)
+      (Runtime_claude_code.dynamic_tool_bytes dynamic_tools);
     let started_at = Time_compat.now () in
     let turn_result =
       try

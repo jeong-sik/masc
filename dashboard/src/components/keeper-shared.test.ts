@@ -71,7 +71,6 @@ vi.mock('../keeper-actions', () => ({
   hydrateKeeperChatHistory: vi.fn(async () => undefined),
   loadFullKeeperHistory: vi.fn(async () => null),
   probeKeeperRuntime: vi.fn(),
-  reconcileKeeperChatReceipts: vi.fn(async () => undefined),
   recoverKeeperRuntime: vi.fn(),
   hydrateTrackedKeeperChatOperations: vi.fn(async () => undefined),
   sendKeeperThreadMessage: vi.fn(async () => null),

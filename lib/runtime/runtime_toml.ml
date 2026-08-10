@@ -225,7 +225,12 @@ let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
 let reserved_namespaces = active_top_level_namespaces @ obsolete_top_level_namespaces
 let is_reserved name = List.mem name reserved_namespaces
 
-let valid_runtime_id_component value =
+(* Provider ids stay dot-free: a Runtime id is the literal string
+   "<provider>.<model>", so a dot inside the provider id would make that
+   compound ambiguous. Model ids admit '.' because they carry upstream API
+   model names verbatim (gpt-5.3-codex-spark, mimo-v2.5), written as quoted
+   TOML keys that Otoml already parses. *)
+let valid_runtime_id_component ~allow_dot value =
   let length = String.length value in
   length > 0
   &&
@@ -235,18 +240,23 @@ let valid_runtime_id_component value =
     else (
       match value.[index] with
       | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> loop (index + 1)
+      | '.' when allow_dot -> loop (index + 1)
       | _ -> false)
   in
   loop 0
 ;;
 
-let validate_runtime_id_component ~kind ~path value =
-  if not (valid_runtime_id_component value)
+let runtime_id_charset ~allow_dot =
+  if allow_dot then "[A-Za-z0-9._-]+" else "[A-Za-z0-9_-]+"
+;;
+
+let validate_runtime_id_component ~allow_dot ~kind ~path value =
+  if not (valid_runtime_id_component ~allow_dot value)
   then
     Error
       (error
          path
-         (Printf.sprintf "%s id must match [A-Za-z0-9_-]+" kind))
+         (Printf.sprintf "%s id must match %s" kind (runtime_id_charset ~allow_dot)))
   else if is_reserved value
   then
     Error
@@ -609,6 +619,7 @@ let parse_providers (toml : Otoml.t)
          (fun (id, tbl) ->
             match
               validate_runtime_id_component
+                ~allow_dot:false
                 ~kind:"provider"
                 ~path:("providers." ^ id)
                 id
@@ -985,6 +996,7 @@ let parse_models (toml : Otoml.t)
          (fun (id, tbl) ->
             match
               validate_runtime_id_component
+                ~allow_dot:true
                 ~kind:"model"
                 ~path:("models." ^ id)
                 id

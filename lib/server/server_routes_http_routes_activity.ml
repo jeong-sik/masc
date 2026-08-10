@@ -694,11 +694,17 @@ let add_routes ~sw ~clock router =
          reqd)
 
   |> Http.Router.get "/api/v1/board/hearths" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
+       with_public_read (fun state req reqd ->
          let config = Mcp_server.workspace_config state in
+         let exclude_system = bool_query_param req "exclude_system" ~default:false in
+         let exclude_automation =
+           bool_query_param req "exclude_automation" ~default:false
+         in
          let cache_key =
-           Printf.sprintf "board:hearths:%s"
+           Printf.sprintf "board:hearths:%s:exclude-system=%b:exclude-automation=%b"
              (Keeper_api_types.cache_key_string_segment config.base_path)
+             exclude_system
+             exclude_automation
          in
          let json =
            Dashboard_cache.get_or_compute
@@ -706,7 +712,10 @@ let add_routes ~sw ~clock router =
              ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
              (fun () ->
                 Domain_pool_ref.submit_io_or_inline (fun () ->
-                  let hearths = Board_dispatch.list_hearths () in
+                  let hearths =
+                    Board_dispatch.list_hearths
+                      ~exclude_system ~exclude_automation ()
+                  in
                   `Assoc [
                     ("hearths", `List (List.map (fun (name, count) ->
                       `Assoc [("name", `String name); ("count", `Int count)]

@@ -117,7 +117,10 @@ export async function refreshBoardHearths(): Promise<void> {
   const requestId = ++boardHearthsRequestId
   boardHearthsLoading.value = true
   try {
-    const hearths = await fetchBoardHearths()
+    const hearths = await fetchBoardHearths({
+      excludeSystem: boardExcludeSystem.value,
+      excludeAutomation: boardExcludeAutomation.value,
+    })
     if (requestId !== boardHearthsRequestId) return
     boardHearths.value = hearths
     boardHearthsError.value = false

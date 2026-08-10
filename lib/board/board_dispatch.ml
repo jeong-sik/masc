@@ -691,9 +691,9 @@ let list_comments ?(limit = 1000) () =
   match backend () with
   | Jsonl store -> Board.list_comments store ~limit ()
 
-let list_hearths () =
+let list_hearths ?(exclude_system = false) ?(exclude_automation = false) () =
   match backend () with
-  | Jsonl store -> Board.list_hearths store
+  | Jsonl store -> Board.list_hearths store ~exclude_system ~exclude_automation ()
 
 let set_thread_id ~post_id ~thread_id =
   match backend () with

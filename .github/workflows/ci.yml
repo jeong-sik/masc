@@ -1116,6 +1116,20 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_keeper_keepalive_launch_order_ast
 
+      - name: Run Keeper owner and chat cutover suites
+        # #27962 put every Keeper mutation and chat turn behind one owner actor,
+        # and #27993 made an unarchived chat-queue.sqlite3 sidecar refuse Keeper
+        # Owner installation at boot. @check compiles both and runs neither, so
+        # one-running-turn, restart settlement, and the boot gate itself were
+        # assertions nothing executed. A gate that can hold a fleet out of ready
+        # has to run where a red result blocks the merge.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_owner \
+            @test/runtest-test_keeper_chat_operation_http \
+            @test/runtest-test_keeper_autoboot_single_owner \
+            @test/runtest-test_keeper_chat_cutover_preflight
+
       - name: Run memory journal suite
         # The journal is the only disk record of a librarian pass that produced
         # no snapshot. @check compiles this suite but does not run it, and an

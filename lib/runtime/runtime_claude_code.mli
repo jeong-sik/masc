@@ -40,6 +40,11 @@ type rate_limit =
   ; overage_disabled_reason : string option
   }
 
+type turn_usage =
+  { input_tokens : int
+  ; output_tokens : int
+  }
+
 type turn_result =
   { session_id : string
   ; turn_id : string
@@ -49,6 +54,7 @@ type turn_result =
   ; subscription : subscription
   ; rate_limit : rate_limit option
   ; resumed : bool
+  ; usage : turn_usage option
   }
 
 type dynamic_tool_result =

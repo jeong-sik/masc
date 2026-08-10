@@ -203,6 +203,21 @@ type model_spec =
     (** [min_p] — per-model minimum probability sampling value forwarded through
         the materialized AGENT_CORE [Provider_config]. [None] leaves the caller/AGENT_CORE
         profile unchanged. *)
+  ; reasoning_effort : Llm_provider.Reasoning_effort.t option
+       [@equal fun a b -> a = b]
+    (* Reasoning_effort.t is a plain variant with no derived [equal];
+       structural equality is exactly right for it, and declaring it here
+       keeps the comparison inside masc rather than widening the AGENT_CORE
+       module's interface for one consumer. *)
+    (** [reasoning-effort] — per-model reasoning depth. Official-client
+        runtimes take no [enable_thinking]
+        ({!Keeper_official_client_host.resolve_reasoning_effort} rejects it
+        outright), so this is the only declared control over how much a
+        Claude Code / Codex / Antigravity turn reasons. [None] leaves the
+        turn at the caller default. Resolved via
+        {!Runtime.reasoning_effort_of_runtime_id} →
+        {!Runtime_inference.resolve_reasoning_effort}, symmetric to the
+        [temperature] path. *)
   ; capabilities : model_capabilities option
   }
 [@@deriving show, eq]

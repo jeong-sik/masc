@@ -126,7 +126,10 @@ val prepare_turn :
   initial_messages:Agent_core.Types.message list ->
   model_input_projection:Agent_core.Agent.model_input_projection option ->
   hooks:Agent_core.Hooks.hooks option ->
+  configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
   (prepared_turn, Agent_core.Error.t) result
+(** [configured_reasoning_effort] seeds the turn params the
+    [before_turn_params] hook receives, so a hook can still override it. *)
 
 val dynamic_tools :
   runtime_label:string ->

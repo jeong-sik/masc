@@ -350,6 +350,11 @@ val temperature_of_runtime_id : string -> float option
     set and its caller fallback ([MASC_KEEPER_UNIFIED_TEMP]) otherwise.  Required
     for models that reject the default temperature (Kimi K2.7 accepts only 1.0). *)
 
+val reasoning_effort_of_runtime_id : string -> Llm_provider.Reasoning_effort.t option
+(** Per-model [reasoning-effort] from runtime.toml, or [None] when unset or
+    the runtime id is unknown. Consumed by
+    {!Runtime_inference.resolve_reasoning_effort}. *)
+
 val top_p_of_runtime_id : string -> float option
 (** Request [top_p] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when the runtime is not configured or no explicit value is

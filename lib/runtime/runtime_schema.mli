@@ -141,6 +141,8 @@ type model_spec =
   ; top_p : float option
   ; top_k : int option
   ; min_p : float option
+  ; reasoning_effort : Llm_provider.Reasoning_effort.t option
+       [@equal fun a b -> a = b]
   ; capabilities : model_capabilities option
   }
 [@@deriving show, eq]

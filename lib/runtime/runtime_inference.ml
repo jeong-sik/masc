@@ -14,6 +14,14 @@ let resolve_temperature ~runtime_id ~fallback =
   | Some temperature -> temperature
   | None -> fallback ()
 
+(* Per-runtime reasoning effort. Official-client runtimes reject
+   [enable_thinking] and take effort instead, so without this the effort a
+   Claude Code / Codex / Antigravity turn runs at is whatever the CLI
+   defaults to and no operator declaration reaches it. [None] leaves the
+   caller's own value in place. *)
+let resolve_reasoning_effort ~runtime_id =
+  Runtime.reasoning_effort_of_runtime_id runtime_id
+
 (* masc#24067 / agent-core boundary: MASC must not synthesize a request [max_tokens]
    value. The former resolver invented one from either a model capability
    ceiling or a flat fallback. Callers now carry explicit intent as [int

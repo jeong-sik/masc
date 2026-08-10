@@ -193,6 +193,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     let turn_count = claim_plan.turn_count in
     let* prepared =
       Host.prepare_turn
+        ~configured_reasoning_effort:
+          (Runtime_inference.resolve_reasoning_effort ~runtime_id)
         ~runtime_label
         ~keeper_name
         ~turn_count

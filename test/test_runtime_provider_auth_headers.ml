@@ -56,6 +56,7 @@ let qwen_model =
   ; top_p = None
   ; top_k = None
   ; min_p = None
+  ; reasoning_effort = None
   ; capabilities = None
   }
 

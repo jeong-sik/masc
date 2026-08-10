@@ -796,6 +796,67 @@ let test_model_without_reasoning_effort_leaves_it_unset () =
          (model.Runtime_schema.reasoning_effort = None)
      | _ -> fail "exactly one model must parse")
 
+(* [turn-timeout-s] exists because reasoning effort is per model while the only
+   pre-existing bound was per provider (antigravity [timeout-s]) or absent
+   entirely (claude-code, codex-app-server, both fixed at 300s in the adapter).
+   A max-effort binding could therefore not be given more wall clock than a
+   low-effort one sharing its provider. Live evidence, 2026-08-10: keeper
+   analyst on claude_code.claude-opus-5-max failed every turn with "timed out
+   after 300.000s" at 5,884 bytes of system+user input.
+
+   The rejection case is the load-bearing one: a timeout that silently became
+   zero or infinity would either kill every turn or hang the keeper, and both
+   read as a provider fault rather than a config typo. *)
+let test_model_turn_timeout_parses_as_a_positive_float () =
+  let config = "[models.probe]\napi-name = \"probe\"\nturn-timeout-s = 900.0\n" in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model declaring a positive turn-timeout-s must parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "turn-timeout-s reaches the model spec"
+         true
+         (model.Runtime_schema.turn_timeout_s = Some 900.0)
+     | _ -> fail "exactly one model must parse")
+
+let test_model_turn_timeout_rejects_a_non_positive_value_at_load () =
+  let config = "[models.probe]\napi-name = \"probe\"\nturn-timeout-s = 0.0\n" in
+  match Runtime_toml.parse_string config with
+  | Ok _ -> fail "a non-positive turn-timeout-s must be rejected at load"
+  | Error errors ->
+    check
+      bool
+      "the rejection names the offending key"
+      true
+      (List.exists
+         (fun (e : Runtime_toml.parse_error) ->
+            let contains needle =
+              let n = String.length needle in
+              let rec scan i =
+                i + n <= String.length e.path
+                && (String.sub e.path i n = needle || scan (i + 1))
+              in
+              scan 0
+            in
+            contains "turn-timeout-s")
+         errors)
+
+let test_model_without_turn_timeout_leaves_it_unset () =
+  let config = "[models.probe]\napi-name = \"probe\"\n" in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model without turn-timeout-s must still parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "an undeclared turn-timeout-s stays None so the caller keeps its bound"
+         true
+         (model.Runtime_schema.turn_timeout_s = None)
+     | _ -> fail "exactly one model must parse")
+
 let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
   let valid =
     "[runtime.exact_output_lanes.compaction_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
@@ -3607,5 +3668,14 @@ let () =
         ; test_case
             "a model without reasoning-effort leaves it unset"
             `Quick test_model_without_reasoning_effort_leaves_it_unset
+        ; test_case
+            "turn-timeout-s parses as a positive float"
+            `Quick test_model_turn_timeout_parses_as_a_positive_float
+        ; test_case
+            "turn-timeout-s rejects a non-positive value at load"
+            `Quick test_model_turn_timeout_rejects_a_non_positive_value_at_load
+        ; test_case
+            "a model without turn-timeout-s leaves it unset"
+            `Quick test_model_without_turn_timeout_leaves_it_unset
         ] )
     ]

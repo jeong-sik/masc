@@ -829,6 +829,19 @@ let reasoning_effort_opt_field ~(path : string) (tbl : Otoml.t)
          ])
 ;;
 
+(* Read the optional per-model [turn-timeout-s]. Named distinctly from the
+   antigravity provider key [timeout-s] because the two sit at different layers
+   and the model value wins: an operator reading a config with both should be
+   able to tell which one bounds the turn without consulting the resolver. *)
+let turn_timeout_opt_field ~(path : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  positive_finite_float_opt_field
+    ~path
+    ~key:"turn-timeout-s"
+    (strict_float_find path tbl "turn-timeout-s")
+;;
+
 (* Read the optional per-model [temperature]. A TOML integer (1) or float (1.0)
    both read as a float so an operator is not tripped by "1 vs 1.0". Absent →
    [Ok None] (caller keeps its fallback). Wrong type or out of
@@ -950,6 +963,7 @@ let parse_model (id : string) (tbl : Otoml.t)
     let top_k_result = positive_int_opt_field ~path ~key:"top-k" tbl in
     let min_p_result = probability_opt_field ~path ~key:"min-p" tbl in
     let reasoning_effort_result = reasoning_effort_opt_field ~path tbl in
+    let turn_timeout_result = turn_timeout_opt_field ~path tbl in
     let ( let* ) = Result.bind in
     let* max_context = max_context_result in
     let* capabilities = capabilities_result in
@@ -958,6 +972,7 @@ let parse_model (id : string) (tbl : Otoml.t)
     let* top_k = top_k_result in
     let* min_p = min_p_result in
     let* reasoning_effort = reasoning_effort_result in
+    let* turn_timeout_s = turn_timeout_result in
     match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
     | _ :: _ as errors -> Error errors
     | [] ->
@@ -975,6 +990,7 @@ let parse_model (id : string) (tbl : Otoml.t)
         ; top_k
         ; min_p
         ; reasoning_effort
+        ; turn_timeout_s
         ; capabilities        })
 ;;
 

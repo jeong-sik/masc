@@ -393,6 +393,172 @@ let test_gate_history_drops_orphan_tool_result () =
     (List.length kept + omitted)
 ;;
 
+(* ── completed_tool_calls: what the judge is handed ────────────────────
+   The judge bundle has two evidence axes and #26081 bounded only one, against
+   a measured "~41 KB remainder". On 2026-08-09 that remainder was 791,432 B of
+   an 860,589 B bundle - 623,999 B of it a single tool [result] - and the judge
+   slot refused the prompt with code 1261. The fix is not a smaller slice of the
+   old shape but a smaller shape: the judge is asked about a call that has not
+   run yet, so a previous tool's payload is not evidence it was ever asked to
+   weigh. These cases pin the payload out and keep the ceiling honest. *)
+
+let huge_tool_result index =
+  (* Mirrors the live 623,999 B [result] that refused the prompt. *)
+  Tool_result.Completed
+    { Tool_result.data =
+        `Assoc
+          [ "index", `Int index
+          ; "body", `String (String.make 620_000 'y')
+          ]
+    ; metadata = None
+    ; tool_name = "network_read"
+    ; duration_ms = 1.0
+    }
+;;
+
+let record_calls context count =
+  List.iter
+    (fun index ->
+       Masc.Keeper_gate_causal_context.record_tool_result
+         context
+         ~operation:"network_read"
+         ~input:(`Assoc [ "index", `Int index ])
+         (huge_tool_result index))
+    (List.init count Fun.id)
+;;
+
+let completed_calls_of_snapshot (context : Masc.Keeper_gate_causal_context.t) =
+  let open Yojson.Safe.Util in
+  let snapshot = (Masc.Keeper_gate_causal_context.snapshot context).snapshot in
+  ( snapshot |> member "completed_tool_calls" |> to_list
+  , snapshot |> member "completed_tool_calls_omitted" |> to_int )
+;;
+
+let encoded_json_bytes items =
+  List.fold_left
+    (fun total json -> total + String.length (Yojson.Safe.to_string json))
+    0
+    items
+;;
+
+let test_completed_calls_share_the_history_budget () =
+  check
+    int
+    "both evidence axes read one declared budget"
+    Masc.Keeper_gate_causal_context.evidence_budget_bytes
+    Setup.gate_history_budget_bytes
+;;
+
+let test_tool_payload_is_never_rendered () =
+  let context =
+    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+  in
+  record_calls context 13;
+  let kept, omitted = completed_calls_of_snapshot context in
+  (* 13 calls each holding a 620 KB payload: on the old shape this was 791,432 B
+     and no budget could keep every call. *)
+  check int "every call is retained" 13 (List.length kept);
+  check int "nothing had to be dropped" 0 omitted;
+  check
+    bool
+    "the whole turn renders in a few KB"
+    true
+    (encoded_json_bytes kept < 4096);
+  let open Yojson.Safe.Util in
+  List.iter
+    (fun call ->
+       check
+         (list string)
+         "only identity, input and disposition reach the judge"
+         [ "operation"; "input"; "disposition" ]
+         (call |> to_assoc |> List.map fst))
+    kept
+;;
+
+let test_disposition_survives_for_every_call () =
+  (* [disposition] is the part the judgment turns on once the payload is gone. *)
+  let context =
+    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+  in
+  Masc.Keeper_gate_causal_context.record_tool_result
+    context
+    ~operation:"network_read"
+    ~input:(`Assoc [ "index", `Int 0 ])
+    (huge_tool_result 0);
+  Masc.Keeper_gate_causal_context.record_tool_result
+    context
+    ~operation:"network_read"
+    ~input:(`Assoc [ "index", `Int 1 ])
+    (Tool_result.Failed
+       { Tool_result.class_ = Tool_result.Transient_error
+       ; message = "upstream refused"
+       ; data = `Null
+       ; metadata = None
+       ; tool_name = "network_read"
+       ; duration_ms = 1.0
+       });
+  let kept, _ = completed_calls_of_snapshot context in
+  let open Yojson.Safe.Util in
+  let dispositions = List.map (fun c -> c |> member "disposition" |> to_string) kept in
+  check int "both calls are present" 2 (List.length dispositions);
+  check
+    bool
+    "the failed call is distinguishable from the completed one"
+    true
+    (List.nth dispositions 0 <> List.nth dispositions 1)
+;;
+
+let test_budget_still_bounds_a_large_input () =
+  (* The payload is gone but a tool [input] can itself be large, and an axis with
+     no declared ceiling is the one that grows until a provider refuses. *)
+  let context =
+    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+  in
+  let total = 40 in
+  List.iter
+    (fun index ->
+       Masc.Keeper_gate_causal_context.record_tool_result
+         context
+         ~operation:"network_read"
+         ~input:
+           (`Assoc
+             [ "index", `Int index
+             ; "body", `String (String.make 4096 'x')
+             ])
+         (huge_tool_result index))
+    (List.init total Fun.id);
+  let kept, omitted = completed_calls_of_snapshot context in
+  check
+    bool
+    "rendered calls stay inside the declared budget"
+    true
+    (encoded_json_bytes kept
+     <= Masc.Keeper_gate_causal_context.evidence_budget_bytes);
+  check bool "older calls were dropped" true (omitted > 0);
+  (* Nothing may vanish unreported: judge.effect.md tells the judge to read
+     [completed_tool_calls_omitted] before treating the list as the whole turn. *)
+  check int "every call is either kept or counted" total (List.length kept + omitted);
+  let open Yojson.Safe.Util in
+  check
+    int
+    "the newest call survives"
+    (total - 1)
+    (List.nth kept (List.length kept - 1)
+     |> member "input"
+     |> member "index"
+     |> to_int)
+;;
+
+let test_completed_calls_short_list_is_whole () =
+  let context =
+    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+  in
+  record_calls context 3;
+  let kept, omitted = completed_calls_of_snapshot context in
+  check int "nothing is dropped" 0 omitted;
+  check int "every call is kept" 3 (List.length kept)
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -442,6 +608,18 @@ let () =
             test_gate_history_short_history_is_whole
         ; test_case "drops a tool result whose call fell outside" `Quick
             test_gate_history_drops_orphan_tool_result
+        ] )
+    ; ( "completed_tool_calls_evidence"
+      , [ test_case "tool payloads never reach the judge" `Quick
+            test_tool_payload_is_never_rendered
+        ; test_case "disposition survives for every call" `Quick
+            test_disposition_survives_for_every_call
+        ; test_case "both evidence axes share one budget" `Quick
+            test_completed_calls_share_the_history_budget
+        ; test_case "the budget still bounds a large input" `Quick
+            test_budget_still_bounds_a_large_input
+        ; test_case "short call list is passed through whole" `Quick
+            test_completed_calls_short_list_is_whole
         ] )
     ; ( "observation_partition"
       , [ test_case

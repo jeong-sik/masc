@@ -1735,6 +1735,15 @@ let test_read_backlog_snapshot_preserves_unreadable_observation () =
         current_task_id = Some task_id
       }
     in
+    (* The recovery snapshot can only preserve a task the store already held;
+       the setup step that creates it was missing. *)
+    let _ =
+      Workspace.add_task
+        config
+        ~title:"Backlog recovery observation"
+        ~priority:1
+        ~description:""
+    in
     let write_corrupt path =
       Out_channel.with_open_text path (fun channel ->
         output_string channel "{\"tasks\":\"not-current\"}")
@@ -1822,6 +1831,15 @@ let test_read_current_task_preserves_unavailable_and_missing () =
       match Keeper_id.Task_id.of_string "task-001" with
       | Ok task_id -> task_id
       | Error message -> Alcotest.fail message
+    in
+    (* The phases below remove this task and then corrupt the store, so the
+       first phase needs it to exist; the setup step was missing. *)
+    let _ =
+      Workspace.add_task
+        config
+        ~title:"Current task observation"
+        ~priority:1
+        ~description:""
     in
     let meta =
       { (keeper_meta_for_self_filter "keeper-current-task-observation-agent") with

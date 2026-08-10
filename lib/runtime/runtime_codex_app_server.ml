@@ -385,7 +385,9 @@ let parse_initialize result =
 let parse_subscription result =
   let stage = "account/read" in
   let* fields = assoc_at stage result in
-  let* _requires_auth = required_bool stage "requiresOpenaiAuth" fields in
+  (* [requiresOpenaiAuth] is in the response and is not read: the decision
+     below is account.type = "chatgpt". Requiring it to be a bool made the
+     subscription probe depend on a field this tree ignores (#28010). *)
   let* account = required_member stage "account" fields in
   match account with
   | `Null -> Error (Subscription_required "the official CLI has no active account")
@@ -532,7 +534,12 @@ let validate_item_delta_notification ~method_ ~thread_id ~turn_id params =
   let* fields = assoc_at method_ params in
   let* notification_thread_id = required_string method_ "threadId" fields in
   let* notification_turn_id = required_string method_ "turnId" fields in
-  let* _item_id = required_string method_ "itemId" fields in
+  (* [delta] stays required: its presence is what makes this frame an item
+     delta, and the identity check below is only meaningful on one. Its
+     *content* is not checked -- #27967 rejected empty chunks a provider
+     legitimately sends. [itemId] carries neither role. Nothing here reads it,
+     so a frame that omits it or sends it empty changes nothing this function
+     decides, while requiring it adds one more way to end a turn (#28010). *)
   let* _delta = required_string_any method_ "delta" fields in
   if notification_thread_id <> thread_id || notification_turn_id <> turn_id
   then protocol_error method_ "item delta identity does not match the active turn"

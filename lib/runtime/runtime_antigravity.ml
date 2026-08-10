@@ -303,7 +303,9 @@ let parse_step_update fields =
   let* step_json = required_member stage "step_update" fields in
   let* step_fields = assoc_at stage step_json in
   let* conversation_id = required_string stage "conversation_id" step_fields in
-  let* _step_index = required_nonnegative_int stage "step_index" step_fields in
+  (* [step_index] is not read; [state] and [step_type] are what this event
+     contributes. Requiring a non-negative int on an unread ordinal made a
+     step update fail on a value nothing consumes (#28010). *)
   let* state_string = required_string stage "state" step_fields in
   let* state = parse_step_state stage state_string in
   let* step_type_string = required_string stage "step_type" step_fields in

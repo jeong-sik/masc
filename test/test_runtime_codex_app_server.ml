@@ -521,6 +521,32 @@ let test_empty_output_delta_does_not_end_the_turn () =
     ; "whitespace delta", {|"   "|}
     ; "newline delta", {|"\n"|}
     ];
+  (* itemId is not read here, so its content cannot change what this frame
+     decides. It used to be required non-empty and a keeper died on the frames
+     that carried it empty; the identity check that does matter -- threadId and
+     turnId -- is asserted unchanged in the rejection list below. *)
+  List.iter
+    (fun (label, notification) ->
+      with_fixture
+        [ init_result
+        ; account_chatgpt
+        ; thread_result
+        ; turn_result
+        ; notification
+        ; item_completed
+        ; turn_completed
+        ]
+        (fun path ->
+          match run_fixture path with
+          | Ok result -> check string label "MASC_SUBSCRIPTION_OK" result.text
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)))
+    [ ( "empty itemId"
+      , {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"","delta":"chunk"}}|}
+      )
+    ; ( "absent itemId"
+      , {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"turn-1","delta":"chunk"}}|}
+      )
+    ];
   List.iter
     (fun (label, notification) ->
       with_fixture
@@ -533,9 +559,6 @@ let test_empty_output_delta_does_not_end_the_turn () =
     [ ( "a non-string delta was admitted", delta "42" )
     ; ( "a delta that is not present was admitted"
       , {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"command-1"}}|}
-      )
-    ; ( "an empty itemId was admitted"
-      , {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"","delta":"chunk"}}|}
       )
     ; ( "an empty turnId was admitted"
       , {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"","itemId":"command-1","delta":"chunk"}}|}

@@ -24,13 +24,29 @@ let provider_error ~runtime_id detail : Fusion_types.panel_failure =
 ;;
 
 let eio_context ~runtime_id =
+  (* Naming the absent handle is the point: both are published together by the
+     server but separately by other entry points, so "the Eio runtime is not
+     initialized" sends the reader to look at the wrong one. *)
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | Some env, Some clock -> Ok (env, clock)
-  | None, _ | _, None ->
+  | None, None ->
     Error
       (provider_error
          ~runtime_id
-         "official-client panelist requires the initialized Eio runtime")
+         "official-client panelist requires Eio_context env and clock; neither \
+          is published")
+  | None, Some _ ->
+    Error
+      (provider_error
+         ~runtime_id
+         "official-client panelist requires Eio_context env (process manager \
+          and fs); it is not published")
+  | Some _, None ->
+    Error
+      (provider_error
+         ~runtime_id
+         "official-client panelist requires Eio_context clock; it is not \
+          published")
 ;;
 
 (* [Runtime_execution.*] carries admission-time config; each adapter has its own

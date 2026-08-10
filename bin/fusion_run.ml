@@ -391,6 +391,15 @@ let () =
   (* Capture the Eio handles used by Fusion runtime dependencies and elapsed
      telemetry. This does not install a Fusion-owned execution deadline. *)
   Masc.Masc_eio_env.init ~sw ~net ~clock:(Eio.Stdenv.clock env) ();
+  (* Official-client panelists spawn a CLI, so they read the process manager and
+     the clock off Eio_context. Masc_eio_env above is a different store
+     (Domain.DLS) and does not feed it. The server publishes both from
+     server_runtime_bootstrap; this harness is the other entry point into the
+     same panel code and has to publish them too, or every official-client
+     panelist in a preset fails while the same preset answers under the
+     server. *)
+  Eio_context.set_env env;
+  Eio_context.set_clock (Eio.Stdenv.clock env);
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
   (match Runtime.init_default_strict ~config_path with
    | Error msg ->

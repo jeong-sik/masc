@@ -22,8 +22,13 @@ type phase =
   | Awaiting_initialized
   | Ready
 
+type session_snapshot =
+  { phase : phase
+  ; negotiated_protocol_version : string option
+  }
+
 type session =
-  { phase : phase Atomic.t
+  { state : session_snapshot Atomic.t
   }
 
 type message =
@@ -35,7 +40,14 @@ type message =
 let ( let* ) = Result.bind
 let error stage detail = Error { stage; detail }
 
-let create_session () = { phase = Atomic.make Awaiting_initialize }
+let create_session () =
+  { state =
+      Atomic.make
+        { phase = Awaiting_initialize; negotiated_protocol_version = None }
+  }
+;;
+
+let snapshot_session session = Atomic.get session.state
 
 let phase_to_string = function
   | Awaiting_initialize -> "awaiting_initialize"
@@ -44,7 +56,7 @@ let phase_to_string = function
 ;;
 
 let require_phase session ~stage expected =
-  let actual = Atomic.get session.phase in
+  let actual = (Atomic.get session.state).phase in
   if actual = expected
   then Ok ()
   else
@@ -56,17 +68,17 @@ let require_phase session ~stage expected =
          (phase_to_string expected))
 ;;
 
-let transition_phase session ~stage ~expected ~next =
-  if Atomic.compare_and_set session.phase expected next
+let transition_state session ~stage ~expected ~next =
+  if Atomic.compare_and_set session.state expected next
   then Ok ()
   else
-    let actual = Atomic.get session.phase in
+    let actual = Atomic.get session.state in
     error
       stage
       (Printf.sprintf
          "MCP session phase changed to %s; expected %s"
-         (phase_to_string actual)
-         (phase_to_string expected))
+         (phase_to_string actual.phase)
+         (phase_to_string expected.phase))
 ;;
 
 let rec validate_message_value ~stage ~path = function
@@ -166,22 +178,6 @@ let protocol_version params =
   | None | Some _ -> error stage "invalid protocolVersion"
 ;;
 
-let initialize ~server_name ~id ~params =
-  let* protocol_version = protocol_version params in
-  Ok
-    (Mcp_transport_protocol.make_response
-       ~id
-       (`Assoc
-          [ "protocolVersion", `String protocol_version
-          ; "capabilities", `Assoc [ "tools", `Assoc [] ]
-          ; ( "serverInfo"
-            , `Assoc
-                [ "name", `String server_name
-                ; "version", `String Runtime_build_version.current
-                ] )
-          ]))
-;;
-
 let tool_result_json ~id (result : tool_result) =
   Mcp_transport_protocol.make_response
     ~id
@@ -254,15 +250,32 @@ let dispatch_message
   =
   match message.method_name, message.request_id with
     | "initialize", Some request_id ->
+      let expected = Atomic.get session.state in
       let* () = require_phase session ~stage:"MCP initialize" Awaiting_initialize in
       let id = Mcp_transport_protocol.request_id_to_yojson request_id in
-      let* initialize_response = initialize ~server_name ~id ~params:message.params in
+      let* protocol_version = protocol_version message.params in
+      let initialize_response =
+        Mcp_transport_protocol.make_response
+          ~id
+          (`Assoc
+             [ "protocolVersion", `String protocol_version
+             ; "capabilities", `Assoc [ "tools", `Assoc [] ]
+             ; ( "serverInfo"
+               , `Assoc
+                   [ "name", `String server_name
+                   ; "version", `String Runtime_build_version.current
+                   ] )
+             ])
+      in
       let* () =
-        transition_phase
+        transition_state
           session
           ~stage:"MCP initialize"
-          ~expected:Awaiting_initialize
-          ~next:Awaiting_initialized
+          ~expected
+          ~next:
+            { phase = Awaiting_initialized
+            ; negotiated_protocol_version = Some protocol_version
+            }
       in
       Ok
         { response = Some initialize_response
@@ -292,12 +305,13 @@ let dispatch_message
            ~params:message.params
            ~call_tool)
     | "notifications/initialized", None ->
+      let expected = Atomic.get session.state in
       let* () =
-        transition_phase
+        transition_state
           session
           ~stage:"MCP notifications/initialized"
-          ~expected:Awaiting_initialized
-          ~next:Ready
+          ~expected
+          ~next:{ expected with phase = Ready }
       in
       Ok { response = None; tool_called = false }
     | _, None ->

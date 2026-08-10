@@ -1,4 +1,4 @@
-(** Keeper projection for the official Claude Code subscription runtime. *)
+(** Keeper projection for the official Antigravity subscription runtime. *)
 
 val run :
   runtime_id:string ->
@@ -15,5 +15,5 @@ val run :
   context:Agent_core.Context.t option ->
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
-  config:Runtime_execution.claude_code ->
+  config:Runtime_execution.antigravity_cli ->
   (Runtime_agent.run_result, Agent_core.Error.t) result

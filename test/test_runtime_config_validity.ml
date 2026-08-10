@@ -3235,17 +3235,23 @@ let antigravity_cli_runtime_toml ?credential ?(options = "") () =
     credential
 ;;
 
+let antigravity_file_credential =
+  "[providers.antigravity.credentials]\n\
+   type = \"file\"\n\
+   path = \"/tmp/antigravity-oauth-token\""
+;;
+
 let test_antigravity_cli_materializes_typed_process_options () =
   let options =
     "agent = \"fixture-agent\"\n\
      effort = \"high\"\n\
-     execution-mode = \"accept-edits\"\n\
-     sandbox = true\n\
-     disable-slash-commands = false\n\
      timeout-s = 45.0"
   in
   with_temp_runtime_toml
-    (antigravity_cli_runtime_toml ~options ())
+    (antigravity_cli_runtime_toml
+       ~credential:antigravity_file_credential
+       ~options
+       ())
     (fun path ->
        match Runtime.load_list ~config_path:path with
        | Error error -> failf "antigravity-cli runtime should load: %s" error
@@ -3261,12 +3267,10 @@ let test_antigravity_cli_materializes_typed_process_options () =
               "effort"
               true
               (config.effort = Some Runtime_antigravity.High);
-            check bool
-              "execution mode"
-              true
-              (config.execution_mode = Runtime_antigravity.Accept_edits);
-            check bool "sandbox" true config.sandbox;
-            check bool "slash commands" false config.disable_slash_commands;
+            check string
+              "OAuth source"
+              "/tmp/antigravity-oauth-token"
+              config.oauth_source;
             check (float 0.0) "timeout" 45.0 config.timeout_s
           | Runtime_execution.Agent_core _
           | Runtime_execution.Codex_app_server _
@@ -3274,47 +3278,52 @@ let test_antigravity_cli_materializes_typed_process_options () =
             fail "antigravity-cli was materialized through the wrong execution owner"))
 ;;
 
-let test_antigravity_cli_defaults_are_explicit () =
-  with_temp_runtime_toml (antigravity_cli_runtime_toml ()) (fun path ->
+let test_antigravity_cli_requires_explicit_timeout () =
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml
+       ~credential:antigravity_file_credential
+       ())
+    (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Error error -> failf "antigravity-cli runtime should load: %s" error
-    | Ok (_, default, _, _, _, _) ->
-      (match default.execution with
-       | Runtime_execution.Antigravity_cli config ->
-         check (option string) "agent" None config.agent;
-         check bool "effort" true (config.effort = None);
-         check bool "plan" true (config.execution_mode = Runtime_antigravity.Plan);
-         check bool "sandbox opt-in" false config.sandbox;
-         check bool "slash expansion disabled" true config.disable_slash_commands;
-         check (float 0.0) "timeout" 300.0 config.timeout_s
-       | Runtime_execution.Agent_core _
-       | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Claude_code _ ->
-         fail "antigravity-cli was materialized through the wrong execution owner"))
+    | Ok _ -> fail "antigravity-cli silently defaulted timeout-s"
+    | Error error ->
+      check bool "diagnostic names required timeout" true
+        (String_util.contains_substring error "timeout-s is required"))
 ;;
 
-let test_antigravity_cli_rejects_declared_credentials () =
-  let credential =
+let test_antigravity_cli_requires_file_credentials () =
+  let expect_rejected name ?credential () =
+    with_temp_runtime_toml
+      (antigravity_cli_runtime_toml
+         ?credential
+         ~options:"timeout-s = 45.0"
+         ())
+      (fun path ->
+         match Runtime.load_list ~config_path:path with
+         | Ok _ -> failf "antigravity-cli admitted %s credentials" name
+         | Error error ->
+           check bool (name ^ " diagnostic") true
+             (String_util.contains_substring error "file credential"))
+  in
+  let env_credential =
     "[providers.antigravity.credentials]\n\
      type = \"env\"\n\
      key = \"GEMINI_API_KEY\""
   in
-  with_temp_runtime_toml
-    (antigravity_cli_runtime_toml ~credential ())
-    (fun path ->
-       match Runtime.load_list ~config_path:path with
-       | Ok _ -> fail "antigravity-cli incorrectly admitted declared credentials"
-       | Error error ->
-         check bool "diagnostic names official login ownership" true
-           (String_util.contains_substring
-              error
-              "official Antigravity client owns login state"))
+  let inline_credential =
+    "[providers.antigravity.credentials]\n\
+     type = \"inline\"\n\
+     value = \"secret\""
+  in
+  expect_rejected "missing" ();
+  expect_rejected "environment" ~credential:env_credential ();
+  expect_rejected "inline" ~credential:inline_credential ()
 ;;
 
 let test_antigravity_options_are_protocol_scoped () =
   with_temp_runtime_toml
     (codex_app_server_runtime_toml
-       ~options:"execution-mode = \"accept-edits\""
+       ~options:"agent = \"fixture-agent\""
        ())
     (fun path ->
        match Runtime.load_list ~config_path:path with
@@ -3323,7 +3332,23 @@ let test_antigravity_options_are_protocol_scoped () =
          check bool "diagnostic names scoped option" true
            (String_util.contains_substring
               error
-              "execution-mode is valid only for protocol antigravity-cli"))
+              "agent is valid only for protocol antigravity-cli"))
+;;
+
+let test_antigravity_authority_fields_are_rejected () =
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml
+       ~credential:antigravity_file_credential
+       ~options:"sandbox = false\ntimeout-s = 45.0"
+       ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> fail "antigravity-cli admitted an operator authority override"
+       | Error error ->
+         check bool "diagnostic names unsupported field" true
+           (String_util.contains_substring
+              error
+              "unsupported antigravity-cli provider field"))
 ;;
 
 let test_codex_app_server_rejects_declared_credentials () =
@@ -3355,12 +3380,14 @@ let () =
             test_codex_app_server_rejects_declared_credentials;
           test_case "antigravity CLI options materialize" `Quick
             test_antigravity_cli_materializes_typed_process_options;
-          test_case "antigravity CLI defaults are explicit" `Quick
-            test_antigravity_cli_defaults_are_explicit;
-          test_case "antigravity CLI rejects declared credentials" `Quick
-            test_antigravity_cli_rejects_declared_credentials;
+          test_case "antigravity CLI requires explicit timeout" `Quick
+            test_antigravity_cli_requires_explicit_timeout;
+          test_case "antigravity CLI requires file credentials" `Quick
+            test_antigravity_cli_requires_file_credentials;
           test_case "antigravity options are protocol-scoped" `Quick
             test_antigravity_options_are_protocol_scoped;
+          test_case "antigravity authority fields are rejected" `Quick
+            test_antigravity_authority_fields_are_rejected;
           test_case "deployment AGENT_CORE catalog covers live RunPod MTP runtime" `Quick
             test_deployment_agent_core_model_catalog_covers_live_runpod_mtp;
           test_case

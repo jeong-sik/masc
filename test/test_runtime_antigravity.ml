@@ -49,7 +49,13 @@ let shell_quote value =
   "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
 ;;
 
-let fixture_script ?(require_resume = false) ?(sleep_s = 0.0) ?(exit_code = 0) lines =
+let fixture_script
+    ?(require_resume = false)
+    ?required_home
+    ?(sleep_s = 0.0)
+    ?(exit_code = 0)
+    lines
+  =
   let path = Filename.temp_file "masc-antigravity-" ".sh" in
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
@@ -60,6 +66,15 @@ let fixture_script ?(require_resume = false) ?(sleep_s = 0.0) ?(exit_code = 0) l
     output_string
       output
       "case \" $* \" in *\" --conversation conversation-1 \"*) ;; *) exit 93 ;; esac\n";
+  Option.iter
+    (fun expected ->
+      output_string
+        output
+        (Printf.sprintf "test \"$HOME\" = %s || exit 94\n" (shell_quote expected));
+      output_string
+        output
+        "test -z \"${XDG_CACHE_HOME+x}\" && test -z \"${XDG_CONFIG_HOME+x}\" && test -z \"${XDG_DATA_HOME+x}\" || exit 95\n")
+    required_home;
   if sleep_s > 0.0 then output_string output (Printf.sprintf "sleep %.3f\n" sleep_s);
   List.iter
     (fun line -> output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
@@ -70,12 +85,12 @@ let fixture_script ?(require_resume = false) ?(sleep_s = 0.0) ?(exit_code = 0) l
   path
 ;;
 
-let with_fixture ?require_resume ?sleep_s ?exit_code lines f =
-  let path = fixture_script ?require_resume ?sleep_s ?exit_code lines in
+let with_fixture ?require_resume ?required_home ?sleep_s ?exit_code lines f =
+  let path = fixture_script ?require_resume ?required_home ?sleep_s ?exit_code lines in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
-let run_fixture ?conversation_mode ?on_conversation_ready ?(timeout_s = 2.0) path =
+let run_fixture ?conversation_mode ?home_dir ?on_conversation_ready ?(timeout_s = 2.0) path =
   Eio_main.run (fun env ->
     let config =
       { (Runtime_antigravity.default_config ~cwd:"/tmp" ~model:"gemini-fixture") with
@@ -85,6 +100,7 @@ let run_fixture ?conversation_mode ?on_conversation_ready ?(timeout_s = 2.0) pat
     in
     Runtime_antigravity.run_turn
       ?conversation_mode
+      ?home_dir
       ?on_conversation_ready
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
@@ -95,7 +111,13 @@ let run_fixture ?conversation_mode ?on_conversation_ready ?(timeout_s = 2.0) pat
 
 let test_successful_official_client_turn () =
   with_fixture
-    [ init (); step (); result () ]
+    [ init ()
+    ; step ~index:0 ~step_type:"user_input" ()
+    ; step ~index:1 ~step_type:"unknown" ()
+    ; step ~index:2 ~step_type:"agent_response" ()
+    ; step ~index:3 ~step_type:"checkpoint" ()
+    ; result ()
+    ]
     (fun path ->
        match run_fixture path with
        | Error error -> fail (Runtime_antigravity.error_to_string error)
@@ -121,6 +143,20 @@ let test_child_environment_is_allowlisted () =
     match run_fixture path with
     | Error error -> fail (Runtime_antigravity.error_to_string error)
     | Ok _ -> ())
+;;
+
+let test_isolated_home_replaces_inherited_directory_roots () =
+  let home_dir = Filename.temp_dir "masc-antigravity-child-home-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree home_dir)
+    (fun () ->
+      with_fixture
+        ~required_home:home_dir
+        [ init (); result () ]
+        (fun path ->
+          match run_fixture ~home_dir path with
+          | Error error -> fail (Runtime_antigravity.error_to_string error)
+          | Ok _ -> ()))
 ;;
 
 let test_resume_requires_exact_identity_and_argv () =
@@ -337,6 +373,10 @@ let () =
             "child environment allowlist"
             `Quick
             test_child_environment_is_allowlisted
+        ; test_case
+            "isolated HOME"
+            `Quick
+            test_isolated_home_replaces_inherited_directory_roots
         ; test_case
             "conversation callback"
             `Quick

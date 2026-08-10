@@ -738,6 +738,8 @@ let same_file_snapshot (left : Unix.stats) (right : Unix.stats) =
 type owned_regular_file_snapshot =
   { device : int
   ; inode : int
+  ; owner_uid : int
+  ; permissions : int
   ; file_size : int
   ; modified_at : float
   ; changed_at : float
@@ -746,6 +748,8 @@ type owned_regular_file_snapshot =
 let owned_regular_file_snapshot_of_stats (stats : Unix.stats) =
   { device = stats.st_dev
   ; inode = stats.st_ino
+  ; owner_uid = stats.st_uid
+  ; permissions = stats.st_perm land 0o7777
   ; file_size = stats.st_size
   ; modified_at = stats.st_mtime
   ; changed_at = stats.st_ctime
@@ -755,6 +759,8 @@ let owned_regular_file_snapshot_of_stats (stats : Unix.stats) =
 let equal_owned_regular_file_snapshot left right =
   Int.equal left.device right.device
   && Int.equal left.inode right.inode
+  && Int.equal left.owner_uid right.owner_uid
+  && Int.equal left.permissions right.permissions
   && Int.equal left.file_size right.file_size
   && Float.equal left.modified_at right.modified_at
   && Float.equal left.changed_at right.changed_at

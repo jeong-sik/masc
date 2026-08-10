@@ -15,7 +15,8 @@ type compute_outcome =
     projection. The caller can durably claim the semantic terminal before
     passing a [Computed] value to {!project}. *)
 val compute
-  :  sw:Eio.Switch.t
+  :  base_dir:string
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> policy:Fusion_policy.t
   -> topology:Fusion_types.fusion_topology

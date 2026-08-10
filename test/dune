@@ -798,6 +798,20 @@
  (modules test_fusion_judge_usage)
  (libraries masc_test_deps masc.fusion_core))
 
+; Panel routing for official-client runtimes. Needs the full masc library
+; (not just fusion_core) because the predicate reads Runtime/Runtime_execution.
+
+(test
+ (name test_fusion_official_client_panel)
+ (modules test_fusion_official_client_panel)
+ (libraries
+  masc_test_deps
+  masc
+  masc.runtime
+  masc.fusion_core
+  masc.masc_eio_context
+  eio_main))
+
 ; RFC-0284 — Fusion deliberation OTel metrics: label wiring + counter emission.
 
 (test

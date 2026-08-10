@@ -5,7 +5,7 @@ type compute_outcome =
   | Compute_denied of Fusion_types.deny_reason
   | Computed of Fusion_types.deliberation_evidence
 
-let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
+let compute ~base_dir ~sw ~net ~policy ~topology ~request () : compute_outcome =
   match Fusion_policy.decide ~policy request with
   | Fusion_types.Deny reason ->
     Fusion_metrics.record_invocation ~topology `Denied;
@@ -27,7 +27,7 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
               groups
           in
           let panel =
-            Fusion_panel.run ~sw ~net
+            Fusion_panel.run ~base_dir ~sw ~net
               ~groups:effective_groups ~prompt:req.Fusion_types.prompt ()
           in
           let judge_web_tools =

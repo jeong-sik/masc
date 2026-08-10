@@ -121,7 +121,8 @@ let test_successful_official_client_turn () =
     ; step ~index:0 ~step_type:"user_input" ()
     ; step ~index:1 ~step_type:"unknown" ()
     ; step ~index:2 ~step_type:"agent_response" ()
-    ; step ~index:3 ~step_type:"checkpoint" ()
+    ; step ~index:3 ~step_type:"system_message" ()
+    ; step ~index:4 ~step_type:"checkpoint" ()
     ; result ()
     ]
     (fun path ->
@@ -141,36 +142,6 @@ let test_successful_official_client_turn () =
            (turn.permission_mode = Runtime_antigravity.Always_proceed);
          check bool "new conversation" false turn.resumed;
          check bool "measured wall duration" true (turn.wall_duration_s >= 0.0))
-;;
-
-(* Live 2026-08-10 (#28027): Antigravity started emitting step_type
-   "system_message" and every taskmaster turn died on it, parking the session
-   until an operator resolved it. step_type only decides whether a step counts
-   as a tool step, so an unseen value carries no decision — but the tool
-   counters must still be exact for the values that do. *)
-let test_unknown_step_type_does_not_end_the_turn () =
-  with_fixture
-    [ init ()
-    ; step ~index:0 ~step_type:"system_message" ()
-    ; step ~index:1 ~state:"ACTIVE" ~step_type:"tool" ()
-    ; step ~index:2 ~state:"DONE" ~step_type:"tool" ()
-    ; step ~index:3 ~step_type:"agent_response" ()
-    ; result ()
-    ]
-    (fun path ->
-       match run_fixture path with
-       | Error error -> fail (Runtime_antigravity.error_to_string error)
-       | Ok turn ->
-         check string "text" "MASC_ANTIGRAVITY_OK\n" turn.text;
-         check int "unknown step is not counted as a tool" 1 turn.tool_steps);
-  (* Control: a value that does decide something stays closed. *)
-  with_fixture
-    [ init (); step ~index:0 ~state:"SIDEWAYS" (); result () ]
-    (fun path ->
-       match run_fixture path with
-       | Error (Runtime_antigravity.Protocol_error _) -> ()
-       | Error error -> fail (Runtime_antigravity.error_to_string error)
-       | Ok _ -> fail "an unknown step state was admitted")
 ;;
 
 let test_child_environment_is_allowlisted () =
@@ -298,14 +269,13 @@ let test_duplicate_keys_fail_closed () =
 
 (* A live init event announced request-review. It was not modelled, the parse
    failed, and the resulting protocol error put the official-client session in
-   Recovery_required -- which blocked every later turn for that keeper until an
-   operator resolved it (taskmaster, 110 turns in one hour).
+   Recovery_required -- taskmaster, 110 turns in one hour (#28008).
 
-   Nothing in this tree branches on [permission_mode]: the only read of the
-   field is its own parse site. Adding the one member that stalled a keeper
-   leaves the next one to stall it again, so an unseen mode is carried in
-   [Unrecognized_permission_mode] rather than rejected -- the drift stays
-   visible without ending a turn. *)
+   Nothing branches on [permission_mode]: the only read of the field is its own
+   parse site. Naming the one member that stalled a keeper leaves the next one
+   to stall it again, so an unseen mode is carried in
+   [Unrecognized_permission_mode] -- the drift stays visible without ending a
+   turn. *)
 let test_observed_permission_modes_are_admitted () =
   List.iter
     (fun (wire, expected) ->
@@ -322,11 +292,37 @@ let test_observed_permission_modes_are_admitted () =
     ]
 ;;
 
+(* #28029 opened step_type with [Unrecognized] after Antigravity began emitting
+   "system_message" and taskmaster stopped. #28037 closed it again and named
+   [System_message] instead -- which admits the value that already stalled a
+   keeper and leaves the next one to stall it again. Nothing branches on
+   [System_message]: it appears at its declaration and at the parse site only.
+
+   This is the control for reopening it: a step_type no one has seen must not
+   end the turn.
+
+   It does not check that the value survives, because nothing surfaces it --
+   [step_type] is not in [turn_result], and every non-[Tool] value feeds the
+   same counters. Normalising an unseen value to [Internal] passes this test,
+   verified by mutation. [Unrecognized] is still the better carrier: it keeps a
+   future consumer from reading an unseen value as a known one. But "the drift
+   stays visible" is not true today, and no test here can make it so. *)
+let test_unseen_step_type_does_not_end_the_turn () =
+  with_fixture
+    [ init (); step ~step_type:"shell" (); result () ]
+    (fun path ->
+       match run_fixture path with
+       | Ok _ -> ()
+       | Error error ->
+         fail ("an unseen step_type ended the turn: "
+               ^ Runtime_antigravity.error_to_string error))
+;;
+
 let test_unknown_protocol_vocabulary_fails_closed () =
   (* step_type left this list in #28027 and permission_mode followed: both are
      vocabularies nothing branches on, so an unseen value carries no ambiguity
      to fail closed over (see [test_observed_permission_modes_are_admitted] and
-     [test_unknown_step_type_does_not_end_the_turn]).
+     [test_unseen_step_type_does_not_end_the_turn]).
 
      step state and result status stay: [Done] vs [Step_error] and [Success] vs
      [Result_error] each select a different terminal outcome, so a value we
@@ -451,16 +447,16 @@ let () =
             `Quick
             test_conversation_callback_failure_is_typed
         ; test_case "tool measurements" `Quick test_tool_steps_and_errors_are_measured
-        ; test_case
-            "unknown step type does not end the turn"
-            `Quick
-            test_unknown_step_type_does_not_end_the_turn
         ; test_case "error result" `Quick test_result_error_is_not_success
         ; test_case "duplicate keys" `Quick test_duplicate_keys_fail_closed
         ; test_case
             "observed permission modes are admitted"
             `Quick
             test_observed_permission_modes_are_admitted
+        ; test_case
+            "unseen step type does not end the turn"
+            `Quick
+            test_unseen_step_type_does_not_end_the_turn
         ; test_case
             "unknown protocol vocabulary fails closed"
             `Quick

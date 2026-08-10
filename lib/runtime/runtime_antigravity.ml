@@ -56,23 +56,12 @@ type usage =
   ; total_tokens : int
   }
 
-(* The modes the CLI has been observed to announce. [Request_review] arrived
-   from a live init event and was not modelled, so the parse failed, the turn
-   ended as a protocol error, and the official-client session went to
-   Recovery_required -- which blocked every later turn for that keeper until an
-   operator resolved it (taskmaster, 110 turns in one hour).
-
-   Nothing in this tree branches on the value: it is parsed, carried through
-   [state.init] into [turn_result], and never matched -- the only read of the
-   field is its own parse site. A closed vocabulary over a field the provider
-   owns and we do not read costs a session each time the provider adds a
-   member.
-
-   "Failing loudly" was the stated reason to keep it closed, but the failure
-   here is not loud: it ends the turn, parks the session, and stops the keeper
-   until an operator acts. [step_type] resolved the same trade-off the other
-   way three definitions down -- carry the unseen value in a constructor so the
-   drift stays visible, without ending a turn over a value no arm reads. *)
+(* Nothing in this tree branches on [permission_mode]: the only read of the
+   field is its own parse site. It was closed, and the one member the CLI added
+   ended a turn, parked the official-client session, and stopped the keeper --
+   taskmaster, 110 turns in one hour (#28008). Adding that member leaves the
+   next one to do it again, so an unseen mode is carried rather than rejected.
+   [step_type] took the same route in #28027. *)
 type permission_mode =
   | Always_proceed
   | Request_review
@@ -229,6 +218,7 @@ and step_state =
 
 and step_type =
   | Agent_response
+  | System_message
   | Tool
   | User_input
   | Internal
@@ -267,13 +257,23 @@ let parse_step_state stage value =
 ;;
 
 (* [step_type] decides one thing: whether this step is a tool step, for the two
-   tool counters. Every non-[Tool] value is behaviourally identical, so an
-   upstream value we have not seen carries no decision we could get wrong — but
-   rejecting it ended the turn and parked the session, which blocked every later
-   turn for that Keeper until an operator resolved it by hand. Live 2026-08-10:
-   Antigravity started emitting "system_message" and taskmaster stopped
-   (#28027). The value is kept in [Unrecognized] so the wire vocabulary drift is
-   still visible rather than silently normalised away.
+   tool counters. Every non-[Tool] value is behaviourally identical, so a value
+   we have not seen carries no decision we could get wrong -- but rejecting it
+   ends the turn and parks the session, which blocks every later turn for that
+   Keeper. Live 2026-08-10: Antigravity began emitting "system_message" and
+   taskmaster stopped (#28027).
+
+   #28029 opened this with [Unrecognized]; #28037 closed it again and named
+   [System_message] instead. Naming the member that stalled a keeper leaves the
+   next one to stall it again, and nothing branches on [System_message] -- it
+   appears at its declaration and at this parse site only. Both are kept here:
+   the known member keeps its name, and anything else is carried rather than
+   rejected.
+
+   [Unrecognized] carries the value rather than folding it into [Internal] so a
+   later consumer cannot read an unseen step as a known one. It does not make
+   the drift observable: [step_type] never reaches [turn_result], so nothing
+   renders it today.
 
    [state] and [status] stay closed: each of those does decide something.
    [permission_mode] does not, and is open for the same reason as this one. *)
@@ -281,6 +281,7 @@ let parse_step_type _stage value =
   Ok
     (match value with
      | "agent_response" -> Agent_response
+     | "system_message" -> System_message
      | "tool" -> Tool
      | "user_input" -> User_input
      | "unknown" -> Internal

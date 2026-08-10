@@ -21,7 +21,7 @@ let require_ok = function
 
 let permission path = (Unix.lstat path).Unix.st_perm land 0o7777
 
-let test_prepares_private_home_with_pinned_oauth_snapshot () =
+let test_prepares_private_home_with_oauth_seed () =
   with_temp_root
   @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
@@ -63,10 +63,10 @@ let test_prepares_private_home_with_pinned_oauth_snapshot () =
        (Yojson.Safe.from_file paths.settings_path));
   check bool "oauth target is a regular file" true
     ((Unix.lstat paths.oauth_path).Unix.st_kind = Unix.S_REG);
-  check int "oauth snapshot mode" 0o600 (permission paths.oauth_path);
+  check int "managed oauth mode" 0o600 (permission paths.oauth_path);
   check
     string
-    "oauth snapshot bytes"
+    "managed oauth seed bytes"
     "operator-secret-canary"
     (Fs_compat.load_file paths.oauth_path);
   check
@@ -108,7 +108,7 @@ let test_rejects_non_private_or_indirect_oauth_source () =
   | Ok _ -> fail "symbolic-link OAuth source was admitted"
 ;;
 
-let test_refreshes_oauth_snapshot_from_current_source () =
+let test_preserves_runtime_managed_oauth_after_initial_seed () =
   with_temp_root
   @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
@@ -120,7 +120,9 @@ let test_refreshes_oauth_snapshot_from_current_source () =
       ~oauth_source
     |> require_ok
   in
-  write_file ~mode:0o600 oauth_source "rotated-operator-secret";
+  let layout_paths = Runtime_antigravity_home.For_testing.paths layout in
+  write_file ~mode:0o600 layout_paths.oauth_path "refreshed-runtime-secret";
+  write_file ~mode:0o600 oauth_source "stale-operator-secret";
   let refreshed =
     Runtime_antigravity_home.prepare
       ~runtime_root
@@ -128,17 +130,46 @@ let test_refreshes_oauth_snapshot_from_current_source () =
       ~oauth_source
     |> require_ok
   in
-  let layout_paths = Runtime_antigravity_home.For_testing.paths layout in
   let refreshed_paths = Runtime_antigravity_home.For_testing.paths refreshed in
   check
     string
-    "current source replaces snapshot"
-    "rotated-operator-secret"
+    "runtime refresh survives later preparation"
+    "refreshed-runtime-secret"
     (Fs_compat.load_file refreshed_paths.oauth_path);
+  check
+    string
+    "bootstrap source remains external"
+    "stale-operator-secret"
+    (Fs_compat.load_file oauth_source);
   check string
     "stable isolated path"
     layout_paths.oauth_path
     refreshed_paths.oauth_path
+;;
+
+let test_rejects_unsafe_existing_runtime_oauth () =
+  with_temp_root
+  @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
+  write_file ~mode:0o600 oauth_source "operator-secret";
+  let layout =
+    Runtime_antigravity_home.prepare
+      ~runtime_root
+      ~owner_leaf:"keeper-sangsu"
+      ~oauth_source
+    |> require_ok
+  in
+  let oauth_path = (Runtime_antigravity_home.For_testing.paths layout).oauth_path in
+  Unix.chmod oauth_path 0o644;
+  match
+    Runtime_antigravity_home.prepare
+      ~runtime_root
+      ~owner_leaf:"keeper-sangsu"
+      ~oauth_source
+  with
+  | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+  | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+  | Ok _ -> fail "unsafe existing runtime OAuth file was silently replaced"
 ;;
 
 let test_mcp_capability_is_turn_scoped () =
@@ -194,17 +225,21 @@ let () =
     "runtime_antigravity_home"
     [ ( "layout"
       , [ test_case
-            "private HOME and OAuth snapshot"
+            "private HOME and OAuth seed"
             `Quick
-            test_prepares_private_home_with_pinned_oauth_snapshot
+            test_prepares_private_home_with_oauth_seed
         ; test_case
             "private direct OAuth source"
             `Quick
             test_rejects_non_private_or_indirect_oauth_source
         ; test_case
-            "OAuth snapshot refresh"
+            "runtime OAuth refresh survives preparation"
             `Quick
-            test_refreshes_oauth_snapshot_from_current_source
+            test_preserves_runtime_managed_oauth_after_initial_seed
+        ; test_case
+            "unsafe existing runtime OAuth"
+            `Quick
+            test_rejects_unsafe_existing_runtime_oauth
         ; test_case
             "turn-scoped MCP capability"
             `Quick

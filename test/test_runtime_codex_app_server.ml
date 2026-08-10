@@ -1182,7 +1182,8 @@ let test_keeper_protocol_failure_enters_recovery () =
               "failed provider session is not resumed"
               None
               (Option.map
-                 (fun settlement -> settlement.session_id)
+                 (fun (settlement : Keeper_official_client_session_store.settlement) ->
+                    settlement.session_id)
                  next_claim.previous_settlement)))
 ;;
 

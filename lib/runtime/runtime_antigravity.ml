@@ -645,9 +645,11 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
     Eio.Fiber.fork ~sw (fun () ->
-      Fun.protect
-        ~finally:(fun () -> Eio.Flow.close stdin_w)
-        (fun () -> Eio.Flow.copy_string prompt stdin_w));
+      Eio.Flow.copy_string prompt stdin_w;
+      (* A successful prompt write must deliver EOF to the CLI. If the copy
+         raises, the failed fiber cancels [sw] and the pipe's switch-owned
+         release handler closes [stdin_w]. *)
+      Eio.Flow.close stdin_w);
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let process_settled = ref false in

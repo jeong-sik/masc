@@ -27,7 +27,7 @@ let observed_completion_evidence
   =
   match stop_reason with
   | Runtime_agent.InputRequired _
-  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
   | Runtime_agent.Yielded_after_repeated_tool_call _ ->

@@ -9,8 +9,6 @@
 
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
-  ; queue : Keeper_chat_queue.configure_report
-  ; requests : Keeper_msg_async.recovery_report
   ; fusion_delivery :
       ( Fusion_delivery_projector.recovery_report
       , Fusion_delivery_obligation.error )
@@ -20,8 +18,7 @@ type keeper_persistence_report =
 type keeper_persistence_failure_phase =
   | Resolving_base_path
   | Restoring_shutdown
-  | Configuring_queue
-  | Recovering_requests
+  | Recovering_persistence
   | Starting_keeper_loops
 
 type keeper_persistence_raised_cause =
@@ -141,14 +138,6 @@ val start_keeper_loops :
 module For_testing : sig
   type keeper_loops_start_ownership
 
-  type queued_chat_projection = {
-    payload_channel : string;
-    payload_channel_user_id : string;
-    payload_channel_user_name : string;
-    payload_channel_workspace_id : string;
-    agent_name : string;
-  }
-
   val autoboot_proactive_warmup_sec :
     base_warmup:int -> stagger_window_sec:int -> keeper_name:string -> int
 
@@ -156,9 +145,6 @@ module For_testing : sig
 
   val broadcast_mention_wakeup_action :
     string option -> [ `Suppress_no_target | `Wake_keeper of string ]
-
-  val queued_chat_projection :
-    Keeper_chat_queue.queued_message -> queued_chat_projection
 
   val reset_keeper_persistence_lifecycle : unit -> unit
 

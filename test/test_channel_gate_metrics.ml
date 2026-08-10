@@ -36,22 +36,19 @@ let test_record_attempt_tracks_connector_diagnostics () =
       Metrics.record_attempt ~channel ~workspace_id:"workspace-b" ~keeper:"luna"
         ~duration_ms:0
         (Metrics.Validation_error "content is required");
-      Metrics.record_attempt ~channel ~workspace_id:"workspace-b" ~keeper:"luna"
-        ~duration_ms:0 Metrics.Duplicate;
       let stats =
         Metrics.snapshot ()
         |> List.find (fun (row : Metrics.channel_stats) ->
                String.equal row.channel channel)
       in
-      check int "message_count includes duplicates" 3 stats.message_count;
+      check int "message_count" 2 stats.message_count;
       check int "success_count" 1 stats.success_count;
-      check int "error_count excludes duplicates" 1 stats.error_count;
-      check int "duplicate_count" 1 stats.duplicate_count;
+      check int "error_count" 1 stats.error_count;
       check int "validation_error_count" 1 stats.validation_error_count;
       check int "workspace_count counts unique workspaces" 2 stats.workspace_count;
       check string "last_keeper trimmed" "luna" stats.last_keeper;
       check_error_kind "last_error_kind" "validation" stats.last_error_kind;
-      check string "last_outcome" "duplicate" stats.last_outcome;
+      check string "last_outcome" "validation_error" stats.last_outcome;
       check string "last_workspace_id" "workspace-b" stats.last_workspace_id)
 
 let test_record_internal_error_exn_tracks_internal_failures () =
@@ -142,7 +139,7 @@ let test_snapshot_json_reports_health_and_latency () =
         (row |> U.member "slow_count" |> U.to_int);
       check int "slow_rate_pct" 100
         (row |> U.member "slow_rate_pct" |> U.to_int);
-      check int "success_rate_pct ignores duplicates" 50
+      check int "success_rate_pct" 50
         (row |> U.member "success_rate_pct" |> U.to_int);
       check string "health" "failing"
         (row |> U.member "health" |> U.to_string);

@@ -65,7 +65,7 @@ let write_file path content =
 ;;
 
 let install_owner_inventory_exn ~sw config =
-  match Keeper_owner_registry.install_from_store ~sw config with
+  match Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
   | Ok _ -> ()
   | Error error -> fail (Keeper_owner_registry.install_error_to_string error)
 ;;
@@ -74,6 +74,63 @@ let create_owner_meta_exn config meta =
   match Keeper_owner_registry.create_meta ~base_path:config.Workspace.base_path meta with
   | Ok (Some _) -> ()
   | Ok None -> fail "owner metadata creation removed its snapshot"
+  | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+;;
+
+let ensure_owner_meta_exn config meta =
+  match
+    Keeper_owner_registry.get
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:meta.Keeper_meta_contract.name
+  with
+  | Ok _ -> ()
+  | Error (Keeper_owner_registry.Owner_not_found _) ->
+    create_owner_meta_exn config meta
+  | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error)
+;;
+
+let owner_shutdown_operation_id_exn ~base_path ~keeper_name =
+  match Keeper_owner_registry.shutdown_operation_id ~base_path ~keeper_name with
+  | Ok operation_id -> operation_id
+  | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error)
+;;
+
+let owner_turn_in_flight_exn ~base_path ~keeper_name =
+  match Keeper_owner_registry.get ~base_path ~keeper_name with
+  | Ok owner -> Masc.Keeper_owner.turn_in_flight owner
+  | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error)
+;;
+
+let begin_owner_shutdown_exn ~base_path ~keeper_name ~operation_id =
+  match
+    Keeper_owner_registry.begin_shutdown ~base_path ~keeper_name ~operation_id
+  with
+  | Ok result -> result
+  | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+;;
+
+let restore_owner_shutdown_exn ~base_path ~keeper_name ~operation_id =
+  match
+    Keeper_owner_registry.restore_shutdown ~base_path ~keeper_name ~operation_id
+  with
+  | Ok result -> result
+  | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+;;
+
+let transition_owner_shutdown_exn
+      ~base_path
+      ~keeper_name
+      ~from_operation_id
+      ~to_operation_id
+  =
+  match
+    Keeper_owner_registry.transition_shutdown
+      ~base_path
+      ~keeper_name
+      ~from_operation_id
+      ~to_operation_id
+  with
+  | Ok result -> result
   | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
 ;;
 
@@ -170,26 +227,6 @@ let seed_keeper_sandbox_profile ~base_dir name =
     (Filename.concat keepers_dir (name ^ ".toml"))
     "[keeper]\nsandbox_profile = \"local\"\n"
 
-let configure_keeper_chat_persistence ~base_path =
-  let report = Masc.Keeper_chat_queue.configure_persistence ~base_path in
-  match report.load_errors with
-  | [] -> ()
-  | errors ->
-    let describe (keeper_name, (error : Masc.Keeper_chat_queue.snapshot_load_error)) =
-      let owner =
-        match keeper_name with
-        | Some name -> name
-        | None -> "<global>"
-      in
-      Printf.sprintf
-        "%s:%s:%s"
-        owner
-        (Masc.Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind)
-        error.message
-    in
-    Alcotest.failf
-      "keeper chat persistence fixture failed: %s"
-      (String.concat "; " (List.map describe errors))
 let dashboard_purge_cleanup requested_name
     (meta : Keeper_meta_contract.keeper_meta)
     : Shutdown_types.cleanup_intent
@@ -831,6 +868,8 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "tester")
       in
+      Eio.Switch.run @@ fun sw ->
+      install_owner_inventory_exn ~sw config;
       let backlog_version =
         match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
@@ -1088,7 +1127,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
   let base_dir = temp_dir "shutdown-supersession" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -1103,6 +1141,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       in
       let operation ~name ~reason ~phase =
         let meta = make_meta name in
+        ensure_owner_meta_exn config meta;
         let now = Masc_domain.now_iso () in
         { Shutdown_types.schema_version = Shutdown_types.schema_version
         ; revision = 0
@@ -1148,13 +1187,13 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         | Error error -> fail (Shutdown_store.error_to_string error)
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         begin_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:blocked.keeper_name
            ~operation_id:blocked.operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_owner.Shutdown_reserved _ -> ()
+       | Masc.Keeper_owner.Shutdown_already_reserved _ ->
          fail "fixture admission was already reserved");
       let token =
         match
@@ -1183,7 +1222,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
          check string "supersession preserves validated operator actor" "tester" actor
        | _ -> fail "blocked shutdown did not reach typed Superseded");
       let released =
-        Masc.Keeper_turn_admission.snapshot_for
+        owner_shutdown_operation_id_exn
           ~base_path:config.base_path
           ~keeper_name:blocked.keeper_name
       in
@@ -1192,7 +1231,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         None
         (Option.map
            Shutdown_types.Operation_id.to_string
-           released.snapshot_shutdown_operation_id);
+           released);
       let corrupt_owner_name = "superseded-corrupt-owner" in
       let corrupt_owner_blocked =
         operation
@@ -1231,13 +1270,13 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | Ok () -> ()
        | Error detail -> fail detail);
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         begin_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:corrupt_owner_name
            ~operation_id:corrupt_owner_blocked.operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_owner.Shutdown_reserved _ -> ()
+       | Masc.Keeper_owner.Shutdown_already_reserved _ ->
          fail "corrupt-owner fixture admission was already reserved");
       let corrupt_owner_token =
         match
@@ -1264,10 +1303,9 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         (Some (Shutdown_types.Operation_id.to_string corrupt_sibling.operation_id))
         (Option.map
            Shutdown_types.Operation_id.to_string
-           (Masc.Keeper_turn_admission.snapshot_for
+           (owner_shutdown_operation_id_exn
               ~base_path:config.base_path
-              ~keeper_name:corrupt_owner_name)
-             .snapshot_shutdown_operation_id);
+              ~keeper_name:corrupt_owner_name));
       let persisted_json =
         Fs_compat.load_file blocked_path |> Yojson.Safe.from_string
       in
@@ -1309,13 +1347,13 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | Ok () -> ()
        | Error error -> fail (Shutdown_store.error_to_string error));
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         begin_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:reconciling.keeper_name
            ~operation_id:reconciling.operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_owner.Shutdown_reserved _ -> ()
+       | Masc.Keeper_owner.Shutdown_already_reserved _ ->
          fail "reconciliation fixture admission was already reserved");
       let reconciling_token =
         match
@@ -1354,7 +1392,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | _ ->
          fail "Reconciliation_required did not reach typed Superseded");
       let reconciling_released =
-        Masc.Keeper_turn_admission.snapshot_for
+        owner_shutdown_operation_id_exn
           ~base_path:config.base_path
           ~keeper_name:reconciling.keeper_name
       in
@@ -1364,7 +1402,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         None
         (Option.map
            Shutdown_types.Operation_id.to_string
-           reconciling_released.snapshot_shutdown_operation_id);
+           reconciling_released);
       let invalid_superseded =
         { superseded with
           operation_id = Shutdown_types.Operation_id.generate ()
@@ -1381,14 +1419,14 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | Error error -> fail (Shutdown_store.error_to_string error)
        | Ok () -> fail "Superseded accepted a non-retained cleanup intent");
       (match
-         Masc.Keeper_turn_admission.restore_shutdown
+         restore_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:blocked.keeper_name
            ~operation_id:blocked.operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_restored
-       | Masc.Keeper_turn_admission.Shutdown_restore_conflict _ ->
+       | Masc.Keeper_owner.Shutdown_restored -> ()
+       | Masc.Keeper_owner.Shutdown_already_restored
+       | Masc.Keeper_owner.Shutdown_restore_conflict _ ->
          fail "crash-window admission fixture could not be restored");
       let retry_token =
         match
@@ -1409,7 +1447,6 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | Ok Shutdown_supersession.No_shutdown_admission ->
          fail "idempotent supersession lost the exact admission owner"
        | Error error -> fail (Shutdown_supersession.error_to_string error));
-      Masc.Keeper_turn_admission.For_testing.reset ();
       let inventory =
         match Shutdown_store.scan_inventory ~config with
         | Ok inventory -> inventory
@@ -1429,10 +1466,9 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            (Some (Shutdown_types.Operation_id.to_string corrupt_sibling.operation_id))
            (Option.map
               Shutdown_types.Operation_id.to_string
-              (Masc.Keeper_turn_admission.snapshot_for
+              (owner_shutdown_operation_id_exn
                  ~base_path:config.base_path
-                 ~keeper_name:corrupt_owner_name)
-                .snapshot_shutdown_operation_id));
+                 ~keeper_name:corrupt_owner_name)));
 
       let conflict =
         operation
@@ -1444,11 +1480,11 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | Ok () -> ()
        | Error error -> fail (Shutdown_store.error_to_string error));
       ignore
-        (Masc.Keeper_turn_admission.begin_shutdown
+        (begin_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:conflict.keeper_name
            ~operation_id:conflict.operation_id
-          : Masc.Keeper_turn_admission.begin_shutdown_result);
+          : Masc.Keeper_owner.begin_shutdown_result);
       let conflict_token =
         match
           Shutdown_supersession.preflight
@@ -1488,7 +1524,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | Error error -> fail (Shutdown_supersession.error_to_string error)
        | Ok _ -> fail "stale preflight token superseded a newer revision");
       let still_fenced =
-        Masc.Keeper_turn_admission.snapshot_for
+        owner_shutdown_operation_id_exn
           ~base_path:config.base_path
           ~keeper_name:conflict.keeper_name
       in
@@ -1497,9 +1533,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         (Some (Shutdown_types.Operation_id.to_string conflict.operation_id))
         (Option.map
            Shutdown_types.Operation_id.to_string
-           still_fenced.snapshot_shutdown_operation_id);
+           still_fenced);
 
-      Masc.Keeper_turn_admission.For_testing.reset ();
       let live_name = "update-blocked-admission" in
       let live_meta = { (make_meta live_name) with paused = true } in
       create_owner_meta_exn config live_meta;
@@ -1516,11 +1551,11 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | Ok () -> ()
        | Error error -> fail (Shutdown_store.error_to_string error));
       ignore
-        (Masc.Keeper_turn_admission.begin_shutdown
+        (begin_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:live_name
            ~operation_id:live_blocked.operation_id
-          : Masc.Keeper_turn_admission.begin_shutdown_result);
+          : Masc.Keeper_owner.begin_shutdown_result);
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some live_meta.sandbox_profile
@@ -1633,7 +1668,6 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
   let base_dir = temp_dir "update-turn-in-flight" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -1681,26 +1715,25 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
          the update from inside the admitted closure reproduces the
          mid-turn self masc_keeper_up of #26542 structurally. *)
       (match
-         Masc.Keeper_turn_admission.run_if_free
+         Keeper_owner_registry.run_maintenance_if_idle
            ~base_path:config.base_path
            ~keeper_name:name
            (fun () -> Turn_up_update.update_keeper ctx parsed meta)
        with
-       | `Busy _ -> fail "turn slot unexpectedly busy before the test turn"
-       | `Ran result ->
+       | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+       | Ok (`Busy _) -> fail "Owner unexpectedly busy before the test turn"
+       | Ok (`Ran result) ->
          check bool "mid-turn update is rejected" false
            (Keeper_types_profile.tool_result_success result);
          let data = Tool_result.data result in
          check (option string) "rejection is typed"
            (Some "keeper_turn_in_flight")
            (Json_util.get_string data "error");
-         let mid_turn_snapshot =
-           Masc.Keeper_turn_admission.snapshot_for
-             ~base_path:config.base_path
-             ~keeper_name:name
-         in
          check bool "rejection rolls the fence back inside the turn" true
-           (Option.is_none mid_turn_snapshot.snapshot_shutdown_operation_id));
+           (Option.is_none
+              (owner_shutdown_operation_id_exn
+                 ~base_path:config.base_path
+                 ~keeper_name:name)));
       let after =
         match Keeper_meta_store.read_meta config name with
         | Ok (Some after) -> after
@@ -1710,15 +1743,16 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
       check string "metadata commit preceded the rejection"
         "rejected mid-turn intent"
         after.instructions;
-      let idle_snapshot =
-        Masc.Keeper_turn_admission.snapshot_for
-          ~base_path:config.base_path
-          ~keeper_name:name
-      in
       check bool "no shutdown fence remains after the turn" true
-        (Option.is_none idle_snapshot.snapshot_shutdown_operation_id);
-      check bool "turn slot is idle after the turn" true
-        (Option.is_none idle_snapshot.snapshot_in_flight);
+        (Option.is_none
+           (owner_shutdown_operation_id_exn
+              ~base_path:config.base_path
+              ~keeper_name:name));
+      check bool "Keeper Owner is idle after the turn" true
+        (Option.is_none
+           (owner_turn_in_flight_exn
+              ~base_path:config.base_path
+              ~keeper_name:name));
       let retry = Turn_up_update.update_keeper ctx parsed after in
       check bool "idle update restarts the lane" true
         (Keeper_types_profile.tool_result_success retry);
@@ -1737,7 +1771,6 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
   Fun.protect
     ~finally:(fun () ->
       Masc.Server_startup_state.state := previous_startup_state;
-      Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -1832,16 +1865,17 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
 let test_keeper_shutdown_store_isolates_corrupt_owner () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "shutdown-store-corrupt-owner" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "tester")
       in
+      install_owner_inventory_exn ~sw config;
       let backlog_version =
         match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
@@ -1862,6 +1896,7 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
        | Error error -> fail (Shutdown_store.error_to_string error));
       let operation name phase =
         let meta = make_meta name in
+        ensure_owner_meta_exn config meta;
         let now = Masc_domain.now_iso () in
         let operation : Shutdown_types.t =
           { schema_version = Shutdown_types.schema_version
@@ -1973,19 +2008,18 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
       check int "one valid operation remains recoverable" 1
         (List.length restored.operations);
       (match
-         Masc.Keeper_turn_admission.run_if_free
+         owner_shutdown_operation_id_exn
            ~base_path:config.base_path
            ~keeper_name:corrupt_operation.keeper_name
-           (fun () -> ())
        with
-       | `Busy (Masc.Keeper_turn_admission.Shutdown_requested operation_id) ->
+       | Some operation_id ->
          check bool
            "corrupt owner fence retains durable operation id"
            true
            (Shutdown_types.Operation_id.equal
               corrupt_operation.operation_id
               operation_id)
-       | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
+       | None ->
          fail "corrupt owner admission was reopened");
       match Shutdown_runtime.recover_operation ~config recoverable_operation with
       | Ok recovered ->
@@ -2000,11 +2034,12 @@ let test_terminal_shutdown_recovery_releases_admission () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir "terminal-shutdown-recovery-release" in
   Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
-      cleanup_dir base_dir)
+    ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "tester")
+      in
       let meta = make_meta "terminal-recovery-owner" in
       let now = Masc_domain.now_iso () in
       let terminal =
@@ -2028,15 +2063,18 @@ let test_terminal_shutdown_recovery_releases_admission () =
         ; updated_at = now
         }
       in
+      Eio.Switch.run @@ fun sw ->
+      install_owner_inventory_exn ~sw config;
+      ensure_owner_meta_exn config meta;
       (match
-         Masc.Keeper_turn_admission.restore_shutdown
+         restore_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:terminal.keeper_name
            ~operation_id:terminal.operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_restored
-       | Masc.Keeper_turn_admission.Shutdown_restore_conflict _ ->
+       | Masc.Keeper_owner.Shutdown_restored -> ()
+       | Masc.Keeper_owner.Shutdown_already_restored
+       | Masc.Keeper_owner.Shutdown_restore_conflict _ ->
          fail "terminal recovery fixture could not restore exact admission");
       (match
          Shutdown_runtime.recover_operation_with_corrupt_owner_fence
@@ -2056,10 +2094,9 @@ let test_terminal_shutdown_recovery_releases_admission () =
         None
         (Option.map
            Shutdown_types.Operation_id.to_string
-           (Masc.Keeper_turn_admission.snapshot_for
+           (owner_shutdown_operation_id_exn
               ~base_path:config.base_path
-              ~keeper_name:terminal.keeper_name)
-             .snapshot_shutdown_operation_id))
+              ~keeper_name:terminal.keeper_name)))
 
 let test_unsupported_shutdown_schema_retains_exact_fence () =
   Eio_main.run @@ fun env ->
@@ -2067,19 +2104,21 @@ let test_unsupported_shutdown_schema_retains_exact_fence () =
   let base_dir = temp_dir "unsupported-shutdown-schema" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "tester")
       in
+      Eio.Switch.run @@ fun sw ->
+      install_owner_inventory_exn ~sw config;
       let backlog_version =
         match Workspace_backlog.read_backlog_r config with
         | Ok backlog -> backlog.version
         | Error detail -> fail detail
       in
       let meta = make_meta "unsupported-schema-owner" in
+      ensure_owner_meta_exn config meta;
       let operation_id = Shutdown_types.Operation_id.generate () in
       let now = Masc_domain.now_iso () in
       let operation : Shutdown_types.t =
@@ -2182,22 +2221,21 @@ let test_unsupported_shutdown_schema_retains_exact_fence () =
         (Some (Shutdown_types.Operation_id.to_string current_operation.operation_id))
         (Option.map
            Shutdown_types.Operation_id.to_string
-           (Masc.Keeper_turn_admission.snapshot_for
+           (owner_shutdown_operation_id_exn
               ~base_path:config.base_path
-              ~keeper_name:meta.name)
-             .snapshot_shutdown_operation_id);
+              ~keeper_name:meta.name));
       (match restored.corrupt_owner_fences with
        | [ fence ] ->
          (match
-            Masc.Keeper_turn_admission.transition_shutdown
+            transition_owner_shutdown_exn
               ~base_path:config.base_path
               ~keeper_name:meta.name
               ~from_operation_id:current_operation.operation_id
               ~to_operation_id:(Some fence.operation_id)
           with
-          | Masc.Keeper_turn_admission.Shutdown_transition_applied -> ()
-          | Masc.Keeper_turn_admission.Shutdown_transition_already_applied
-          | Masc.Keeper_turn_admission.Shutdown_transition_reserved_by_other _ ->
+          | Masc.Keeper_owner.Shutdown_transition_applied -> ()
+          | Masc.Keeper_owner.Shutdown_transition_already_applied
+          | Masc.Keeper_owner.Shutdown_transition_reserved_by_other _ ->
             fail "current operation did not hand admission to its corrupt sibling")
        | _ -> fail "corrupt owner fence cardinality changed");
       check
@@ -2206,10 +2244,9 @@ let test_unsupported_shutdown_schema_retains_exact_fence () =
         (Some (Shutdown_types.Operation_id.to_string operation_id))
         (Option.map
            Shutdown_types.Operation_id.to_string
-           (Masc.Keeper_turn_admission.snapshot_for
+           (owner_shutdown_operation_id_exn
               ~base_path:config.base_path
-              ~keeper_name:meta.name)
-             .snapshot_shutdown_operation_id))
+              ~keeper_name:meta.name)))
 
 let test_dashboard_purge_resolution_is_fail_closed () =
   Eio_main.run @@ fun env ->
@@ -2217,7 +2254,6 @@ let test_dashboard_purge_resolution_is_fail_closed () =
   let base_dir = temp_dir "dashboard-purge-resolution" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -2225,14 +2261,14 @@ let test_dashboard_purge_resolution_is_fail_closed () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
+      Eio.Switch.run @@ fun sw ->
+      install_owner_inventory_exn ~sw config;
       (match Dashboard_purge.resolve config "plain-agent" with
        | Ok None -> ()
        | Ok (Some _) -> fail "plain agent was classified as a Keeper"
        | Error error -> fail (Dashboard_purge.resolve_error_to_string error));
       let persisted = make_meta "dashboard-purge-persisted" in
-      (match Keeper_meta_store.replace_snapshot config persisted with
-       | Ok () -> ()
-       | Error detail -> fail detail);
+      create_owner_meta_exn config persisted;
       let persisted =
         match Keeper_meta_store.read_meta config persisted.name with
         | Ok (Some meta) -> meta
@@ -2284,14 +2320,14 @@ let test_dashboard_purge_resolution_is_fail_closed () =
        | Ok () -> ()
        | Error error -> fail (Shutdown_store.error_to_string error));
       (match
-         Masc.Keeper_turn_admission.restore_shutdown
+         restore_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:persisted.name
            ~operation_id:existing_operation.operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
-       | Shutdown_already_restored
-       | Shutdown_restore_conflict _ ->
+       | Masc.Keeper_owner.Shutdown_restored -> ()
+       | Masc.Keeper_owner.Shutdown_already_restored
+       | Masc.Keeper_owner.Shutdown_restore_conflict _ ->
          fail "existing cleanup fixture could not restore admission");
       (match Dashboard_purge.submit ~config ~actor:"operator" target with
        | Error (Shutdown_runtime.Existing_operation_intent_mismatch operation) ->
@@ -2338,8 +2374,6 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
   let base_dir = temp_dir "shutdown-prepare-join" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_chat_queue.For_testing.reset ();
-      Masc.Keeper_turn_admission.For_testing.reset ();
       Memory_lane.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
@@ -2348,6 +2382,8 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
+      Eio.Switch.run @@ fun sw ->
+      install_owner_inventory_exn ~sw config;
       let name = "shutdown-idle-lane" in
       let meta = make_meta name in
       (match Keeper_meta_store.replace_snapshot config meta with
@@ -2435,17 +2471,16 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
            ~keeper_name:name
            ~lane:Memory_lane.Librarian);
       (match
-         Masc.Keeper_turn_admission.run_if_free
+         owner_shutdown_operation_id_exn
            ~base_path:config.base_path
            ~keeper_name:name
-           (fun () -> ())
        with
-       | `Busy (Masc.Keeper_turn_admission.Shutdown_requested operation_id) ->
+       | Some operation_id ->
          check bool
            "shutdown admission fence retains operation identity"
            true
            (Shutdown_types.Operation_id.equal operation.operation_id operation_id)
-      | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
+      | None ->
          fail "shutdown admission fence reopened before finalization"))
 
 let test_keeper_shutdown_prepare_joins_not_started_lane () =
@@ -2454,8 +2489,6 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
   let base_dir = temp_dir "shutdown-prepare-not-started" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_chat_queue.For_testing.reset ();
-      Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -2503,11 +2536,10 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
 let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "shutdown-prepare-rollback" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_chat_queue.For_testing.reset ();
-      Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -2515,11 +2547,10 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
+      install_owner_inventory_exn ~sw config;
       let name = "shutdown-prepare-rollback-lane" in
       let meta = make_meta name in
-      (match Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error detail -> fail detail);
+      create_owner_meta_exn config meta;
       let entry = R.For_testing.register ~base_path:config.base_path name meta in
       let probe_operation_id = Shutdown_types.Operation_id.generate () in
       let records_dir =
@@ -2543,22 +2574,18 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
        | Error error -> fail (Shutdown_prepare_join.error_to_string error)
        | Ok _ -> fail "shutdown prepare unexpectedly persisted through a file blocker");
       match
-        Masc.Keeper_turn_admission.run_if_free
+        owner_shutdown_operation_id_exn
           ~base_path:config.base_path
           ~keeper_name:name
-          (fun () -> ())
       with
-      | `Ran () -> ()
-      | `Busy (Masc.Keeper_turn_admission.Shutdown_requested id) ->
+      | None -> ()
+      | Some id ->
         fail
           (Printf.sprintf
              "failed shutdown prepare left the keeper admission fence closed: \
-              Shutdown_requested %s still owns the slot"
+              shutdown operation %s still owns the Owner"
              (Shutdown_types.Operation_id.to_string id))
-      | `Busy (Masc.Keeper_turn_admission.Turn_busy _) ->
-        fail
-          "failed shutdown prepare left the keeper admission fence closed: \
-           Turn_busy owns the slot")
+      )
 
 let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
   Eio_main.run @@ fun env ->
@@ -2566,8 +2593,6 @@ let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
   let base_dir = temp_dir "shutdown-dormant-cancel-rollback" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_chat_queue.For_testing.reset ();
-      Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -2575,26 +2600,26 @@ let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
+      Eio.Switch.run @@ fun sw ->
+      install_owner_inventory_exn ~sw config;
       let name = "shutdown-dormant-cancel-rollback" in
       let meta = make_meta name in
-      (match Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error detail -> fail detail);
+      create_owner_meta_exn config meta;
       let intake_started, intake_started_u = Eio.Promise.create () in
       let release_intake, release_intake_u = Eio.Promise.create () in
       let intake_finished, intake_finished_u = Eio.Promise.create () in
       Eio.Switch.run @@ fun outer_sw ->
       Eio.Fiber.fork ~sw:outer_sw (fun () ->
         (match
-           Masc.Keeper_turn_admission.run_durable_intake_if_open
+           Masc.Keeper_shutdown_intake_fence.run_durable_intake_if_open
              ~base_path:config.base_path
              ~keeper_name:name
              (fun _intake_token ->
                 Eio.Promise.resolve intake_started_u ();
                 Eio.Promise.await release_intake)
          with
-         | Masc.Keeper_turn_admission.Intake_committed () -> ()
-         | Masc.Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+         | Masc.Keeper_shutdown_intake_fence.Intake_committed () -> ()
+         | Masc.Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
            fail
              ("test intake unexpectedly saw shutdown reservation "
               ^ Shutdown_types.Operation_id.to_string operation_id));
@@ -2616,28 +2641,25 @@ let test_keeper_dormant_shutdown_join_cancel_rolls_back_fence () =
          Eio.Fiber.yield ();
          check bool "dormant prepare reserved shutdown before joining intake" true
            (Option.is_some
-              (Masc.Keeper_turn_admission.snapshot_for
+              (owner_shutdown_operation_id_exn
                  ~base_path:config.base_path
-                 ~keeper_name:name)
-                .snapshot_shutdown_operation_id);
+                 ~keeper_name:name));
          Eio.Switch.fail prepare_sw Cancel_dormant_prepare
        with
        | Cancel_dormant_prepare -> ());
       Eio.Promise.resolve release_intake_u ();
       Eio.Promise.await intake_finished;
       match
-        Masc.Keeper_turn_admission.run_if_free
+        owner_shutdown_operation_id_exn
           ~base_path:config.base_path
           ~keeper_name:name
-          (fun () -> ())
       with
-      | `Ran () -> ()
-      | `Busy (Masc.Keeper_turn_admission.Shutdown_requested operation_id) ->
+      | None -> ()
+      | Some operation_id ->
         fail
           ("cancelled dormant prepare left shutdown reservation "
            ^ Shutdown_types.Operation_id.to_string operation_id)
-      | `Busy (Masc.Keeper_turn_admission.Turn_busy _) ->
-        fail "cancelled dormant prepare left the keeper turn busy")
+      )
 
 let install_pending_summary ~base_path ~keeper_name ~bind_exact =
   Approval_queue.For_testing.reset_runtime_state ();
@@ -2691,8 +2713,6 @@ let test_keeper_shutdown_finalizes_idle_operation () =
   Fun.protect
     ~finally:(fun () ->
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
-      Masc.Keeper_chat_queue.For_testing.reset ();
-      Masc.Keeper_turn_admission.For_testing.reset ();
       Approval_queue.For_testing.reset_runtime_state ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
@@ -2741,13 +2761,13 @@ let test_keeper_shutdown_finalizes_idle_operation () =
         }
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         begin_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:meta.name
            ~operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_owner.Shutdown_reserved _ -> ()
+       | Masc.Keeper_owner.Shutdown_already_reserved _ ->
          fail "fresh shutdown finalization fixture was already reserved");
       (match Shutdown_store.persist_new ~config operation with
        | Ok () -> ()
@@ -2768,13 +2788,13 @@ let test_keeper_shutdown_finalizes_idle_operation () =
        | Shutdown_types.Blocked _
        | Shutdown_types.Superseded _ -> fail "shutdown did not reach Finalized");
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         begin_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:meta.name
            ~operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_owner.Shutdown_reserved _ -> ()
+       | Masc.Keeper_owner.Shutdown_already_reserved _ ->
          fail "finalized shutdown did not release its admission fence");
       (match Shutdown_finalize.run ~config ~entry:None finalized with
        | Ok _ -> ()
@@ -2784,10 +2804,9 @@ let test_keeper_shutdown_finalizes_idle_operation () =
         "finalized shutdown replay releases admission fence"
         true
         (Option.is_none
-           (Masc.Keeper_turn_admission.snapshot_for
+           (owner_shutdown_operation_id_exn
              ~base_path:config.base_path
-              ~keeper_name:meta.name)
-             .snapshot_shutdown_operation_id);
+              ~keeper_name:meta.name));
       (match Approval_queue.For_testing.get_pending_entry_unchecked ~id:approval_id with
        | Some { summary_status = Approval_types.Summary_pending; _ } -> ()
        | Some _ | None -> fail "retain-meta shutdown changed pending summary");
@@ -2980,7 +2999,6 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
       Shutdown_finalize.For_testing.reset_completion_handler ();
       Lifecycle_hooks.reset_for_testing ();
       Subprocess_registry.reset_for_testing ();
-      Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -3035,13 +3053,13 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
         }
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         begin_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:meta.name
            ~operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_owner.Shutdown_reserved _ -> ()
+       | Masc.Keeper_owner.Shutdown_already_reserved _ ->
          fail "fresh dead-tombstone fixture was already reserved");
       (match Shutdown_store.persist_new ~config operation with
        | Ok () -> ()
@@ -3083,17 +3101,15 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
          fail "completion outage did not retain a pending durable receipt");
       check int "pending receipt did not fire hook" 0 !hook_deliveries;
       (match
-         Masc.Keeper_turn_admission.run_if_free
+         owner_shutdown_operation_id_exn
            ~base_path:config.base_path
            ~keeper_name:meta.name
-           (fun () -> ())
        with
-       | `Busy (Masc.Keeper_turn_admission.Shutdown_requested reserved) ->
+       | Some reserved ->
          check bool "pending receipt retains exact admission owner" true
            (Shutdown_types.Operation_id.equal operation_id reserved)
-       | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
+       | None ->
          fail "pending completion reopened admission");
-      Masc.Keeper_turn_admission.For_testing.reset ();
       let boot_inventory =
         match Shutdown_store.scan_inventory ~config with
         | Ok inventory -> inventory
@@ -3112,15 +3128,14 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
         [ meta.name ]
         restored.blocked_keeper_names;
       (match
-         Masc.Keeper_turn_admission.run_if_free
+         owner_shutdown_operation_id_exn
            ~base_path:config.base_path
            ~keeper_name:meta.name
-           (fun () -> ())
        with
-       | `Busy (Masc.Keeper_turn_admission.Shutdown_requested reserved) ->
+       | Some reserved ->
          check bool "boot-restored fence keeps exact completion owner" true
            (Shutdown_types.Operation_id.equal operation_id reserved)
-       | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
+       | None ->
          fail "boot recovery reopened pending completion admission");
       Shutdown_finalize.register_completion_handler
         Tombstone_cleanup.handle_completion;
@@ -3208,10 +3223,9 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
         "delivered dead completion releases admission fence"
         true
         (Option.is_none
-           (Masc.Keeper_turn_admission.snapshot_for
+           (owner_shutdown_operation_id_exn
               ~base_path:config.base_path
-              ~keeper_name:meta.name)
-             .snapshot_shutdown_operation_id))
+              ~keeper_name:meta.name)))
 
 let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
   Eio_main.run @@ fun env ->
@@ -3232,7 +3246,6 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       Masc.Runtime_event_bus.unsubscribe completion_bus completion_subscription;
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
       Shutdown_finalize.For_testing.reset_completion_handler ();
-      Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -3343,14 +3356,14 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
        | Ok () -> ()
        | Error error -> fail (Shutdown_store.error_to_string error));
       (match
-         Masc.Keeper_turn_admission.restore_shutdown
+         restore_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:meta.name
            ~operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
-       | Shutdown_already_restored
-       | Shutdown_restore_conflict _ ->
+       | Masc.Keeper_owner.Shutdown_restored -> ()
+       | Masc.Keeper_owner.Shutdown_already_restored
+       | Masc.Keeper_owner.Shutdown_restore_conflict _ ->
          fail "dashboard purge fixture could not restore admission");
       Shutdown_finalize.register_remove_pending_confirms_by_target
         (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
@@ -3466,14 +3479,14 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         0
         (List.length (Masc.Runtime_event_bus.drain completion_subscription));
       let admission =
-        Masc.Keeper_turn_admission.snapshot_for
+        owner_shutdown_operation_id_exn
           ~base_path:config.base_path
           ~keeper_name:meta.name
       in
       check bool
         "delivered dashboard purge released admission fence"
         true
-        (Option.is_none admission.snapshot_shutdown_operation_id);
+        (Option.is_none admission);
       let late_stimulus : Keeper_event_queue.stimulus =
         { post_id = "dashboard-purge-late-stimulus"
         ; urgency = Keeper_event_queue.Normal
@@ -3547,7 +3560,6 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
   let base_dir = temp_dir "shutdown-meta-replay" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -3613,7 +3625,6 @@ let test_keeper_shutdown_rejects_stale_snapshot_delete () =
   let base_dir = temp_dir "shutdown-stale-meta-delete" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -3684,7 +3695,6 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
   Fun.protect
     ~finally:(fun () ->
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
-      Masc.Keeper_turn_admission.For_testing.reset ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->

@@ -515,7 +515,7 @@ let prepare_compaction_admitted
       ~(trigger : Compaction_trigger.t)
   : (prepared_compaction, compaction_recovery_error) result =
   (* Load the durable source and run the policy + LLM planner.  This phase
-     is deliberately admission-free: the keeper's turn slot is not held
+     is deliberately outside turn execution: no Keeper Owner child is active
      while the provider call runs.  Correctness after an interleaved state
      change is enforced by the source CAS at commit, not by the slot. *)
   let session =

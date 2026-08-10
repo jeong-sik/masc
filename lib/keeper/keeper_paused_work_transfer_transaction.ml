@@ -13,7 +13,8 @@ type projection_stage =
 
 type failure =
   | Invalid_request of string
-  | Admission_busy of Keeper_turn_admission.autonomous_block
+  | Admission_busy of Keeper_owner.autonomous_block
+  | Owner_unavailable of string
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Receipt_lock_failed of string
   | Receipt_read_failed of string
@@ -81,8 +82,9 @@ let failure_to_string = function
   | Invalid_request detail -> "invalid Transfer_owner request: " ^ detail
   | Admission_busy block ->
     Printf.sprintf
-      "keeper_turn_admission_busy: operation=transfer_pending %s"
-      (Keeper_turn_admission.autonomous_block_to_string block)
+      "keeper_owner_busy: operation=transfer_pending %s"
+      (Keeper_owner.autonomous_block_to_string block)
+  | Owner_unavailable detail -> "Transfer_owner Keeper owner unavailable: " ^ detail
   | Reservation_conflict owner ->
     "Transfer_owner lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
@@ -552,7 +554,7 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
   | Ok token ->
     (try
        let outcome =
-         Keeper_turn_admission.run_transfer_intake_if_open
+         Keeper_shutdown_intake_fence.run_transfer_intake_if_open
            ~base_path:config.Workspace.base_path
            ~from_keeper
            ~to_keeper
@@ -567,17 +569,17 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
        in
        let reservation_release = Keeper_lifecycle_reservation.release token in
        (match outcome with
-        | Keeper_turn_admission.Transfer_intake_committed
+        | Keeper_shutdown_intake_fence.Transfer_intake_committed
             (Ok (receipt, commit_status, projection)) ->
           Ok { receipt; commit_status; projection; reservation_release }
-        | Keeper_turn_admission.Transfer_intake_committed (Error cause) ->
+        | Keeper_shutdown_intake_fence.Transfer_intake_committed (Error cause) ->
           Error { cause; reservation_release = Some reservation_release }
-        | Keeper_turn_admission.Transfer_intake_source_shutdown_reserved operation_id ->
+        | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved operation_id ->
           Error
             { cause = Source_transfer_shutdown_reserved operation_id
             ; reservation_release = Some reservation_release
             }
-        | Keeper_turn_admission.Transfer_intake_target_shutdown_reserved operation_id ->
+        | Keeper_shutdown_intake_fence.Transfer_intake_target_shutdown_reserved operation_id ->
           Error
             { cause = Target_transfer_shutdown_reserved operation_id
             ; reservation_release = Some reservation_release
@@ -595,7 +597,7 @@ let transfer_pending config ~from_keeper ~to_keeper request =
     Error { cause = Invalid_request detail; reservation_release = None }
   | Ok () ->
     (match
-       Keeper_turn_admission.run_if_free
+       Keeper_owner_registry.run_maintenance_if_idle
          ~base_path:config.Workspace.base_path
          ~keeper_name:from_keeper
          (fun () ->
@@ -605,7 +607,13 @@ let transfer_pending config ~from_keeper ~to_keeper request =
               ~to_keeper
               request)
      with
-     | `Busy block ->
+     | Ok (`Busy block) ->
        Error { cause = Admission_busy block; reservation_release = None }
-     | `Ran outcome -> outcome)
+     | Ok (`Ran outcome) -> outcome
+     | Error error ->
+       Error
+         { cause =
+             Owner_unavailable (Keeper_owner_registry.command_error_to_string error)
+         ; reservation_release = None
+         })
 ;;

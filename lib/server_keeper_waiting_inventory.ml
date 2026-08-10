@@ -1,15 +1,12 @@
 type waiting_source =
   | Event_queue_pending
-  | Chat_queue_pending
-  | Chat_queue_inflight
-  | Chat_queue_recovery_required
-  | Chat_queue_persistence_blocked
+  | Chat_operation_queued
+  | Chat_operation_running
   | Hitl_pending
   | External_attention
   | Fusion_running
   | Schedule_waiting
-  | Turn_admission_waiting
-  | Turn_admission_shutdown
+  | Owner_shutdown
   | Operator_pending_confirm
   | Read_error
 
@@ -22,7 +19,7 @@ type keeper_state =
 type wake_producer =
   | Board_dispatch
   | Board_attention_judge
-  | Keeper_chat_queue_store
+  | Keeper_owner_actor
   | Keeper_supervisor
   | Fusion_sink
   | Connector_attention_hook
@@ -30,7 +27,6 @@ type wake_producer =
   | External_attention_store
   | Schedule_store
   | Schedule_runner
-  | Keeper_turn_admission
   | Operator_pending_confirm_store
   | Keeper_goal_assignment
   | Keeper_goal_reconciliation
@@ -54,32 +50,26 @@ let external_attention_dashboard_row_limit = 64
 
 let source_to_string = function
   | Event_queue_pending -> "event_queue_pending"
-  | Chat_queue_pending -> "chat_queue_pending"
-  | Chat_queue_inflight -> "chat_queue_inflight"
-  | Chat_queue_recovery_required -> "chat_queue_recovery_required"
-  | Chat_queue_persistence_blocked -> "chat_queue_persistence_blocked"
+  | Chat_operation_queued -> "chat_operation_queued"
+  | Chat_operation_running -> "chat_operation_running"
   | Hitl_pending -> "hitl_pending"
   | External_attention -> "external_attention"
   | Fusion_running -> "fusion_running"
   | Schedule_waiting -> "schedule_waiting"
-  | Turn_admission_waiting -> "turn_admission_waiting"
-  | Turn_admission_shutdown -> "turn_admission_shutdown"
+  | Owner_shutdown -> "owner_shutdown"
   | Operator_pending_confirm -> "operator_pending_confirm"
   | Read_error -> "read_error"
 ;;
 
 let all_waiting_sources =
   [ Event_queue_pending
-  ; Chat_queue_pending
-  ; Chat_queue_inflight
-  ; Chat_queue_recovery_required
-  ; Chat_queue_persistence_blocked
+  ; Chat_operation_queued
+  ; Chat_operation_running
   ; Hitl_pending
   ; External_attention
   ; Fusion_running
   ; Schedule_waiting
-  ; Turn_admission_waiting
-  ; Turn_admission_shutdown
+  ; Owner_shutdown
   ; Operator_pending_confirm
   ; Read_error
   ]
@@ -97,7 +87,7 @@ let all_keeper_states = [ Idle; Busy; Waiting; Deferred ]
 let wake_producer_to_string = function
   | Board_dispatch -> "board_dispatch"
   | Board_attention_judge -> "board_attention_judge"
-  | Keeper_chat_queue_store -> "keeper_chat_queue_store"
+  | Keeper_owner_actor -> "keeper_owner_actor"
   | Keeper_supervisor -> "keeper_supervisor"
   | Fusion_sink -> "fusion_sink"
   | Connector_attention_hook -> "connector_attention_hook"
@@ -105,7 +95,6 @@ let wake_producer_to_string = function
   | External_attention_store -> "external_attention_store"
   | Schedule_store -> "schedule_store"
   | Schedule_runner -> "schedule_runner"
-  | Keeper_turn_admission -> "keeper_turn_admission"
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
   | Keeper_goal_assignment -> "keeper_goal_assignment"
   | Keeper_goal_reconciliation -> "keeper_goal_reconciliation"
@@ -244,184 +233,98 @@ let schedule_read_error_detail = function
       ]
 ;;
 
-let chat_queue_source_label = function
-  | Keeper_chat_queue.Dashboard _ -> "dashboard"
-  | Keeper_chat_queue.Discord _ -> "discord"
-  | Keeper_chat_queue.Slack _ -> "slack"
-;;
-
-let chat_queue_active_row ~source ~next_action ~lifecycle_fields keeper_name queue_index
-    (receipt : Keeper_chat_queue.active_receipt) =
-  let msg = receipt.message in
-  let source_label = chat_queue_source_label msg.source in
-  { keeper_name = Some keeper_name
-    ; source
-    ; waiting_on = source_label
-    ; wake_producer = Keeper_chat_queue_store
-    ; since = Some msg.timestamp
-    ; due_at = None
-    ; next_action
-    ; detail =
-        `Assoc
-          [ "queue_index", `Int queue_index
-          ; ( "receipt_id"
-            , `String
-                (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
-          ; ( "message_source"
-            , Keeper_chat_receipt_projection.message_source_json
-                msg.source )
-          ; "content_length", `Int (String.length msg.content)
-          ; "user_block_count", `Int (List.length msg.user_blocks)
-          ; "attachment_count", `Int (List.length msg.attachments)
-          ; "lifecycle", `Assoc lifecycle_fields
-          ]
-    }
-;;
-
-let chat_queue_invariant_error_row keeper_name queue_index
-    (receipt : Keeper_chat_queue.active_receipt) expected_state =
-  read_error_row ~keeper_name ~waiting_on:"chat_queue_snapshot_invariant"
-    ~next_action:"repair_keeper_chat_queue_snapshot"
-    (`Assoc
-      [ "expected_state", `String expected_state
-      ; ( "receipt_id"
-        , `String
-            (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
-      ; "queue_index", `Int queue_index
-      ])
-;;
-
-let chat_queue_load_error_row keeper_name
-    (error : Keeper_chat_queue.snapshot_load_error) =
-  let kind = Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind in
-  read_error_row ~keeper_name ~waiting_on:"chat_queue_snapshot"
-    ~next_action:"repair_keeper_chat_queue_snapshot"
-    (`Assoc
-      [ "kind", `String kind
-      ; "path", Json_util.string_opt_to_json error.path
-      ; "message", `String error.message
-      ])
-;;
-
-let chat_queue_persistence_blocked_rows ~base_path keeper_name =
-  match
-    Keeper_chat_consumer.persistence_blocked_status
-      ~base_path
-      ~keeper_name
-  with
-  | Ok None -> []
-  | Error message ->
+let chat_operation_rows ~base_path keeper_name =
+  match Keeper_owner_registry.operation_projection ~base_path ~keeper_name with
+  | Error error ->
     [ read_error_row
         ~keeper_name
-        ~waiting_on:"chat_queue_persistence_blocked_observation"
-        ~next_action:"repair_keeper_chat_consumer_state"
-        (`Assoc [ "message", `String message ])
+        ~waiting_on:"keeper_owner_operation_projection"
+        ~next_action:"inspect_keeper_owner"
+        (`Assoc
+           [ "message",
+             `String (Keeper_owner_registry.lookup_error_to_string error)
+           ])
     ]
-  | Ok (Some status) ->
+  | Ok projection ->
+    let queued =
+      if projection.queued_count = 0
+      then []
+      else
+        [ { keeper_name = Some keeper_name
+          ; source = Chat_operation_queued
+          ; waiting_on = "owner_fifo"
+          ; wake_producer = Keeper_owner_actor
+          ; since = None
+          ; due_at = None
+          ; next_action = "keeper_owner_start_fifo_head"
+          ; detail = `Assoc [ "queued_count", `Int projection.queued_count ]
+          }
+        ]
+    in
+    let running =
+      match projection.running_operation_id with
+      | None -> []
+      | Some operation_id ->
+        [ { keeper_name = Some keeper_name
+          ; source = Chat_operation_running
+          ; waiting_on = "keeper_turn"
+          ; wake_producer = Keeper_owner_actor
+          ; since = None
+          ; due_at = None
+          ; next_action = "keeper_owner_settle_operation"
+          ; detail =
+              `Assoc
+                [ "operation_id",
+                  `String
+                    (Keeper_chat_operation.Operation_id.to_string operation_id)
+                ]
+          }
+        ]
+    in
+    running @ queued
+;;
+
+let owner_shutdown_rows ~base_path keeper_name =
+  match Keeper_owner_registry.get ~base_path ~keeper_name with
+  | Error error ->
     [ { keeper_name = Some keeper_name
-      ; source = Chat_queue_persistence_blocked
-      ; waiting_on = "operator_reconciliation"
-      ; wake_producer = Keeper_chat_queue_store
+      ; source = Read_error
+      ; waiting_on = "keeper_owner"
+      ; wake_producer = Read_model_reader
       ; since = None
       ; due_at = None
-      ; next_action = "reconcile_keeper_chat_queue"
+      ; next_action = "restart_keeper_owner"
       ; detail =
           `Assoc
-            [ "operation", `String "finalize"
-            ; "lease_id", `String status.lease_id
-            ; "error", Keeper_chat_queue.mutation_error_to_json status.error
-            ]
+            [ "error", `String (Keeper_owner_registry.lookup_error_to_string error) ]
       }
     ]
-;;
-
-let chat_queue_rows ~base_path keeper_name =
-  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
-  let pending =
-    snapshot.pending
-    |> List.mapi (fun queue_index
-                       (receipt : Keeper_chat_queue.active_receipt) ->
-           match receipt.Keeper_chat_queue.state with
-           | Keeper_chat_queue.Pending ->
-               chat_queue_active_row ~source:Chat_queue_pending
-                 ~next_action:"keeper_chat_consumer_drain"
-                 ~lifecycle_fields:[ "state", `String "pending" ] keeper_name
-                 queue_index receipt
-           | Keeper_chat_queue.Inflight _ | Keeper_chat_queue.Delivered _
-           | Keeper_chat_queue.Recovery_required _
-           | Keeper_chat_queue.Failed _ ->
-               chat_queue_invariant_error_row keeper_name queue_index receipt
-                 "pending")
-  in
-  let inflight =
-    snapshot.inflight
-    |> List.mapi (fun queue_index
-                       (receipt : Keeper_chat_queue.active_receipt) ->
-           match receipt.Keeper_chat_queue.state with
-           | Keeper_chat_queue.Inflight { lease_id; started_at } ->
-               chat_queue_active_row ~source:Chat_queue_inflight
-                 ~next_action:"keeper_chat_turn_terminal_receipt"
-                 ~lifecycle_fields:
-                   [ "state", `String "inflight"
-                   ; "lease_id", `String lease_id
-                   ; "started_at", `Float started_at
-                   ; "started_at_iso", unix_iso_json (Some started_at)
-                   ]
-                 keeper_name queue_index receipt
-           | Keeper_chat_queue.Pending | Keeper_chat_queue.Delivered _
-           | Keeper_chat_queue.Recovery_required _
-           | Keeper_chat_queue.Failed _ ->
-               chat_queue_invariant_error_row keeper_name queue_index receipt
-                 "inflight")
-  in
-  let recovery_required =
-    snapshot.recovery_required
-    |> List.mapi (fun queue_index
-                       (receipt : Keeper_chat_queue.active_receipt) ->
-           match receipt.Keeper_chat_queue.state with
-           | Keeper_chat_queue.Recovery_required { lease_id; started_at } ->
-             chat_queue_active_row ~source:Chat_queue_recovery_required
-               ~next_action:"resolve_keeper_chat_queue_recovery"
-               ~lifecycle_fields:
-                 [ "state", `String "recovery_required"
-                 ; "lease_id", `String lease_id
-                 ; "started_at", `Float started_at
-                 ; "started_at_iso", unix_iso_json (Some started_at)
-                 ; "dispatchable", `Bool false
-                 ]
-               keeper_name queue_index receipt
-           | Keeper_chat_queue.Pending
-           | Keeper_chat_queue.Inflight _
-           | Keeper_chat_queue.Delivered _
-           | Keeper_chat_queue.Failed _ ->
-             chat_queue_invariant_error_row keeper_name queue_index receipt
-               "recovery_required")
-  in
-  pending @ inflight @ recovery_required
-  @ chat_queue_persistence_blocked_rows ~base_path keeper_name
-  @ List.map (chat_queue_load_error_row keeper_name) snapshot.load_errors
-;;
-
-let turn_admission_rows ~base_path keeper_name =
-  let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
+  | Ok owner ->
+  let in_flight = Keeper_owner.turn_in_flight owner in
   let in_flight_detail =
-    match snapshot.snapshot_in_flight with
+    match in_flight with
     | None -> `Null
-    | Some (info : Keeper_turn_admission.in_flight_info) ->
+    | Some (info : Keeper_owner.turn_in_flight) ->
+      let lane =
+        match info.lane with
+        | Keeper_owner.Autonomous -> "autonomous"
+        | Keeper_owner.Chat_operation -> "chat_operation"
+        | Keeper_owner.Maintenance -> "maintenance"
+      in
       `Assoc
-        [ "lane", `String (Keeper_turn_admission.lane_to_string info.lane)
+        [ "lane", `String lane
         ; "started_at", `Float info.started_at
         ; "started_at_iso", unix_iso_json (Some info.started_at)
         ]
   in
   let shutdown_rows =
-    match snapshot.snapshot_shutdown_operation_id with
+    match Keeper_owner.shutdown_operation_id owner with
     | None -> []
     | Some operation_id ->
       [ { keeper_name = Some keeper_name
-        ; source = Turn_admission_shutdown
+        ; source = Owner_shutdown
         ; waiting_on = "shutdown"
-        ; wake_producer = Keeper_turn_admission
+        ; wake_producer = Keeper_owner_actor
         ; since = None
         ; due_at = None
         ; next_action = "keeper_shutdown_finalize"
@@ -431,35 +334,12 @@ let turn_admission_rows ~base_path keeper_name =
                 , `String
                     (Keeper_shutdown_types.Operation_id.to_string operation_id) )
               ; "admission_fenced", `Bool true
-              ; "chat_waiting_count", `Int snapshot.snapshot_waiting
               ; "in_flight", in_flight_detail
               ]
         }
       ]
   in
-  let waiting_rows =
-    if snapshot.snapshot_waiting <= 0
-    then []
-    else
-      [ { keeper_name = Some keeper_name
-      ; source = Turn_admission_waiting
-      ; waiting_on = "chat"
-      ; wake_producer = Keeper_turn_admission
-      ; since = snapshot.snapshot_waiting_since
-      ; due_at = None
-      ; next_action = "turn_slot_release"
-      ; detail =
-          `Assoc
-            [ "waiting_lane", `String "chat"
-            ; "waiting_since", float_json snapshot.snapshot_waiting_since
-            ; "waiting_since_iso", unix_iso_json snapshot.snapshot_waiting_since
-            ; "chat_waiting_count", `Int snapshot.snapshot_waiting
-            ; "in_flight", in_flight_detail
-            ]
-      }
-      ]
-  in
-  shutdown_rows @ waiting_rows
+  shutdown_rows
 ;;
 
 let hitl_rows keeper_name pending =
@@ -699,7 +579,7 @@ let row_state rows =
     List.exists
       (fun row ->
          row.source = Fusion_running
-         || row.source = Turn_admission_shutdown)
+         || row.source = Owner_shutdown)
       rows
   then Deferred
   else if rows <> []
@@ -911,8 +791,8 @@ let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms kee
     in
     let rows =
       event_queue_rows ~base_path ~keeper_name
-      @ chat_queue_rows ~base_path keeper_name
-      @ turn_admission_rows ~base_path keeper_name
+      @ chat_operation_rows ~base_path keeper_name
+      @ owner_shutdown_rows ~base_path keeper_name
       @ hitl_rows keeper_name pending_approvals
       @ external_attention_rows
       @ fusion_rows keeper_name fusion_runs

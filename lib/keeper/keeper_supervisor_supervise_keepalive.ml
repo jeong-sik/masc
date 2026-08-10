@@ -49,17 +49,22 @@ let supervise_keepalive
   =
   let base_path = ctx.config.base_path in
   let admission =
-    Keeper_turn_admission.snapshot_for
+    Keeper_owner_registry.shutdown_operation_id
       ~base_path
       ~keeper_name:meta.name
   in
   let execution_truth =
-    Keeper_activation_readiness.classify_owner_execution
-      ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
-      ~runtime:
-        (Keeper_activation_readiness.owner_runtime_of_registry_entry
-           (Keeper_registry.get ~base_path meta.name))
-      (Ok meta)
+    match admission with
+    | Error error ->
+      Keeper_activation_readiness.Unknown
+        (Keeper_owner_registry.lookup_error_to_string error)
+    | Ok shutdown_operation_id ->
+      Keeper_activation_readiness.classify_owner_execution
+        ~shutdown_operation_id
+        ~runtime:
+          (Keeper_activation_readiness.owner_runtime_of_registry_entry
+             (Keeper_registry.get ~base_path meta.name))
+        (Ok meta)
   in
   let record_recovery_retained reason =
     Otel_metric_store.inc_counter

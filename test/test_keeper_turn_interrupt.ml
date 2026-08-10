@@ -57,7 +57,6 @@ let with_env body =
     ~finally:(fun () -> Fs_compat.remove_tree base)
     (fun () ->
       Keeper_registry.For_testing.clear ();
-      Keeper_turn_admission.For_testing.reset ();
       body ~base)
 ;;
 

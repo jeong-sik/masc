@@ -257,18 +257,18 @@ let execute_transfer ~base_path ~keeper_name prepared =
          Ok (transfer.source, target_projection_failure_json source_result detail))
   in
   match
-    Keeper_turn_admission.run_transfer_intake_if_open
+    Keeper_shutdown_intake_fence.run_transfer_intake_if_open
       ~base_path
       ~from_keeper:keeper_name
       ~to_keeper:transfer.to_keeper
       execute_fenced
   with
-  | Keeper_turn_admission.Transfer_intake_committed result -> result
-  | Keeper_turn_admission.Transfer_intake_source_shutdown_reserved operation_id ->
+  | Keeper_shutdown_intake_fence.Transfer_intake_committed result -> result
+  | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved operation_id ->
     Error
       (Keeper_registry_event_queue.transfer_pending_error_to_string
          (Keeper_registry_event_queue.Transfer_pending_shutdown_reserved operation_id))
-  | Keeper_turn_admission.Transfer_intake_target_shutdown_reserved operation_id ->
+  | Keeper_shutdown_intake_fence.Transfer_intake_target_shutdown_reserved operation_id ->
     Error
       (Printf.sprintf
          "target Keeper shutdown owns durable intake operation=%s"
@@ -462,24 +462,29 @@ let run_fresh_request ~config ~base_path ~keeper_name request =
   | Some entry ->
     let owner_nonce = entry.meta.runtime.nonce in
     (match
-       Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () ->
-         match Keeper_registry.get ~base_path keeper_name with
-         | None -> Error "keeper registration disappeared"
-         | Some current when current.meta.runtime.nonce <> owner_nonce ->
-           Error "keeper owner nonce changed"
-         | Some _ ->
-           run_admitted_request
-             ~config
-             ~base_path
-             ~keeper_name
-             ~owner_nonce
-             request)
+       Keeper_owner_registry.run_maintenance_if_idle
+         ~base_path
+         ~keeper_name
+         (fun () ->
+            match Keeper_registry.get ~base_path keeper_name with
+            | None -> Error "keeper registration disappeared"
+            | Some current when current.meta.runtime.nonce <> owner_nonce ->
+              Error "keeper owner nonce changed"
+            | Some _ ->
+              run_admitted_request
+                ~config
+                ~base_path
+                ~keeper_name
+                ~owner_nonce
+                request)
      with
-     | `Ran result -> result
-     | `Busy block ->
+     | Ok (`Ran result) -> result
+     | Ok (`Busy block) ->
+       Error ("keeper owner is busy: " ^ Keeper_owner.autonomous_block_to_string block)
+     | Error error ->
        Error
-         ("keeper turn is busy: "
-          ^ Keeper_turn_admission.autonomous_block_to_string block))
+         ("keeper owner unavailable: "
+          ^ Keeper_owner_registry.command_error_to_string error))
 ;;
 
 let run ~config ~keeper_name request =

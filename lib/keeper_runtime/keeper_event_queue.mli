@@ -88,7 +88,7 @@ type stimulus_payload =
           emit this duplicate wake. Mirrors [Fusion_completed]. *)
   | Manual_compaction_requested
       (** Operator-requested MASC compaction. The tool only enqueues this
-          stimulus; the owning Keeper consumes it under its turn slot. *)
+          stimulus; the owning Keeper consumes it in its Owner child. *)
   | Goal_assigned of goal_assignment
       (** A goal was newly added to this keeper's [active_goal_ids]. *)
   | Goal_reconciliation_ready of goal_reconciliation_ready

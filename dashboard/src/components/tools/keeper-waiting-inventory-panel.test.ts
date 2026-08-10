@@ -21,11 +21,10 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
     global_pending_confirm_count: 1,
     source_counts: {
       event_queue_pending: 1,
-      chat_queue_inflight: 1,
-      chat_queue_recovery_required: 1,
+      chat_operation_running: 1,
+      chat_operation_queued: 1,
       schedule_waiting: 1,
-      turn_admission_waiting: 1,
-      turn_admission_shutdown: 1,
+      owner_shutdown: 1,
     },
     keepers: [
       {
@@ -34,8 +33,8 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         waiting_count: 3,
         sources: {
           event_queue_pending: 1,
-          chat_queue_inflight: 1,
-          chat_queue_recovery_required: 1,
+          chat_operation_running: 1,
+          chat_operation_queued: 1,
         },
         waiting_on: [
           {
@@ -48,37 +47,24 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
           },
           {
             keeper_name: 'sangsu',
-            source: 'chat_queue_inflight',
-            waiting_on: 'dashboard',
-            wake_producer: 'keeper_chat_queue_store',
+            source: 'chat_operation_running',
+            waiting_on: 'keeper_turn',
+            wake_producer: 'keeper_owner_actor',
             since_iso: '2026-07-04T00:02:00Z',
-            next_action: 'keeper_chat_turn_terminal_receipt',
+            next_action: 'keeper_owner_settle_operation',
             detail: {
-              queue_index: 0,
-              receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-              lifecycle: {
-                state: 'inflight',
-                lease_id: 'lease_00000000-0000-4000-8000-000000000002',
-                started_at_iso: '2026-07-04T00:02:30Z',
-              },
+              operation_id: 'kmsg-operation-running',
             },
           },
           {
             keeper_name: 'sangsu',
-            source: 'chat_queue_recovery_required',
-            waiting_on: 'dashboard',
-            wake_producer: 'keeper_chat_queue_store',
+            source: 'chat_operation_queued',
+            waiting_on: 'owner_fifo',
+            wake_producer: 'keeper_owner_actor',
             since_iso: '2026-07-04T00:03:00Z',
-            next_action: 'resolve_keeper_chat_queue_recovery',
+            next_action: 'keeper_owner_start_fifo_head',
             detail: {
-              queue_index: 0,
-              receipt_id: 'chatq_00000000-0000-4000-8000-000000000003',
-              lifecycle: {
-                state: 'recovery_required',
-                lease_id: 'lease_00000000-0000-4000-8000-000000000004',
-                started_at_iso: '2026-07-04T00:02:45Z',
-                dispatchable: false,
-              },
+              queued_count: 2,
             },
           },
         ],
@@ -88,16 +74,16 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         state: 'busy',
         waiting_count: 1,
         sources: {
-          turn_admission_waiting: 1,
+          chat_operation_running: 1,
         },
         waiting_on: [
           {
             keeper_name: 'busy-one',
-            source: 'turn_admission_waiting',
-            waiting_on: 'chat',
-            wake_producer: 'keeper_turn_admission',
+            source: 'chat_operation_running',
+            waiting_on: 'keeper_turn',
+            wake_producer: 'keeper_owner_actor',
             since_iso: '2026-07-04T00:02:00Z',
-            next_action: 'turn_slot_release',
+            next_action: 'keeper_owner_settle_operation',
           },
         ],
       },
@@ -112,14 +98,14 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         state: 'deferred',
         waiting_count: 1,
         sources: {
-          turn_admission_shutdown: 1,
+          owner_shutdown: 1,
         },
         waiting_on: [
           {
             keeper_name: 'stopping-one',
-            source: 'turn_admission_shutdown',
+            source: 'owner_shutdown',
             waiting_on: 'shutdown',
-            wake_producer: 'keeper_turn_admission',
+            wake_producer: 'keeper_owner_actor',
             next_action: 'keeper_shutdown_finalize',
             detail: {
               shutdown_operation_id: 'shutdown-op-7',
@@ -162,27 +148,23 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('sangsu')
     expect(container.textContent).toContain('busy-one')
     expect(container.textContent).toContain('busy')
-    expect(container.textContent).toContain('turn admission waiting')
-    expect(container.textContent).toContain('producer keeper turn admission')
-    expect(container.textContent).toContain('turn slot release')
-    expect(container.textContent).toContain('turn admission shutdown')
+    expect(container.textContent).toContain('chat operation running')
+    expect(container.textContent).toContain('producer keeper owner actor')
+    expect(container.textContent).toContain('keeper owner settle operation')
+    expect(container.textContent).toContain('owner shutdown')
     expect(container.textContent).toContain('keeper shutdown finalize')
     expect(container.textContent).toContain('shutdown operation shutdown-op-7')
     expect(container.textContent).toContain('admission fenced')
     expect(container.querySelector('[data-keeper-shutdown-operation-id="shutdown-op-7"]')).not.toBeNull()
     const shutdownChip = [...container.querySelectorAll('[data-status-chip]')]
-      .find(chip => chip.textContent?.trim() === 'turn admission shutdown')
+      .find(chip => chip.textContent?.trim() === 'owner shutdown')
     expect(shutdownChip?.getAttribute('data-status-chip-tone')).toBe('info')
     expect(container.textContent).toContain('event queue pending')
     expect(container.textContent).toContain('producer keeper supervisor')
     expect(container.textContent).toContain('producer keeper supervisor')
-    expect(container.textContent).toContain('chatq_00000000-0000-4000-8000-000000000001')
-    expect(container.textContent).toContain('lease_00000000-0000-4000-8000-000000000002')
-    expect(container.textContent).toContain('state inflight')
-    expect(container.textContent).toContain('chat queue recovery required')
-    expect(container.textContent).toContain('resolve keeper chat queue recovery')
-    expect(container.textContent).toContain('state recovery required')
-    expect(container.textContent).toContain('lease_00000000-0000-4000-8000-000000000004')
+    expect(container.textContent).toContain('operation kmsg-operation-running')
+    expect(container.textContent).toContain('chat operation queued')
+    expect(container.textContent).toContain('queued 2')
     expect(container.textContent).toContain('Global waiting')
     expect(container.textContent).toContain('masc.board_post')
     expect(container.textContent).not.toContain('idle-one')
@@ -194,29 +176,27 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('waiting inventory unavailable')
   })
 
-  it('expands the active receipt rows instead of hiding reload correlation ids', () => {
+  it('expands operation rows without hiding operation identities', () => {
     const inventory = inventoryFixture()
     const keeper = inventory.keepers[0]
     if (!keeper) throw new Error('fixture keeper missing')
     keeper.waiting_on = Array.from({ length: 7 }, (_, index) => ({
       keeper_name: keeper.keeper_name,
-      source: 'chat_queue_pending',
-      waiting_on: 'slack',
-      wake_producer: 'keeper_chat_queue',
-      next_action: 'keeper_chat_consumer_drain',
+      source: 'chat_operation_running',
+      waiting_on: 'keeper_turn',
+      wake_producer: 'keeper_owner_actor',
+      next_action: 'keeper_owner_settle_operation',
       detail: {
-        queue_index: index,
-        receipt_id: `chatq_00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
-        lifecycle: { state: 'pending' },
+        operation_id: `kmsg-operation-${index}`,
       },
     }))
     keeper.waiting_count = keeper.waiting_on.length
 
     render(html`<${KeeperWaitingInventoryPanel} inventory=${inventory} />`, container)
 
-    expect(container.textContent).not.toContain('chatq_00000000-0000-4000-8000-000000000006')
+    expect(container.textContent).not.toContain('kmsg-operation-6')
     fireEvent.click(container.querySelector('[data-expand-waiting-rows]') as HTMLButtonElement)
-    expect(container.textContent).toContain('chatq_00000000-0000-4000-8000-000000000006')
+    expect(container.textContent).toContain('kmsg-operation-6')
     expect(container.querySelector('[data-collapse-waiting-rows]')).not.toBeNull()
   })
 
@@ -280,9 +260,9 @@ describe('KeeperLaneInventoryPanel', () => {
     const cards = container.querySelectorAll('[data-testid="keeper-lane-card"]')
     expect(cards).toHaveLength(4)
     expect(container.querySelector('[data-keeper-lane="sangsu"]')?.textContent).toContain('event queue pending')
-    expect(container.querySelector('[data-keeper-lane="busy-one"]')?.textContent).toContain('turn admission waiting')
+    expect(container.querySelector('[data-keeper-lane="busy-one"]')?.textContent).toContain('chat operation running')
     expect(container.querySelector('[data-keeper-lane="idle-one"]')?.textContent).toContain('no keeper-specific waiting rows')
-    expect(container.querySelector('[data-keeper-lane="stopping-one"]')?.textContent).toContain('turn admission shutdown')
+    expect(container.querySelector('[data-keeper-lane="stopping-one"]')?.textContent).toContain('owner shutdown')
     expect(container.textContent).toContain('Global lane evidence')
     expect(container.textContent).toContain('producer schedule runner')
   })

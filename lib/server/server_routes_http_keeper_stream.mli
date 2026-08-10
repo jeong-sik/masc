@@ -70,6 +70,7 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
     rich-render [ChatBlock] values and from AGENT_CORE provider blocks. *)
 
 type keeper_chat_stream_request = {
+  request_id : Keeper_owner.Chat_operation.Operation_id.t;
   name : string;
   message : string;
   user_blocks : user_input_block list;
@@ -111,22 +112,6 @@ val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 (** [{ "error": { "message": "…" } }] envelope for
     parse / handler errors. *)
 
-(** {1 Queue request handlers} *)
-
-val handle_keeper_chat_request_result :
-  caller:string ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Drives [GET /api/v1/keepers/chat/requests/<request_id>].
-    Reads the async keeper message request state directly from
-    {!Keeper_msg_async} without requiring an MCP session. *)
-
-val handle_keeper_chat_request_cancel :
-  caller:string ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Drives [POST /api/v1/keepers/chat/requests/<request_id>/cancel].
-    Cancels a live async keeper message request when it is still
-    cancellable. *)
-
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].
@@ -156,7 +141,7 @@ val handle_keeper_chat_stream :
     through the SSE stream rather than the HTTP envelope
     once the headers have flushed. *)
 
-(** {1 Turn execution (shared between HTTP handler and queue consumer)} *)
+(** {1 Owner operation turn execution} *)
 
 type queued_turn_failure_kind =
   | Turn_failed
@@ -172,14 +157,18 @@ type queued_turn_outcome =
       { kind : queued_turn_failure_kind
       ; detail : string
       }
-  | Deferred of { rejection : Keeper_turn_admission.rejection }
 
 type turn_submission =
-  | Direct_request
-  | Queued_receipt of
-      { receipt_ids : Keeper_chat_delivery_identity.Receipt_ids.t
-      ; claim : unit -> (unit, string) result
+  | Owner_operation of
+      { operation_id : Keeper_owner.Chat_operation.Operation_id.t
+      ; admission_token : Keeper_turn_dispatch_authority.token
       ; execution_sw : Eio.Switch.t
+      ; surface : Surface_ref.t
+      ; speaker : Keeper_chat_store.speaker
+      ; conversation_id : string option
+      ; external_message_id : string option
+      ; workspace_id : string option
+      ; extra_mentions : Keeper_identity.Keeper_id.t list
       }
 
 val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
@@ -198,50 +187,25 @@ val process_single_turn :
   run_id:string ->
   message_id:string ->
   agent_name:string ->
-  submitted_by:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   queued_turn_outcome option
-(** Execute a single keeper turn, publishing events to the provided
-    event stream. Direct HTTP requests enter the durable {!Keeper_msg_async}
-    boundary and run under its server-owned request switch. Queue-consumer
-    turns are already durably owned by {!Keeper_chat_queue}: [Queued_receipt]
-    runs inline under its [execution_sw], parks on the Keeper turn slot, and
-    invokes [claim] for its exact [receipt_ids] only after admission. It does
-    not create a second durable async request. The typed [submission] prevents
-    direct requests from carrying queue claim authority and prevents queued
-    receipts from omitting it. [closed] is a mutable flag that suppresses
-    worker event pushes when set to [true] (used by the SSE adapter when the
-    HTTP stream is closed). [client_disconnects] carries the HTTP stream switch
-    and disconnect signal; it stops only the stream projection and does not
-    cancel an accepted direct request. [auth_token] is [None] for
-    queue-consumer turns where no HTTP request is available.
+(** Execute one already-claimed Owner operation and publish its live turn
+    events. The operation owns transcript provenance, admission, cancellation,
+    and terminal settlement; this function never creates another durable
+    request identity. [closed] and [client_disconnects] affect only a live SSE
+    projection, never the accepted operation. [user_row_origin] decides whether
+    the operation appends the user row or observes an upstream append.
 
-    [user_row_origin] is the durable provenance selected by the accepting
-    boundary. [Needs_append] makes this turn own the user row;
-    [Already_persisted] and [Already_persisted_upstream] prohibit a duplicate
-    append. Queue-consumer turns pass the exact provenance stored with their
-    receipt instead of deriving ownership from a connector label.
+    With no visible blocks, the operation records a typed terminal failure
+    rather than inventing assistant prose. *)
 
-    [Queued_receipt] (constructed only by [Server_bootstrap_loops]'s
-    queue-consumer [handle_turn] wiring) changes terminal handling for
-    [No_visible_reply], an empty [Visible_reply], and
-    [Continuation_checkpoint]. A media-only ordinary reply is delivered even
-    when its text is empty. A continuation persists a typed status block and
-    is delivered to the originating connector without inventing assistant
-    prose. A continuation always commits a delivered assistant row
-    ([content = ""] plus the typed status block) — including direct turns,
-    which previously could commit [No_assistant_reply] or [Tool_calls_only]
-    instead. The [claim]
-    callback atomically claims the exact observed queue receipt after turn
-    admission and before transcript or provider effects.
-
-    With no visible blocks, the interactive HTTP stream keeps recording the user line
-    only ([persist_user_message_only]), matching its existing "the keeper will
-    answer on the next turn" semantics; a queued turn instead persists a typed
-    failure row via [persist_failure_reply]. A queued message is claimed from
-    [Keeper_chat_queue] at [claim] — there is no later turn for it
-    to ride along with, so true silence after that claim is terminal, not
-    merely deferred. *)
+val operation_executor :
+  state:Mcp_server.server_state ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  Keeper_owner.operation_executor
+(** Production executor installed into every Keeper Owner. It claims the FIFO
+    head only after the Keeper Owner starts it, streams Dashboard events by
+    operation id, and joins Discord/Slack terminal delivery before returning. *)
 
 (** {1 Testing helpers} *)
 
@@ -287,21 +251,6 @@ module For_testing : sig
   val direct_message_of_request :
     keeper_chat_stream_request -> Keeper_invocation_contract.direct_message
   val keeper_chat_stream_headers : string -> Httpun.Headers.t
-  val defer_dashboard_payload_if_busy :
-    base_path:string ->
-    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-    thread_id:string ->
-    keeper_chat_stream_request ->
-    [ `Not_busy | `Queued of int | `Queue_error of string ]
-  val defer_dashboard_payload_if_busy_evidence :
-    base_path:string ->
-    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-    thread_id:string ->
-    keeper_chat_stream_request ->
-    [ `Not_busy
-    | `Queued of Yojson.Safe.t * string
-    | `Queue_error of string
-    ]
   val canonical_reply_payload_of_body :
     redact_text:(string -> string) ->
     string ->
@@ -315,15 +264,13 @@ module For_testing : sig
   val queued_delivery_outcome_of_turn_ref :
     Ids.Turn_ref.t option -> queued_turn_outcome
   val committed_delivery_outcome :
-    queued_turn:bool ->
     turn_ref:Ids.Turn_ref.t option ->
     (unit, string) result ->
-    (queued_turn_outcome option, string) result
+    (queued_turn_outcome, string) result
   val empty_reply_delivery_plan :
-    queued_turn:bool ->
     has_visible_blocks:bool ->
     has_tool_calls:bool ->
-    [ `Visible_blocks | `Tool_calls_only | `Failure | `User_only ]
+    [ `Visible_blocks | `Tool_calls_only | `Failure ]
 
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val keeper_tool_failure_log_details :
@@ -334,8 +281,4 @@ module For_testing : sig
     error_body:string ->
     failure_class:Tool_result.tool_failure_class ->
     Yojson.Safe.t
-  val worker_settlement_terminal_body :
-    staged_body:string option ->
-    Keeper_msg_async.worker_settlement ->
-    string option
 end

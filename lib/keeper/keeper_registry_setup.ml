@@ -173,7 +173,7 @@ let decr_running_count_clamped () =
    the metric store and [Log] use stdlib I/O rather than Eio flows, and the
    install is a CAS loop.
    That totality is what makes this body legal to run inside
-   [Keeper_turn_admission.commit_registration_if_open], whose critical section
+   [Keeper_shutdown_intake_fence.commit_registration_if_open], whose critical section
    is guarded by a scheduler-blocking [Stdlib.Mutex]: a fiber that suspends
    there can never be resumed, because [Stdlib.Mutex.lock] blocks the very OS
    thread that runs the Eio scheduler. Acquiring the key lock here instead
@@ -536,19 +536,19 @@ let register_with_state_result
       if respect_shutdown_fence
       then (
         match
-          Keeper_turn_admission.commit_registration_if_open
+          Keeper_shutdown_intake_fence.commit_registration_if_open
             ~base_path
             ~keeper_name:name
             commit_key_locked
         with
-        | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
+        | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
           Error (Registration_shutdown_reserved operation_id)
-        | Keeper_turn_admission.Registration_committed
+        | Keeper_shutdown_intake_fence.Registration_committed
             (Error (Lifecycle_transaction_reserved owner)) ->
           Error (Registration_lifecycle_reserved owner)
-        | Keeper_turn_admission.Registration_committed (Error validation_error) ->
+        | Keeper_shutdown_intake_fence.Registration_committed (Error validation_error) ->
           Error (Registration_invalid validation_error)
-        | Keeper_turn_admission.Registration_committed (Ok ()) -> Ok ())
+        | Keeper_shutdown_intake_fence.Registration_committed (Ok ()) -> Ok ())
       else (
         match commit_key_locked () with
         | Ok () -> Ok ()
@@ -742,15 +742,15 @@ let register_restarting ~base_path name meta
      nesting it inside would wedge the domain. *)
   match
     Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
-      Keeper_turn_admission.commit_registration_if_open
+      Keeper_shutdown_intake_fence.commit_registration_if_open
         ~base_path
         ~keeper_name:name
         guarded_loop_key_locked)
   with
-  | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
+  | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
     Error (Restart_shutdown_reserved operation_id)
-  | Keeper_turn_admission.Registration_committed (Error _ as error) -> error
-  | Keeper_turn_admission.Registration_committed (Ok registered) ->
+  | Keeper_shutdown_intake_fence.Registration_committed (Error _ as error) -> error
+  | Keeper_shutdown_intake_fence.Registration_committed (Ok registered) ->
     Log.Keeper.info
       "registry: registering keeper name=%s base_path=%s phase=%s"
       name

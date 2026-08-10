@@ -13,6 +13,7 @@ type error =
   | Meta_snapshot_identity_changed
   | Meta_snapshot_read_failed of string
   | Task_discovery_failed of string
+  | Owner_command_failed of string
   | Prepare_persist_failed of Keeper_shutdown_store.error
   | Cancellation_failed of Keeper_shutdown_types.t
   | Join_failed of Keeper_shutdown_types.t
@@ -33,6 +34,7 @@ let error_to_string = function
     Printf.sprintf "Keeper shutdown metadata read failed: %s" detail
   | Task_discovery_failed detail ->
     Printf.sprintf "Keeper shutdown task discovery failed: %s" detail
+  | Owner_command_failed detail -> "Keeper Owner shutdown command failed: " ^ detail
   | Prepare_persist_failed error -> Keeper_shutdown_store.error_to_string error
   | Cancellation_failed operation ->
     Printf.sprintf
@@ -58,15 +60,15 @@ let current_entry ~config (observed : Keeper_registry.registry_entry) =
 ;;
 
 let admission_lane = function
-  | Keeper_turn_admission.Autonomous -> Autonomous
-  | Keeper_turn_admission.Chat -> Chat
+  | Keeper_owner.Autonomous | Keeper_owner.Maintenance -> Autonomous
+  | Keeper_owner.Chat_operation -> Chat
 ;;
 
 let active_turn_of_snapshots reservation current =
   let observation : Keeper_registry.turn_observation option =
     current.Keeper_registry.current_turn_observation
   in
-  match reservation.Keeper_turn_admission.in_flight, observation with
+  match reservation.Keeper_owner.in_flight, observation with
   | None, None -> No_inflight_turn
   | in_flight, observation ->
     let lane, admitted_at =
@@ -90,19 +92,25 @@ let active_turn_of_snapshots reservation current =
 
 let rollback_reservation ~config ~keeper_name operation_id =
   match
-    Keeper_turn_admission.rollback_shutdown
+    Keeper_owner_registry.rollback_shutdown
       ~base_path:config.Workspace.base_path
       ~keeper_name
       ~operation_id
   with
-  | Keeper_turn_admission.Shutdown_rolled_back
-  | Keeper_turn_admission.Shutdown_not_reserved -> ()
-  | Keeper_turn_admission.Shutdown_reserved_by_other existing ->
+  | Ok Keeper_owner.Shutdown_rolled_back
+  | Ok Keeper_owner.Shutdown_not_reserved -> ()
+  | Ok (Keeper_owner.Shutdown_reserved_by_other existing) ->
     Log.Keeper.error
       "%s: shutdown rollback for %s found reservation %s"
       keeper_name
       (Operation_id.to_string operation_id)
       (Operation_id.to_string existing)
+  | Error error ->
+    Log.Keeper.error
+      "%s: shutdown rollback for %s failed: %s"
+      keeper_name
+      (Operation_id.to_string operation_id)
+      (Keeper_owner_registry.command_error_to_string error)
 ;;
 
 let read_guarded_meta
@@ -171,14 +179,16 @@ let terminal = function
 let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
   let operation_id = Operation_id.generate () in
   match
-    Keeper_turn_admission.begin_shutdown
+    Keeper_owner_registry.begin_shutdown
       ~base_path:config.Workspace.base_path
       ~keeper_name:entry.name
       ~operation_id
   with
-  | Keeper_turn_admission.Shutdown_already_reserved reservation ->
+  | Error error ->
+    Error (Owner_command_failed (Keeper_owner_registry.command_error_to_string error))
+  | Ok (Keeper_owner.Shutdown_already_reserved reservation) ->
     Error (Existing_operation reservation.operation_id)
-  | Keeper_turn_admission.Shutdown_reserved reservation ->
+  | Ok (Keeper_owner.Shutdown_reserved reservation) ->
     let durable_prepare_committed = Atomic.make false in
     Fun.protect
       ~finally:(fun () ->
@@ -248,23 +258,32 @@ let prepare_dormant
   =
   let operation_id = Operation_id.generate () in
   match
-    Keeper_turn_admission.begin_shutdown
+    Keeper_owner_registry.begin_shutdown
       ~base_path:config.Workspace.base_path
       ~keeper_name:meta.name
       ~operation_id
   with
-  | Keeper_turn_admission.Shutdown_already_reserved reservation ->
+  | Error error ->
+    Error (Owner_command_failed (Keeper_owner_registry.command_error_to_string error))
+  | Ok (Keeper_owner.Shutdown_already_reserved reservation) ->
     Error (Existing_operation reservation.operation_id)
-  | Keeper_turn_admission.Shutdown_reserved _ ->
+  | Ok (Keeper_owner.Shutdown_reserved _) ->
     let durable_prepare_committed = Atomic.make false in
     Fun.protect
       ~finally:(fun () ->
         if not (Atomic.get durable_prepare_committed)
         then rollback_reservation ~config ~keeper_name:meta.name operation_id)
       (fun () ->
-         Keeper_turn_admission.await_idle_after_shutdown
-           ~base_path:config.Workspace.base_path
-           ~keeper_name:meta.name;
+         match
+           Keeper_owner_registry.await_idle_after_shutdown
+             ~base_path:config.Workspace.base_path
+             ~keeper_name:meta.name
+         with
+         | Error error ->
+           Error
+             (Owner_command_failed
+                (Keeper_owner_registry.command_error_to_string error))
+         | Ok () ->
          match Keeper_registry.get ~base_path:config.base_path meta.name with
          | Some _ -> Error Dormant_registry_lane_present
          | None ->
@@ -357,9 +376,16 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
         | Keeper_lane.Cancel_requested
         | Keeper_lane.Cancel_already_requested
         | Keeper_lane.Cancel_already_exiting ->
-          Keeper_turn_admission.await_idle_after_shutdown
-            ~base_path:config.Workspace.base_path
-            ~keeper_name:current.name;
+          (match
+             Keeper_owner_registry.await_idle_after_shutdown
+               ~base_path:config.Workspace.base_path
+               ~keeper_name:current.name
+           with
+           | Error error ->
+             Error
+               (Owner_command_failed
+                  (Keeper_owner_registry.command_error_to_string error))
+           | Ok () ->
           let lane_exit = Keeper_lane.await_exit current.lane in
           (match lane_exit.outcome with
            | Keeper_lane.Shutdown_before_start ->
@@ -468,7 +494,7 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
                joined
            with
            | Ok () -> Ok joined
-           | Error error -> Error (Join_record_update_failed error)))))
+           | Error error -> Error (Join_record_update_failed error))))))
 ;;
 
 let run ~config ~entry ~request =

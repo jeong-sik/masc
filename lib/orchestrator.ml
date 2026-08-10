@@ -144,13 +144,12 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr workspace_config =
   let orphan_observation_consumer =
     make_orphan_observation_consumer ~sw ~workspace_config
   in
-  let dedup_consumer = Channel_gate.make_dedup_cleanup_consumer () in
   let mp =
     Pulse.create
       ~clock
       ~rhythm:(fixed_rhythm maintenance_interval)
       ~lifecycle:Always_on
-      ~consumers:[ orphan_observation_consumer; dedup_consumer ]
+      ~consumers:[ orphan_observation_consumer ]
   in
   with_pulse_rw (fun () -> maintenance_pulse := Some mp);
   Eio.Fiber.fork ~sw (fun () ->

@@ -82,15 +82,15 @@ let resolve_active_goal_ids config p old_ids =
              (String.concat ", " missing))
 
 let turn_in_flight_rejection ~keeper_name
-    (info : Keeper_turn_admission.in_flight_info) : tool_result =
+    (info : Keeper_owner.turn_in_flight) : tool_result =
   tool_result_error_data
     ~class_:Tool_result.Workflow_rejection
     (`Assoc
        [ "error", `String "keeper_turn_in_flight"
        ; "keeper", `String keeper_name
        ; ( "block"
-         , Keeper_turn_admission.autonomous_block_to_yojson
-             (Keeper_turn_admission.Turn_busy (Some info)) )
+         , Keeper_owner.autonomous_block_to_yojson
+             (Keeper_owner.Turn_busy (Some info)) )
        ; "metadata_committed", `Bool true
        ; ( "message"
          , `String
@@ -107,7 +107,7 @@ let turn_in_flight_rejection ~keeper_name
    permanently held after its provider run completed (#26542 — a keeper
    calling masc_keeper_up on itself mid-turn locked itself out of every
    subsequent turn until process restart). The swap therefore requires an
-   idle turn slot, enforced with the same admission fence the shutdown
+   idle Owner, enforced with the same lifecycle reservation the shutdown
    path uses:
 
    - [begin_shutdown] fences new admissions and samples the current holder
@@ -131,27 +131,32 @@ let swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
   let keeper_name = updated.name in
   let rollback ~operation_id =
     match
-      Keeper_turn_admission.rollback_shutdown
+      Keeper_owner_registry.rollback_shutdown
         ~base_path
         ~keeper_name
         ~operation_id
     with
-    | Keeper_turn_admission.Shutdown_rolled_back
-    | Keeper_turn_admission.Shutdown_not_reserved
-    | Keeper_turn_admission.Shutdown_reserved_by_other _ -> ()
+    | Ok Keeper_owner.Shutdown_rolled_back
+    | Ok Keeper_owner.Shutdown_not_reserved
+    | Ok (Keeper_owner.Shutdown_reserved_by_other _)
+    | Error _ -> ()
   in
   let swap () = stop_keepalive_and_await ~base_path keeper_name in
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   match
-    Keeper_turn_admission.begin_shutdown ~base_path ~keeper_name ~operation_id
+    Keeper_owner_registry.begin_shutdown ~base_path ~keeper_name ~operation_id
   with
-  | Keeper_turn_admission.Shutdown_reserved { in_flight = Some info; _ } ->
+  | Error error ->
+    Error
+      (tool_result_error
+         (Keeper_owner_registry.command_error_to_string error))
+  | Ok (Keeper_owner.Shutdown_reserved { in_flight = Some info; _ }) ->
     rollback ~operation_id;
     Error (turn_in_flight_rejection ~keeper_name info)
-  | Keeper_turn_admission.Shutdown_already_reserved
-      { in_flight = Some info; _ } ->
+  | Ok (Keeper_owner.Shutdown_already_reserved
+      { in_flight = Some info; _ }) ->
     Error (turn_in_flight_rejection ~keeper_name info)
-  | Keeper_turn_admission.Shutdown_reserved { in_flight = None; _ } ->
+  | Ok (Keeper_owner.Shutdown_reserved { in_flight = None; _ }) ->
     let stop_outcome =
       match swap () with
       | outcome ->
@@ -162,7 +167,7 @@ let swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
         raise exn
     in
     Ok (stop_outcome, start_keepalive ctx updated)
-  | Keeper_turn_admission.Shutdown_already_reserved { in_flight = None; _ } ->
+  | Ok (Keeper_owner.Shutdown_already_reserved { in_flight = None; _ }) ->
     Ok (swap (), start_keepalive ctx updated)
 ;;
 

@@ -5,7 +5,7 @@ open Keeper_tool_descriptor
 (* RFC-0182 Phase 5 PR-A (RFC §12): optional Eio resource fields.
    When set, descriptor handlers like masc_keeper_msg / masc_keeper_up /
    masc_operator_* can call into Eio-bound
-   primitives (start_keepalive, Keeper_msg_async.submit, LLM-call fibers,
+   primitives (start_keepalive, Owner operation submission, LLM-call fibers,
    Operator_control.context) without re-introducing dispatch-ref
    plumbing.  Default = [None]; callers without Eio context (AGENT_CORE handler,
    tests) leave them unset and the Eio-bound descriptor handlers return

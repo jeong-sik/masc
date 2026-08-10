@@ -129,7 +129,7 @@ type turn_success =
 
 let turn_success_of_stop_reason ~meta = function
   | Runtime_agent.Completed -> Turn_completed meta
-  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
   | Runtime_agent.Yielded_after_repeated_tool_call _ ->
@@ -141,9 +141,12 @@ let chat_yield_request ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
   | Some _ ->
-    if Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
-    then Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
-    else Ok None
+    (match Keeper_owner_registry.operation_projection ~base_path ~keeper_name with
+     | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
+     | Ok operations ->
+       if operations.Keeper_owner.queued_count > 0
+       then Ok (Some Keeper_agent_run.{ reason = Operation_queued })
+       else Ok None)
 ;;
 
 let autonomous_yield_request ~base_path ~keeper_name =
@@ -234,7 +237,7 @@ let manual_compaction_yield_request ~wake ~base_path ~keeper_name =
     Option.iter
       (fun (request : Keeper_agent_run.autonomous_yield_request) ->
          match request.reason with
-         | Keeper_agent_run.Chat_waiting -> ()
+         | Keeper_agent_run.Operation_queued -> ()
          | Keeper_agent_run.Durable_stimulus_waiting summary ->
            Log.Keeper.info
              ~keeper_name

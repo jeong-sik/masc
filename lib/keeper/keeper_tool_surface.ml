@@ -466,6 +466,7 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
         (tool_result_with_tool_name
            ~tool_name:name
            (Keeper_tool_surface_ops.handle_keeper_delegate
+              ?invocation_ref
               ~submitted_by:ctx.agent_name
               ctx
               args))
@@ -518,51 +519,26 @@ let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~message : tool_
     (handle_keeper_msg ?continuation_channel ~submitted_by ctx message)
 ;;
 
-(** Private direct-delivery stream used by connector and dashboard adapters. *)
-let dispatch_keeper_msg_stream
+let dispatch_keeper_msg_stream_admitted
+      ~admission_token
       ?on_text_delta
       ?on_event
       ?continuation_channel
-      ?on_admission_rejected
-      ?on_admitted
       ctx
       ~message
-  : tool_result option
   =
   let name = "masc_keeper_msg" in
   let ctx = resolve_ctx ctx ~name in
   Some
     (tool_result_with_tool_name
        ~tool_name:name
-       (handle_keeper_msg_stream
+       (handle_keeper_msg_stream_admitted
+          ~admission_token
           ?on_text_delta
           ?on_event
           ?continuation_channel
-          ?on_admission_rejected
-          ?on_admitted
           ctx
           message))
-
-let dispatch_keeper_msg_stream_if_free
-      ?on_text_delta
-      ?on_event
-      ?continuation_channel
-      ctx
-      ~message
-  =
-  let name = "masc_keeper_msg" in
-  let ctx = resolve_ctx ctx ~name in
-  match
-    handle_keeper_msg_stream_if_free
-      ?on_text_delta
-      ?on_event
-      ?continuation_channel
-      ctx
-      message
-  with
-  | `Busy rejection -> `Busy rejection
-  | `Ran result ->
-    `Ran (Some (tool_result_with_tool_name ~tool_name:name result))
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

@@ -86,6 +86,7 @@
   (re_export masc.tool_call_quality_benchmark)
   (re_export masc.keeper_runtime)
   (re_export masc.keeper_chat_delivery_identity)
+  (re_export masc.keeper_chat_operations)
   (re_export masc.keeper_contract)
   ;; RFC-0056 Phase 1K — Compaction_trigger leaf sub-library.
   (re_export masc.compaction_trigger)

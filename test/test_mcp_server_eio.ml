@@ -744,7 +744,7 @@ let test_handle_request_initialize_operator_profile () =
               | _ -> ""
             in
             Alcotest.(check bool) "mentions operator profile" true
-              (contains_substring instructions "seven operator tools");
+              (contains_substring instructions "six operator tools");
             Alcotest.(check bool) "does not mention surface audit" false
               (contains_substring instructions "surface audit");
             Alcotest.(check bool) "mentions confirm workflow" true
@@ -786,7 +786,6 @@ let test_handle_request_tools_list_operator_profile () =
                    [
                      "masc_operator_action";
                      "masc_operator_board_attention_quarantine_requeue";
-                     "masc_operator_chat_recovery_resolve";
                      "masc_operator_confirm";
                      "masc_operator_digest";
                      "masc_operator_snapshot";

@@ -45,10 +45,6 @@ type cycle_outcome =
       { meta : keeper_meta
       ; failure : Keeper_unified_turn.turn_failure
       }
-  | Busy of
-      { meta : keeper_meta
-      ; block : Keeper_turn_admission.autonomous_block
-      }
   | Manual_compaction_failed of
       { meta : keeper_meta
       ; failure : Keeper_manual_compaction.failure
@@ -69,7 +65,6 @@ let rec meta = function
   | Cancelled meta
   | Skipped meta
   | Failed { meta; _ }
-  | Busy { meta; _ }
   | Manual_compaction_failed { meta; _ }
   | Manual_compaction_not_applied { meta; _ } ->
     meta
@@ -80,14 +75,14 @@ let rec turn_failure = function
   | Failed { failure; _ } -> Some failure
   | Manual_compaction_applied { followup; _ } -> turn_failure followup
   | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _
-  | Busy _ | Manual_compaction_failed _ | Manual_compaction_not_applied _ ->
+  | Manual_compaction_failed _ | Manual_compaction_not_applied _ ->
     None
 ;;
 
 let manual_compaction_followup_failure = function
   | Manual_compaction_applied { followup; _ } -> turn_failure followup
   | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _
-  | Failed _ | Busy _ | Manual_compaction_failed _ | Manual_compaction_not_applied _
+  | Failed _ | Manual_compaction_failed _ | Manual_compaction_not_applied _
     ->
     None
 ;;
@@ -96,12 +91,12 @@ let rec deferred_runtime_lane = function
   | Failed { failure; _ } -> failure.Keeper_unified_turn.deferred_runtime_lane
   | Manual_compaction_applied { followup; _ } -> deferred_runtime_lane followup
   | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _
-  | Busy _ | Manual_compaction_failed _ | Manual_compaction_not_applied _ ->
+  | Manual_compaction_failed _ | Manual_compaction_not_applied _ ->
     None
 ;;
 
 (* Body of [run_keeper_cycle], runnable only while holding the keeper's
-   turn slot ([Keeper_turn_admission]). The post-failure meta re-reads stay
+   Keeper Owner child. The post-failure meta re-reads stay
    inside the slot for the same reason as the chat lane: a concurrent turn
    must not interleave with this lane's meta writes (RFC-0225 §1). *)
 let run_keeper_cycle_admitted
@@ -222,37 +217,10 @@ let run_keeper_cycle_with
       ?manual_compaction_requested
       ()
   =
-  let busy_outcome block =
-    (match block with
-     | Keeper_turn_admission.Shutdown_requested operation_id ->
-       Log.Keeper.info
-         "%s: autonomous turn admission closed by shutdown operation %s"
-         meta_after_triage.name
-         (Keeper_shutdown_types.Operation_id.to_string operation_id)
-     | Keeper_turn_admission.Turn_busy in_flight ->
-       (* Another lane holds this keeper's turn slot (RFC-0225 §3.1): skip the
-          cycle and return the pre-cycle meta unchanged. The next heartbeat
-          retries naturally — same shape as the pre-existing skip decisions. *)
-       let holder =
-         match in_flight with
-         | Some { Keeper_turn_admission.lane; started_at } ->
-           Printf.sprintf
-             "%s turn running for %.0fs"
-             (Keeper_turn_admission.lane_to_string lane)
-             (* NDT-OK: gettimeofday renders the in-flight turn age for the log line only *)
-             (Unix.gettimeofday () -. started_at)
-         | None -> "holder info not yet published"
-       in
-       Log.Keeper.info
-         "%s: turn slot busy (%s); skipping autonomous cycle until next heartbeat"
-         meta_after_triage.name
-         holder);
-    Busy { meta = meta_after_triage; block }
-  in
   let run_standard_cycle () =
     run_keeper_cycle_admitted
       ~before_dispatch_authority:
-        (fun () -> Keeper_turn_admission.validate_before_dispatch admission_token)
+        (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ~ctx
@@ -270,19 +238,17 @@ let run_keeper_cycle_with
   match manual_compaction_requested with
   | Some false | None -> run_standard_cycle ()
   | Some true ->
-    (* Manual compaction and its follow-up remain inside the already admitted
-       cycle. The turn mutex is the only live admission authority; durable chat
-       receipts do not add a separate compaction gate. *)
+    (* Manual compaction and its follow-up remain inside the Owner-admitted
+       autonomous child. *)
     (match
        run_manual_compaction
          ~before_dispatch_authority:
            (fun _observation ->
-              Keeper_turn_admission.validate_before_dispatch admission_token)
+              Keeper_turn_dispatch_authority.validate admission_token)
          ~config:ctx.config
          ~meta:meta_after_triage
          ()
      with
-     | `Busy block -> busy_outcome block
      | `Compaction_failed failure ->
        Log.Keeper.error
          ~keeper_name:meta_after_triage.name
@@ -328,7 +294,7 @@ run_keeper_cycle_with
        Keeper_manual_compaction.run_under_admission
          ~before_dispatch_authority:
            (fun _observation ->
-              Keeper_turn_admission.validate_before_dispatch admission_token)
+              Keeper_turn_dispatch_authority.validate admission_token)
          ~config
          ~meta
          ())

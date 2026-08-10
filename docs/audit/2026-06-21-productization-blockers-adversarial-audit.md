@@ -12,7 +12,6 @@ code_refs:
   - lib/keeper/keeper_tool_surface_ops.ml
   - lib/workspace/workspace_gc.ml
   - lib/workspace/workspace_utils_paths_backend.ml
-  - lib/keeper/keeper_chat_queue.ml
   - lib/keeper/keeper_msg_async.ml
   - scripts/check-feature-flag-consistency.sh
   - scripts/check-ssot.sh
@@ -98,7 +97,6 @@ This is a product-control problem. A product operator cannot reason about the ru
 **Evidence**:
 
 - `lib/workspace/workspace_gc.ml:70-87`, `319-340`, and `364-419` use `Sys.readdir`, `Sys.remove`, `Sys.is_directory`, and `Unix.rmdir` inside workspace GC.
-- `lib/keeper/keeper_chat_queue.ml:354-371` scans the keepers directory and loads snapshots during persistence setup.
 - `lib/keeper/keeper_msg_async.ml:268-291` scans async request records for GC.
 - `lib/workspace/workspace_utils_paths_backend.ml:199-209` exposes a shared `list_dir` helper that uses `Sys.readdir` directly for local backends.
 
@@ -161,7 +159,6 @@ This creates inconsistent parse semantics, inconsistent invalid-value telemetry,
 **Evidence**:
 
 - `lib/keeper/keeper_msg_async.ml:535-546` fails only the active request switch for cancellation.
-- `lib/keeper/keeper_chat_queue.ml:350-371` uses per-entry mutexes after a shared registry read.
 - Prior code comments in keeper transition/memory-lane areas indicate known work to avoid shared flush/stall behavior.
 
 **Impact**:

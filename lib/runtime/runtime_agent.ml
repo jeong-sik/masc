@@ -62,7 +62,7 @@ let transport_error_kind_of_exception = function
 type stop_reason =
   Runtime_agent_context.stop_reason =
   | Completed
-  | Yielded_to_chat_waiting of { turns_used : int }
+  | Yielded_to_operation_queued of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | Awaiting_external_effect of { turns_used : int }
   | Yielded_after_repeated_tool_call of
@@ -76,7 +76,7 @@ type stop_reason =
     }
 
 type cooperative_yield_reason =
-  | Chat_waiting
+  | Operation_queued
   | Durable_stimulus_waiting
   | External_effect_deferred
   | Repeated_tool_call of
@@ -763,7 +763,7 @@ let select_agent_result ~checkpoint ~resume ~build =
   | None -> build ()
 
 let stop_reason_of_cooperative_yield ~turns_used = function
-  | Chat_waiting -> Yielded_to_chat_waiting { turns_used }
+  | Operation_queued -> Yielded_to_operation_queued { turns_used }
   | Durable_stimulus_waiting ->
     Yielded_to_durable_stimulus { turns_used }
   | External_effect_deferred -> Awaiting_external_effect { turns_used }
@@ -873,8 +873,8 @@ let run_duration_ms_since started_at =
 
 let dashboard_status_of_stop_reason = function
   | Completed -> Dashboard_agent_core_bridge.Success
-  | Yielded_to_chat_waiting _ ->
-      Dashboard_agent_core_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
+  | Yielded_to_operation_queued _ ->
+      Dashboard_agent_core_bridge.Cancelled { reason = "yielded_to_operation_queued" }
   | Yielded_to_durable_stimulus _ ->
       Dashboard_agent_core_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
   | Awaiting_external_effect _ ->

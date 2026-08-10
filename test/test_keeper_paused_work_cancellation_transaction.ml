@@ -63,7 +63,7 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
          |> require_ok "read persisted Keeper metadata"
          |> require_some "persisted Keeper metadata"
        in
-       (match Keeper_owner_registry.install_from_store ~sw config with
+       (match Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
         | Ok count -> Alcotest.(check int) "installed owner count" 1 count
         | Error error ->
           Alcotest.fail
@@ -195,16 +195,18 @@ let test_pending_cancellation_busy_has_zero_mutation () =
     (fun config keeper_name request ->
        let base_path = config.Workspace.base_path in
        (match
-          Keeper_turn_admission.run_if_free
+          Keeper_owner_registry.run_maintenance_if_idle
             ~base_path
             ~keeper_name
             (fun () -> Transaction.cancel_pending config ~keeper_name request)
         with
-        | `Ran (Error (Transaction.Admission_busy _)) -> ()
-        | `Ran (Error error) ->
+        | Ok (`Ran (Error (Transaction.Admission_busy _))) -> ()
+        | Ok (`Ran (Error error)) ->
           Alcotest.fail (Transaction.error_to_string error)
-        | `Ran (Ok _) | `Busy _ ->
-          Alcotest.fail "pending cancellation was not deferred by turn admission");
+        | Error error ->
+          Alcotest.fail (Keeper_owner_registry.command_error_to_string error)
+        | Ok (`Ran (Ok _) | `Busy _) ->
+          Alcotest.fail "pending cancellation was not deferred by Keeper Owner");
        let state =
          Persistence.load_state_result ~base_path ~keeper_name
          |> require_ok "load admission-busy cancellation lane"

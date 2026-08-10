@@ -58,7 +58,7 @@ let test_of_stop_reason () =
     (TO.of_stop_reason Runtime_agent.Completed);
   check outcome "chat yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
-       (Runtime_agent.Yielded_to_chat_waiting { turns_used = 2 }));
+       (Runtime_agent.Yielded_to_operation_queued { turns_used = 2 }));
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
@@ -142,7 +142,7 @@ let test_external_effect_status_survives_server_projection () =
       check string "typed Gate wait keeps the exact turn ref"
         (Ids.Turn_ref.to_string turn_ref)
         outcome_ref
-    | Stream.Failed _ | Stream.Deferred _ ->
+    | Stream.Failed _ ->
       fail "typed Gate wait did not remain deliverable for a queued turn"
 
 let test_external_effect_status_becomes_persisted_chat_block () =
@@ -181,7 +181,7 @@ let test_terminal_effect_defer_kinds_remain_distinct () =
         (match actual with
          | Runtime_agent.Durable_stimulus_waiting -> "durable_stimulus_waiting"
          | Runtime_agent.External_effect_deferred -> "external_effect_deferred"
-         | Runtime_agent.Chat_waiting -> "chat_waiting"
+         | Runtime_agent.Operation_queued -> "operation_queued"
          | Runtime_agent.Repeated_tool_call _ -> "repeated_tool_call"
          | Runtime_agent.Terminal_tool_completed -> "terminal_tool_completed")
     | Ok Runtime_agent.Continue -> fail (label ^ " unexpectedly continued")
@@ -236,7 +236,7 @@ let test_repeated_exact_tool_call_boundary () =
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
   let chat : Masc.Keeper_agent_run.autonomous_yield_request =
-    { reason = Masc.Keeper_agent_run.Chat_waiting }
+    { reason = Masc.Keeper_agent_run.Operation_queued }
   in
   let durable_stimulus : Masc.Keeper_agent_run.autonomous_yield_request =
     { reason =
@@ -249,7 +249,7 @@ let test_autonomous_yield_boundary_contract () =
     }
   in
   (match F.runtime_yield_reason chat with
-    | Runtime_agent.Chat_waiting -> ()
+    | Runtime_agent.Operation_queued -> ()
     | Runtime_agent.Durable_stimulus_waiting
     | Runtime_agent.External_effect_deferred
     | Runtime_agent.Repeated_tool_call _
@@ -257,7 +257,7 @@ let test_autonomous_yield_boundary_contract () =
      fail "chat request mapped to the durable reason");
   (match F.runtime_yield_reason durable_stimulus with
     | Runtime_agent.Durable_stimulus_waiting -> ()
-    | Runtime_agent.Chat_waiting
+    | Runtime_agent.Operation_queued
     | Runtime_agent.External_effect_deferred
    | Runtime_agent.Repeated_tool_call _
    | Runtime_agent.Terminal_tool_completed ->
@@ -276,7 +276,7 @@ let test_autonomous_yield_boundary_contract () =
          } ->
        true
      | Runtime_agent.Completed
-     | Runtime_agent.Yielded_to_chat_waiting _
+     | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
@@ -289,7 +289,7 @@ let test_autonomous_yield_boundary_contract () =
          Runtime_agent.Terminal_tool_completed
      with
      | Runtime_agent.Completed -> true
-     | Runtime_agent.Yielded_to_chat_waiting _
+     | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
@@ -456,7 +456,7 @@ let test_queued_delivery_requires_exact_turn_ref () =
     | Stream.Failed { kind = Stream.Missing_turn_ref; detail } ->
         check bool (label ^ " has diagnostic detail") true
           (String.trim detail <> "")
-    | Stream.Failed _ | Stream.Delivered _ | Stream.Deferred _ ->
+    | Stream.Failed _ | Stream.Delivered _ ->
         fail (label ^ " must fail with Missing_turn_ref")
   in
   check_failed "missing turn_ref"
@@ -480,34 +480,27 @@ let test_queued_delivery_requires_exact_turn_ref () =
   | Stream.Delivered { outcome_ref } ->
       check string "valid turn_ref is preserved exactly"
         "trace-queued#42" outcome_ref
-  | Stream.Failed _ | Stream.Deferred _ ->
+  | Stream.Failed _ ->
     fail "valid turn_ref must produce Delivered"
 
 let test_terminal_commit_error_cannot_become_delivery_success () =
   let persist_error = "terminal transcript fsync failed" in
-  let check_error label queued_turn =
-    match
-      Stream.For_testing.committed_delivery_outcome
-        ~queued_turn
-        ~turn_ref:None
-        (Error persist_error)
-    with
-    | Error observed -> check string label persist_error observed
-    | Ok None -> fail (label ^ " was downgraded to direct delivery success")
-    | Ok (Some _) -> fail (label ^ " was downgraded to queued delivery success")
-  in
-  check_error "direct commit preserves typed Error" false;
-  check_error "queued commit preserves typed Error" true
+  match
+    Stream.For_testing.committed_delivery_outcome
+      ~turn_ref:None
+      (Error persist_error)
+  with
+  | Error observed -> check string "operation commit preserves typed Error" persist_error observed
+  | Ok _ -> fail "operation commit was downgraded to delivery success"
 
 let test_media_only_queued_reply_uses_delivery_path () =
   match
     Stream.For_testing.empty_reply_delivery_plan
-      ~queued_turn:true
       ~has_visible_blocks:true
       ~has_tool_calls:false
   with
   | `Visible_blocks -> ()
-  | `Tool_calls_only | `Failure | `User_only ->
+  | `Tool_calls_only | `Failure ->
     fail "media-only queued reply must use the delivered assistant path"
 
 let test_media_continuation_uses_assistant_delivery_path () =

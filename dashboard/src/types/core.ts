@@ -683,23 +683,6 @@ export type KeeperTurnOutcome =
   | 'external_effect_pending'
   | 'no_visible_reply'
 
-export type KeeperQueueReceiptLifecycle =
-  | 'pending'
-  | 'inflight'
-  | 'recovery_required'
-  | 'delivered'
-  | 'failed'
-
-export type KeeperQueueReceiptFailureKind =
-  | 'turn_failed'
-  | 'no_visible_reply'
-  | 'transcript_persist_failed'
-  | 'connector_unavailable'
-  | 'delivery_failed'
-  | 'cancelled'
-  | 'internal_error'
-  | 'recovery_interrupted'
-
 export interface KeeperConversationDetails {
   traceId?: string | null
   turnRef?: string | null
@@ -712,20 +695,6 @@ export interface KeeperConversationDetails {
   usage?: KeeperConversationUsage | null
   replyText?: string | null
   turnOutcome?: KeeperTurnOutcome | null
-  /** Durable server receipt for a busy chat message accepted into the Keeper
-   * queue. This is distinct from the browser-local draft queue. */
-  queueReceiptId?: string | null
-  /** Shutdown fence that caused this message to be deferred, when present. */
-  queueShutdownOperationId?: string | null
-  queueRevision?: string | null
-  queuePendingCount?: number | null
-  queueInflightCount?: number | null
-  queueRecoveryRequiredCount?: number | null
-  queueInFlightLane?: string | null
-  queueInFlightStartedAt?: number | null
-  queueState?: KeeperQueueReceiptLifecycle | null
-  queueFailureKind?: KeeperQueueReceiptFailureKind | null
-  queueCorrelationError?: 'missing_outcome_ref' | null
   rawPayload?: unknown
 }
 
@@ -901,11 +870,10 @@ export type KeeperConversationStreamContractSource =
   | 'backend_turn_trace'
   | 'rest_history'
   | 'sse_event'
-  | 'queue_event'
-  | 'queue_poll'
-  | 'pending_request_store'
+  | 'client_operation_store'
+  | 'client_operation_lookup'
   | 'client_local_send'
-  | 'client_reconciliation'
+  | 'client_stream_failure'
 
 export type KeeperConversationStreamContractStatus =
   | 'backend_stream_event'
@@ -914,17 +882,10 @@ export type KeeperConversationStreamContractStatus =
   | 'backend_trace_join'
   | 'history_without_turn_ref'
   | 'history_without_stream_events'
-  | 'queue_request_event'
-  | 'queue_poll_result'
+  | 'client_operation_terminal'
   | 'client_placeholder'
   | 'client_reconciled_history'
   | 'contract_gap'
-
-export type KeeperConversationStreamDeliveryReceipt =
-  | 'client_observed_sse_event'
-  | 'server_durable_receipt'
-  | 'server_lifecycle_replay_only'
-  | 'no_delivery_receipt'
 
 export interface KeeperConversationStreamContract {
   source: KeeperConversationStreamContractSource
@@ -934,7 +895,6 @@ export interface KeeperConversationStreamContract {
   turnRef?: string | null
   traceEventCount?: number | null
   lifecycleEvents?: string[] | null
-  deliveryReceipt?: KeeperConversationStreamDeliveryReceipt | null
   reason?: string | null
 }
 
@@ -968,14 +928,9 @@ export interface KeeperConversationEntry {
   // Direct/async delivery identity for history reconciliation. Local
   // placeholders carry the backend-minted request id once it is observed.
   requestId?: string | null
-  // Queue-lane delivery identity. Persisted history can reference one or more
-  // durable queue receipts instead of a request id.
-  queueReceiptIds?: string[]
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   streamContract?: KeeperConversationStreamContract | null
-  queueSeq?: number | null
-  queueClientActionId?: string | null
   attachments?: KeeperConversationAttachment[]
   /** Exact ordered multimodal input sent to the Keeper. Kept on optimistic and
    * pending rows so editing never reconstructs model input from display text. */

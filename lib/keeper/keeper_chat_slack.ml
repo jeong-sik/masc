@@ -389,10 +389,6 @@ let adapter_loop_with_transport
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
     | Text_message_start { message_id = _; role = _ } ->
         loop ~acc_text ~acc_blocks ~run_id_opt
-    | Queue_request _
-    | Request_terminal _
-    | Queued_turn_deferred _
-    | Chat_queued _
     | Reply_details _
     | Continuation_checkpoint _
     | Agent_core_stream_connected

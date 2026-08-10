@@ -106,28 +106,32 @@ let chat_appended ~keeper_name ~source ?content () =
 let chat_appended_with_audio ~keeper_name ~source ~audio ?content () =
   do_broadcast ~keeper_name ~source ~audio:(Some audio) ?content ()
 
-let turn_event_to_json ~keeper_name ~receipt_id ~event =
-  `Assoc
-    [ ("type", `String "keeper_chat_turn_event")
-     ; ("name", `String keeper_name)
-     ; ("receipt_id", `String receipt_id)
-     ; ("ag_ui_event", Ag_ui.event_to_json event)
-     ; ("ts_unix", `Float (Time_compat.now ()))
-     ]
 
-let turn_event ~keeper_name ~receipt_id ~event =
+let operation_event_to_json ~keeper_name ~operation_id ~event =
+  `Assoc
+    [ "type", `String "keeper_chat_operation_event"
+    ; "name", `String keeper_name
+    ; "operation_id", `String operation_id
+    ; "ag_ui_event", Ag_ui.event_to_json event
+    ; "ts_unix", `Float (Time_compat.now ())
+    ]
+;;
+
+let operation_event ~keeper_name ~operation_id ~event =
   try
-    Sse.broadcast_to Sse.Observers
-      (turn_event_to_json ~keeper_name ~receipt_id ~event)
+    Sse.broadcast_to
+      Sse.Observers
+      (operation_event_to_json ~keeper_name ~operation_id ~event)
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SseBroadcastFailures)
-      ~labels:[ ("keeper", keeper_name); ("site", "chat_turn_event") ]
+      ~labels:[ "keeper", keeper_name; "site", "chat_operation_event" ]
       ();
     Log.Keeper.warn
-      "keeper_chat_broadcast: turn_event name=%s receipt_id=%s failed: %s"
+      "keeper_chat_broadcast: operation_event name=%s operation_id=%s failed: %s"
       keeper_name
-      receipt_id
+      operation_id
       (Printexc.to_string exn)
+;;

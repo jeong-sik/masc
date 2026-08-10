@@ -27,6 +27,7 @@ type pool =
   ; owners_mu : Eio.Mutex.t
   ; owner_handles : Keeper_owner.t list Atomic.t
   ; stopping : bool Atomic.t
+  ; operation_executor : Keeper_owner.operation_executor option
   }
 
 let pools : (string, pool) Hashtbl.t = Hashtbl.create 4
@@ -125,6 +126,50 @@ let store_for pool keeper_name : Keeper_owner.store =
   }
 ;;
 
+let operation_store_path pool keeper_name =
+  Filename.concat
+    (Filename.concat (Workspace.keepers_runtime_dir pool.config) keeper_name)
+    Keeper_chat_operation_store.database_file
+;;
+
+let prepare_operation_store_path pool keeper_name =
+  let path = operation_store_path pool keeper_name in
+  let keeper_dir = Filename.dirname path in
+  try
+    Eio_unix.run_in_systhread ~label:"open Keeper chat operation store" (fun () ->
+      (try Unix.mkdir keeper_dir 0o755 with
+       | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+      if not (Sys.is_directory keeper_dir)
+      then
+        Error
+          (Keeper_owner.Store_unavailable
+             (Printf.sprintf "Keeper runtime path is not a directory: %s" keeper_dir))
+      else Ok path)
+  with
+  | exn ->
+    Error
+      (Keeper_owner.Store_unavailable
+         (Printf.sprintf
+            "failed to open Keeper chat operation store %s: %s"
+            path
+            (Printexc.to_string exn)))
+;;
+
+let start_owner pool ~keeper_name ~initial_meta =
+  match prepare_operation_store_path pool keeper_name with
+  | Error _ as error -> error
+  | Ok operation_store_path ->
+    Keeper_owner.start
+      ~sw:pool.sw
+      ~store:(store_for pool keeper_name)
+      ~operation_store_path
+      (* NDT-OK: wall time is injected once at the Owner persistence boundary. *)
+      ~now:Unix.gettimeofday
+      ~operation_executor:pool.operation_executor
+      ~keeper_name
+      ~initial_meta
+;;
+
 let refresh_owner_handles pool =
   let owner_handles =
     Hashtbl.to_seq_values pool.owners
@@ -161,9 +206,8 @@ let ensure_in_pool pool meta =
       | Some owner -> Ok owner
       | None ->
         (match
-          Keeper_owner.start
-            ~sw:pool.sw
-            ~store:(store_for pool meta.name)
+          start_owner
+            pool
             ~keeper_name:meta.name
             ~initial_meta:(Some meta)
          with
@@ -187,11 +231,7 @@ let ensure_empty_in_pool pool keeper_name =
          | Some _ -> Error (Owner_unavailable keeper_name)
          | None ->
            (match
-              Keeper_owner.start
-                ~sw:pool.sw
-                ~store:(store_for pool keeper_name)
-                ~keeper_name
-                ~initial_meta:None
+              start_owner pool ~keeper_name ~initial_meta:None
             with
             | Error error -> Error (Owner_initialization_failed error)
             | Ok owner ->
@@ -201,7 +241,7 @@ let ensure_empty_in_pool pool keeper_name =
               Ok owner)))
 ;;
 
-let install_from_store ~sw config =
+let install_from_store ~sw ~operation_executor config =
   let base_path = pool_key config.Workspace.base_path in
   match load_all config with
   | Error _ as error -> error
@@ -214,6 +254,7 @@ let install_from_store ~sw config =
       ; owners_mu = Eio.Mutex.create ()
       ; owner_handles = Atomic.make []
       ; stopping = Atomic.make false
+      ; operation_executor
       }
     in
     let installed =
@@ -238,6 +279,14 @@ let install_from_store ~sw config =
         | meta :: rest ->
           (match ensure_in_pool pool meta with
            | Ok _ -> start_all (count + 1) rest
+           | Error (Owner_initialization_failed error) ->
+             let detail = Keeper_owner.error_to_string error in
+             Log.Keeper.error
+               "keeper_owner: owner unavailable keeper=%s error=%s"
+               meta.name
+               detail;
+             Hashtbl.replace pool.unavailable meta.name detail;
+             start_all count rest
            | Error Inventory_stopping ->
              Error
                (Inventory_load_failed
@@ -245,8 +294,7 @@ let install_from_store ~sw config =
                   ; detail = "root switch stopped during owner installation"
                   })
            | Error
-               (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
-               | Owner_initialization_failed _) ->
+               (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _) ->
              Error
                (Inventory_load_failed
                   { keeper_name = Some meta.name
@@ -276,6 +324,183 @@ let get ~base_path ~keeper_name =
         (match Hashtbl.find_opt pool.unavailable keeper_name with
          | Some _ -> Error (Owner_unavailable keeper_name)
          | None -> Error (Owner_not_found keeper_name)))
+;;
+
+let operation_projection ~base_path ~keeper_name =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error error
+  | Ok owner -> Ok (Keeper_owner.operation_projection owner)
+;;
+
+let shutdown_operation_id ~base_path ~keeper_name =
+  match get ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner -> Ok (Keeper_owner.shutdown_operation_id owner)
+;;
+
+let shutdown_fence_error detail =
+  Command_rejected
+    (Keeper_owner.Store_unavailable ("shutdown intake fence conflict: " ^ detail))
+;;
+
+let begin_shutdown ~base_path ~keeper_name ~operation_id =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Eio.Cancel.protect (fun () ->
+      match Keeper_owner.begin_shutdown owner ~operation_id with
+      | Error error -> Error (Command_rejected error)
+      | Ok owner_result ->
+        let owner_id =
+          match owner_result with
+          | Keeper_owner.Shutdown_reserved reservation
+          | Keeper_owner.Shutdown_already_reserved reservation ->
+            reservation.operation_id
+        in
+        let fence_result =
+          Keeper_shutdown_intake_fence.begin_shutdown
+            ~base_path
+            ~keeper_name
+            ~operation_id:owner_id
+        in
+        let fence_id =
+          match fence_result with
+          | Keeper_shutdown_intake_fence.Reserved reservation
+          | Keeper_shutdown_intake_fence.Already_reserved reservation ->
+            reservation.operation_id
+        in
+        if Keeper_shutdown_types.Operation_id.equal owner_id fence_id
+        then Ok owner_result
+        else
+          Error
+            (shutdown_fence_error
+               (Printf.sprintf
+                  "keeper=%s owner=%s intake=%s"
+                  keeper_name
+                  (Keeper_shutdown_types.Operation_id.to_string owner_id)
+                  (Keeper_shutdown_types.Operation_id.to_string fence_id))))
+;;
+
+let rollback_shutdown ~base_path ~keeper_name ~operation_id =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Eio.Cancel.protect (fun () ->
+      match
+        Keeper_shutdown_intake_fence.rollback_shutdown
+          ~base_path
+          ~keeper_name
+          ~operation_id
+      with
+      | Keeper_shutdown_intake_fence.Reserved_by_other existing ->
+        Error
+          (shutdown_fence_error
+             (Printf.sprintf
+                "keeper=%s rollback_owner=%s intake_owner=%s"
+                keeper_name
+                (Keeper_shutdown_types.Operation_id.to_string operation_id)
+                (Keeper_shutdown_types.Operation_id.to_string existing)))
+      | Keeper_shutdown_intake_fence.Rolled_back
+      | Keeper_shutdown_intake_fence.Not_reserved ->
+        Keeper_owner.rollback_shutdown owner ~operation_id
+        |> Result.map_error (fun error -> Command_rejected error))
+;;
+
+let restore_shutdown ~base_path ~keeper_name ~operation_id =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Eio.Cancel.protect (fun () ->
+      match
+        Keeper_shutdown_intake_fence.restore_shutdown
+          ~base_path
+          ~keeper_name
+          ~operation_id
+      with
+      | Keeper_shutdown_intake_fence.Restore_conflict existing ->
+        Error
+          (shutdown_fence_error
+             (Printf.sprintf
+                "keeper=%s restore_owner=%s intake_owner=%s"
+                keeper_name
+                (Keeper_shutdown_types.Operation_id.to_string operation_id)
+                (Keeper_shutdown_types.Operation_id.to_string existing)))
+      | Keeper_shutdown_intake_fence.Restored
+      | Keeper_shutdown_intake_fence.Already_restored ->
+        Keeper_owner.restore_shutdown owner ~operation_id
+        |> Result.map_error (fun error -> Command_rejected error))
+;;
+
+let transition_shutdown
+      ~base_path
+      ~keeper_name
+      ~from_operation_id
+      ~to_operation_id
+  =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Eio.Cancel.protect (fun () ->
+      match
+        Keeper_owner.transition_shutdown owner ~from_operation_id ~to_operation_id
+      with
+      | Error error -> Error (Command_rejected error)
+      | Ok owner_result ->
+        ignore
+          (Keeper_shutdown_intake_fence.transition_shutdown
+             ~base_path
+             ~keeper_name
+             ~from_operation_id
+             ~to_operation_id
+            : Keeper_shutdown_intake_fence.transition_result);
+        let owner_id = Keeper_owner.shutdown_operation_id owner in
+        let fence_id =
+          Keeper_shutdown_intake_fence.shutdown_operation_id
+            ~base_path
+            ~keeper_name
+        in
+        let same_id =
+          match owner_id, fence_id with
+          | None, None -> true
+          | Some left, Some right ->
+            Keeper_shutdown_types.Operation_id.equal left right
+          | None, Some _ | Some _, None -> false
+        in
+        if same_id
+        then Ok owner_result
+        else
+          Error
+            (shutdown_fence_error
+               (Printf.sprintf "keeper=%s transition results diverged" keeper_name)))
+;;
+
+let await_idle_after_shutdown ~base_path ~keeper_name =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    (match Keeper_owner.await_idle_after_shutdown owner with
+     | Error error -> Error (Command_rejected error)
+     | Ok () ->
+       Keeper_shutdown_intake_fence.await_idle_after_shutdown
+         ~base_path
+         ~keeper_name;
+       Ok ())
+;;
+
+let run_autonomous_if_idle ~base_path ~keeper_name run =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Keeper_owner.run_autonomous_if_idle owner run
+    |> Result.map_error (fun error -> Command_rejected error)
+;;
+
+let run_maintenance_if_idle ~base_path ~keeper_name run =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Keeper_owner.run_maintenance_if_idle owner run
+    |> Result.map_error (fun error -> Command_rejected error)
 ;;
 
 let refresh_registry_projection ?lifecycle_token entry meta =
@@ -341,6 +566,43 @@ let commit_turn_runtime ~base_path ~keeper_name ~before ~after =
       (Keeper_owner_reducer.Commit_turn_runtime delta)
 ;;
 
+let with_owner_command ~base_path ~keeper_name f =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    f owner |> Result.map_error (fun error -> Command_rejected error)
+;;
+
+let exact_operation ~base_path ~keeper_name operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.exact_operation owner operation_id)
+;;
+
+let submit_operation ~base_path ~keeper_name ~operation_id ~source ~input =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.submit_operation owner ~operation_id ~source ~input)
+;;
+
+let list_queued_operations ~base_path ~keeper_name ~after_sequence ~limit =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.list_queued_operations owner ~after_sequence ~limit)
+;;
+
+let edit_queued_operation ~base_path ~keeper_name ~operation_id ~input =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.edit_queued_operation owner ~operation_id ~input)
+;;
+
+let move_queued_operation_to_end ~base_path ~keeper_name operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.move_queued_operation_to_end owner operation_id)
+;;
+
+let cancel_queued_operation ~base_path ~keeper_name operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.cancel_queued_operation owner operation_id)
+;;
+
 let create_meta ~base_path meta =
   match find_pool base_path with
   | Error error -> Error (Command_lookup_failed error)
@@ -370,6 +632,23 @@ let all_projections ~base_path =
   | Error _ as error -> error
   | Ok pool ->
     Ok (List.map Keeper_owner.projection (Atomic.get pool.owner_handles))
+;;
+
+let begin_stopping_all ~base_path =
+  let base_path = pool_key base_path in
+  match
+    Stdlib.Mutex.protect pools_mu (fun () -> Hashtbl.find_opt pools base_path)
+  with
+  | None -> Error (Inventory_not_installed base_path)
+  | Some pool ->
+    Atomic.set pool.stopping true;
+    let owners = Atomic.get pool.owner_handles in
+    let results =
+      Eio.Fiber.List.map
+        (fun owner -> Keeper_owner.begin_stopping owner)
+        owners
+    in
+    Ok results
 ;;
 
 module For_testing = struct

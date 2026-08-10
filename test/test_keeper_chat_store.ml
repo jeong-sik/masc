@@ -804,7 +804,7 @@ let test_identified_tool_only_history_is_not_trimmed () =
         | Error detail -> Alcotest.fail detail
       in
       let delivery_key =
-        Keeper_chat_delivery_identity.Direct_request request_id
+        Keeper_chat_delivery_identity.Operation request_id
       in
       (match
          K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
@@ -1881,7 +1881,7 @@ let test_turn_ref_malformed_reads_none () =
 (* The idempotent append-once paths persist the exact delivery identity on
    the row; load decodes it back and to_json_array exposes it verbatim so the
    dashboard can reconcile a history reload against its optimistic turn rows
-   on the exact [delivery_key.request_id]. *)
+   on the exact [delivery_key.operation_id]. *)
 let test_delivery_key_round_trip_to_json_array () =
   let base_dir = temp_base_path "keeper-chat-store-delivery-key" in
   Fun.protect
@@ -1897,7 +1897,7 @@ let test_delivery_key_round_trip_to_json_array () =
         | Error detail -> Alcotest.fail detail
       in
       let delivery_key =
-        Keeper_chat_delivery_identity.Direct_request request_id
+        Keeper_chat_delivery_identity.Operation request_id
       in
       (match
          K.append_user_message_once ~base_dir ~keeper_name ~delivery_key
@@ -1935,11 +1935,11 @@ let test_delivery_key_round_trip_to_json_array () =
           List.iter
             (fun row ->
               let key_json = row |> member "delivery_key" in
-              Alcotest.(check string) "delivery_key kind" "direct_request"
+              Alcotest.(check string) "delivery_key kind" "operation"
                 (key_json |> member "kind" |> to_string);
-              Alcotest.(check string) "delivery_key request_id"
+              Alcotest.(check string) "delivery_key operation_id"
                 "kmsg-turn-identity-1"
-                (key_json |> member "request_id" |> to_string))
+                (key_json |> member "operation_id" |> to_string))
             rows
       | _ -> Alcotest.fail "to_json_array must return a list")
 

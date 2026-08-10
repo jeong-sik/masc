@@ -107,13 +107,4 @@ require_text \
   "lib/keeper/keeper_msg_async.mli" \
   "val list_for_keeper" \
   "keeper_msg async list"
-require_text \
-  "lib/keeper/keeper_turn_admission.mli" \
-  "async [Keeper_msg_async] dispatch" \
-  "async keeper_msg admission contract"
-require_text \
-  "lib/keeper/keeper_turn_admission.mli" \
-  "run_serialized" \
-  "keeper turn serialized admission"
-
 echo "execute-async-surface: PASS"

@@ -14,7 +14,6 @@ import type {
   KeeperConversationRole,
   KeeperConversationSource,
   KeeperConversationStreamContract,
-  KeeperConversationStreamDeliveryReceipt,
   KeeperConversationStreamContractSource,
   KeeperConversationStreamContractStatus,
   KeeperConversationStreamState,
@@ -52,8 +51,15 @@ export const THREAD_ENTRY_CAP = 200
 
 // --- Private stream tracking ---
 
-const keeperStreamControllers = new Map<string, AbortController>()
-const keeperStreamEntryIds = new Map<string, string>()
+interface KeeperActiveStream {
+  entryId: string
+  controller: AbortController
+}
+
+// keeperName -> operationId -> stream. Map insertion order is the owner FIFO
+// order, so the first entry is the currently runnable operation and later
+// entries remain independently cancellable while queued.
+const keeperActiveStreams = new Map<string, Map<string, KeeperActiveStream>>()
 // requestId -> keeperName: which queued requests a live in-session send
 // stream currently owns. Resume defers to this so an SPA remount does not
 // spin up a second handler/entry for a request the live send already drives.
@@ -62,6 +68,10 @@ const keeperStreamEntryIds = new Map<string, string>()
 // Module state, so it survives unmount/remount exactly like the controller
 // maps above; a full page reload resets it, leaving cold-start resume intact.
 const liveSendRequestOwners = new Map<string, string>()
+
+export function _resetActiveKeeperStreamsForTests(): void {
+  keeperActiveStreams.clear()
+}
 
 // --- Helpers ---
 
@@ -261,7 +271,6 @@ export function keeperStreamContract(
     turnRef?: string | null
     traceEventCount?: number | null
     lifecycleEvents?: string[] | null
-    deliveryReceipt?: KeeperConversationStreamDeliveryReceipt | null
     reason?: string | null
   } = {},
 ): KeeperConversationStreamContract {
@@ -273,7 +282,6 @@ export function keeperStreamContract(
     turnRef: opts.turnRef ?? undefined,
     traceEventCount: opts.traceEventCount ?? undefined,
     lifecycleEvents: opts.lifecycleEvents ?? undefined,
-    deliveryReceipt: opts.deliveryReceipt ?? undefined,
     reason: opts.reason ?? undefined,
   })
 }
@@ -290,10 +298,7 @@ export function keeperClientObservedSseStreamContract(
     reason?: string | null
   } = {},
 ): KeeperConversationStreamContract {
-  return keeperStreamContract(source, status, {
-    ...opts,
-    deliveryReceipt: 'client_observed_sse_event',
-  })
+  return keeperStreamContract(source, status, opts)
 }
 
 function normalizeStreamContractSource(value: unknown): KeeperConversationStreamContractSource | null {
@@ -308,16 +313,14 @@ function normalizeStreamContractSource(value: unknown): KeeperConversationStream
       return 'rest_history'
     case 'sse_event':
       return 'sse_event'
-    case 'queue_event':
-      return 'queue_event'
-    case 'queue_poll':
-      return 'queue_poll'
-    case 'pending_request_store':
-      return 'pending_request_store'
+    case 'client_operation_store':
+      return 'client_operation_store'
+    case 'client_operation_lookup':
+      return 'client_operation_lookup'
     case 'client_local_send':
       return 'client_local_send'
-    case 'client_reconciliation':
-      return 'client_reconciliation'
+    case 'client_stream_failure':
+      return 'client_stream_failure'
     default:
       return null
   }
@@ -337,29 +340,14 @@ function normalizeStreamContractStatus(value: unknown): KeeperConversationStream
       return 'history_without_turn_ref'
     case 'history_without_stream_events':
       return 'history_without_stream_events'
-    case 'queue_request_event':
-      return 'queue_request_event'
-    case 'queue_poll_result':
-      return 'queue_poll_result'
+    case 'client_operation_terminal':
+      return 'client_operation_terminal'
     case 'client_placeholder':
       return 'client_placeholder'
     case 'client_reconciled_history':
       return 'client_reconciled_history'
     case 'contract_gap':
       return 'contract_gap'
-    default:
-      return null
-  }
-}
-
-function normalizeStreamDeliveryReceipt(value: unknown): KeeperConversationStreamDeliveryReceipt | null {
-  switch (asString(value)?.trim()) {
-    case 'client_observed_sse_event':
-      return 'client_observed_sse_event'
-    case 'server_lifecycle_replay_only':
-      return 'server_lifecycle_replay_only'
-    case 'no_delivery_receipt':
-      return 'no_delivery_receipt'
     default:
       return null
   }
@@ -376,7 +364,6 @@ function normalizeStreamContract(raw: unknown): KeeperConversationStreamContract
     turnRef: asString(raw.turn_ref) ?? asString(raw.turnRef) ?? null,
     traceEventCount: asNumber(raw.trace_event_count) ?? asNumber(raw.traceEventCount) ?? null,
     lifecycleEvents: normalizeStringArray(raw.lifecycle_events) ?? normalizeStringArray(raw.lifecycleEvents) ?? null,
-    deliveryReceipt: normalizeStreamDeliveryReceipt(raw.delivery_receipt) ?? normalizeStreamDeliveryReceipt(raw.deliveryReceipt) ?? null,
     reason: asString(raw.reason) ?? null,
   })
 }
@@ -907,26 +894,18 @@ function fallbackHistoryEntryId(
 
 interface DeliveryIdentity {
   requestId: string | null
-  queueReceiptIds: string[]
 }
 
 // Typed delivery identity carried on persisted history rows. Unknown or
 // malformed shapes fail closed for reconciliation without dropping the row.
 function deliveryIdentityFromKey(raw: unknown): DeliveryIdentity {
-  if (!isRecord(raw)) return { requestId: null, queueReceiptIds: [] }
+  if (!isRecord(raw)) return { requestId: null }
   const kind = asString(raw.kind)
-  if (kind === 'direct_request' || kind === 'async_request') {
+  if (kind === 'operation') {
     const requestId = asString(raw.request_id)?.trim() ?? ''
-    return { requestId: requestId || null, queueReceiptIds: [] }
+    return { requestId: requestId || null }
   }
-  const rawReceiptIds = normalizeStringArray(raw.receipt_ids)
-  if (kind === 'queue_receipts' && rawReceiptIds !== null) {
-    const queueReceiptIds = rawReceiptIds
-      .map(receiptId => receiptId.trim())
-      .filter((receiptId): receiptId is string => receiptId.length > 0)
-    return { requestId: null, queueReceiptIds: [...new Set(queueReceiptIds)] }
-  }
-  return { requestId: null, queueReceiptIds: [] }
+  return { requestId: null }
 }
 
 function normalizeHistoryEntry(
@@ -988,7 +967,6 @@ function normalizeHistoryEntry(
     timestamp,
     turnRef,
     requestId: deliveryIdentity.requestId,
-    queueReceiptIds: deliveryIdentity.queueReceiptIds,
     delivery,
     error: delivery === 'transport_failure' ? rawText : null,
     streamState: null,
@@ -1108,7 +1086,6 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
     delivery: 'streaming',
     streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
       eventName: 'TEXT_MESSAGE_CONTENT',
-      deliveryReceipt: 'client_observed_sse_event',
     }),
   }))
 }
@@ -1195,7 +1172,6 @@ function writeAssistantThinkingText(
       delivery: 'streaming',
       streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
         eventName: 'KEEPER_THINKING_DELTA',
-        deliveryReceipt: 'client_observed_sse_event',
       }),
     }
   })
@@ -1399,22 +1375,11 @@ export function finalizeAssistantEntry(
 
 // Dedup key for merging server history with locally-appended entries.
 // Server ids win when both sides have already converged. User/assistant
-// rows converge through exact producer identities only: request id first,
-// then a shared queue receipt, then turn_ref when neither side carries a
-// delivery key. Conflicting delivery identities fail closed. The legacy
-// role+text heuristic stays hard-cut because it collapsed distinct same-text
-// turns. Tool rows only dedup by their explicit `tool-<tool_call_id>` id.
-function queueReceiptIds(entry: KeeperConversationEntry): string[] {
-  const receiptIds = new Set(
-    (entry.queueReceiptIds ?? [])
-      .map(receiptId => receiptId.trim())
-      .filter(receiptId => receiptId.length > 0),
-  )
-  const localReceiptId = entry.details?.queueReceiptId?.trim()
-  if (localReceiptId) receiptIds.add(localReceiptId)
-  return [...receiptIds]
-}
-
+// rows converge through exact producer identities only: operation id first,
+// then turn_ref when neither side carries an operation identity. Conflicting
+// identities fail closed. Role+text is not an identity because it collapses
+// distinct same-text turns. Tool rows only dedup by their explicit
+// `tool-<tool_call_id>` id.
 function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,
@@ -1425,16 +1390,7 @@ function sameConversationEntry(
   const leftRequestId = left.requestId?.trim()
   const rightRequestId = right.requestId?.trim()
   if (leftRequestId && rightRequestId) return leftRequestId === rightRequestId
-
-  const leftReceiptIds = queueReceiptIds(left)
-  const rightReceiptIds = queueReceiptIds(right)
-  if (leftReceiptIds.length > 0 && rightReceiptIds.length > 0) {
-    const rightReceipts = new Set(rightReceiptIds)
-    return leftReceiptIds.some(receiptId => rightReceipts.has(receiptId))
-  }
-  if (leftRequestId || rightRequestId || leftReceiptIds.length > 0 || rightReceiptIds.length > 0) {
-    return false
-  }
+  if (leftRequestId || rightRequestId) return false
 
   const leftTurnRef = left.turnRef?.trim()
   const rightTurnRef = right.turnRef?.trim()
@@ -1484,28 +1440,6 @@ function mergeLocalAssistantTraceSteps(
       traceSteps: localTraceSourceByRequestId.traceSteps,
     }
   }
-  // Queue-lane join: a keeper that was busy answers through the chat queue, so
-  // the stream carries KEEPER_CHAT_QUEUED (receipt id, no request id). Such a
-  // placeholder has neither request id nor turnRef, and its receipt is the only
-  // producer identity shared with the history row. Without this the trace stays
-  // unmerged and the transcript renders a second "턴 타임라인".
-  const historyReceiptIds = new Set(queueReceiptIds(historyEntry))
-  const localTraceSourceByReceipt = historyReceiptIds.size > 0
-    ? localEntries.find(
-        entry =>
-          entry.role === 'assistant'
-          && (entry.traceSteps?.length ?? 0) > 0
-          && !consumed.has(entry.id)
-          && queueReceiptIds(entry).some(receiptId => historyReceiptIds.has(receiptId)),
-      )
-    : undefined
-  if (localTraceSourceByReceipt?.traceSteps?.length) {
-    consumed.add(localTraceSourceByReceipt.id)
-    return {
-      ...historyEntry,
-      traceSteps: localTraceSourceByReceipt.traceSteps,
-    }
-  }
   const historyTurnRef = historyEntry.turnRef?.trim()
   const localTraceSourceByTurnRef = historyTurnRef
     ? localEntries.find(
@@ -1549,19 +1483,6 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       const isCoveredToolRow = entry.role === 'tool' && coveredByHistory
       // In-flight (sending/streaming/queued) entries represent live state and
       // must survive history merges until they finalize.
-      // A terminal durable-receipt observation is also operator evidence, not
-      // a duplicate assistant reply: keep it alongside the canonical history
-      // row so its Pending/Inflight/Delivered/Failed lifecycle remains visible.
-      // ...unless the history row already carries this placeholder's identity
-      // and its trace was folded in above (mergeLocalAssistantTraceSteps).
-      // A queue-lane placeholder whose stream died holds only the trace and an
-      // empty text; keeping it next to the converged history row renders the
-      // same turn twice, and only the placeholder copy shows per-tool
-      // durations (live 2026-07-28).
-      const isReceiptObservation =
-        entry.role === 'assistant'
-        && Boolean(entry.details?.queueReceiptId)
-        && !coveredByHistory
       // A converged assistant row supersedes its own placeholder even while the
       // placeholder still reads in-flight: a stream that died before
       // REPLY_DETAILS leaves `sending` set forever, so treating in-flight as
@@ -1571,7 +1492,6 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       const supersededByHistory = entry.role === 'assistant' && coveredByHistory
       const shouldKeepLocalEntry = !supersededByHistory
         && (isInFlightDelivery(entry.delivery)
-          || isReceiptObservation
           || !coveredByHistory)
       return entry.delivery !== 'history' && !isCoveredToolRow && shouldKeepLocalEntry
     },
@@ -1788,23 +1708,34 @@ export function setStatusDetail(name: string, detail: KeeperStatusDetail): void 
 
 // --- Stream controller management ---
 
-export function setActiveStream(name: string, entryId: string, controller: AbortController): void {
-  keeperStreamEntryIds.set(name, entryId)
-  keeperStreamControllers.set(name, controller)
+export function setActiveStream(
+  name: string,
+  operationId: string,
+  entryId: string,
+  controller: AbortController,
+): void {
+  const streams = keeperActiveStreams.get(name) ?? new Map<string, KeeperActiveStream>()
+  streams.set(operationId, { entryId, controller })
+  keeperActiveStreams.set(name, streams)
 }
 
-export function clearActiveStream(name: string): void {
-  keeperStreamEntryIds.delete(name)
-  keeperStreamControllers.delete(name)
-  clearActiveStreamRequestId(name)
+export function clearActiveStream(name: string, operationId: string): void {
+  const streams = keeperActiveStreams.get(name)
+  streams?.delete(operationId)
+  if (streams?.size === 0) keeperActiveStreams.delete(name)
+  releaseActiveStreamRequestId(operationId)
 }
 
 export function activeStreamEntryId(name: string): string | null {
-  return keeperStreamEntryIds.get(name) ?? null
+  return keeperActiveStreams.get(name)?.values().next().value?.entryId ?? null
+}
+
+export function activeStreamOperationId(name: string): string | null {
+  return keeperActiveStreams.get(name)?.keys().next().value ?? null
 }
 
 export function getStreamController(name: string): AbortController | undefined {
-  return keeperStreamControllers.get(name)
+  return keeperActiveStreams.get(name)?.values().next().value?.controller
 }
 
 export function setActiveStreamRequestId(name: string, requestId: string): void {
@@ -1844,7 +1775,6 @@ export function claimLiveSendRequest(requestId: string, name: string): void {
   const id = requestId.trim()
   const keeperName = name.trim()
   if (!id || !keeperName) return
-  clearActiveStreamRequestId(keeperName)
   liveSendRequestOwners.set(id, keeperName)
 }
 

@@ -115,7 +115,7 @@ let run_keeper_cycle = Cycle.run_keeper_cycle
 type keepalive_cycle_status =
   | Turn_cycle_completed
   | Turn_cycle_crashed
-  | Turn_cycle_busy of Keeper_turn_admission.autonomous_block
+  | Turn_cycle_busy of Keeper_owner.autonomous_block
 
 type keepalive_cycle_accounting =
   { record_turn_status : bool
@@ -251,7 +251,6 @@ let rec compaction_outcomes_of_cycle_outcome = function
   | Cycle.Input_required _
   | Cycle.Cancelled _
   | Cycle.Skipped _
-  | Cycle.Busy _
   | Cycle.Manual_compaction_not_applied _ ->
     []
 ;;
@@ -336,10 +335,11 @@ let run_keepalive_unified_turn
   then { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
   else
     match
-      Keeper_turn_admission.run_if_free_with_token
+      Keeper_owner_registry.run_autonomous_if_idle
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
-        (fun admission_token ->
+        (fun () ->
+           Keeper_turn_dispatch_authority.run (fun admission_token ->
     let consumed_stimuli = ref [] in
     let pending_selection
       : Keeper_event_queue_state.pending_selection option ref
@@ -362,7 +362,6 @@ let run_keepalive_unified_turn
           | Cycle.Input_required _
           | Cycle.Cancelled _
           | Cycle.Skipped _
-          | Cycle.Busy _
           | Cycle.Manual_compaction_failed _
           | Cycle.Manual_compaction_not_applied _
           | Cycle.Manual_compaction_applied _ )
@@ -421,7 +420,7 @@ let run_keepalive_unified_turn
                ~selection)
       in
       (match
-         Keeper_turn_admission.install_before_dispatch_authority
+         Keeper_turn_dispatch_authority.install
            admission_token
            selected_source_authority
        with
@@ -758,7 +757,6 @@ let run_keepalive_unified_turn
            | Cycle.Input_required _
            | Cycle.Cancelled _
            | Cycle.Skipped _
-           | Cycle.Busy _
            | Cycle.Manual_compaction_applied _
            | Cycle.Manual_compaction_failed _
            | Cycle.Manual_compaction_not_applied _ )
@@ -805,8 +803,7 @@ let run_keepalive_unified_turn
                ( Cycle.Checkpointed _
                | Cycle.Input_required _
                | Cycle.Cancelled _
-               | Cycle.Skipped _
-               | Cycle.Busy _ )
+               | Cycle.Skipped _ )
            | None ->
              ());
       (let compaction_outcomes =
@@ -868,15 +865,24 @@ let run_keepalive_unified_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         exn;
-      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed })
-  with
-  | `Ran outcome -> outcome
-  | `Busy block ->
+      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed }))
+    with
+  | Ok (`Ran outcome) -> outcome
+  | Ok (`Busy ((Keeper_owner.Turn_busy (Some in_flight)) as block)) ->
     Log.Keeper.info
       ~keeper_name:meta_after_triage.name
-      "keeper turn admission busy before stimulus intake: %s"
-      (Keeper_turn_admission.autonomous_block_to_string block);
+      "keeper owner busy before stimulus intake: %s"
+      (Keeper_owner.autonomous_block_to_string
+         (Keeper_owner.Turn_busy (Some in_flight)));
     { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
+  | Ok (`Busy block) ->
+    { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
+  | Error error ->
+    Log.Keeper.error
+      ~keeper_name:meta_after_triage.name
+      "keeper owner rejected autonomous turn: %s"
+      (Keeper_owner_registry.command_error_to_string error);
+    { meta = meta_after_triage; cycle_status = Turn_cycle_crashed }
 ;;
 
 let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat
@@ -1179,14 +1185,14 @@ let run_heartbeat_loop
               ~base_path:ctx.config.base_path
               m.name
               ~reasons:
-                [ "turn_admission_"
-                  ^ Keeper_turn_admission.autonomous_block_kind block
+                [ "keeper_owner_"
+                  ^ Keeper_owner.autonomous_block_kind block
                 ];
             Log.Keeper.info
               ~keeper_name:m.name
-              "turn admission deferred autonomous work: %s; this keepalive cycle \
+              "Keeper Owner deferred autonomous work: %s; this keepalive cycle \
                records no turn status, crash, or work-health refresh"
-              (Keeper_turn_admission.autonomous_block_to_string block)
+              (Keeper_owner.autonomous_block_to_string block)
           | Turn_cycle_completed | Turn_cycle_crashed -> assert false)
         else if not lifecycle_blocked
         then (

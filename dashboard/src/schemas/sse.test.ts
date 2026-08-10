@@ -231,11 +231,11 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
-  it('accepts a receipt-keyed queued Keeper AG-UI event', () => {
+  it('accepts an operation-keyed Keeper AG-UI event', () => {
     const r = SSEMessageSchema.safeParse({
-      type: 'keeper_chat_turn_event',
+      type: 'keeper_chat_operation_event',
       name: 'sangsu',
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      operation_id: 'kmsg-operation-1',
       ts_unix: 1_712_000_000,
       ag_ui_event: {
         type: 'TEXT_MESSAGE_CONTENT',
@@ -249,11 +249,11 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
-  it('accepts an operator-visible projection error for a queued turn', () => {
+  it('accepts an operator-visible projection error for an operation', () => {
     const r = SSEMessageSchema.safeParse({
-      type: 'keeper_chat_turn_event',
+      type: 'keeper_chat_operation_event',
       name: 'sangsu',
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      operation_id: 'kmsg-operation-1',
       ag_ui_event: {
         type: 'RUN_ERROR',
         threadId: 'keeper-consumer:sangsu',
@@ -266,9 +266,9 @@ describe('SSEMessageSchema', () => {
 
   it('rejects an untyped Keeper custom event name', () => {
     const r = SSEMessageSchema.safeParse({
-      type: 'keeper_chat_turn_event',
+      type: 'keeper_chat_operation_event',
       name: 'sangsu',
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      operation_id: 'kmsg-operation-1',
       ag_ui_event: {
         type: 'CUSTOM',
         threadId: 'keeper-consumer:sangsu',
@@ -282,9 +282,9 @@ describe('SSEMessageSchema', () => {
 
   it('rejects fields outside the exact AG-UI event variant', () => {
     const r = SSEMessageSchema.safeParse({
-      type: 'keeper_chat_turn_event',
+      type: 'keeper_chat_operation_event',
       name: 'sangsu',
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
+      operation_id: 'kmsg-operation-1',
       ag_ui_event: {
         type: 'TEXT_MESSAGE_CONTENT',
         threadId: 'keeper-consumer:sangsu',
@@ -296,11 +296,10 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
-  it('rejects a queued turn event without an exact durable receipt', () => {
+  it('rejects the removed Keeper turn event contract', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'keeper_chat_turn_event',
       name: 'sangsu',
-      receipt_id: 'not-a-receipt',
       ag_ui_event: {
         type: 'RUN_STARTED',
         threadId: 'keeper-consumer:sangsu',
@@ -314,7 +313,7 @@ describe('SSEMessageSchema', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'keeper_waiting_inventory_changed',
       keeper_name: 'keeper-1',
-      queue_kind: 'chat_queue',
+      queue_kind: 'chat_operation',
       ts_unix: 1_712_000_000,
     })
     expect(r.success).toBe(true)
@@ -343,7 +342,7 @@ describe('SSEMessageSchema', () => {
   })
 
   it.each([
-    { type: 'keeper_waiting_inventory_changed', queue_kind: 'chat_queue' },
+    { type: 'keeper_waiting_inventory_changed', queue_kind: 'chat_operation' },
     { type: 'keeper_waiting_inventory_changed', keeper_name: 'keeper-1' },
     { type: 'keeper_waiting_inventory_changed', keeper_name: 'keeper-1', queue_kind: 'unknown' },
   ])('rejects an incomplete Keeper waiting-inventory invalidation: %o', value => {

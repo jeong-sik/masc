@@ -9,6 +9,7 @@ type error =
   | Finalization_blocked of Keeper_shutdown_types.t
   | Finalization_draining of Keeper_shutdown_types.t * string
   | Completion_failed of Keeper_shutdown_types.t * string
+  | Admission_release_failed of Keeper_shutdown_types.t * string
 
 val error_to_string : error -> string
 

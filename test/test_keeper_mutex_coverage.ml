@@ -1597,37 +1597,6 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
          Alcotest.fail "canonical terminal was not exact polling truth")
 ;;
 
-let test_keeper_stream_canonical_settlement_ignores_staged_worker_result () =
-  let status =
-    Keeper_msg_async.Done
-      { ok = true; body = "canonical-disk"; data = None }
-  in
-  let project origin =
-    let entry : Keeper_msg_async.entry =
-      { request_id = "canonical-settlement"
-      ; keeper_name = "keeper"
-      ; base_path = Filename.concat (Filename.get_temp_dir_name ()) "canonical-settlement"
-      ; submitted_by = "owner"
-      ; status
-      ; submitted_at = 0.
-      ; completed_at = Some 0.
-      }
-    in
-    Server_routes_http_keeper_stream.For_testing.worker_settlement_terminal_body
-      ~staged_body:(Some "staged-worker")
-      (Keeper_msg_async.Status_settlement
-         { entry; durability = Keeper_msg_async.Durable; origin })
-  in
-  Alcotest.(check (option string))
-    "canonical reconciliation uses disk body"
-    (Some "canonical-disk")
-    (project Keeper_msg_async.Canonical_reconciliation);
-  Alcotest.(check (option string))
-    "normal transition retains staged stream body"
-    (Some "staged-worker")
-    (project Keeper_msg_async.Transition_commit)
-;;
-
 let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
   with_eio_env
   @@ fun env ->
@@ -1948,145 +1917,6 @@ let test_keeper_msg_async_recovery_rejects_linked_request_root () =
          (Sys.file_exists terminal_path))
 ;;
 
-let test_keeper_persistence_preparation_configures_queue_before_request_recovery () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-persistence-prepare-" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-      rm_rf base_path)
-    (fun () ->
-       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-       Keeper_chat_queue.For_testing.reset ();
-       let request_id = "kmsg_prepare_running_0_0" in
-       write_request_record
-         ~base_path
-         ~request_id
-         ~status:"running"
-         ~status_fields:[]
-         ();
-       let prepared =
-         match
-           Server_bootstrap_loops.prepare_keeper_persistence
-             ~config:(Workspace.default_config base_path)
-             ()
-         with
-         | Ok prepared -> prepared
-         | Error error ->
-           Alcotest.failf
-             "persistence preparation failed: %s"
-             (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
-                error)
-       in
-       Alcotest.(check bool) "queue is configured by preparation" true
-         (Keeper_chat_queue.persistence_configured ());
-       let report =
-         Server_bootstrap_loops.keeper_persistence_report prepared
-       in
-       Alcotest.(check int) "request recovery completed inside preparation" 1
-         report.requests.lost;
-       match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
-       | Keeper_msg_async.Found { status = Lost _; _ } -> ()
-       | _ -> Alcotest.fail "prepared request was published before recovery")
-;;
-
-let test_keeper_persistence_preparation_observes_structural_request_store () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-persistence-structural-store-" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-      rm_rf base_path)
-    (fun () ->
-       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-       let request_id = "kmsg_structural_store_0_0" in
-       let active_path =
-         require_record_path ~location:Active_record ~base_path ~request_id
-       in
-       let active_store = Filename.dirname active_path in
-       mkdir_p (Filename.dirname active_store);
-       Fs_compat.save_file active_store "not-a-directory";
-       let prepared =
-         match
-         Server_bootstrap_loops.prepare_keeper_persistence
-           ~config:(Workspace.default_config base_path)
-           ()
-         with
-         | Ok prepared -> prepared
-         | Error error ->
-           Alcotest.failf
-             "structural request observation blocked preparation: %s"
-             (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
-                error)
-       in
-       let report = Server_bootstrap_loops.keeper_persistence_report prepared in
-       Alcotest.(check bool)
-         "active store error remains typed"
-         true
-         (List.exists
-            (fun (error : Keeper_msg_async.recovery_store_error) ->
-               error.store = Keeper_msg_async.Active_store
-               && String.equal error.path active_store)
-            report.requests.store_errors);
-       match
-         Server_bootstrap_loops.claim_prepared_keeper_persistence
-           ~config:(Workspace.default_config base_path)
-           prepared
-       with
-       | Ok _ -> ()
-       | Error error ->
-         Alcotest.failf
-           "typed request-store observation poisoned owner claim: %s"
-           (Server_bootstrap_loops.keeper_persistence_claim_error_to_string error))
-;;
-
-let test_keeper_persistence_preparation_preserves_unattributed_request_record () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-persistence-unattributed-record-" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-      rm_rf base_path)
-    (fun () ->
-       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-       let request_id = "kmsg_unattributed_record_0_0" in
-       write_disk_record
-         ~location:Active_record
-         ~base_path
-         ~request_id
-         "{corrupt";
-       let prepared =
-         match
-           Server_bootstrap_loops.prepare_keeper_persistence
-             ~config:(Workspace.default_config base_path)
-             ()
-         with
-         | Ok prepared -> prepared
-         | Error error ->
-           Alcotest.failf
-             "unattributed record blocked unrelated Keeper lanes: %s"
-             (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
-                error)
-       in
-       match
-         (Server_bootstrap_loops.keeper_persistence_report prepared).requests
-           .record_errors
-       with
-       | [ error ] ->
-         Alcotest.(check string) "request id remains observable" request_id
-           error.Keeper_msg_async.request_id;
-         Alcotest.(check (option string)) "unattributed lane remains explicit"
-           None error.keeper_name
-       | _ -> Alcotest.fail "unattributed corrupt record evidence was lost")
-;;
-
-
 let test_keeper_persistence_ready_rejects_second_preparation () =
   with_eio_env
   @@ fun _env ->
@@ -2094,7 +1924,6 @@ let test_keeper_persistence_ready_rejects_second_preparation () =
   let base_b = temp_dir "keeper-persistence-ready-b-" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf base_a;
       rm_rf base_b)
@@ -2145,7 +1974,6 @@ let test_keeper_persistence_canonical_start_token_is_affine () =
   Unix.symlink real_a alias;
   Fun.protect
     ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf parent)
     (fun () ->
@@ -2274,7 +2102,6 @@ let test_keeper_persistence_claim_is_one_shot_for_process () =
   let base_b = temp_dir "keeper-persistence-claim-b-" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf base_a;
       rm_rf base_b)
@@ -2664,10 +2491,6 @@ let () =
             `Quick
             test_keeper_msg_async_integrity_conflict_projects_canonical_terminal
         ; test_case
-            "canonical settlement ignores staged worker result"
-            `Quick
-            test_keeper_stream_canonical_settlement_ignores_staged_worker_result
-        ; test_case
             "integrity ambiguity projects exact poll error"
             `Quick
             test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error
@@ -2695,18 +2518,6 @@ let () =
             "exact load rejects active and terminal outside symlinks"
             `Quick
             test_keeper_msg_async_exact_load_rejects_outside_symlink_records
-        ; test_case
-            "persistence preparation configures queue then recovers requests"
-            `Quick
-            test_keeper_persistence_preparation_configures_queue_before_request_recovery
-        ; test_case
-            "persistence preparation observes structural request store"
-            `Quick
-            test_keeper_persistence_preparation_observes_structural_request_store
-        ; test_case
-            "persistence preparation preserves unattributed request record"
-            `Quick
-            test_keeper_persistence_preparation_preserves_unattributed_request_record
         ; test_case
             "ready persistence preparation rejects a second owner"
             `Quick

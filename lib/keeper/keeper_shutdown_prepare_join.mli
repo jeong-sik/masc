@@ -16,6 +16,7 @@ type error =
   | Meta_snapshot_identity_changed
   | Meta_snapshot_read_failed of string
   | Task_discovery_failed of string
+  | Owner_command_failed of string
   | Prepare_persist_failed of Keeper_shutdown_store.error
   | Cancellation_failed of Keeper_shutdown_types.t
   | Join_failed of Keeper_shutdown_types.t

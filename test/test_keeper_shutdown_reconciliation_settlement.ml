@@ -49,7 +49,7 @@ let with_workspace f =
             let config = Workspace.default_config base in
             let (_init_msg : string) = Workspace.init config ~agent_name:None in
             Eio.Switch.run @@ fun sw ->
-            (match Keeper_owner_registry.install_from_store ~sw config with
+            (match Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
              | Ok 0 -> ()
              | Ok count -> failf "unexpected initial owner count: %d" count
              | Error error ->

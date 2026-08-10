@@ -29,7 +29,8 @@ type success =
   }
 
 type error =
-  | Admission_busy of Keeper_turn_admission.autonomous_block
+  | Admission_busy of Keeper_owner.autonomous_block
+  | Owner_unavailable of string
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Failed of
       { cause : failure
@@ -62,8 +63,9 @@ let failure_to_string = function
 let error_to_string = function
   | Admission_busy block ->
     Printf.sprintf
-      "keeper_turn_admission_busy: operation=cancel_pending %s"
-      (Keeper_turn_admission.autonomous_block_to_string block)
+      "keeper_owner_busy: operation=cancel_pending %s"
+      (Keeper_owner.autonomous_block_to_string block)
+  | Owner_unavailable detail -> "Keeper owner unavailable: " ^ detail
   | Reservation_conflict owner ->
     "Keeper lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
@@ -212,13 +214,16 @@ let cancel_with_lifecycle
       }
   | Ok None ->
     (match
-       Keeper_turn_admission.run_if_free
+       Keeper_owner_registry.run_maintenance_if_idle
          ~base_path
          ~keeper_name
          acquire
      with
-     | `Ran outcome -> outcome
-     | `Busy block -> Error (Admission_busy block))
+     | Ok (`Ran outcome) -> outcome
+     | Ok (`Busy block) -> Error (Admission_busy block)
+     | Error error ->
+       Error
+         (Owner_unavailable (Keeper_owner_registry.command_error_to_string error)))
 ;;
 
 let cancel_pending config ~keeper_name request =

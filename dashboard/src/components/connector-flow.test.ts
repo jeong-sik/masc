@@ -23,7 +23,6 @@ function mkGate(overrides?: Partial<Record<string, unknown>>) {
         message_count: 12,
         success_count: 10,
         error_count: 2,
-        duplicate_count: 1,
         success_rate_pct: 91,
         avg_duration_ms: 1400,
         last_activity: '2026-06-11T00:00:00Z',

@@ -404,7 +404,7 @@ let handle_tool_execute_typed
              storage-facing copies are redacted below by [redact_execute_output].
              The removed per-chunk redactor re-copied and re-scanned its whole
              held buffer on every 4KB read, so output whose newlines are far
-             apart cost O(n^2) inside the turn slot. *)
+             apart cost O(n^2) inside the Owner child. *)
           let on_output_chunk chunk =
             if stream_dispatch
             then (

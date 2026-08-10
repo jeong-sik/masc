@@ -125,45 +125,18 @@ end
     render. *)
 val surface_context_to_instructions : Yojson.Safe.t -> string option
 
-val handle_keeper_msg :
-  ?on_text_delta:(string -> unit) ->
-  ?on_event:(Agent_core.Types.sse_event -> unit) ->
-  ?event_bus:Agent_core.Event_bus.t ->
-  ?continuation_channel:Keeper_continuation_channel.t ->
-  ?on_admission_rejected:(Keeper_turn_admission.rejection -> unit) ->
-  ?on_admitted:(unit -> (unit, string) result) ->
-  _ Keeper_types_profile.context ->
-  Keeper_invocation_contract.direct_message ->
-  tool_result
-(** [event_bus] is captured at the handler boundary and reused by the admitted
-    turn body. Callers that omit it keep the process/domain fallback, but
-    async wrappers should pass an explicit value captured before submitting the
-    background turn. [on_admission_rejected] receives the typed admission
-    result before the tool error is rendered; queue consumers use it to leave
-    an unclaimed receipt [Pending] without matching diagnostic strings.
-    [on_admitted] runs while the turn slot is held and before the admitted turn
-    body; the queue consumer uses it as the exact Pending-to-Inflight claim
-    boundary. *)
-
-val handle_keeper_delegate :
-  ?event_bus:Agent_core.Event_bus.t ->
-  _ Keeper_types_profile.context ->
-  Keeper_invocation_contract.request ->
-  tool_result
-(** Run a typed delegated invocation through the same serialized Keeper lane. *)
-
-val handle_keeper_msg_if_free :
+val handle_keeper_msg_admitted :
+  admission_token:Keeper_turn_dispatch_authority.token ->
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?event_bus:Agent_core.Event_bus.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   _ Keeper_types_profile.context ->
   Keeper_invocation_contract.direct_message ->
-  [ `Ran of tool_result | `Busy of Keeper_turn_admission.rejection ]
-(** Non-blocking chat entrypoint for direct dashboard streaming. It runs the
-    same admitted turn body as [handle_keeper_msg] only when the keeper slot is
-    immediately available; otherwise it returns [`Busy] without parking behind
-    an in-flight turn. *)
+  tool_result
+(** Execute a direct message under an already-held chat admission token. Only
+    the Owner operation child uses this path, after atomically claiming the
+    latest durable operation body. *)
 
 (** Stop a running keeper agent. *)
 val handle_keeper_down : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

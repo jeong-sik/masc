@@ -605,22 +605,22 @@ let test_keeper_wake_creation_respects_shutdown_fence () =
   let base_path = config.Workspace.base_path in
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   (match
-     Keeper_turn_admission.begin_shutdown
+     Keeper_shutdown_intake_fence.begin_shutdown
        ~base_path
        ~keeper_name
        ~operation_id
    with
-   | Keeper_turn_admission.Shutdown_reserved _ -> ()
-   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+   | Keeper_shutdown_intake_fence.Reserved _ -> ()
+   | Keeper_shutdown_intake_fence.Already_reserved _ ->
      fail "fresh shutdown fence was already reserved");
   Fun.protect
     ~finally:(fun () ->
       ignore
-        (Keeper_turn_admission.rollback_shutdown
+        (Keeper_shutdown_intake_fence.rollback_shutdown
            ~base_path
            ~keeper_name
            ~operation_id
-         : Keeper_turn_admission.rollback_shutdown_result))
+         : Keeper_shutdown_intake_fence.rollback_result))
     (fun () ->
        let result =
          dispatch_exn config Tool_schemas_schedule.Create_request

@@ -84,7 +84,7 @@ import {
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from '../tool-call-output-store'
-import { _clearPendingKeeperChatRequestsForTests } from '../keeper-chat-pending'
+import { _clearTrackedKeeperChatOperationsForTests } from '../keeper-chat-operations-local'
 import { _resetChatStoreForTests } from '../keeper-chat-store'
 import { keeperCatchupDigests } from '../keeper-digest-signals'
 
@@ -115,7 +115,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
     activeKeeperName.value = ''
     keeperCatchupDigests.value = {}
     _resetChatHydrationForTests()
-    _clearPendingKeeperChatRequestsForTests()
+    _clearTrackedKeeperChatOperationsForTests()
     _resetChatStoreForTests()
     resetToolCallOutputs()
   })
@@ -125,7 +125,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
     container.remove()
     vi.unstubAllGlobals()
     _resetChatHydrationForTests()
-    _clearPendingKeeperChatRequestsForTests()
+    _clearTrackedKeeperChatOperationsForTests()
     _resetChatStoreForTests()
     resetToolCallOutputs()
   })
@@ -154,7 +154,6 @@ describe('KeeperConversationPanel hydration wiring', () => {
           source: 'sse_event',
           status: 'backend_terminal_event',
           event_name: 'RUN_FINISHED',
-          delivery_receipt: 'client_observed_sse_event',
         },
       },
     ])
@@ -226,7 +225,6 @@ describe('KeeperConversationPanel hydration wiring', () => {
           source: 'sse_event',
           status: 'backend_terminal_event',
           event_name: 'RUN_FINISHED',
-          delivery_receipt: 'client_observed_sse_event',
         },
       },
     ])
@@ -331,7 +329,6 @@ describe('KeeperConversationPanel hydration wiring', () => {
               source: 'sse_event',
               status: 'backend_terminal_event',
               event_name: 'RUN_FINISHED',
-              delivery_receipt: 'client_observed_sse_event',
             },
           },
         ]
@@ -359,7 +356,6 @@ describe('KeeperConversationPanel hydration wiring', () => {
               source: 'sse_event',
               status: 'backend_terminal_event',
               event_name: 'RUN_FINISHED',
-              delivery_receipt: 'client_observed_sse_event',
             },
           },
         ]
@@ -504,7 +500,6 @@ describe('KeeperConversationPanel hydration wiring', () => {
           source: 'sse_event',
           status: 'backend_terminal_event',
           event_name: 'RUN_FINISHED',
-          delivery_receipt: 'client_observed_sse_event',
         },
       },
     ]
@@ -624,7 +619,6 @@ describe('KeeperConversationPanel hydration wiring', () => {
           source: 'sse_event',
           status: 'backend_terminal_event',
           event_name: 'RUN_FINISHED',
-          delivery_receipt: 'client_observed_sse_event',
         },
       },
     ]

@@ -18,6 +18,7 @@ type error =
   | Metadata_committed_successor_lookup_failed of Keeper_shutdown_store.error
   | Metadata_committed_admission_owned_by_other of
       Keeper_shutdown_types.Operation_id.t
+  | Owner_command_failed of string
 
 let error_to_string = function
   | Preflight_failed error ->
@@ -42,16 +43,19 @@ let error_to_string = function
     Printf.sprintf
       "keeper metadata was updated and the old shutdown was superseded, but a newer shutdown operation owns admission; retry only after resolving operation %s"
       (Keeper_shutdown_types.Operation_id.to_string operation_id)
+  | Owner_command_failed detail -> "Keeper Owner shutdown command failed: " ^ detail
 ;;
 
 let preflight ~config ~keeper_name ~actor =
   let snapshot =
-    Keeper_turn_admission.snapshot_for
+    Keeper_owner_registry.shutdown_operation_id
       ~base_path:config.Workspace.base_path
       ~keeper_name
   in
-  match snapshot.snapshot_shutdown_operation_id with
-  | Some operation_id ->
+  match snapshot with
+  | Error error ->
+    Error (Owner_command_failed (Keeper_owner_registry.lookup_error_to_string error))
+  | Ok (Some operation_id) ->
     Keeper_shutdown_store.prepare_operator_metadata_supersession
       ~config
       ~keeper_name
@@ -59,7 +63,7 @@ let preflight ~config ~keeper_name ~actor =
       ~actor
     |> Result.map (fun token -> Operator_supersession_token token)
     |> Result.map_error (fun error -> Preflight_failed error)
-  | None ->
+  | Ok None ->
     (match Keeper_shutdown_store.list_for_keeper ~config ~keeper_name with
      | Error error -> Error (Preflight_failed error)
      | Ok operations ->
@@ -110,15 +114,19 @@ let commit_after_metadata_update ~config = function
         | Error error -> Error (Metadata_committed_successor_lookup_failed error)
         | Ok successor_operation_id ->
           (match
-             Keeper_turn_admission.transition_shutdown
+             Keeper_owner_registry.transition_shutdown
                ~base_path:config.Workspace.base_path
                ~keeper_name:operation.keeper_name
                ~from_operation_id:operation_id
                ~to_operation_id:successor_operation_id
            with
-           | Keeper_turn_admission.Shutdown_transition_applied
-           | Keeper_turn_admission.Shutdown_transition_already_applied ->
+           | Ok Keeper_owner.Shutdown_transition_applied
+           | Ok Keeper_owner.Shutdown_transition_already_applied ->
              Ok (Shutdown_superseded operation)
-           | Keeper_turn_admission.Shutdown_transition_reserved_by_other existing ->
-             Error (Metadata_committed_admission_owned_by_other existing))))
+           | Ok (Keeper_owner.Shutdown_transition_reserved_by_other existing) ->
+             Error (Metadata_committed_admission_owned_by_other existing)
+           | Error error ->
+             Error
+               (Owner_command_failed
+                  (Keeper_owner_registry.command_error_to_string error)))))
 ;;

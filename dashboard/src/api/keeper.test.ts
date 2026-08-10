@@ -17,36 +17,22 @@ vi.mock('./core', async (importOriginal) => {
 import {
   bootKeeper,
   bulkKeeperDirective,
-  cancelKeeperChatPendingReceipt,
-  cancelQueuedKeeperMessage,
   clearKeeper,
   deleteKeeperHistorySnapshots,
-  editKeeperChatPendingReceipt,
   fetchKeeperEventQueuePending,
+  fetchKeeperChatOperation,
   fetchKeeperChatHistory,
-  fetchKeeperChatPending,
-  fetchKeeperChatReceipt,
   fetchKeeperCheckpoints,
-  fetchQueuedKeeperMessageResult,
   fetchKeeperRuntimeTrace,
-  isTerminalQueuedKeeperMessage,
   KeeperEventQueueOperationError,
-  moveKeeperChatPendingReceiptToEnd,
   operateKeeperEventQueue,
   pauseKeeper,
   parseKeeperRuntimeTrace,
-  parseKeeperChatPendingSnapshot,
   parseKeeperEventQueuePendingSnapshot,
-  parseKeeperChatReceipt,
-  resolveKeeperChatRecovery,
-  queuedKeeperMessageError,
-  queuedKeeperMessageToReply,
   resumeKeeper,
   resetKeeper,
-  sendKeeperMessageDetailed,
   shutdownKeeper,
   streamKeeperMessage,
-  submitQueuedKeeperMessage,
   wakeKeeper,
 } from './keeper'
 import {
@@ -107,422 +93,7 @@ describe('keeper API module split compatibility', () => {
   })
 })
 
-describe('Keeper chat durable receipt API', () => {
-  it('parses exact non-dispatchable recovery evidence', () => {
-    expect(parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
-      keeper_name: 'echo',
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '8',
-      state: {
-        kind: 'recovery_required',
-        lease_id: 'lease_00000000-0000-4000-8000-000000000002',
-        started_at: 42,
-        dispatchable: false,
-      },
-    })).toEqual({
-      keeperName: 'echo',
-      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '8',
-      state: {
-        kind: 'recovery_required',
-        leaseId: 'lease_00000000-0000-4000-8000-000000000002',
-        startedAt: 42,
-        dispatchable: false,
-      },
-    })
-  })
-
-  it('rejects recovery evidence that claims automatic dispatchability', () => {
-    expect(() => parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
-      keeper_name: 'echo',
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '8',
-      state: {
-        kind: 'recovery_required',
-        lease_id: 'lease_00000000-0000-4000-8000-000000000002',
-        started_at: 42,
-        dispatchable: true,
-      },
-    })).toThrow('invalid recovery evidence')
-  })
-
-  it('parses the closed terminal failure state', () => {
-    expect(parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
-      keeper_name: 'echo',
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '7',
-      state: {
-        kind: 'failed',
-        failure_kind: 'delivery_failed',
-        detail: 'Slack API rejected the message',
-        completed_at: 42,
-        outcome_ref: null,
-      },
-    })).toEqual({
-      keeperName: 'echo',
-      receiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '7',
-      state: {
-        kind: 'failed',
-        failureKind: 'delivery_failed',
-        detail: 'Slack API rejected the message',
-        completedAt: 42,
-        outcomeRef: null,
-      },
-    })
-  })
-
-  it.each(['recovery_interrupted'] as const)(
-    'parses the canonical %s terminal failure kind',
-    (failureKind) => {
-      expect(parseKeeperChatReceipt({
-        schema: 'keeper_chat_queue.receipt.v2',
-        keeper_name: 'echo',
-        receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-        revision: '7',
-        state: {
-          kind: 'failed',
-          failure_kind: failureKind,
-          detail: 'startup recovery could not prove terminal connector delivery',
-          completed_at: 42,
-          outcome_ref: null,
-        },
-      }).state).toMatchObject({ kind: 'failed', failureKind })
-    },
-  )
-
-  it('rejects an unknown receipt lifecycle instead of guessing', () => {
-    expect(() => parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
-      keeper_name: 'echo',
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '1',
-      state: { kind: 'lost_somewhere' },
-    })).toThrow('unknown state')
-  })
-
-  it('rejects a non-canonical receipt identity', () => {
-    expect(() => parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
-      keeper_name: 'echo',
-      receipt_id: 'receipt-echo-1',
-      revision: '1',
-      state: { kind: 'pending' },
-    })).toThrow('missing identity')
-  })
-
-  it('rejects malformed nullable outcome refs instead of coercing schema drift', () => {
-    expect(() => parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
-      keeper_name: 'echo',
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '2',
-      state: { kind: 'delivered', completed_at: 42, outcome_ref: 7 },
-    })).toThrow('outcome_ref must be a string or null')
-  })
-
-  it('rejects whitespace-only failure detail', () => {
-    expect(() => parseKeeperChatReceipt({
-      schema: 'keeper_chat_queue.receipt.v2',
-      keeper_name: 'echo',
-      receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-      revision: '2',
-      state: {
-        kind: 'failed',
-        failure_kind: 'delivery_failed',
-        detail: '   ',
-        completed_at: 42,
-        outcome_ref: null,
-      },
-    })).toThrow('invalid failure metadata')
-  })
-
-  it('fetches the exact encoded Keeper receipt route', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        schema: 'keeper_chat_queue.receipt.v2',
-        keeper_name: 'keeper sangsu',
-        receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-        revision: '2',
-        state: { kind: 'pending' },
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    await fetchKeeperChatReceipt(
-      'keeper sangsu',
-      'chatq_00000000-0000-4000-8000-000000000001',
-    )
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/keepers/keeper%20sangsu/chat/receipts/chatq_00000000-0000-4000-8000-000000000001',
-      expect.objectContaining({ headers: expect.any(Object) }),
-    )
-  })
-
-  it('resolves one exact recovery receipt with string revision and lease evidence', async () => {
-    const receiptId = 'chatq_00000000-0000-4000-8000-000000000001'
-    const leaseId = 'lease_00000000-0000-4000-8000-000000000002'
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        schema: 'keeper_chat_queue.recovery.result.v1',
-        ok: true,
-        decision: 'requeue_unconfirmed',
-        receipt: {
-          schema: 'keeper_chat_queue.receipt.v2',
-          keeper_name: 'keeper sangsu',
-          receipt_id: receiptId,
-          revision: '9223372036854775806',
-          state: { kind: 'pending' },
-        },
-        audit: { recorded: true },
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await resolveKeeperChatRecovery(
-      'keeper sangsu',
-      receiptId,
-      '9223372036854775805',
-      leaseId,
-      { kind: 'requeue_unconfirmed' },
-    )
-
-    expect(result.receipt.revision).toBe('9223372036854775806')
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/v1/keepers/keeper%20sangsu/chat/receipts/${receiptId}/recovery`,
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({
-          schema: 'keeper_chat_queue.recovery.request.v1',
-          expected_revision: '9223372036854775805',
-          lease_id: leaseId,
-          decision: { kind: 'requeue_unconfirmed' },
-        }),
-      }),
-    )
-  })
-
-  it('cancels one exact pending receipt with its observed revision', async () => {
-    const receiptId = 'chatq_00000000-0000-4000-8000-000000000003'
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        schema: 'keeper_chat_queue.pending_cancel.result.v1',
-        ok: true,
-        receipt: {
-          schema: 'keeper_chat_queue.receipt.v2',
-          keeper_name: 'sangsu',
-          receipt_id: receiptId,
-          revision: '10',
-          state: {
-            kind: 'failed',
-            failure_kind: 'cancelled',
-            detail: 'cancelled by dashboard user before delivery',
-            completed_at: 42,
-            outcome_ref: null,
-          },
-        },
-        audit: { recorded: true },
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await cancelKeeperChatPendingReceipt('sangsu', receiptId)
-
-    expect(result.receipt.state.kind).toBe('failed')
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/v1/keepers/sangsu/chat/receipts/${receiptId}/cancel`,
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({
-          schema: 'keeper_chat_queue.pending_cancel.request.v1',
-        }),
-      }),
-    )
-  })
-
-  it('fetches pending input metadata without materializing attachment bytes', async () => {
-    const receiptId = 'chatq_00000000-0000-4000-8000-000000000004'
-    const payload = {
-      schema: 'keeper_chat_queue.pending.v2',
-      ok: true,
-      keeper_name: 'keeper sangsu',
-      revision: '11',
-      current_work: { lane: 'autonomous', started_at: 42 },
-      total_pending: 1,
-      next_after: null,
-      pending: [{
-        receipt: {
-          schema: 'keeper_chat_queue.receipt.v2',
-          keeper_name: 'keeper sangsu',
-          receipt_id: receiptId,
-          revision: '11',
-          state: { kind: 'pending' },
-        },
-        content: '[image attached: photo.png]',
-        source: {
-          kind: 'slack',
-          channel_id: 'channel-1',
-          user_id: 'user-1',
-          team_id: 'team-1',
-          thread_ts: '42.1',
-        },
-        user_blocks: [{
-          type: 'image',
-          attachment_id: 'att-1',
-          name: 'photo.png',
-          mime_type: 'image/png',
-          size: 3,
-        }],
-        attachments: [{
-          id: 'att-1',
-          type: 'image',
-          name: 'photo.png',
-          size: 3,
-          mime_type: 'image/png',
-        }],
-        submitted_at: 40,
-      }],
-    }
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(payload), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchKeeperChatPending('keeper sangsu')
-
-    expect(result).toEqual(parseKeeperChatPendingSnapshot(payload))
-    expect(result.currentWork).toEqual({ lane: 'autonomous', startedAt: 42 })
-    expect(result.pending[0]?.source).toEqual({
-      kind: 'slack',
-      channelId: 'channel-1',
-      userId: 'user-1',
-      teamId: 'team-1',
-      threadTs: '42.1',
-    })
-    expect(result.pending[0]?.userBlocks).toEqual([{
-      type: 'image',
-      attachmentId: 'att-1',
-      name: 'photo.png',
-      mimeType: 'image/png',
-      size: 3,
-    }])
-    expect(result.pending[0]?.attachments).toEqual([{
-      id: 'att-1',
-      type: 'image',
-      name: 'photo.png',
-      size: 3,
-      mimeType: 'image/png',
-    }])
-    expect(result.pending[0]?.attachments[0]).not.toHaveProperty('data')
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/keepers/keeper%20sangsu/chat/pending?limit=100',
-      expect.objectContaining({ headers: expect.any(Object) }),
-    )
-  })
-
-  it('combines bounded pending pages only when their queue revision is stable', async () => {
-    const entry = (suffix: string, content: string) => ({
-      receipt: {
-        schema: 'keeper_chat_queue.receipt.v2',
-        keeper_name: 'sangsu',
-        receipt_id: `chatq_00000000-0000-4000-8000-0000000000${suffix}`,
-        revision: '22',
-        state: { kind: 'pending' },
-      },
-      content,
-      source: { kind: 'dashboard', thread_id: 'thread-1' },
-      user_blocks: [],
-      attachments: [],
-      submitted_at: 42,
-    })
-    const envelope = (
-      pending: ReturnType<typeof entry>[],
-      nextAfter: string | null,
-    ) => ({
-      schema: 'keeper_chat_queue.pending.v2',
-      ok: true,
-      keeper_name: 'sangsu',
-      revision: '22',
-      current_work: null,
-      total_pending: 2,
-      next_after: nextAfter,
-      pending,
-    })
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(
-        [entry('21', 'first')],
-        '41',
-      )), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(
-        [entry('22', 'second')],
-        null,
-      )), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchKeeperChatPending('sangsu')
-
-    expect(result.pending.map(item => item.content)).toEqual(['first', 'second'])
-    expect(result.totalPending).toBe(2)
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      '/api/v1/keepers/sangsu/chat/pending?limit=100&after=41',
-      expect.objectContaining({ headers: expect.any(Object) }),
-    )
-  })
-
-  it('rejects chat pagination revision drift without a fixed retry loop', async () => {
-    const entry = (revision: string, suffix: string) => ({
-      receipt: {
-        schema: 'keeper_chat_queue.receipt.v2',
-        keeper_name: 'sangsu',
-        receipt_id: `chatq_00000000-0000-4000-8000-0000000000${suffix}`,
-        revision,
-        state: { kind: 'pending' },
-      },
-      content: `revision ${revision}`,
-      source: {
-        kind: 'discord',
-        channel_id: 'channel-1',
-        user_id: 'user-1',
-      },
-      user_blocks: [],
-      attachments: [],
-      submitted_at: 42,
-    })
-    const envelope = (revision: string, nextAfter: string | null) => ({
-      schema: 'keeper_chat_queue.pending.v2',
-      ok: true,
-      keeper_name: 'sangsu',
-      revision,
-      current_work: null,
-      total_pending: 2,
-      next_after: nextAfter,
-      pending: [entry(revision, revision)],
-    })
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope('22', '41')), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope('23', null)), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(fetchKeeperChatPending('sangsu')).rejects.toThrow(
-      'fetchKeeperChatPending: queue changed during pagination',
-    )
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-  })
-
+describe('Keeper Event Queue API', () => {
   it('combines metadata-only event refs across one stable Admin inventory revision', async () => {
     const item = (queueIndex: number, postId: string) => ({
       queue_index: queueIndex,
@@ -616,55 +187,6 @@ describe('Keeper chat durable receipt API', () => {
       'fetchKeeperEventQueuePending: queue changed during pagination',
     )
     expect(fetchMock).toHaveBeenCalledTimes(2)
-  })
-
-  it('sends revision-fenced pending edit and move requests', async () => {
-    const receiptId = 'chatq_00000000-0000-4000-8000-000000000014'
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        schema: 'keeper_chat_queue.pending_mutation.result.v1',
-        ok: true,
-        keeper_name: 'sangsu',
-        receipt_id: receiptId,
-        revision: '12',
-        pending_index: 1,
-        audit: { recorded: true },
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        schema: 'keeper_chat_queue.pending_mutation.result.v1',
-        ok: true,
-        keeper_name: 'sangsu',
-        receipt_id: receiptId,
-        revision: '13',
-        pending_index: 3,
-        audit: { recorded: true },
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await editKeeperChatPendingReceipt('sangsu', receiptId, '11', 'edited')
-    await moveKeeperChatPendingReceiptToEnd('sangsu', receiptId, '12')
-
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      `/api/v1/keepers/sangsu/chat/receipts/${receiptId}/edit`,
-      expect.objectContaining({
-        body: JSON.stringify({
-          content: 'edited',
-          expected_revision: '11',
-          schema: 'keeper_chat_queue.pending_edit.request.v1',
-        }),
-      }),
-    )
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      `/api/v1/keepers/sangsu/chat/receipts/${receiptId}/move-to-end`,
-      expect.objectContaining({
-        body: JSON.stringify({
-          expected_revision: '12',
-          schema: 'keeper_chat_queue.pending_move_to_end.request.v1',
-        }),
-      }),
-    )
   })
 
   it('sends a metadata-only event ref with its durable revision', async () => {
@@ -793,40 +315,6 @@ describe('Keeper chat durable receipt API', () => {
     )
   })
 
-  it('recovers a committed cancellation when the POST response is lost', async () => {
-    const receiptId = 'chatq_00000000-0000-4000-8000-000000000005'
-    const fetchMock = vi.fn()
-      .mockRejectedValueOnce(new TypeError('connection reset after commit'))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          schema: 'keeper_chat_queue.receipt.v2',
-          keeper_name: 'sangsu',
-          receipt_id: receiptId,
-          revision: '12',
-          state: {
-            kind: 'failed',
-            failure_kind: 'cancelled',
-            detail: 'cancelled by dashboard user before delivery',
-            completed_at: 42,
-            outcome_ref: null,
-          },
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-      )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await cancelKeeperChatPendingReceipt('sangsu', receiptId)
-
-    expect(result.receipt.state).toMatchObject({
-      kind: 'failed',
-      failureKind: 'cancelled',
-    })
-    expect(result.audit).toEqual({
-      recorded: false,
-      error: '취소 응답이 유실되어 audit 기록 여부를 확인할 수 없습니다.',
-    })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-  })
-
   it('bounds chat history response-body consumption after headers arrive', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn().mockResolvedValue({
@@ -849,248 +337,6 @@ describe('Keeper chat durable receipt API', () => {
   })
 })
 
-describe('sendKeeperMessageDetailed', () => {
-  it('forces direct reply mode for operator-mediated direct chats', async () => {
-    runOperatorAction.mockResolvedValueOnce({
-      result: {
-        reply: 'pong',
-        model_used: 'test-model',
-      },
-    })
-
-    const reply = await sendKeeperMessageDetailed('sangsu', 'ping')
-
-    expect(currentDashboardActor).toHaveBeenCalled()
-    expect(runOperatorAction).toHaveBeenCalledWith({
-      actor: 'dashboard',
-      action_type: 'keeper_message',
-      target_type: 'keeper',
-      target_id: 'sangsu',
-      payload: {
-        message: 'ping',
-      },
-    })
-    expect(reply.text).toBe('pong')
-  })
-})
-
-describe('submitQueuedKeeperMessage', () => {
-  it('submits direct keeper input through the async queue', async () => {
-    runOperatorAction.mockResolvedValueOnce({
-      result: {
-        tool_name: 'masc_keeper_msg',
-        result: {
-          request_id: 'kmsg_sangsu_1',
-          keeper_name: 'sangsu',
-          status: 'queued',
-        },
-      },
-    })
-
-    const submitted = await submitQueuedKeeperMessage('sangsu', 'ping')
-
-    expect(runOperatorAction).toHaveBeenCalledWith({
-      actor: 'dashboard',
-      action_type: 'keeper_message',
-      target_type: 'keeper',
-      target_id: 'sangsu',
-      payload: {
-        message: 'ping',
-      },
-    })
-    expect(submitted).toEqual({
-      requestId: 'kmsg_sangsu_1',
-      keeperName: 'sangsu',
-      status: 'queued',
-      message: undefined,
-    })
-  })
-})
-
-describe('fetchQueuedKeeperMessageResult', () => {
-  it('polls the keeper chat request HTTP wrapper instead of MCP session state', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        request_id: 'kmsg_sangsu_1',
-        keeper_name: 'sangsu',
-        status: 'done',
-        ok: true,
-        result: { reply: 'pong' },
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_1')
-
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('/api/v1/gate/message/requests/kmsg_sangsu_1')
-    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' })
-    expect(result.status).toBe('done')
-    expect(result.result).toEqual({ reply: 'pong' })
-  })
-
-  it('normalizes cancelled queued results as cancellation text', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        request_id: 'kmsg_sangsu_2',
-        keeper_name: 'sangsu',
-        status: 'cancelled',
-        ok: false,
-        result: {
-          cancelled: true,
-          reason: 'keeper_msg request was cancelled by operator',
-          cancelled_by: 'operator',
-        },
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_2')
-
-    expect(result.status).toBe('cancelled')
-    expect(queuedKeeperMessageError(result)).toBe('요청이 취소되었습니다.')
-    expect(queuedKeeperMessageToReply(result).text).toBe('요청이 취소되었습니다.')
-  })
-
-  it('keeps cancelling as a typed non-terminal lifecycle state', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        request_id: 'kmsg_sangsu_cancelling',
-        keeper_name: 'sangsu',
-        status: 'cancelling',
-        result: {
-          cancellation_requested: true,
-          cancelled_by: 'operator',
-        },
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    ))
-
-    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_cancelling')
-
-    expect(result.status).toBe('cancelling')
-    expect(isTerminalQueuedKeeperMessage(result)).toBe(false)
-  })
-
-  it('rejects an unknown request lifecycle instead of coercing it to error', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        request_id: 'kmsg_sangsu_future',
-        keeper_name: 'sangsu',
-        status: 'future_state',
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    ))
-
-    await expect(fetchQueuedKeeperMessageResult('kmsg_sangsu_future'))
-      .rejects.toThrow('unsupported keeper message status')
-  })
-
-  it('preserves typed persistence failure detail as a terminal result', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        request_id: 'kmsg_sangsu_persist_failure',
-        keeper_name: 'sangsu',
-        status: 'persistence_failed',
-        ok: false,
-        result: {
-          error: 'request_persistence_failed',
-          attempted_status: 'cancelled',
-          reason: 'terminal callback failed',
-        },
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    ))
-
-    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_persist_failure')
-
-    expect(result.status).toBe('persistence_failed')
-    expect(isTerminalQueuedKeeperMessage(result)).toBe(true)
-    expect(result.result).toEqual(expect.objectContaining({
-      attempted_status: 'cancelled',
-      reason: 'terminal callback failed',
-    }))
-  })
-
-  it('suppresses queued continuation checkpoints as non-visible replies', () => {
-    const result = {
-      requestId: 'kmsg_sangsu_3',
-      keeperName: 'sangsu',
-      status: 'done' as const,
-      ok: true,
-      result: {
-        reply: 'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
-        turn_outcome: 'continuation_checkpoint',
-      },
-    }
-
-    const reply = queuedKeeperMessageToReply(result)
-
-    expect(reply.text).toBe('')
-    expect(reply.details?.turnOutcome).toBe('continuation_checkpoint')
-    expect(reply.details?.replyText).toBe(
-      'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
-    )
-  })
-
-  it('suppresses queued no-visible replies as non-visible replies', () => {
-    const result = {
-      requestId: 'kmsg_sangsu_4',
-      keeperName: 'sangsu',
-      status: 'done' as const,
-      ok: true,
-      result: {
-        reply: '',
-        turn_outcome: 'no_visible_reply',
-      },
-    }
-
-    const reply = queuedKeeperMessageToReply(result)
-
-    expect(reply.text).toBe('')
-    expect(reply.details?.turnOutcome).toBe('no_visible_reply')
-    expect(reply.details?.replyText).toBeNull()
-  })
-})
-
-describe('cancelQueuedKeeperMessage', () => {
-  it('accepts a durable cancelling acknowledgement without claiming terminal cancellation', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        request_id: 'kmsg_sangsu_cancel',
-        status: 'cancelling',
-      }), {
-        status: 202,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await cancelQueuedKeeperMessage('kmsg_sangsu_cancel')
-
-    expect(result).toEqual({
-      requestId: 'kmsg_sangsu_cancel',
-      status: 'cancelling',
-      message: undefined,
-    })
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(init.signal).toBeUndefined()
-  })
-})
-
 describe('streamKeeperMessage', () => {
   it('posts direct reply mode to the keeper chat stream endpoint', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-eager-manta%E3%85%8A')
@@ -1105,6 +351,7 @@ describe('streamKeeperMessage', () => {
 
     const events: string[] = []
     await streamKeeperMessage('sangsu', 'ping', {
+      requestId: 'kmsg-stream-direct',
       onEvent: event => {
         events.push(event.type)
       },
@@ -1114,6 +361,7 @@ describe('streamKeeperMessage', () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     const headers = init.headers as Record<string, string>
     expect(JSON.parse(String(init.body))).toEqual({
+      request_id: 'kmsg-stream-direct',
       name: 'sangsu',
       message: 'ping',
     })
@@ -1134,6 +382,7 @@ describe('streamKeeperMessage', () => {
 
     const events: string[] = []
     await streamKeeperMessage('sangsu', 'ping', {
+      requestId: 'kmsg-stream-copilot',
       onEvent: event => {
         events.push(event.type)
       },
@@ -1151,6 +400,7 @@ describe('streamKeeperMessage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(String(init.body))).toEqual({
+      request_id: 'kmsg-stream-copilot',
       name: 'sangsu',
       message: 'ping',
       channel: 'copilot',
@@ -1348,6 +598,41 @@ describe('streamKeeperMessage', () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       '/api/v1/keepers/chat/stream',
     ])
+  })
+})
+
+describe('fetchKeeperChatOperation', () => {
+  it('parses restart interruption as a terminal failed operation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        schema: 'masc.keeper_chat_operation.v1',
+        operation_id: 'kmsg-restart-1',
+        sequence: '7',
+        created_at: 42,
+        source: {},
+        input: null,
+        state: 'Failed',
+        completed_at: 43,
+        failure_kind: 'Interrupted_by_restart',
+        failure_detail: 'runtime restarted while operation was Running',
+        outcome_ref: null,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const operation = await fetchKeeperChatOperation('sangsu', 'kmsg-restart-1')
+
+    expect(operation.state).toEqual({
+      kind: 'failed',
+      completedAt: 43,
+      failureKind: 'Interrupted_by_restart',
+      detail: 'runtime restarted while operation was Running',
+      outcomeRef: null,
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/keepers/sangsu/chat/operations/kmsg-restart-1',
+      expect.any(Object),
+    )
   })
 })
 

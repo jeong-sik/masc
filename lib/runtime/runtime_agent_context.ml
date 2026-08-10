@@ -7,9 +7,9 @@
 
 type stop_reason =
   | Completed
-  | Yielded_to_chat_waiting of { turns_used : int }
+  | Yielded_to_operation_queued of { turns_used : int }
     (* The autonomous lane's AGENT_CORE run stopped at a turn boundary because a
-       dashboard/connector chat request was parked on the keeper's turn slot.
+        durable Dashboard/connector operation is queued behind the Owner child.
        Progress is checkpointed and the keeper resumes on the next cycle — the
        same checkpoint disposition as a turn-limit observation, but a distinct
        reason so receipts do not conflate an on-demand yield with an AGENT_CORE loop

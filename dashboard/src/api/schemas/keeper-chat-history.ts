@@ -26,6 +26,7 @@ import {
   optional,
   record,
   safeParse,
+  strictObject,
   string,
   union,
   unknown,
@@ -225,7 +226,7 @@ export const KeeperChatBlockSchema = union([
 
 export type KeeperChatBlock = InferOutput<typeof KeeperChatBlockSchema>
 
-export const KeeperChatHistoryStreamContractSchema = object({
+export const KeeperChatHistoryStreamContractSchema = strictObject({
   source: string(),
   status: string(),
   event_name: optional(string()),
@@ -238,8 +239,6 @@ export const KeeperChatHistoryStreamContractSchema = object({
   traceEventCount: optional(number()),
   lifecycle_events: optional(array(string())),
   lifecycleEvents: optional(array(string())),
-  delivery_receipt: optional(string()),
-  deliveryReceipt: optional(string()),
   reason: optional(string()),
 })
 
@@ -302,9 +301,9 @@ export const KeeperChatHistoryMessageSchema = object({
   attachments: optional(array(KeeperChatHistoryAttachmentSchema)),
   // Turn identity stamped by the backend on every dashboard-originated row
   // (keeper_chat_store.ml delivery_key, e.g.
-  // `{"kind":"direct_request","request_id":"kmsg-..."}`). Accepted as
+  // `{"kind":"operation","operation_id":"kmsg-..."}`). Accepted as
   // `unknown` so a shape drift never drops the row; the consumer extracts
-  // `request_id` tolerantly (absent/malformed -> undefined).
+  // `operation_id` tolerantly (absent/malformed -> undefined).
   delivery_key: optional(unknown()),
   // RFC-0235 P3: server-parsed rich chat blocks. Carried on history rows so
   // reloads preserve the structured render instead of re-parsing plain text.

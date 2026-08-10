@@ -50,19 +50,6 @@ val handle_keeper_operator_note_post :
     (RFC-0366). The note renders on the next turn that assembles and is then
     stamped consumed; oversized text is rejected rather than truncated. *)
 
-val handle_keeper_chat_recovery_post :
-  Mcp_server.server_state ->
-  string ->
-  Httpun.Request.t ->
-  Httpun.Reqd.t ->
-  keeper_name:string ->
-  raw_receipt_id:string ->
-  string ->
-  unit
-(** Resolve exactly one recovery-required chat receipt using the caller's
-    revision and lease evidence. The route is wired only behind token-bound
-    [CanAdmin] authorization. *)
-
 val handle_keeper_board_attention_quarantine_recovery_post :
   Mcp_server.server_state ->
   string ->
@@ -233,10 +220,6 @@ val handle_keeper_get_subroutes :
   Httpun.Request.t -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Dispatch [GET /api/v1/keepers/<name>/<sub>] sub-routes
     (status / tools / checkpoints listing / etc.). *)
-
-val keeper_chat_receipt_route : string -> (string * string) option
-(** Parse the exact
-    [/api/v1/keepers/<name>/chat/receipts/<receipt_id>] read route. *)
 
 (** {1 Memory-OS dashboard JSON} *)
 

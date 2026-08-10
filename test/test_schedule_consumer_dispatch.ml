@@ -99,6 +99,9 @@ let with_workspace f =
   Board_dispatch.init_jsonl ();
   let config = Workspace.default_config dir in
   ignore (Workspace.init config ~agent_name:(Some "test"));
+  (match Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
   Executor_pool_ref.For_testing.with_pool
     (Domain_pool.executor_pool pool)
     (fun () -> f config)
@@ -143,7 +146,24 @@ let persist_keeper_meta ?proactive_enabled config keeper_name =
 ;;
 
 let register_keeper ?proactive_enabled config keeper_name =
-  let meta = persist_keeper_meta ?proactive_enabled config keeper_name in
+  let meta =
+    let meta = keeper_meta_for_name keeper_name in
+    match proactive_enabled with
+    | None -> meta
+    | Some enabled ->
+      { meta with
+        autoboot_enabled = true
+      ; proactive = { enabled }
+      }
+  in
+  (match
+     Keeper_owner_registry.create_meta
+       ~base_path:config.Workspace_utils.base_path
+       meta
+   with
+   | Ok (Some _) -> ()
+   | Ok None -> fail "owner metadata creation removed its snapshot"
+   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
   Keeper_registry.For_testing.register
     ~base_path:config.Workspace_utils.base_path
     keeper_name
@@ -724,22 +744,22 @@ let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
   let base_path = config.Workspace_utils.base_path in
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   (match
-     Keeper_turn_admission.begin_shutdown
+     Keeper_shutdown_intake_fence.begin_shutdown
        ~base_path
        ~keeper_name
        ~operation_id
    with
-   | Keeper_turn_admission.Shutdown_reserved _ -> ()
-   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+   | Keeper_shutdown_intake_fence.Reserved _ -> ()
+   | Keeper_shutdown_intake_fence.Already_reserved _ ->
      fail "fresh shutdown fence was already reserved");
   Fun.protect
     ~finally:(fun () ->
       ignore
-        (Keeper_turn_admission.rollback_shutdown
+        (Keeper_shutdown_intake_fence.rollback_shutdown
            ~base_path
            ~keeper_name
            ~operation_id
-         : Keeper_turn_admission.rollback_shutdown_result))
+         : Keeper_shutdown_intake_fence.rollback_result))
     (fun () ->
        let request = create_keeper_wake_schedule config in
        let result = tick_ok config ~now:201.0 in
@@ -777,22 +797,22 @@ let test_shutdown_fence_covers_direct_durable_queue_producers () =
   in
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   (match
-     Keeper_turn_admission.begin_shutdown
+     Keeper_shutdown_intake_fence.begin_shutdown
        ~base_path
        ~keeper_name
        ~operation_id
    with
-   | Keeper_turn_admission.Shutdown_reserved _ -> ()
-   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+   | Keeper_shutdown_intake_fence.Reserved _ -> ()
+   | Keeper_shutdown_intake_fence.Already_reserved _ ->
      fail "fresh direct-producer shutdown fence was already reserved");
   Fun.protect
     ~finally:(fun () ->
       ignore
-        (Keeper_turn_admission.rollback_shutdown
+        (Keeper_shutdown_intake_fence.rollback_shutdown
            ~base_path
            ~keeper_name
            ~operation_id
-         : Keeper_turn_admission.rollback_shutdown_result))
+         : Keeper_shutdown_intake_fence.rollback_result))
     (fun () ->
        let expected_rejection =
          Printf.sprintf
@@ -890,22 +910,22 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
      fail (Keeper_event_queue_recovery.projection_error_to_string error));
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   (match
-     Keeper_turn_admission.begin_shutdown
+     Keeper_shutdown_intake_fence.begin_shutdown
        ~base_path
        ~keeper_name:target_keeper
        ~operation_id
    with
-   | Keeper_turn_admission.Shutdown_reserved _ -> ()
-   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+   | Keeper_shutdown_intake_fence.Reserved _ -> ()
+   | Keeper_shutdown_intake_fence.Already_reserved _ ->
      fail "fresh target shutdown fence was already reserved");
   Fun.protect
     ~finally:(fun () ->
       ignore
-        (Keeper_turn_admission.rollback_shutdown
+        (Keeper_shutdown_intake_fence.rollback_shutdown
            ~base_path
            ~keeper_name:target_keeper
            ~operation_id
-         : Keeper_turn_admission.rollback_shutdown_result))
+         : Keeper_shutdown_intake_fence.rollback_result))
     (fun () ->
        let retried = tick_ok config ~now:202.0 in
        (match retried.dispatches with
@@ -979,26 +999,26 @@ let test_shutdown_join_waits_for_inflight_schedule_intake () =
     (fun () ->
        Eio.Promise.await intake_started;
        (match
-          Keeper_turn_admission.begin_shutdown
+          Keeper_shutdown_intake_fence.begin_shutdown
             ~base_path
             ~keeper_name
             ~operation_id
         with
-        | Keeper_turn_admission.Shutdown_reserved _ -> ()
-        | Keeper_turn_admission.Shutdown_already_reserved _ ->
+        | Keeper_shutdown_intake_fence.Reserved _ -> ()
+        | Keeper_shutdown_intake_fence.Already_reserved _ ->
           fail "fresh shutdown fence was already reserved");
        Fun.protect
          ~finally:(fun () ->
            ignore
-             (Keeper_turn_admission.rollback_shutdown
+             (Keeper_shutdown_intake_fence.rollback_shutdown
                 ~base_path
                 ~keeper_name
                 ~operation_id
-              : Keeper_turn_admission.rollback_shutdown_result))
+              : Keeper_shutdown_intake_fence.rollback_result))
          (fun () ->
             Eio.Fiber.both
               (fun () ->
-                 Keeper_turn_admission.await_idle_after_shutdown
+                 Keeper_shutdown_intake_fence.await_idle_after_shutdown
                    ~base_path
                    ~keeper_name;
                  Eio.Promise.resolve join_completed_u ())

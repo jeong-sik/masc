@@ -6,6 +6,14 @@ module Persistence = Keeper_event_queue_persistence
 module Receipt = Keeper_paused_work_disposition_receipt
 module Transaction = Keeper_paused_work_source_terminal_transaction
 
+let test_switch : Eio.Switch.t option ref = ref None
+
+let current_switch () =
+  match !test_switch with
+  | Some sw -> sw
+  | None -> Alcotest.fail "test Owner switch is not installed"
+;;
+
 let require_ok label = function
   | Ok value -> value
   | Error detail -> Alcotest.failf "%s: %s" label detail
@@ -91,6 +99,15 @@ let with_source_terminal_lane f =
          }
        in
        Keeper_meta_store.replace_snapshot config meta |> require_ok "persist Keeper metadata";
+       (match
+          Keeper_owner_registry.install_from_store
+            ~sw:(current_switch ())
+            ~operation_executor:None
+            config
+        with
+        | Ok count -> Alcotest.(check int) "installed owner count" 1 count
+        | Error error ->
+          Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
        let channel =
          Keeper_continuation_channel.dashboard ~thread_id:"thread-terminal-1"
          |> require_ok "construct terminal continuation channel"
@@ -803,15 +820,17 @@ let test_source_terminal_busy_has_zero_mutation () =
   with_source_terminal_lane (fun config keeper_name _meta request ->
     let base_path = config.Workspace.base_path in
     (match
-       Keeper_turn_admission.run_if_free
+       Keeper_owner_registry.run_maintenance_if_idle
          ~base_path
          ~keeper_name
          (fun () -> Transaction.ack_pending config ~keeper_name request)
      with
-     | `Ran (Error { cause = Transaction.Admission_busy _; _ }) -> ()
-     | `Ran (Error error) -> Alcotest.fail (Transaction.error_to_string error)
-     | `Ran (Ok _) | `Busy _ ->
-       Alcotest.fail "source-terminal ACK was not deferred by turn admission");
+     | Ok (`Ran (Error { cause = Transaction.Admission_busy _; _ })) -> ()
+     | Ok (`Ran (Error error)) -> Alcotest.fail (Transaction.error_to_string error)
+     | Error error ->
+       Alcotest.fail (Keeper_owner_registry.command_error_to_string error)
+     | Ok (`Ran (Ok _) | `Busy _) ->
+       Alcotest.fail "source-terminal ACK was not deferred by Keeper Owner");
     let state =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "load admission-busy source-terminal lane"
@@ -873,6 +892,10 @@ let test_nonterminal_payload_is_rejected () =
 ;;
 
 let () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  test_switch := Some sw;
   Alcotest.run
     "keeper paused-work source-terminal transaction"
     [ ( "Ack_source_terminal"

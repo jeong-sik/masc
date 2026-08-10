@@ -8,7 +8,7 @@ import type { KeeperConversationEntry } from './types'
 // the since-last-seen digest deterministic: the server echoes the same
 // since_unix it was queried with.
 //
-// Storage/normalize conventions are cloned from keeper-chat-pending.ts
+// Storage/normalize conventions are cloned from keeper-chat-operations-local.ts
 // (try/catch storage() wrapper, normalize-on-read dropping malformed values,
 // a _clear...ForTests reset). The reactive signal is the render source of
 // truth; localStorage is the durability layer.

@@ -10,10 +10,6 @@ type cycle_outcome =
       { meta : Keeper_meta_contract.keeper_meta
       ; failure : Keeper_unified_turn.turn_failure
       }
-  | Busy of
-      { meta : Keeper_meta_contract.keeper_meta
-      ; block : Keeper_turn_admission.autonomous_block
-      }
   | Manual_compaction_failed of
       { meta : Keeper_meta_contract.keeper_meta
       ; failure : Keeper_manual_compaction.failure
@@ -45,7 +41,7 @@ val deferred_runtime_lane :
   cycle_outcome -> Keeper_turn_driver.deferred_runtime_lane option
 
 val run_keeper_cycle
-  :  admission_token:Keeper_turn_admission.token
+  :  admission_token:Keeper_turn_dispatch_authority.token
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?event_bus:Agent_core.Event_bus.t

@@ -96,39 +96,12 @@ let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
         cached_json_by_key cache_ref ~key ~ttl_s compute
       end
 
-let submit_keeper_msg_with_captured_event_bus
-      ~background_sw
-      ~base_path
-      ~caller
-      ~request
-      ~(f :
-          ?event_bus:Agent_core.Event_bus.t
-          -> Keeper_invocation_contract.request
-          -> Eio.Switch.t
-          -> tool_result)
-      () =
-  let event_bus = Event_bus_slots.get_keeper () in
-  Keeper_invocation_contract.submit
-    ~background_sw
-    ~base_path
-    ~caller
-    ~request
-    ~f:(fun request request_sw -> f ?event_bus request request_sw)
-    ()
-
-let submit_outcome_with_keeper_json ~request outcome =
-  Keeper_invocation_contract.submission_to_json request outcome
-;;
-
 module For_testing = struct
   let reset_keeper_list_cache () =
     Atomic.set keeper_list_cache (empty_json_cache ~generation:0)
   let invalidate_keeper_list_cache = invalidate_keeper_list_cache
   let cached_keeper_list_data ~key ~ttl_s compute =
     cached_json_by_key keeper_list_cache ~key ~ttl_s compute
-  let submit_keeper_msg_with_captured_event_bus =
-    submit_keeper_msg_with_captured_event_bus
-  let submit_outcome_with_keeper_json = submit_outcome_with_keeper_json
 end
 let annotate_keeper_json ~runtime_class json =
   match json with
@@ -512,117 +485,122 @@ let direct_reply_visible_text json =
   | Error error -> Error error
 ;;
 
-let append_direct_chat_pair_if_reply
-      ~(config : Workspace.config)
-      ~name
-      ~message
-      result
-  =
-  if Keeper_invocation_contract.direct_message_direct_reply message
-     && tool_result_success result
-  then (
-    let user_content =
-      Keeper_invocation_contract.direct_message_prompt message |> String.trim
-    in
-    (* RFC-0233 §7: the join key the keeper minted into the reply payload,
-       threaded onto the persisted row of this agent-initiated / connector
-       turn (parse, don't repair — absent/malformed reads as None). *)
-    let turn_ref =
-      Keeper_turn_outcome.turn_ref_of_reply_payload
-        (Some (Tool_result.data result))
-    in
-    match direct_reply_projection (Tool_result.data result) with
-    | Error error -> Error error
-    | Ok projection ->
-      let projected_assistant =
-        match projection with
-        | Keeper_chat_blocks.Connector_text text -> Some (text, None)
-        | Connector_status status ->
-          Some ("", Some [ Keeper_chat_blocks.Status status ])
-        | Connector_no_visible_reply -> None
-      in
-      (match user_content, projected_assistant with
-       | "", _ | _, None -> Ok ()
-       | _, Some (assistant_content, blocks) ->
-        (* Agent-initiated [masc_keeper_msg] path: only the final tool
-           result is visible here (no stream events), so no tool lines
-           are persisted for this surface. *)
-        (* RFC-0226 ownership split: connector traffic (a non-empty
-           [channel], set by [Gate_keeper_backend.dispatch]) had its
-           user line recorded at the gate inbound boundary, at delivery
-           time — appending it again here would double-record. This
-           site owns the assistant reply only. Without [channel] this
-           is a genuine agent-initiated message with no upstream
-           recorder, so it still owns the full pair. *)
-        let channel = Keeper_invocation_contract.direct_message_channel message in
-        if channel = "" then begin
-          Keeper_chat_store.append_turn
-            ~base_dir:config.base_path
-            ~keeper_name:name
-            ~user_content
-            ~user_attachments:[]
-            ~surface:Surface_ref.Agent
-            ~assistant_content
-            ?blocks
-            ?turn_ref
-            ();
-          Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:"agent"
-            ~content:assistant_content
-            ()
-        end
-        else begin
-          Keeper_chat_store.append_assistant_message
-            ~base_dir:config.base_path
-            ~keeper_name:name
-            ~content:assistant_content
-            ~surface:(Surface_ref.Gate { label = channel; address = [] })
-            ?blocks
-            ?turn_ref
-            ();
-          Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:channel
-            ~content:assistant_content
-            ()
-        end;
-        Ok ()))
-  else Ok ()
+let owner_operation_error_code = function
+  | Keeper_owner_registry.Command_lifecycle_reserved _ -> "owner_stopping"
+  | Command_lookup_failed Inventory_stopping -> "owner_stopping"
+  | Command_lookup_failed
+      (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
+      | Owner_initialization_failed _) ->
+    "store_unavailable"
+  | Command_rejected (Keeper_owner.Owner_stopping | Owner_closed) ->
+    "owner_stopping"
+  | Command_rejected (Keeper_owner.Operation_rejected error) ->
+    (match Keeper_owner.operation_error_kind error with
+     | Invalid_operation_input -> "invalid_input"
+     | Unknown_operation -> "unknown_operation"
+     | Operation_not_queued -> "not_queued"
+     | Operation_idempotency_conflict -> "idempotency_conflict"
+     | Operation_store_unavailable -> "store_unavailable")
+  | Command_rejected (Keeper_owner.Store_unavailable _ | Reducer_rejected _) ->
+    "store_unavailable"
 ;;
 
-let submit_keeper_invocation
+let operation_payload_error code detail =
+  Payload_error
+    (`Assoc
+       [ "error", `String code
+       ; "message", `String detail
+       ])
+;;
+
+let operation_id_of_invocation_ref invocation_ref =
+  let canonical =
+    Tool_invocation_ref.to_yojson invocation_ref |> Yojson.Safe.to_string
+  in
+  let digest = Digestif.SHA256.(digest_string canonical |> to_hex) in
+  "kmsg-" ^ String.sub digest 0 32
+;;
+
+let submit_agent_operation
+      ?continuation_channel
+      ?operation_id_raw
       ~submitted_by
-      ~submission_to_json
-      ~submission_error_to_json
-      ~run_turn
+      ~keeper_name
+      ~message
+      ~user_blocks
+      ~turn_instructions
+      ~surface_context
+      ~attachments
       ctx
-      ~request
   =
+  let ( let* ) = Result.bind in
+  let operation_id_raw =
+    Option.value
+      operation_id_raw
+      ~default:(Random_id.prefixed ~prefix:"kmsg-" ~bytes:16)
+  in
+  let* operation_id =
+    Keeper_owner.Chat_operation.Operation_id.of_string operation_id_raw
+    |> Result.map_error (operation_payload_error "invalid_input")
+  in
+  let thread_id = "keeper:" ^ keeper_name in
+  let* continuation_channel =
+    match continuation_channel with
+    | Some continuation_channel -> Ok continuation_channel
+    | None ->
+      Keeper_continuation_channel.dashboard ~thread_id
+      |> Result.map_error (operation_payload_error "invalid_input")
+  in
+  let* source =
+    Keeper_chat_operation_payload.source_to_json
+      ~submitted_by
+      ~thread_id
+      ~continuation_channel
+      ~surface:Surface_ref.Agent
+      ~channel:"agent"
+      ~channel_user_id:""
+      ~channel_user_name:""
+      ~channel_workspace_id:""
+      ~conversation_id:None
+      ~external_message_id:None
+      ~workspace_id:None
+      ~extra_mentions:[]
+      ~user_row_origin:Keeper_chat_store.Needs_append
+    |> Result.map_error (operation_payload_error "invalid_input")
+  in
+  let input =
+    Keeper_chat_operation_payload.input_to_json
+      ~message
+      ~user_blocks
+      ~turn_instructions
+      ~surface_context
+      ~attachments
+  in
   match
-    let* background_sw =
-      Keeper_msg_async.server_background_switch ()
-      |> Result.map_error (fun error ->
-        Payload_error (submission_error_to_json error))
-    in
-    let* submission =
-      submit_keeper_msg_with_captured_event_bus
-        ~background_sw
-        ~base_path:ctx.config.base_path
-        ~caller:submitted_by
-        ~request
-        ~f:(fun ?event_bus request request_sw ->
-          let worker_ctx = { ctx with sw = request_sw } in
-          let result = run_turn ?event_bus request worker_ctx in
-          if tool_result_success result
-          then invalidate_keeper_list_cache ();
-          result)
-        ()
-      |> Result.map_error (fun error ->
-        Payload_error (submission_error_to_json error))
-    in
+    Keeper_owner_registry.submit_operation
+      ~base_path:ctx.config.base_path
+      ~keeper_name
+      ~operation_id
+      ~source
+      ~input
+  with
+  | Ok acceptance ->
     Ok
       (tool_result_ok_data
-         (submission_to_json request submission))
-  with
-  | Ok result -> result
-  | Error error -> tool_result_of_handler_error error
+         (`Assoc
+            [ "operation_id", `String operation_id_raw
+            ; "state",
+              `String
+                (Keeper_owner.Chat_operation.state_to_string
+                   acceptance.operation.state)
+            ; "queued_count", `Int acceptance.queued_count
+            ; "existing", `Bool acceptance.existing
+            ]))
+  | Error error ->
+    Error
+      (operation_payload_error
+         (owner_operation_error_code error)
+         (Keeper_owner_registry.command_error_to_string error))
 ;;
 
 let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_result =
@@ -634,34 +612,24 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_res
       |> message_error
     in
     let* message = message_error (Turn.preflight_keeper_msg ctx message) in
-    let request = Keeper_invocation_contract.direct_message_request message in
-    Ok
-      (submit_keeper_invocation
-         ~submitted_by
-         ~submission_to_json:Keeper_invocation_contract.submission_to_json
-         ~submission_error_to_json:Keeper_msg_async.submit_error_to_json
-         ~run_turn:(fun ?event_bus _request worker_ctx ->
-           let result =
-             Turn.handle_keeper_msg
-               ?event_bus
-               ?continuation_channel
-               worker_ctx
-               message
-           in
-           match
-             append_direct_chat_pair_if_reply
-               ~config:ctx.config ~name ~message result
-           with
-           | Ok () -> result
-           | Error error ->
-             tool_result_error (direct_reply_decode_error_to_string error))
-         ctx ~request)
+    submit_agent_operation
+      ?continuation_channel
+      ~submitted_by
+      ~keeper_name:name
+      ~message:(Keeper_invocation_contract.direct_message_prompt message)
+      ~user_blocks:(Keeper_invocation_contract.direct_message_user_blocks message)
+      ~turn_instructions:
+        (Keeper_invocation_contract.direct_message_turn_instructions message)
+      ~surface_context:
+        (Keeper_invocation_contract.direct_message_surface_context message)
+      ~attachments:(Keeper_invocation_contract.direct_message_attachments message)
+      ctx
   with
   | Ok result -> result
   | Error error -> tool_result_of_handler_error error
 ;;
 
-let handle_keeper_delegate ~submitted_by ctx args =
+let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
   match
     let* request =
       Keeper_invocation_contract.request_of_json args
@@ -669,153 +637,199 @@ let handle_keeper_delegate ~submitted_by ctx args =
       |> message_error
     in
     let* request = message_error (Turn.preflight_keeper_delegate ctx request) in
-    Ok
-      (submit_keeper_invocation
-         ~submitted_by
-         ~submission_to_json:Keeper_invocation_contract.delegate_submission_to_json
-         ~submission_error_to_json:
-           (Keeper_invocation_contract.delegate_submission_error_to_json request)
-         ~run_turn:(fun ?event_bus request worker_ctx ->
-           Turn.handle_keeper_delegate ?event_bus worker_ctx request)
-         ctx
-         ~request)
+    submit_agent_operation
+      ?operation_id_raw:(Option.map operation_id_of_invocation_ref invocation_ref)
+      ~submitted_by
+      ~keeper_name:(Keeper_invocation_contract.target_name request)
+      ~message:(Keeper_invocation_contract.prompt request)
+      ~user_blocks:[]
+      ~turn_instructions:None
+      ~surface_context:None
+      ~attachments:[]
+      ctx
   with
   | Ok result -> result
   | Error error -> tool_result_of_handler_error error
 ;;
-
-let run_ref_arg args =
-  match args with
-  | `Assoc [ ("run_ref", value) ] -> Keeper_invocation_contract.run_ref_of_json value
-  | _ ->
+let operation_reference_arg args =
+  let invalid detail =
     Error
-      (Keeper_invocation_contract.Invalid_wire_value
-         { field = "delegate_operation"; expected = "object containing only run_ref" })
+      (`Assoc
+         [ "error", `String "invalid_input"
+         ; "message", `String detail
+         ])
+  in
+  match args with
+  | `Assoc fields ->
+    let keys = List.map fst fields |> List.sort String.compare in
+    if keys <> [ "operation_id"; "target" ]
+    then invalid "operation lookup requires exactly operation_id and target"
+    else
+      (match
+         Keeper_invocation_contract.target_of_json (List.assoc "target" fields),
+         List.assoc "operation_id" fields
+       with
+       | Error error, _ ->
+         invalid (Keeper_invocation_contract.request_error_to_string error)
+       | Ok target, `String operation_id ->
+         (match
+            Keeper_owner.Chat_operation.Operation_id.of_string operation_id
+          with
+          | Ok operation_id ->
+            Ok
+              ( Keeper_invocation_contract.target_name_of_target target
+              , operation_id )
+          | Error detail -> invalid detail)
+       | Ok _, _ -> invalid "operation_id must be a string")
+  | _ -> invalid "operation lookup must be an object"
 ;;
 
-let run_ref_error error =
+let operation_target_arg args =
+  match args with
+  | `Assoc [ ("target", target) ] ->
+    Keeper_invocation_contract.target_of_json target
+    |> Result.map Keeper_invocation_contract.target_name_of_target
+    |> Result.map_error (fun error ->
+      `Assoc
+        [ "error", `String "invalid_input"
+        ; "message",
+          `String (Keeper_invocation_contract.request_error_to_string error)
+        ])
+  | _ ->
+    Error
+      (`Assoc
+         [ "error", `String "invalid_input"
+         ; "message", `String "operation list requires exactly target"
+         ])
+;;
+
+let owner_command_error_result error =
   tool_result_error_data
     (`Assoc
-       [ "error", `String "invalid_run_ref"
-       ; "message", `String (Keeper_invocation_contract.request_error_to_string error)
+       [ "error", `String (owner_operation_error_code error)
+       ; "message",
+         `String (Keeper_owner_registry.command_error_to_string error)
        ])
 ;;
 
-let delegate_access_rejection reference rejection =
-  let error, message =
-    match rejection with
-    | Keeper_msg_async.Invalid_base_path { reason } -> "invalid_base_path", reason
-    | Keeper_msg_async.Invalid_caller -> "invalid_caller", "caller identity is invalid"
-    | Keeper_msg_async.Invalid_request_id -> "invalid_run_ref", "run_ref.run_id is invalid"
-    | Keeper_msg_async.Caller_mismatch ->
-      "run_ref_caller_mismatch", "run_ref does not belong to the authenticated caller"
-  in
-  `Assoc
-    [ "error", `String error
-    ; "message", `String message
-    ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
-    ]
+let operation_is_owned_by ~caller (operation : Keeper_owner.Chat_operation.t) =
+  match Keeper_chat_operation_payload.source_of_json operation.source with
+  | Ok source -> Ok (String.equal caller source.submitted_by)
+  | Error detail -> Error detail
 ;;
 
 let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
-  match run_ref_arg args with
-  | Error error -> run_ref_error error
-  | Ok reference ->
-    let run_id = Keeper_invocation_contract.run_id reference in
-    (match Keeper_msg_async.poll ~base_path:config.base_path ~caller run_id with
-    | Keeper_msg_async.Absent ->
-      tool_result_error_data
-        (`Assoc [ "error", `String "run_not_found"; "run_ref", Keeper_invocation_contract.run_ref_to_json reference ])
-    | Keeper_msg_async.Unreadable reason ->
-      tool_result_error_data
-        (`Assoc
-           [ "error", `String "invocation_record_unreadable"
-           ; "message", `String reason
-           ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
-           ])
-    | Keeper_msg_async.Rejected rejection ->
-      tool_result_error_data (delegate_access_rejection reference rejection)
-    | Keeper_msg_async.Found entry
-      when not (Keeper_invocation_contract.run_ref_matches_entry reference entry) ->
-      run_ref_error Keeper_invocation_contract.Run_ref_mismatch
-    | Keeper_msg_async.Found entry ->
-      (match Keeper_invocation_contract.delegate_entry_to_json entry with
-       | Ok json -> tool_result_ok_data json
-       | Error error ->
-         run_ref_error error))
+  match operation_reference_arg args with
+  | Error json -> tool_result_error_data json
+  | Ok (keeper_name, operation_id) ->
+    (match
+       Keeper_owner_registry.exact_operation
+         ~base_path:config.base_path
+         ~keeper_name
+         operation_id
+     with
+     | Error error -> owner_command_error_result error
+     | Ok None ->
+       tool_result_error_data
+         (`Assoc
+            [ "error", `String "unknown_operation"
+            ; "message", `String "Keeper chat operation was not found"
+            ])
+     | Ok (Some operation) ->
+       (match operation_is_owned_by ~caller operation with
+        | Error detail ->
+          tool_result_error_data
+            (`Assoc
+               [ "error", `String "store_unavailable"
+               ; "message", `String detail
+               ])
+        | Ok false ->
+          tool_result_error_data
+            (`Assoc
+               [ "error", `String "unknown_operation"
+               ; "message", `String "Keeper chat operation was not found"
+               ])
+        | Ok true ->
+          tool_result_ok_data (Keeper_owner.Chat_operation.to_json operation)))
 ;;
 
 let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
-  match run_ref_arg args with
-  | Error error -> run_ref_error error
-  | Ok reference ->
-    let run_id = Keeper_invocation_contract.run_id reference in
-    (match Keeper_msg_async.poll ~base_path:config.base_path ~caller run_id with
-     | Keeper_msg_async.Found entry
-       when not (Keeper_invocation_contract.run_ref_matches_entry reference entry) ->
-       run_ref_error Keeper_invocation_contract.Run_ref_mismatch
-     | Keeper_msg_async.Found _ ->
-    let result =
-      Keeper_msg_async.cancel ~base_path:config.base_path ~caller run_id
-    in
-    let json = Keeper_invocation_contract.delegate_cancellation_to_json reference result in
-    (match result with
-     | Keeper_msg_async.Cancellation_requested _ ->
-       tool_result_ok_data json
-     | Keeper_msg_async.Cancel_not_found
-     | Keeper_msg_async.Cancel_unreadable _
-     | Keeper_msg_async.Cancel_rejected _
-     | Keeper_msg_async.Cancel_worker_ownership_unknown _
-     | Keeper_msg_async.Cancel_already_terminal _
-     | Keeper_msg_async.Cancel_persistence_failed _
-     | Keeper_msg_async.Cancel_worker_signal_failed _
-     | Keeper_msg_async.Cancel_state_invariant_failed _ ->
-       tool_result_error_data json)
-     | Keeper_msg_async.Absent ->
-       tool_result_error_data (Keeper_invocation_contract.delegate_cancellation_to_json reference Keeper_msg_async.Cancel_not_found)
-     | Keeper_msg_async.Unreadable reason ->
-       tool_result_error_data (Keeper_invocation_contract.delegate_cancellation_to_json reference (Keeper_msg_async.Cancel_unreadable reason))
-     | Keeper_msg_async.Rejected rejection ->
-       tool_result_error_data (delegate_access_rejection reference rejection))
+  match operation_reference_arg args with
+  | Error json -> tool_result_error_data json
+  | Ok (keeper_name, operation_id) ->
+    (match
+       Keeper_owner_registry.exact_operation
+         ~base_path:config.base_path
+         ~keeper_name
+         operation_id
+     with
+     | Error error -> owner_command_error_result error
+     | Ok None ->
+       tool_result_error_data
+         (`Assoc
+            [ "error", `String "unknown_operation"
+            ; "message", `String "Keeper chat operation was not found"
+            ])
+     | Ok (Some operation) ->
+       (match operation_is_owned_by ~caller operation with
+        | Error detail ->
+          tool_result_error_data
+            (`Assoc
+               [ "error", `String "store_unavailable"
+               ; "message", `String detail
+               ])
+        | Ok false ->
+          tool_result_error_data
+            (`Assoc
+               [ "error", `String "unknown_operation"
+               ; "message", `String "Keeper chat operation was not found"
+               ])
+        | Ok true ->
+          (match
+             Keeper_owner_registry.cancel_queued_operation
+               ~base_path:config.base_path
+               ~keeper_name
+               operation_id
+           with
+           | Error error -> owner_command_error_result error
+           | Ok operation ->
+             tool_result_ok_data
+               (Keeper_owner.Chat_operation.to_json operation))))
 ;;
 
 let keeper_delegate_list_body ~(config : Workspace.config) ~caller args =
-  let target =
-    match args with
-    | `Assoc [] -> Ok None
-    | `Assoc [ ("target", value) ] ->
-      Keeper_invocation_contract.target_of_json value |> Result.map (fun target -> Some target)
-    | _ ->
-      Error
-        (Keeper_invocation_contract.Invalid_wire_value
-           { field = "delegate_list"; expected = "empty object or typed target" })
-  in
-  match target with
-  | Error error -> run_ref_error error
-  | Ok target ->
-  let keeper_name = Option.map Keeper_invocation_contract.target_name_of_target target in
-  match
-    Keeper_msg_async.list_for_keeper
-      ~base_path:config.base_path
-      ~caller
-      ?keeper_name
-      ()
-  with
-  | Ok entries ->
-    let rec project = function
-      | [] -> Ok []
-      | entry :: rest ->
-        let* json = Keeper_invocation_contract.delegate_entry_to_json entry in
-        let* rest = project rest in
-        Ok (json :: rest)
-    in
-    (match project entries with
-     | Ok json_list -> tool_result_ok_data (`List json_list)
-     | Error error -> run_ref_error error)
-  | Error rejection ->
-    tool_result_error_data (Keeper_msg_async.access_rejection_to_json rejection)
+  match operation_target_arg args with
+  | Error json -> tool_result_error_data json
+  | Ok keeper_name ->
+    (match
+       Keeper_owner_registry.list_queued_operations
+         ~base_path:config.base_path
+         ~keeper_name
+         ~after_sequence:None
+         ~limit:100
+     with
+     | Error error -> owner_command_error_result error
+     | Ok operations ->
+       let rec owned acc = function
+         | [] -> Ok (List.rev acc)
+         | operation :: rest ->
+           (match operation_is_owned_by ~caller operation with
+            | Error detail -> Error detail
+            | Ok false -> owned acc rest
+            | Ok true ->
+              owned
+                (Keeper_owner.Chat_operation.to_json operation :: acc)
+                rest)
+       in
+       (match owned [] operations with
+        | Ok operations -> tool_result_ok_data (`List operations)
+        | Error detail ->
+          tool_result_error_data
+            (`Assoc
+               [ "error", `String "store_unavailable"
+               ; "message", `String detail
+               ])))
 ;;
-
 let complete_keeper_msg_stream_result result =
   if not (tool_result_success result) then result
   else begin
@@ -824,91 +838,34 @@ let complete_keeper_msg_stream_result result =
       (annotate_keeper_json ~runtime_class:"keeper" (Tool_result.data result))
   end
 
-let handle_keeper_msg_stream
+let handle_keeper_msg_stream_admitted
+      ~admission_token
       ?on_text_delta
       ?on_event
       ?continuation_channel
-      ?on_admission_rejected
-      ?on_admitted
       ctx
       message
-  : tool_result
   =
-  let run name =
-    match
-      Keeper_invocation_contract.direct_message_with_keeper_name message name
-    with
-    | Error error ->
-      tool_result_error (Keeper_invocation_contract.request_error_to_string error)
-    | Ok message ->
-      (* Stream turns are synchronous today, but still pin the bus visible at the
-         public surface boundary so later refactors cannot reintroduce a nested
-         fallback lookup in the turn body. *)
-      let event_bus = Event_bus_slots.get_keeper () in
-      let result =
-        Turn.handle_keeper_msg
-          ?on_text_delta
-          ?on_event
-          ?event_bus
-          ?continuation_channel
-          ?on_admission_rejected
-          ?on_admitted
-          ctx
-          message
-      in
-      complete_keeper_msg_stream_result result
+  let raw_name =
+    Keeper_invocation_contract.direct_message_target_name message
   in
-  match resolve_keeper_name ctx message with
-  | Ok name -> run name
-  | Error err ->
-    let raw_name = Keeper_invocation_contract.direct_message_target_name message in
-    (* Preserve typed admission truth after lifecycle teardown removes the
-       metadata row: a shutdown-fenced queued receipt must return to Pending,
-       not become a terminal lookup failure. An open lane still runs the
-       admitted body and surfaces its authoritative metadata error. *)
-    ignore err;
-    run raw_name
-
-let handle_keeper_msg_stream_if_free
+  match
+    Keeper_invocation_contract.direct_message_with_keeper_name message raw_name
+  with
+  | Error error ->
+    tool_result_error (Keeper_invocation_contract.request_error_to_string error)
+  | Ok message ->
+    let event_bus = Event_bus_slots.get_keeper () in
+    Turn.handle_keeper_msg_admitted
+      ~admission_token
       ?on_text_delta
       ?on_event
+      ?event_bus
       ?continuation_channel
       ctx
       message
-  =
-  match resolve_keeper_name ctx message with
-  | Error err ->
-    let raw_name = Keeper_invocation_contract.direct_message_target_name message in
-    (* A connector message already accepted for a live/raw Keeper identity
-       must remain queueable even if metadata resolution is temporarily
-       unavailable. Run the resolution error itself through the same
-       post-lock admission boundary: a held slot, parked waiter, active
-       receipt, or queue read error returns Busy; only an atomically free
-       lane returns the original metadata error. *)
-    Keeper_turn_admission.run_chat_if_free
-      ~base_path:ctx.config.base_path
-      ~keeper_name:raw_name
-      (fun () -> tool_result_error err)
-  | Ok name ->
-    (match Keeper_invocation_contract.direct_message_with_keeper_name message name with
-     | Error error ->
-       `Ran
-         (tool_result_error
-            (Keeper_invocation_contract.request_error_to_string error))
-     | Ok message ->
-       let event_bus = Event_bus_slots.get_keeper () in
-       (match
-          Turn.handle_keeper_msg_if_free
-            ?on_text_delta
-            ?on_event
-            ?event_bus
-            ?continuation_channel
-            ctx
-            message
-        with
-        | `Busy rejection -> `Busy rejection
-        | `Ran result ->
-          `Ran (complete_keeper_msg_stream_result result)))
+    |> complete_keeper_msg_stream_result
+
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in

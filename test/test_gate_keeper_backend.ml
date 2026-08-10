@@ -35,6 +35,10 @@ let stream_payload_exn
       fail (Keeper_invocation_contract.request_error_to_string error)
   in
   { Server_routes_http_keeper_stream.name = name
+  ; request_id =
+      (match Keeper_owner.Chat_operation.Operation_id.of_string "kmsg-gate-test" with
+       | Ok operation_id -> operation_id
+       | Error detail -> fail detail)
   ; message
   ; user_blocks
   ; turn_instructions
@@ -191,89 +195,6 @@ user_name: Alice Ops
 hello keeper|}
     rendered
 
-let test_persist_connector_assistant_reply_records_lane_reply () =
-  let base_dir = temp_base_path "gate-keeper-reply" in
-  Fun.protect
-    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
-    (fun () ->
-      let keeper_name = "discord-reply-keeper" in
-      let surface =
-        Masc.Surface_ref.Discord
-          {
-            guild_id = Some "guild-1";
-            channel_id = "chan-9";
-            parent_channel_id = None;
-            thread_id = None;
-          }
-      in
-      K.append_user_message ~base_dir ~keeper_name
-        ~content:"<@bot> factorio?"
-        ~surface
-        ~conversation_id:"discord:guild-1:channel:chan-9" ();
-      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~surface
-        ~conversation_id:"discord:guild-1:channel:chan-9"
-        ~reply:"already answered" ();
-      match K.load ~base_dir ~keeper_name with
-      | [ user; assistant ] ->
-          check string "user line first" "user" (K.Role.to_label user.K.role);
-          check string "assistant reply persisted" "assistant" (K.Role.to_label assistant.K.role);
-          check string "assistant conversation id"
-            "discord:guild-1:channel:chan-9"
-            (Option.value assistant.K.conversation_id ~default:"");
-          check bool "assistant keeps typed surface" true
-            (match assistant.K.surface with
-             | Some actual -> Surface_ref.equal surface actual
-             | None -> false);
-          check string "assistant content" "already answered" assistant.K.content
-      | messages ->
-          failf "expected 2 chat messages, got %d" (List.length messages))
-
-let test_persist_connector_assistant_reply_ignores_empty_reply () =
-  let base_dir = temp_base_path "gate-keeper-empty-reply" in
-  Fun.protect
-    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
-    (fun () ->
-      let keeper_name = "discord-empty-reply-keeper" in
-      let surface =
-        Surface_ref.Gate { label = "discord"; address = [] }
-      in
-      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~surface ~reply:"   " ();
-      check int "empty reply does not create chat file" 0
-        (List.length (K.load ~base_dir ~keeper_name)))
-
-let test_persist_connector_assistant_reply_records_typed_status () =
-  let base_dir = temp_base_path "gate-keeper-status-reply" in
-  Fun.protect
-    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
-    (fun () ->
-      let keeper_name = "discord-status-keeper" in
-      let surface =
-        Surface_ref.Gate { label = "discord"; address = [] }
-      in
-      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
-        ~keeper_name ~surface
-        ~reply:"assistant preface that must not survive"
-        ~blocks:
-          [ Keeper_chat_blocks.Status
-              { kind = Keeper_chat_blocks.External_effect_pending }
-          ]
-        ();
-      match K.load ~base_dir ~keeper_name with
-      | [ assistant ] ->
-          check string "assistant content stays empty" "" assistant.K.content;
-          (match assistant.K.blocks with
-           | Some
-               [ Keeper_chat_blocks.Status
-                   { kind = Keeper_chat_blocks.External_effect_pending }
-               ] ->
-             ()
-           | Some _ -> fail "connector status changed shape during persistence"
-           | None -> fail "connector status was not persisted")
-      | messages ->
-          failf "expected 1 typed status row, got %d" (List.length messages))
-
 let test_contextualize_message_includes_channel_metadata () =
   let rendered =
     Gate_keeper_backend.contextualize_message
@@ -307,7 +228,7 @@ hello from a thread|}
 
 let test_parse_keeper_chat_stream_request_accepts_connector_context () =
   let body =
-    {|{"name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
+    {|{"request_id":"kmsg-connector","name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload ->
@@ -318,15 +239,22 @@ let test_parse_keeper_chat_stream_request_accepts_connector_context () =
   | Error err -> fail ("expected connector context to parse: " ^ err)
 
 let test_parse_keeper_chat_stream_request_rejects_unknown_field () =
-  let body = {|{"name":"luna","message":"hello","unexpected":true}|} in
+  let body = {|{"request_id":"kmsg-unknown","name":"luna","message":"hello","unexpected":true}|} in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok _ -> fail "expected an undeclared field to be rejected"
   | Error err ->
     check bool "unknown field is named" true (string_contains err "unexpected")
 ;;
 
+let test_parse_keeper_chat_stream_request_requires_request_id () =
+  let body = {|{"name":"luna","message":"hello"}|} in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected request_id to be required"
+  | Error err -> check string "missing id error" "request_id is required" err
+;;
+
 let test_parse_keeper_chat_stream_request_rejects_duplicate_field () =
-  let body = {|{"name":"luna","name":"other","message":"hello"}|} in
+  let body = {|{"request_id":"kmsg-duplicate","name":"luna","name":"other","message":"hello"}|} in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok _ -> fail "expected duplicate fields to be rejected"
   | Error err ->
@@ -335,7 +263,7 @@ let test_parse_keeper_chat_stream_request_rejects_duplicate_field () =
 ;;
 
 let test_parse_keeper_chat_stream_request_rejects_wrong_field_type () =
-  let body = {|{"name":"luna","message":"hello","channel":42}|} in
+  let body = {|{"request_id":"kmsg-type","name":"luna","message":"hello","channel":42}|} in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok _ -> fail "expected wrong field type to be rejected"
   | Error err -> check string "wrong type error" "channel must be a string" err
@@ -343,7 +271,7 @@ let test_parse_keeper_chat_stream_request_rejects_wrong_field_type () =
 
 let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
   let body =
-    {|{"name":"luna","message":"hello","channel":"discord"}|}
+    {|{"request_id":"kmsg-partial","name":"luna","message":"hello","channel":"discord"}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok _ -> fail "expected partial connector context to be rejected"
@@ -354,7 +282,7 @@ let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
 
 let test_parse_keeper_chat_stream_request_accepts_copilot_context () =
   let body =
-    {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
+    {|{"request_id":"kmsg-copilot","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload ->
@@ -367,7 +295,7 @@ let test_parse_keeper_chat_stream_request_accepts_copilot_context () =
 
 let test_parse_keeper_chat_stream_request_formats_surface_context () =
   let body =
-    {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","surface_context":{"label":"Overview","route":"/overview","scene":"fleet view","fields":[{"k":"run","v":"2/5"},{"k":"alert","v":"1"}]}}|}
+    {|{"request_id":"kmsg-surface","name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","surface_context":{"label":"Overview","route":"/overview","scene":"fleet view","fields":[{"k":"run","v":"2/5"},{"k":"alert","v":"1"}]}}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload ->
@@ -378,7 +306,7 @@ let test_parse_keeper_chat_stream_request_formats_surface_context () =
 
 let test_parse_keeper_chat_stream_request_accepts_attachment_only_user_blocks () =
   let body =
-    {|{"name":"luna","message":"","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024}]}|}
+    {|{"request_id":"kmsg-attachment","name":"luna","message":"","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024}]}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload -> (
@@ -394,7 +322,7 @@ let test_parse_keeper_chat_stream_request_accepts_attachment_only_user_blocks ()
 
 let test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type () =
   let body =
-    {|{"name":"luna","message":"hello","user_blocks":[{"type":"tool_result","text":"nope"}]}|}
+    {|{"request_id":"kmsg-block","name":"luna","message":"hello","user_blocks":[{"type":"tool_result","text":"nope"}]}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok _ -> fail "expected unknown user block type to be rejected"
@@ -2760,142 +2688,6 @@ let test_agent_name_special_chars_sanitized () =
   check string "special chars become underscore"
     "gate:my_chan:thread_1:user_2" agent_name
 
-(* ── Response parsing ────────────────────────────────────────────── *)
-
-let test_extract_reply_from_reply_field () =
-  let body = {|{"reply":"hello world","model_used":"test"}|} in
-  let result = Gate_keeper_backend.extract_reply_text body in
-  check string "reply field extracted" "hello world" result
-
-let test_extract_reply_does_not_fallback_to_text_field () =
-  let body = {|{"text":"fallback content"}|} in
-  let result = Gate_keeper_backend.extract_reply_text body in
-  check string "text field is not reply" body result
-
-let test_extract_reply_raw_on_non_json () =
-  let body = "not json at all" in
-  let result = Gate_keeper_backend.extract_reply_text body in
-  check string "raw body returned" "not json at all" result
-
-let test_extract_turn_stats_present () =
-  let body = {|{"model_used":"claude-opus","duration_ms":1500,"total_tokens":500}|} in
-  match Gate_keeper_backend.extract_turn_stats body with
-  | Some { Gate_protocol.model_used; duration_ms; tokens_used } ->
-      check string "model redacted to runtime lane" "runtime" model_used;
-      check int "duration" 1500 duration_ms;
-      check int "tokens" 500 tokens_used
-  | None -> fail "expected Some stats"
-
-let test_extract_turn_stats_ignores_model_only_payload () =
-  let body = {|{"model_used":"claude-opus"}|} in
-  let result = Gate_keeper_backend.extract_turn_stats body in
-  check bool "model-only fields are not stats" true (result = None)
-
-let test_extract_turn_stats_missing_returns_none () =
-  let body = {|{"other_field":"value"}|} in
-  let result = Gate_keeper_backend.extract_turn_stats body in
-  check bool "missing fields returns None" true (result = None)
-
-(* ── ACK envelope parse (regression for #22569 blocker) ───────────────
-   The previous [Safe_ops.protect ~default:None] wrapper collapsed two
-   distinct failure modes into a single [None]: the keeper legitimately
-   returned no ACK fields vs the backend could not parse what the keeper
-   sent. These tests pin the typed [Result.t] so the dispatch site can
-   surface a deliberate degraded path instead of silently substituting
-   the keeper's reply body. *)
-
-let expect_error expected actual =
-  match actual with
-  | Ok _ -> failf "expected Error %s, got Ok _" expected
-  | Error failure ->
-      let got = Gate_keeper_backend.ack_parse_failure_to_string failure in
-      check bool
-        (Printf.sprintf "expected Error %s, got Error %s" expected got)
-        true
-        (String_util.string_contains_substring ~needle:expected got)
-
-let test_extract_message_request_ack_accepts_well_formed_envelope () =
-  let body =
-    {|{"request_id":"req-1","status":"queued","keeper_name":"luna"}|}
-  in
-  match
-    Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
-      ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body
-  with
-  | Ok request ->
-      check string "request_id" "req-1" request.request_id;
-      check string "destination_id" "luna" request.destination_id;
-      check string "channel" "discord" request.channel;
-      (match request.status with
-       | Gate_protocol.Queued -> ()
-       | _ -> fail "expected Queued status")
-  | Error failure ->
-      fail
-        ("expected Ok request: "
-         ^ Gate_keeper_backend.ack_parse_failure_to_string failure)
-
-let test_extract_message_request_ack_rejects_missing_request_id () =
-  let body = {|{"status":"queued"}|} in
-  expect_error "missing request_id"
-    (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
-       ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
-
-let test_extract_message_request_ack_rejects_empty_request_id () =
-  let body = {|{"request_id":"   ","status":"queued"}|} in
-  expect_error "empty request_id"
-    (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
-       ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
-
-let test_extract_message_request_ack_rejects_missing_status () =
-  let body = {|{"request_id":"req-1"}|} in
-  expect_error "missing status"
-    (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
-       ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
-
-let test_extract_message_request_ack_rejects_unknown_status () =
-  let body = {|{"request_id":"req-1","status":"frobnicated"}|} in
-  expect_error "unknown status"
-    (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
-       ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
-
-let test_extract_message_request_ack_rejects_invalid_json () =
-  let body = "{not valid json" in
-  expect_error "invalid json"
-    (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
-       ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
-
-let test_extract_message_request_ack_normalizes_status_case () =
-  (* The wire contract lowercases the status before consulting the closed
-     sum. A mixed-case envelope from a future keeper should still be
-     accepted, not rejected as unknown. *)
-  let body = {|{"request_id":"req-1","status":"Running"}|} in
-  match
-    Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
-      ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body
-  with
-  | Ok request ->
-      (match request.status with
-       | Gate_protocol.Running -> ()
-       | _ -> fail "expected Running status after case normalization")
-  | Error failure ->
-      fail
-        ("expected Ok after case normalization: "
-         ^ Gate_keeper_backend.ack_parse_failure_to_string failure)
-
-let test_extract_message_request_ack_falls_back_to_keeper_name () =
-  let body = {|{"request_id":"req-1","status":"done"}|} in
-  match
-    Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
-      ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body
-  with
-  | Ok request ->
-      check string "destination_id falls back to keeper_name" "luna"
-        request.destination_id
-  | Error failure ->
-      fail
-        ("expected Ok with fallback keeper_name: "
-         ^ Gate_keeper_backend.ack_parse_failure_to_string failure)
-
 let () =
   Alcotest.run "Gate_keeper_backend"
     [
@@ -2909,18 +2701,14 @@ let () =
             test_contextualize_message_includes_external_metadata;
           test_case "context envelope sanitizes metadata lines" `Quick
             test_contextualize_message_sanitizes_context_lines;
-          test_case "persists connector assistant reply" `Quick
-            test_persist_connector_assistant_reply_records_lane_reply;
-          test_case "skips empty connector assistant reply" `Quick
-            test_persist_connector_assistant_reply_ignores_empty_reply;
-          test_case "persists typed connector status without prose" `Quick
-            test_persist_connector_assistant_reply_records_typed_status;
           test_case "context envelope includes channel metadata" `Quick
             test_contextualize_message_includes_channel_metadata;
           test_case "stream request accepts connector context" `Quick
             test_parse_keeper_chat_stream_request_accepts_connector_context;
           test_case "stream request rejects unknown fields" `Quick
             test_parse_keeper_chat_stream_request_rejects_unknown_field;
+          test_case "stream request requires request id" `Quick
+            test_parse_keeper_chat_stream_request_requires_request_id;
           test_case "stream request rejects duplicate fields" `Quick
             test_parse_keeper_chat_stream_request_rejects_duplicate_field;
           test_case "stream request rejects wrong field types" `Quick
@@ -3084,36 +2872,5 @@ let () =
             test_agent_name_normal_values_unchanged;
           test_case "special chars sanitized" `Quick
             test_agent_name_special_chars_sanitized;
-        ] );
-      ( "response_parsing",
-        [
-          test_case "reply field extracted" `Quick test_extract_reply_from_reply_field;
-          test_case "text field is not reply" `Quick
-            test_extract_reply_does_not_fallback_to_text_field;
-          test_case "raw body on non-json" `Quick test_extract_reply_raw_on_non_json;
-          test_case "turn stats present" `Quick test_extract_turn_stats_present;
-          test_case "turn stats ignore model-only payload" `Quick
-            test_extract_turn_stats_ignores_model_only_payload;
-          test_case "turn stats missing returns None" `Quick
-            test_extract_turn_stats_missing_returns_none;
-        ] );
-      ( "ack_envelope_parse",
-        [
-          test_case "accepts well-formed envelope" `Quick
-            test_extract_message_request_ack_accepts_well_formed_envelope;
-          test_case "rejects missing request_id" `Quick
-            test_extract_message_request_ack_rejects_missing_request_id;
-          test_case "rejects empty request_id" `Quick
-            test_extract_message_request_ack_rejects_empty_request_id;
-          test_case "rejects missing status" `Quick
-            test_extract_message_request_ack_rejects_missing_status;
-          test_case "rejects unknown status" `Quick
-            test_extract_message_request_ack_rejects_unknown_status;
-          test_case "rejects invalid json" `Quick
-            test_extract_message_request_ack_rejects_invalid_json;
-          test_case "normalizes status case" `Quick
-            test_extract_message_request_ack_normalizes_status_case;
-          test_case "falls back to keeper_name" `Quick
-            test_extract_message_request_ack_falls_back_to_keeper_name;
         ] );
     ]

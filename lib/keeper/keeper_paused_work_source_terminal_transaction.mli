@@ -10,7 +10,8 @@ type request =
 
 type failure =
   | Invalid_request of string
-  | Admission_busy of Keeper_turn_admission.autonomous_block
+  | Admission_busy of Keeper_owner.autonomous_block
+  | Owner_unavailable of string
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Receipt_lock_failed of string
   | Receipt_read_failed of string

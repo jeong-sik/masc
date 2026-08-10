@@ -37,7 +37,6 @@
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
-  test_keeper_chat_direct_delivery
   test_keeper_librarian_retry
   test_surface_ref
   test_inference_inflight_observation
@@ -335,7 +334,6 @@
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
-  test_keeper_chat_direct_delivery
   test_keeper_librarian_retry
   test_surface_ref
   test_inference_inflight_observation
@@ -914,12 +912,7 @@
 
 (tests
  (names
-  test_keeper_busy_connector_deferred
-  test_keeper_busy_dashboard_deferred
   test_keeper_turn_interrupt
-  test_keeper_chat_consumer_delivery
-  test_keeper_chat_consumer_dispatch
-  test_keeper_consumer_wake_wiring
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage
@@ -1058,12 +1051,7 @@
   test_board_core_payload
   test_board_moderation)
  (modules
-  test_keeper_busy_connector_deferred
-  test_keeper_busy_dashboard_deferred
   test_keeper_turn_interrupt
-  test_keeper_chat_consumer_delivery
-  test_keeper_chat_consumer_dispatch
-  test_keeper_consumer_wake_wiring
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage
@@ -1823,10 +1811,9 @@
 
 (include stanzas/test_keeper_context_observation_projection.inc)
 
-(include stanzas/test_keeper_chat_coalescing.inc)
-
-(include stanzas/test_keeper_turn_admission.inc)
+(include stanzas/test_keeper_turn_dispatch_authority.inc)
 (include stanzas/test_keeper_owner.inc)
+(include stanzas/test_keeper_chat_operation_http.inc)
 
 
 
@@ -2478,8 +2465,6 @@
 
 (include stanzas/test_fs_compat_publication_reconciliation.inc)
 (include stanzas/test_eio_resource_scope.inc)
-
-(include stanzas/test_keeper_chat_admission_contention.inc)
 
 (include stanzas/test_dashboard_continuity_briefs.inc)
 

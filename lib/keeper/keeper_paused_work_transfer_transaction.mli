@@ -15,7 +15,8 @@ type projection_stage =
 
 type failure =
   | Invalid_request of string
-  | Admission_busy of Keeper_turn_admission.autonomous_block
+  | Admission_busy of Keeper_owner.autonomous_block
+  | Owner_unavailable of string
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Receipt_lock_failed of string
   | Receipt_read_failed of string
@@ -75,7 +76,7 @@ type success =
 val error_to_string : error -> string
 
 val project_committed_target_if_receipted :
-  ?intake_token:Keeper_turn_admission.intake_token ->
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   Workspace.config ->
   transfer:Keeper_registry_event_queue.accepted_transfer ->
   (target_projection option, failure) result

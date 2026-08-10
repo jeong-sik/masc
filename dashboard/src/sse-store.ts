@@ -119,7 +119,6 @@ export function registerKeeperTurnRefresh(fn: (keeperName: string) => void): voi
 // their authoritative re-read here instead of reconstructing queue state from
 // event deltas.
 const _refreshKeeperWaitingInventoryFns = new Set<(keeperName: string) => void>()
-const pendingKeeperChatReceiptRefreshNames = new Set<string>()
 export function registerKeeperWaitingInventoryRefresh(
   fn: (keeperName: string) => void,
 ): () => void {
@@ -884,27 +883,6 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     const keeperName = event.keeper_name?.trim() ?? ''
     if (keeperName) {
       for (const refresh of _refreshKeeperWaitingInventoryFns) refresh(keeperName)
-      if (event.queue_kind === 'chat_queue') {
-        pendingKeeperChatReceiptRefreshNames.add(keeperName)
-        scheduleRefresh(
-          'keeper_chat_receipts',
-          () => {
-            const keeperNames = Array.from(pendingKeeperChatReceiptRefreshNames)
-            pendingKeeperChatReceiptRefreshNames.clear()
-            void import('./keeper-runtime')
-              .then(mod => Promise.all(
-                keeperNames.map(name => mod.reconcileKeeperChatReceipts(name)),
-              ))
-              .catch(err => {
-                console.warn(
-                  '[server-push] keeper chat receipt reconciliation unavailable',
-                  err instanceof Error ? err.message : err,
-                )
-              })
-          },
-          SSE_KEEPER_THREAD_DEBOUNCE_MS,
-        )
-      }
     }
     return true
   }

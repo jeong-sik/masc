@@ -26,7 +26,6 @@ module Dashboard_execution = Dashboard_execution
 module Dashboard_briefing = Dashboard_briefing
 module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Masc.Build_identity
-module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_tool_call_log = Masc.Keeper_tool_call_log
 module Graphql_api = Masc.Graphql_api

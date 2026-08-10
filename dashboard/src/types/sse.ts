@@ -33,7 +33,7 @@ export type SSEEventType =
   | 'keeper_phase_changed'
   | 'keeper_composite_changed'
   | 'keeper_chat_appended'
-  | 'keeper_chat_turn_event'
+  | 'keeper_chat_operation_event'
   | 'keeper_waiting_inventory_changed'
   | 'keeper_compaction_snapshots_changed'
   | 'agent_core_telemetry_sample'
@@ -182,7 +182,7 @@ export interface SSEEvent {
   saved_tokens?: number
   // Waiting-inventory invalidation queue kind. The event carries no rows or
   // revision ID; consumers re-read the authoritative projection.
-  queue_kind?: 'chat_queue' | 'event_queue'
+  queue_kind?: 'chat_operation' | 'event_queue'
   trigger?: string
   runtime?: string
   provider_id?: string
@@ -251,9 +251,8 @@ export interface SSEEvent {
   // duration_sec?, device_id? }`. Optional; assistant transcript rows
   // render a user-gesture play button when present.
   audio?: SSEAudioClip
-  // keeper_chat_turn_event: the same AG-UI payload used by direct chat,
-  // correlated to exactly one durable queued request.
-  receipt_id?: string
+  // keeper_chat_operation_event: the same AG-UI payload used by the accepted
+  // stream, correlated to exactly one durable operation.
   ag_ui_event?: unknown
 }
 

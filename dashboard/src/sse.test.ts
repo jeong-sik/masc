@@ -6,31 +6,31 @@ import {
 } from './sse'
 import { appendThreadEntry, keeperThreads } from './keeper-state'
 
-describe('queued Keeper chat server push', () => {
-  const receiptId = 'chatq_00000000-0000-4000-8000-000000000001'
+describe('Keeper operation server push', () => {
+  const operationId = 'kmsg-operation-1'
 
   beforeEach(() => {
     keeperThreads.value = {}
     appendThreadEntry('sangsu', {
-      id: 'queued-reply',
+      id: 'operation-reply',
       role: 'assistant',
       source: 'direct_assistant',
       label: 'sangsu',
-      text: '대기열에 추가했습니다.',
-      rawText: '대기열에 추가했습니다.',
+      text: 'Queued',
+      rawText: 'Queued',
       timestamp: null,
       delivery: 'queued',
       streamState: null,
-      queueReceiptIds: [receiptId],
-      details: { queueReceiptId: receiptId, queueState: 'pending' },
+      requestId: operationId,
+      details: null,
     })
   })
 
-  it('routes the nested AG-UI delta to the exact queued bubble', () => {
+  it('routes the nested AG-UI delta to the exact operation bubble', () => {
     recordServerPushEvent({
-      type: 'keeper_chat_turn_event',
+      type: 'keeper_chat_operation_event',
       name: 'sangsu',
-      receipt_id: receiptId,
+      operation_id: operationId,
       ag_ui_event: {
         type: 'TEXT_MESSAGE_CONTENT',
         threadId: 'keeper-consumer:sangsu',
@@ -41,7 +41,7 @@ describe('queued Keeper chat server push', () => {
       },
     })
 
-    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'queued-reply')
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'operation-reply')
     expect(entry?.text).toBe('실제 답변')
     expect(entry?.delivery).toBe('streaming')
   })

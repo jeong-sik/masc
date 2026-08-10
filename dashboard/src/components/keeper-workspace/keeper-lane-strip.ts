@@ -48,32 +48,26 @@ const LANE_STATE_LABELS: Record<string, string> = {
 
 const LANE_SOURCE_LABELS: Record<string, string> = {
   event_queue_pending: '자율 이벤트',
-  chat_queue_pending: '채팅 대기',
-  chat_queue_inflight: '채팅 처리 중',
-  chat_queue_recovery_required: '채팅 복구 필요',
-  chat_queue_persistence_blocked: '채팅 저장 복구 필요',
+  chat_operation_queued: '채팅 대기',
+  chat_operation_running: '채팅 처리 중',
   hitl_pending: '승인 대기',
   external_attention: '외부 알림',
   fusion_running: 'Fusion 실행 중',
   schedule_waiting: '예약 실행',
-  turn_admission_waiting: '실행 슬롯 대기',
-  turn_admission_shutdown: '종료 정리',
+  owner_shutdown: '종료 정리',
   operator_pending_confirm: '운영자 확인',
   read_error: '읽기 오류',
 }
 
 const LANE_SOURCE_GRAPH_COLORS: Record<DashboardKeeperWaitingSource, string> = {
   event_queue_pending: 'var(--color-accent)',
-  chat_queue_pending: 'var(--color-accent)',
-  chat_queue_inflight: 'var(--status-warn)',
-  chat_queue_recovery_required: 'var(--color-danger)',
-  chat_queue_persistence_blocked: 'var(--color-danger)',
+  chat_operation_queued: 'var(--color-accent)',
+  chat_operation_running: 'var(--status-warn)',
   hitl_pending: 'var(--status-warn)',
   external_attention: 'var(--color-accent)',
   fusion_running: 'var(--status-ok)',
   schedule_waiting: 'var(--status-warn)',
-  turn_admission_waiting: 'var(--color-fg-muted)',
-  turn_admission_shutdown: 'var(--color-fg-muted)',
+  owner_shutdown: 'var(--color-fg-muted)',
   operator_pending_confirm: 'var(--status-warn)',
   read_error: 'var(--color-danger)',
 }

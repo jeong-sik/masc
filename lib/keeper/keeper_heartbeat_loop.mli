@@ -105,7 +105,7 @@ val record_provider_timeout_observation :
 type keepalive_cycle_status =
   | Turn_cycle_completed
   | Turn_cycle_crashed
-  | Turn_cycle_busy of Keeper_turn_admission.autonomous_block
+  | Turn_cycle_busy of Keeper_owner.autonomous_block
 
 type keepalive_cycle_accounting =
   { record_turn_status : bool

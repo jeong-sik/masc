@@ -289,31 +289,25 @@ export interface DashboardScheduledAutomation {
 
 export type DashboardKeeperWaitingSource =
   | 'event_queue_pending'
-  | 'chat_queue_pending'
-  | 'chat_queue_inflight'
-  | 'chat_queue_recovery_required'
-  | 'chat_queue_persistence_blocked'
+  | 'chat_operation_queued'
+  | 'chat_operation_running'
   | 'hitl_pending'
   | 'external_attention'
   | 'fusion_running'
   | 'schedule_waiting'
-  | 'turn_admission_waiting'
-  | 'turn_admission_shutdown'
+  | 'owner_shutdown'
   | 'operator_pending_confirm'
   | 'read_error'
 
 export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
   'event_queue_pending',
-  'chat_queue_pending',
-  'chat_queue_inflight',
-  'chat_queue_recovery_required',
-  'chat_queue_persistence_blocked',
+  'chat_operation_queued',
+  'chat_operation_running',
   'hitl_pending',
   'external_attention',
   'fusion_running',
   'schedule_waiting',
-  'turn_admission_waiting',
-  'turn_admission_shutdown',
+  'owner_shutdown',
   'operator_pending_confirm',
   'read_error',
 ] as const satisfies ReadonlyArray<DashboardKeeperWaitingSource>

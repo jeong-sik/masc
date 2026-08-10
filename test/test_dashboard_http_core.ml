@@ -4,7 +4,6 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 module Lib = Masc
 module Auth = Auth
-module Keeper_chat_queue = Masc.Keeper_chat_queue
 module Workspace = Masc.Workspace
 module Dashboard_http_keeper = Dashboard_http_keeper
 
@@ -197,128 +196,7 @@ let test_internal_exact_lane_registry_is_admin_only () =
     (Server_routes_http_routes_dashboard.For_testing.exact_lane_run_permission
      = Masc_domain.CanAdmin)
 
-let test_keeper_chat_receipt_route_and_json () =
-  let receipt_id =
-    match
-      Keeper_chat_queue.Receipt_id.of_string
-        "chatq_00000000-0000-4000-8000-000000000123"
-    with
-    | Ok receipt_id -> receipt_id
-    | Error error -> fail error
-  in
-  let path =
-    "/api/v1/keepers/idealist/chat/receipts/"
-    ^ Keeper_chat_queue.Receipt_id.to_string receipt_id
-  in
-  check (option (pair string string)) "receipt route is exact"
-    (Some ("idealist", Keeper_chat_queue.Receipt_id.to_string receipt_id))
-    (Server_dashboard_http_keeper_api.keeper_chat_receipt_route path);
-  check (option (pair string string)) "receipt route rejects extra segments" None
-    (Server_dashboard_http_keeper_api.keeper_chat_receipt_route (path ^ "/extra"));
-  let json =
-    Server_dashboard_http_keeper_api.keeper_chat_receipt_json
-      ~keeper_name:"idealist" ~revision:7L
-      { Keeper_chat_queue.receipt_id
-      ; state =
-          Keeper_chat_queue.Failed
-            { completed_at = 42.0
-            ; kind = Keeper_chat_queue.Delivery_failed
-            ; detail = "Slack rejected sk-proj-abcdefghijklmnopqrstuvwxyz"
-            ; outcome_ref = Some "chat-row-7"
-            }
-      }
-  in
-  let open Yojson.Safe.Util in
-  check string "receipt JSON state" "failed"
-    (json |> member "state" |> member "kind" |> to_string);
-  check string "receipt JSON revision" "7"
-    (match json |> member "revision" with
-     | `String revision -> revision
-     | _ -> "invalid");
-  check string "receipt JSON failure kind" "delivery_failed"
-    (json |> member "state" |> member "failure_kind" |> to_string);
-  check bool "receipt JSON redacts failure detail" false
-    (contains_substring
-       (json |> member "state" |> member "detail" |> to_string)
-       "sk-proj-abcdefghijklmnopqrstuvwxyz")
-
-let test_keeper_chat_recovery_route_is_exact () =
-  let receipt_id = "chatq_00000000-0000-4000-8000-000000000123" in
-  let path =
-    "/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/recovery"
-  in
-  (match Server_dashboard_http_keeper_api.classify_keeper_post_route path with
-   | Server_dashboard_http_keeper_api.Keeper_post_chat_recovery route ->
-       check string "recovery route keeper" "idealist" route.keeper_name;
-       check string "recovery route receipt" receipt_id route.receipt_id
-   | _ -> fail "exact recovery route was not classified");
-  check bool "recovery route rejects extra segments" true
-    (Server_dashboard_http_keeper_api.classify_keeper_post_route (path ^ "/bulk")
-     = Server_dashboard_http_keeper_api.Keeper_post_unknown)
-  ;
-  let cancel_path =
-    "/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/cancel"
-  in
-  (match
-     Server_dashboard_http_keeper_chat_pending.pending_mutation_route cancel_path
-   with
-   | Some
-       ( keeper_name
-       , observed_receipt_id
-       , Server_dashboard_http_keeper_chat_pending.Cancel ) ->
-     check string "pending cancel route keeper" "idealist" keeper_name;
-     check string "pending cancel route receipt" receipt_id observed_receipt_id
-   | _ -> fail "exact pending cancel route was not classified");
-  check bool "pending cancel route rejects extra segments" true
-    (Server_dashboard_http_keeper_chat_pending.pending_mutation_route
-       (cancel_path ^ "/bulk")
-     = None);
-  let pending_path = "/api/v1/keepers/idealist/chat/pending" in
-  check (option string) "pending inventory route is exact" (Some "idealist")
-    (Server_dashboard_http_keeper_chat_pending.pending_get_route pending_path);
-  check (option string) "pending inventory route rejects extra segments" None
-    (Server_dashboard_http_keeper_chat_pending.pending_get_route
-       (pending_path ^ "/extra"));
-  check bool "Worker cannot enumerate or mutate another worker's pending payload" false
-    (Masc_domain.has_permission
-       Masc_domain.Worker
-       Server_dashboard_http_keeper_chat_pending.operator_permission);
-  check bool "Admin can inspect and mutate the durable pending queue" true
-    (Masc_domain.has_permission
-       Masc_domain.Admin
-       Server_dashboard_http_keeper_chat_pending.operator_permission);
-  let pending_source_json =
-    Masc.Keeper_chat_receipt_projection.message_source_json
-      (Keeper_chat_queue.Slack
-         { channel_id = "channel-1"
-         ; user_id = "user-1"
-         ; user_name = "operator"
-         ; team_id = Some "team-1"
-         ; thread_ts = Some "42.1"
-         })
-  in
-  let open Yojson.Safe.Util in
-  check string "pending provenance retains source kind"
-    "slack"
-    (pending_source_json |> member "kind" |> to_string);
-  check string "pending provenance retains submitter identity"
-    "user-1"
-    (pending_source_json |> member "user_id" |> to_string);
-  check string "pending provenance retains channel identity"
-    "channel-1"
-    (pending_source_json |> member "channel_id" |> to_string);
-  (match
-     Server_dashboard_http_keeper_chat_pending.pending_mutation_route
-       ("/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/edit")
-   with
-   | Some (_, _, Server_dashboard_http_keeper_chat_pending.Edit) -> ()
-   | _ -> fail "exact pending edit route was not classified");
-  (match
-     Server_dashboard_http_keeper_chat_pending.pending_mutation_route
-       ("/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/move-to-end")
-   with
-   | Some (_, _, Server_dashboard_http_keeper_chat_pending.Move_to_end) -> ()
-   | _ -> fail "exact pending move route was not classified");
+let test_event_queue_operator_routes_are_exact () =
   check (option string) "event operator route is exact" (Some "idealist")
     (Server_dashboard_http_keeper_event_queue_operator.route
        "/api/v1/keepers/idealist/events/operator");
@@ -535,7 +413,7 @@ let test_event_pending_projection_omits_non_rejection_payloads () =
 ;;
 
 let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  with_test_env @@ fun ~env:_ ~sw ~config ->
   let require_ok label = function
     | Ok value -> value
     | Error detail -> failf "%s: %s" label detail
@@ -686,6 +564,15 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
        |> require_ok "persist transfer source keeper metadata";
        Masc.Keeper_meta_store.replace_snapshot config target_meta
        |> require_ok "persist target keeper metadata";
+       (match
+          Masc.Keeper_owner_registry.install_from_store
+            ~sw
+            ~operation_executor:None
+            config
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail (Masc.Keeper_owner_registry.install_error_to_string error));
        ignore
          (Masc.Keeper_registry.For_testing.register
             ~base_path
@@ -759,26 +646,29 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
          Masc.Keeper_shutdown_types.Operation_id.generate ()
        in
        (match
-          Masc.Keeper_turn_admission.begin_shutdown
+          Masc.Keeper_owner_registry.begin_shutdown
             ~base_path
             ~keeper_name:target_keeper
             ~operation_id:target_shutdown_operation_id
         with
-        | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-        | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
-          fail "fresh target shutdown reservation was already owned");
+        | Ok (Masc.Keeper_owner.Shutdown_reserved _) -> ()
+        | Ok (Masc.Keeper_owner.Shutdown_already_reserved _) ->
+          fail "fresh target shutdown reservation was already owned"
+        | Error error ->
+          fail (Masc.Keeper_owner_registry.command_error_to_string error));
        let fenced_raw, _fenced_response =
          Fun.protect
            ~finally:(fun () ->
              match
-               Masc.Keeper_turn_admission.rollback_shutdown
+               Masc.Keeper_owner_registry.rollback_shutdown
                  ~base_path
                  ~keeper_name:target_keeper
                  ~operation_id:target_shutdown_operation_id
              with
-             | Masc.Keeper_turn_admission.Shutdown_rolled_back -> ()
-             | Masc.Keeper_turn_admission.Shutdown_not_reserved
-             | Masc.Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+             | Ok Masc.Keeper_owner.Shutdown_rolled_back -> ()
+             | Ok Masc.Keeper_owner.Shutdown_not_reserved
+             | Ok (Masc.Keeper_owner.Shutdown_reserved_by_other _)
+             | Error _ ->
                fail "target shutdown reservation was not released")
            (fun () ->
               post_event_operator
@@ -3179,7 +3069,7 @@ let prepare_config_sync_keeper ~sw config name =
   (match Masc.Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error error -> fail ("write meta: " ^ error));
-  match Masc.Keeper_owner_registry.install_from_store ~sw config with
+  match Masc.Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
   | Ok _ -> ()
   | Error error ->
     fail (Masc.Keeper_owner_registry.install_error_to_string error)
@@ -3564,10 +3454,8 @@ let () =
             test_keeper_sensitive_get_permissions_are_exact;
           test_case "internal exact lane registry is Admin-only" `Quick
             test_internal_exact_lane_registry_is_admin_only;
-          test_case "keeper chat receipt route is typed" `Quick
-            test_keeper_chat_receipt_route_and_json;
-          test_case "keeper chat recovery route is exact" `Quick
-            test_keeper_chat_recovery_route_is_exact;
+          test_case "event queue operator routes are exact" `Quick
+            test_event_queue_operator_routes_are_exact;
           test_case "event operator keeps exact source refs across queue changes" `Quick
             test_event_operator_uses_exact_source_refs_across_unrelated_enqueues;
           test_case "event pending projection surfaces the rejection reason" `Quick

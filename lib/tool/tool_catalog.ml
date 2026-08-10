@@ -260,16 +260,6 @@ let explicit_metadata : (string * metadata) list =
            ~allow_direct_call_when_hidden:false
            ~required_permission:Masc_domain.CanAdmin
            "Operator-profile-only exact recovery of one Board-attention quarantine.")) );
-    ( "masc_operator_chat_recovery_resolve",
-      with_execution_policy
-        ~readonly:false
-        ~idempotent:false
-        (with_required_permission
-           Masc_domain.CanAdmin
-           (hidden_active
-           ~allow_direct_call_when_hidden:false
-           ~required_permission:Masc_domain.CanAdmin
-           "Operator-profile-only exact recovery of one crash-ambiguous Keeper chat receipt.")) );
     ( "masc_operator_task_recovery_resolve",
       with_execution_policy
         ~readonly:false

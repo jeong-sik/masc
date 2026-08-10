@@ -193,7 +193,7 @@ let with_durable_intake
   match intake_token with
   | Some token ->
     if
-      Keeper_turn_admission.intake_token_matches
+      Keeper_shutdown_intake_fence.intake_token_matches
         token
         ~base_path
         ~keeper_name
@@ -204,7 +204,7 @@ let with_durable_intake
     else Error Durable_intake_token_not_live
   | None ->
     (match
-       Keeper_turn_admission.run_durable_intake_if_open
+       Keeper_shutdown_intake_fence.run_durable_intake_if_open
          ~base_path
          ~keeper_name
          (fun _intake_token ->
@@ -212,8 +212,8 @@ let with_durable_intake
             | Ok () -> Ok (operation ())
             | Error _ as error -> error)
      with
-     | Keeper_turn_admission.Intake_committed result -> result
-     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+     | Keeper_shutdown_intake_fence.Intake_committed result -> result
+     | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
        Error (Durable_intake_shutdown_reserved operation_id))
 ;;
 
@@ -532,7 +532,7 @@ let project_accepted_transfer_durable_result
   match intake_token with
   | Some token ->
     if
-      Keeper_turn_admission.intake_token_matches
+      Keeper_shutdown_intake_fence.intake_token_matches
         token
         ~base_path
         ~keeper_name:name
@@ -542,14 +542,14 @@ let project_accepted_transfer_durable_result
         "target transfer durable intake token is not live for this Keeper"
   | None ->
     (match
-       Keeper_turn_admission.run_durable_intake_if_open
+       Keeper_shutdown_intake_fence.run_durable_intake_if_open
          ~base_path
          ~keeper_name:name
          (fun _intake_token -> project ())
      with
-     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+     | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
        Transfer_projection_shutdown_reserved operation_id
-     | Keeper_turn_admission.Intake_committed result -> interpret result)
+     | Keeper_shutdown_intake_fence.Intake_committed result -> interpret result)
 ;;
 
 let enqueue_hitl_resolution_durable_result
@@ -693,7 +693,7 @@ let transfer_pending_accepted_result
   match intake_token with
   | Some token ->
     if
-      Keeper_turn_admission.intake_token_matches
+      Keeper_shutdown_intake_fence.intake_token_matches
         token
         ~base_path
         ~keeper_name:name
@@ -704,13 +704,13 @@ let transfer_pending_accepted_result
            "source transfer durable intake token is not live for this Keeper")
   | None ->
     (match
-       Keeper_turn_admission.run_durable_intake_if_open
+       Keeper_shutdown_intake_fence.run_durable_intake_if_open
          ~base_path
          ~keeper_name:name
          (fun _intake_token -> commit ())
      with
-     | Keeper_turn_admission.Intake_committed result -> result
-     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+     | Keeper_shutdown_intake_fence.Intake_committed result -> result
+     | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
        Error (Transfer_pending_shutdown_reserved operation_id))
 ;;
 

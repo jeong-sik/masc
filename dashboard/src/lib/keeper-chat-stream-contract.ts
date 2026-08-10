@@ -10,12 +10,9 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_THINKING_SIGNATURE_DELTA',
   'KEEPER_MEDIA_DELTA',
   'KEEPER_STREAM_PROTOCOL_ERROR',
-  'KEEPER_QUEUE_REQUEST',
-  'KEEPER_CHAT_QUEUED',
-  'KEEPER_QUEUED_TURN_DEFERRED',
+  'KEEPER_CHAT_OPERATION_ACCEPTED',
   'KEEPER_CONTINUATION_CHECKPOINT',
   'KEEPER_EXTERNAL_EFFECT_COMPLETED',
-  'KEEPER_REQUEST_TERMINAL',
   'KEEPER_REPLY_DETAILS',
 ] as const
 
@@ -49,15 +46,6 @@ export type KeeperStreamProtocolErrorKind =
   | 'sse_unsupported_response'
   | 'sse_stream_incomplete'
 
-export type KeeperRequestTerminalStatus =
-  | 'deferred'
-  | 'queued'
-  | 'done'
-  | 'error'
-  | 'cancelled'
-  | 'rejected'
-  | 'acceptance_uncertain'
-
 export type KeeperTurnOutcome =
   | 'visible_reply'
   | 'continuation_checkpoint'
@@ -67,6 +55,15 @@ export type KeeperTurnOutcome =
 
 type KeeperChatCustomEvent =
   | { type: 'CUSTOM'; name: 'KEEPER_CONNECTED'; value: null }
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_CHAT_OPERATION_ACCEPTED'
+      value: {
+        operation_id: string
+        state: 'Queued' | 'Running' | 'Succeeded' | 'Failed' | 'Cancelled'
+        queued_count: number
+      }
+    }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_START'
@@ -128,64 +125,10 @@ type KeeperChatCustomEvent =
     }
   | {
       type: 'CUSTOM'
-      name: 'KEEPER_QUEUE_REQUEST'
-      value: {
-        request_id?: string
-        destination_type?: 'keeper'
-        destination_id?: string
-        channel?: string
-        actor_id?: string | null
-        status?: 'queued'
-        modalities?: string[]
-        transport?: 'sse'
-        metadata?: Record<string, string>
-      }
-    }
-  | {
-      type: 'CUSTOM'
-      name: 'KEEPER_CHAT_QUEUED'
-      value: {
-        keeper_name?: string
-        status?: 'queued'
-        queue?: 'keeper_chat_queue'
-        pending_count?: number
-        inflight_count?: number
-        recovery_required_count?: number
-        chat_waiting?: boolean
-        receipt_id?: string
-        queue_revision?: string
-        shutdown_operation_id?: string | null
-        in_flight_lane?: 'autonomous' | 'chat'
-        in_flight_started_at?: number
-      }
-    }
-  | {
-      type: 'CUSTOM'
-      name: 'KEEPER_QUEUED_TURN_DEFERRED'
-      value: {
-        waiting?: number
-        shutdown_operation_id?: string | null
-        in_flight_lane?: 'autonomous' | 'chat'
-        in_flight_started_at?: number
-      }
-    }
-  | {
-      type: 'CUSTOM'
       name: 'KEEPER_CONTINUATION_CHECKPOINT'
       value: { message?: string; request_id?: string }
     }
   | { type: 'CUSTOM'; name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED'; value: null }
-  | {
-      type: 'CUSTOM'
-      name: 'KEEPER_REQUEST_TERMINAL'
-      value: {
-        request_id?: string
-        keeper_name?: string
-        status: KeeperRequestTerminalStatus
-        ok: boolean
-        message?: string
-      }
-    }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_REPLY_DETAILS'

@@ -20,7 +20,7 @@
 
 type stop_reason = Runtime_agent_context.stop_reason =
   | Completed
-  | Yielded_to_chat_waiting of { turns_used : int }
+  | Yielded_to_operation_queued of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | Awaiting_external_effect of { turns_used : int }
   | Yielded_after_repeated_tool_call of {
@@ -34,7 +34,7 @@ type stop_reason = Runtime_agent_context.stop_reason =
     }
 
 type cooperative_yield_reason =
-  | Chat_waiting
+  | Operation_queued
   | Durable_stimulus_waiting
   | External_effect_deferred
   | Repeated_tool_call of {
@@ -51,9 +51,9 @@ type cooperative_yield_probe =
   Agent_core.Agent.Advanced.tool_boundary ->
   (cooperative_yield_decision, Agent_core.Error.t) result
 (** Why this single Agent Core call yielded control. [Completed] is the
-    model's success path. [Yielded_to_chat_waiting] fires when an
-    autonomous-lane run stopped at a turn boundary to hand the keeper's
-    turn slot to a parked dashboard/connector chat request.
+    model's success path. [Yielded_to_operation_queued] fires when an
+    autonomous-lane run stopped at a turn boundary to let the Owner start its
+    queued Dashboard/connector operation.
     [Yielded_to_durable_stimulus] fires after at least one provider turn when
     another durable event is waiting behind the event currently leased by the
     cycle. [Awaiting_external_effect] fires when a typed external-effect

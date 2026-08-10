@@ -23,7 +23,7 @@ val redact_text : t -> string -> string
    ['\n'] and re-copied plus re-scanned the whole held buffer on every 4KB
    chunk, so a stream with newlines far apart cost O(n^2): one 590MB
    subprocess capture over single-line JSON moved ~3.1TB and held a keeper's
-   turn slot for 115 minutes, which stalled that keeper's event queue.
+   Owner child for 115 minutes, which stalled that keeper's event queue.
 
    No comparable harness redacts at this layer — claude-code, Codex,
    OpenHands, SWE-agent and Hermes have no built-in tool-output redaction,

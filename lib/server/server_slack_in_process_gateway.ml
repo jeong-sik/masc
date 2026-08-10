@@ -140,23 +140,19 @@ let metadata_bool key value = [ (key, string_of_bool value) ]
 let slack_conversation_id ~channel_id = Printf.sprintf "slack:channel:%s" channel_id
 
 let slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
-    ~user_name ~ts : Gate_keeper_backend.connector_delivery =
-  { source =
-      Keeper_chat_queue.Slack
-        { channel_id
-        ; user_id
-        ; user_name
-        ; team_id
-        ; thread_ts = Some reply_to_thread_ts
-        }
-  ; surface = Surface_ref.Slack { team_id; channel_id; thread_ts }
-  ; conversation_id = Some (slack_conversation_id ~channel_id)
-  ; external_message_id = Some ts
-    (* The team IS the workspace identity; when auth.test could not resolve
-       it, the typed delivery carries explicit absence ([None]), never an
-       empty string. *)
-  ; workspace_id = team_id
-  }
+    ~user_name:_ ~ts : (Gate_keeper_backend.connector_delivery, string) result =
+  Result.map
+    (fun continuation_channel ->
+       { Gate_keeper_backend.continuation_channel
+       ; surface =
+           Surface_ref.Slack
+             { team_id; channel_id; thread_ts = Some reply_to_thread_ts }
+       ; conversation_id = Some (slack_conversation_id ~channel_id)
+       ; external_message_id = Some ts
+       ; workspace_id = team_id
+       })
+    (Keeper_continuation_channel.slack
+       ~team_id ~channel_id ~thread_ts:(Some reply_to_thread_ts) ~user_id)
 
 (* ---------------------------------------------------------------- *)
 (* Ambient lane (RFC-0226 parity with the Discord gateway)          *)
@@ -309,18 +305,21 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
         ~mentions_bot:(mentions_bot || is_app_mention) ~route:"triggered"
         ~urgency
     in
-    let delivery =
-      slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
-        ~user_name ~ts
+    let outcome =
+      match
+        slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts
+          ~user_id ~user_name ~ts
+      with
+      | Error detail -> Error (Channel_gate.Internal detail)
+      | Ok delivery ->
+        Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg
     in
     Some
       { channel_id
       ; reply_to_thread_ts
       ; keeper_name
       ; attention_event_id
-      ; outcome =
-          Channel_gate.handle_inbound
-            ~dispatch:(dispatch_for_delivery delivery) msg
+      ; outcome
       }
 
 let deliver_inbound ~clock ~base_dir accepted =

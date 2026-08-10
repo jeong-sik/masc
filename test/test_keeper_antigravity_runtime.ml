@@ -350,6 +350,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                     with
                     | Error error -> fail (Agent_core.Error.to_string error)
                     | Ok resumed ->
+                      let resumed = resumed.Keeper_turn_driver.run_result in
                       observed_trace_ref := resumed.trace_ref;
                       check int
                         "provider cumulative turn count"

@@ -29,6 +29,8 @@ type run_result =
   { response_text : string
   ; turn_outcome : Keeper_turn_outcome.t
   ; model_used : string
+  ; runtime_id : string
+  ; max_context : int
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; ctx_composition : Keeper_agent_prompt_metrics.ctx_composition_metrics
   ; runtime_observation : Runtime_observation.runtime_observation option

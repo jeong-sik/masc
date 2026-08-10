@@ -58,9 +58,27 @@ type provider_attempt_outcomes =
   ; turn_result : provider_run_result
   }
 
+type named_run_result =
+  { run_result : Runtime_agent.run_result
+  ; selected_runtime_id : string
+  ; selected_max_context : int
+  ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  }
+
 type runtime_attempt_candidate =
   | Resolved_runtime of Runtime.t
   | Missing_runtime of string
+
+let selected_runtime_result (runtime : Runtime.t) result =
+  Result.map
+    (fun run_result ->
+       { run_result
+       ; selected_runtime_id = runtime.id
+       ; selected_max_context = runtime.max_context
+       ; checkpoint_owner = Runtime_execution.checkpoint_owner runtime.execution
+       })
+    result
+;;
 
 type deferred_runtime_lane =
   { assignment_id : string
@@ -757,7 +775,7 @@ let run_named
              (fun observe -> Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        codex_result, None
+        selected_runtime_result runtime codex_result, None
       | Runtime_execution.Antigravity_cli config ->
         let run_antigravity ~initial_messages () =
           Keeper_antigravity_runtime.run
@@ -825,7 +843,7 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        antigravity_result, None
+        selected_runtime_result runtime antigravity_result, None
       | Runtime_execution.Claude_code config ->
         let run_claude ~initial_messages () =
           Keeper_claude_code_runtime.run
@@ -895,7 +913,7 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        claude_result, None
+        selected_runtime_result runtime claude_result, None
       | Runtime_execution.Agent_core runtime_provider_config ->
        (match
           match provider_config_transform with
@@ -987,7 +1005,7 @@ let run_named
               ~replay_prefix_projection
               provider_result
           in
-          outcomes.turn_result, checkpoint_after))
+          selected_runtime_result runtime outcomes.turn_result, checkpoint_after))
        )
     attempt_candidates
 
@@ -1019,6 +1037,8 @@ module For_testing = struct
   let resolve_runtime_candidates = resolve_runtime_candidates
   let resolve_runtime_candidate_for_attempt =
     resolve_runtime_candidate_for_attempt
+
+  let selected_runtime_result = selected_runtime_result
 
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision
 	  let attempt_inference_policy = attempt_inference_policy

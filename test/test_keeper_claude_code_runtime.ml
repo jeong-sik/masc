@@ -197,22 +197,24 @@ let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
                       | _ :: _ -> Some (Agent_core.Context.create ())
                     in
                     let run () =
-                      Keeper_turn_driver.run_named
-                        ~runtime_id:"claude.claude"
-                        ~keeper_name:"claude-fixture"
-                        ~base_path
-                        ~goal
-                        ~tools
-                        ~initial_messages
-                        ?context
-                        ?event_bus
-                        ?agent_core_checkpoint
-                        ?runtime_manifest_context
-                        ?runtime_manifest_append
-                        ?raw_trace
-                        ~sw
-                        ~net:(Eio.Stdenv.net env)
-                        ()
+                      Result.map
+                        (fun selected -> selected.Keeper_turn_driver.run_result)
+                        (Keeper_turn_driver.run_named
+                           ~runtime_id:"claude.claude"
+                           ~keeper_name:"claude-fixture"
+                           ~base_path
+                           ~goal
+                           ~tools
+                           ~initial_messages
+                           ?context
+                           ?event_bus
+                           ?agent_core_checkpoint
+                           ?runtime_manifest_context
+                           ?runtime_manifest_append
+                           ?raw_trace
+                           ~sw
+                           ~net:(Eio.Stdenv.net env)
+                           ())
                     in
                     (match event_bus, event_capture with
                      | Some bus, Some capture ->

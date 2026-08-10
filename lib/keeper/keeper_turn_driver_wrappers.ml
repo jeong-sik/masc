@@ -176,12 +176,30 @@ let run_named_with_masc_tools
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
-  Keeper_turn_driver.run_named ~runtime_id ~keeper_name ~goal ~base_path ~system_prompt ~tools:agent_core_tools
-    ?temperature
-    ?stream_idle_timeout_s ?hooks
-    ~accept
-    ?raw_trace ?on_event ?on_yield ?on_resume 
-    ?transport ~yield_on_tool ?provider_config_transform ?sw ?net ()
+  let+ selected =
+    Keeper_turn_driver.run_named
+      ~runtime_id
+      ~keeper_name
+      ~goal
+      ~base_path
+      ~system_prompt
+      ~tools:agent_core_tools
+      ?temperature
+      ?stream_idle_timeout_s
+      ?hooks
+      ~accept
+      ?raw_trace
+      ?on_event
+      ?on_yield
+      ?on_resume
+      ?transport
+      ~yield_on_tool
+      ?provider_config_transform
+      ?sw
+      ?net
+      ()
+  in
+  selected.run_result
 
 let run_model_with_masc_tools
     ~(model_label : string)

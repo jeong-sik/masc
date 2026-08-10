@@ -80,6 +80,13 @@ val deferred_runtime_ids : deferred_runtime_lane -> string list
 val equal_deferred_runtime_lane :
   deferred_runtime_lane -> deferred_runtime_lane -> bool
 
+type named_run_result =
+  { run_result : Runtime_agent.run_result
+  ; selected_runtime_id : string
+  ; selected_max_context : int
+  ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  }
+
 val run_named :
   runtime_id:string ->
   ?keeper_name:string ->
@@ -130,7 +137,7 @@ val run_named :
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->
-  (Runtime_agent.run_result, Agent_core.Error.t) result
+  (named_run_result, Agent_core.Error.t) result
 (** Run a single [Agent.run] call with MASC-driven runtime model fallback.
     MASC drives the runtime FSM directly: resolves runtime providers,
     resolves each candidate's model temperature before trying it with AGENT_CORE, and
@@ -204,6 +211,11 @@ module For_testing : sig
     ?on_missing:(unit -> unit) ->
     string ->
     (Runtime.t, Agent_core.Error.t) result
+
+  val selected_runtime_result :
+    Runtime.t ->
+    (Runtime_agent.run_result, Agent_core.Error.t) result ->
+    (named_run_result, Agent_core.Error.t) result
 
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t

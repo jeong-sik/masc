@@ -62,6 +62,24 @@ let checkpoint_with_session_id session_id : Agent_core.Checkpoint.t =
   ; working_context = None
   }
 
+let completed_run_result () : Runtime_agent.run_result =
+  { response =
+      { Agent_core.Types.id = "response-test"
+      ; model = "model-test"
+      ; stop_reason = Agent_core.Types.EndTurn
+      ; content = []
+      ; usage = None
+      ; telemetry = None
+      }
+  ; checkpoint = Some (checkpoint_with_session_id "selected-runtime")
+  ; session_id = "selected-runtime"
+  ; turns = 1
+  ; trace_ref = None
+  ; run_validation = None
+  ; runtime_observation = None
+  ; stop_reason = Runtime_agent.Completed
+  }
+
 let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 
@@ -724,7 +742,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
          ~sw
          ~net:env#net
          ()
-       : (Runtime_agent.run_result, Agent_core.Error.t) result);
+       : (Driver.named_run_result, Agent_core.Error.t) result);
     let degraded =
       List.find_opt
         (fun (manifest : Runtime_manifest.t) ->
@@ -1031,6 +1049,49 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
          Runtime_manifest.Runtime_completed;
        ])
     (List.map (fun (event, _, _) -> event_name event) events)
+
+let test_attempt_loop_returns_winning_runtime_authority () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let runtime runtime_id =
+      match Runtime.get_runtime_by_id runtime_id with
+      | Some runtime -> runtime
+      | None -> Alcotest.failf "missing runtime %s" runtime_id
+    in
+    let primary = runtime "primary.test_model" in
+    let fallback = runtime "fallback.test_model" in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"resilient"
+        ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx:_ ~runtime_id runtime ->
+          if String.equal runtime_id primary.id
+          then Error (retryable_network_error "primary failed"), None
+          else
+            ( Driver.For_testing.selected_runtime_result
+                runtime
+                (Ok (completed_run_result ()))
+            , None ))
+        [ primary; fallback ]
+    in
+    match result with
+    | Error error ->
+      Alcotest.failf
+        "expected fallback success, got %s"
+        (Agent_core.Error.to_string error)
+    | Ok selected ->
+      Alcotest.(check string)
+        "selected runtime id"
+        "fallback.test_model"
+        selected.Driver.selected_runtime_id;
+      Alcotest.(check int)
+        "selected context window"
+        fallback.max_context
+        selected.selected_max_context;
+      (match selected.checkpoint_owner with
+       | Runtime_execution.Masc_agent_core -> ()
+       | Runtime_execution.Official_client ->
+         Alcotest.fail "fallback checkpoint owner must be AGENT_CORE"))
 
 let test_attempt_loop_retries_provider_wire_failure_same_turn () =
   let attempts = ref [] in
@@ -1714,6 +1775,10 @@ let () =
             "transport failure before checkpoint safely falls back"
             `Quick
             test_attempt_loop_retries_transport_failure_before_checkpoint;
+          Alcotest.test_case
+            "fallback returns winning runtime authority"
+            `Quick
+            test_attempt_loop_returns_winning_runtime_authority;
           Alcotest.test_case
             "provider-wire failure rotates in the same turn"
             `Quick

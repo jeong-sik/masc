@@ -2187,39 +2187,142 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
          check (option bool) "provider-qualified preserve policy" None
            (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
 
-let test_runtime_assignment_rejects_commented_disabled_binding () =
+let test_runtime_toml_enabled_defaults_true () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string runtime_toml with
+  | Error errors ->
+    failf "enabled defaults should parse: %s"
+      (errors
+       |> List.map (fun (error : Runtime_toml.parse_error) -> error.message)
+       |> String.concat "; ")
+  | Ok cfg ->
+    (match cfg.Runtime_schema.providers, cfg.Runtime_schema.bindings with
+     | [ provider ], [ binding ] ->
+       check bool "provider enabled by default" true provider.enabled;
+       check bool "binding enabled by default" true binding.enabled
+     | providers, bindings ->
+       failf
+         "expected one provider and one binding, got %d and %d"
+         (List.length providers)
+         (List.length bindings))
+;;
+
+let test_runtime_provider_disable_excludes_its_bindings () =
+  let runtime_toml =
+    "[providers.active]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [providers.dormant]\n\
+     enabled = false\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:2/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [active.sample]\n\
+     [dormant.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"active.sample\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "disabled provider should not block active runtime: %s" msg
+    | Ok (runtimes, _, _, _, _, _) ->
+      check (list string) "materialized runtime ids" [ "active.sample" ]
+        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
+;;
+
+let test_runtime_binding_disable_excludes_only_that_binding () =
   let runtime_toml =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
      endpoint = \"http://127.0.0.1:1/v1\"\n\
      \n\
      [models.good]\n\
-     api-name = \"chat\"\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.disabled]\n\
+     api-name = \"disabled\"\n\
      max-context = 1024\n\
      \n\
      [local.good]\n\
-     \n\
-     # Disabled runtime binding. An assignment to it must fail closed rather\n\
-     # than inheriting [runtime].default.\n\
-     # [models.disabled]\n\
-     # api-name = \"disabled\"\n\
-     # max-context = 1024\n\
-     # [local.disabled]\n\
+     [local.disabled]\n\
+     enabled = false\n\
      \n\
      [runtime]\n\
-     default = \"local.good\"\n\
-     \n\
-     [runtime.assignments]\n\
-     keeper_a = \"local.disabled\"\n"
+     default = \"local.good\"\n"
   in
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ -> failf "assignment to commented/disabled runtime should be rejected"
+    | Error msg -> failf "disabled binding should not block active runtime: %s" msg
+    | Ok (runtimes, _, _, _, _, _) ->
+      check (list string) "materialized runtime ids" [ "local.good" ]
+        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes));
+  let referenced_runtime_toml =
+    runtime_toml
+    ^ "\n[runtime.assignments]\nkeeper_a = \"local.disabled\"\n"
+  in
+  with_temp_runtime_toml referenced_runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ -> failf "assignment to explicitly disabled runtime should be rejected"
     | Error msg ->
       check bool "error mentions assignment table" true
         (String_util.contains_substring msg "[runtime.assignments].keeper_a");
       check bool "error mentions disabled runtime id" true
-        (String_util.contains_substring msg "local.disabled"))
+        (String_util.contains_substring msg "local.disabled");
+      check bool "error identifies configured disable" true
+        (String_util.contains_substring msg "disabled by runtime.toml"))
+;;
+
+let test_runtime_toml_rejects_non_boolean_enabled () =
+  let runtime_toml =
+    "[providers.local]\n\
+     enabled = \"no\"\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     enabled = 0\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string runtime_toml with
+  | Ok _ -> failf "non-boolean enabled fields should be rejected"
+  | Error errors ->
+    let rendered =
+      errors
+      |> List.map (fun (error : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" error.path error.message)
+      |> String.concat "\n"
+    in
+    check bool "provider enabled path" true
+      (String_util.contains_substring rendered "providers.local.enabled");
+    check bool "binding enabled path" true
+      (String_util.contains_substring rendered "local.sample.enabled")
+;;
 
 (* One validator now decides every [runtime] field that names a routing target
    (keeper assignments, the route ids, media_failover entries), so the properties
@@ -3590,9 +3693,14 @@ let () =
           test_case
             "server degraded init rejects uncatalogued default"
             `Quick test_server_degraded_init_rejects_uncatalogued_default;
-          test_case
-            "runtime assignment rejects commented disabled binding"
-            `Quick test_runtime_assignment_rejects_commented_disabled_binding;
+          test_case "runtime enabled defaults true" `Quick
+            test_runtime_toml_enabled_defaults_true;
+          test_case "disabled provider excludes all of its bindings" `Quick
+            test_runtime_provider_disable_excludes_its_bindings;
+          test_case "disabled binding is excluded and rejected when referenced" `Quick
+            test_runtime_binding_disable_excludes_only_that_binding;
+          test_case "runtime enabled fields require booleans" `Quick
+            test_runtime_toml_rejects_non_boolean_enabled;
           test_case
             "every routing field names itself in its diagnostic"
             `Quick test_every_routing_field_names_itself_in_its_diagnostic;

@@ -482,6 +482,9 @@ let parse_provider (id : string) (tbl : Otoml.t)
   : (Runtime_schema.provider, parse_error list) result
   =
   let path = Printf.sprintf "providers.%s" id in
+  let enabled_result =
+    typed_find "a boolean" path tbl "enabled" Otoml.get_boolean
+  in
   let display_name =
     match Otoml.find_opt tbl Otoml.get_string [ "display-name" ] with
     | Some n -> n
@@ -555,11 +558,13 @@ let parse_provider (id : string) (tbl : Otoml.t)
          strict_float_find path tbl connect_timeout_key
          |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
        in
-       (match healthcheck_result, connect_timeout_result with
-        | Error errs, _ | _, Error errs -> Error errs
-        | Ok healthcheck_path, Ok connect_timeout_s ->
+       (match enabled_result, healthcheck_result, connect_timeout_result with
+        | Error errs, _, _ | _, Error errs, _ | _, _, Error errs -> Error errs
+        | Ok enabled_opt, Ok healthcheck_path, Ok connect_timeout_s ->
+          let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id
+            ; enabled
             ; display_name
             ; protocol
             ; api_format
@@ -1067,6 +1072,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
      An explicit non-positive value is a configuration error: 0 was historically
      used as an omission sentinel, and negative values are meaningless. Reject
      them at load time rather than silently downgrading to "no cap". *)
+  let enabled_result = typed_find "a boolean" path tbl "enabled" Otoml.get_boolean in
   let is_default_result = typed_find "a boolean" path tbl "is-default" Otoml.get_boolean in
   let wizard_default_result =
     typed_find "a boolean" path tbl "wizard-default" Otoml.get_boolean
@@ -1109,6 +1115,8 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let keep_alive_result = typed_find "a string" path tbl "keep-alive" Otoml.get_string in
   let num_ctx_result = typed_find "an integer" path tbl "num-ctx" Otoml.get_integer in
   let ( let* ) = Result.bind in
+  let* enabled_opt = enabled_result in
+  let enabled = match enabled_opt with Some value -> value | None -> true in
   let* is_default_opt = is_default_result in
   let is_default = Option.value is_default_opt ~default:false (* DET-OK: fallback to false if omitted *) in
   let* wizard_default_opt = wizard_default_result in
@@ -1125,6 +1133,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   Ok
     { Runtime_schema.provider_id
     ; model_id
+    ; enabled
     ; is_default
     ; wizard_default
     ; max_concurrent

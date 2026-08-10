@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createRuntimeTomlBinding,
   deleteRuntimeTomlKey,
+  enabledRuntimeIds,
   getRuntimeTomlKey,
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
@@ -51,6 +52,7 @@ describe('runtime TOML dashboard editing helpers', () => {
     expect(environment.assignments).toEqual({})
     expect(environment.providers[0]).toMatchObject({
       id: 'runpod_mtp',
+      enabled: true,
       displayName: 'RunPod',
       protocol: 'openai-http',
       transportKind: 'endpoint',
@@ -69,9 +71,21 @@ describe('runtime TOML dashboard editing helpers', () => {
     })
     expect(environment.bindings[0]).toMatchObject({
       id: 'runpod_mtp.qwen',
+      enabled: true,
       maxConcurrent: 4,
       keepAlive: '10m',
     })
+  })
+
+  it('parses and edits explicit provider and binding disable state', () => {
+    let next = setRuntimeTomlProviderField(sourceText, 'runpod_mtp', 'enabled', false)
+    next = setRuntimeTomlBindingField(next, 'runpod_mtp.qwen', 'enabled', false)
+
+    const environment = parseRuntimeTomlEnvironment(next)
+    expect(environment.providers[0]?.enabled).toBe(false)
+    expect(environment.bindings[0]?.enabled).toBe(false)
+    expect(enabledRuntimeIds(environment)).toEqual([])
+    expect(next.match(/^enabled = false$/gm)).toHaveLength(2)
   })
 
   it('projects the Codex official-client subscription boundary without credentials', () => {

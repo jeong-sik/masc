@@ -30,6 +30,7 @@ let with_env key value f =
 
 let runpod_provider =
   { Runtime_schema.id = "runpod_mtp"
+  ; enabled = true
   ; display_name = "RunPod"
   ; protocol = "openai-compatible-http"
   ; api_format = Chat_completions_api
@@ -64,6 +65,7 @@ let qwen_model =
 let runpod_binding =
   { Runtime_schema.provider_id = "runpod_mtp"
   ; model_id = "qwen"
+  ; enabled = true
   ; is_default = true
   ; wizard_default = false
   ; max_concurrent = None

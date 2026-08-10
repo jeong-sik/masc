@@ -3,6 +3,7 @@ export type RuntimeTomlCredentialType = 'env' | 'file' | 'inline' | 'none'
 
 export interface RuntimeTomlProvider {
   id: string
+  enabled: boolean
   displayName: string
   protocol: string
   transportKind: RuntimeTomlTransportKind
@@ -36,6 +37,7 @@ export interface RuntimeTomlBinding {
   id: string
   providerId: string
   modelId: string
+  enabled: boolean
   isDefault: boolean
   maxConcurrent: number | null
   keepAlive: string
@@ -279,6 +281,7 @@ function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlPr
   const credentialType = asString(credentials.type) as RuntimeTomlCredentialType
   return {
     id,
+    enabled: asBoolean(values.enabled, true),
     displayName: asString(values['display-name'], asString(values['provider-name'], id)),
     protocol: asString(values.protocol),
     transportKind: endpoint ? 'endpoint' : command ? 'command' : 'missing',
@@ -340,6 +343,7 @@ function bindingFromDocument(
     id: `${entry.providerId}.${entry.modelId}`,
     providerId: entry.providerId,
     modelId: entry.modelId,
+    enabled: asBoolean(values.enabled, true),
     isDefault: asBoolean(values['is-default']),
     maxConcurrent: asNumber(values['max-concurrent']),
     keepAlive: asString(values['keep-alive']),
@@ -380,6 +384,15 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
     bindings,
     warnings,
   }
+}
+
+export function enabledRuntimeIds(environment: RuntimeTomlEnvironment): string[] {
+  const enabledProviderIds = new Set(
+    environment.providers.filter(provider => provider.enabled).map(provider => provider.id),
+  )
+  return environment.bindings
+    .filter(binding => binding.enabled && enabledProviderIds.has(binding.providerId))
+    .map(binding => binding.id)
 }
 
 function sourceLineCount(sourceText: string): number {
@@ -641,7 +654,7 @@ export function setRuntimeTomlDefault(sourceText: string, runtimeId: string): st
 export function setRuntimeTomlProviderField(
   sourceText: string,
   providerId: string,
-  field: 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive',
+  field: 'enabled' | 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive',
   value: string | boolean,
 ): string {
   const section = `providers.${providerId}`
@@ -706,7 +719,7 @@ export function setRuntimeTomlModelField(
 export function setRuntimeTomlBindingField(
   sourceText: string,
   runtimeId: string,
-  field: 'is-default' | 'max-concurrent' | 'keep-alive' | 'num-ctx',
+  field: 'enabled' | 'is-default' | 'max-concurrent' | 'keep-alive' | 'num-ctx',
   value: string | number | boolean | null,
 ): string {
   if (value === null) return deleteRuntimeTomlKey(sourceText, runtimeId, field)

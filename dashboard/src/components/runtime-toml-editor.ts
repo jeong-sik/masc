@@ -13,6 +13,7 @@ import { errorToString } from '../lib/format-string'
 import {
   cascadeDeleteProvider,
   createRuntimeTomlBinding,
+  enabledRuntimeIds,
   parseRuntimeTomlEnvironment,
   runtimeTomlImpactSummary,
   setRuntimeTomlBindingField,
@@ -291,7 +292,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   function handleBindingFieldChange(
     runtimeId: string,
     field: RuntimeBindingEditableField,
-    value: string | number | null,
+    value: string | number | boolean | null,
   ) {
     if (saving || loadState !== 'loaded') return
     setDraft(current => setRuntimeTomlBindingField(current, runtimeId, field, value))
@@ -360,6 +361,13 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   ) {
     if (saving || loadState !== 'loaded') return
     setDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
+    setNotice(null)
+    setError(null)
+  }
+
+  function handleProviderEnabledChange(providerId: string, enabled: boolean) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => setRuntimeTomlProviderField(current, providerId, 'enabled', enabled))
     setNotice(null)
     setError(null)
   }
@@ -457,7 +465,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     [config, dirty, draft],
   )
   const environment = useMemo(() => parseRuntimeTomlEnvironment(draft), [draft])
-  const runtimeCount = environment.bindings.length
+  const runtimeCount = enabledRuntimeIds(environment).length
   const providerCount = environment.providers.length
 
   // Structured sections (routing/providers/models/bindings/assignments) all map
@@ -642,8 +650,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 onAddModel=${handleAddModel}
                 onAddBinding=${handleAddBinding}
                 onDeleteProvider=${handleDeleteProvider}
-                onProviderTransportChange=${handleProviderTransportChange}
-                onProviderCredentialChange=${handleProviderCredentialChange}
+              onProviderTransportChange=${handleProviderTransportChange}
+              onProviderEnabledChange=${handleProviderEnabledChange}
+              onProviderCredentialChange=${handleProviderCredentialChange}
               />` : null}
             </div>
 

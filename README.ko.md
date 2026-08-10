@@ -236,6 +236,12 @@ instructions = """
 
 Keeper → runtime 할당은 `runtime.toml`에서 합니다 (keeper toml은 model/runtime을 직접 갖지 않습니다):
 
+Provider와 binding 테이블은 `enabled = false`를 지원합니다.
+`[providers.<id>]`를 비활성화하면 해당 provider의 모든 binding이 실행
+inventory에서 빠지고, `[<provider>.<model>]`을 비활성화하면 해당
+runtime만 빠집니다. 비활성 runtime ID를 `[runtime].default`, lane, assignment,
+failover list가 계속 참조하면 설정 오류로 거부합니다.
+
 ```toml
 [runtime.assignments]
 albini = "<provider>.<model>"   # config/runtime.toml에 정의된 id로 교체

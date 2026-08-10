@@ -3721,6 +3721,66 @@ function AutonomousTurnGroup({
   `
 }
 
+/** A run of consecutive autonomous turns behind one header. Starts closed for
+ *  the same reason each turn does: the transcript's subject is the conversation
+ *  these wakes sit between. Expanding renders the run's turns as the same rows
+ *  they would be at top level, each still closed and each still its own turn. */
+function AutonomousTurnRun({
+  entries,
+  showMetadata,
+  variant,
+  showSourceBadge,
+  toolOutputsCoveredSinceMs,
+  toolOutputsCoveredThroughMs,
+  toolOutputHydrationContract,
+  action,
+}: {
+  entries: KeeperConversationEntry[]
+  showMetadata?: boolean
+  variant: ChatTranscriptVariant
+  showSourceBadge: boolean
+  toolOutputsCoveredSinceMs: number | null
+  toolOutputsCoveredThroughMs: number | null
+  toolOutputHydrationContract: ToolCallOutputHydrationContract | null
+  action?: ChatTranscriptAction
+}) {
+  const [open, setOpen] = useState(false)
+  const first = timeLabel(entries[0]?.timestamp)
+  const last = timeLabel(entries[entries.length - 1]?.timestamp)
+  // Both ends or neither: a half range would read as a single point in time.
+  const range = first && last ? (first === last ? first : `${first} ~ ${last}`) : null
+  return html`
+    <div class="chat-block-trace chat-auto-run ${open ? 'open' : ''}">
+      <button
+        type="button"
+        class="chat-block-trace-hd"
+        onClick=${() => setOpen((o) => !o)}
+        aria-expanded=${open}
+      >
+        <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
+        <span class="chat-block-trace-label">자율턴</span>
+        <span class="chat-block-trace-count">${entries.length}개</span>
+        ${range ? html`<span class="chat-block-trace-meta">${range}</span>` : null}
+      </button>
+      ${open
+        ? html`<div class="chat-auto-run-turns">
+            ${entries.map((entry) => html`<${AutonomousTurnGroup}
+              key=${entry.id}
+              entry=${entry}
+              showMetadata=${showMetadata}
+              variant=${variant}
+              showSourceBadge=${showSourceBadge}
+              toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+              toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+              toolOutputHydrationContract=${toolOutputHydrationContract}
+              action=${action}
+            />`)}
+          </div>`
+        : null}
+    </div>
+  `
+}
+
 type ChatRenderUnit =
   | { kind: 'entry'; entry: KeeperConversationEntry }
   | { kind: 'toolGroup'; id: string; entries: KeeperConversationEntry[] }
@@ -3731,6 +3791,15 @@ type ChatRenderUnit =
   // bury the conversation it sits between. The exact turn remains the group
   // boundary; adjacent autonomous turns must never merge into one giant run.
   | { kind: 'autonomousGroup'; id: string; entry: KeeperConversationEntry }
+  // Consecutive autonomous turns behind one header. Collapsing each turn
+  // individually bounds how tall one wake renders but not how many wakes do:
+  // an hour with nobody watching still puts dozens of identical rows between
+  // two human messages, which buries the conversation the same way expanding
+  // them would. This is a container, not a merge — every turn keeps its own
+  // row and its own open/closed state inside, so the exact turn is still the
+  // group boundary. Runs are cut at any boundary the transcript itself has to
+  // draw; see foldAutonomousRuns.
+  | { kind: 'autonomousRun'; id: string; entries: KeeperConversationEntry[] }
 
 function entryTurnRef(entry: KeeperConversationEntry): string | null {
   const value = entry.turnRef?.trim()
@@ -3836,11 +3905,76 @@ export function buildChatRenderUnits(
   return units
 }
 
+// Below this many consecutive autonomous turns, folding costs more than it
+// saves: one or two stray wakes read as part of the surrounding conversation,
+// and hiding them behind a header only adds a click. At or above it the rows
+// stop being incidental and start being the wall this fold exists to remove.
+const AUTONOMOUS_RUN_FOLD_THRESHOLD = 3
+
+/** Fold consecutive `autonomousGroup` units behind one `autonomousRun`.
+ *
+ *  Runs shorter than the threshold are returned untouched, so a transcript with
+ *  the occasional wake renders exactly as before.
+ *
+ *  A folded run is not allowed to swallow a row the transcript still has to
+ *  anchor something on: the caller draws day dividers and the unread line
+ *  against top-level units, and a unit absorbed into a run stops being one.
+ *  `startsNewRun` cuts before such a row, and `runBoundaryKey` cuts whenever the
+ *  key changes inside an open run — both leave the row at top level as the
+ *  start of the next run. */
+export function foldAutonomousRuns(
+  units: ChatRenderUnit[],
+  opts: {
+    startsNewRun: (unit: ChatRenderUnit) => boolean
+    runBoundaryKey: (unit: ChatRenderUnit) => string | null
+  },
+): ChatRenderUnit[] {
+  const out: ChatRenderUnit[] = []
+  let run: Extract<ChatRenderUnit, { kind: 'autonomousGroup' }>[] = []
+  let boundary: string | null = null
+  const flush = () => {
+    const first = run[0]
+    if (first && run.length >= AUTONOMOUS_RUN_FOLD_THRESHOLD) {
+      // The run reuses the first group's id so its key and timestamp are the
+      // ones the caller already computed anchors from: a divider that would
+      // have landed on that group lands on the run instead of vanishing.
+      out.push({ kind: 'autonomousRun', id: first.id, entries: run.map((unit) => unit.entry) })
+    } else {
+      out.push(...run)
+    }
+    run = []
+    boundary = null
+  }
+  for (const unit of units) {
+    if (unit.kind !== 'autonomousGroup') {
+      flush()
+      out.push(unit)
+      continue
+    }
+    const key = opts.runBoundaryKey(unit)
+    // A null key carries no boundary information, so it neither cuts the run
+    // nor overwrites the last key that did.
+    if (opts.startsNewRun(unit) || (key !== null && boundary !== null && key !== boundary)) {
+      flush()
+    }
+    if (key !== null) boundary = key
+    run.push(unit)
+  }
+  flush()
+  return out
+}
+
 function unitTimestamp(unit: ChatRenderUnit): string | null {
-  const ts = unit.kind === 'entry' || unit.kind === 'autonomousGroup'
-    ? unit.entry.timestamp
-    : unit.entries[0]?.timestamp ?? (unit.kind === 'turnBundle' ? unit.entry.timestamp : null)
-  return ts ?? null
+  switch (unit.kind) {
+    case 'entry':
+    case 'autonomousGroup':
+      return unit.entry.timestamp ?? null
+    case 'toolGroup':
+    case 'autonomousRun':
+      return unit.entries[0]?.timestamp ?? null
+    case 'turnBundle':
+      return unit.entries[0]?.timestamp ?? unit.entry.timestamp ?? null
+  }
 }
 
 function unitTimestampMs(unit: ChatRenderUnit): number | null {
@@ -3870,11 +4004,21 @@ function renderChatTranscriptBody(opts: {
   action?: ChatTranscriptAction
 }): VNode[] {
   const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract, unreadAfterTs, action } = opts
-  const units = buildChatRenderUnits(entries, groupToolCalls)
+  const ungroupedUnits = buildChatRenderUnits(entries, groupToolCalls)
+  // Anchored on the unfolded list: folding must not move the unread line, only
+  // avoid hiding it. foldAutonomousRuns cuts a run open at this key so the unit
+  // it names is still top level below.
   const unreadAnchorKey = unreadDividerAnchorKey(
-    units.map(unit => ({ key: unitKey(unit), tsMs: unitTimestampMs(unit) })),
+    ungroupedUnits.map(unit => ({ key: unitKey(unit), tsMs: unitTimestampMs(unit) })),
     unreadAfterTs,
   )
+  const units = foldAutonomousRuns(ungroupedUnits, {
+    startsNewRun: (unit) => unreadAnchorKey !== null && unitKey(unit) === unreadAnchorKey,
+    // Day dividers are emitted per unit below, so a run that spanned midnight
+    // would show only its first day. Cutting on the day key keeps every day
+    // that has turns in it addressable by a divider.
+    runBoundaryKey: (unit) => (showDayDividers ? dayKey(unitTimestamp(unit)) : null),
+  })
   const out: VNode[] = []
   // Track the last NON-NULL calendar day rather than only the immediately
   // previous entry, so a null-timestamp entry (live placeholder, checkpoint) in
@@ -3895,7 +4039,19 @@ function renderChatTranscriptBody(opts: {
     if (unreadAnchorKey !== null && unitKey(unit) === unreadAnchorKey) {
       out.push(html`<div class="kw-daydiv kw-unreaddiv" key="unread-divider">${UNREAD_DIVIDER_LABEL}</div>`)
     }
-    if (unit.kind === 'autonomousGroup') {
+    if (unit.kind === 'autonomousRun') {
+      out.push(html`<${AutonomousTurnRun}
+        key=${unit.id}
+        entries=${unit.entries}
+        showMetadata=${showMetadata}
+        variant=${variant}
+        showSourceBadge=${showSourceBadge}
+        toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+        toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+        toolOutputHydrationContract=${toolOutputHydrationContract}
+        action=${action}
+      />`)
+    } else if (unit.kind === 'autonomousGroup') {
       out.push(html`<${AutonomousTurnGroup}
         key=${unit.id}
         entry=${unit.entry}

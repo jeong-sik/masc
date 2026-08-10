@@ -42,6 +42,10 @@ type usage =
 type permission_mode =
   | Always_proceed
   | Request_review
+  | Unrecognized_permission_mode of string
+      (** A mode the CLI announced that this tree does not model. Nothing
+          branches on [permission_mode], so an unseen member is carried rather
+          than rejected: rejecting it ended the turn and parked the session. *)
 
 type turn_result =
   { conversation_id : string

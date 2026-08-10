@@ -63,13 +63,20 @@ type usage =
    operator resolved it (taskmaster, 110 turns in one hour).
 
    Nothing in this tree branches on the value: it is parsed, carried through
-   [state.init] into [turn_result], and never matched. A closed vocabulary over
-   a field the provider owns and we do not read costs a session each time the
-   provider adds a member. Kept closed for now because guessing members is
-   worse than failing loudly, but see #28008. *)
+   [state.init] into [turn_result], and never matched -- the only read of the
+   field is its own parse site. A closed vocabulary over a field the provider
+   owns and we do not read costs a session each time the provider adds a
+   member.
+
+   "Failing loudly" was the stated reason to keep it closed, but the failure
+   here is not loud: it ends the turn, parks the session, and stops the keeper
+   until an operator acts. [step_type] resolved the same trade-off the other
+   way three definitions down -- carry the unseen value in a constructor so the
+   drift stays visible, without ending a turn over a value no arm reads. *)
 type permission_mode =
   | Always_proceed
   | Request_review
+  | Unrecognized_permission_mode of string
 
 type turn_result =
   { conversation_id : string
@@ -239,15 +246,12 @@ let closed_string stage name parse value =
     protocol_error stage (Printf.sprintf "unsupported field %S value %S" name value)
 ;;
 
-let parse_permission_mode stage value =
-  closed_string
-    stage
-    "permission_mode"
-    (function
-      | "always-proceed" -> Some Always_proceed
-      | "request-review" -> Some Request_review
-      | _ -> None)
-    value
+let parse_permission_mode _stage value =
+  Ok
+    (match value with
+     | "always-proceed" -> Always_proceed
+     | "request-review" -> Request_review
+     | other -> Unrecognized_permission_mode other)
 ;;
 
 let parse_step_state stage value =
@@ -271,8 +275,8 @@ let parse_step_state stage value =
    (#28027). The value is kept in [Unrecognized] so the wire vocabulary drift is
    still visible rather than silently normalised away.
 
-   [state], [permission_mode] and [status] stay closed: each of those does
-   decide something. *)
+   [state] and [status] stay closed: each of those does decide something.
+   [permission_mode] does not, and is open for the same reason as this one. *)
 let parse_step_type _stage value =
   Ok
     (match value with

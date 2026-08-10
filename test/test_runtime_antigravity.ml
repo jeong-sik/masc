@@ -299,9 +299,13 @@ let test_duplicate_keys_fail_closed () =
 (* A live init event announced request-review. It was not modelled, the parse
    failed, and the resulting protocol error put the official-client session in
    Recovery_required -- which blocked every later turn for that keeper until an
-   operator resolved it (taskmaster, 110 turns in one hour). Nothing in this
-   tree branches on the value; the vocabulary is closed only to fail loudly on
-   a member we have not seen. *)
+   operator resolved it (taskmaster, 110 turns in one hour).
+
+   Nothing in this tree branches on [permission_mode]: the only read of the
+   field is its own parse site. Adding the one member that stalled a keeper
+   leaves the next one to stall it again, so an unseen mode is carried in
+   [Unrecognized_permission_mode] rather than rejected -- the drift stays
+   visible without ending a turn. *)
 let test_observed_permission_modes_are_admitted () =
   List.iter
     (fun (wire, expected) ->
@@ -313,20 +317,22 @@ let test_observed_permission_modes_are_admitted () =
           fail (wire ^ " was rejected: " ^ Runtime_antigravity.error_to_string error)))
     [ "always-proceed", Runtime_antigravity.Always_proceed
     ; "request-review", Runtime_antigravity.Request_review
+    ; ( "supervised-2027"
+      , Runtime_antigravity.Unrecognized_permission_mode "supervised-2027" )
     ]
 ;;
 
 let test_unknown_protocol_vocabulary_fails_closed () =
-  let unknown_permission =
-    {|{"event":"init","conversation_id":"conversation-1","init":{"model":"gemini-fixture","cwd":"/tmp","permission_mode":"unreviewed"}}|}
-  in
-  (* step_type left this list in #28027: it is the one vocabulary here that
-     decides nothing (see [test_unknown_step_type_does_not_end_the_turn]).
-     permission_mode, step state and result status each still decide something,
-     so an unseen value there is a real ambiguity and stays closed. *)
+  (* step_type left this list in #28027 and permission_mode followed: both are
+     vocabularies nothing branches on, so an unseen value carries no ambiguity
+     to fail closed over (see [test_observed_permission_modes_are_admitted] and
+     [test_unknown_step_type_does_not_end_the_turn]).
+
+     step state and result status stay: [Done] vs [Step_error] and [Success] vs
+     [Result_error] each select a different terminal outcome, so a value we
+     cannot place is a real ambiguity. *)
   let cases =
-    [ "permission mode", [ unknown_permission; result () ]
-    ; "step state", [ init (); step ~state:"PAUSED" (); result () ]
+    [ "step state", [ init (); step ~state:"PAUSED" (); result () ]
     ; "result status", [ init (); result ~status:"PARTIAL" () ]
     ]
   in

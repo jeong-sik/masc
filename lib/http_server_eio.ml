@@ -463,8 +463,8 @@ module Router = struct
     delete: method_routes;
     options: method_routes;
     exact_paths: (string, unit) Hashtbl.t;
-    mutable routes: route list;
-    mutable route_count: int;
+    routes: route list;
+    route_count: int;
   }
 
   let create_prefix_node () =
@@ -558,9 +558,14 @@ module Router = struct
               | Some routes -> add_to_method_routes Prefix route routes
               | None -> ())
            methods);
-    router.routes <- route :: router.routes;
-    router.route_count <- router.route_count + 1;
-    router
+    (* [add_kind] already returns the router and every caller threads it
+       (`router |> get ... |> post ...`), so the two fields the router owns
+       can come back on a new record. The method index and the prefix trie
+       stay in-place containers carried by [{ router with ... }]. *)
+    { router with
+      routes = route :: router.routes
+    ; route_count = router.route_count + 1
+    }
 
   let add ~path ~methods ~handler router =
     add_kind Exact ~path ~methods ~handler:(Plain handler) router

@@ -252,6 +252,31 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~raw_trace_run:None
     in
     let dynamic_tools = List.map codex_dynamic_tool host_dynamic_tools in
+    (* The only size this tree reports for a turn is
+       [keeper_unified_turn.ml]'s [system_and_user_bytes], which sums
+       [system_prompt + world_state + user_message] and nothing else. The
+       history and the tool declarations reach the provider through
+       [thread/inject_items] and [thread/start]'s [dynamicTools], so a live
+       keeper can report 6,971 bytes used of a 128,000 budget while the server
+       answers that the context window is full (#28071). A [Start] also injects
+       the whole history into the new thread, so "fresh" does not mean "empty
+       context" — the mode is recorded because the injection only happens on
+       that branch. Sizes are the bytes this process holds, not provider
+       tokens; they bound the request, they do not price it. *)
+    Log.Keeper.info
+      ~keeper_name
+      "%s turn composition: mode=%s prompt_bytes=%d developer_instructions_bytes=%d \
+       history_messages=%d history_bytes=%d tools=%d tool_surface_bytes=%d"
+      runtime_label
+      (match thread_mode with
+       | Runtime_codex_app_server.Start -> "start"
+       | Runtime_codex_app_server.Resume _ -> "resume")
+      (String.length prompt)
+      (Option.fold ~none:0 ~some:String.length client_config.developer_instructions)
+      (List.length history)
+      (Runtime_codex_app_server.history_bytes history)
+      (List.length dynamic_tools)
+      (Runtime_codex_app_server.dynamic_tool_bytes dynamic_tools);
     let* () =
       match
         Runtime_codex_app_server.validate_turn

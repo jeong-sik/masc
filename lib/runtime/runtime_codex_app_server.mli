@@ -60,6 +60,16 @@ type history_message =
   ; text : string
   }
 
+val history_bytes : history_message list -> int
+(** Bytes the history occupies on the wire. On a [Start] this is what
+    [thread/inject_items] carries into the new thread; on a [Resume] the thread
+    already holds it. Bytes this process sends, not provider tokens. *)
+
+val dynamic_tool_bytes : dynamic_tool list -> int
+(** Bytes the tool declarations occupy in [thread/start]'s [dynamicTools]. Sums
+    each name, description, and serialized input schema; the protocol wrapper
+    keys are excluded because they are fixed per tool. *)
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string

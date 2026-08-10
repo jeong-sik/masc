@@ -76,6 +76,21 @@ type history_message =
   ; text : string
   }
 
+let history_bytes messages =
+  List.fold_left (fun acc message -> acc + String.length message.text) 0 messages
+;;
+
+let dynamic_tool_bytes tools =
+  List.fold_left
+    (fun acc tool ->
+      acc
+      + String.length tool.name
+      + String.length tool.description
+      + String.length (Yojson.Safe.to_string tool.input_schema))
+    0
+    tools
+;;
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string

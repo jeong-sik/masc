@@ -899,23 +899,23 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       | [] -> None
                       | _ :: _ -> Some (Agent_core.Context.create ())
                     in
-                    Result.map
-                      (fun selected -> selected.Keeper_turn_driver.run_result)
-                      (Keeper_turn_driver.run_named
-                         ~runtime_id:"codex.codex"
-                         ~keeper_name:"codex-fixture"
-                         ~base_path
-                         ~goal
-                         ~tools
-                         ~initial_messages
-                         ?model_input_projection
-                         ?hooks
-                         ?context_injector
-                         ?context
-                         ?raw_trace
-                         ~sw
-                         ~net:(Eio.Stdenv.net env)
-                         ())))))
+                    Keeper_turn_driver.run_named
+                      ~runtime_id:"codex.codex"
+                      ~keeper_name:"codex-fixture"
+                      ~base_path
+                      ~goal
+                      ~tools
+                      ~initial_messages
+                      ?model_input_projection
+                      ?hooks
+                      ?context_injector
+                      ?context
+                      ?raw_trace
+                      ~sw
+                      ~net:(Eio.Stdenv.net env)
+                      ()
+                    |> Result.map (fun selected ->
+                      selected.Keeper_turn_driver.run_result))))))
 ;;
 
 let test_keeper_dispatches_codex_turn_runtime () =

@@ -1086,7 +1086,7 @@ let test_attempt_loop_returns_winning_runtime_authority () =
         selected.Driver.selected_runtime_id;
       Alcotest.(check int)
         "selected context window"
-        fallback.max_context
+        (Runtime.max_context_of_runtime fallback)
         selected.selected_max_context;
       (match selected.checkpoint_owner with
        | Runtime_execution.Masc_agent_core -> ()

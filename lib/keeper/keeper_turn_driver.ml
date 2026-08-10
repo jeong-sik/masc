@@ -74,7 +74,7 @@ let selected_runtime_result (runtime : Runtime.t) result =
     (fun run_result ->
        { run_result
        ; selected_runtime_id = runtime.id
-       ; selected_max_context = runtime.max_context
+       ; selected_max_context = Runtime.max_context_of_runtime runtime
        ; checkpoint_owner = Runtime_execution.checkpoint_owner runtime.execution
        })
     result

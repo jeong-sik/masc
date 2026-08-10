@@ -95,7 +95,13 @@ let run_fixture ?conversation_mode ?on_conversation_ready ?(timeout_s = 2.0) pat
 
 let test_successful_official_client_turn () =
   with_fixture
-    [ init (); step (); result () ]
+    [ init ()
+    ; step ~index:0 ~step_type:"user_input" ()
+    ; step ~index:1 ~step_type:"unknown" ()
+    ; step ~index:2 ~step_type:"agent_response" ()
+    ; step ~index:3 ~step_type:"checkpoint" ()
+    ; result ()
+    ]
     (fun path ->
        match run_fixture path with
        | Error error -> fail (Runtime_antigravity.error_to_string error)

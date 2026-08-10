@@ -210,6 +210,9 @@ and step_state =
 and step_type =
   | Agent_response
   | Tool
+  | User_input
+  | Internal
+  | Checkpoint
 
 and result_status =
   | Success
@@ -251,6 +254,9 @@ let parse_step_type stage value =
     (function
       | "agent_response" -> Some Agent_response
       | "tool" -> Some Tool
+      | "user_input" -> Some User_input
+      | "unknown" -> Some Internal
+      | "checkpoint" -> Some Checkpoint
       | _ -> None)
     value
 ;;

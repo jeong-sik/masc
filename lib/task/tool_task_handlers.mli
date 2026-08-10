@@ -76,5 +76,3 @@ val handle_claim :
 val handle_claim_next :
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 
-val handle_release :
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result

@@ -225,16 +225,32 @@ let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
 let reserved_namespaces = active_top_level_namespaces @ obsolete_top_level_namespaces
 let is_reserved name = List.mem name reserved_namespaces
 
+(* Model and provider ids routinely carry a dotted version segment:
+   [gpt-5.3-codex-spark], [mimo-v2.5-pro], [claude-3.5-sonnet]. runtime.toml
+   writes them as quoted keys — [\[models."gpt-5.3-codex-spark"\]] — so the dot
+   is unambiguous to the TOML parser and never nests a table.
+
+   Excluding it made a live config unbootable on 2026-08-09 (#27957): the
+   workspace had been serving those three ids, and startup then refused the
+   same file with "model id must match [A-Za-z0-9_-]+", stopping all eight
+   keepers before readiness.
+
+   ["."] and [".."] stay rejected, and so does a leading dot: an id reaches
+   path construction elsewhere in the runtime, and those are the traversal
+   forms. A dot inside the identifier is not one. *)
 let valid_runtime_id_component value =
   let length = String.length value in
   length > 0
+  && (not (String.equal value "."))
+  && (not (String.equal value ".."))
+  && value.[0] <> '.'
   &&
   let rec loop index =
     if index = length
     then true
     else (
       match value.[index] with
-      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> loop (index + 1)
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' -> loop (index + 1)
       | _ -> false)
   in
   loop 0
@@ -246,7 +262,10 @@ let validate_runtime_id_component ~kind ~path value =
     Error
       (error
          path
-         (Printf.sprintf "%s id must match [A-Za-z0-9_-]+" kind))
+         (Printf.sprintf
+            "%s id must match [A-Za-z0-9_.-]+ and must not be a path component \
+             (., .., or a leading dot)"
+            kind))
   else if is_reserved value
   then
     Error

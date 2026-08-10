@@ -931,6 +931,15 @@ let queued_turn_failure_kind_to_string = function
   | Transcript_persist_failed -> "transcript_persist_failed"
   | Stream_projection_failed -> "stream_projection_failed"
 
+(* Total mapping into the closed operation-ledger vocabulary; the queued kind's
+   full name still travels in the failure detail. *)
+let chat_operation_failure_kind_of_queued = function
+  | Turn_failed -> Keeper_chat_operation.Turn_exception
+  | Turn_cancelled -> Keeper_chat_operation.Turn_cancelled
+  | No_visible_reply | Missing_turn_ref -> Keeper_chat_operation.Turn_invariant
+  | Transcript_persist_failed | Stream_projection_failed ->
+    Keeper_chat_operation.Delivery_failed
+
 let queued_delivery_outcome_of_turn_ref = function
   | Some turn_ref ->
       Delivered { outcome_ref = Ids.Turn_ref.to_string turn_ref }
@@ -2003,9 +2012,11 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
              | Some (Delivered { outcome_ref }), Ok () ->
                Keeper_owner.Operation_succeeded { outcome_ref }
              | Some (Delivered { outcome_ref }), Error detail ->
-               failed ~outcome_ref "Delivery_failed" detail
+               failed ~outcome_ref Keeper_chat_operation.Delivery_failed detail
              | Some (Failed { kind; detail }), _ ->
-               failed (queued_turn_failure_kind_to_string kind) detail
+               failed
+                 (chat_operation_failure_kind_of_queued kind)
+                 (queued_turn_failure_kind_to_string kind ^ ": " ^ detail)
              | None, _ ->
                failed
                  Keeper_chat_operation.Turn_invariant

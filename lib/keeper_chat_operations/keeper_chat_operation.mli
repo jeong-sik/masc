@@ -21,6 +21,7 @@ type failure_kind =
   | No_queued_operation
   | Invalid_input
   | Turn_invariant
+  | Delivery_failed
 
 val all_failure_kinds : failure_kind list
 val failure_kind_to_string : failure_kind -> string

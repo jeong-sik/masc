@@ -1,3 +1,9 @@
+val resolve_reasoning_effort :
+  runtime_id:string -> Llm_provider.Reasoning_effort.t option
+(** The per-model [reasoning-effort] declared for [runtime_id], or [None]
+    when the model leaves it unset. Official-client runtimes have no other
+    declared reasoning control. *)
+
 val resolve_temperature :
   runtime_id:string -> fallback:(unit -> float) -> float
 (** Use the runtime.toml model override when present; evaluate [fallback] only

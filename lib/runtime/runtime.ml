@@ -1312,6 +1312,17 @@ let top_p_of_runtime_id (id : string) : float option =
   | None -> None
 ;;
 
+(* The per-model [reasoning-effort] declared in runtime.toml
+   ([models.<id>.reasoning-effort]), or [None] when the runtime is unknown
+   or the model leaves it unset. Mirrors [temperature_of_runtime_id]. *)
+let reasoning_effort_of_runtime_id (id : string)
+  : Llm_provider.Reasoning_effort.t option
+  =
+  match get_runtime_by_id id with
+  | Some rt -> rt.model.reasoning_effort
+  | None -> None
+;;
+
 let default_preserve_thinking_for_model (_rt : t) : bool option =
   (* AGENT_CORE owns provider/model capability truth and can preserve reasoning when
      the provider contract requires it. MASC must not turn "request-side

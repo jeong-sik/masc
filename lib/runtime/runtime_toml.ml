@@ -805,6 +805,30 @@ let bounded_number_opt_field
             value))
 ;;
 
+(* Read the optional per-model [reasoning-effort]. Parsed into the typed
+   effort at load time rather than carried as a string: an unknown value is
+   an operator typo, and rejecting it here means no later consumer has to
+   decide what an unparseable effort means. *)
+let reasoning_effort_opt_field ~(path : string) (tbl : Otoml.t)
+  : (Llm_provider.Reasoning_effort.t option, parse_error list) result
+  =
+  match Otoml.find_opt tbl Otoml.get_string [ "reasoning-effort" ] with
+  | None -> Ok None
+  | Some raw ->
+    (match Llm_provider.Reasoning_effort.of_string raw with
+     | Some effort -> Ok (Some effort)
+     | None ->
+       Error
+         [ { path
+           ; message =
+               Printf.sprintf
+                 "reasoning-effort %S is not a known effort; expected one of %s"
+                 raw
+                 Llm_provider.Reasoning_effort.values_for_log
+           }
+         ])
+;;
+
 (* Read the optional per-model [temperature]. A TOML integer (1) or float (1.0)
    both read as a float so an operator is not tripped by "1 vs 1.0". Absent →
    [Ok None] (caller keeps its fallback). Wrong type or out of
@@ -925,6 +949,7 @@ let parse_model (id : string) (tbl : Otoml.t)
     let top_p_result = probability_opt_field ~path ~key:"top-p" tbl in
     let top_k_result = positive_int_opt_field ~path ~key:"top-k" tbl in
     let min_p_result = probability_opt_field ~path ~key:"min-p" tbl in
+    let reasoning_effort_result = reasoning_effort_opt_field ~path tbl in
     let ( let* ) = Result.bind in
     let* max_context = max_context_result in
     let* capabilities = capabilities_result in
@@ -932,6 +957,7 @@ let parse_model (id : string) (tbl : Otoml.t)
     let* top_p = top_p_result in
     let* top_k = top_k_result in
     let* min_p = min_p_result in
+    let* reasoning_effort = reasoning_effort_result in
     match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
     | _ :: _ as errors -> Error errors
     | [] ->
@@ -948,6 +974,7 @@ let parse_model (id : string) (tbl : Otoml.t)
         ; top_p
         ; top_k
         ; min_p
+        ; reasoning_effort
         ; capabilities        })
 ;;
 

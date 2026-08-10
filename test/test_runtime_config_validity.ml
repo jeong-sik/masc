@@ -736,6 +736,66 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
               (caps.modality_priority = expected)))
     rows
 
+(* [reasoning-effort] is the only declared reasoning control official-client
+   runtimes have: Keeper_official_client_host.resolve_reasoning_effort rejects
+   enable_thinking outright. Asserting the parsed variant rather than "parsing
+   succeeded" is what separates a declaration that reached the model spec from
+   one that was accepted and dropped. *)
+let test_model_reasoning_effort_parses_into_the_typed_variant () =
+  let config =
+    "[models.probe]\napi-name = \"probe\"\nreasoning-effort = \"xhigh\"\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model declaring a known reasoning-effort must parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "reasoning-effort xhigh reaches the model spec as XHigh"
+         true
+         (model.Runtime_schema.reasoning_effort
+          = Some Llm_provider.Reasoning_effort.XHigh)
+     | _ -> fail "exactly one model must parse")
+
+let test_model_reasoning_effort_rejects_unknown_value_at_load () =
+  let config =
+    "[models.probe]\napi-name = \"probe\"\nreasoning-effort = \"turbo\"\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Ok _ -> fail "an unknown reasoning-effort must be rejected at load"
+  | Error errors ->
+    check
+      bool
+      "the rejection names the offending value"
+      true
+      (List.exists
+         (fun (e : Runtime_toml.parse_error) ->
+            let contains needle =
+              let n = String.length needle in
+              let rec scan i =
+                i + n <= String.length e.message
+                && (String.sub e.message i n = needle || scan (i + 1))
+              in
+              scan 0
+            in
+            contains "turbo")
+         errors)
+
+let test_model_without_reasoning_effort_leaves_it_unset () =
+  let config = "[models.probe]\napi-name = \"probe\"\n" in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model without reasoning-effort must still parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "an undeclared reasoning-effort stays None rather than defaulting"
+         true
+         (model.Runtime_schema.reasoning_effort = None)
+     | _ -> fail "exactly one model must parse")
+
 let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
   let valid =
     "[runtime.exact_output_lanes.compaction_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
@@ -3538,5 +3598,14 @@ let () =
           test_case
             "release-evidence smoke lanes resolve with no credential present"
             `Quick test_release_evidence_fixture_lanes_resolve_without_credentials
+        ; test_case
+            "reasoning-effort parses into the typed variant"
+            `Quick test_model_reasoning_effort_parses_into_the_typed_variant
+        ; test_case
+            "reasoning-effort rejects an unknown value at load"
+            `Quick test_model_reasoning_effort_rejects_unknown_value_at_load
+        ; test_case
+            "a model without reasoning-effort leaves it unset"
+            `Quick test_model_without_reasoning_effort_leaves_it_unset
         ] )
     ]

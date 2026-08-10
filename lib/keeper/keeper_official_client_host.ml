@@ -179,7 +179,7 @@ let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
 ;;
 
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
-    ~initial_messages ~model_input_projection ~hooks =
+    ~initial_messages ~model_input_projection ~hooks ~configured_reasoning_effort =
   let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
   let before_turn =
     invoke_turn_hook
@@ -198,7 +198,17 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     | decision ->
       Error (illegal_hook_decision ~runtime_label ~hook_name:"before_turn" decision)
   in
-  let current_params = Agent_core.Hooks.default_turn_params in
+  (* Seed the params the hook sees rather than overwriting its answer: an
+     operator declaration is a default for the turn, not an override of a
+     hook that deliberately chose a different effort. *)
+  let current_params =
+    match configured_reasoning_effort with
+    | None -> Agent_core.Hooks.default_turn_params
+    | Some _ ->
+      { Agent_core.Hooks.default_turn_params with
+        reasoning_effort = configured_reasoning_effort
+      }
+  in
   let before_turn_params =
     invoke_turn_hook
       ~keeper_name

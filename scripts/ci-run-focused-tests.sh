@@ -51,6 +51,7 @@ normal_targets=(
   @test/runtest-test_keeper_approval_resolved_history
   @test/runtest-test_keeper_gate_effect_coverage
   @test/runtest-test_keeper_gate_replay
+  @test/runtest-test_workspace
   @test/runtest-test_verification
   @test/runtest-test_tool_schema_constraint_enforcement
   @test/runtest-test_keeper_artifact_read_request

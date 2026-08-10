@@ -98,9 +98,17 @@ let codex_error_to_core_error = function
     config_error ~field:"codex_app_server" detail
   | Runtime_codex_app_server.Subscription_required detail ->
     config_error ~field:"codex_subscription" detail
-  | Runtime_codex_app_server.Context_window_exceeded { message } ->
+  | Runtime_codex_app_server.Context_window_exceeded
+      { message; tool_effect_attempted = false } ->
     Agent_core.Error.Api
       (Llm_provider.Retry.ContextOverflow { message; limit = None })
+  | Runtime_codex_app_server.Context_window_exceeded _ as error ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "codex_app_server"
+         ; error_type = Some "context_window_exceeded_after_tool_effect"
+         ; detail = Runtime_codex_app_server.error_to_string error
+         })
   | error -> Agent_core.Error.Internal (Runtime_codex_app_server.error_to_string error)
 ;;
 

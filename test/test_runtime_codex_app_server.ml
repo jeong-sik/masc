@@ -170,6 +170,37 @@ let test_dynamic_tool_callback () =
            (Yojson.Safe.to_string !arguments))
 ;;
 
+let test_context_error_records_prior_tool_effect () =
+  let tool : Runtime_codex_app_server.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "Record one deterministic tool effect"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call =
+        (fun ~call_id:_ _ ->
+          { Runtime_codex_app_server.success = true; content = "effect applied" })
+    }
+  in
+  let failed =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+  in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; tool_call_request
+    ; failed
+    ]
+    (fun path ->
+       match run_fixture ~dynamic_tools:[ tool ] path with
+       | Error
+           (Runtime_codex_app_server.Context_window_exceeded
+              { message = "context is full"; tool_effect_attempted = true }) ->
+         ()
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "context overflow after a tool effect was not reported")
+;;
+
 let test_history_is_injected_before_turn () =
   let injected = {|{"id":4,"result":{}}|} in
   let turn_after_injection = {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|} in
@@ -440,7 +471,8 @@ let test_failed_turn_uses_official_context_error_enum () =
     (fun path ->
       match run_fixture path with
       | Error
-          (Runtime_codex_app_server.Context_window_exceeded { message }) ->
+          (Runtime_codex_app_server.Context_window_exceeded
+             { message; tool_effect_attempted = false }) ->
         check
           string
           "provider message"
@@ -609,7 +641,7 @@ let test_terminal_error_notification_uses_official_context_error_enum () =
        match run_fixture path with
        | Error
            (Runtime_codex_app_server.Context_window_exceeded
-              { message = "context is full" }) ->
+              { message = "context is full"; tool_effect_attempted = false }) ->
          ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "typed terminal context overflow did not fail the turn")
@@ -1107,6 +1139,44 @@ let test_keeper_maps_official_context_error_to_typed_core_error () =
          ()
        | Error error -> fail (Agent_core.Error.to_string error)
        | Ok _ -> fail "Keeper erased the typed Codex context overflow")
+;;
+
+let test_keeper_does_not_retry_context_error_after_tool_effect () =
+  let tool =
+    fixture_tool
+      ~name:"masc_probe"
+      ~description:"Record one deterministic tool effect"
+      ()
+  in
+  let failed =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+  in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; tool_call_request
+    ; failed
+    ]
+    (fun cli_path ->
+       match
+         run_keeper_turn
+           ~tools:[ tool ]
+           ~cli_path
+           ~model:"gpt-fixture"
+           ()
+       with
+       | Error
+           (Agent_core.Error.Provider
+              (Llm_provider.Error.ProviderReportedError
+                 { provider = "codex_app_server"
+                 ; error_type = Some "context_window_exceeded_after_tool_effect"
+                 ; _
+                 })) ->
+         ()
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;
 
 let test_keeper_dispatches_codex_turn_runtime () =
@@ -2378,6 +2448,10 @@ let () =
             `Quick
             test_dispatch_validation_is_process_free
         ; test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
+        ; test_case
+            "context error records prior tool effect"
+            `Quick
+            test_context_error_records_prior_tool_effect
         ; test_case "history injects before turn" `Quick test_history_is_injected_before_turn
         ; test_case
             "thread resume skips history injection"
@@ -2399,6 +2473,10 @@ let () =
             "Keeper maps official context error to typed core error"
             `Quick
             test_keeper_maps_official_context_error_to_typed_core_error
+        ; test_case
+            "Keeper does not retry context error after tool effect"
+            `Quick
+            test_keeper_does_not_retry_context_error_after_tool_effect
         ; test_case
             "Keeper preserves typed history on Codex wire"
             `Quick

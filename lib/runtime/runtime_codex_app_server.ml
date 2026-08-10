@@ -105,7 +105,10 @@ type error =
       }
   | Subscription_required of string
   | Unsupported_server_request of string
-  | Context_window_exceeded of { message : string }
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      }
   | Turn_failed of string
   | Turn_interrupted
   | Process_exited of string
@@ -123,8 +126,11 @@ let error_to_string = function
     "Codex ChatGPT subscription login required: " ^ detail
   | Unsupported_server_request method_ ->
     "Codex app-server requested unsupported host action: " ^ method_
-  | Context_window_exceeded { message } ->
-    "Codex app-server context window exceeded: " ^ message
+  | Context_window_exceeded { message; tool_effect_attempted } ->
+    Printf.sprintf
+      "Codex app-server context window exceeded (tool_effect_attempted=%b): %s"
+      tool_effect_attempted
+      message
   | Turn_failed detail -> "Codex app-server turn failed: " ^ detail
   | Turn_interrupted -> "Codex app-server turn was interrupted"
   | Process_exited detail -> "Codex app-server exited before completion: " ^ detail
@@ -518,14 +524,14 @@ let turn_error_detail ~message error_fields =
   | annotations -> message ^ " (" ^ String.concat " " annotations ^ ")"
 ;;
 
-let turn_error_of_fields ~message error_fields =
+let turn_error_of_fields ~tool_effect_attempted ~message error_fields =
   match List.assoc_opt "codexErrorInfo" error_fields with
   | Some (`String "contextWindowExceeded") ->
-    Context_window_exceeded { message }
+    Context_window_exceeded { message; tool_effect_attempted }
   | Some _ | None -> Turn_failed (turn_error_detail ~message error_fields)
 ;;
 
-let turn_error fields =
+let turn_error ~tool_effect_attempted fields =
   match List.assoc_opt "error" fields with
   | Some (`Assoc error_fields) ->
     let message =
@@ -534,11 +540,12 @@ let turn_error fields =
         String.trim message
       | _ -> "turn failed without a typed error message"
     in
-    turn_error_of_fields ~message error_fields
+    turn_error_of_fields ~tool_effect_attempted ~message error_fields
   | Some _ | None -> Turn_failed "turn failed without an error object"
 ;;
 
-let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params =
+let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
+    ~tool_effect_attempted params =
   let stage = "turn/completed" in
   let* fields = assoc_at stage params in
   let* terminal_thread_id = required_string stage "threadId" fields in
@@ -553,7 +560,7 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params =
     else
       let* status = required_string stage "status" turn_fields in
       match status with
-      | "failed" -> Error (turn_error turn_fields)
+      | "failed" -> Error (turn_error ~tool_effect_attempted turn_fields)
       | "interrupted" -> Error Turn_interrupted
       | "inProgress" -> protocol_error stage "terminal notification carried inProgress status"
       | "completed" ->
@@ -694,9 +701,19 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       let* error_json = required_member stage "error" fields in
       let* error_fields = assoc_at stage error_json in
       let* message = required_string stage "message" error_fields in
-      Error (turn_error_of_fields ~message error_fields)
+      Error
+        (turn_error_of_fields
+           ~tool_effect_attempted:(!tool_call_count > 0)
+           ~message
+           error_fields)
   | Notification { method_ = "turn/completed"; params } ->
-    terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params
+    terminal_result
+      ~thread_id
+      ~turn_id
+      ~seen_final
+      ~seen_fallback
+      ~tool_effect_attempted:(!tool_call_count > 0)
+      params
   (* App-server progress and account notifications are observational. Protocol
      evolution must not turn them into a computation failure; the enclosing
      turn timeout remains the liveness boundary. *)

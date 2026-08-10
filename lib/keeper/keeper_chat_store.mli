@@ -207,8 +207,15 @@ type chat_message = {
           paths ({!append_user_message_once} /
           {!append_assistant_message_once}).  [None] on rows written by the
           plain append paths and on rows written before this field existed.
+
           A malformed persisted value is reported as a persistence read drop
-          and reads as [None]; the row stays valid. *)
+          and reads as [None] here; the row stays valid. That leniency is
+          local to reading rows out. The append-once paths decode the same
+          persisted pair to answer "is this delivery already on disk?", and
+          there an undecodable row fails the whole append instead — skipping
+          it would append a duplicate. So a row this field cannot decode is
+          not merely cosmetic: it blocks every later append to that keeper's
+          file until the row is repaired or removed. *)
 }
 
 (** {1 I/O} *)

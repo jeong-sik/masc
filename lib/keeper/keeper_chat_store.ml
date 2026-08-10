@@ -511,7 +511,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?workspace_id
     ?speaker
     ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref
-    ?stream_lifecycle ?delivery_key ?transcript_slot ()
+    ?stream_lifecycle ?provenance ()
     : string =
   let surface_field =
     match surface with
@@ -592,19 +592,19 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     @ blocks_fields blocks
     @ opt_string_field "turn_ref" (Option.map Ids.Turn_ref.to_string turn_ref)
     @ stream_lifecycle_fields stream_lifecycle
-    @ (match delivery_key with
+    @ (match provenance with
        | None -> []
        | Some value ->
-         [ ( "delivery_key"
-           , Keeper_chat_delivery_identity.delivery_key_to_yojson value ) ])
-    @ (match transcript_slot with
-       | None -> []
-       | Some value ->
-         [ ( "transcript_slot"
-           , Keeper_chat_delivery_identity.transcript_slot_to_yojson value ) ])
+         Keeper_chat_delivery_identity.delivery_provenance_fields value)
   in
   Yojson.Safe.to_string (`Assoc all_fields)
 
+(* The append-once reader. It answers "does this exact delivery already have
+   a row?", so an undecodable row cannot be skipped: skipping one would
+   answer "no" for a delivery that is in fact present and append a duplicate.
+   Hence [Error] here fails the whole transaction, unlike the row reader in
+   [parse_line], which only needs to render. Both decode the pair through
+   [delivery_provenance_of_fields]; only the failure policy differs. *)
 let provenance_of_line ~line_number line =
   let fail detail =
     Error
@@ -617,40 +617,24 @@ let provenance_of_line ~line_number line =
     match Yojson.Safe.from_string line with
     | `Assoc fields ->
       (match
-         List.assoc_opt "delivery_key" fields,
-         List.assoc_opt "transcript_slot" fields
+         Keeper_chat_delivery_identity.delivery_provenance_of_fields fields
        with
-       | None, None -> Ok None
-       | Some _, None | None, Some _ ->
-         fail "delivery_key and transcript_slot must appear together"
-       | Some delivery_key_json, Some transcript_slot_json ->
-         (match
-            Keeper_chat_delivery_identity.delivery_key_of_yojson
-              delivery_key_json,
-            Keeper_chat_delivery_identity.transcript_slot_of_yojson
-              transcript_slot_json,
-            List.assoc_opt "id" fields
-          with
-          | Ok delivery_key, Ok transcript_slot, Some (`String row_id)
-            when not (String.equal (String.trim row_id) "") ->
-            Ok (Some (delivery_key, transcript_slot, row_id))
-          | Error detail, _, _ | _, Error detail, _ -> fail detail
-          | _, _, _ -> fail "provenance row requires a nonblank id"))
+       | Error detail -> fail detail
+       | Ok None -> Ok None
+       | Ok (Some provenance) ->
+         (match List.assoc_opt "id" fields with
+          | Some (`String row_id) when not (String.equal (String.trim row_id) "") ->
+            Ok (Some (provenance, row_id))
+          | _ -> fail "provenance row requires a nonblank id"))
     | _ -> fail "row must be a JSON object"
   with
   | Yojson.Json_error detail -> fail detail
 ;;
 
 module Provenance_key = struct
-  type t =
-    Keeper_chat_delivery_identity.delivery_key
-    * Keeper_chat_delivery_identity.transcript_slot
+  type t = Keeper_chat_delivery_identity.delivery_provenance
 
-  let equal (left_key, left_slot) (right_key, right_slot) =
-    Keeper_chat_delivery_identity.delivery_key_equal left_key right_key
-    && Keeper_chat_delivery_identity.transcript_slot_equal left_slot right_slot
-  ;;
-
+  let equal = Keeper_chat_delivery_identity.delivery_provenance_equal
   let hash = Hashtbl.hash
 end
 
@@ -662,12 +646,11 @@ type indexed_provenance =
 
 let provenance_index_of_existing existing =
   let index = Provenance_index.create 16 in
-  let add_provenance (delivery_key, transcript_slot, row_id) =
-    let key = delivery_key, transcript_slot in
-    match Provenance_index.find_opt index key with
-    | None -> Provenance_index.add index key (Unique_provenance row_id)
+  let add_provenance (provenance, row_id) =
+    match Provenance_index.find_opt index provenance with
+    | None -> Provenance_index.add index provenance (Unique_provenance row_id)
     | Some (Unique_provenance _ | Duplicate_provenance) ->
-      Provenance_index.replace index key Duplicate_provenance
+      Provenance_index.replace index provenance Duplicate_provenance
   in
   existing
   |> String.split_on_char '\n'
@@ -686,24 +669,24 @@ let provenance_index_of_existing existing =
   |> Result.map (fun () -> index)
 ;;
 
-let find_indexed_provenance index ~delivery_key ~transcript_slot =
-  match Provenance_index.find_opt index (delivery_key, transcript_slot) with
+let find_indexed_provenance index ~provenance =
+  match Provenance_index.find_opt index provenance with
   | None -> Ok None
   | Some (Unique_provenance row_id) -> Ok (Some row_id)
   | Some Duplicate_provenance ->
     Error "duplicate Keeper chat delivery provenance rows"
 ;;
 
-let find_provenance existing ~delivery_key ~transcript_slot =
+let find_provenance existing ~provenance =
   let ( let* ) = Result.bind in
   let* index = provenance_index_of_existing existing in
-  find_indexed_provenance index ~delivery_key ~transcript_slot
+  find_indexed_provenance index ~provenance
 ;;
 
-let append_line_once path ~delivery_key ~transcript_slot ~row_id line =
+let append_line_once path ~provenance ~row_id line =
   match
     Fs_compat.update_private_file_durable_locked_result path (fun existing ->
-      match find_provenance existing ~delivery_key ~transcript_slot with
+      match find_provenance existing ~provenance with
       | Error detail -> None, Error detail
       | Ok (Some existing_row_id) ->
         None, Ok (Already_present { row_id = existing_row_id })
@@ -1000,7 +983,12 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
           | [] -> Ok (found, List.rev additions)
           | ({ transcript_slot; row_id; line = _ } as candidate) :: rest ->
             (match
-               find_indexed_provenance index ~delivery_key ~transcript_slot
+               find_indexed_provenance
+                 index
+                 ~provenance:
+                   { Keeper_chat_delivery_identity.delivery_key
+                   ; transcript_slot
+                   }
              with
              | Error detail -> Error detail
              | Ok (Some existing_row_id) ->
@@ -1091,8 +1079,8 @@ let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
              ?surface
              ?conversation_id
              ?turn_ref
-             ~delivery_key
-             ~transcript_slot
+             ~provenance:
+               { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
              ()
        })
     tool_calls
@@ -1186,8 +1174,8 @@ let append_assistant_message_once
         ?blocks
         ?turn_ref
         ?stream_lifecycle
-        ~delivery_key
-        ~transcript_slot
+        ~provenance:
+          { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
         ()
     in
     let tool_lines =
@@ -1281,7 +1269,11 @@ let append_user_message_once
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let row_id = mint_message_id ~ts in
-    let transcript_slot = Keeper_chat_delivery_identity.Accepted_user in
+    let provenance =
+      { Keeper_chat_delivery_identity.delivery_key
+      ; transcript_slot = Keeper_chat_delivery_identity.Accepted_user
+      }
+    in
     let line =
       encode_line
         ~role:Role.User
@@ -1295,11 +1287,10 @@ let append_user_message_once
         ?workspace_id
         ?speaker
         ~mentions:(user_line_mentions ~extra_mentions content)
-        ~delivery_key
-        ~transcript_slot
+        ~provenance
         ()
     in
-    append_line_once path ~delivery_key ~transcript_slot ~row_id line
+    append_line_once path ~provenance ~row_id line
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -1526,21 +1517,27 @@ let parse_line ~file_path (line : string) : chat_message option =
     in
     let delivery_key =
       (* Same read-drop convention as [turn_ref]: a malformed persisted
-         value is surfaced and reads as [None] — the row stays valid. *)
-      match Json_util.assoc_member_opt "delivery_key" json with
-      | None -> None
-      | Some delivery_key_json -> (
+         value is surfaced and reads as [None] — the row stays valid.
+         This reader only renders, so it can carry on without the
+         provenance; [provenance_of_line] decodes the same pair through
+         the same function but must fail its transaction instead, because
+         a skipped row there would answer "not appended yet" for a
+         delivery that is already on disk. *)
+      match json with
+      | `Assoc fields -> (
           match
-            Keeper_chat_delivery_identity.delivery_key_of_yojson
-              delivery_key_json
+            Keeper_chat_delivery_identity.delivery_provenance_of_fields fields
           with
-          | Ok key -> Some key
+          | Ok None -> None
+          | Ok (Some { Keeper_chat_delivery_identity.delivery_key; _ }) ->
+              Some delivery_key
           | Error detail ->
               report_persistence_read_drop
                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
                 ~path:file_path
-                ~detail:(Printf.sprintf "invalid delivery_key: %s" detail);
+                ~detail:(Printf.sprintf "invalid delivery provenance: %s" detail);
               None)
+      | _ -> None
     in
     let has_structured_payload =
       Option.is_some audio

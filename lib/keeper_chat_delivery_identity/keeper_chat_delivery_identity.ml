@@ -43,6 +43,11 @@ type transcript_slot =
       }
   | Terminal_assistant
 
+type delivery_provenance =
+  { delivery_key : delivery_key
+  ; transcript_slot : transcript_slot
+  }
+
 let ( let* ) = Result.bind
 
 let assoc_field name fields =
@@ -122,19 +127,6 @@ let delivery_key_equal left right =
   | Operation _, Fusion_run _ | Fusion_run _, Operation _ -> false
 ;;
 
-let delivery_key_file_stem key =
-  let digest =
-    key
-    |> delivery_key_to_yojson
-    |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
-  in
-  match key with
-  | Operation _ -> "operation-" ^ digest
-  | Fusion_run _ -> "fusion-" ^ digest
-;;
-
 let transcript_slot_to_yojson = function
   | Accepted_user -> `Assoc [ "kind", `String "accepted_user" ]
   | Terminal_assistant -> `Assoc [ "kind", `String "terminal_assistant" ]
@@ -200,4 +192,28 @@ let transcript_slot_equal left right =
   | Accepted_user, (Terminal_assistant | Tool_call _)
   | Terminal_assistant, (Accepted_user | Tool_call _)
   | Tool_call _, (Accepted_user | Terminal_assistant) -> false
+;;
+
+let delivery_provenance_fields { delivery_key; transcript_slot } =
+  [ "delivery_key", delivery_key_to_yojson delivery_key
+  ; "transcript_slot", transcript_slot_to_yojson transcript_slot
+  ]
+;;
+
+let delivery_provenance_of_fields fields =
+  match
+    List.assoc_opt "delivery_key" fields, List.assoc_opt "transcript_slot" fields
+  with
+  | None, None -> Ok None
+  | Some _, None | None, Some _ ->
+    Error "delivery_key and transcript_slot must appear together"
+  | Some delivery_key_json, Some transcript_slot_json ->
+    let* delivery_key = delivery_key_of_yojson delivery_key_json in
+    let* transcript_slot = transcript_slot_of_yojson transcript_slot_json in
+    Ok (Some { delivery_key; transcript_slot })
+;;
+
+let delivery_provenance_equal left right =
+  delivery_key_equal left.delivery_key right.delivery_key
+  && transcript_slot_equal left.transcript_slot right.transcript_slot
 ;;

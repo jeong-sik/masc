@@ -90,37 +90,11 @@ let with_cached_surface_success
       json
       f
   =
-  let saved =
-    ( surface.json
-    , surface.last_success_at
-    , surface.last_success_unix
-    , surface.last_attempt_at
-    , surface.last_attempt_unix
-    , surface.last_error
-    , surface.last_error_at
-    , surface.last_error_unix )
-  in
+  (* One snapshot is the whole saved state now — the eight-field save and
+     restore this used to carry collapsed with the record. *)
+  let saved = Server_dashboard_http_cache.snapshot surface in
   Fun.protect
-    ~finally:(fun () ->
-      let ( json
-          , last_success_at
-          , last_success_unix
-          , last_attempt_at
-          , last_attempt_unix
-          , last_error
-          , last_error_at
-          , last_error_unix )
-        =
-        saved
-      in
-      surface.json <- json;
-      surface.last_success_at <- last_success_at;
-      surface.last_success_unix <- last_success_unix;
-      surface.last_attempt_at <- last_attempt_at;
-      surface.last_attempt_unix <- last_attempt_unix;
-      surface.last_error <- last_error;
-      surface.last_error_at <- last_error_at;
-      surface.last_error_unix <- last_error_unix)
+    ~finally:(fun () -> surface.Server_dashboard_http_cache.current <- saved)
     (fun () ->
       Server_dashboard_http_cache.mark_cached_surface_success surface json;
       f ())
@@ -3355,6 +3329,37 @@ let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
         (List.length names)
         (json |> member "total" |> to_int))
 
+
+(* The `.mli` calls the error clear on success a deliberate contract, and
+   nothing tested it. It is also exactly what a snapshot swap could drop,
+   since the fields now have to be named in the record update rather than
+   simply assigned. *)
+let test_cached_surface_success_clears_the_previous_error () =
+  let module Cache = Server_dashboard_http_cache in
+  let surface = Cache.create_cached_surface (`Assoc [ "seed", `Bool true ]) in
+  Cache.mark_cached_surface_error surface (Failure "compute blew up");
+  let errored = Cache.snapshot surface in
+  check bool "the error is recorded" true (Option.is_some errored.Cache.last_error);
+  check bool "the error is stamped" true (Option.is_some errored.Cache.last_error_at);
+  check bool "the error has a unix stamp" true
+    (Option.is_some errored.Cache.last_error_unix);
+  Cache.mark_cached_surface_success surface (`Assoc [ "fresh", `Bool true ]);
+  let succeeded = Cache.snapshot surface in
+  check bool "success clears the error" true
+    (Option.is_none succeeded.Cache.last_error);
+  check bool "success clears the error stamp" true
+    (Option.is_none succeeded.Cache.last_error_at);
+  check bool "success clears the error unix stamp" true
+    (Option.is_none succeeded.Cache.last_error_unix);
+  check bool "success records its own stamp" true
+    (Option.is_some succeeded.Cache.last_success_unix);
+  check
+    string
+    "success installs the new payload"
+    (Yojson.Safe.to_string (`Assoc [ "fresh", `Bool true ]))
+    (Yojson.Safe.to_string succeeded.Cache.json)
+;;
+
 let () =
   run "dashboard_http_core"
     [
@@ -3510,7 +3515,9 @@ let () =
             test_running_keeper_reconciliation_rebuilds_continuity_brief;
         ] );
       ( "context-window shrink guard (#25062/#25268)",
-        [ test_case "shrink of max_context_override is detected" `Quick
+        [ test_case "success clears the previous error" `Quick
+            test_cached_surface_success_clears_the_previous_error;
+          test_case "shrink of max_context_override is detected" `Quick
             test_context_shrink_detection;
           test_case "config POST atomically restarts runtime" `Quick
             test_config_post_restarts_from_atomic_toml;

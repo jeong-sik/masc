@@ -96,7 +96,10 @@ let operator_snapshot_publication_ref =
 
 let install_operator_snapshot_invalidation generation =
   invalidate_cached_surface operator_snapshot_cache;
-  operator_snapshot_cache.json <- invalidated_operator_snapshot_json ();
+  operator_snapshot_cache.current <-
+    { (snapshot operator_snapshot_cache) with
+      json = invalidated_operator_snapshot_json ()
+    };
   let publication =
     make_operator_snapshot_publication
       ~generation
@@ -250,9 +253,12 @@ let mark_operator_snapshot_error_if_current ~compute exn =
            && compute.sequence > publication.terminal_sequence
         then (
           mark_cached_surface_error operator_snapshot_cache exn;
-          operator_snapshot_cache.json <- unavailable_operator_snapshot_json ();
-          operator_snapshot_cache.last_success_at <- None;
-          operator_snapshot_cache.last_success_unix <- None;
+          operator_snapshot_cache.current <-
+            { (snapshot operator_snapshot_cache) with
+              json = unavailable_operator_snapshot_json ()
+            ; last_success_at = None
+            ; last_success_unix = None
+            };
           let terminal =
             make_operator_snapshot_publication
               ~generation:compute.generation

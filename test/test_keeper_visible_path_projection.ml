@@ -385,6 +385,105 @@ let test_repo_prefixed_missing_read_preserves_exact_input () =
     (Json.member "available_repos" json = `Null)
 ;;
 
+(* A keeper that guesses the host layout and one whose repos were never
+   materialized both got "directory does not exist", and the two need opposite
+   responses. Live taskmaster asked for
+   [workspace/yousleepwhen/masc] and retried (#23442).
+
+   The hint enumerates the playground's own [repos/]; it does not infer which
+   repo was meant. The last case pins that distinction: the file-path failure
+   keeps refusing to volunteer a repository list, which is a separate decision
+   this change does not touch. *)
+let test_cwd_rejection_names_the_materialized_repos () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  write_file (Filename.concat playground "repos/masc/README.md") "readme\n";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "cwd", `String "workspace/yousleepwhen/masc"
+            ; "path", `String "README.md"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
+  let error = Option.value (parse_string "error" raw) ~default:raw in
+  let contains needle = String_util.contains_substring error needle in
+  Alcotest.(check bool) "names the cwd vocabulary" true (contains "repos/masc");
+  Alcotest.(check bool) "still says why it failed" true
+    (contains "cwd_not_directory")
+;;
+
+let test_cwd_rejection_says_when_nothing_is_materialized () =
+  setup
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "cwd", `String "repos/masc"
+            ; "path", `String "README.md"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
+  let error = Option.value (parse_string "error" raw) ~default:raw in
+  Alcotest.(check bool) "distinguishes empty from wrong" true
+    (String_util.contains_substring error "no repository is materialized")
+;;
+
+let test_valid_repo_cwd_carries_no_hint () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  write_file (Filename.concat playground "repos/masc/README.md") "readme\n";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "cwd", `String "repos/masc"
+            ; "path", `String "README.md"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if not (parse_ok raw) then Alcotest.failf "expected Read ok, got: %s" raw;
+  Alcotest.(check bool) "success carries no cwd advice" false
+    (String_util.contains_substring raw "available repo cwds")
+;;
+
+let test_missing_file_still_volunteers_no_repository_list () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  write_file (Filename.concat playground "repos/masc/README.md") "readme\n";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "path", `String "repos/masc/does_not_exist_xyz.ml"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
+  Alcotest.(check bool) "no inferred repository list" true
+    (Json.member "available_repos" (parse raw) = `Null)
+;;
+
 let test_write_visible_scratch_path () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker ~always_allow:true
   @@ fun ~config ~meta ~playground ~publication_recovery ->
@@ -447,6 +546,22 @@ let () =
             "repo-prefixed missing read surfaces playground hint"
             `Quick
             test_repo_prefixed_missing_read_preserves_exact_input
+        ; Alcotest.test_case
+            "cwd rejection names the materialized repos"
+            `Quick
+            test_cwd_rejection_names_the_materialized_repos
+        ; Alcotest.test_case
+            "cwd rejection says when nothing is materialized"
+            `Quick
+            test_cwd_rejection_says_when_nothing_is_materialized
+        ; Alcotest.test_case
+            "valid repo cwd carries no hint"
+            `Quick
+            test_valid_repo_cwd_carries_no_hint
+        ; Alcotest.test_case
+            "missing file still volunteers no repository list"
+            `Quick
+            test_missing_file_still_volunteers_no_repository_list
         ] )
     ; ( "repository_checkouts"
       , [ Alcotest.test_case

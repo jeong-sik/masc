@@ -193,6 +193,42 @@ let string_opt_nonempty name json =
     if trimmed = "" then None else Some trimmed
 ;;
 
+(* The rejection names the cwds that would have worked.
+   A keeper that guesses the host layout ("workspace/<org>/<repo>") gets the
+   same "directory does not exist" as one that asked for a repo nobody
+   materialized, and the two need opposite responses: retry with the right
+   prefix, or stop asking. Live taskmaster hit the first and kept retrying
+   (#23442). The vocabulary is "repos/<repo>" -- see the projection note in
+   [resolve_read_file_cwd] -- so the accepted set is exactly what sits under
+   the keeper's playground [repos/]. An empty set is reported as empty rather
+   than omitted, because "no repository is materialized" is the answer to a
+   different question than "you named the wrong one". *)
+let materialized_repo_cwds ~config ~meta =
+  let repos_root = Filename.concat (keeper_playground_root ~config ~meta) "repos" in
+  if not (safe_is_dir repos_root)
+  then []
+  else (
+    match Sys.readdir repos_root with
+    | exception Sys_error _ -> []
+    | entries ->
+      Array.to_list entries
+      |> List.filter (fun name ->
+           (not (String.length name > 0 && name.[0] = '.'))
+           && safe_is_dir (Filename.concat repos_root name))
+      |> List.sort String.compare)
+;;
+
+let available_cwd_hint ~config ~meta =
+  match materialized_repo_cwds ~config ~meta with
+  | [] ->
+    " no repository is materialized under repos/ for this keeper, so no \
+     repos/<repo> cwd exists yet"
+  | repos ->
+    Printf.sprintf
+      " available repo cwds: %s"
+      (String.concat ", " (List.map (fun name -> "repos/" ^ name) repos))
+;;
+
 let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd =
   match cwd with
   | None -> Ok (keeper_default_read_root ~config ~meta)
@@ -210,8 +246,10 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
     else
       Error
         (Printf.sprintf
-           "cwd_not_directory: %s (directory does not exist; Read will not create cwd)"
-           cwd)
+           "cwd_not_directory: %s (directory does not exist; Read will not create \
+            cwd);%s"
+           cwd
+           (available_cwd_hint ~config ~meta))
 ;;
 
 let resolve_read_file_target

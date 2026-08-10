@@ -918,12 +918,21 @@ type content_block =
       { content : string
       ; signature : string option
         (** [Some s]: Anthropic cryptographic signature, replayed byte-exact on
-            tool turns (never sanitized or re-encoded). [None]: provider
-            reasoning that carries no verification signature
-            (OpenAI-compatible / Gemini / GLM / Ollama). Replaces the former
-            [thinking_type : string], which conflated this signature with a
-            free-form provider label ("reasoning" / "thinking" /
-            "reasoning_summary") that no consumer read. *)
+            tool turns (never sanitized or re-encoded). Only the Anthropic wire
+            parse populates it; every other backend constructs [None].
+
+            [None] says this block carries no signature, not that the provider
+            has none. Gemini signs too, and its [thoughtSignature] rides in a
+            {!RedactedThinking} carrier instead — see
+            [Backend_gemini.gemini_thought_signature_carrier] — which is why
+            {!Reasoning_dialect} gives Gemini a replay policy that keeps signed
+            parts attached to their exact response part. Reading [None] here as
+            "Gemini is signature-less" contradicts that policy and is the
+            misreading this paragraph exists to prevent.
+
+            Replaces the former [thinking_type : string], which conflated this
+            signature with a free-form provider label ("reasoning" /
+            "thinking" / "reasoning_summary") that no consumer read. *)
       }
   | ReasoningDetails of
       { reasoning_content : string option

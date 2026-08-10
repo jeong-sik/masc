@@ -1080,8 +1080,13 @@ let init_default ~config_path =
   set_loaded ~config_path loaded;
   Ok ()
 
-let publish_exact_output_registry ~lanes resolver_snapshot =
-  match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
+let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
+  match
+    Runtime_exact_output_registry.publish
+      ?required_lane_ids
+      ~lanes
+      resolver_snapshot
+  with
   | Ok registry -> Ok registry
   | Error error ->
     Error (Runtime_exact_output_registry.publication_error_to_string error)

@@ -30,12 +30,14 @@ type publication_error =
       ; slot_id : string
       ; cause : Agent_core.Exact_output.target_ref_error
       }
-  | Unknown_lane_slot of
-      { lane_id : string
-      ; position : int
-      ; slot_id : string
-      ; target_ref : string
-      }
+  | Required_lane_unavailable of { lane_id : string }
+
+type rejected_slot =
+  { lane_id : string
+  ; position : int
+  ; slot_id : string
+  ; target_ref : string
+  }
 
 type prepared_replacement
 
@@ -56,7 +58,8 @@ type lane_resolution_error =
   | No_admitted_lane_slots of { lane_id : string }
 
 val publish
-  :  lanes:Runtime_schema.exact_output_lane_decl list
+  :  ?required_lane_ids:string list
+  -> lanes:Runtime_schema.exact_output_lane_decl list
   -> Agent_core.Exact_output.resolver_snapshot
   -> (t, publication_error) result
 (** Validate and atomically publish one complete resolver-and-lane registry.
@@ -64,11 +67,13 @@ val publish
     monotonically. Invalid declarations are rejected before the Atomic is
     changed.
 
-    Every declaration string is converted to an immutable AGENT_CORE admitted-target
-    handle before publication. Credential presence is deliberately excluded
-    from publication admission. Config-level errors — blank or duplicate ids,
-    malformed or unknown target refs — remain fatal at publish. Returns
-    [Publication_busy] while a replacement reservation is active. *)
+    Every declaration string present in the frozen catalog is converted to an
+    immutable AGENT_CORE admitted-target handle before publication. Credential
+    presence is deliberately excluded from publication admission. Unknown
+    catalog targets are retained as typed [rejected_slot] observations and do
+    not suppress admitted siblings. Blank or duplicate ids and malformed target
+    refs remain fatal. A required lane must retain at least one admitted slot.
+    Returns [Publication_busy] while a replacement reservation is active. *)
 
 val prepare_replacement
   :  lanes:Runtime_schema.exact_output_lane_decl list
@@ -97,6 +102,7 @@ val current : unit -> (t, publication_error) result
     [Registry_not_published] before bootstrap has published one. *)
 
 val generation : t -> int64
+val rejected_slots : t -> rejected_slot list
 
 val resolve_lane : t -> lane_id:string -> (resolved_lane, lane_resolution_error) result
 (** Acquire one lane exclusively from the immutable admitted handles retained

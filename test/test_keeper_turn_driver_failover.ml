@@ -134,12 +134,6 @@ max-concurrent = 1
 max-request-body-bytes = 65536
 |}
 
-(* Both lane candidates are official-client: [Runtime.validate_lanes] refuses a
-   lane whose candidates disagree on checkpoint ownership, because a turn that
-   fails over across that boundary is rejected at finalization after the answer
-   was produced. The tests below assert only on the codex attempt's manifest
-   rows, so the second candidate's owner was incidental — it is pinned here so
-   the fixture keeps loading and keeps meaning "failover lane". *)
 let runtime_toml_checkpoint_lane =
   {|
 [runtime]
@@ -147,7 +141,7 @@ default = "codex.codex"
 
 [runtime.lanes.checkpoint_lane]
 strategy = "ordered"
-candidates = [ "codex.codex", "codex.codex_standby" ]
+candidates = [ "codex.codex", "primary.test_model" ]
 
 [providers.codex]
 protocol = "codex-app-server"
@@ -158,13 +152,7 @@ is-non-interactive = true
 api-name = "gpt-fixture"
 max-context = 400000
 
-[models.codex_standby]
-api-name = "gpt-fixture-standby"
-max-context = 400000
-
 [codex.codex]
-
-[codex.codex_standby]
 
 [providers.primary]
 display-name = "Primary Provider"
@@ -1062,18 +1050,18 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
        ])
     (List.map (fun (event, _, _) -> event_name event) events)
 
-let test_attempt_loop_returns_winning_runtime_authority () =
-  with_runtime_config runtime_toml_with_lane (fun () ->
+let test_cross_owner_fallback_returns_winning_runtime_authority () =
+  with_runtime_config runtime_toml_checkpoint_lane (fun () ->
     let runtime runtime_id =
       match Runtime.get_runtime_by_id runtime_id with
       | Some runtime -> runtime
       | None -> Alcotest.failf "missing runtime %s" runtime_id
     in
-    let primary = runtime "primary.test_model" in
-    let fallback = runtime "fallback.test_model" in
+    let primary = runtime "codex.codex" in
+    let fallback = runtime "primary.test_model" in
     let result =
       Driver.For_testing.attempt_runtime_candidates
-        ~runtime_id:"resilient"
+        ~runtime_id:"checkpoint_lane"
         ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~run_attempt:(fun ~idx:_ ~runtime_id runtime ->
@@ -1094,7 +1082,7 @@ let test_attempt_loop_returns_winning_runtime_authority () =
     | Ok selected ->
       Alcotest.(check string)
         "selected runtime id"
-        "fallback.test_model"
+        "primary.test_model"
         selected.Driver.selected_runtime_id;
       Alcotest.(check int)
         "selected context window"
@@ -1788,9 +1776,9 @@ let () =
             `Quick
             test_attempt_loop_retries_transport_failure_before_checkpoint;
           Alcotest.test_case
-            "fallback returns winning runtime authority"
+            "cross-owner fallback returns winning runtime authority"
             `Quick
-            test_attempt_loop_returns_winning_runtime_authority;
+            test_cross_owner_fallback_returns_winning_runtime_authority;
           Alcotest.test_case
             "provider-wire failure rotates in the same turn"
             `Quick

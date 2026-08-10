@@ -414,6 +414,83 @@ let test_registry_preserves_admitted_slots_without_resolving_credentials () =
     registry
 ;;
 
+let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
+  let snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement
+         { source = "unknown-slot-local-degradation"
+         ; contents = replacement_catalog
+         })
+  in
+  let optional_lane = "optional-exact" in
+  let unknown_target = "not-in-frozen-catalog" in
+  let optional_registry =
+    match
+      Registry.publish
+        ~lanes:[ { id = optional_lane; slot_ids = [ unknown_target ] } ]
+        snapshot
+    with
+    | Ok registry -> registry
+    | Error error ->
+      Alcotest.failf
+        "unknown optional slot must not block publication: %s"
+        (Registry.publication_error_to_string error)
+  in
+  (match Registry.resolve_lane optional_registry ~lane_id:optional_lane with
+   | Error (Registry.No_admitted_lane_slots { lane_id }) ->
+     Alcotest.(check string) "degraded optional lane" optional_lane lane_id
+   | Error error ->
+     Alcotest.failf
+       "unknown optional slot returned the wrong typed result: %s"
+       (Registry.lane_resolution_error_to_string error)
+   | Ok _ -> Alcotest.fail "unknown optional lane must have no selected slots");
+  (match Registry.rejected_slots optional_registry with
+   | [ rejected ] ->
+     Alcotest.(check string) "rejected optional slot" unknown_target rejected.slot_id
+   | rejected ->
+     Alcotest.failf
+       "expected one rejected optional slot, got %d"
+       (List.length rejected));
+  let required_lane = "required-exact" in
+  let stable_registry =
+    match
+      Registry.publish
+        ~required_lane_ids:[ required_lane ]
+        ~lanes:[ { id = required_lane; slot_ids = [ replacement_target ] } ]
+        snapshot
+    with
+    | Ok registry -> registry
+    | Error error ->
+      Alcotest.failf
+        "required lane fixture failed to publish: %s"
+        (Registry.publication_error_to_string error)
+  in
+  let stable_generation = Registry.generation stable_registry in
+  (match
+     Registry.publish
+       ~required_lane_ids:[ required_lane ]
+       ~lanes:[ { id = required_lane; slot_ids = [ unknown_target ] } ]
+       snapshot
+   with
+   | Error (Registry.Required_lane_unavailable { lane_id }) ->
+     Alcotest.(check string) "unavailable required lane" required_lane lane_id
+   | Error error ->
+     Alcotest.failf
+       "unknown required slot returned the wrong typed error: %s"
+       (Registry.publication_error_to_string error)
+   | Ok _ -> Alcotest.fail "unknown required slot must block publication");
+  match Registry.current () with
+  | Ok current ->
+    Alcotest.(check int64)
+      "failed required publication preserves the prior generation"
+      stable_generation
+      (Registry.generation current)
+  | Error error ->
+    Alcotest.failf
+      "failed required publication lost the prior registry: %s"
+      (Registry.publication_error_to_string error)
+;;
+
 let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   with_temp_dir "exact-output-hitl-lane-bootstrap" @@ fun root ->
   let config_root = Filename.concat root "config" in
@@ -484,12 +561,39 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
    | Ok _ -> Alcotest.fail "missing HITL exact lane was synthesized");
   write_file runtime_path (runtime_toml replacement_target);
   create_server_state ();
-let default_registry = current_registry "default HITL lane bootstrap" in
-require_lane_slots
-  "explicit default HITL lane keeps its configured slot"
+  let default_registry = current_registry "default HITL lane bootstrap" in
+  require_lane_slots
+    "explicit default HITL lane keeps its configured slot"
     ~lane_id:"hitl_auto_judge"
-~expected:[ replacement_target ]
-default_registry;
+    ~expected:[ replacement_target ]
+    default_registry;
+  write_file
+    runtime_path
+    (runtime_toml
+       ~compaction_slots:[ overlay_target; replacement_target ]
+       replacement_target);
+  create_server_state ();
+  let degraded_optional_registry =
+    current_registry "unknown optional exact-output slot bootstrap"
+  in
+  require_lane_slots
+    "unknown optional slot is excluded while admitted fallback remains"
+    ~lane_id:"compaction_exact"
+    ~expected:[ replacement_target ]
+    degraded_optional_registry;
+  (match Registry.rejected_slots degraded_optional_registry with
+   | [ rejected ] ->
+     Alcotest.(check string)
+       "rejected lane"
+       "compaction_exact"
+       rejected.lane_id;
+     Alcotest.(check int) "rejected position" 1 rejected.position;
+     Alcotest.(check string) "rejected slot" overlay_target rejected.slot_id;
+     Alcotest.(check string) "rejected target" overlay_target rejected.target_ref
+   | rejected ->
+     Alcotest.failf
+       "expected one typed rejected slot, got %d"
+       (List.length rejected));
   let runtime_lane_candidates =
     [ replacement_runtime_target
     ; replacement_secondary_runtime_target
@@ -694,6 +798,10 @@ let () =
             "registry preserves admitted slots without resolving credentials"
             `Quick
             test_registry_preserves_admitted_slots_without_resolving_credentials
+        ; Alcotest.test_case
+            "unknown slots degrade locally while required lanes stay atomic"
+            `Quick
+            test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity
         ; Alcotest.test_case
             "closed registry transaction publishes final generation and lane"
             `Quick

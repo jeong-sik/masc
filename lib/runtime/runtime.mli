@@ -152,12 +152,13 @@ val init_default : config_path:string -> (unit, string) result
     with arbitrary-model runtime fixtures. *)
 
 val publish_exact_output_registry :
+  ?required_lane_ids:string list ->
   lanes:Runtime_schema.exact_output_lane_decl list ->
   Agent_core.Exact_output.resolver_snapshot ->
   (Runtime_exact_output_registry.t, string) result
 (** Publish one immutable AGENT_CORE resolver-and-lane snapshot and return that exact
-    publication. Startup callers validate mandatory lanes against this value,
-    so validation cannot observe a later global generation. *)
+    publication. [required_lane_ids] must each retain an admitted slot; that
+    validation happens before the global publication changes. *)
 
 val init_default_strict : config_path:string -> (unit, string) result
 (** Fail-closed startup entry point: {!init_default} PLUS the AGENT_CORE

@@ -255,34 +255,32 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
     mandatory_exact_output_lane_ids
 ;;
 
-let require_usable_mandatory_exact_output_lanes ~config_path registry =
+let warn_rejected_exact_output_slots registry =
   List.iter
-    (fun lane_id ->
-       match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-       | Ok { selected_slots = _ :: _; _ } -> ()
-       | Ok { selected_slots = []; _ } ->
-         raise
-           (Env_config_core.Config_error
-              (Printf.sprintf
-                 "exact-output registry: mandatory lane %S in %s resolved \
-                  without a usable admitted slot; make at least one configured \
-                  target credential available and restart; no runtime, \
-                  environment, or migration fallback is applied"
-                 lane_id
-                 config_path))
-       | Error error ->
-         raise
-           (Env_config_core.Config_error
-              (Printf.sprintf
-                 "exact-output registry: mandatory lane %S in %s has no \
-                  credential-usable admitted slot: %s; make at least one \
-                  configured target credential available and restart; no \
-                  runtime, environment, or migration fallback is applied"
-                 lane_id
-                 config_path
-                 (Runtime_exact_output_registry.lane_resolution_error_to_string
-                    error))))
-    mandatory_exact_output_lane_ids
+    (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+       Log.Server.warn
+         "exact_output: lane %S slot %d (%S) ignored because target %S is absent from the frozen catalog; remaining admitted slots stay active"
+         slot.lane_id
+         slot.position
+         slot.slot_id
+         slot.target_ref)
+    (Runtime_exact_output_registry.rejected_slots registry)
+;;
+
+let warn_optional_exact_output_lane registry ~lane_id ~feature =
+  match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+  | Ok { selected_slots = _ :: _; _ } -> ()
+  | Ok { selected_slots = []; _ }
+  | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
+    Log.Server.warn
+      "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"
+      feature
+      lane_id
+  | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
+    Log.Server.warn
+      "exact_output: %s is degraded until [runtime.exact_output_lanes.%s] is configured with AGENT_CORE target refs"
+      feature
+      lane_id
 ;;
 
 let configure_exact_output_registry ?config_root () =
@@ -320,39 +318,31 @@ let configure_exact_output_registry ?config_root () =
          ("exact-output resolver snapshot: "
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
-    (match Runtime.publish_exact_output_registry ~lanes resolver_snapshot with
+    (match
+       Runtime.publish_exact_output_registry
+         ~required_lane_ids:mandatory_exact_output_lane_ids
+         ~lanes
+         resolver_snapshot
+     with
      | Error detail ->
        raise
          (Env_config_core.Config_error
             ("exact-output resolver-and-lane registry: " ^ detail))
      | Ok registry ->
-       (* [resolve_lane] is the exact credential-availability path used by
-          execution. Validate the immutable value returned by atomic publication
-          before Keeper persistence recovery or any worker can be produced. *)
-       require_usable_mandatory_exact_output_lanes ~config_path registry;
+       warn_rejected_exact_output_slots registry;
        let generation = Runtime_exact_output_registry.generation registry in
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
          generation
          catalog_description;
-       if
-         not
-           (List.exists
-              (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-                 String.equal lane.id "compaction_exact")
-              lanes)
-       then
-         Log.Server.warn
-           "exact_output: compaction is degraded until [runtime.exact_output_lanes.compaction_exact] is configured with AGENT_CORE target refs";
-       if
-         not
-           (List.exists
-              (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-                 String.equal lane.id "librarian_exact")
-              lanes)
-       then
-         Log.Server.warn
-           "exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with AGENT_CORE target refs")
+       warn_optional_exact_output_lane
+         registry
+         ~lane_id:"compaction_exact"
+         ~feature:"compaction";
+       warn_optional_exact_output_lane
+         registry
+         ~lane_id:"librarian_exact"
+         ~feature:"librarian")
 ;;
 
 let install_domain_pool_references domain_pool =

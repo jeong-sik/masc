@@ -439,19 +439,29 @@ let handle_control_request
           Protocol_error { stage; detail })
       in
       if dispatch.tool_called then incr tool_call_count;
-      (match dispatch.response with
-       | None -> Ok ()
-       | Some mcp_response ->
-         send_control_response
-           io
-           ~control_phase
-           ~stage:"control success response"
-           ~tool_effect_attempted:dispatch.tool_called
-           (fun () ->
-             send_control_success
-               io
-               ~request_id
-               (`Assoc [ "mcp_response", mcp_response ])))
+      (* The control channel and the MCP payload have different reply rules and
+         the two must not be conflated. An MCP notification carries no id and so
+         produces no JSON-RPC response, but the client wraps *every* MCP message
+         in a control_request that carries a [request_id] and blocks until that
+         id is answered. Returning without sending anything therefore parks the
+         client forever: it waits for the control_response, MASC waits for the
+         next message, and the turn ends only when the turn timeout fires.
+
+         Measured against the real client (2.1.226): with the notification
+         unanswered the turn stops after `notifications/initialized` and never
+         reaches a result; answering it with an empty payload lets the same turn
+         run tools/list -> init -> result in 5.2s. Every other variable held. *)
+      let control_payload =
+        match dispatch.response with
+        | Some mcp_response -> `Assoc [ "mcp_response", mcp_response ]
+        | None -> `Assoc []
+      in
+      send_control_response
+        io
+        ~control_phase
+        ~stage:"control success response"
+        ~tool_effect_attempted:dispatch.tool_called
+        (fun () -> send_control_success io ~request_id control_payload)
   | unsupported ->
     let* () =
       send_control_response

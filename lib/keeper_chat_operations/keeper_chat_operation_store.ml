@@ -524,6 +524,7 @@ let configure db =
 let open_or_create ~path =
   let db = Sqlite3.db_open path in
   let fail error =
+    (* See open failure contract: preserve the typed store error; close is best-effort. *)
     ignore (Sqlite3.db_close db : bool);
     Error error
   in

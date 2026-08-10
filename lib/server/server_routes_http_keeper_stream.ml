@@ -1857,6 +1857,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
             let closed = ref false in
             let delivery, resolve_delivery = Eio.Promise.create () in
             let settle_delivery result =
+              (* See terminal delivery race: the first resolver is authoritative. *)
               ignore (Eio.Promise.try_resolve resolve_delivery result : bool)
             in
             let drain_events () =
@@ -2066,6 +2067,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
   in
   let finished, resolve_finished = Eio.Promise.create () in
   let finish () =
+    (* See stream terminal fan-in: the first terminal notification wins. *)
     ignore (Eio.Promise.try_resolve resolve_finished () : bool)
   in
   ignore
@@ -2121,6 +2123,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                ; "queued_count", `Int acceptance.queued_count
                ])
         in
+        (* See durable acceptance: a closed SSE stream cannot roll back the operation. *)
         ignore (keeper_stream_send_event writer mutex closed event);
         let pending =
           Stdlib.Mutex.protect buffered_mu (fun () ->

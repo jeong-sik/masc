@@ -431,6 +431,7 @@ let start
   in
   (match startup_result with
    | Error _ as error ->
+     (* See startup failure path: preserve the original error; close is best-effort. *)
      ignore (Chat_operation_store.close operation_store : (unit, _) result);
      error
    | Ok initial_operation_inventory ->

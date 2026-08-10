@@ -5,8 +5,12 @@ the Bonsai client island (`dashboard_bonsai/`).
 
 ## Purpose
 
-This library is the **single source of truth** for the shape of every JSON
-response the Bonsai island consumes. Two consumers:
+This library is the **single source of truth for the encoder** of the routes
+listed under [Modules](#modules): the server serializes those responses from
+records defined here. It is not a shared-compile SSOT, and it does not cover
+every Bonsai route — the client does not link this library, so nothing here
+constrains how the client reads the bytes, and routes not listed below have
+their types elsewhere. Two consumers:
 
 - **Server** — `lib/dashboard/dashboard_http_*.ml` serialize via
   `<Module>.response_to_yojson` instead of hand-rolling
@@ -41,12 +45,16 @@ once it stabilizes).
 
 ## ppx strategy
 
-Server uses `ppx_deriving_yojson` (the same ppx already in `lib/types/`).
-For the client, Bonsai's `ppx_yojson_conv` can re-parse the same record by
-copying the module file or by generating a mirror with compatible field
-attributes. Phase 1 uses the simplest path: server emits the JSON, client
-parses with a small hand-written `of_yojson` in `dashboard_bonsai/src/`.
-Full ppx sharing is Phase 2.
+Server uses `ppx_deriving_yojson` and derives the encoder only. There is no
+decoder here: #26992 removed the generated `*_of_yojson` API, and the client
+reads each field with `Yojson.Safe.Util.member` in `dashboard_bonsai/src/`
+rather than calling into this library at all — `dashboard_bonsai/src/dune`
+does not depend on it.
+
+This section used to describe that split as "Phase 1" with full ppx sharing
+as "Phase 2". Sharing the ppx is not planned: it would require the client to
+link this library, which is what the module boundary above exists to prevent.
+The hand-written mirror is the arrangement, not a step toward another one.
 
 ## Guarantees we do **not** make
 

@@ -1376,6 +1376,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # The gate counts with ripgrep, and its counts swallowed a missing binary
+      # as zero, so this job passed on a runner without rg while real drift sat
+      # in the tree (#27965). The script now refuses to run without it; install
+      # it so the refusal never triggers here.
+      - name: Install ripgrep
+        run: |
+          bash scripts/ci/apt-refresh.sh
+          sudo apt-get install -y -qq ripgrep
+
       - name: Run drift gate
         run: scripts/dashboard-drift-check.sh
 

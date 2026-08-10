@@ -19,6 +19,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Every count below runs `rg ... 2>/dev/null || true`, which reads "no matches"
+# and "no ripgrep" as the same zero. A runner without rg therefore reported every
+# pattern at 0 and passed the gate while real drift sat in the tree (#27965: the
+# text-px-literal count was 51 against a baseline of 12). Refuse to run rather
+# than report a count nothing measured.
+if ! command -v rg >/dev/null 2>&1; then
+  echo "dashboard-drift-check: ripgrep (rg) is required; every pattern would" >&2
+  echo "  otherwise count 0 and the gate would pass without scanning." >&2
+  exit 1
+fi
 BASELINE_FILE="${REPO_ROOT}/scripts/dashboard-drift-baseline.json"
 SCAN_ROOT="${REPO_ROOT}/dashboard/src"
 

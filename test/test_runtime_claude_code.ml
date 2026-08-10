@@ -207,6 +207,34 @@ let quota_result_with_success_flag =
   {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-quota-flag-1","result":"must not settle","api_error_status":null}|}
 ;;
 
+let error_400_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-1","result":"prompt is too long: 250000 tokens > 200000 maximum","api_error_status":400}|}
+;;
+
+(* A live keeper reported "terminal subtype=success api_status=400" eleven times
+   in fifteen minutes with no way to tell a context overflow from anything else
+   that returns 400. The frame carried the reason in [result] and the error path
+   parsed it and dropped it (#28071). The expectation is a substring of the
+   provider's own sentence, not a re-render of the format string, so it fails if
+   the field stops being carried. *)
+let test_terminal_error_carries_the_provider_reason () =
+  with_fixture [ Emit error_400_result ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Turn_failed detail) ->
+      check
+        bool
+        "provider reason survives into the typed failure"
+        true
+        (Astring.String.is_infix ~affix:"prompt is too long" detail);
+      check
+        bool
+        "status code is still reported"
+        true
+        (Astring.String.is_infix ~affix:"api_status=400" detail)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "an is_error terminal was reported as completion")
+;;
+
 let test_quota_is_structurally_classified () =
   with_fixture [ Emit rate_limit_rejected; Emit quota_result ] (fun path ->
     match run_fixture path with
@@ -797,6 +825,10 @@ let () =
         ] )
     ; ( "terminal"
       , [ test_case
+            "terminal error carries the provider reason"
+            `Quick
+            test_terminal_error_carries_the_provider_reason
+        ; test_case
             "quota is structurally classified"
             `Quick
             test_quota_is_structurally_classified

@@ -667,15 +667,26 @@ let parse_result ~expected_session_id ~rate_limit fields =
     then Error (Quota_blocked { api_error_status; rate_limit })
     else if is_error
     then
+      (* [result] is the one field on this frame that says why the turn failed,
+         and it was parsed and dropped: a live keeper reported
+         "terminal subtype=success api_status=400" eleven times with no way to
+         tell a context overflow from anything else that returns 400 (#28071).
+         The 429 branch above already proves a status code can carry a typed
+         decision; until 400 gets the same treatment, the operator needs the
+         provider's own sentence. *)
       Error
         (Turn_failed
            (Printf.sprintf
-              "terminal subtype=%s api_status=%s"
+              "terminal subtype=%s api_status=%s%s"
               subtype
               (Option.fold
                  ~none:"unknown"
                  ~some:string_of_int
-                 api_error_status)))
+                 api_error_status)
+              (match result with
+               | Some detail when String.trim detail <> "" ->
+                 ": " ^ String.trim detail
+               | Some _ | None -> "")))
     else if subtype <> "success"
     then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
     else Ok (turn_id, result)

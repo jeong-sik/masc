@@ -1,6 +1,5 @@
 type install_error =
   | Inventory_already_installed of string
-  | Keeper_chat_cutover_required of Keeper_chat_cutover_preflight.report
   | Inventory_load_failed of
       { keeper_name : string option
       ; detail : string
@@ -43,9 +42,6 @@ let pool_key base_path = canonical_base_path base_path
 let install_error_to_string = function
   | Inventory_already_installed base_path ->
     Printf.sprintf "Keeper owner inventory already installed for BasePath %s" base_path
-  | Keeper_chat_cutover_required report ->
-    "Keeper owner inventory refused legacy chat artifacts; stop the old runtime and complete the one-shot cutover: "
-    ^ Keeper_chat_cutover_preflight.report_to_string report
   | Inventory_load_failed { keeper_name; detail } ->
     (match keeper_name with
      | None -> "failed to load Keeper owner inventory: " ^ detail
@@ -245,7 +241,8 @@ let ensure_empty_in_pool pool keeper_name =
               Ok owner)))
 ;;
 
-let install_from_store_after_cutover ~sw ~operation_executor ~base_path config =
+let install_from_store ~sw ~operation_executor config =
+  let base_path = pool_key config.Workspace.base_path in
   match load_all config with
   | Error _ as error -> error
   | Ok (metas, unavailable) ->
@@ -305,30 +302,6 @@ let install_from_store_after_cutover ~sw ~operation_executor ~base_path config =
                   }))
       in
       start_all 0 metas)
-;;
-
-let install_from_store ~sw ~operation_executor config =
-  let base_path = pool_key config.Workspace.base_path in
-  match
-    Keeper_chat_cutover_preflight.inspect
-      ~keepers_root:(Workspace.keepers_runtime_dir config)
-  with
-  | Error error ->
-    Error
-      (Inventory_load_failed
-         { keeper_name = None
-         ; detail = Keeper_chat_cutover_preflight.error_to_string error
-         })
-  | Ok report when not (Keeper_chat_cutover_preflight.is_clear report) ->
-    Log.Keeper.error
-      "keeper_chat_cutover_required artifacts=%d active_queue_rows=%d direct_markers=%d report=%s"
-      (Keeper_chat_cutover_preflight.artifact_count report)
-      (Keeper_chat_cutover_preflight.active_queue_row_count report)
-      report.direct_marker_count
-      (Keeper_chat_cutover_preflight.report_to_string report);
-    Error (Keeper_chat_cutover_required report)
-  | Ok _ ->
-    install_from_store_after_cutover ~sw ~operation_executor ~base_path config
 ;;
 
 let find_pool base_path =

@@ -184,8 +184,6 @@
  (package masc)
  (libraries
   masc.server
-  masc
-  masc_core
   masc.host_config
   masc.keeper_runtime
   masc.masc_schedule

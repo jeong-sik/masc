@@ -1,5 +1,4 @@
 open Cmdliner
-open Masc
 
 let ( let* ) = Result.bind
 
@@ -82,17 +81,6 @@ let validate_current_wal ~base_path ~keeper_name =
     ~load:Keeper_event_queue_persistence.validate_state_read_only_result
     ~base_path
     ~keeper_name
-;;
-
-let inspect_keeper_chat_cutover ~base_path =
-  let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
-  Keeper_chat_cutover_preflight.inspect ~keepers_root
-  |> Result.map (fun report ->
-    Yojson.Safe.to_channel stdout (Keeper_chat_cutover_preflight.report_to_yojson report);
-    output_char stdout '\n';
-    flush stdout)
-  |> Result.map_error (fun error ->
-    `Msg (Keeper_chat_cutover_preflight.error_to_string error))
 ;;
 
 let validate_schedule_ledger path =
@@ -470,18 +458,6 @@ let validate_current_wal_cmd =
          $ current_queue_keeper_name))
 ;;
 
-let inspect_keeper_chat_cutover_cmd =
-  let doc = "inventory storage that must be archived before the Keeper chat hard cut" in
-  Cmd.v
-    (Cmd.info "inspect-keeper-chat-cutover" ~doc)
-    Term.(
-      ret
-        (const
-           (fun base_path ->
-              cmdliner_result (inspect_keeper_chat_cutover ~base_path))
-         $ current_queue_base_path))
-;;
-
 let schedule_ledger_file =
   let doc = "Validate one current schedule ledger." in
   Arg.(required & pos 0 (some file) None & info [] ~docv:"SCHEDULE_LEDGER" ~doc)
@@ -587,7 +563,6 @@ let () =
           ; verify_lease_owner_cmd
           ; validate_current_queue_cmd
           ; validate_current_wal_cmd
-          ; inspect_keeper_chat_cutover_cmd
           ; validate_schedule_ledger_cmd
           ; validate_signals_cmd
           ]))

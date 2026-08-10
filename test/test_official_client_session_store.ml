@@ -711,6 +711,159 @@ let test_retry_previous_restores_exact_settlement () =
       fail "restored settlement did not drive the next resume claim")
 ;;
 
+(* The sibling restart case starts at turn_count = 1, where [turn_count - 1] and
+   a true reset are the same number, so it cannot see the ordinal carry across a
+   discarded conversation. This one reaches turn_count = 2 first and then runs
+   the next turn far enough to reach [mark_turn_started], which is where the
+   carried ordinal becomes a failure: a restart opens a fresh provider
+   conversation, that conversation reports ordinal 1, and the regression guard
+   rejects any observed count below the durable one. *)
+let test_restart_fresh_lets_the_next_fresh_turn_start () =
+  with_workspace "masc-official-client-store-restart-ordinal-" (fun base_path ->
+    let keeper_name = "restart-ordinal" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let settled =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~session_id:"session-1"
+        ~updated_at:2.0
+      |> Result.get_ok
+      |> fun active ->
+      mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~session_id:"session-1"
+        ~updated_at:3.0
+      |> Result.get_ok
+      |> fun starting ->
+      mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:starting
+        ~session_id:"session-1"
+        ~turn_id:"session-1:ordinal:1"
+        ~turn_count:1
+        ~updated_at:4.0
+      |> Result.get_ok
+      |> fun inflight ->
+      settle
+        ~base_path
+        ~keeper_name
+        ~expected:inflight
+        ~session_id:"session-1"
+        ~turn_id:"session-1:ordinal:1"
+        ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let second_claim =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:6.0
+      |> Result.get_ok
+    in
+    check int "second claim is ordinal two" 2 second_claim.turn_count;
+    let recovery =
+      require_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:second_claim
+        ~failure:Protocol_failed
+        ~detail:"second turn ended ambiguously"
+        ~required_at:7.0
+      |> Result.get_ok
+    in
+    let recovery_id =
+      match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        fail "second turn did not enter recovery"
+    in
+    let restarted, application =
+      resolve_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:recovery
+        ~recovery_id
+        ~resolution:Restart_fresh
+        ~resolved_by:"operator"
+        ~resolved_at:8.0
+      |> Result.get_ok
+    in
+    check bool "restart applied" true (application = Applied);
+    check int "restart resets the ordinal" 0 restarted.turn_count;
+    (match restarted.phase with
+     | Ready -> ()
+     | Settled _ | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+       fail "fresh restart did not return the binding to Ready");
+    let next_claim =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some restarted)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:9.0
+      |> Result.get_ok
+    in
+    check int "claim after restart asks for ordinal one" 1 next_claim.turn_count;
+    (match next_claim.phase with
+     | Start { previous_settlement = None; _ } -> ()
+     | Start { previous_settlement = Some _; _ } ->
+       fail "restart carried a settlement into the next claim"
+     | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+       fail "claim after restart did not open a turn");
+    let starting =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:next_claim
+        ~session_id:"session-2"
+        ~updated_at:10.0
+      |> Result.get_ok
+      |> fun active ->
+      mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~session_id:"session-2"
+        ~updated_at:11.0
+      |> Result.get_ok
+    in
+    match
+      mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:starting
+        ~session_id:"session-2"
+        ~turn_id:"session-2:ordinal:1"
+        ~turn_count:1
+        ~updated_at:12.0
+    with
+    | Ok inflight ->
+      check int "fresh conversation ordinal is accepted" 1 inflight.turn_count
+    | Error detail ->
+      fail ("a fresh conversation after restart was rejected: " ^ detail))
+;;
+
 let write_file path content =
   let output = open_out_bin path in
   Fun.protect
@@ -807,6 +960,10 @@ let () =
             "retry previous restores exact settlement"
             `Quick
             test_retry_previous_restores_exact_settlement
+        ; test_case
+            "restart fresh lets the next fresh turn start"
+            `Quick
+            test_restart_fresh_lets_the_next_fresh_turn_start
         ; test_case "ambiguous JSON rejected" `Quick test_ambiguous_json_is_rejected
         ; test_case
             "tool surface fingerprint canonical"

@@ -4383,6 +4383,10 @@ describe('official-client session API', () => {
       session: {
         ...recoveryPayload.session,
         phase: { kind: 'ready' },
+        // restart_fresh abandons the conversation, so the server resets the
+        // completed-turn count with it. Spreading recoveryPayload's turn_count: 1
+        // would mock a response the server cannot emit.
+        turn_count: 0,
         last_recovery_resolution: {
           recovery_id: recoveryPayload.session.phase.recovery_id,
           failure: 'protocol_failed',

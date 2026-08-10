@@ -241,9 +241,12 @@ val resolve_recovery :
   resolved_at:float ->
   ((t * recovery_resolution_application), recovery_resolution_error) result
 (** Resolve one exact recovery claim with compare-and-swap authority.
-    [Retry_previous] restores the last settled session, [Restart_fresh] makes
-    the next claim start a new session. Repeating the same recovery id and
-    decision returns the already committed binding as [Replayed]; a different
-    decision for the same recovery id is a conflict. *)
+    [Retry_previous] restores the last settled session and drops only the turn
+    that failed, so the next claim re-attempts the same ordinal against it.
+    [Restart_fresh] abandons the conversation, so the ordinal restarts with it
+    and the next claim asks for ordinal 1 -- the same reset an automatic
+    supersede performs. Repeating the same recovery id and decision returns the
+    already committed binding as [Replayed]; a different decision for the same
+    recovery id is a conflict. *)
 (** Every phase change is a process-safe durable compare-and-swap followed by
     exact read-back. Any incomplete phase blocks a later automatic claim. *)

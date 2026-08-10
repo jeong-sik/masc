@@ -1030,19 +1030,26 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
     | Some _ | None -> Error Recovery_not_required
   in
   let apply directory (current : t) (recovery : recovery_required) =
-    let completed_turn_count = current.turn_count - 1 in
-    let* phase =
+    let* phase, turn_count =
       match resolution with
       | Retry_previous ->
+        (* The conversation is kept, so only the turn that failed is dropped and
+           the next claim re-attempts the same ordinal. *)
         (match recovery.previous_settlement with
          | None -> Error Retry_previous_unavailable
-         | Some settlement -> Ok (Settled settlement))
-      | Restart_fresh -> Ok Ready
+         | Some settlement -> Ok (Settled settlement, current.turn_count - 1))
+      | Restart_fresh ->
+        (* Restart abandons the conversation, the same discard [reconcile_tool_surface]
+           performs, so the ordinal restarts with it: the next claim carries no
+           previous settlement and asks the provider for a fresh conversation whose
+           own ordinal begins at 1. Carrying [current.turn_count - 1] across the
+           discard left masc counting from a conversation that no longer exists. *)
+        Ok (Ready, 0)
     in
     let resolved =
       { current with
         phase
-      ; turn_count = completed_turn_count
+      ; turn_count
       ; last_recovery_resolution =
           Some
             { recovery_id

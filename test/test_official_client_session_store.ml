@@ -677,6 +677,126 @@ let test_retry_previous_restores_exact_settlement () =
       fail "restored settlement did not drive the next resume claim")
 ;;
 
+(* The sibling restart test starts at turn_count = 1, where the old
+   [current.turn_count - 1] and a true reset are the same number. This one
+   reaches turn_count = 2 first, so the two differ, and it asserts the ordinal
+   the next claim actually hands the provider: a restart discards the
+   conversation, so that claim must ask for ordinal 1, matching the fresh
+   conversation the provider will open. *)
+let test_restart_fresh_resets_ordinal_after_second_turn () =
+  with_workspace "masc-official-client-store-restart-ordinal-" (fun base_path ->
+    let keeper_name = "restart-ordinal" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let settled =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~session_id:"session-1"
+        ~updated_at:2.0
+      |> Result.get_ok
+      |> fun active ->
+      mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~session_id:"session-1"
+        ~updated_at:3.0
+      |> Result.get_ok
+      |> fun starting ->
+      mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:starting
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~updated_at:4.0
+      |> Result.get_ok
+      |> fun inflight ->
+      settle
+        ~base_path
+        ~keeper_name
+        ~expected:inflight
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let second_claim =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:6.0
+      |> Result.get_ok
+    in
+    check int "second claim is ordinal two" 2 second_claim.turn_count;
+    let recovery =
+      require_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:second_claim
+        ~failure:Protocol_failed
+        ~detail:"second turn ended ambiguously"
+        ~required_at:7.0
+      |> Result.get_ok
+    in
+    let recovery_id =
+      match recovery.phase with
+      | Recovery_required required -> required.recovery_id
+      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        fail "second turn did not enter recovery"
+    in
+    let restarted, application =
+      resolve_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:recovery
+        ~recovery_id
+        ~resolution:Restart_fresh
+        ~resolved_by:"operator"
+        ~resolved_at:8.0
+      |> Result.get_ok
+    in
+    check bool "restart applied" true (application = Applied);
+    check int "restart resets the ordinal" 0 restarted.turn_count;
+    (match restarted.phase with
+     | Ready -> ()
+     | Settled _ | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+       fail "fresh restart did not return the binding to Ready");
+    let next_claim =
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some restarted)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:9.0
+      |> Result.get_ok
+    in
+    check int "claim after restart asks for ordinal one" 1 next_claim.turn_count;
+    match next_claim.phase with
+    | Start { previous_settlement = None; _ } -> ()
+    | Start { previous_settlement = Some _; _ } ->
+      fail "restart carried a settlement into the next claim"
+    | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+      fail "claim after restart did not open a turn")
+;;
+
 let write_file path content =
   let output = open_out_bin path in
   Fun.protect
@@ -773,6 +893,10 @@ let () =
             "retry previous restores exact settlement"
             `Quick
             test_retry_previous_restores_exact_settlement
+        ; test_case
+            "restart fresh resets ordinal after second turn"
+            `Quick
+            test_restart_fresh_resets_ordinal_after_second_turn
         ; test_case "ambiguous JSON rejected" `Quick test_ambiguous_json_is_rejected
         ; test_case
             "tool surface fingerprint canonical"

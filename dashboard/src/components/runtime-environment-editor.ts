@@ -657,7 +657,7 @@ export function RuntimeEnvironmentEditor({
                 <span class="rt-card-id mono">${provider.id}</span>
                 <span class="rt-card-name">${provider.displayName}</span>
                 <span class="rt-proto mono">${provider.protocol || '—'}</span>
-                <label class="rt-mini">
+                <label class="rt-mini v2-mobile-operator-target">
                   <span>enabled</span>
                   <input
                     type="checkbox"
@@ -1113,7 +1113,7 @@ export function RuntimeEnvironmentEditor({
                   <${RuntimeBindingCatalogSpec} runtimeId=${binding.id} />
                 </div>
                 <div class="rt-bind-fields">
-                  <label class="rt-mini">
+                  <label class="rt-mini v2-mobile-operator-target">
                     <span>enabled</span>
                     <input
                       type="checkbox"

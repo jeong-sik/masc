@@ -912,6 +912,7 @@ jobs:
             @test/runtest-test_guarded_dispatch_telemetry \
             @test/runtest-test_keeper_checkpoint_stale_guard \
             @test/runtest-test_keeper_contract_classifier_pure \
+            @test/runtest-test_keeper_conditions_wire_parity \
             @test/runtest-test_keeper_fsm_guard_actions \
             @test/runtest-test_keeper_invariant \
             @test/runtest-test_keeper_invocation_contract_hints \

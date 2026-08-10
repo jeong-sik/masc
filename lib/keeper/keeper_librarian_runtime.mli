@@ -14,6 +14,15 @@ val cadence_step_keyed
 val cadence_counter_entries : unit -> int
 
 val max_messages : unit -> int
+val prompt_max_messages : unit -> int
+
+(** The immutable input projected into the Librarian prompt. The exact-run
+    registry records this value as the actual input, so observability and
+    provider dispatch share the same history window. *)
+val prompt_input_for_librarian
+  :  Keeper_librarian.input
+  -> Keeper_librarian.input
+
 val messages_for_librarian
   :  Keeper_librarian.input
   -> (Agent_core.Types.message list, string) result

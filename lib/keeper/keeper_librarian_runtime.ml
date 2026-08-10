@@ -83,6 +83,15 @@ let select_recent_messages ~max_messages messages =
   drop drop_count messages
 ;;
 
+let prompt_input_for_librarian (inp : Keeper_librarian.input) =
+  { inp with
+    messages =
+      select_recent_messages
+        ~max_messages:(prompt_max_messages ())
+        inp.messages
+  }
+;;
+
 let message role text =
   Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 ;;
@@ -188,23 +197,20 @@ let render_prompt key variables =
   | Error message -> Error (Printf.sprintf "%s: %s" key message)
 ;;
 
+let render_librarian_prompt input =
+  render_prompt
+    Prompt_names.librarian
+    (Keeper_librarian.prompt_variables input)
+;;
+
 let prompt_and_input_for_librarian (inp : Keeper_librarian.input) =
-  let input =
-    { inp with
-      messages =
-        select_recent_messages
-          ~max_messages:(prompt_max_messages ())
-          inp.messages
-    }
-  in
+  let input = prompt_input_for_librarian inp in
   let open Result.Syntax in
   (* One asset, one message: the librarian's role statement lives at the top
      of the selection prompt it is rendered with, so there is no second file
      to keep in step. *)
   let+ prompt =
-    render_prompt
-      Prompt_names.librarian
-      (Keeper_librarian.prompt_variables input)
+    render_librarian_prompt input
   in
   input, prompt
 ;;
@@ -472,6 +478,7 @@ let run_best_effort
           | None -> 0
           | Some current -> List.length current.facts
         in
+        let prompt_input = prompt_input_for_librarian inp in
         Exact_lane_run_registry.register_running
           registry
           ~run_id
@@ -482,11 +489,12 @@ let run_best_effort
           ~input:
             (Exact_lane_run_registry.Exact_input
                (`Assoc
-                  [ "actual_input", exact_input_payload inp
-                  ; "generation", `Int inp.generation
-                  ; "message_count", `Int (List.length inp.messages)
+                  [ "actual_input", exact_input_payload prompt_input
+                  ; "generation", `Int prompt_input.generation
+                  ; "message_count", `Int (List.length prompt_input.messages)
                   ; "current_fact_count", `Int current_fact_count
-                  ; "max_recall_fact_bytes", `Int inp.max_recall_fact_bytes
+                  ; ( "max_recall_fact_bytes"
+                    , `Int prompt_input.max_recall_fact_bytes )
                   ]));
         let complete outcome output =
           Exact_lane_run_registry.mark_completed
@@ -499,15 +507,15 @@ let run_best_effort
         (try
            let result =
              let open Result.Syntax in
-             let* selected_input, prompt =
-               prompt_and_input_for_librarian inp
+             let* prompt =
+               render_librarian_prompt prompt_input
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
              let* selection, exact_output =
                execute_exact_output_classified
                  ~clock
                  ~net
-                 ~selected_input
+                 ~selected_input:prompt_input
                  ~messages:[ message Agent_core.Types.User prompt ]
              in
              let+ snapshot =

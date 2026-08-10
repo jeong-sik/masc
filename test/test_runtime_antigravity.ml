@@ -1,11 +1,17 @@
 open Alcotest
 open Masc
 
-let init ?(conversation_id = "conversation-1") ?(model = "gemini-fixture") () =
+let init
+    ?(conversation_id = "conversation-1")
+    ?(model = "gemini-fixture")
+    ?(permission_mode = "always-proceed")
+    ()
+  =
   Printf.sprintf
-    {|{"event":"init","conversation_id":%S,"init":{"model":%S,"cwd":"/tmp","tools":["view_file"],"permission_mode":"always-proceed"}}|}
+    {|{"event":"init","conversation_id":%S,"init":{"model":%S,"cwd":"/tmp","tools":["view_file"],"permission_mode":%S}}|}
     conversation_id
     model
+    permission_mode
 ;;
 
 let step
@@ -260,6 +266,26 @@ let test_duplicate_keys_fail_closed () =
        | Ok _ -> fail "duplicate key was admitted")
 ;;
 
+(* A live init event announced request-review. It was not modelled, the parse
+   failed, and the resulting protocol error put the official-client session in
+   Recovery_required -- which blocked every later turn for that keeper until an
+   operator resolved it (taskmaster, 110 turns in one hour). Nothing in this
+   tree branches on the value; the vocabulary is closed only to fail loudly on
+   a member we have not seen. *)
+let test_observed_permission_modes_are_admitted () =
+  List.iter
+    (fun (wire, expected) ->
+      with_fixture [ init ~permission_mode:wire (); result () ] (fun path ->
+        match run_fixture path with
+        | Ok turn ->
+          check bool ("permission mode " ^ wire) true (turn.permission_mode = expected)
+        | Error error ->
+          fail (wire ^ " was rejected: " ^ Runtime_antigravity.error_to_string error)))
+    [ "always-proceed", Runtime_antigravity.Always_proceed
+    ; "request-review", Runtime_antigravity.Request_review
+    ]
+;;
+
 let test_unknown_protocol_vocabulary_fails_closed () =
   let unknown_permission =
     {|{"event":"init","conversation_id":"conversation-1","init":{"model":"gemini-fixture","cwd":"/tmp","permission_mode":"unreviewed"}}|}
@@ -389,7 +415,11 @@ let () =
         ; test_case "error result" `Quick test_result_error_is_not_success
         ; test_case "duplicate keys" `Quick test_duplicate_keys_fail_closed
         ; test_case
-            "unknown protocol vocabulary"
+            "observed permission modes are admitted"
+            `Quick
+            test_observed_permission_modes_are_admitted
+        ; test_case
+            "unknown protocol vocabulary fails closed"
             `Quick
             test_unknown_protocol_vocabulary_fails_closed
         ; test_case "typed timeout" `Quick test_timeout_is_typed

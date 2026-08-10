@@ -289,6 +289,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("schedule_runner", schedule_runner_status_json ());
       ("runtime_startup_degradation",
        Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ()));
+      ("dashboard_surface", Web_dashboard.surface_status_json ());
       ("subsystems", Subsystem_health.to_yojson ());
       ("logs", Log.Ring.summary_json ());
       ("gc", quick_gc_json ());
@@ -643,6 +644,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("sse_clients", `Int (Sse.client_count ()));
     ("startup", Server_startup_state.to_yojson ());
     ("runtime_startup_degradation", runtime_startup_degradation_json);
+    ("dashboard_surface", Web_dashboard.surface_status_json ());
     ("subsystems", Subsystem_health.to_yojson ());
     (* Server log visibility belongs on the first health probe too.  Keep the
        payload cheap and redacted: only ring counters, latest metadata, and

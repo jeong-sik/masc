@@ -100,6 +100,48 @@ let log_bundle_freshness_warning () =
       (iso8601_of_unix_seconds stamp_mtime)
       (iso8601_of_unix_seconds binary_mtime)
 
+let rebuild_next_action = "cd dashboard && pnpm run build"
+
+(** Health projection of the dashboard surface. The boot-time WARN from
+    {!log_bundle_freshness_warning} scrolls away with the log ring; this JSON
+    keeps the same verdict visible on every [/health] probe, so an operator
+    (or an audit) can see a dark dashboard surface without replaying startup
+    logs. [status] is ["ok"], ["stale"], or ["missing"]; a present build-stamp
+    with no [index.html] still reports ["missing"] because the index is what
+    actually serves. *)
+let surface_status_json () =
+  let index = index_path () in
+  let index_present = Sys.file_exists index in
+  let freshness_status, freshness_fields =
+    match bundle_freshness () with
+    | Missing_stamp -> ("missing", [])
+    | Stale { stamp_mtime; binary_mtime } ->
+      ( "stale"
+      , [ ("build_stamp_at", `String (iso8601_of_unix_seconds stamp_mtime))
+        ; ("binary_built_at", `String (iso8601_of_unix_seconds binary_mtime))
+        ] )
+    | Fresh ->
+      let stamp_field =
+        match mtime_of (build_stamp_path ()) with
+        | Some stamp_mtime ->
+          [ ("build_stamp_at", `String (iso8601_of_unix_seconds stamp_mtime)) ]
+        | None -> []
+      in
+      ("ok", stamp_field)
+  in
+  (* A missing index.html trumps freshness: the index is what actually
+     serves, so a stale-or-fresh stamp without it is still a dark surface. *)
+  let status = if index_present then freshness_status else "missing" in
+  let next_action = if status = "ok" then "none" else rebuild_next_action in
+  `Assoc
+    ([ ("schema", `String "masc.dashboard_surface.v1")
+     ; ("status", `String status)
+     ; ("index_present", `Bool index_present)
+     ; ("assets_root", `String (assets_root ()))
+     ; ("next_action", `String next_action)
+     ]
+     @ freshness_fields)
+
 let html () =
   try
     Fs_compat.load_file (index_path ())

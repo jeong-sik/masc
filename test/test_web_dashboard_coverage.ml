@@ -361,6 +361,70 @@ let test_log_bundle_freshness_warning_does_not_raise_on_fresh () =
     Web_dashboard.log_bundle_freshness_warning ())
 
 (* ============================================================
+   surface_status_json: /health projection of the dashboard surface
+   ============================================================ *)
+
+let assoc_field name = function
+  | `Assoc kvs -> List.assoc_opt name kvs
+  | _ -> None
+
+let status_of json =
+  match assoc_field "status" json with
+  | Some (`String s) -> s
+  | _ -> "<no-status>"
+
+let index_present_of json =
+  match assoc_field "index_present" json with
+  | Some (`Bool b) -> b
+  | _ -> fail "index_present field missing"
+
+let next_action_of json =
+  match assoc_field "next_action" json with
+  | Some (`String s) -> s
+  | _ -> "<no-next-action>"
+
+let test_surface_status_ok_when_fresh_and_index_present () =
+  let far_future = Unix.gettimeofday () +. (365.0 *. 24.0 *. 3600.0) in
+  with_temp_dashboard_root ~stamp_mtime:far_future (fun () ->
+    let json = Web_dashboard.surface_status_json () in
+    check string "status" "ok" (status_of json);
+    check bool "index_present" true (index_present_of json);
+    check string "next_action" "none" (next_action_of json);
+    check bool "build_stamp_at present" true
+      (assoc_field "build_stamp_at" json <> None))
+
+let test_surface_status_stale_when_stamp_predates_binary () =
+  with_temp_dashboard_root ~stamp_mtime:long_ago (fun () ->
+    let json = Web_dashboard.surface_status_json () in
+    check string "status" "stale" (status_of json);
+    check bool "binary_built_at present" true
+      (assoc_field "binary_built_at" json <> None);
+    check string "next_action names the rebuild" "cd dashboard && pnpm run build"
+      (next_action_of json))
+
+let test_surface_status_missing_without_stamp () =
+  with_temp_dashboard_root (fun () ->
+    let json = Web_dashboard.surface_status_json () in
+    check string "status" "missing" (status_of json);
+    check bool "index_present stays true" true (index_present_of json);
+    check string "next_action names the rebuild" "cd dashboard && pnpm run build"
+      (next_action_of json))
+
+let test_surface_status_missing_when_index_absent_despite_fresh_stamp () =
+  let far_future = Unix.gettimeofday () +. (365.0 *. 24.0 *. 3600.0) in
+  with_temp_dashboard_root ~stamp_mtime:far_future (fun () ->
+    (* Partially-deployed tree: the stamp survived, index.html did not. *)
+    let index =
+      Filename.concat
+        (Filename.concat (Web_dashboard.assets_root ()) "dashboard")
+        "index.html"
+    in
+    if Sys.file_exists index then Sys.remove index;
+    let json = Web_dashboard.surface_status_json () in
+    check string "status" "missing" (status_of json);
+    check bool "index_present" false (index_present_of json))
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -403,5 +467,11 @@ let () =
       test_case "warn does not raise on missing stamp" `Quick test_log_bundle_freshness_warning_does_not_raise_on_missing_stamp;
       test_case "warn does not raise on stale" `Quick test_log_bundle_freshness_warning_does_not_raise_on_stale;
       test_case "warn does not raise on fresh" `Quick test_log_bundle_freshness_warning_does_not_raise_on_fresh;
+    ];
+    "surface_status", [
+      test_case "ok when fresh and index present" `Quick test_surface_status_ok_when_fresh_and_index_present;
+      test_case "stale when stamp predates binary" `Quick test_surface_status_stale_when_stamp_predates_binary;
+      test_case "missing without stamp" `Quick test_surface_status_missing_without_stamp;
+      test_case "missing when index absent despite fresh stamp" `Quick test_surface_status_missing_when_index_absent_despite_fresh_stamp;
     ];
   ]

@@ -69,6 +69,10 @@ type dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+val dynamic_tool_bytes : dynamic_tool list -> int
+(** Bytes the tool declarations occupy in the request this process builds. Not
+    provider tokens: it bounds the request, it does not price it. *)
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string

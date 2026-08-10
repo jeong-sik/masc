@@ -857,6 +857,61 @@ let test_model_without_turn_timeout_leaves_it_unset () =
          (model.Runtime_schema.turn_timeout_s = None)
      | _ -> fail "exactly one model must parse")
 
+(* A lane whose candidates disagree on checkpoint ownership cannot execute: the
+   turn is finalized against the assignment's owner while the checkpoint in hand
+   comes from whichever candidate ran, so the answer is produced and then
+   discarded. Measured on a live deployment before this check existed: kidsnote
+   18/18 and taskmaster 16/17 turns executed on an Agent_core candidate under an
+   official-client lane and every one was rejected. Same-owner rotation is the
+   normal case and must keep loading. *)
+let test_lane_checkpoint_owner_conflict_arms () =
+  check
+    (option string)
+    "an empty lane has no conflict"
+    None
+    (Runtime.For_testing.lane_checkpoint_owner_conflict ~lane_id:"l" []);
+  check
+    (option string)
+    "a single candidate has no conflict"
+    None
+    (Runtime.For_testing.lane_checkpoint_owner_conflict
+       ~lane_id:"l"
+       [ "a", Runtime_execution.Official_client ]);
+  check
+    (option string)
+    "candidates that share an owner have no conflict"
+    None
+    (Runtime.For_testing.lane_checkpoint_owner_conflict
+       ~lane_id:"l"
+       (
+          [ "a", Runtime_execution.Masc_agent_core
+          ; "b", Runtime_execution.Masc_agent_core
+          ]));
+  match
+    Runtime.For_testing.lane_checkpoint_owner_conflict
+      ~lane_id:"claude_code.sonnet"
+      (
+         [ "claude_code.sonnet", Runtime_execution.Official_client
+         ; "glm.turbo", Runtime_execution.Masc_agent_core
+         ])
+  with
+  | None -> fail "a lane mixing checkpoint owners must be reported"
+  | Some detail ->
+    let contains needle =
+      let n = String.length needle in
+      let rec scan i =
+        i + n <= String.length detail
+        && (String.sub detail i n = needle || scan (i + 1))
+      in
+      scan 0
+    in
+    (* The operator has to know which two candidates disagree; a bare "lane is
+       invalid" would send them reading the whole candidate list. *)
+    check bool "names the lane" true (contains "claude_code.sonnet");
+    check bool "names the other candidate" true (contains "glm.turbo");
+    check bool "names the official-client owner" true (contains "official_client");
+    check bool "names the agent-core owner" true (contains "masc_agent_core")
+
 let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
   let valid =
     "[runtime.exact_output_lanes.compaction_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
@@ -2772,6 +2827,84 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
 
 (* [runtime].cross_verifier resolves to a configured JSON-capable runtime,
    defaults to None, and rejects unknown or incapable targets. *)
+(* The pure decision above is only worth having if the loader consults it. This
+   drives [Runtime.load_list] end to end so a lane declared across the ownership
+   boundary is refused where the operator writes it, and a same-owner lane over
+   the same runtimes still loads. Without the second half a check that rejects
+   every lane would pass. *)
+let test_load_rejects_a_lane_that_mixes_checkpoint_owners () =
+  with_fake_runtime_model_catalog @@ fun () ->
+  let base =
+    "[providers.local]\n\
+     display-name = \"Local\"\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://localhost:11434\"\n\
+     \n\
+     [providers.subscription]\n\
+     display-name = \"Claude Code Subscription\"\n\
+     protocol = \"claude-code\"\n\
+     command = \"/usr/bin/true\"\n\
+     is-non-interactive = true\n\
+     \n\
+     [models.chat]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.other]\n\
+     api-name = \"other\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.sonnet]\n\
+     api-name = \"sonnet\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.chat]\n\
+     \n\
+     [local.other]\n\
+     \n\
+     [subscription.sonnet]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.chat\"\n"
+  in
+  with_temp_runtime_toml
+    (base
+     ^ "\n\
+        [runtime.lanes.\"subscription.sonnet\"]\n\
+        strategy = \"ordered\"\n\
+        candidates = [\"subscription.sonnet\", \"local.chat\"]\n")
+    (fun path ->
+      match Runtime.load_list ~config_path:path with
+      | Ok _ ->
+        fail
+          "a lane pairing an official-client candidate with an Agent_core one \
+           must be rejected at load"
+      | Error msg ->
+        let contains needle =
+          let n = String.length needle in
+          let rec scan i =
+            i + n <= String.length msg
+            && (String.sub msg i n = needle || scan (i + 1))
+          in
+          scan 0
+        in
+        check bool "the rejection names the lane" true
+          (contains "subscription.sonnet");
+        check bool "the rejection names checkpoint ownership" true
+          (contains "checkpoint owners"));
+  (* Control: the same runtimes, both Agent_core. This is the ordinary failover
+     lane and it must keep loading, or the check is just refusing lanes. *)
+  with_temp_runtime_toml
+    (base
+     ^ "\n\
+        [runtime.lanes.\"local.chat\"]\n\
+        strategy = \"ordered\"\n\
+        candidates = [\"local.chat\", \"local.other\"]\n")
+    (fun path ->
+      match Runtime.load_list ~config_path:path with
+      | Ok _ -> ()
+      | Error msg -> failf "a same-owner failover lane must load: %s" msg)
+
 let test_cross_verifier_runtime_routing () =
   with_fake_runtime_model_catalog @@ fun () ->
   let base =
@@ -3785,5 +3918,11 @@ let () =
         ; test_case
             "a model without turn-timeout-s leaves it unset"
             `Quick test_model_without_turn_timeout_leaves_it_unset
+        ; test_case
+            "lane checkpoint-owner conflict is reported per candidate pair"
+            `Quick test_lane_checkpoint_owner_conflict_arms
+        ; test_case
+            "load rejects a lane that mixes checkpoint owners"
+            `Quick test_load_rejects_a_lane_that_mixes_checkpoint_owners
         ] )
     ]

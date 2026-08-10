@@ -336,10 +336,28 @@ let test_dynamic_tool_callback () =
           (Yojson.Safe.to_string !observed_input))
 ;;
 
-let test_mcp_notification_has_no_response () =
+(* This test used to assert the opposite: that an MCP notification draws no
+   control_response, on the reasoning that a JSON-RPC notification carries no id
+   and so needs no reply. That conflates two layers. The reply rule that binds
+   here belongs to the control channel, not to the MCP payload: the client wraps
+   every MCP message in a control_request carrying a [request_id] and blocks
+   until that id comes back.
+
+   The old fixture could not see the difference because it moved on without
+   waiting — a fake client that never blocks cannot observe that the real one
+   does. Measured against Claude Code 2.1.226 with every other variable held:
+   with the notification unanswered the turn stops after
+   notifications/initialized and never reaches a result (90s, 4 events); with it
+   answered the same turn runs tools/list -> init -> result in 5.2s. On the live
+   fleet that stall was every claude_code keeper turn — 458 attempts, 0
+   completions over 8 days (#28060).
+
+   Emit_and_expect_request_id makes the fixture wait and exit 96 unless the
+   response carries the id, so this now fails if the ack is dropped again. *)
+let test_mcp_notification_is_acknowledged_on_the_control_channel () =
   with_fixture
     [ Emit_and_read mcp_initialize
-    ; Emit mcp_initialized_notification
+    ; Emit_and_expect_request_id (mcp_initialized_notification, "mcp-notify-1")
     ; Emit_and_expect_request_id
         (mcp_list_after_notification, "mcp-list-after-notification")
     ; Emit assistant
@@ -808,9 +826,9 @@ let () =
             `Quick
             test_shared_mcp_protocol_is_negotiated
         ; test_case
-            "notification has no response"
+            "notification is acknowledged on the control channel"
             `Quick
-            test_mcp_notification_has_no_response
+            test_mcp_notification_is_acknowledged_on_the_control_channel
         ; test_case
             "unsupported control request fails closed"
             `Quick

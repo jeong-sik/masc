@@ -244,6 +244,16 @@ let complete_prepared_sync
            | _, _ -> ());
           Ok resp
         | Error err ->
+          let metric_error_reason =
+            match err with
+            | Http_client.HttpError { code = 429; _ } -> Metrics.Rate_limit
+            | Http_client.TimeoutError _ -> Metrics.Timeout
+            | Http_client.HttpError _
+            | Http_client.AcceptRejected _
+            | Http_client.NetworkError _
+            | Http_client.ProviderTerminal _
+            | Http_client.ProviderFailure _ -> Metrics.Unknown
+          in
           let err_str =
             match err with
             | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
@@ -254,7 +264,7 @@ let complete_prepared_sync
             | Http_client.ProviderFailure { kind; message } ->
               Http_client.provider_failure_to_string ~kind ~message
           in
-          m.on_error ~model_id ~error:err_str;
+          m.on_error ~model_id ~message:err_str ~reason:metric_error_reason;
           Error err))
 ;;
 

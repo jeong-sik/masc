@@ -46,6 +46,15 @@ type resolver_binding_component =
   | Target_provider
   | Target_model
 
+type target_binding_policy =
+  | Require_all_target_bindings
+  | Exclude_unbound_targets
+
+type rejected_target_binding =
+  { target_ref : string
+  ; component : resolver_binding_component
+  }
+
 type resolver_endpoint_error =
   | Malformed_base_url
   | Base_url_userinfo_not_allowed
@@ -124,9 +133,14 @@ val option_float : float option -> string
 
 val load_resolver_snapshot
   :  io:resolver_io
+  -> ?target_binding_policy:target_binding_policy
   -> ?catalog:resolver_catalog_input
   -> unit
   -> (resolver_snapshot, resolver_snapshot_error) result
+
+val resolver_rejected_target_bindings
+  :  resolver_snapshot
+  -> rejected_target_binding list
 
 val admit_target_ref
   :  resolver_snapshot

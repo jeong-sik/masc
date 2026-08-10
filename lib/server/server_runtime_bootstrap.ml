@@ -267,6 +267,16 @@ let warn_rejected_exact_output_slots registry =
     (Runtime_exact_output_registry.rejected_slots registry)
 ;;
 
+let warn_rejected_exact_output_bindings resolver_snapshot =
+  List.iter
+    (fun (binding : Exact_output.rejected_target_binding) ->
+       Log.Server.warn
+         "exact_output: target %S excluded from the frozen resolver because its %s binding is missing; lane admission will decide whether required targets remain"
+         binding.target_ref
+         (exact_output_binding_component_to_string binding.component))
+    (Exact_output.resolver_rejected_target_bindings resolver_snapshot)
+;;
+
 let warn_optional_exact_output_lane registry ~lane_id ~feature =
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Ok { selected_slots = _ :: _; _ } -> ()
@@ -311,13 +321,20 @@ let configure_exact_output_registry ?config_root () =
           | Sys_error _ | Invalid_argument _ -> Error ())
     }
   in
-  match Exact_output.load_resolver_snapshot ~io ~catalog () with
+  match
+    Exact_output.load_resolver_snapshot
+      ~io
+      ~target_binding_policy:Exact_output.Exclude_unbound_targets
+      ~catalog
+      ()
+  with
   | Error error ->
     raise
       (Env_config_core.Config_error
          ("exact-output resolver snapshot: "
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
+    warn_rejected_exact_output_bindings resolver_snapshot;
     (match
        Runtime.publish_exact_output_registry
          ~required_lane_ids:mandatory_exact_output_lane_ids

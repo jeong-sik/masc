@@ -1,8 +1,9 @@
 (** Persistent, operator-owned HOME layout for the official Antigravity CLI.
 
-    The operator credential is read through the owned-file boundary and copied
-    into the isolated HOME as an exact 0600 snapshot. Turn-scoped MCP
-    configuration is deliberately owned by the caller. *)
+    The operator credential seeds the isolated HOME once. The resulting 0600
+    regular file is then persistent runtime state so an OAuth refresh written by
+    the CLI survives later turns. Turn-scoped MCP configuration is deliberately
+    owned by the caller. *)
 
 type error =
   | Invalid_runtime_root of string
@@ -15,7 +16,7 @@ type error =
       { path : string
       ; detail : string
       }
-  | Invalid_oauth_copy of
+  | Invalid_managed_oauth of
       { path : string
       ; detail : string
       }
@@ -45,7 +46,9 @@ val prepare
     [<runtime_root>/official-clients/antigravity/<owner_leaf>]. Every managed
     directory is an exact 0700 real directory owned by the effective user.
     [oauth_source] must be an effective-user-owned regular 0600 file reached
-    without symbolic links. *)
+    without symbolic links. It is copied only when the managed OAuth file does
+    not exist; an existing managed file must itself be an effective-user-owned
+    regular 0600 file and is never overwritten by preparation. *)
 
 val home_dir : t -> string
 

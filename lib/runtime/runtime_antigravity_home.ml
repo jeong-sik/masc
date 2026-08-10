@@ -9,7 +9,7 @@ type error =
       { path : string
       ; detail : string
       }
-  | Invalid_oauth_copy of
+  | Invalid_managed_oauth of
       { path : string
       ; detail : string
       }
@@ -41,8 +41,8 @@ let error_to_string = function
     Printf.sprintf "unsafe Antigravity directory %s: %s" path detail
   | Invalid_oauth_source { path; detail } ->
     Printf.sprintf "invalid Antigravity OAuth source %s: %s" path detail
-  | Invalid_oauth_copy { path; detail } ->
-    Printf.sprintf "invalid Antigravity OAuth copy %s: %s" path detail
+  | Invalid_managed_oauth { path; detail } ->
+    Printf.sprintf "invalid managed Antigravity OAuth file %s: %s" path detail
   | Settings_write_failed { path; detail } ->
     Printf.sprintf "failed to write Antigravity settings %s: %s" path detail
   | Mcp_config_write_failed { path; detail } ->
@@ -218,33 +218,49 @@ let write_private_settings path =
     (settings_json () |> Yojson.Safe.pretty_to_string)
 ;;
 
-let read_oauth_source path =
+let load_private_oauth_file ~make_error path =
+  match
+    Fs_compat.load_owned_regular_file_with_snapshot
+      ~ownership_root:(Filename.dirname path)
+      path
+  with
+  | Ok (Some contents)
+    when contents.snapshot.owner_uid <> effective_uid
+         || contents.snapshot.permissions <> 0o600 ->
+    Error
+      (make_error
+         path
+         (Printf.sprintf
+            "owner/mode mismatch: uid=%d mode=%04o"
+            contents.snapshot.owner_uid
+            contents.snapshot.permissions))
+  | Ok contents -> Ok contents
+  | Error error ->
+    Error
+      (make_error path (Fs_compat.owned_regular_file_read_error_to_string error))
+;;
+
+let read_oauth_seed path =
   if Filename.is_relative path
   then Error (Invalid_oauth_source { path; detail = "path must be absolute" })
   else
     match
-      Fs_compat.load_owned_regular_file_with_snapshot
-        ~ownership_root:(Filename.dirname path)
+      load_private_oauth_file
+        ~make_error:(fun path detail -> Invalid_oauth_source { path; detail })
         path
     with
-    | Ok (Some contents)
-      when contents.snapshot.owner_uid <> effective_uid
-           || contents.snapshot.permissions <> 0o600 ->
-      Error
-        (Invalid_oauth_source
-           { path
-           ; detail =
-               Printf.sprintf
-                 "owner/mode mismatch: uid=%d mode=%04o"
-                 contents.snapshot.owner_uid
-                 contents.snapshot.permissions
-           })
     | Ok (Some contents) -> Ok contents.content
     | Ok None -> Error (Invalid_oauth_source { path; detail = "file is missing" })
-    | Error error ->
-      Error
-        (Invalid_oauth_source
-           { path; detail = Fs_compat.owned_regular_file_read_error_to_string error })
+    | Error _ as error -> error
+;;
+
+let inspect_managed_oauth path =
+  load_private_oauth_file
+    ~make_error:(fun path detail -> Invalid_managed_oauth { path; detail })
+    path
+  |> Result.map (function
+    | Some _ -> `Present
+    | None -> `Missing)
 ;;
 
 let ( let* ) = Result.bind
@@ -254,7 +270,7 @@ let prepare ~runtime_root ~owner_leaf ~oauth_source =
   then Error (Invalid_owner_leaf owner_leaf)
   else
     let* () = verify_runtime_root runtime_root in
-    let* oauth_contents = read_oauth_source oauth_source in
+    let* oauth_seed = read_oauth_seed oauth_source in
     let* official_clients = ensure_private_child runtime_root "official-clients" in
     let* antigravity_root = ensure_private_child official_clients "antigravity" in
     let* home_dir = ensure_private_child antigravity_root owner_leaf in
@@ -265,10 +281,14 @@ let prepare ~runtime_root ~owner_leaf ~oauth_source =
     let mcp_config_path = Filename.concat config_dir "mcp_config.json" in
     let oauth_path = Filename.concat cli_dir "antigravity-oauth-token" in
     let* () =
-      write_private_file
-        ~make_error:(fun path detail -> Invalid_oauth_copy { path; detail })
-        oauth_path
-        oauth_contents
+      match inspect_managed_oauth oauth_path with
+      | Error _ as error -> error
+      | Ok `Present -> Ok ()
+      | Ok `Missing ->
+        write_private_file
+          ~make_error:(fun path detail -> Invalid_managed_oauth { path; detail })
+          oauth_path
+          oauth_seed
     in
     let* () = write_private_settings settings_path in
     Ok { home_dir; settings_path; mcp_config_path; oauth_path }

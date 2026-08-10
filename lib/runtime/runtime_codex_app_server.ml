@@ -477,12 +477,34 @@ let messages_of_items ~stage = function
   | _ -> protocol_error stage "turn items must be an array"
 ;;
 
+(* Only [message] used to survive this function, so a live keeper failing every
+   turn on "Codex ran out of room in the model's context window" carried no
+   machine-readable trace of what kind of failure that was (#28071). Whatever
+   else the server put on the error object is kept here as well: a later change
+   that wants to route context overflow to the shrink retry needs a typed field
+   to key on, and it cannot recover one that was discarded at parse time.
+
+   This does not classify anything. It stops throwing away the input a
+   classification would need. *)
 let turn_error_message fields =
   match List.assoc_opt "error" fields with
   | Some (`Assoc error_fields) ->
-    (match List.assoc_opt "message" error_fields with
-     | Some (`String message) when String.trim message <> "" -> message
-     | _ -> "turn failed without a typed error message")
+    let message =
+      match List.assoc_opt "message" error_fields with
+      | Some (`String message) when String.trim message <> "" ->
+        String.trim message
+      | _ -> "turn failed without a typed error message"
+    in
+    let scalar name =
+      match List.assoc_opt name error_fields with
+      | Some (`String value) when String.trim value <> "" ->
+        Some (name ^ "=" ^ String.trim value)
+      | Some (`Int value) -> Some (name ^ "=" ^ string_of_int value)
+      | _ -> None
+    in
+    (match List.filter_map scalar [ "code"; "type" ] with
+     | [] -> message
+     | annotations -> message ^ " (" ^ String.concat " " annotations ^ ")")
   | _ -> "turn failed without an error object"
 ;;
 

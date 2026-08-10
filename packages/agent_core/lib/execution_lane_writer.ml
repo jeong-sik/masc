@@ -506,6 +506,10 @@ let publish_open_journal writer journal =
       writer.journal_view <- Available journal;
       writer.pending_outcome <- None;
       writer.worker_phase <- Idle);
+    (* [false] means readiness was already published, which happens whenever a
+       reopen follows an open that a waiter had already observed. The promise
+       carries the first outcome and later publishes are the same fact, so the
+       flag has no consumer here. *)
     ignore (Eio.Promise.try_resolve writer.resolve_ready (Ok ()) : bool))
 ;;
 
@@ -618,6 +622,10 @@ let complete_actor writer =
     in
     if transitioned
     then (
+      (* [transitioned] already says this fiber performed the close. Either
+         promise may be resolved from an earlier ready publish or a concurrent
+         closer, and both mean the waiter has its answer, so [false] is not a
+         failure to report. *)
       ignore (Eio.Promise.try_resolve writer.resolve_ready (Ok ()) : bool);
       ignore (Eio.Promise.try_resolve writer.resolve_closed (Ok ()) : bool)))
 ;;
@@ -658,6 +666,9 @@ let fail_actor writer failure =
     match pending with
     | None -> ()
     | Some (failure, in_flight, queued) ->
+      (* A waiter that already holds a readiness outcome keeps it: the failure
+         it would learn here reaches it through its own command settlement
+         below, which is the path that carries the per-command error. *)
       ignore (Eio.Promise.try_resolve writer.resolve_ready (Error failure) : bool);
       let rec settle_all count = function
         | [] -> count
@@ -668,6 +679,8 @@ let fail_actor writer failure =
       in
       let newly_settled = settle_all (settle_all 0 in_flight) queued in
       record_settled writer newly_settled;
+      (* Same as the readiness promise above: closure is announced once, and a
+         second announcement of the same failure is redundant rather than lost. *)
       ignore (Eio.Promise.try_resolve writer.resolve_closed (Error failure) : bool))
 ;;
 

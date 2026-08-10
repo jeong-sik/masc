@@ -16,6 +16,13 @@ val is_official_client : runtime_id:string -> bool
     unknown id: an id that resolves to nothing is not this module's failure to
     report, and the Agent_core path already names it precisely. *)
 
+module For_testing : sig
+  val missing_handle_detail : env_present:bool -> clock_present:bool -> string option
+  (** The failure detail for an unresolvable Eio context, or [None] when both
+      handles are present. Exposed because {!Eio_context} has no reset, so a
+      test driving the real globals could reach these arms in only one order. *)
+end
+
 val run_panelist
   :  base_dir:string
   -> runtime_id:string

@@ -23,30 +23,50 @@ let provider_error ~runtime_id detail : Fusion_types.panel_failure =
   Fusion_types.Provider_error (Printf.sprintf "%s: %s" runtime_id detail)
 ;;
 
+(* Naming the absent handle is the point: the server publishes both together but
+   other entry points publish them separately, so "the Eio runtime is not
+   initialized" sends the reader to look at the wrong one. Split out as a pure
+   function because Eio_context has no reset, so a test that drove the real
+   globals could only reach these arms in one fragile order.
+
+   Its result is already carried to the caller as a typed
+   [Fusion_types.panel_failure] and lands in the fusion run record. *)
+(* TEL-OK: pure string selection, no effect; the failure it names is already
+   observable through the panel outcome. *)
+let missing_handle_detail ~env_present ~clock_present =
+  match env_present, clock_present with
+  | true, true -> None
+  | false, false ->
+    Some
+      "official-client panelist requires Eio_context env and clock; neither is \
+       published"
+  | false, true ->
+    Some
+      "official-client panelist requires Eio_context env (process manager and \
+       fs); it is not published"
+  | true, false ->
+    Some "official-client panelist requires Eio_context clock; it is not published"
+;;
+
 let eio_context ~runtime_id =
-  (* Naming the absent handle is the point: both are published together by the
-     server but separately by other entry points, so "the Eio runtime is not
-     initialized" sends the reader to look at the wrong one. *)
-  match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
+  let env = Eio_context.get_env_opt () in
+  let clock = Eio_context.get_clock_opt () in
+  match env, clock with
   | Some env, Some clock -> Ok (env, clock)
-  | None, None ->
-    Error
-      (provider_error
-         ~runtime_id
-         "official-client panelist requires Eio_context env and clock; neither \
-          is published")
-  | None, Some _ ->
-    Error
-      (provider_error
-         ~runtime_id
-         "official-client panelist requires Eio_context env (process manager \
-          and fs); it is not published")
-  | Some _, None ->
-    Error
-      (provider_error
-         ~runtime_id
-         "official-client panelist requires Eio_context clock; it is not \
-          published")
+  | _ ->
+    let detail =
+      match
+        missing_handle_detail
+          ~env_present:(Option.is_some env)
+          ~clock_present:(Option.is_some clock)
+      with
+      | Some detail -> detail
+      (* Unreachable: the Some/Some pair is matched above. Kept as a total
+         function rather than an assert so a future edit to either match cannot
+         raise on a live panel. *)
+      | None -> "official-client panelist could not resolve the Eio context"
+    in
+    Error (provider_error ~runtime_id detail)
 ;;
 
 (* [Runtime_execution.*] carries admission-time config; each adapter has its own
@@ -143,3 +163,10 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ~prompt =
      | Error error ->
        Error (provider_error ~runtime_id (Runtime_antigravity.error_to_string error)))
 ;;
+
+module For_testing = struct
+  (* Re-exported so a test can reach every arm without driving the
+     process-global Eio context, which has no reset. *)
+  (* TEL-OK: alias of a pure function; no behaviour of its own. *)
+  let missing_handle_detail = missing_handle_detail
+end

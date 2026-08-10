@@ -1052,19 +1052,17 @@ let test_keeper_protocol_failure_enters_recovery () =
                check (option string) "no observed session" None required.observed_session_id
              | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
                fail "failed Codex runtime claim was not converted to recovery-required");
-            (match
-               run_keeper_turn
-                 ~base_path
-                 ~cli_path
-                 ~model:"gpt-fixture"
-                 ()
-             with
-             | Error
-                 (Agent_core.Error.Config
-                   (Agent_core.Error.InvalidConfig { field; _ })) ->
-               check string "recovery gate field" "official_client_session.claim" field
-             | Error error -> fail (Agent_core.Error.to_string error)
-             | Ok _ -> fail "unresolved Codex recovery admitted a duplicate turn")))
+            let next_claim =
+              Keeper_official_client_session_store.plan_claim
+                ~expected:(Some recovery)
+                ~client_kind:Codex
+                ~runtime_id:recovery.runtime_id
+              |> Result.get_ok
+            in
+            check int
+              "failed turn ordinal is reused without an operator gate"
+              recovery.turn_count
+              next_claim.turn_count))
 ;;
 
 let test_dashboard_official_client_recovery_projection_and_resolution () =

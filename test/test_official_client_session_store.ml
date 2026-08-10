@@ -307,47 +307,33 @@ let test_restart_recovery_and_transient_release () =
         ~required_at:3.0
       |> Result.get_ok
     in
-    let recovery_id =
-      match recovery.phase with
-      | Recovery_required required ->
-        check bool "restart class" true (required.failure = Process_restarted);
-        check bool "ambiguous" true (failure_disposition required.failure = Ambiguous);
-        check string "claim epoch" owner_epoch required.owner_epoch;
-        required.recovery_id
-      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
-        fail "old process claim did not enter recovery"
-    in
-    let ready, application =
-      resolve_recovery
-        ~base_path
-        ~keeper_name
-        ~expected:recovery
-        ~recovery_id
-        ~resolution:Restart_fresh
-        ~resolved_by:"operator"
-        ~resolved_at:4.0
-      |> Result.get_ok
-    in
-    check bool "recovery applied" true (application = Applied);
+    (match recovery.phase with
+     | Recovery_required required ->
+       check bool "restart class" true (required.failure = Process_restarted);
+       check bool "ambiguous" true (failure_disposition required.failure = Ambiguous);
+       check string "claim epoch" owner_epoch required.owner_epoch
+     | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+       fail "old process claim did not enter recovery");
     let reclaimed =
       claim
         ~base_path
         ~keeper_name
-        ~expected:(Some ready)
+        ~expected:(Some recovery)
         ~client_kind:Antigravity
         ~owner_epoch:next_owner_epoch
         ~runtime_id:"antigravity.gemini"
         ~tool_surface_sha256:empty_surface
-        ~updated_at:5.0
+        ~updated_at:4.0
       |> Result.get_ok
     in
+    check int "recovery claim reuses failed turn ordinal" 1 reclaimed.turn_count;
     let released =
       release_transient
         ~base_path
         ~keeper_name
         ~expected:reclaimed
         ~failure:Transient_spawn_failed
-        ~released_at:6.0
+        ~released_at:5.0
       |> Result.get_ok
     in
     check int "transient does not count" 0 released.turn_count;

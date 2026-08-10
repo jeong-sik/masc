@@ -169,7 +169,7 @@ export function OfficialClientSessionPanel() {
             ? html`
               <div class="mt-4 rounded-[var(--r-1)] border border-[var(--danger-20)] bg-[var(--danger-10)] p-3" data-testid="official-client-session-recovery-required">
                 <div class="flex flex-wrap items-center gap-2 mb-2">
-                  <${StatusChip} tone="bad" uppercase=${false}>operator resolution required<//>
+                  <${StatusChip} tone="warn" uppercase=${false}>next turn auto-recovers<//>
                   <span class="mono text-2xs">${recovery.recovery_id}</span>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs mb-3">

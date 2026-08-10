@@ -479,6 +479,64 @@ let test_item_output_deltas_are_typed_and_unbounded () =
       | Ok _ -> fail "item output delta with the wrong identity was admitted")
 ;;
 
+(* An empty or whitespace stream chunk is ordinary in a streaming protocol and
+   this decoder never reads the payload. It used to reject both, which ended
+   the turn, put the official-client session into Recovery_required, and made
+   every later turn for that keeper fail closed until an operator resolved it
+   by hand: three such chunks accounted for 3,236 rejected turns across sangsu,
+   kidsnote and taskmaster in one retained log window (#27967).
+
+   The rejections that must survive are in the same test, because widening a
+   decoder is only correct if it stops accepting nothing else: an empty
+   identifier, a delta that is not a string, an absent delta, and a chunk
+   belonging to another turn. *)
+let test_empty_output_delta_does_not_end_the_turn () =
+  let delta payload =
+    Printf.sprintf
+      {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"command-1","delta":%s}}|}
+      payload
+  in
+  List.iter
+    (fun (label, payload) ->
+      with_fixture
+        [ init_result
+        ; account_chatgpt
+        ; thread_result
+        ; turn_result
+        ; delta payload
+        ; item_completed
+        ; turn_completed
+        ]
+        (fun path ->
+          match run_fixture path with
+          | Ok result -> check string label "MASC_SUBSCRIPTION_OK" result.text
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)))
+    [ "empty delta", {|""|}
+    ; "whitespace delta", {|"   "|}
+    ; "newline delta", {|"\n"|}
+    ];
+  List.iter
+    (fun (label, notification) ->
+      with_fixture
+        [ init_result; account_chatgpt; thread_result; turn_result; notification ]
+        (fun path ->
+          match run_fixture path with
+          | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+          | Ok _ -> fail label))
+    [ ( "a non-string delta was admitted", delta "42" )
+    ; ( "a delta that is not present was admitted"
+      , {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"command-1"}}|}
+      )
+    ; ( "an empty itemId was admitted"
+      , {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"","delta":"chunk"}}|}
+      )
+    ; ( "an empty turnId was admitted"
+      , {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"","itemId":"command-1","delta":"chunk"}}|}
+      )
+    ]
+;;
+
 let codex_runtime_toml ~model cli_path =
   Printf.sprintf
     "[providers.codex]\n\
@@ -1959,6 +2017,10 @@ let () =
              "item output deltas are typed and unbounded"
              `Quick
              test_item_output_deltas_are_typed_and_unbounded
+         ; test_case
+             "an empty output delta does not end the turn"
+             `Quick
+             test_empty_output_delta_does_not_end_the_turn
         ; test_case
             "dispatch validation is process-free"
             `Quick

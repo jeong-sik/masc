@@ -4,6 +4,7 @@ module EO = Agent_core.Exact_output
 
 let _load_resolver_snapshot_contract
   :  io:EO.resolver_io
+  -> ?target_binding_policy:EO.target_binding_policy
   -> ?catalog:EO.resolver_catalog_input
   -> unit
   -> (EO.resolver_snapshot, EO.resolver_snapshot_error) result
@@ -680,6 +681,50 @@ let test_invalid_full_replacement_inputs_fail_without_fallback () =
   | Ok _ | Error _ -> fail "missing replacement file must fail without fallback"
 ;;
 
+let test_unbound_target_policy_is_explicit_and_observable () =
+  let valid_target = "bound-target" in
+  let unbound_target = "unbound-target" in
+  let contents =
+    target_catalog ~target:valid_target ()
+    ^ Printf.sprintf
+        "\n[[targets]]\nid = %S\nprovider_ref = \"missing-provider\"\nmodel_id = \"missing-model\"\n"
+        unbound_target
+  in
+  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+  let catalog : EO.resolver_catalog_input =
+    EO.Embedded_with_overlay
+      { source = "unbound target policy fixture"; contents }
+  in
+  (match EO.load_resolver_snapshot ~io ~catalog () with
+   | Error
+       (EO.Target_binding_missing
+          { target_ref; component = EO.Target_provider }) ->
+     check string "strict target identity" unbound_target target_ref
+   | Error _ -> fail "strict mode returned the wrong target binding failure"
+   | Ok _ -> fail "strict mode must reject an unbound target");
+  let degraded =
+    match
+      EO.load_resolver_snapshot
+        ~io
+        ~target_binding_policy:EO.Exclude_unbound_targets
+        ~catalog
+        ()
+    with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "explicit exclusion mode must preserve bound targets"
+  in
+  ignore (admit degraded valid_target);
+  (match EO.admit_target_ref degraded unbound_target with
+   | Error (EO.Target_not_in_catalog target_ref) ->
+     check string "excluded target is absent" unbound_target target_ref
+   | Error _ -> fail "excluded target returned the wrong admission error"
+   | Ok _ -> fail "unbound target must not be admitted");
+  match EO.resolver_rejected_target_bindings degraded with
+  | [ { target_ref; component = EO.Target_provider } ] ->
+    check string "typed rejected target" unbound_target target_ref
+  | _ -> fail "degraded snapshot must retain one typed binding rejection"
+;;
+
 let test_credential_rotation_is_not_functional_identity () =
   let contents = target_catalog ~api_key_env:"ROTATING_FIXTURE_KEY" () in
   let load credential =
@@ -1062,6 +1107,10 @@ let () =
             "invalid full replacement has no fallback"
             `Quick
             test_invalid_full_replacement_inputs_fail_without_fallback
+        ; test_case
+            "unbound target policy is explicit and observable"
+            `Quick
+            test_unbound_target_policy_is_explicit_and_observable
         ; test_case
             "credential rotation is nonfunctional"
             `Quick

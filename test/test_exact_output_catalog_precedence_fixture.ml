@@ -41,6 +41,7 @@ let replacement_target = "replacement-only-target"
 let replacement_runtime_target = "replacement_provider.replacement"
 let replacement_secondary_runtime_target = "replacement_provider.secondary"
 let replacement_secondary_target = "replacement-secondary-target"
+let unbound_target = "unbound-target"
 
 let catalog_toml
       ?(api_key_env = "")
@@ -120,8 +121,16 @@ let replacement_catalog =
     ()
 ;;
 
+let replacement_catalog_with_unbound_target =
+  replacement_catalog
+  ^ Printf.sprintf
+      "\n[[targets]]\nid = %S\nprovider_ref = \"replacement_provider\"\nmodel_id = \"missing-model\"\n"
+      unbound_target
+;;
+
 let runtime_toml
       ?hitl_slots
+      ?compaction_slots
       ?runtime_lane_candidates
       ?(include_board_attention = true)
       ?(include_hitl_auto_judge = true)
@@ -154,6 +163,7 @@ let runtime_toml
     else ""
   in
   let base =
+    let compaction_slots = Option.value ~default:[ lane_target ] compaction_slots in
     (Printf.sprintf
        {|[providers.replacement_provider]
 protocol = "openai-compatible-http"
@@ -186,10 +196,10 @@ default = "replacement_provider.replacement"
 %s
 
 [runtime.exact_output_lanes.compaction_exact]
-slots = [%S]
+slots = [%s]
 |}
        runtime_route
-       lane_target)
+       (compaction_slots |> List.map (Printf.sprintf "%S") |> String.concat ", "))
     ^ board_attention_lane
     ^ runtime_lane
     ^ hitl_auto_judge_lane

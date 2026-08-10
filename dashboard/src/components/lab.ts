@@ -5,6 +5,7 @@ import { HarnessHealth } from './harness-health'
 import { LabPerf } from './lab-perf'
 import { KeeperMemoryHealth } from './memory/keeper-memory-health'
 import { AuditIntegrity } from './memory/audit-integrity'
+import { SectionNav } from './common/section-nav'
 import { SurfaceHeader } from './common/surface-header'
 
 type LabSection =
@@ -32,6 +33,7 @@ export function Lab() {
 
   return html`
     <div class="v2-lab-surface ss-surface bg-surface-page flex flex-col gap-6" data-testid="lab-surface">
+      <${SectionNav} tab="lab" current=${section} />
       <${SurfaceHeader} />
       ${section === 'tools' ? html`
         <${Tools} />

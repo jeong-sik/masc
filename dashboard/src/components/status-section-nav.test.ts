@@ -17,7 +17,7 @@ afterEach(cleanup)
 function renderAt(section: string) {
   route.value = { tab: 'monitoring', params: { section }, postId: null }
   render(html`<${Status} />`)
-  return screen.getByTestId('monitor-section-nav')
+  return screen.getByTestId('section-nav-monitoring')
 }
 
 describe('Monitor section navigation', () => {

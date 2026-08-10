@@ -2830,6 +2830,14 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       String.equal lane_id actual_lane_id
     | Error _ | Ok _ -> false
   in
+  let lane_has_no_admitted_slots ~lane_id registry =
+    match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+    | Error
+        (Runtime_exact_output_registry.No_admitted_lane_slots
+           { lane_id = actual_lane_id }) ->
+      String.equal lane_id actual_lane_id
+    | Error _ | Ok _ -> false
+  in
   let baseline = content ~default:"local.chat" "slot-a" in
   with_temp_runtime_toml baseline (fun path ->
     (match Runtime.save_config_text ~runtime_config_path:path baseline with
@@ -2839,24 +2847,27 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     let stable_generation =
       Runtime_exact_output_registry.generation stable_registry
     in
-    let stable_file = Fs_compat.load_file path in
-    let invalid = content ~default:"local.libr" "missing-slot" in
-    (match Runtime.save_config_text ~runtime_config_path:path invalid with
-     | Ok () -> fail "unknown exact target must reject raw save"
+    let degraded = content ~default:"local.libr" "missing-slot" in
+    (match Runtime.save_config_text ~runtime_config_path:path degraded with
      | Error detail ->
-       check bool "error identifies frozen catalog rejection" true
-         (String_util.contains_substring detail "frozen catalog"));
-    check string "invalid save preserves file" stable_file (Fs_compat.load_file path);
-    check string "invalid save preserves runtime cache" "local.chat"
+       failf "optional unbound exact target must not reject raw save: %s" detail
+     | Ok () -> ());
+    check string "degraded save commits file" degraded (Fs_compat.load_file path);
+    check string "degraded save commits runtime cache" "local.libr"
       (Runtime.get_default_runtime_id ());
-    let after_invalid = registry_exn () in
-    check int64 "invalid save preserves registry generation" stable_generation
-      (Runtime_exact_output_registry.generation after_invalid);
-    check (list string) "invalid save preserves registry slots" [ "slot-a" ]
-      (slots_exn ~lane_id:"compaction_exact" after_invalid);
-check bool "invalid save does not synthesize HITL lane" true
-  (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_invalid);
-    let replacement = content ~default:"local.libr" "slot-b" in
+    let after_degraded = registry_exn () in
+    let degraded_generation =
+      Runtime_exact_output_registry.generation after_degraded
+    in
+    check bool "degraded save advances registry generation" true
+      (Int64.compare degraded_generation stable_generation > 0);
+    check bool "degraded save leaves optional lane without admitted slots" true
+      (lane_has_no_admitted_slots
+         ~lane_id:"compaction_exact"
+         after_degraded);
+    check bool "degraded save does not synthesize HITL lane" true
+      (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_degraded);
+    let replacement = content ~default:"local.chat" "slot-b" in
     let failed_path = path ^ ".directory" in
     Unix.mkdir failed_path 0o755;
     Fun.protect
@@ -2867,31 +2878,35 @@ check bool "invalid save does not synthesize HITL lane" true
           | Error detail ->
             check bool "write failure is surfaced" true
               (String_util.contains_substring detail "save_file_atomic"));
-         check string "write failure preserves runtime cache" "local.chat"
+         check string "write failure preserves runtime cache" "local.libr"
            (Runtime.get_default_runtime_id ());
          let after_write_failure = registry_exn () in
-         check int64 "write failure preserves registry generation" stable_generation
+         check int64 "write failure preserves registry generation" degraded_generation
            (Runtime_exact_output_registry.generation after_write_failure);
-         check (list string) "write failure preserves registry slots" [ "slot-a" ]
-           (slots_exn ~lane_id:"compaction_exact" after_write_failure);
-check bool "write failure does not synthesize HITL lane" true
-  (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_write_failure));
+         check bool "write failure preserves no-admitted lane" true
+           (lane_has_no_admitted_slots
+              ~lane_id:"compaction_exact"
+              after_write_failure);
+         check bool "write failure does not synthesize HITL lane" true
+           (lane_is_unconfigured
+              ~lane_id:"hitl_auto_judge"
+              after_write_failure));
     (match Runtime.save_config_text ~runtime_config_path:path replacement with
      | Error detail -> failf "valid exact replacement failed: %s" detail
      | Ok () -> ());
     check string "valid save commits file" replacement (Fs_compat.load_file path);
-    check string "valid save commits runtime cache" "local.libr"
+    check string "valid save commits runtime cache" "local.chat"
       (Runtime.get_default_runtime_id ());
     let replaced = registry_exn () in
     check bool "valid save advances registry generation" true
       (Int64.compare
          (Runtime_exact_output_registry.generation replaced)
-         stable_generation
+         degraded_generation
        > 0);
     check (list string) "valid save commits registry slots" [ "slot-b" ]
       (slots_exn ~lane_id:"compaction_exact" replaced);
-check bool "valid save does not synthesize HITL lane" true
-  (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
+    check bool "valid save does not synthesize HITL lane" true
+      (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
 
 let test_deprecated_capability_notice_warns_once_per_process () =
   (* runtime.toml is re-parsed on every keeper boot; a per-parse deprecation

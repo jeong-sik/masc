@@ -56,17 +56,6 @@ type usage =
   ; total_tokens : int
   }
 
-(* The modes the CLI has been observed to announce. [Request_review] arrived
-   from a live init event and was not modelled, so the parse failed, the turn
-   ended as a protocol error, and the official-client session went to
-   Recovery_required -- which blocked every later turn for that keeper until an
-   operator resolved it (taskmaster, 110 turns in one hour).
-
-   Nothing in this tree branches on the value: it is parsed, carried through
-   [state.init] into [turn_result], and never matched. A closed vocabulary over
-   a field the provider owns and we do not read costs a session each time the
-   provider adds a member. Kept closed for now because guessing members is
-   worse than failing loudly, but see #28008. *)
 type permission_mode =
   | Always_proceed
   | Request_review
@@ -222,11 +211,11 @@ and step_state =
 
 and step_type =
   | Agent_response
+  | System_message
   | Tool
   | User_input
   | Internal
   | Checkpoint
-  | Unrecognized of string
 
 and result_status =
   | Success
@@ -262,26 +251,19 @@ let parse_step_state stage value =
     value
 ;;
 
-(* [step_type] decides one thing: whether this step is a tool step, for the two
-   tool counters. Every non-[Tool] value is behaviourally identical, so an
-   upstream value we have not seen carries no decision we could get wrong — but
-   rejecting it ended the turn and parked the session, which blocked every later
-   turn for that Keeper until an operator resolved it by hand. Live 2026-08-10:
-   Antigravity started emitting "system_message" and taskmaster stopped
-   (#28027). The value is kept in [Unrecognized] so the wire vocabulary drift is
-   still visible rather than silently normalised away.
-
-   [state], [permission_mode] and [status] stay closed: each of those does
-   decide something. *)
-let parse_step_type _stage value =
-  Ok
-    (match value with
-     | "agent_response" -> Agent_response
-     | "tool" -> Tool
-     | "user_input" -> User_input
-     | "unknown" -> Internal
-     | "checkpoint" -> Checkpoint
-     | other -> Unrecognized other)
+let parse_step_type stage value =
+  closed_string
+    stage
+    "step_type"
+    (function
+      | "agent_response" -> Some Agent_response
+      | "system_message" -> Some System_message
+      | "tool" -> Some Tool
+      | "user_input" -> Some User_input
+      | "unknown" -> Some Internal
+      | "checkpoint" -> Some Checkpoint
+      | _ -> None)
+    value
 ;;
 
 let parse_result_status stage value =

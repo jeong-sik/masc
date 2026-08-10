@@ -36,9 +36,22 @@ CI_TARGET_SOURCES=(
 # is how this check came to report test_task_cache_invariant_13397 as missing
 # while (names ...) declared it. The trailing `)` closing a (names ...) list is
 # stripped so the last entry in each block still counts.
-awk '/^[[:space:]]+test_[a-z_0-9]+/ {
-       for (i = 1; i <= NF; i++) {
-         name = $i
+# Field-aware: only (names ...) entries are test executables with a
+# runtest-<name> alias. (modules ...) lists the support modules compiled into
+# them, which have none — `dune build @test/runtest-<module>` answers "Alias ...
+# is empty". Counting both inflated the unwired baseline with six such modules
+# (test_operator_control_support, test_keeper_tool_matrix_cases, and four
+# siblings; the first two verified against dune directly), and let the
+# referenced-subset-declared check above pass for a name dune cannot build —
+# the exact breakage that check exists to catch.
+awk '/^[[:space:]]*\(names/ { field = "names"; line = substr($0, index($0, "(names") + 6) }
+     /^[[:space:]]*\(modules/ { field = "modules"; line = substr($0, index($0, "(modules") + 8) }
+     /^[[:space:]]*\((libraries|preprocess|deps|flags|action|alias)/ { field = ""; line = "" }
+     !/^[[:space:]]*\(/ { line = $0 }
+     field == "names" {
+       n = split(line, parts, /[[:space:]]+/)
+       for (i = 1; i <= n; i++) {
+         name = parts[i]
          sub(/\)+$/, "", name)
          if (name ~ /^test_[a-z_0-9]+$/) print name
        }
@@ -111,7 +124,7 @@ fi
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
 # Exact current count. Adding an unwired suite is a regression.
-UNWIRED_BASELINE=689
+UNWIRED_BASELINE=686
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

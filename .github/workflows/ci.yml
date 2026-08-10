@@ -924,6 +924,7 @@ jobs:
             @test/runtest-test_keepers_runtime_dir_ssot \
             @test/runtest-test_mcp_h1_h2_admission_parity \
             @test/runtest-test_masc_dirname_ssot \
+            @test/runtest-test_masc_test_runtime \
             @test/runtest-test_nickname_words_ssot \
             @test/runtest-test_agent_core_message_constructor_contract \
             @test/runtest-test_otel_port_ssot \

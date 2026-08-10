@@ -31,6 +31,12 @@ let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 8192
 let max_wire_line_bytes = 8 * 1024 * 1024
 
+(* [agy --print] accepts the prompt only as one argv member. Linux caps one
+   member below ARG_MAX and macOS charges it against the whole argv+environment
+   block, so a provider request-body budget cannot protect this spawn boundary.
+   Keep one cross-platform limit below both kernels and reject before execve. *)
+let max_prompt_bytes = 120 * 1024
+
 let default_config ~cwd ~model =
   { cli_path = "agy"
   ; cwd
@@ -82,6 +88,10 @@ type turn_result =
 
 type error =
   | Invalid_config of string
+  | Prompt_too_large of
+      { bytes : int
+      ; limit : int
+      }
   | Spawn_failed of string
   | Protocol_error of
       { stage : string
@@ -96,6 +106,11 @@ exception Runtime_error of error
 
 let error_to_string = function
   | Invalid_config detail -> "invalid Antigravity CLI config: " ^ detail
+  | Prompt_too_large { bytes; limit } ->
+    Printf.sprintf
+      "Antigravity prompt is %d bytes; the CLI argv boundary admits at most %d"
+      bytes
+      limit
   | Spawn_failed detail -> "failed to start Antigravity CLI: " ^ detail
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Antigravity stream-json protocol error during %s: %s" stage detail
@@ -380,6 +395,10 @@ let validate_config config ~conversation_mode ~prompt =
   then Error (Invalid_config "timeout_s must be positive and finite")
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
+  else if String.length prompt > max_prompt_bytes
+  then
+    Error
+      (Prompt_too_large { bytes = String.length prompt; limit = max_prompt_bytes })
   else
     match config.agent, conversation_mode with
     | Some agent, _ when String.trim agent = "" ->

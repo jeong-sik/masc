@@ -27,6 +27,11 @@ type config =
 
 val default_config : cwd:string -> model:string -> config
 
+val max_prompt_bytes : int
+(** Largest prompt accepted by the spawn boundary. [agy] exposes no stdin or
+    prompt-file form, so the prompt is one argv member and must fit the kernel
+    limit before [execve]. *)
+
 type conversation_mode =
   | Start
   | Resume of { conversation_id : string }
@@ -65,6 +70,10 @@ type turn_result =
 
 type error =
   | Invalid_config of string
+  | Prompt_too_large of
+      { bytes : int
+      ; limit : int
+      }
   | Spawn_failed of string
   | Protocol_error of
       { stage : string

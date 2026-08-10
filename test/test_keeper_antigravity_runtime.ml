@@ -278,6 +278,17 @@ let test_keeper_projects_mcp_tool_and_settles () =
         ; metadata = []
         }
       in
+      let large_history =
+        List.init 70 (fun index ->
+          let marker = Printf.sprintf "history-%02d" index in
+          { Agent_core.Types.role = User
+          ; content = [ Text (marker ^ ":" ^ String.make 4096 'x') ]
+          ; name = None
+          ; tool_call_id = None
+          ; metadata = []
+          })
+        @ [ tool_history ]
+      in
       let runtime_snapshot = Runtime.For_testing.snapshot () in
       Fun.protect
         ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -301,7 +312,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~base_path
                       ~goal:"Call masc_probe once"
                       ~tools:[ tool ]
-                      ~initial_messages:[ tool_history ]
+                      ~initial_messages:large_history
                       ~context:(Agent_core.Context.create ())
                       ~raw_trace
                       ~sw
@@ -328,7 +339,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         ~base_path
                         ~goal:"Call masc_probe once"
                         ~tools:[ tool ]
-                        ~initial_messages:[ tool_history ]
+                        ~initial_messages:large_history
                         ~context:(Agent_core.Context.create ())
                         ~raw_trace
                         ~sw
@@ -351,6 +362,18 @@ let test_keeper_projects_mcp_tool_and_settles () =
         | Some prompt -> prompt
         | None -> fail "initial Antigravity prompt was not captured"
       in
+      check bool
+        "fresh prompt fits argv boundary"
+        true
+        (String.length prompt <= Runtime_antigravity.max_prompt_bytes);
+      check bool
+        "fresh prompt drops complete old atoms"
+        false
+        (String_util.contains_substring prompt "history-00");
+      check bool
+        "fresh prompt keeps newest atom"
+        true
+        (String_util.contains_substring prompt "history-69");
       check bool
         "prompt preserves prior tool role"
         true

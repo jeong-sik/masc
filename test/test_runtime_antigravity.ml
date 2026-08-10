@@ -369,6 +369,19 @@ let test_admission_is_process_free () =
   | Ok () -> fail "invalid deterministic config passed admission"
 ;;
 
+let test_oversized_prompt_is_typed_before_spawn () =
+  let config =
+    Runtime_antigravity.default_config ~cwd:"/tmp" ~model:"gemini-fixture"
+  in
+  let prompt = String.make (Runtime_antigravity.max_prompt_bytes + 1) 'x' in
+  match Runtime_antigravity.validate_turn config ~prompt with
+  | Error (Runtime_antigravity.Prompt_too_large { bytes; limit }) ->
+    check int "measured bytes" (String.length prompt) bytes;
+    check int "declared argv limit" Runtime_antigravity.max_prompt_bytes limit
+  | Error error -> fail (Runtime_antigravity.error_to_string error)
+  | Ok () -> fail "oversized prompt reached the spawn boundary"
+;;
+
 let test_live_start_and_resume () =
   match Sys.getenv_opt "MASC_ANTIGRAVITY_LIVE", Sys.getenv_opt "MASC_ANTIGRAVITY_MODEL" with
   | Some "1", Some model ->
@@ -467,6 +480,10 @@ let () =
             test_unknown_protocol_vocabulary_fails_closed
         ; test_case "typed timeout" `Quick test_timeout_is_typed
         ; test_case "process-free admission" `Quick test_admission_is_process_free
+        ; test_case
+            "oversized prompt is typed before spawn"
+            `Quick
+            test_oversized_prompt_is_typed_before_spawn
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

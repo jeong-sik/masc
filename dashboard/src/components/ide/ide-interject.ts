@@ -16,6 +16,9 @@ import {
 } from './ide-context-lens'
 import { globalPresenceSnapshot, presenceEntries, type KeeperPresenceStatus } from './keeper-presence-store'
 import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
+import { activeIdeFocus } from './ide-state'
+import { ideEditorSelection } from './ide-editor-selection'
+import { buildIdeInterjectSurfaceContext } from './ide-interject-surface-context'
 
 // The input and button states flow through the same store/dispatch boundary
 // that live active-keeper wiring uses. Send remains disabled until a concrete
@@ -26,6 +29,10 @@ async function dispatchInterject(request: InterjectDispatchRequest): Promise<voi
     kind: request.kind,
     keeperName: request.keeper_id,
     message: request.message,
+    surfaceContext: buildIdeInterjectSurfaceContext({
+      focus: activeIdeFocus.value,
+      selection: ideEditorSelection.value,
+    }),
   })
 }
 

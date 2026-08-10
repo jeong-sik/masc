@@ -156,6 +156,48 @@ export function resolveRuntimeFleetSafetyCounts(
   }
 }
 
+/** Keeper execution counts exactly as the runtime-health fleet projection
+ *  reports them. One producer backs every field here:
+ *  `keeper_fleet_safety_health_json` (server_routes_http_runtime_fleet_scan.ml),
+ *  which both `/health?full=1` and the shell `runtime_resolution` embed
+ *  verbatim.
+ *
+ *  A field is null when the server did not report it. Callers must render that
+ *  as unknown — collapsing it to 0 would present "we could not read the fleet"
+ *  as "the fleet is empty", which is the roster-estimate failure this type
+ *  exists to prevent. */
+export interface KeeperFleetExecutionCounts {
+  readonly running: number | null
+  readonly recovering: number | null
+  readonly executable: number | null
+  readonly paused: number | null
+}
+
+/** Returns null when no fleet projection is available at all — distinct from a
+ *  projection that reports zero, which is a fact the operator needs to see.
+ *
+ *  Unlike {!resolveRuntimeFleetSafetyCounts} this selector never substitutes a
+ *  count it did not receive, because its consumer (the Root surface) displays
+ *  the numbers directly instead of feeding a count-reconciliation chain. */
+export function resolveKeeperFleetExecutionCounts(
+  fleetSafety: DashboardFleetSafetyHealth | null | undefined,
+): KeeperFleetExecutionCounts | null {
+  if (!fleetSafety) return null
+  const fleet = fleetSafety.keeper_fleet_safety
+  const running = firstFiniteCount(fleet?.running_keeper_fiber_count)
+  const recovering = firstFiniteCount(fleet?.recovering_keeper_fiber_count)
+  const executable = firstFiniteCount(fleet?.executable_keeper_fiber_count)
+  const paused = firstFiniteCount(
+    fleetSafety.paused_keepers_health?.count,
+    fleet?.paused_keeper_count,
+    fleetSafety.paused_keepers,
+  )
+  if (running === null && recovering === null && executable === null && paused === null) {
+    return null
+  }
+  return { running, recovering, executable, paused }
+}
+
 export function runtimeHealthIsFresh(
   generatedAt: string | null | undefined,
   nowMs = Date.now(),

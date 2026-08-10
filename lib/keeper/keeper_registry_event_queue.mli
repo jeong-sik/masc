@@ -28,6 +28,7 @@ type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
 type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
   | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
@@ -140,6 +141,16 @@ val terminalize_pending_turn_attempt_result :
   (source_ack_result, string) result
 (** Commit a source-bearing terminal receipt for one failed admitted turn and
     publish the post-commit pending projection. *)
+
+val terminalize_pending_turn_completed_result :
+  base_path:string ->
+  string ->
+  current_owner_nonce:int ->
+  applied_at:float ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  (source_ack_result, string) result
+(** Commit a source-bearing completion receipt for one successful admitted turn
+    and publish the post-commit pending projection. *)
 
 (** Enqueue a stimulus on the keeper's event queue. An owner not registered yet
     may receive durable work so a later lane can replay it. A finalized

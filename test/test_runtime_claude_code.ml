@@ -68,6 +68,7 @@ let fixture_script
     ; "MASC_CLAUDE_SECRET_CANARY"
     ];
   output_string output "[ -n \"${HOME-}\" ] || exit 91\n";
+  output_string output "[ -n \"${USER-}\" ] || exit 97\n";
   output_string output
     "[ \"${CLAUDE_CODE_ENTRYPOINT-}\" = masc ] || exit 92\n";
   output_string output

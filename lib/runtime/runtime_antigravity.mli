@@ -76,6 +76,7 @@ val validate_turn :
 
 val run_turn :
   ?conversation_mode:conversation_mode ->
+  ?home_dir:string ->
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
@@ -83,3 +84,5 @@ val run_turn :
   config ->
   prompt:string ->
   (turn_result, error) result
+(** [home_dir], when present, replaces inherited [HOME] and removes inherited
+    XDG directory overrides before spawning the official client. *)

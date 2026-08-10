@@ -350,6 +350,63 @@ let observe_raw_trace ~keeper_name ~stage observe =
     None
 ;;
 
+let start_raw_trace ~keeper_name ~raw_trace ~prompt ?model ?reasoning_effort () =
+  match raw_trace with
+  | None -> None
+  | Some sink ->
+    observe_raw_trace ~keeper_name ~stage:Run_start (fun () ->
+      Agent_core.Raw_trace.start_run
+        sink
+        ~agent_name:keeper_name
+        ~prompt
+        ?model
+        ?reasoning_effort
+        ())
+;;
+
+let finish_raw_error ~keeper_name raw_trace_run error =
+  match raw_trace_run with
+  | None -> ()
+  | Some active ->
+    ignore
+      (observe_raw_trace ~keeper_name ~stage:Run_finish (fun () ->
+         Agent_core.Raw_trace.finish_run
+           active
+           ~final_text:None
+           ~stop_reason:None
+           ~error:(Some (Agent_core.Error.to_string error))))
+;;
+
+let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_result) =
+  match raw_trace_run with
+  | None -> result
+  | Some active ->
+    let all_blocks_recorded = ref true in
+    result.response.content
+    |> List.iteri (fun block_index block ->
+      if
+        Option.is_none
+          (observe_raw_trace ~keeper_name ~stage:Assistant_block (fun () ->
+             Agent_core.Raw_trace.record_assistant_block active ~block_index block))
+      then all_blocks_recorded := false);
+    let finished =
+      observe_raw_trace ~keeper_name ~stage:Run_finish (fun () ->
+        Agent_core.Raw_trace.finish_run
+          active
+          ~final_text:
+            (Agent_core.Types.text_of_response result.response
+             |> String_util.trim_to_option)
+          ~stop_reason:
+            (Some
+               (Agent_core.Types.stop_reason_to_string
+                  result.response.stop_reason))
+          ~error:None)
+    in
+    (match !all_blocks_recorded, finished with
+     | true, Some trace_ref -> { result with trace_ref = Some trace_ref }
+     | false, _ | _, None -> result)
+;;
+
 let record_raw_tool_started ~keeper_name ~raw_trace_run ~invocation ~tool_name ~input =
   match raw_trace_run with
   | None -> false

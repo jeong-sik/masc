@@ -666,21 +666,15 @@ let run_keepalive_unified_turn
           Cycle.meta cycle_outcome)
         else meta_after_triage
       in
-      let terminalize_failed_selection ~selection ~detail =
-        match
-          Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
-            ~base_path:ctx.config.base_path
-            meta_after_triage.name
-            ~current_owner_nonce:meta_after_triage.runtime.nonce
-            ~applied_at:(Time_compat.now ())
-            ~selection
-            ~detail
-        with
-        | Error message -> record_event_queue_failure message
+      let record_terminal_selection_result ~label = function
+        | Error message ->
+          record_event_queue_failure message;
+          false
         | Ok
             ( Keeper_registry_event_queue.Acked _
             | Keeper_registry_event_queue.Already_acked _ ) ->
-          selection_acked := true
+          selection_acked := true;
+          true
         | Ok
             (Keeper_registry_event_queue.Ack_committed_followup_failed
                { stage; detail = followup_detail; _ }) ->
@@ -693,10 +687,32 @@ let run_keepalive_unified_turn
           in
           record_event_queue_failure
             (Printf.sprintf
-               "turn-attempt terminal receipt committed but %s follow-up \
+               "%s receipt committed but %s follow-up \
                 failed: %s"
+               label
                stage
-               followup_detail)
+               followup_detail);
+          true
+      in
+      let terminalize_failed_selection ~selection ~detail =
+        Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+          ~base_path:ctx.config.base_path
+          meta_after_triage.name
+          ~current_owner_nonce:meta_after_triage.runtime.nonce
+          ~applied_at:(Time_compat.now ())
+          ~selection
+          ~detail
+        |> record_terminal_selection_result ~label:"turn-attempt terminal"
+        |> ignore
+      in
+      let terminalize_completed_selection ~selection =
+        Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+          ~base_path:ctx.config.base_path
+          meta_after_triage.name
+          ~current_owner_nonce:meta_after_triage.runtime.nonce
+          ~applied_at:(Time_compat.now ())
+          ~selection
+        |> record_terminal_selection_result ~label:"turn completion"
       in
       let persist_transcript_corruption_pause ~detail =
         let pause_result =
@@ -766,19 +782,12 @@ let run_keepalive_unified_turn
        | None -> ()
        | Some selection ->
            let remove_completed_selection () =
-             match
-               Keeper_registry_event_queue.ack_pending_result
-                 ~base_path:ctx.config.base_path
-                 meta_after_triage.name
-                 ~selection
-             with
-             | Ok () ->
-               selection_acked := true;
+             if terminalize_completed_selection ~selection
+             then
                mark_connector_attention_ignored_after_turn
                  ~base_path:ctx.config.base_path
                  ~keeper_name:meta_after_triage.name
                  (connector_attention_event_ids_of_stimuli !consumed_stimuli)
-             | Error message -> record_event_queue_failure message
            in
            match !cycle_outcome_ref with
            | Some

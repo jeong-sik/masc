@@ -20,6 +20,7 @@ type accepted_transfer =
 type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
   | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal =
@@ -417,7 +418,7 @@ let validate_accepted_source_terminal
   then Error "source-terminal ACK operation id must not be empty"
   else (
     match source_terminal.source_receipt with
-    | Turn_attempt_terminal _ -> Ok ()
+    | Turn_completed | Turn_attempt_terminal _ -> Ok ()
     | (Fusion_terminal _ | Hitl_terminal _) as expected ->
       let* receipt = source_terminal_receipt_of_stimulus source_terminal.source in
       if receipt = expected
@@ -731,11 +732,23 @@ let ack_pending_source_terminal
        state)
 ;;
 
-let terminalize_pending_turn_attempt
+let turn_terminal_receipt_matches_replay left right =
+  match left, right with
+  | Turn_completed, Turn_completed
+  | Turn_attempt_terminal _, Turn_attempt_terminal _ ->
+    true
+  | Fusion_terminal _, _
+  | Hitl_terminal _, _
+  | Turn_completed, _
+  | Turn_attempt_terminal _, _ ->
+    false
+;;
+
+let terminalize_pending_turn
       ~current_owner_nonce
       ~applied_at
       ~selection
-      ~detail
+      ~source_receipt
       state
   =
   let { source; admitted_revision } = selection in
@@ -751,13 +764,16 @@ let terminalize_pending_turn_attempt
            Ack_source_terminal
              { source = prior_source
              ; owner_nonce
-             ; source_receipt = Turn_attempt_terminal _
+             ; source_receipt = prior_source_receipt
              ; _
              }
        ; _
        } as receipt)
     when Int.equal owner_nonce current_owner_nonce
-         && prior_source = source ->
+         && prior_source = source
+         && turn_terminal_receipt_matches_replay
+              prior_source_receipt
+              source_receipt ->
     Ok (state, Transition_already_applied receipt)
   | Some _ ->
     Error
@@ -771,7 +787,7 @@ let terminalize_pending_turn_attempt
       ; source_incarnation = admitted_revision
       ; owner_nonce = current_owner_nonce
       ; operator_operation_id
-      ; source_receipt = Turn_attempt_terminal { detail }
+      ; source_receipt
       }
     in
     ack_pending_source_terminal
@@ -779,6 +795,35 @@ let terminalize_pending_turn_attempt
       ~applied_at
       ~source_terminal
       state
+;;
+
+let terminalize_pending_turn_attempt
+      ~current_owner_nonce
+      ~applied_at
+      ~selection
+      ~detail
+      state
+  =
+  terminalize_pending_turn
+    ~current_owner_nonce
+    ~applied_at
+    ~selection
+    ~source_receipt:(Turn_attempt_terminal { detail })
+    state
+;;
+
+let terminalize_pending_turn_completed
+      ~current_owner_nonce
+      ~applied_at
+      ~selection
+      state
+  =
+  terminalize_pending_turn
+    ~current_owner_nonce
+    ~applied_at
+    ~selection
+    ~source_receipt:Turn_completed
+    state
 ;;
 
 let restore_pending_transition entry state apply =
@@ -971,6 +1016,8 @@ let transition_to_yojson = function
         [ "source_receipt_kind", `String "fusion_terminal" ]
       | Hitl_terminal _ ->
         [ "source_receipt_kind", `String "hitl_terminal" ]
+      | Turn_completed ->
+        [ "source_receipt_kind", `String "turn_completed" ]
       | Turn_attempt_terminal { detail } ->
         [ "source_receipt_kind", `String "turn_attempt_terminal"
         ; "detail", `String detail
@@ -1079,6 +1126,9 @@ let transition_of_yojson json =
     in
     let* source_receipt =
       match source_receipt_kind with
+      | "turn_completed" ->
+        let* () = exact_fields ~context ~expected:common_fields fields in
+        Ok Turn_completed
       | "turn_attempt_terminal" ->
         let* () =
           exact_fields
@@ -1095,6 +1145,7 @@ let transition_of_yojson json =
           match source_receipt with
           | Fusion_terminal _ -> Ok "fusion_terminal"
           | Hitl_terminal _ -> Ok "hitl_terminal"
+          | Turn_completed
           | Turn_attempt_terminal _ ->
             Error "source payload produced a non-intrinsic terminal receipt"
         in

@@ -1564,13 +1564,9 @@ let runtime_request_config_json (rt : Runtime.t) =
                  | Runtime_antigravity.Medium -> "medium"
                  | Runtime_antigravity.High -> "high")
                config.effort) )
-      ; ( "execution_mode"
-        , `String
-            (match config.execution_mode with
-             | Runtime_antigravity.Plan -> "plan"
-             | Runtime_antigravity.Accept_edits -> "accept-edits") )
-      ; "sandbox", `Bool config.sandbox
-      ; "disable_slash_commands", `Bool config.disable_slash_commands
+      ; "execution_mode", `String "plan"
+      ; "sandbox", `Bool true
+      ; "disable_slash_commands", `Bool true
       ; "timeout_s", `Float config.timeout_s
       ; "verified", `Bool false
       ]

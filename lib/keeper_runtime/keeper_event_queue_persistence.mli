@@ -60,6 +60,7 @@ type accepted_transfer = Keeper_event_queue_state.accepted_transfer =
 type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
   | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_state.accepted_source_terminal =
@@ -235,6 +236,18 @@ val terminalize_pending_turn_attempt_result :
 (** Atomically construct and commit a source-bearing terminal receipt for one
     failed admitted turn. The selection carries the exact source incarnation;
     no caller-provided prose or counter controls admission. *)
+
+val terminalize_pending_turn_completed_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  current_owner_nonce:int ->
+  applied_at:float ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  unit ->
+  (transition_result, string) result
+(** Atomically construct and commit a source-bearing completion receipt for one
+    successful admitted turn. *)
 
 val project_transition_outbox_result :
   append_before_retire:(outbox_entry -> (unit, string) result) ->

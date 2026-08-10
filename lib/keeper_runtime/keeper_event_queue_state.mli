@@ -33,10 +33,12 @@ type accepted_transfer =
 type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
   | Turn_attempt_terminal of { detail : string }
-(** Closed terminal source evidence. The first three families are intrinsically
-    represented by their durable event payload. [Turn_attempt_terminal] records
-    that one admitted turn ended without durable compaction progress; the exact
+(** Closed terminal source evidence. Fusion and HITL completion are intrinsically
+    represented by their durable event payload. [Turn_completed] records a
+    successful admitted turn; [Turn_attempt_terminal] records that one admitted
+    turn ended without durable compaction progress. In both cases the exact
     source remains in the transition receipt instead of being discarded by a
     raw ACK. [detail] is diagnostic only and carries no transition authority. *)
 
@@ -197,6 +199,17 @@ val terminalize_pending_turn_attempt :
     Repeating the same request after WAL projection returns its original
     receipt, while a later selection of the same source is a new attempt;
     diagnostic [detail] never participates in admission or idempotency. *)
+
+val terminalize_pending_turn_completed :
+  current_owner_nonce:int ->
+  applied_at:float ->
+  selection:pending_selection ->
+  t ->
+  (t * transition_result, string) result
+(** Commit typed completion evidence for one admitted turn. Completion and
+    failure share one deterministic per-attempt operation identity, so a stale
+    contradictory settlement fails closed instead of replacing the first
+    durable outcome. *)
 
 val accepted_pending_cancellation_replay :
   accepted_cancellation ->

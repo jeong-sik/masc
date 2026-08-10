@@ -1,6 +1,7 @@
 module Queue = Keeper_event_queue
 module State = Keeper_event_queue_state
 module Persistence = Keeper_event_queue_persistence
+module Keeper_reaction_ledger = Masc.Keeper_reaction_ledger
 
 let require_ok label = function
   | Ok value -> value
@@ -230,6 +231,64 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
   |> State.of_yojson
   |> require_ok "turn-attempt terminal receipt round trip"
   |> ignore
+;;
+
+let test_turn_completed_receipt_is_terminal_and_conflict_fenced () =
+  let source = stimulus "completed-turn-source" 1.0 in
+  let initial = State.with_pending (queue [ source ]) State.empty in
+  let selection = select initial in
+  let staged, receipt =
+    match
+      State.terminalize_pending_turn_completed
+        ~current_owner_nonce:7
+        ~applied_at:2.0
+        ~selection
+        initial
+      |> require_ok "terminalize completed turn source"
+    with
+    | state, State.Transition_applied receipt -> state, receipt
+    | _, State.Transition_already_applied _ ->
+      Alcotest.fail "first completed-turn terminalization was replayed"
+  in
+  Alcotest.(check (list string))
+    "completed source leaves runnable pending"
+    []
+    (post_ids (State.pending staged));
+  (match receipt.transition with
+   | State.Ack_source_terminal { source_receipt = State.Turn_completed; _ } -> ()
+   | State.Cancel_accepted _
+   | State.Transfer_accepted _
+   | State.Ack_source_terminal _ ->
+     Alcotest.fail "completed turn did not commit Turn_completed evidence");
+  let projected =
+    State.mark_transition_projected ~transition_id:receipt.transition_id staged
+    |> require_ok "project completed turn receipt"
+  in
+  (match
+     State.terminalize_pending_turn_completed
+       ~current_owner_nonce:7
+       ~applied_at:3.0
+       ~selection
+       projected
+     |> require_ok "replay completed turn receipt"
+   with
+   | _, State.Transition_already_applied replayed ->
+     Alcotest.(check string)
+       "completion replay keeps transition identity"
+       receipt.transition_id
+       replayed.transition_id
+   | _, State.Transition_applied _ ->
+     Alcotest.fail "completed turn was applied twice");
+  (match
+     State.terminalize_pending_turn_attempt
+       ~current_owner_nonce:7
+       ~applied_at:4.0
+       ~selection
+       ~detail:"late contradictory failure"
+       projected
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "failure replaced an already-completed turn")
 ;;
 
 let test_projected_disposition_ledger_replays_older_operation () =
@@ -685,6 +744,78 @@ let test_durable_inflight_selection_rejects_reinserted_source () =
       (post_ids pending))
 ;;
 
+let test_durable_completed_turn_projects_reaction_ack () =
+  with_temp_dir "keeper-completed-turn-terminal" (fun base_path ->
+    let keeper_name = "completed-turn-keeper" in
+    let source = stimulus "completed" 1.0 in
+    Keeper_reaction_ledger.record_event_queue_stimulus
+      ~base_path
+      ~keeper_name
+      source;
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending source)
+    |> require_ok "seed completed turn pending";
+    let selection =
+      Persistence.select_when_result
+        ~base_path
+        ~keeper_name
+        ~ready:(fun _ -> true)
+      |> require_ok "select completed turn source"
+      |> require_some "completed turn selection"
+    in
+    let receipt =
+      match
+        Persistence.terminalize_pending_turn_completed_result
+          ~base_path
+          ~keeper_name
+          ~current_owner_nonce:7
+          ~applied_at:3.0
+          ~selection
+          ()
+        |> require_ok "commit completed turn receipt"
+      with
+      | Persistence.Transition_applied receipt
+      | Persistence.Transition_already_applied receipt ->
+        receipt
+      | Persistence.Transition_committed_followup_failed { detail; _ } ->
+        Alcotest.fail detail
+    in
+    Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+      ~base_path
+      ~keeper_name
+      ~expected_transition_id:receipt.transition_id
+    |> require_ok "project completed turn reaction";
+    let restarted =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "restart completed turn state"
+    in
+    Alcotest.(check int)
+      "completed source stays removed after restart"
+      0
+      (Queue.length (State.pending restarted));
+    Alcotest.(check int)
+      "completed reaction retires outbox"
+      0
+      (List.length (State.transition_outbox restarted));
+    let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue source in
+    match
+      Keeper_reaction_ledger.event_queue_reaction_evidence_result
+        ~base_path
+        ~keeper_name
+        ~stimulus_id
+    with
+    | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+      Alcotest.(check bool)
+        "completed turn has durable ACK evidence"
+        true
+        evidence.event_queue_ack_seen
+    | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+      Alcotest.fail "completed turn evidence was quarantined"
+    | Error error ->
+      Alcotest.fail
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error))
+;;
+
 let () =
   Alcotest.run
     "keeper pending queue current schema"
@@ -709,6 +840,10 @@ let () =
             `Quick
             test_turn_attempt_terminal_receipt_preserves_exact_source
         ; Alcotest.test_case
+            "turn completion is terminal and conflict fenced"
+            `Quick
+            test_turn_completed_receipt_is_terminal_and_conflict_fenced
+        ; Alcotest.test_case
             "older projected disposition replays"
             `Quick
             test_projected_disposition_ledger_replays_older_operation
@@ -727,6 +862,10 @@ let () =
             "durable failed turn receipt restart"
             `Quick
             test_durable_turn_attempt_terminal_restart
+        ; Alcotest.test_case
+            "durable completed turn projects reaction ACK"
+            `Quick
+            test_durable_completed_turn_projects_reaction_ack
         ; Alcotest.test_case
             "durable in-flight selection rejects reinserted source"
             `Quick

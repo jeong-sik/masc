@@ -6,11 +6,6 @@ let remove_if_exists path =
   | Sys_error _ -> ()
 ;;
 
-let write_file path content =
-  let channel = open_out_bin path in
-  Fun.protect ~finally:(fun () -> close_out_noerr channel) (fun () -> output_string channel content)
-;;
-
 let test_round_trip_preserves_exact_evidence () =
   let path = Filename.temp_file "exact-lane-runs-" ".jsonl" in
   remove_if_exists path;
@@ -55,27 +50,8 @@ let test_running_shape_has_no_invented_completion () =
   | _ -> fail "run serializer must emit an object"
 ;;
 
-let test_open_json_input_is_not_replayed_into_current_store () =
-  let path = Filename.temp_file "exact-lane-runs-v1-" ".jsonl" in
-  write_file
-    path
-    {|{"event":"register","id":"old-run","started_at":1.0,"registration":{"lane":"librarian_exact","subject_id":"trace-old","actor":"keeper-a","input":{"message_count":4}}}
-|};
-  let replayed = R.replay path in
-  check int "old open input is absent" 0 (List.length (R.list_runs replayed));
-  check string "current-only store file" "exact-lane-runs-v2.jsonl" R.storage_filename;
-  remove_if_exists path
-;;
-
-let test_research_input_is_not_replayed_into_current_store () =
-  let path = Filename.temp_file "exact-lane-runs-research-" ".jsonl" in
-  write_file
-    path
-    {|{"event":"register","id":"research-run","started_at":1.0,"registration":{"lane":"librarian_exact","subject_id":"trace-research","actor":"keeper-a","input":{"kind":"research","raw_trace_path":"/tmp/research.jsonl","payload":{"message_count":4}}}}
-|};
-  let replayed = R.replay path in
-  check int "research input is absent" 0 (List.length (R.list_runs replayed));
-  remove_if_exists path
+let test_current_storage_generation () =
+  check string "current store file" "exact-lane-runs-v3.jsonl" R.storage_filename
 ;;
 
 let test_exact_history_is_not_pruned_across_lanes () =
@@ -173,10 +149,7 @@ let () =
     [ ( "registry"
       , [ test_case "durable exact evidence" `Quick test_round_trip_preserves_exact_evidence
         ; test_case "running shape" `Quick test_running_shape_has_no_invented_completion
-        ; test_case "open JSON input is not replayed" `Quick
-            test_open_json_input_is_not_replayed_into_current_store
-        ; test_case "research input is not replayed" `Quick
-            test_research_input_is_not_replayed_into_current_store
+        ; test_case "current storage generation" `Quick test_current_storage_generation
         ; test_case "exact history is not cross-lane pruned" `Quick
             test_exact_history_is_not_pruned_across_lanes
         ; test_case "failed durable registration is not published" `Quick

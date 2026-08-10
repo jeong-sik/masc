@@ -79,6 +79,10 @@ const KeeperPhaseDiagnosisSchema = object({
   current_phase: string(),
   derived_phase: string(),
   can_execute_turn: boolean(),
+  // Mirrors the thirteen fields of Keeper_state_machine_types.conditions in
+  // the order they are declared there, so a field added on one side is a
+  // visible gap here rather than a value the parser drops. test_keeper_-
+  // conditions_wire_parity pins the two lists against each other.
   conditions: object({
     launch_pending: boolean(),
     fiber_alive: boolean(),
@@ -90,7 +94,9 @@ const KeeperPhaseDiagnosisSchema = object({
     operator_paused: boolean(),
     stop_requested: boolean(),
     dead_tombstone_latched: boolean(),
+    restart_requested: boolean(),
     drain_complete: boolean(),
+    credential_archived: boolean(),
   }),
   determining_condition: nullable(string()),
   rows: array(KeeperPhaseDiagnosisRowSchema),

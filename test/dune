@@ -689,6 +689,17 @@
  (modules test_operator_control_snapshot_cache)
  (libraries alcotest yojson masc_test_deps eio_main))
 
+; Focused CI gate: the conditions wire vocabulary must match on both ends.
+; #26569 had the encoder emitting thirteen fields while the client zod object
+; declared eleven; zod strips undeclared keys, so two conditions never reached
+; the dashboard and nothing failed.
+
+(test
+ (name test_keeper_conditions_wire_parity)
+ (modules test_keeper_conditions_wire_parity)
+ (libraries masc_test_deps)
+ (deps ../dashboard/src/api/schemas/keeper-composite.ts))
+
 ; Focused CI gate for runtime TOML validity.
 
 (test

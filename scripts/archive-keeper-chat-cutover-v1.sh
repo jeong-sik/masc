@@ -74,6 +74,18 @@ owner_pid="${MASC_DEPLOYMENT_LEASE_OWNER_PID:-}"
   >/dev/null \
   || fail "BasePath lease proof is invalid"
 
+requested_base_path="$(cd "$BASE_PATH" && pwd -L)"
+requested_archive_parent="$(dirname "$ARCHIVE_DIR")"
+archive_name="$(basename "$ARCHIVE_DIR")"
+[[ -n "$archive_name" && "$archive_name" != "." && "$archive_name" != ".." ]] \
+  || fail "archive destination has an invalid final component"
+requested_archive_parent_name="$(basename "$requested_archive_parent")"
+[[ "$requested_archive_parent_name" == "archive" ]] \
+  || fail "archive destination must be below the BasePath archive directory"
+requested_archive_runtime_root="$(dirname "$requested_archive_parent")"
+[[ -d "$requested_archive_runtime_root" && ! -L "$requested_archive_runtime_root" ]] \
+  || fail "archive runtime root is not an exact directory: $requested_archive_runtime_root"
+requested_archive_parent="$(cd "$requested_archive_runtime_root" && pwd -L)/archive"
 BASE_PATH="$(cd "$BASE_PATH" && pwd -P)"
 runtime_root="$BASE_PATH/.masc"
 keepers_root="$runtime_root/keepers"
@@ -81,13 +93,13 @@ archive_parent="$runtime_root/archive"
 
 [[ -d "$runtime_root" && ! -L "$runtime_root" ]] \
   || fail "runtime root is not an exact directory: $runtime_root"
+if [[ "$requested_archive_parent" != "$requested_base_path/.masc/archive" \
+      && "$requested_archive_parent" != "$archive_parent" ]]; then
+  fail "archive destination must be an immediate child of $archive_parent"
+fi
+ARCHIVE_DIR="$archive_parent/$archive_name"
 [[ ! -e "$ARCHIVE_DIR" && ! -L "$ARCHIVE_DIR" ]] \
   || fail "archive destination already exists: $ARCHIVE_DIR"
-[[ "$(dirname "$ARCHIVE_DIR")" == "$archive_parent" ]] \
-  || fail "archive destination must be an immediate child of $archive_parent"
-archive_name="$(basename "$ARCHIVE_DIR")"
-[[ -n "$archive_name" && "$archive_name" != "." && "$archive_name" != ".." ]] \
-  || fail "archive destination has an invalid final component"
 if [[ -e "$archive_parent" || -L "$archive_parent" ]]; then
   [[ -d "$archive_parent" && ! -L "$archive_parent" ]] \
     || fail "archive parent is not an exact directory: $archive_parent"

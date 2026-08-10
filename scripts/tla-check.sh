@@ -130,6 +130,8 @@ run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tl
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDeadRevivalTransaction.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperHeartbeat.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHeartbeat.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperLastBlockerLatch.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperLastBlockerLatch.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla" "KeeperHitlDeferred-blocking-buggy.cfg" "blocking-buggy"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperHitlDeferred.tla" "KeeperHitlDeferred-wake-buggy.cfg" "wake-buggy"

@@ -537,7 +537,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # Exact current count. The audit's documented categories explain why every
 # reported entry is not mechanically removable; the ratchet still forbids
 # adding another dead public export.
-DEAD_EXPORT_BASELINE = 549
+DEAD_EXPORT_BASELINE = 548
 
 
 def run_ratchet(count: int) -> int:

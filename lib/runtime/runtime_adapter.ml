@@ -501,11 +501,6 @@ let runtime_antigravity_effort = function
   | Runtime_schema.Antigravity_high -> Runtime_antigravity.High
 ;;
 
-let runtime_antigravity_execution_mode = function
-  | Runtime_schema.Antigravity_plan -> Runtime_antigravity.Plan
-  | Runtime_schema.Antigravity_accept_edits -> Runtime_antigravity.Accept_edits
-;;
-
 let antigravity_cli_execution (provider : Runtime_schema.provider)
     (spec : Runtime_schema.model_spec) : (Runtime_execution.t, string) result =
   match provider.transport with
@@ -522,34 +517,44 @@ let antigravity_cli_execution (provider : Runtime_schema.provider)
          provider.id)
   | Cli command ->
     (match provider.credentials, provider.antigravity_cli with
-     | Some _, _ ->
+     | None, _ ->
        Error
          (Printf.sprintf
-            "provider %S uses antigravity-cli and must not declare credentials; \
-             the official Antigravity client owns login state"
+            "provider %S uses antigravity-cli and requires a file credential \
+             naming the operator-owned OAuth source"
             provider.id)
-     | None, _ when not provider.is_non_interactive ->
+     | Some (Env _ | Inline _), _ ->
+       Error
+         (Printf.sprintf
+            "provider %S uses antigravity-cli and accepts only a file credential; \
+             OAuth token material must stay outside runtime.toml"
+            provider.id)
+     | Some (File oauth_source), _ when Filename.is_relative oauth_source ->
+       Error
+         (Printf.sprintf
+            "provider %S uses antigravity-cli with a relative OAuth source %S; \
+             the file credential path must be absolute"
+            provider.id
+            oauth_source)
+     | Some (File _), _ when not provider.is_non_interactive ->
        Error
          (Printf.sprintf
             "provider %S uses antigravity-cli and must declare \
              is-non-interactive = true"
             provider.id)
-     | None, None ->
+     | Some (File _), None ->
        Error
          (Printf.sprintf
             "provider %S uses antigravity-cli without typed Antigravity options"
             provider.id)
-     | None, Some options ->
+     | Some (File oauth_source), Some options ->
        Ok
          (Runtime_execution.Antigravity_cli
             { cli_path = command
             ; model = spec.api_name
             ; agent = options.agent
             ; effort = Option.map runtime_antigravity_effort options.effort
-            ; execution_mode =
-                runtime_antigravity_execution_mode options.execution_mode
-            ; sandbox = options.sandbox
-            ; disable_slash_commands = options.disable_slash_commands
+            ; oauth_source
             ; timeout_s = options.timeout_s
             }))
 ;;

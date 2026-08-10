@@ -40,6 +40,30 @@ val observe_raw_trace
     cancellation result. Reserved exceptions from the observation still
     propagate. *)
 
+val start_raw_trace
+  :  keeper_name:string
+  -> raw_trace:Agent_core.Raw_trace.t option
+  -> prompt:string
+  -> ?model:string
+  -> ?reasoning_effort:string
+  -> unit
+  -> Agent_core.Raw_trace.active_run option
+
+val finish_raw_error
+  :  keeper_name:string
+  -> Agent_core.Raw_trace.active_run option
+  -> Agent_core.Error.t
+  -> unit
+
+val finish_raw_success
+  :  keeper_name:string
+  -> Agent_core.Raw_trace.active_run option
+  -> Runtime_agent.run_result
+  -> Runtime_agent.run_result
+(** Complete one official-client RAW run. Observation failure cannot replace
+    the authoritative runtime result; a trace reference is returned only when
+    every assistant block and the terminal record were persisted. *)
+
 val resolve_reasoning_effort :
   enable_thinking:bool option ->
   reasoning_effort:Llm_provider.Reasoning_effort.t option ->

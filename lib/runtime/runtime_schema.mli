@@ -44,17 +44,9 @@ type antigravity_effort =
   | Antigravity_high
 [@@deriving show, eq]
 
-type antigravity_execution_mode =
-  | Antigravity_plan
-  | Antigravity_accept_edits
-[@@deriving show, eq]
-
 type antigravity_cli_options =
   { agent : string option
   ; effort : antigravity_effort option
-  ; execution_mode : antigravity_execution_mode
-  ; sandbox : bool
-  ; disable_slash_commands : bool
   ; timeout_s : float
   }
 [@@deriving show, eq]

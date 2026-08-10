@@ -79,9 +79,12 @@ normal_targets=(
   @test/runtest-test_keeper_official_client_host
   @test/runtest-test_runtime_codex_app_server
   @test/runtest-test_runtime_antigravity
+  @test/runtest-test_runtime_antigravity_home
+  @test/runtest-test_runtime_official_client_mcp_http
   @test/runtest-test_official_client_session_store
   @test/runtest-test_runtime_claude_code
   @test/runtest-test_runtime_claude_code_config
+  @test/runtest-test_keeper_antigravity_runtime
   @test/runtest-test_keeper_claude_code_runtime
   @test/runtest-test_server_dashboard_official_client_probe
   @test/runtest-test_host_fd_pressure_poller

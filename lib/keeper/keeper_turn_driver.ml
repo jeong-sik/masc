@@ -797,16 +797,109 @@ let run_named
              on_runtime_observation
          | Error _ -> ());
         codex_result, None
-      | Runtime_execution.Antigravity_cli _ ->
+      | Runtime_execution.Antigravity_cli config ->
+        let run_antigravity ~initial_messages () =
+          Keeper_antigravity_runtime.run
+            ~runtime_id:attempt_runtime_id
+            ~keeper_name
+            ~base_path
+            ~goal
+            ~goal_blocks
+            ~system_prompt
+            ~tools
+            ~initial_messages
+            ~model_input_projection
+            ~hooks
+            ~context_injector
+            ~context
+            ~event_bus
+            ~raw_trace
+            ~config
+        in
+        let run_projected_antigravity () =
+          let ({ Keeper_official_client_host.messages = projected_history
+               ; dropped_tool_messages
+               ; dropped_messages
+               ; dropped_blocks
+               } as projection)
+            =
+            Keeper_official_client_host.project_official_history initial_messages
+          in
+          if
+            not
+              (Keeper_official_client_host.history_projection_lossless projection)
+          then (
+            Log.Keeper.warn
+              "%s: official-client runtime %s history projection dropped %d \
+               tool message(s), %d unrepresentable message(s), %d non-text \
+               block(s); the text-only remainder is preserved"
+              keeper_name
+              attempt_runtime_id
+              dropped_tool_messages
+              dropped_messages
+              dropped_blocks;
+            emit_runtime_manifest
+              ~status:"degraded"
+              ~decision:
+                (`Assoc
+                  [ ( "routing_action"
+                    , `String "official_client_history_projected" )
+                  ; ( "routing_reason"
+                    , `String "official_client_wire_admits_text_only_history" )
+                  ; "history_kept_messages", `Int (List.length projected_history)
+                  ; "history_dropped_tool_messages", `Int dropped_tool_messages
+                  ; "history_dropped_messages", `Int dropped_messages
+                  ; "history_dropped_blocks", `Int dropped_blocks
+                  ])
+              Keeper_runtime_manifest.Runtime_routed);
+          run_antigravity ~initial_messages:projected_history ()
+        in
+        let antigravity_result =
+          match provider_config_transform, agent_core_checkpoint with
+          | Some _, _ ->
+            Error
+              (Agent_core.Error.Config
+                 (Agent_core.Error.InvalidConfig
+                    { field = "provider_config_transform"
+                    ; detail =
+                        "provider config transforms cannot target an antigravity-cli runtime"
+                    }))
+          | None, Some _ ->
+            Log.Keeper.info
+              "%s: official-client runtime %s resolves start-or-resume from \
+               its durable session store; the Agent Core checkpoint payload is not \
+               replayed"
+              keeper_name
+              attempt_runtime_id;
+            emit_runtime_manifest
+              ~status:"checkpoint_not_replayed"
+              ~decision:
+                (`Assoc
+                  [ ( "routing_action"
+                    , `String "official_client_checkpoint_not_replayed" )
+                  ; ( "routing_reason"
+                    , `String "official_client_session_store_owns_resume" )
+                  ])
+              Keeper_runtime_manifest.Runtime_routed;
+            run_projected_antigravity ()
+          | None, None -> run_projected_antigravity ()
+        in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-        ( Error
-            (Agent_core.Error.Config
-               (Agent_core.Error.InvalidConfig
-                  { field = "runtime_execution"
-                  ; detail =
-                      "antigravity-cli is configured but Keeper dispatch is not admitted"
-                  }))
-        , None )
+        let antigravity_result =
+          Result.bind antigravity_result (fun run_result ->
+            Keeper_turn_driver_try_provider.apply_accept
+              ~runtime_id:attempt_runtime_id
+              ~accept
+              run_result)
+        in
+        (match antigravity_result with
+         | Ok run_result ->
+           Option.iter
+             (fun observe ->
+               Option.iter observe run_result.Runtime_agent.runtime_observation)
+             on_runtime_observation
+         | Error _ -> ());
+        antigravity_result, None
       | Runtime_execution.Claude_code config ->
         let run_claude ~initial_messages () =
           Keeper_claude_code_runtime.run
@@ -823,6 +916,7 @@ let run_named
             ~context_injector
             ~context
             ~event_bus
+            ~raw_trace
             ~config
         in
         let claude_result =

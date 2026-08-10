@@ -696,6 +696,72 @@ let test_compaction_snapshots_cache_returns_warming_then_ready () =
       Yojson.Safe.Util.(ready |> member "count" |> to_int))
 ;;
 
+
+(* Clock groups fold the edge stream into a table of per-group accumulators.
+   The records are immutable, so each edge rebinds its entry; two edges in the
+   same turn must still land in one group with the count advanced and the
+   observed-at window spanning both. *)
+let test_clock_groups_accumulate_edges_per_turn () =
+  with_temp_dir @@ fun dir ->
+  let config = Workspace.default_config dir in
+  let keeper_name = "clock-group-keeper" in
+  let trace_id = "trace-clock-groups" in
+  let row event =
+    Keeper_runtime_manifest.make
+      ~keeper_name
+      ~trace_id
+      ~keeper_turn_id:7
+      ~event
+      ~status:"observed"
+      ()
+    |> Keeper_runtime_manifest.to_json
+  in
+  let path = Keeper_runtime_manifest.path_for_trace config ~keeper_name ~trace_id in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let channel = open_out path in
+  List.iter
+    (fun json -> Printf.fprintf channel "%s\n" (Yojson.Safe.to_string json))
+    [ row Keeper_runtime_manifest.Turn_started
+    ; row Keeper_runtime_manifest.Turn_finished
+    ];
+  close_out channel;
+  let scan =
+    Runtime_lens_scan.read_runtime_manifest_scan
+      ~config
+      ~keeper_name
+      ~trace_id
+      ~limit:8
+      ()
+  in
+  check int "both rows decoded" 2 scan.total_rows;
+  let open Yojson.Safe.Util in
+  let groups =
+    match
+      Server_dashboard_http_keeper_runtime_lens_clock_groups
+      .runtime_lens_clock_groups_json
+        scan
+    with
+    | `List groups -> groups
+    | _ -> fail "clock groups projection must be a list"
+  in
+  let turn_groups =
+    List.filter (fun g -> g |> member "group_type" |> to_string = "turn") groups
+  in
+  check int "one turn group" 1 (List.length turn_groups);
+  match turn_groups with
+  | [ group ] ->
+    check int "both edges folded into it" 2 (group |> member "edge_count" |> to_int);
+    check bool
+      "the terminal event closes the group"
+      true
+      (group |> member "closed" |> to_bool);
+    check bool
+      "distinct events are kept"
+      true
+      (List.length (group |> member "events" |> to_list) >= 2)
+  | _ -> fail "expected exactly one turn group"
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -742,6 +808,10 @@ let () =
             "folding a row leaves the argument scan untouched"
             `Quick
             test_runtime_manifest_scan_fold_leaves_input_untouched
+        ; test_case
+            "clock groups accumulate edges per turn"
+            `Quick
+            test_clock_groups_accumulate_edges_per_turn
         ] )
     ; ( "checkpoint_inventory"
       , [ test_case

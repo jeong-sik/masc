@@ -62,7 +62,7 @@ test "$mode" = plan
 test "$sandbox" -eq 1
 test "$slash_commands_disabled" -eq 1
 if [ "$turns" -eq 1 ]; then test "$new_project" -eq 1; else test "$new_project" -eq 0; fi
-printf '%%s' "$2" > %s
+cat > %s
 printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture","cwd":%s,"tools":["call_mcp_tool"],"permission_mode":"always-proceed"}}\n' "$conversation"
 python3 - <<'PY'
 import json
@@ -365,12 +365,8 @@ let test_keeper_projects_mcp_tool_and_settles () =
         | None -> fail "initial Antigravity prompt was not captured"
       in
       check bool
-        "fresh prompt fits argv boundary"
+        "fresh prompt preserves oldest atom"
         true
-        (String.length prompt <= Runtime_antigravity.max_prompt_bytes);
-      check bool
-        "fresh prompt drops complete old atoms"
-        false
         (String_util.contains_substring prompt "history-00");
       check bool
         "fresh prompt keeps newest atom"

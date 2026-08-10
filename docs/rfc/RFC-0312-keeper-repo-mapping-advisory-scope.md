@@ -3,11 +3,11 @@ rfc: "0312"
 title: "Keeper repo mappings are advisory default scope, not access caps"
 status: Accepted
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-08-11
 author: vincent + codex
 supersedes: []
 superseded_by: null
-related: ["0104", "0219", "0305", "0309"]
+related: ["0104", "0219", "0305"]
 implementation_prs:
   - "#23359"
 ---
@@ -61,8 +61,10 @@ policy layers:
   is a known repository.
 - Destructive filesystem and shell operations remain gated by the existing
   execution policy.
-- GitHub mutation capability is governed by the typed capability-policy axis in
-  RFC-0309, not by keeper repo mappings.
+- Repo-hosting CLI mutations (for example `gh`) are not governed by keeper
+  repo mappings. Like every external effect, they are judged per operation by
+  the non-hierarchical effect Gate
+  (`docs/spec/05-keeper-agent.md#inv-keeper-008-non-hierarchical-effect-gate`).
 
 Mutable checkout metadata, including a playground clone's `.git/config` remote
 URLs, must not authorize repository identity. It can inform diagnostics, but it

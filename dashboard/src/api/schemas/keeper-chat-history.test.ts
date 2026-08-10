@@ -216,12 +216,12 @@ describe('safeParseKeeperChatHistoryMessage', () => {
 
   it('passes delivery_key through without dropping the row, whatever its shape', () => {
     const out = safeParseKeeperChatHistoryMessage(
-      validMessage({ delivery_key: { kind: 'direct_request', request_id: 'kmsg-1' } }),
+      validMessage({ delivery_key: { kind: 'operation', operation_id: 'kmsg-1' } }),
     )
     expect(out).not.toBeNull()
-    expect(out?.delivery_key).toEqual({ kind: 'direct_request', request_id: 'kmsg-1' })
+    expect(out?.delivery_key).toEqual({ kind: 'operation', operation_id: 'kmsg-1' })
     // Malformed / unexpected shapes are tolerated too: the consumer extracts
-    // request_id tolerantly, so the row must survive.
+    // operation_id tolerantly, so the row must survive.
     expect(
       safeParseKeeperChatHistoryMessage(validMessage({ delivery_key: 'kmsg-1' })),
     ).not.toBeNull()

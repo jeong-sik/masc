@@ -96,15 +96,11 @@ Each migration PR:
 - `GET /api/v1/keepers/:name/chat/history` — each message object may carry
   an optional `delivery_key` field: the exact delivery identity persisted by
   the idempotent append-once write paths, e.g.
-  `{"kind":"direct_request","request_id":"kmsg-..."}` (other `kind` values:
-  `async_request` with `request_id`, `queue_receipts` with `receipt_ids`).
-  Rows written by the plain append paths omit the field entirely. The
-  dashboard reconciles optimistic rows using exact typed identity:
-  `request_id` for direct/async delivery, or an intersecting `receipt_ids`
-  value for queue delivery. If neither side carries a delivery key, an exact
-  non-empty `turn_ref` match is the final fallback. It never reconciles by
-  role/text. Consumers MUST treat `delivery_key` as optional (absent on
-  legacy and plain-append rows).
+  `{"kind":"operation","operation_id":"kmsg-..."}`. Rows written by the
+  plain append paths omit the field entirely. The dashboard reconciles an
+  accepted operation with transcript rows by exact `operation_id`. Consumers
+  MUST treat `delivery_key` as optional because plain-append rows do not carry
+  operation provenance.
 
 ## Non-goals
 

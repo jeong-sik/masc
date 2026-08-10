@@ -84,11 +84,10 @@ let test_identity_rejects_schema_drift () =
     | Ok _ -> failf "%s was accepted" label
   in
   reject
-    "removed direct identity"
+    "unknown delivery identity"
     (`Assoc
-        [ "kind", `String "direct_request"
-        ; "request_id", `String "kmsg-direct-test"
-        ; "legacy_id", `String "legacy"
+        [ "kind", `String "unknown"
+        ; "operation_id", `String "kmsg-unknown-test"
         ])
     Identity.delivery_key_of_yojson;
   reject

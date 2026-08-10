@@ -63,7 +63,7 @@ let test_mutation_bodies_are_closed () =
     [ {|{"input":{"message":"edited"},"obsolete_authority":"old"}|}
     ; {|{"input":{"message":"edited"}}|}
     ; {|{"input":{},"input":{}}|}
-    ; {|{"message":"flattened legacy body"}|}
+    ; {|{"message":"flattened body"}|}
     ];
   List.iter
     (fun mutation ->

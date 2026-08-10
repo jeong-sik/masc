@@ -1377,9 +1377,9 @@ export function finalizeAssistantEntry(
 // Server ids win when both sides have already converged. User/assistant
 // rows converge through exact producer identities only: operation id first,
 // then turn_ref when neither side carries an operation identity. Conflicting
-// identities fail closed. The legacy
-// role+text heuristic stays hard-cut because it collapsed distinct same-text
-// turns. Tool rows only dedup by their explicit `tool-<tool_call_id>` id.
+// identities fail closed. Role+text is not an identity because it collapses
+// distinct same-text turns. Tool rows only dedup by their explicit
+// `tool-<tool_call_id>` id.
 function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,

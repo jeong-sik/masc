@@ -30,7 +30,7 @@ import type {
   TelemetryEntry,
   TelemetrySourceSummary,
 } from '../../api/dashboard'
-import { keepers, boardPosts, boardTotal, lastBoardRefreshAt } from '../../store'
+import { keepers, boardPosts, boardTotal, lastBoardRefreshAt, shellRuntimeResolution } from '../../store'
 import type { Goal } from '../../types/core'
 
 const overviewMocks = vi.hoisted(() => ({
@@ -626,7 +626,6 @@ describe('pickAttentionKeepers', () => {
 describe('computeOverviewStats', () => {
   it('returns zeroed stats when empty', () => {
     expect(computeOverviewStats([], [])).toEqual({
-      run: 0,
       att: 0,
       hot: 0,
       avgCtx: null,
@@ -636,16 +635,18 @@ describe('computeOverviewStats', () => {
     })
   })
 
-  it('counts running keepers and context pressure', () => {
+  it('counts roster totals and context pressure without a running count', () => {
     const keepers = [
       makeKeeper({ name: 'a', status: 'active', context_ratio: 0.9, total_turns: 10 }),
       makeKeeper({ name: 'b', status: 'offline', context_ratio: 0.5, total_turns: 5 }),
     ]
     const stats = computeOverviewStats(keepers, [])
-    expect(stats.run).toBe(1)
     expect(stats.total).toBe(2)
     expect(stats.hot).toBe(1)
     expect(stats.traces).toBe(15)
+    // Execution counts are not derivable from roster rows; they come from the
+    // runtime-health fleet projection instead.
+    expect('run' in stats).toBe(false)
   })
 
   it('counts tasks assigned to keepers', () => {
@@ -1021,6 +1022,74 @@ describe('Overview prototype surface', () => {
       '예약 HITL',
       '진행 심의',
     ])
+  })
+
+  it('shows keeper execution counts from the runtime-health fleet projection', () => {
+    keepers.value = [
+      makeKeeper({ name: 'a', status: 'active' }),
+      makeKeeper({ name: 'b', status: 'active' }),
+    ]
+    shellRuntimeResolution.value = {
+      fleet_safety: {
+        paused_keepers_health: { count: 1 },
+        keeper_fleet_safety: {
+          running_keeper_fiber_count: 4,
+          recovering_keeper_fiber_count: 3,
+          executable_keeper_fiber_count: 7,
+        },
+      },
+    } as never
+
+    const { container } = render(h(Overview, null))
+    // The roster holds 2 active-looking rows; the projection reports 4 running.
+    // The projection wins.
+    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('4 / 2')
+    expect(container.querySelector('[data-testid="fleet-stat-running"] .v')?.textContent).toBe('4')
+    expect(container.querySelector('[data-testid="fleet-stat-recovering"] .v')?.textContent).toBe('3')
+    expect(container.querySelector('[data-testid="fleet-stat-paused"] .v')?.textContent).toBe('1')
+
+    keepers.value = []
+    shellRuntimeResolution.value = null
+  })
+
+  it('shows no keeper execution count when the fleet projection is missing', () => {
+    // Three rows that the roster heuristic would have counted as running. With
+    // no fleet projection the surface must say it does not know, not print an
+    // estimate derived from these status strings.
+    keepers.value = [
+      makeKeeper({ name: 'a', status: 'active' }),
+      makeKeeper({ name: 'b', status: 'busy' }),
+      makeKeeper({ name: 'c', status: 'idle' }),
+    ]
+    shellRuntimeResolution.value = null
+
+    const { container } = render(h(Overview, null))
+    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('— / 3')
+    expect(container.querySelector('[data-testid="fleet-stat-running"] .v')?.textContent).toBe('—')
+    expect(container.querySelector('[data-testid="fleet-stat-recovering"] .v')?.textContent).toBe('—')
+    expect(container.querySelector('[data-testid="fleet-stat-paused"] .v')?.textContent).toBe('—')
+
+    keepers.value = []
+  })
+
+  it('renders a projection-reported zero as zero, not as unknown', () => {
+    keepers.value = [makeKeeper({ name: 'a', status: 'active' })]
+    shellRuntimeResolution.value = {
+      fleet_safety: {
+        keeper_fleet_safety: {
+          running_keeper_fiber_count: 0,
+          recovering_keeper_fiber_count: 0,
+          paused_keeper_count: 0,
+        },
+      },
+    } as never
+
+    const { container } = render(h(Overview, null))
+    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('0 / 1')
+    expect(container.querySelector('[data-testid="fleet-stat-running"] .v')?.textContent).toBe('0')
+
+    keepers.value = []
+    shellRuntimeResolution.value = null
   })
 
   it('marks deep-link KPI cells as buttons', () => {

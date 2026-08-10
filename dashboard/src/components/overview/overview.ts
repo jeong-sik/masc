@@ -19,7 +19,7 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { AgentAvatar } from './agent-avatar'
 import { SCHED_TERMINAL_SET } from '../v2/schedule-constants'
-import { tasks, keepers, boardPosts, boardTotal, lastBoardRefreshAt, goals, fusionRuns } from '../../store'
+import { tasks, keepers, boardPosts, boardTotal, lastBoardRefreshAt, goals, fusionRuns, shellRuntimeResolution } from '../../store'
 import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
 import type {
   DashboardScheduledAutomation,
@@ -41,7 +41,11 @@ import {
   type KeeperPhaseToken,
 } from '../../lib/fleet-tone'
 import { UNKNOWN_STATUS_LABEL } from '../../lib/format-string'
-import { keeperRowLooksRunning } from '../../runtime-counts'
+import {
+  keeperRowLooksRunning,
+  resolveKeeperFleetExecutionCounts,
+  type KeeperFleetExecutionCounts,
+} from '../../runtime-counts'
 import { createAsyncResource, type AsyncResource, type AsyncState } from '../../lib/async-state'
 import { navigate } from '../../router'
 import { gateData } from '../gate-signals'
@@ -127,8 +131,12 @@ export function pickAttentionKeepers(keeperList: readonly Keeper[]): Keeper[] {
 
 // ─── KPI stats ───────────────────────────────────────────────────────────────
 
+/** Roster-derived counts. Keeper *execution* counts deliberately live outside
+ *  this type: they come from the runtime-health fleet projection via
+ *  {!resolveKeeperFleetExecutionCounts}, because a roster row's status string
+ *  describes what the row last recorded, not whether a keeper fiber is running
+ *  right now. */
 export interface OverviewStats {
-  run: number
   att: number
   hot: number
   avgCtx: number | null
@@ -147,7 +155,6 @@ export function keeperRuntimeLabel(keeper: Keeper): string {
 
 export function computeOverviewStats(keeperList: readonly Keeper[], taskList: readonly Task[]): OverviewStats {
   const total = keeperList.length
-  const run = keeperList.filter(keeperRowLooksRunning).length
   const att = pickAttentionKeepers(keeperList).length
   const hot = keeperList.filter(k => (k.context_ratio ?? 0) >= 0.85).length
   const traces = keeperList.reduce((sum, k) => sum + keeperTraceCount(k), 0)
@@ -155,12 +162,22 @@ export function computeOverviewStats(keeperList: readonly Keeper[], taskList: re
   const keeperNames = new Set(keeperList.map(k => k.name.toLowerCase()))
   const tasks = taskList.filter(t => t.assignee && keeperNames.has(t.assignee.toLowerCase())).length
 
+  // Still roster-scoped: context_ratio is only carried on roster rows, and the
+  // fleet projection reports running keepers as a count without the per-keeper
+  // ratios needed to average them.
   const liveCtx = keeperList.filter(k => keeperRowLooksRunning(k) && typeof k.context_ratio === 'number')
   const avgCtx = liveCtx.length
     ? Math.round(liveCtx.reduce((sum, k) => sum + (k.context_ratio ?? 0), 0) / liveCtx.length * 100)
     : null
 
-  return { run, att, hot, avgCtx, tasks, traces, total }
+  return { att, hot, avgCtx, tasks, traces, total }
+}
+
+/** Renders a fleet execution count. `—` means the runtime-health fleet
+ *  projection did not report the number; a rendered `0` always means the
+ *  projection reported zero. */
+export function fleetCountText(value: number | null | undefined): string {
+  return typeof value === 'number' ? String(value) : '—'
 }
 
 // ─── Cross-surface digest (overview.jsx:71-92) ───────────────────────────────
@@ -1016,16 +1033,18 @@ function OverviewKpi({
 // its surface. Labels and `sub` separators are copied verbatim from the prototype.
 function OverviewKpiStrip({
   stats,
+  fleet,
   digest,
   approvalQueueState,
 }: {
   stats: OverviewStats
+  fleet: KeeperFleetExecutionCounts | null
   digest: OverviewDigest
   approvalQueueState: NonNullable<typeof gateData.value>['approval_queue_state'] | undefined
 }) {
   return html`
     <section class="ov-kpis v2-overview-kpis" aria-label="Cross-surface KPIs" data-testid="overview-kpis">
-      <${OverviewKpi} label="실행 중 keeper" value=${String(stats.run)} sub=${` / ${stats.total}`} tone="ok" testId="kpi-run" onClick=${() => navigate('monitoring')} />
+      <${OverviewKpi} label="실행 중 keeper" value=${fleetCountText(fleet?.running)} sub=${` / ${stats.total}`} tone=${fleet?.running != null ? 'ok' : undefined} testId="kpi-run" onClick=${() => navigate('monitoring')} />
       <${OverviewKpi} label="주의 필요" value=${String(stats.att)} tone=${stats.att > 0 ? 'bad' : undefined} testId="kpi-att" onClick=${() => navigate('monitoring')} />
       ${approvalQueueState && approvalQueueState.state !== 'ready'
         ? html`<${OverviewKpi}
@@ -1225,10 +1244,12 @@ function DomainCard({
 
 function OverviewDomainSection({
   stats,
+  fleet,
   digest,
   approvalQueueState,
 }: {
   stats: OverviewStats
+  fleet: KeeperFleetExecutionCounts | null
   digest: OverviewDigest
   approvalQueueState: NonNullable<typeof gateData.value>['approval_queue_state'] | undefined
 }) {
@@ -1436,7 +1457,9 @@ function OverviewDomainSection({
       <!-- FLEET summary · overview.jsx:252-260 -->
       <${DomainCard} title="Fleet 요약" linkLabel="Monitor" nav=${{ tab: 'monitoring' }} testId="domain-fleet">
         <div class="ov-fleet-sum">
-          <div class="ov-fleet-stat"><span class="v ok">${stats.run}</span><span class="k">실행</span></div>
+          <div class="ov-fleet-stat" data-testid="fleet-stat-running"><span class="v ok">${fleetCountText(fleet?.running)}</span><span class="k">실행</span></div>
+          <div class="ov-fleet-stat" data-testid="fleet-stat-recovering"><span class=${`v ${(fleet?.recovering ?? 0) > 0 ? 'warn' : ''}`}>${fleetCountText(fleet?.recovering)}</span><span class="k">복구</span></div>
+          <div class="ov-fleet-stat" data-testid="fleet-stat-paused"><span class="v">${fleetCountText(fleet?.paused)}</span><span class="k">일시정지</span></div>
           <div class="ov-fleet-stat"><span class="v warn">${stats.att}</span><span class="k">주의</span></div>
           <div class="ov-fleet-stat"><span class=${`v ${stats.hot > 0 ? 'bad' : ''}`}>${stats.hot}</span><span class="k">압박</span></div>
           <div class="ov-fleet-stat"><span class="v">${stats.total}</span><span class="k">전체</span></div>
@@ -1474,6 +1497,11 @@ export function Overview() {
     overviewFullHealthResource.state.value.status === 'loaded'
       ? overviewFullHealthResource.state.value.data.schedule_runner ?? null
       : null
+  // Keeper execution counts come from the runtime-health fleet projection the
+  // shell already holds — the same `keeper_fleet_safety_health_json` payload
+  // `/health?full=1` embeds, so reading it here adds no request.
+  const fleetSafety = shellRuntimeResolution.value?.fleet_safety ?? null
+  const fleet = useMemo(() => resolveKeeperFleetExecutionCounts(fleetSafety), [fleetSafety])
   const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
   const digest = useMemo(
     () => computeOverviewDigest(openGateRequests, goalList, fusionList, scheduledAutomation, scheduleRunnerStatus),
@@ -1487,6 +1515,7 @@ export function Overview() {
         <${OverviewHeader} />
         <${OverviewKpiStrip}
           stats=${stats}
+          fleet=${fleet}
           digest=${digest}
           approvalQueueState=${approvalQueueState}
         />
@@ -1496,6 +1525,7 @@ export function Overview() {
         </div>
         <${OverviewDomainSection}
           stats=${stats}
+          fleet=${fleet}
           digest=${digest}
           approvalQueueState=${approvalQueueState}
         />

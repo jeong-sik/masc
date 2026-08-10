@@ -991,10 +991,13 @@
   margin-top: 4px;
 }
 
-/* FLEET domain — summary tiles — surfaces.css:207-211 */
+/* FLEET domain — summary tiles — surfaces.css:207-211
+ * Six tiles (실행/복구/일시정지/주의/압박/전체) over three columns fill two rows
+ * exactly. An empty trailing track would expose the container --border-soft as
+ * a solid band through the 1px gap, the same failure documented on .ov-kpis. */
 .ov-fleet-sum {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 1px;
   background: var(--border-soft);
   border: 1px solid var(--border-main);

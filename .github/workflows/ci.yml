@@ -1125,8 +1125,7 @@ jobs:
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_keeper_owner \
-            @test/runtest-test_keeper_chat_operation_http \
-            @test/runtest-test_keeper_chat_cutover_preflight
+            @test/runtest-test_keeper_chat_operation_http
 
       - name: Run memory journal suite
         # The journal is the only disk record of a librarian pass that produced

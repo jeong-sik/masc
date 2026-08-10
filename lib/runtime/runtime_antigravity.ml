@@ -226,6 +226,7 @@ and step_type =
   | User_input
   | Internal
   | Checkpoint
+  | Unrecognized of string
 
 and result_status =
   | Success
@@ -261,18 +262,26 @@ let parse_step_state stage value =
     value
 ;;
 
-let parse_step_type stage value =
-  closed_string
-    stage
-    "step_type"
-    (function
-      | "agent_response" -> Some Agent_response
-      | "tool" -> Some Tool
-      | "user_input" -> Some User_input
-      | "unknown" -> Some Internal
-      | "checkpoint" -> Some Checkpoint
-      | _ -> None)
-    value
+(* [step_type] decides one thing: whether this step is a tool step, for the two
+   tool counters. Every non-[Tool] value is behaviourally identical, so an
+   upstream value we have not seen carries no decision we could get wrong — but
+   rejecting it ended the turn and parked the session, which blocked every later
+   turn for that Keeper until an operator resolved it by hand. Live 2026-08-10:
+   Antigravity started emitting "system_message" and taskmaster stopped
+   (#28027). The value is kept in [Unrecognized] so the wire vocabulary drift is
+   still visible rather than silently normalised away.
+
+   [state], [permission_mode] and [status] stay closed: each of those does
+   decide something. *)
+let parse_step_type _stage value =
+  Ok
+    (match value with
+     | "agent_response" -> Agent_response
+     | "tool" -> Tool
+     | "user_input" -> User_input
+     | "unknown" -> Internal
+     | "checkpoint" -> Checkpoint
+     | other -> Unrecognized other)
 ;;
 
 let parse_result_status stage value =

@@ -22,14 +22,36 @@ type transcript_slot =
       }
   | Terminal_assistant
 
+(** The persisted provenance pair. A durable row carries both halves or
+    neither: a delivery key without its transcript slot cannot answer
+    "was this exact row already appended?", and a slot without its key
+    belongs to no delivery. Constructing the pair is the only way to
+    persist either half. *)
+type delivery_provenance =
+  { delivery_key : delivery_key
+  ; transcript_slot : transcript_slot
+  }
+
 val delivery_key_to_yojson : delivery_key -> Yojson.Safe.t
 val delivery_key_of_yojson : Yojson.Safe.t -> (delivery_key, string) result
 val delivery_key_equal : delivery_key -> delivery_key -> bool
-
-(** Deterministic, filesystem-safe derivation used only as a record filename.
-    The full typed identity remains inside every durable record. *)
-val delivery_key_file_stem : delivery_key -> string
-
 val transcript_slot_to_yojson : transcript_slot -> Yojson.Safe.t
 val transcript_slot_of_yojson : Yojson.Safe.t -> (transcript_slot, string) result
 val transcript_slot_equal : transcript_slot -> transcript_slot -> bool
+
+(** The two JSON fields a row carries for {!delivery_provenance}, written
+    together. *)
+val delivery_provenance_fields :
+  delivery_provenance -> (string * Yojson.Safe.t) list
+
+(** Reads the pair back out of a row's fields. [Ok None] when neither field
+    is present; [Error] when only one is present or either fails to decode.
+    Both durable readers decode through this function, so the pair
+    invariant cannot drift between them; they differ only in what they do
+    with [Error] — see {!Keeper_chat_store.chat_message} and the
+    append-once paths. *)
+val delivery_provenance_of_fields :
+  (string * Yojson.Safe.t) list -> (delivery_provenance option, string) result
+
+val delivery_provenance_equal :
+  delivery_provenance -> delivery_provenance -> bool

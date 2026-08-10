@@ -1878,6 +1878,65 @@ let test_turn_ref_malformed_reads_none () =
       | messages ->
           Alcotest.failf "expected 1 message, got %d" (List.length messages))
 
+(* Half a provenance pair answers no question, so the row reader refuses to
+   decode it: a delivery_key without its transcript_slot cannot say which row
+   of the delivery this is. It is a read drop, not a row drop — the message
+   still loads, exactly as for a malformed turn_ref. *)
+let test_half_provenance_reads_none () =
+  let base_dir = temp_base_path "keeper-chat-store-half-provenance" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-half-provenance" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before = drop_value invalid_payload in
+      write_file path
+        ({|{"id":"half-pair","role":"user","content":"x","ts":1.0,"delivery_key":{"kind":"operation","operation_id":"kmsg-half-pair"}}|}
+        ^ "\n");
+      (match K.load ~base_dir ~keeper_name with
+       | [ m ] ->
+           Alcotest.(check bool) "row survives the half pair" true
+             (String.equal m.K.content "x");
+           Alcotest.(check bool) "half pair reads as None" true
+             (m.K.delivery_key = None)
+       | messages ->
+           Alcotest.failf "expected 1 message, got %d" (List.length messages));
+      Alcotest.(check (float 0.001)) "drop counted as invalid payload"
+        1.0
+        (drop_value invalid_payload -. before))
+
+(* The same undecodable row is not cosmetic: the append-once reader must
+   fail rather than skip it, because skipping would report "not appended
+   yet" for a delivery that may already be on disk. This pins the
+   [chat_message.delivery_key] contract in the .mli. *)
+let test_half_provenance_blocks_append_once () =
+  let base_dir = temp_base_path "keeper-chat-store-half-provenance-append" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-half-provenance-append" in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        ({|{"id":"half-pair","role":"user","content":"x","ts":1.0,"delivery_key":{"kind":"operation","operation_id":"kmsg-half-pair"}}|}
+        ^ "\n");
+      let request_id =
+        match
+          Keeper_chat_delivery_identity.Request_id.of_string "kmsg-after-half"
+        with
+        | Ok request_id -> request_id
+        | Error detail -> Alcotest.fail detail
+      in
+      let delivery_key = Keeper_chat_delivery_identity.Operation request_id in
+      match
+        K.append_user_message_once ~base_dir ~keeper_name ~delivery_key
+          ~content:"blocked" ()
+      with
+      | Error _ -> ()
+      | Ok _ ->
+          Alcotest.fail
+            "append-once accepted a file holding an undecodable provenance row")
+
 (* The idempotent append-once paths persist the exact delivery identity on
    the row; load decodes it back and to_json_array exposes it verbatim so the
    dashboard can reconcile a history reload against its optimistic turn rows
@@ -2188,6 +2247,10 @@ let () =
             `Quick test_delivery_key_absent_on_plain_append;
           Alcotest.test_case "malformed delivery_key reads as None" `Quick
             test_delivery_key_malformed_reads_none;
+          Alcotest.test_case "half a provenance pair reads as None" `Quick
+            test_half_provenance_reads_none;
+          Alcotest.test_case "half a provenance pair blocks append-once"
+            `Quick test_half_provenance_blocks_append_once;
           Alcotest.test_case
             "transcript_of_messages joins turn_ref (RFC-0233 §7)" `Quick
             test_transcript_of_messages_joins_turn_ref;

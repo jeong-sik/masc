@@ -288,6 +288,46 @@ let test_keeper_projects_mcp_tool_and_settles () =
       check bool "turn capability cleared" false (Sys.file_exists mcp_path))
 ;;
 
+(* A start turn seeds a fresh vendor conversation with the rendered history in
+   one argv entry, so the seed is bounded by the exec boundary. The window keeps
+   the newest messages: the goal answers the most recent turn, so trimming from
+   the tail would drop exactly the context the goal refers to. *)
+let test_history_window_keeps_the_newest_messages_within_budget () =
+  let module W = Keeper_antigravity_runtime.For_testing in
+  let messages = [ "oldest"; "middle"; "newest" ] in
+  (* Every message fits: nothing is dropped and the order is preserved. *)
+  let full = W.window_history_to_budget ~budget:1000 messages in
+  check int "admits every message" 3 full.admitted;
+  check int "drops nothing" 0 full.dropped;
+  check string "keeps declared order" "oldest\n\nmiddle\n\nnewest" full.history;
+  (* "middle\n\nnewest" is 14 bytes; "oldest" plus a separator would need 22. *)
+  let windowed = W.window_history_to_budget ~budget:14 messages in
+  check int "admits what fits" 2 windowed.admitted;
+  check int "reports what it left out" 1 windowed.dropped;
+  check string "keeps the newest, in order" "middle\n\nnewest" windowed.history;
+  (* A budget under the newest message alone admits nothing rather than
+     emitting a half message: the caller then hits the typed argv rejection,
+     which names the boundary, instead of sending a truncated turn. *)
+  let none = W.window_history_to_budget ~budget:3 messages in
+  check int "admits nothing" 0 none.admitted;
+  check int "reports the whole history as dropped" 3 none.dropped;
+  check string "produces no history" "" none.history
+;;
+
+let test_history_window_budget_accounts_for_the_prompt_frame () =
+  let module W = Keeper_antigravity_runtime.For_testing in
+  (* The caller subtracts this from the argv budget, so it has to be the real
+     cost of the frame rather than a guess. *)
+  check
+    int
+    "frame cost is the two labels plus the two section joins"
+    (String.length "SYSTEM INSTRUCTIONS:\n"
+     + String.length "CURRENT GOAL:\n"
+     + String.length "\n\n"
+     + String.length "\n\n")
+    W.fixed_prompt_label_bytes
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -296,6 +336,16 @@ let () =
             "projects MCP tool and settles"
             `Quick
             test_keeper_projects_mcp_tool_and_settles
+        ] )
+    ; ( "start-turn history window"
+      , [ test_case
+            "keeps the newest messages within the argv budget"
+            `Quick
+            test_history_window_keeps_the_newest_messages_within_budget
+        ; test_case
+            "the budget accounts for the prompt frame"
+            `Quick
+            test_history_window_budget_accounts_for_the_prompt_frame
         ] )
     ]
 ;;

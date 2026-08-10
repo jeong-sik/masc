@@ -365,6 +365,35 @@ let test_admission_is_process_free () =
   | Ok () -> fail "invalid deterministic config passed admission"
 ;;
 
+(* The CLI takes the prompt as one argv entry and documents no stdin mode, so a
+   prompt larger than a single argv entry admits is rejected here rather than
+   surfacing as Failure("execve: Argument list too long") from Unix. Measured on
+   a live deployment before this bound existed: a keeper rendered 1064246 bytes
+   of history into the start turn and every turn died with that untyped
+   exception, reported to the operator as "Provider 'antigravity_cli'
+   unavailable". *)
+let test_prompt_over_the_argv_budget_is_rejected_before_spawn () =
+  let config =
+    Runtime_antigravity.default_config ~cwd:"/tmp" ~model:"gemini-fixture"
+  in
+  let at_limit = String.make Runtime_antigravity.max_prompt_argv_bytes 'x' in
+  (match Runtime_antigravity.validate_turn config ~prompt:at_limit with
+   | Ok () -> ()
+   | Error error ->
+     failf "a prompt exactly at the budget must be admitted: %s"
+       (Runtime_antigravity.error_to_string error));
+  let over = at_limit ^ "x" in
+  match Runtime_antigravity.validate_turn config ~prompt:over with
+  | Ok () -> fail "a prompt over the argv budget must be rejected"
+  | Error (Runtime_antigravity.Prompt_too_large { bytes; limit; _ }) ->
+    (* The operator has to see both numbers to know how much to shed. *)
+    check int "reports the measured prompt size" (String.length over) bytes;
+    check int "reports the budget" Runtime_antigravity.max_prompt_argv_bytes limit
+  | Error error ->
+    failf "the rejection must be typed as Prompt_too_large: %s"
+      (Runtime_antigravity.error_to_string error)
+;;
+
 let test_live_start_and_resume () =
   match Sys.getenv_opt "MASC_ANTIGRAVITY_LIVE", Sys.getenv_opt "MASC_ANTIGRAVITY_MODEL" with
   | Some "1", Some model ->
@@ -463,6 +492,10 @@ let () =
             test_unknown_protocol_vocabulary_fails_closed
         ; test_case "typed timeout" `Quick test_timeout_is_typed
         ; test_case "process-free admission" `Quick test_admission_is_process_free
+        ; test_case
+            "a prompt over the argv budget is rejected before spawn"
+            `Quick
+            test_prompt_over_the_argv_budget_is_rejected_before_spawn
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

@@ -71,8 +71,23 @@ type error =
   | Turn_failed of string
   | Process_exited of string
   | Timeout of float
+  | Prompt_too_large of
+      { bytes : int
+      ; limit : int
+      ; detail : string
+      }
+      (** The rendered prompt exceeds what a single argv entry admits. The CLI
+          has no stdin prompt mode, so the caller must shorten the prompt rather
+          than retry it. *)
 
 val error_to_string : error -> string
+
+val max_prompt_argv_bytes : int
+(** Largest prompt, in bytes, that {!run_turn} will pass to the CLI. Bounded by
+    Linux MAX_ARG_STRLEN (32 pages) less a margin for the fixed flags, the cwd
+    path, and the environment. Callers that render history into the prompt
+    should window it to this budget; {!validate_turn} rejects anything larger
+    with {!Prompt_too_large} instead of letting [execve] raise. *)
 
 val validate_turn :
   ?conversation_mode:conversation_mode ->

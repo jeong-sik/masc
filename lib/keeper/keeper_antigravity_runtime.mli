@@ -17,3 +17,21 @@ val run :
   raw_trace:Agent_core.Raw_trace.t option ->
   config:Runtime_execution.antigravity_cli ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
+
+module For_testing : sig
+  type history_window =
+    { history : string
+    ; admitted : int
+    ; dropped : int
+    }
+
+  val window_history_to_budget : budget:int -> string list -> history_window
+  (** Keeps the most recent rendered messages that fit [budget] bytes including
+      the separators between them, and reports how many older ones were left
+      out. The start-turn prompt travels as one argv entry, so this bound is the
+      exec boundary rather than the model's context window. *)
+
+  val fixed_prompt_label_bytes : int
+  (** Bytes the prompt frame costs before any content, charged against the argv
+      budget by the caller. *)
+end

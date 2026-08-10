@@ -91,6 +91,11 @@ type error =
   | Turn_failed of string
   | Process_exited of string
   | Timeout of float
+  | Prompt_too_large of
+      { bytes : int
+      ; limit : int
+      ; detail : string
+      }
 
 exception Runtime_error of error
 
@@ -103,6 +108,12 @@ let error_to_string = function
   | Turn_failed detail -> "Antigravity turn failed: " ^ detail
   | Process_exited detail -> "Antigravity CLI exited before completion: " ^ detail
   | Timeout seconds -> Printf.sprintf "Antigravity turn timed out after %.3fs" seconds
+  | Prompt_too_large { bytes; limit; detail } ->
+    Printf.sprintf
+      "Antigravity prompt is %d bytes; the exec boundary admits %d (%s)"
+      bytes
+      limit
+      detail
 ;;
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
@@ -369,6 +380,31 @@ let execution_mode_to_string = function
   | Accept_edits -> "accept-edits"
 ;;
 
+(* The Antigravity CLI takes the whole prompt as one argv entry (`--print
+   <prompt>`); `agy --help` documents no stdin prompt mode, and piping a prompt
+   with `--print` unset makes the CLI read the following flag as the prompt
+   instead. So the prompt is bounded by the exec boundary, not by the wire.
+
+   Linux caps a *single* argv entry at MAX_ARG_STRLEN = 32 pages = 131072 bytes
+   regardless of the larger ARG_MAX total; macOS has no per-entry cap but bounds
+   argv + envp together at ARG_MAX (1048576 on darwin 25). The per-entry Linux
+   cap is the smaller of the two, so it is the portable bound. The margin below
+   covers the fixed flags, the cwd path, and the environment, none of which the
+   prompt controls.
+
+   A keeper whose prompt exceeds this does not fail once: on a start turn the
+   prompt carries the rendered history, so it re-renders and re-fails on every
+   later turn while the history only grows. Measured on a live deployment: a
+   keeper with 3255 canonical messages rendered 1064246 bytes and every turn
+   died with Failure("execve: Argument list too long") — an untyped exception
+   from Unix, escaping as "Provider 'antigravity_cli' unavailable". *)
+let max_prompt_argv_bytes = 131072 - 8192
+
+let prompt_argv_overflow ~prompt =
+  let bytes = String.length prompt in
+  if bytes <= max_prompt_argv_bytes then None else Some (bytes, max_prompt_argv_bytes)
+;;
+
 let validate_config config ~conversation_mode ~prompt =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
@@ -381,6 +417,12 @@ let validate_config config ~conversation_mode ~prompt =
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
   else
+    match prompt_argv_overflow ~prompt with
+    | Some (bytes, limit) ->
+      Error
+        (Prompt_too_large
+           { bytes; limit; detail = "antigravity CLI takes the prompt as one argv entry" })
+    | None ->
     match config.agent, conversation_mode with
     | Some agent, _ when String.trim agent = "" ->
       Error (Invalid_config "agent must not be empty when present")

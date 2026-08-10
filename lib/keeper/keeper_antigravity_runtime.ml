@@ -37,6 +37,13 @@ let runtime_error_to_core_error = function
       (Llm_provider.Error.ParseError
          { detail = Printf.sprintf "%s: %s" stage detail })
   | Runtime_antigravity.State_callback_failed detail -> internal_error detail
+  (* Not a provider fault and not retryable: the prompt never reached the CLI.
+     With the start-turn history windowed to the argv budget this only fires
+     when the system prompt and goal alone overflow, which is an operator-side
+     condition, so it surfaces as an invalid input on the prompt field rather
+     than as provider capacity (which implies a retry_after). *)
+  | Runtime_antigravity.Prompt_too_large _ as error ->
+    config_error ~field:"prompt" (Runtime_antigravity.error_to_string error)
 ;;
 
 let recovery_failure_of_runtime_error = function
@@ -49,6 +56,13 @@ let recovery_failure_of_runtime_error = function
   | Runtime_antigravity.State_callback_failed _ ->
     Session_store.State_persistence_failed
   | Runtime_antigravity.Turn_failed _ -> Session_store.Provider_rejected
+  (* The rejection happens before spawn, so the vendor never admitted this turn
+     and the claim can be released without recovery — which is what
+     [Transient_spawn_failed] means on the store's axis. It says nothing about
+     whether a retry of the same input would succeed; that is the lane
+     classifier's question, and [runtime_error_to_core_error] answers it with a
+     non-retryable config error. *)
+  | Runtime_antigravity.Prompt_too_large _ -> Session_store.Transient_spawn_failed
 ;;
 
 let home_error_to_core_error error =
@@ -66,9 +80,9 @@ let render_message (message : Agent_core.Types.message) =
   | Agent_core.Types.Tool -> Ok ("TOOL:\n" ^ text)
 ;;
 
-let render_messages messages =
+let render_message_list messages =
   let rec loop rendered = function
-    | [] -> Ok (String.concat "\n\n" (List.rev rendered))
+    | [] -> Ok (List.rev rendered)
     | message :: rest ->
       let* rendered_message = render_message message in
       loop (rendered_message :: rendered) rest
@@ -76,19 +90,65 @@ let render_messages messages =
   loop [] messages
 ;;
 
-let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
+let history_separator = "\n\n"
+
+(* "SYSTEM INSTRUCTIONS:\n", "CURRENT GOAL:\n", and the two blank-line joins
+   between the three sections. Charged against the argv budget so the history
+   window does not have to be told about the frame it sits in. *)
+let fixed_prompt_label_bytes =
+  String.length "SYSTEM INSTRUCTIONS:\n"
+  + String.length "CURRENT GOAL:\n"
+  + (2 * String.length history_separator)
+;;
+
+type history_window =
+  { history : string
+  ; admitted : int
+  ; dropped : int
+  }
+
+(* The start-turn prompt seeds a fresh vendor conversation; from turn two on the
+   CLI owns the transcript and [prompt_for_turn] sends only the goal. That seed
+   travels as one argv entry, so it is bounded by the exec boundary rather than
+   by the model's context window, and an unbounded seed does not fail once: it
+   re-renders and re-fails on every later turn while the history only grows.
+
+   Keep the most recent messages, since a truncated tail would drop the turn the
+   goal responds to. [admitted]/[dropped] are returned rather than logged here so
+   the caller can put the loss on the keeper's own log line — a silent window
+   would read as "the model saw everything". *)
+let window_history_to_budget ~budget messages =
+  let rec take acc used admitted = function
+    | [] -> { history = String.concat history_separator acc; admitted; dropped = 0 }
+    | (rendered : string) :: older ->
+      let separator = if admitted = 0 then 0 else String.length history_separator in
+      let next = used + separator + String.length rendered in
+      if next > budget
+      then
+        { history = String.concat history_separator acc
+        ; admitted
+        ; dropped = List.length older + 1
+        }
+      else take (rendered :: acc) next (admitted + 1) older
+  in
+  take [] 0 0 (List.rev messages)
+;;
+
+let prompt_for_turn ~is_resume ~goal ~history_budget_bytes (prepared : Host.prepared_turn) =
   if is_resume
-  then Ok goal
+  then Ok (goal, None)
   else
-    let* history = render_messages prepared.messages in
+    let* rendered = render_message_list prepared.messages in
+    let window = window_history_to_budget ~budget:history_budget_bytes rendered in
     Ok
-      ([ String_util.trim_to_option prepared.system_prompt
-         |> Option.map (fun value -> "SYSTEM INSTRUCTIONS:\n" ^ value)
-       ; String_util.trim_to_option history
-       ; Some ("CURRENT GOAL:\n" ^ goal)
-       ]
-       |> List.filter_map Fun.id
-       |> String.concat "\n\n")
+      ( [ String_util.trim_to_option prepared.system_prompt
+          |> Option.map (fun value -> "SYSTEM INSTRUCTIONS:\n" ^ value)
+        ; String_util.trim_to_option window.history
+        ; Some ("CURRENT GOAL:\n" ^ goal)
+        ]
+        |> List.filter_map Fun.id
+        |> String.concat "\n\n"
+      , if window.dropped = 0 then None else Some window )
 ;;
 
 let tool_spec (tool : Host.dynamic_tool) =
@@ -206,7 +266,31 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       | None -> Ok goal
       | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
     in
-    let* prompt = prompt_for_turn ~is_resume ~goal prepared in
+    (* What is left for history after the fixed parts of the prompt. Negative or
+       tiny budgets are not special-cased here: the window then admits nothing,
+       and [Runtime_antigravity.validate_turn] still rejects with
+       [Prompt_too_large] if the system prompt and goal alone overflow, which is
+       the honest answer — there is nothing to shorten from this side. *)
+    let history_budget_bytes =
+      Runtime_antigravity.max_prompt_argv_bytes
+      - String.length prepared.system_prompt
+      - String.length goal
+      - fixed_prompt_label_bytes
+    in
+    let* prompt, windowed = prompt_for_turn ~is_resume ~goal ~history_budget_bytes prepared in
+    Option.iter
+      (fun window ->
+        Log.Keeper.warn
+          "%s: official-client runtime %s seeded its start turn with the most \
+           recent %d of %d history message(s); %d dropped to fit the %d-byte \
+           argv budget"
+          keeper_name
+          runtime_id
+          window.admitted
+          (window.admitted + window.dropped)
+          window.dropped
+          Runtime_antigravity.max_prompt_argv_bytes)
+      windowed;
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools
@@ -621,3 +705,15 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
       ~raw_trace
       ~config)
 ;;
+
+module For_testing = struct
+  type nonrec history_window = history_window =
+    { history : string
+    ; admitted : int
+    ; dropped : int
+    }
+
+  (* TEL-OK: pure aliases of the windowing decision above; no effect. *)
+  let window_history_to_budget = window_history_to_budget
+  let fixed_prompt_label_bytes = fixed_prompt_label_bytes
+end

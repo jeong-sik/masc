@@ -367,7 +367,11 @@ async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
     jsonrpc: '2.0',
     method: 'tools/list',
     params: cursor ? { cursor } : {},
-    id: Date.now(),
+    // A uuid, like every other request in this file. `Date.now()` gave two
+    // calls in the same millisecond the same JSON-RPC id, and repeated the
+    // whole value space roughly every 16m40s once it was taken modulo a
+    // million.
+    id: randomUuid(),
   }, binding)
   const parsed = parseMcpListResponse(text)
   if (parsed.error) {
@@ -380,10 +384,19 @@ async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
   return parsed.result
 }
 
-const MAX_TOOL_LIST_PAGES = 50
+/* Pagination ends when the server stops handing back a cursor. The failure
+   worth guarding is a server that never stops -- one that returns the same
+   cursor forever, or cycles through a set of them -- and the answer to that is
+   progress, not a page budget.
 
+   A fixed cap answered a different question. It refused a server that
+   legitimately had more pages than the number someone picked, and it let a
+   non-progressing server run for that many round trips before saying anything.
+   Seen cursors decide it directly: a cursor that repeats means the server has
+   not advanced, and that is the error. */
 export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
   const all: McpToolsListResult['tools'] = []
+  const seenCursors = new Set<string>()
   let cursor: string | undefined
   let pages = 0
   do {
@@ -391,10 +404,13 @@ export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
     all.push(...page.tools)
     cursor = page.nextCursor
     pages++
-    if (pages >= MAX_TOOL_LIST_PAGES && cursor) {
-      throw new Error(
-        `tools/list: reached maximum pagination limit of ${MAX_TOOL_LIST_PAGES} pages while server indicated more pages (pagesFetched=${pages}, toolsCollected=${all.length}, lastCursor=${cursor})`
-      )
+    if (cursor !== undefined) {
+      if (seenCursors.has(cursor)) {
+        throw new Error(
+          `tools/list: server repeated cursor ${cursor} after ${pages} page(s), so pagination is not advancing (toolsCollected=${all.length})`
+        )
+      }
+      seenCursors.add(cursor)
     }
   } while (cursor)
   return all

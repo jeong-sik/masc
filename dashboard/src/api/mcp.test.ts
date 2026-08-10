@@ -193,6 +193,56 @@ describe('MCP 2026-07-28 dashboard client', () => {
     expect(body.params.arguments).toEqual({})
   })
 
+  // Pagination stops on absence of a cursor, and the guard is progress rather
+  // than a page budget: #26771 capped at 50 pages, which refused a server with
+  // 51 legitimate pages and let a non-progressing one run 50 round trips first.
+  it('rejects a server that repeats a cursor instead of advancing', async () => {
+    const page = () => new Response(JSON.stringify({
+      result: { tools: [{ name: 'one', description: '', inputSchema: {} }], nextCursor: 'same' },
+    }), { status: 200 })
+    fetchWithTimeout.mockResolvedValueOnce(page()).mockResolvedValueOnce(page())
+
+    const { listAllMcpTools } = await import('./mcp')
+    await expect(listAllMcpTools()).rejects.toThrow(/repeated cursor same/)
+    // Two round trips, not fifty: the second page is where non-progress shows.
+    expect(callsByMethod('tools/list')).toHaveLength(2)
+  })
+
+  it('follows more pages than the retired fixed cap allowed', async () => {
+    const PAGES = 60
+    for (let i = 0; i < PAGES; i++) {
+      const last = i === PAGES - 1
+      fetchWithTimeout.mockResolvedValueOnce(new Response(JSON.stringify({
+        result: {
+          tools: [{ name: `tool-${i}`, description: '', inputSchema: {} }],
+          ...(last ? {} : { nextCursor: `cursor-${i}` }),
+        },
+      }), { status: 200 }))
+    }
+
+    const { listAllMcpTools } = await import('./mcp')
+    await expect(listAllMcpTools()).resolves.toHaveLength(PAGES)
+  })
+
+  it('gives every tools/list page a distinct request id', async () => {
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        result: { tools: [{ name: 'one', description: '', inputSchema: {} }], nextCursor: 'next' },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        result: { tools: [{ name: 'two', description: '', inputSchema: {} }] },
+      }), { status: 200 }))
+
+    const { listAllMcpTools } = await import('./mcp')
+    await listAllMcpTools()
+
+    const ids = callsByMethod('tools/list')
+      .map(([, init]) => JSON.parse(init.body as string).id)
+    expect(new Set(ids).size).toBe(ids.length)
+    // A wall-clock id is a number; these are uuids.
+    for (const id of ids) expect(typeof id).toBe('string')
+  })
+
   it('uses current metadata on every tools/list page', async () => {
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({

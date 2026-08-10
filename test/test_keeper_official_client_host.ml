@@ -272,6 +272,85 @@ let test_typed_blocks_are_preserved_as_canonical_json () =
     (encoded_message_json message |> Yojson.Safe.to_string)
 ;;
 
+
+let msg role text : Agent_core.Types.message =
+  { role; content = [ Agent_core.Types.Text text ]; name = None
+  ; tool_call_id = None; metadata = [] }
+;;
+
+let prepare ?max_prompt_bytes messages =
+  Host.prepare_turn
+    ~runtime_label:"Fixture"
+    ~keeper_name:"seed-fixture"
+    ~turn_count:1
+    ~system_prompt:"SYS"
+    ~tools:[]
+    ~initial_messages:messages
+    ~model_input_projection:None
+    ~hooks:None
+    ~configured_reasoning_effort:None
+    ~max_prompt_bytes
+;;
+
+let text_of (m : Agent_core.Types.message) =
+  m.content
+  |> List.filter_map (function Agent_core.Types.Text t -> Some t | _ -> None)
+  |> String.concat ""
+;;
+
+(* An official-client turn 1 seeds the vendor conversation with the whole
+   history, so an unbounded seed is what pins a keeper at turn_count = 1
+   forever: it overflows the model window, never reaches turn 2, and a fresh
+   session makes the next turn a start turn again. Measured on the live fleet
+   as claude_code ~2,227,119 tokens against a 1,000,000 limit and codex "ran
+   out of room in the model's context window".
+
+   The history is 240 messages because the cut is quantized to
+   [atoms_per_window] (60): a handful of messages has no cut position below
+   "keep everything", so a small fixture would exercise the refusal path
+   instead of the windowing path and prove nothing about either. Real keepers
+   carry thousands. *)
+let seed_history () =
+  List.init 240 (fun i ->
+    msg
+      (if i mod 2 = 0 then Agent_core.Types.User else Agent_core.Types.Assistant)
+      (Printf.sprintf "history message %03d" i))
+;;
+
+let test_seed_is_bounded_and_keeps_the_newest () =
+  let messages = seed_history () in
+  let total = List.fold_left (fun acc m -> acc + Host.measure_message_bytes m) 0 messages in
+  (* Controls first. Without them a bound that dropped everything, or one that
+     refused every turn, would still look correct below. *)
+  (match prepare messages with
+   | Error _ -> fail "an undeclared ceiling must not fail the turn"
+   | Ok prepared ->
+     check int "keeps every message" 240 (List.length prepared.messages);
+     check int "reports no drop" 0 prepared.seed_dropped_atoms);
+  (match prepare ~max_prompt_bytes:(total * 2) messages with
+   | Error _ -> fail "a generous ceiling must not fail the turn"
+   | Ok prepared ->
+     check int "keeps every message" 240 (List.length prepared.messages);
+     check int "reports no drop" 0 prepared.seed_dropped_atoms);
+  (* Half the history's worth of budget has to cut, and what survives must be
+     the newest: the goal answers the most recent turn, so trimming the tail
+     would drop exactly the context it refers to. *)
+  match prepare ~max_prompt_bytes:(total / 2) messages with
+  | Error e ->
+    fail ("a partial fit must window rather than fail: " ^ Agent_core.Error.to_string e)
+  | Ok prepared ->
+    check bool "drops something" true (prepared.seed_dropped_atoms > 0);
+    check bool "keeps fewer than all" true (List.length prepared.messages < 240);
+    let kept =
+      List.fold_left (fun acc m -> acc + Host.measure_message_bytes m) 0 prepared.messages
+    in
+    check bool "fits the declared budget" true (kept <= total / 2);
+    (match List.rev prepared.messages with
+     | last :: _ ->
+       check string "keeps the newest" "history message 239" (text_of last)
+     | [] -> fail "the window must not empty the history")
+;;
+
 let () =
   run
     "keeper official-client host"
@@ -318,6 +397,12 @@ let () =
             "typed blocks preserve canonical JSON"
             `Quick
             test_typed_blocks_are_preserved_as_canonical_json
+        ] )
+    ; ( "start-turn seed budget"
+      , [ test_case
+            "bounds the seed and keeps the newest messages"
+            `Quick
+            test_seed_is_bounded_and_keeps_the_newest
         ] )
     ]
 ;;

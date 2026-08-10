@@ -231,6 +231,27 @@ type model_spec =
         exists (antigravity [timeout-s]) and the adapter default otherwise.
         Resolved via {!Runtime.turn_timeout_s_of_runtime_id} →
         {!Runtime_inference.resolve_turn_timeout_s}. *)
+  ; max_prompt_bytes : int option
+    (** [max-prompt-bytes] — per-model ceiling on the history an official-client
+        start turn seeds its conversation with, in bytes.
+
+        An official-client turn 1 sends the whole projected history; from turn 2
+        the client owns the transcript and MASC sends only the goal. So a keeper
+        whose history outgrows the model's window cannot fail once — it fails on
+        turn 1, never reaches turn 2, and re-sends a larger history next cycle.
+        Recovery does not break the loop: a fresh session resets the counter,
+        which makes the next turn a start turn again.
+
+        Declared in bytes rather than derived from [max-context] because MASC
+        has no tokenizer: converting a token budget would need a
+        bytes-per-token constant with nothing to justify it, and a wrong
+        constant either truncates silently or overflows silently. This mirrors
+        [max-request-body-bytes] on the Agent_core side, which is likewise an
+        operator-declared byte cap.
+
+        [None] applies no ceiling, which is the behaviour every deployment has
+        today. Resolved via {!Runtime.max_prompt_bytes_of_runtime_id} →
+        {!Runtime_inference.resolve_max_prompt_bytes}. *)
   ; capabilities : model_capabilities option
   }
 [@@deriving show, eq]

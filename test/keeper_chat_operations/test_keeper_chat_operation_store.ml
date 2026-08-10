@@ -320,11 +320,38 @@ let test_terminal_row_is_sql_immutable () =
        check bool "terminal update rejected" false (Sqlite3.Rc.is_success rc))
 ;;
 
+
+(* [closed] is an [Atomic] so that the test-and-set in [close] is one step and
+   exactly one caller reaches [Sqlite3.db_close]. Two things have to hold and
+   neither was covered: a second close is a no-op that still reports success,
+   and every operation after a close is refused rather than reaching the freed
+   handle. *)
+let test_close_is_idempotent_and_refuses_later_operations () =
+  let directory = Filename.temp_dir "keeper-chat-operations-close" "" in
+  let path = Filename.concat directory Store.For_testing.database_file in
+  let store = store_ok (Store.open_or_create ~path) in
+  store_ok (Store.close store);
+  store_ok (Store.close store);
+  let operation_id =
+    match Operation.Operation_id.of_string "op-after-close" with
+    | Ok id -> id
+    | Error detail -> fail ("operation id fixture rejected: " ^ detail)
+  in
+  (match Store.get store operation_id with
+   | Ok _ -> fail "get after close must be refused"
+   | Error _ -> ());
+  match Store.close store with
+  | Ok () -> ()
+  | Error _ -> fail "a repeated close must stay successful"
+;;
+
 let () =
   run
     "keeper-chat-operation-store"
     [ ( "store"
       , [ test_case "schema identity and budget" `Quick test_schema_identity_and_budget
+        ; test_case "close is idempotent and refuses later operations" `Quick
+            test_close_is_idempotent_and_refuses_later_operations
         ; test_case "exact idempotency and terminal dedupe" `Quick
             test_exact_idempotency_and_terminal_dedupe
         ; test_case "FIFO edit move cancel" `Quick test_fifo_edit_move_cancel

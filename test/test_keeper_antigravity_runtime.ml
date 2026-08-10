@@ -27,6 +27,7 @@ let write_file ~mode path contents =
 
 let fixture_script ~base_path =
   let path = Filename.concat base_path "agy-fixture.sh" in
+  let prompt_path = Filename.concat base_path "antigravity-prompt.txt" in
   let script =
     Printf.sprintf
       {|#!/bin/sh
@@ -58,6 +59,7 @@ test "$expect_mode" -eq 0
 test "$mode" = plan
 test "$sandbox" -eq 1
 test "$slash_commands_disabled" -eq 1
+printf '%%s' "$2" > %s
 printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture","cwd":%s,"tools":["call_mcp_tool"],"permission_mode":"always-proceed"}}\n' "$conversation"
 python3 - <<'PY'
 import json
@@ -102,6 +104,7 @@ printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","
                (Filename.concat base_path ".masc")
                "official-clients")
             "antigravity/antigravity-fixture"))
+      (shell_quote prompt_path)
       (Yojson.Safe.to_string (`String base_path))
   in
   write_file ~mode:0o700 path script;
@@ -233,6 +236,16 @@ let test_keeper_projects_mcp_tool_and_settles () =
         "tool arguments"
         {|{"marker":"from-antigravity"}|}
         (Yojson.Safe.to_string !observed);
+      let prompt_path = Filename.concat base_path "antigravity-prompt.txt" in
+      let prompt = In_channel.with_open_bin prompt_path In_channel.input_all in
+      check bool
+        "prompt preserves prior tool role"
+        true
+        (String_util.contains_substring prompt {|"role":"tool"|});
+      check bool
+        "prompt preserves prior tool output"
+        true
+        (String_util.contains_substring prompt "prior tool output");
       let trace_ref =
         match !observed_trace_ref with
         | Some trace_ref -> trace_ref

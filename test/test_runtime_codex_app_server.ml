@@ -855,7 +855,7 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
 ;;
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
-    ?base_path ?raw_trace_path
+    ?(initial_messages = []) ?base_path ?raw_trace_path
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model () =
   let owns_base_path = Option.is_none base_path in
@@ -905,7 +905,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ~base_path
                       ~goal
                       ~tools
-                      ~initial_messages:[]
+                      ~initial_messages
                       ?model_input_projection
                       ?hooks
                       ?context_injector
@@ -925,6 +925,97 @@ let test_keeper_dispatches_codex_turn_runtime () =
        | Ok result ->
          check string "Keeper response" "MASC_SUBSCRIPTION_OK" (keeper_response_text result);
          check bool "measured observation" true (Option.is_some result.runtime_observation))
+;;
+
+let test_keeper_preserves_typed_history_on_codex_wire () =
+  let capture_path = Filename.temp_file "masc-codex-typed-history-" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove capture_path)
+    (fun () ->
+       let assistant_message : Agent_core.Types.message =
+         { role = Assistant
+         ; content =
+             [ ToolUse
+                 { id = "prior-call"
+                 ; name = "prior_tool"
+                 ; input = `Assoc [ "path", `String "README.md" ]
+                 }
+             ]
+         ; name = None
+         ; tool_call_id = None
+         ; metadata = []
+         }
+       in
+       let tool_message =
+         Agent_core.Types.tool_result_msg
+           ~tool_use_id:"prior-call"
+           ~content:"prior tool output"
+           ()
+       in
+       let injected = {|{"id":4,"result":{}}|} in
+       let turn_after_injection =
+         {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
+       in
+       with_fixture
+         ~capture_path
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; injected
+         ; turn_after_injection
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~initial_messages:[ assistant_message; tool_message ]
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> ());
+       let requests =
+         In_channel.with_open_bin capture_path (fun input ->
+           In_channel.input_lines input |> List.map Yojson.Safe.from_string)
+       in
+       let items =
+         requests
+         |> List.find (fun json -> Yojson.Safe.Util.member "id" json = `Int 4)
+         |> Yojson.Safe.Util.member "params"
+         |> Yojson.Safe.Util.member "items"
+         |> Yojson.Safe.Util.to_list
+       in
+       check int "typed history item count" 2 (List.length items);
+       check
+         (list string)
+         "wire roles"
+         [ "assistant"; "user" ]
+         (List.map
+            (fun item ->
+               item
+               |> Yojson.Safe.Util.member "role"
+               |> Yojson.Safe.Util.to_string)
+            items);
+       List.iter2
+         (fun expected item ->
+            let encoded =
+              item
+              |> Yojson.Safe.Util.member "content"
+              |> Yojson.Safe.Util.to_list
+              |> List.hd
+              |> Yojson.Safe.Util.member "text"
+              |> Yojson.Safe.Util.to_string
+              |> Yojson.Safe.from_string
+              |> Yojson.Safe.Util.member "message"
+            in
+            check string
+              "canonical history message"
+              (Keeper_context_core.message_to_json expected |> Yojson.Safe.to_string)
+              (Yojson.Safe.to_string encoded))
+         [ assistant_message; tool_message ]
+         items)
 ;;
 
 let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
@@ -2089,6 +2180,10 @@ let () =
             "Keeper dispatches Codex runtime"
             `Quick
             test_keeper_dispatches_codex_turn_runtime
+        ; test_case
+            "Keeper preserves typed history on Codex wire"
+            `Quick
+            test_keeper_preserves_typed_history_on_codex_wire
         ; test_case
             "Keeper Codex RAW contains tool and response"
             `Quick

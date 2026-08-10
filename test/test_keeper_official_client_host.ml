@@ -224,100 +224,52 @@ let msg role content : Agent_core.Types.message =
 
 let text value = Agent_core.Types.Text value
 
-let projection_counts
-    { Host.messages = _; dropped_tool_messages; dropped_messages; dropped_blocks } =
-  dropped_tool_messages, dropped_messages, dropped_blocks
+let encoded_message_json message =
+  let encoded = Host.encode_history_message message |> Yojson.Safe.from_string in
+  let open Yojson.Safe.Util in
+  check string
+    "envelope schema"
+    "masc.official-client-context-message.v1"
+    (encoded |> member "schema" |> to_string);
+  encoded |> member "message"
 ;;
 
-(* Feeding the projected output back through the strict [text_of_blocks] both
-   extracts the kept text and proves the projection satisfies the runtime's
-   admission invariant. Expected values below stay literal. *)
-let projected_texts (projection : Host.history_projection) =
-  List.map
-    (fun (message : Agent_core.Types.message) ->
-      match
-        Host.text_of_blocks
-          ~runtime_label:"Test"
-          ~field:"projection"
-          message.content
-      with
-      | Ok value -> value
-      | Error _ -> fail "projected message still holds non-text blocks")
-    projection.Host.messages
+let test_text_history_is_preserved_verbatim () =
+  let message = msg Agent_core.Types.User [ text "first"; text "second" ] in
+  check string "plain text" "first\nsecond" (Host.encode_history_message message)
 ;;
 
-let test_lossless_history_is_preserved_verbatim () =
-  let projection =
-    Host.project_official_history
-      [ msg Agent_core.Types.User [ text "prior user turn" ]
-      ; msg Agent_core.Types.Assistant [ text "prior assistant reply" ]
+let test_tool_message_is_preserved_as_canonical_json () =
+  let message =
+    Agent_core.Types.tool_result_msg
+      ~tool_use_id:"call-1"
+      ~content:"tool output"
+      ()
+  in
+  check string
+    "canonical tool message"
+    (Keeper_context_core.message_to_json message |> Yojson.Safe.to_string)
+    (encoded_message_json message |> Yojson.Safe.to_string)
+;;
+
+let test_typed_blocks_are_preserved_as_canonical_json () =
+  let message =
+    msg
+      Agent_core.Types.Assistant
+      [ Agent_core.Types.Thinking
+          { content = "prior provider reasoning"; signature = None }
+      ; text "visible reply"
+      ; Agent_core.Types.ToolUse
+          { id = "call-1"
+          ; name = "prior_tool"
+          ; input = `Assoc [ "path", `String "README.md" ]
+          }
       ]
   in
-  check
-    (list string)
-    "kept texts"
-    [ "prior user turn"; "prior assistant reply" ]
-    (projected_texts projection);
-  check (triple int int int) "no drops" (0, 0, 0) (projection_counts projection);
-  check bool "lossless" true (Host.history_projection_lossless projection)
-;;
-
-let test_tool_messages_are_dropped_and_counted () =
-  let projection =
-    Host.project_official_history
-      [ msg Agent_core.Types.User [ text "prior user turn" ]
-      ; Agent_core.Types.tool_result_msg
-          ~tool_use_id:"call-1"
-          ~content:"tool output"
-          ()
-      ]
-  in
-  check (list string) "kept texts" [ "prior user turn" ] (projected_texts projection);
-  check
-    (triple int int int)
-    "tool message dropped"
-    (1, 0, 0)
-    (projection_counts projection);
-  check bool "lossy" false (Host.history_projection_lossless projection)
-;;
-
-let test_non_text_blocks_are_stripped_from_kept_messages () =
-  let projection =
-    Host.project_official_history
-      [ msg
-          Agent_core.Types.Assistant
-          [ Agent_core.Types.Thinking
-              { content = "hidden reasoning"; signature = None }
-          ; text "visible reply"
-          ; Agent_core.Types.ToolUse
-              { id = "call-1"; name = "prior_tool"; input = `Assoc [] }
-          ]
-      ]
-  in
-  check (list string) "kept texts" [ "visible reply" ] (projected_texts projection);
-  check
-    (triple int int int)
-    "blocks stripped"
-    (0, 0, 2)
-    (projection_counts projection)
-;;
-
-let test_fully_unrepresentable_message_is_dropped () =
-  let projection =
-    Host.project_official_history
-      [ msg
-          Agent_core.Types.Assistant
-          [ Agent_core.Types.ToolUse
-              { id = "call-1"; name = "prior_tool"; input = `Assoc [] }
-          ]
-      ]
-  in
-  check (list string) "no kept texts" [] (projected_texts projection);
-  check
-    (triple int int int)
-    "message dropped"
-    (0, 1, 1)
-    (projection_counts projection)
+  check string
+    "canonical typed message"
+    (Keeper_context_core.message_to_json message |> Yojson.Safe.to_string)
+    (encoded_message_json message |> Yojson.Safe.to_string)
 ;;
 
 let () =
@@ -353,23 +305,19 @@ let () =
             `Quick
             test_cancellation_records_terminal_raw_observation
         ] )
-    ; ( "history projection"
+    ; ( "history encoding"
       , [ test_case
-            "lossless history is preserved verbatim"
+            "text history is preserved verbatim"
             `Quick
-            test_lossless_history_is_preserved_verbatim
+            test_text_history_is_preserved_verbatim
         ; test_case
-            "tool messages are dropped and counted"
+            "tool messages preserve canonical JSON"
             `Quick
-            test_tool_messages_are_dropped_and_counted
+            test_tool_message_is_preserved_as_canonical_json
         ; test_case
-            "non-text blocks are stripped from kept messages"
+            "typed blocks preserve canonical JSON"
             `Quick
-            test_non_text_blocks_are_stripped_from_kept_messages
-        ; test_case
-            "fully unrepresentable message is dropped"
-            `Quick
-            test_fully_unrepresentable_message_is_dropped
+            test_typed_blocks_are_preserved_as_canonical_json
         ] )
     ]
 ;;

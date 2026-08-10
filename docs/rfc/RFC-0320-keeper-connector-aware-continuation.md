@@ -7,7 +7,7 @@ updated: 2026-07-13
 author: vincent (+ Claude Opus 4.8)
 supersedes: []
 superseded_by: null
-related: ["0315", "connector-deferred-reply-via-chat-queue", "connector-ambient-attention-wake"]
+related: ["0315", "connector-ambient-attention-wake"]
 implementation_prs: []
 ---
 
@@ -49,9 +49,9 @@ adversarial 검증에서 교정된 사실: 대시보드-소스 queued 턴의 결
 
 ### 1.5 기존 RFC와의 경계
 
-- `RFC-connector-deferred-reply-via-chat-queue` — busy-path connector 메시지를 chat queue로 drain (구현: #22798/#23446, stale Draft/[] 메타에도 실질 구현됨). **Discord inbound 한정.**
+- Keeper Owner chat operations — busy/idle 구분 없이 connector 메시지를 동일한 operation ledger로 수락한다.
 - `RFC-connector-ambient-attention-wake` — idle keeper가 ambient connector 메시지 인지 (구현: #22818/#22825). **Discord ambient 한정.**
-- 두 RFC 모두 **inbound** dispatch/ambient를 다루며, `Hitl_resolved` 및 나머지 event-queue wake의 **outbound continuation connector-blindness는 어느 쪽도 닫지 않는다.** 이 RFC가 그 gap을 닫는다.
+- 두 경로 모두 **inbound** dispatch/ambient를 다루며, `Hitl_resolved` 및 나머지 event-queue wake의 **outbound continuation connector-blindness는 닫지 않는다.** 이 RFC가 그 gap을 닫는다.
 
 ## 2. 원칙 — continuation channel을 일급으로
 

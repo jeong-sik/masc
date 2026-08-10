@@ -904,7 +904,7 @@ let handle_person_note_set ~config ~meta ~args =
 
 (* Slack bot token, resolved through the config boundary ({!Env_config_slack})
    so [SLACK_BOT_TOKEN] is read from one place — shared with the in-process
-   gateway and the chat-queue consumer — rather than a direct env lookup here. *)
+   gateway and Owner connector delivery — rather than a direct env lookup here. *)
 let slack_token_opt = Env_config_slack.bot_token_opt
 
 let connector_post_gate_input ~connector ~channel_id ~content ?blocks () =

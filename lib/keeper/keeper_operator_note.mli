@@ -2,10 +2,10 @@
 
     An instruction that is true for one turn — "the openssl decision landed,
     task-195 can resume" — had no path that matched its lifetime. Board posts
-    need a tool call to be read. Chat queue messages accumulate in the
-    conversation. [Explicit_write] memory reaches the recall block and stays
-    there until the librarian drops it, which is how a one-turn fact becomes a
-    permanent rule; #26729 is that shape.
+    need a tool call to be read. Chat operations accumulate in the conversation.
+    [Explicit_write] memory reaches the recall block and stays there until the
+    librarian drops it, which is how a one-turn fact becomes a permanent rule;
+    #26729 is that shape.
 
     {1 One turn, and the record stays}
 

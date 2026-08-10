@@ -346,11 +346,12 @@ type wake_reason =
   | Chat_request
       (** The chat lane ({!Keeper_turn.run_keeper_invocation_turn_admitted})
           entered the turn. It carries no stimulus payload: a chat turn is
-          admitted from the chat queue, not selected from the event queue, so
-          there is nothing in {!Keeper_event_queue.stimulus_payload} that
-          describes it. Distinct from [Proactive_tick] because a chat turn is
-          requested, not scheduled — collapsing the two would report an
-          operator's message as autonomous activity. *)
+          claimed from the Owner's durable operation ledger, not selected from
+          the event queue, so there is nothing in
+          {!Keeper_event_queue.stimulus_payload} that describes it. Distinct
+          from [Proactive_tick] because a chat turn is requested, not scheduled
+          — collapsing the two would report an operator's message as autonomous
+          activity. *)
 
 val wake_reason_label : wake_reason -> string
 (** Stable low-cardinality label: ["proactive_tick"], ["woken"], or

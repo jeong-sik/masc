@@ -37,6 +37,7 @@ type failure_kind =
   | No_queued_operation
   | Invalid_input
   | Turn_invariant
+  | Delivery_failed
 
 let all_failure_kinds =
   [ Interrupted_by_restart
@@ -46,6 +47,7 @@ let all_failure_kinds =
   ; No_queued_operation
   ; Invalid_input
   ; Turn_invariant
+  ; Delivery_failed
   ]
 ;;
 
@@ -57,6 +59,7 @@ let failure_kind_to_string = function
   | No_queued_operation -> "No_queued_operation"
   | Invalid_input -> "Invalid_input"
   | Turn_invariant -> "Turn_invariant"
+  | Delivery_failed -> "Delivery_failed"
 ;;
 
 let failure_kind_of_string = function
@@ -67,6 +70,7 @@ let failure_kind_of_string = function
   | "No_queued_operation" -> Ok No_queued_operation
   | "Invalid_input" -> Ok Invalid_input
   | "Turn_invariant" -> Ok Turn_invariant
+  | "Delivery_failed" -> Ok Delivery_failed
   | value -> Error (Printf.sprintf "unknown Keeper chat operation failure kind %S" value)
 ;;
 

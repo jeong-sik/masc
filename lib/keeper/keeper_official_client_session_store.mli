@@ -17,6 +17,7 @@ type settlement =
 
 type recovery_failure =
   | Transient_spawn_failed
+  | Owner_stopped_turn
   | Transport_interrupted
   | Protocol_failed
   | Provider_rejected

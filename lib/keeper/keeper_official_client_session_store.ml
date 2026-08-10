@@ -10,6 +10,7 @@ type settlement =
 
 type recovery_failure =
   | Transient_spawn_failed
+  | Owner_stopped_turn
   | Transport_interrupted
   | Protocol_failed
   | Provider_rejected
@@ -22,8 +23,14 @@ type failure_disposition =
   | Ambiguous
   | Fatal
 
+(* [Owner_stopped_turn] is transient because it is not an ambiguity: the owner
+   raised the stop itself and already classifies the operation as
+   Turn_cancelled. Recovery exists to get an operator's judgement on what a
+   crash left behind; a stop we made with a known reason has nothing to
+   adjudicate, and routing it to Recovery_required blocked every later turn for
+   that keeper until someone resolved it by hand (#28012). *)
 let failure_disposition = function
-  | Transient_spawn_failed -> Transient
+  | Transient_spawn_failed | Owner_stopped_turn -> Transient
   | Transport_interrupted
   | Protocol_failed
   | Host_hook_failed
@@ -339,6 +346,7 @@ let settlement_opt_of_yojson = function
 
 let recovery_failure_to_string = function
   | Transient_spawn_failed -> "transient_spawn_failed"
+  | Owner_stopped_turn -> "owner_stopped_turn"
   | Transport_interrupted -> "transport_interrupted"
   | Protocol_failed -> "protocol_failed"
   | Provider_rejected -> "provider_rejected"
@@ -349,6 +357,7 @@ let recovery_failure_to_string = function
 
 let recovery_failure_of_string = function
   | "transient_spawn_failed" -> Ok Transient_spawn_failed
+  | "owner_stopped_turn" -> Ok Owner_stopped_turn
   | "transport_interrupted" -> Ok Transport_interrupted
   | "protocol_failed" -> Ok Protocol_failed
   | "provider_rejected" -> Ok Provider_rejected

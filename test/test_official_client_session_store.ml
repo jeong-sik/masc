@@ -295,6 +295,28 @@ let test_moved_tool_surface_starts_fresh () =
     | Error detail -> fail ("claim after a moved surface must succeed: " ^ detail))
 ;;
 
+(* A stop the owner raised is not an ambiguity. Recovery exists to get an
+   operator's judgement on what a crash left behind; the owner knows the turn
+   did not finish and why, and already classifies the operation as
+   Turn_cancelled. Routing it to Recovery_required blocked every later turn for
+   that keeper until someone resolved it by hand -- kidsnote re-entered three
+   minutes after being cleared (#28012). *)
+let test_owner_stop_releases_without_recovery () =
+  check bool
+    "owner stop is transient"
+    true
+    (failure_disposition Owner_stopped_turn = Transient);
+  (* Control: an unexplained cancellation still needs an operator, so this
+     cannot pass by making every failure transient. *)
+  check bool
+    "unexplained transport interruption stays ambiguous"
+    true
+    (failure_disposition Transport_interrupted = Ambiguous);
+  (* The wire codec is not exported, so the round trip is covered where it is
+     reachable rather than asserted here. *)
+  ()
+;;
+
 let test_terminal_identity_switch_starts_fresh () =
   with_workspace "masc-official-client-store-switch-" (fun base_path ->
     let keeper_name = "switch" in
@@ -744,6 +766,10 @@ let () =
             "duplicate claim and CAS fail closed"
             `Quick
             test_duplicate_claim_and_cas_are_fail_closed
+        ; test_case
+            "owner stop releases without recovery"
+            `Quick
+            test_owner_stop_releases_without_recovery
         ; test_case
             "moved tool surface starts fresh"
             `Quick

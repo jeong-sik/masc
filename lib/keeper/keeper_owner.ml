@@ -172,7 +172,9 @@ type _ command =
 type packed_command =
   | Command : 'response command * 'response Eio.Promise.u -> packed_command
 
-exception Stop_active_child
+(* Declared in Keeper_owner_signals so the runtime adapters can match it
+   without depending on this module; see #28012. *)
+exception Stop_active_child = Keeper_owner_signals.Stop_active_child
 
 type t =
   { keeper_name : string

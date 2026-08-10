@@ -23,6 +23,7 @@ let client_kind_to_string = function
 let failure_to_string = function
   | Keeper_official_client_session_store.Transient_spawn_failed ->
     "transient_spawn_failed"
+  | Owner_stopped_turn -> "owner_stopped_turn"
   | Transport_interrupted -> "transport_interrupted"
   | Protocol_failed -> "protocol_failed"
   | Provider_rejected -> "provider_rejected"

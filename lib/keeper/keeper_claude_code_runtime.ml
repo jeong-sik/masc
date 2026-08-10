@@ -560,9 +560,16 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              ; stop_reason = Completed
              })
       with
+      (* A stop the owner raised is not an ambiguity: it knows the turn did
+         not finish and why. Only an unexplained cancellation needs an
+         operator to adjudicate what the transport left behind (#28012). *)
       | Eio.Cancel.Cancelled _ as exn ->
         let backtrace = Printexc.get_raw_backtrace () in
-        recovery_failure := Session_store.Transport_interrupted;
+        recovery_failure
+          := (match exn with
+              | Eio.Cancel.Cancelled Keeper_owner_signals.Stop_active_child ->
+                Session_store.Owner_stopped_turn
+              | _ -> Session_store.Transport_interrupted);
         let detail = "Claude Code turn cancelled: " ^ Printexc.to_string exn in
         (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
          | Ok () -> ()

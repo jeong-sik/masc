@@ -215,26 +215,95 @@ let media_failover_references (media_failover : string list) =
     media_failover
 ;;
 
+let checkpoint_owner_label = function
+  | Runtime_execution.Masc_agent_core -> "masc_agent_core"
+  | Runtime_execution.Official_client -> "official_client"
+;;
+
+(* A lane's candidates must agree on who owns the resumable execution state.
+   [Keeper_agent_run_finalize_response] derives [checkpoint_owner] from the
+   assignment (the lane id), while the checkpoint in hand comes from whichever
+   candidate actually ran. When those disagree the turn is rejected after the
+   answer was already produced, and the rejection names the assigned runtime
+   rather than the executor — so the operator-facing error describes something
+   that never ran.
+
+   The failure is also permanent rather than intermittent:
+   [Runtime_lane_preference.note_success] fires on the runtime attempt, which
+   succeeded, so the cross-owner candidate becomes the sticky head of the lane
+   and every later turn repeats the rejection.
+
+   Same-owner failover is unaffected: an Agent_core lane may rotate freely
+   across Agent_core candidates, which is what the failover lanes are for.
+
+   Pure so the decision is testable without a materialized runtime catalog;
+   [candidates] is [(candidate_id, owner)] in declared order. *)
+let lane_checkpoint_owner_conflict ~(lane_id : string)
+    (candidates : (string * Runtime_execution.checkpoint_owner) list)
+  : string option
+  =
+  match candidates with
+  | [] | [ _ ] -> None
+  | (head_id, head_owner) :: rest ->
+    (match
+       List.find_opt
+         (fun (_, owner) -> owner <> head_owner)
+         rest
+     with
+     | None -> None
+     | Some (other_id, other_owner) ->
+       Some
+         (Printf.sprintf
+            "[runtime.lanes.%s] mixes checkpoint owners: candidate %S owns %s \
+             but candidate %S owns %s. A turn that fails over across this \
+             boundary is rejected at checkpoint finalization, and the sticky \
+             lane preference makes the rejection permanent. Use candidates \
+             that share one owner."
+            lane_id
+            head_id
+            (checkpoint_owner_label head_owner)
+            other_id
+            (checkpoint_owner_label other_owner)))
+;;
+
 (* [runtime.lanes.<id>] candidate ids must resolve to configured runtimes.
    Empty candidate lists are rejected at parse time; here we reject unknown ids
-   as operator typos (mirrors [runtime].default validation). *)
+   as operator typos (mirrors [runtime].default validation), then reject
+   candidate sets that disagree on checkpoint ownership. *)
 let validate_lanes ~(config_path : string)
     ~(dropped_bindings : (string * string) list) (runtimes : t list)
     (lane_decls : Runtime_schema.lane_decl list)
   : (unit, string) result
   =
-  let runtime_exists id =
-    List.exists (fun (r : t) -> String.equal r.id id) runtimes
+  let runtime_by_id id =
+    List.find_opt (fun (r : t) -> String.equal r.id id) runtimes
   in
   let rec first_unknown = function
     | [] -> None
     | { Runtime_schema.id = lane_id; candidate_ids; _ } :: rest ->
-      (match List.find_opt (fun id -> not (runtime_exists id)) candidate_ids with
+      (match
+         List.find_opt (fun id -> Option.is_none (runtime_by_id id)) candidate_ids
+       with
        | Some id -> Some (lane_id, id)
        | None -> first_unknown rest)
   in
+  let rec first_owner_conflict = function
+    | [] -> None
+    | { Runtime_schema.id = lane_id; candidate_ids; _ } :: rest ->
+      let owners =
+        List.filter_map
+          (fun id ->
+            Option.map
+              (fun (r : t) ->
+                id, Runtime_execution.checkpoint_owner r.execution)
+              (runtime_by_id id))
+          candidate_ids
+      in
+      (match lane_checkpoint_owner_conflict ~lane_id owners with
+       | Some detail -> Some detail
+       | None -> first_owner_conflict rest)
+  in
   match first_unknown lane_decls with
-  | None -> Ok ()
   | Some (lane_id, id) ->
     Error
       (Printf.sprintf
@@ -244,6 +313,10 @@ let validate_lanes ~(config_path : string)
          id
          (unresolved_runtime_suffix ~dropped_bindings
             ~runtime_count:(List.length runtimes) id))
+  | None ->
+    (match first_owner_conflict lane_decls with
+     | None -> Ok ()
+     | Some detail -> Error (Printf.sprintf "%s: %s" config_path detail))
 ;;
 
 let lanes_of_decls ~(config_path : string)
@@ -1778,6 +1851,8 @@ module For_testing = struct
   let restore snapshot = Atomic.set loaded_state_ref snapshot
   (* TEL-OK: test-only alias of the pure reachability projection above. *)
   let keeper_dispatch_runtime_ids = keeper_dispatch_runtime_ids
+  (* TEL-OK: test-only alias of the pure lane-ownership decision above. *)
+  let lane_checkpoint_owner_conflict = lane_checkpoint_owner_conflict
 
   let save_config_text_with_sync_parent
       ?runtime_config_path

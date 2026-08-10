@@ -33,6 +33,7 @@ const TARGET_FILES = [
   'src/components/mission.ts',
   'src/components/runtime-monitor.ts',
   'src/components/session-trace/session-trace-live-store.ts',
+  'src/components/common/section-nav.ts',
   'src/components/status.ts',
   'src/components/transport-health.ts',
   'src/dashboard-ws.ts',

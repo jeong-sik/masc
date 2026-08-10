@@ -5,9 +5,9 @@
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
-import { sectionItemsForTab, visibleSectionItemsForTab } from '../config/navigation'
+import { sectionItemsForTab } from '../config/navigation'
 import { LoadingState } from './common/feedback-state'
-import { RouteLink } from './common/route-link'
+import { SectionNav } from './common/section-nav'
 import { SurfaceHeader } from './common/surface-header'
 
 export type StatusSection =
@@ -97,44 +97,6 @@ function currentSection(): StatusSection {
   return normalizeStatusSection(route.value.params.section)
 }
 
-/* Every Monitor section except the 'agents' landing was routable but had no
-   rendered link anywhere in the app. The nav that used to draw section
-   sublists ([SideRail]) is never mounted — the live rail ([NavRailV2]) has no
-   section concept, and [SurfaceHeader] only renders the current section as a
-   breadcrumb label. So 'internal-agents', which carries librarian and judge
-   runs, could only be reached by typing #monitoring?section=internal-agents.
-   This strip is that missing link, and it renders on the landing too — the
-   'agents' branch below returns before [SurfaceHeader], so putting it there
-   would have left the one screen users actually arrive at without a way out. */
-function MonitorSectionNav({ current }: { current: StatusSection }) {
-  const items = visibleSectionItemsForTab('monitoring')
-  if (items.length < 2) return null
-  return html`
-    <nav
-      class="flex flex-wrap items-center gap-1 border-b border-[var(--color-border-divider)] pb-2"
-      aria-label="Monitor sections"
-      data-testid="monitor-section-nav"
-    >
-      ${items.map(item => {
-        const active = item.params.section === current
-        return html`
-          <${RouteLink}
-            tab="monitoring"
-            params=${item.params}
-            title=${item.description}
-            ariaCurrent=${active ? 'page' : undefined}
-            class="rounded-[var(--r-0)] border px-2 py-0.5 font-mono text-[var(--fs-10)] uppercase leading-5 tracking-[var(--track-sub)] cursor-pointer transition-[background-color,border-color,color] duration-[var(--t-med)] ${active
-              ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)]'
-              : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-primary)]'}"
-          >
-            ${item.label}
-          <//>
-        `
-      })}
-    </nav>
-  `
-}
-
 export function Status() {
   const section = currentSection()
 
@@ -146,7 +108,7 @@ export function Status() {
     // row above a min-h-0 flex child rather than an extra wrapper card.
     return html`
       <div class="v2-monitoring-surface flex h-full min-h-0 flex-col gap-3">
-        <${MonitorSectionNav} current=${section} />
+        <${SectionNav} tab="monitoring" current=${section} />
         <div class="min-h-0 flex-1">
           <${Suspense} fallback=${sectionFallback(sectionLabel('agents'))}>
             <${LazyAgentsUnified} />
@@ -158,7 +120,7 @@ export function Status() {
 
   return html`
     <div class="v2-monitoring-surface flex flex-col gap-5">
-      <${MonitorSectionNav} current=${section} />
+      <${SectionNav} tab="monitoring" current=${section} />
       <${SurfaceHeader} />
       <div class="transition-opacity duration-[var(--t-slow)]">
         <${Suspense} fallback=${sectionFallback(sectionLabel(section))}>

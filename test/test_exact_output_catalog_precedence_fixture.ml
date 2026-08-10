@@ -41,6 +41,7 @@ let replacement_target = "replacement-only-target"
 let replacement_runtime_target = "replacement_provider.replacement"
 let replacement_secondary_runtime_target = "replacement_provider.secondary"
 let replacement_secondary_target = "replacement-secondary-target"
+let unbound_target = "unbound-target"
 
 let catalog_toml
       ?(api_key_env = "")
@@ -118,6 +119,13 @@ let replacement_catalog =
     ~model_id:"replacement-model"
     ~target_id:replacement_target
     ()
+;;
+
+let replacement_catalog_with_unbound_target =
+  replacement_catalog
+  ^ Printf.sprintf
+      "\n[[targets]]\nid = %S\nprovider_ref = \"replacement_provider\"\nmodel_id = \"missing-model\"\n"
+      unbound_target
 ;;
 
 let runtime_toml

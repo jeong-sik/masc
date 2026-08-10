@@ -21,7 +21,12 @@ vi.mock('../api/mcp', () => ({
   callMcpTool: callMcpToolMock,
 }))
 
-vi.mock('../router', () => ({
+// Only the two entry points this file drives are replaced. The rest of the
+// module stays real because the surface renders RouteLink, which calls
+// hashForRoute: a mock listing just route and navigate left that undefined,
+// and every case here failed on the call once Work mounted its section nav.
+vi.mock('../router', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../router')>(),
   get route() { return routeSignal },
   navigate: navigateMock,
 }))

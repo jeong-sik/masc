@@ -51,10 +51,12 @@ health, and dashboard surfaces report the read failure explicitly.
 
 ## Recall Contract
 
-Recall reads the same current snapshot projected by the dashboard and injects
-every claim in stored order; it does not rank, trim, or apply a count/byte
-budget. A malformed snapshot is reported as recall unavailable rather than
-silently treated as empty memory.
+Recall reads the same current snapshot projected by the dashboard and renders
+every claim in stored order. It does not rank or trim individual claims. If the
+complete rendered block exceeds the current 64 KiB byte budget, recall is
+reported unavailable for that turn rather than injecting a partial block. A
+malformed snapshot is likewise reported as unavailable rather than silently
+treated as empty memory.
 
 Explicit Memory OS search filters exact query substrings and preserves snapshot
 order. It does not emit a relevance score or reorder facts by timestamp.
@@ -69,11 +71,12 @@ agent core reduces active context through its checkpoint/context APIs. MASC may
 request a configured strategy and observe the outcome, but must not rewrite
 the transcript through domain-specific text parsing.
 
-The librarian LLM returns retained current memory IDs and new claims. Omission
-removes a current claim. Deterministic code validates the exact schema and
-claim identities, then atomically replaces the snapshot only if its observed
-revision still matches. No threshold, priority score, recency rule, or
-capacity heuristic decides which memories survive.
+The librarian LLM returns exactly one retain/drop disposition for every current
+memory ID plus any new claims. Missing or duplicate dispositions invalidate the
+result. Deterministic code validates the exact schema and claim identities,
+then atomically replaces the snapshot only if its observed revision still
+matches. No threshold, priority score, recency rule, or capacity heuristic
+decides which memories survive.
 
 ## Generation and Handoff
 

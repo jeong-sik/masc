@@ -2419,7 +2419,6 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
          Memory_lane.submit
            ~base_path:config.base_path
            ~keeper_name:name
-           ~lane:Memory_lane.Librarian
            (fun () ->
               Eio.Promise.resolve resolve_librarian_started ();
               try Eio.Promise.await librarian_never with
@@ -2468,8 +2467,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
         (Some 0)
         (Memory_lane.For_testing.pending
            ~base_path:config.base_path
-           ~keeper_name:name
-           ~lane:Memory_lane.Librarian);
+           ~keeper_name:name);
       (match
          owner_shutdown_operation_id_exn
            ~base_path:config.base_path

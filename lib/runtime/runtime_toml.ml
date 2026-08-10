@@ -225,16 +225,33 @@ let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
 let reserved_namespaces = active_top_level_namespaces @ obsolete_top_level_namespaces
 let is_reserved name = List.mem name reserved_namespaces
 
+(* Model and provider ids routinely carry a dotted version segment — a vendor
+   family followed by a decimal revision. runtime.toml writes such an id as a
+   quoted table key, so the dot is one character inside a single key and never
+   nests a table.
+
+   Excluding it made a live config unbootable on 2026-08-09 (#27957): the
+   workspace had been serving three dotted ids, and startup then refused the
+   same file with a model-id character-set error, stopping all eight keepers
+   before readiness. The parser had already handed the id over intact; only
+   this check rejected it.
+
+   ["."] and [".."] stay rejected, and so does a leading dot: an id reaches
+   path construction elsewhere in the runtime, and those are the traversal
+   forms. A dot inside the identifier is not one. *)
 let valid_runtime_id_component value =
   let length = String.length value in
   length > 0
+  && (not (String.equal value "."))
+  && (not (String.equal value ".."))
+  && value.[0] <> '.'
   &&
   let rec loop index =
     if index = length
     then true
     else (
       match value.[index] with
-      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> loop (index + 1)
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' -> loop (index + 1)
       | _ -> false)
   in
   loop 0
@@ -246,7 +263,10 @@ let validate_runtime_id_component ~kind ~path value =
     Error
       (error
          path
-         (Printf.sprintf "%s id must match [A-Za-z0-9_-]+" kind))
+         (Printf.sprintf
+            "%s id must match [A-Za-z0-9_.-]+ and must not be a path component \
+             (., .., or a leading dot)"
+            kind))
   else if is_reserved value
   then
     Error

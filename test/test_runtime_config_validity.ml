@@ -772,6 +772,45 @@ let test_exact_output_lane_rejects_unknown_key () =
          errors)
   | Ok _ -> fail "unknown exact-output lane key must fail config parsing"
 
+(* Live regression (#27957): the workspace config declares
+   [\[models."gpt-5.3-codex-spark"\]] and two mimo ids with the same shape. A
+   character class without '.' rejected all three, and startup refused the file
+   it had been serving — every keeper stopped before readiness. The key is
+   quoted, so the dot never nests a table. *)
+let test_dotted_model_id_parses () =
+  (* A neutral fixture id, not a live model name: the property under test is
+     the dot, and a real name would pin this suite to a catalog entry. *)
+  let config =
+    "[models.\"fixture-9.9-sample\"]\n\
+     api-name = \"fixture-9.9-sample\"\n\
+     max-context = 131072\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Ok _ -> ()
+  | Error errors ->
+    failf
+      "dotted model id must parse; got: %s"
+      (String.concat "; "
+         (List.map
+            (fun (error : Runtime_toml.parse_error) ->
+               error.path ^ ": " ^ error.message)
+            errors))
+
+(* A dot inside an identifier is not a path component. These two forms are, and
+   the id reaches path construction elsewhere in the runtime. *)
+let test_path_traversal_model_ids_are_rejected () =
+  List.iter
+    (fun id ->
+       let config =
+         Printf.sprintf
+           "[models.%S]\napi-name = \"sample\"\nmax-context = 1024\n"
+           id
+       in
+       match Runtime_toml.parse_string config with
+       | Ok _ -> failf "model id %S must fail config parsing" id
+       | Error _ -> ())
+    [ "."; ".."; ".hidden" ]
+
 let test_retired_native_streaming_capability_is_rejected () =
   let config =
     "[models.sample]\n\
@@ -3373,6 +3412,10 @@ let () =
             test_exact_output_lane_rejects_unknown_key;
           test_case "retired native-streaming capability is rejected" `Quick
             test_retired_native_streaming_capability_is_rejected;
+          test_case "dotted model id parses" `Quick
+            test_dotted_model_id_parses;
+          test_case "path-traversal model ids are rejected" `Quick
+            test_path_traversal_model_ids_are_rejected;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case

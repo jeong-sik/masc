@@ -109,6 +109,26 @@ TYPE_NAME_RE = re.compile(r"^\s*type\s+([a-z_][A-Za-z0-9_']*)", re.M)
 DOC_RE = re.compile(r"\(\*\*(.*?)\*\)", re.S)
 ODOC_REF_RE = re.compile(r"\{!([A-Za-z_][A-Za-z0-9_'.]*)\}")
 
+# `[foo]` is odoc code formatting, not a reference, so odoc never resolves it
+# and neither does the sweep above. One shape of it still makes a checkable
+# claim: "these helpers stay private" asserts the listed names exist AND are
+# unexported, which is a statement about the paired .ml and nothing else. When
+# such a name is absent the note describes a private layer that was never
+# there -- the wrong thing to hand a reader who cannot see the .ml. #26634
+# found eight; two outlived the {!...} sweep by being written in brackets.
+#
+# Scoped three ways, because brackets are used for far more than symbols:
+#   - only the line carrying the private-note phrase, not the whole comment,
+#     so neighbouring prose about tools and modules is out
+#   - resolved against the paired .ml alone, since "private here" is a claim
+#     about this module and a tree-wide symbol set would answer a different
+#     question
+#   - leading-underscore names skipped: `[_eio]`, `[_list]` are name fragments
+#     the prose is spelling out, not bindings
+PRIVATE_NOTE_RE = re.compile(
+    r"(?:Internal:|(?:stay|remain)s? private|Selective \.mli)", re.I)
+BRACKET_NAME_RE = re.compile(r"\[([a-z][a-z0-9_']*)\]")
+
 DERIVED_SUFFIXES = ("_to_yojson", "_of_yojson")
 DERIVED_PREFIXES = ("show_", "pp_", "equal_", "compare_")
 
@@ -165,6 +185,18 @@ def absent_references(known: set[str]) -> list[tuple[Path, str]]:
                     continue
                 if last not in known:
                     hits.append((path, ref))
+        ml_path = path.with_suffix(".ml")
+        if ml_path.exists():
+            try:
+                ml_text = ml_path.read_text(errors="ignore")
+            except OSError:
+                ml_text = ""
+            for line in text.splitlines():
+                if not PRIVATE_NOTE_RE.search(line):
+                    continue
+                for name in BRACKET_NAME_RE.findall(line):
+                    if not re.search(r"\b%s\b" % re.escape(name), ml_text):
+                        hits.append((path, "[%s]" % name))
     return hits
 
 
@@ -181,12 +213,13 @@ def main() -> int:
     hits = absent_references(known_symbols(files))
 
     if not hits:
-        print(f"[odoc-refs] OK - every {{!...}} in lib/**/*.mli resolves ({len(files)} files scanned)")
+        print(f"[odoc-refs] OK - every {{!...}} and every private-note [name] in lib/**/*.mli resolves ({len(files)} files scanned)")
         return 0
 
     print(f"[odoc-refs] {len(hits)} reference(s) name a symbol this tree does not define:\n")
     for path, ref in hits:
-        print(f"  {path.relative_to(REPO_ROOT)}: {{!{ref}}}")
+        rendered = ref if ref.startswith("[") else "{!%s}" % ref
+        print(f"  {path.relative_to(REPO_ROOT)}: {rendered}")
     print(
         "\nEither the symbol was renamed or removed and the doc did not follow,"
         "\nor it lives outside lib/ and its module prefix belongs in"

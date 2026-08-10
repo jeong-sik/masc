@@ -413,11 +413,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         | Error error -> Error error
         | Ok turn ->
           recovery_failure := Session_store.Protocol_failed;
-          let* () =
-            if Bool.equal is_resume turn.resumed
-            then Ok ()
-            else Error (internal_error "Antigravity resumed flag differs from durable plan")
-          in
           let turn_id =
             provider_turn_identity
               ~conversation_id:turn.conversation_id

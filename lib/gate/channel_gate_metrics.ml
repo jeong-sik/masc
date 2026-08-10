@@ -89,41 +89,41 @@ type gate_event = {
 }
 
 type binding_acc = {
-  mutable msg_count : int;
-  mutable success_count : int;
-  mutable err_count : int;
-  mutable last_ts : float;
-  mutable last_success_ts : float;
-  mutable last_error_ts : float;
-  mutable keeper : string;
-  mutable last_error : string;
-  mutable last_error_kind : error_kind;
-  mutable last_outcome : string;
-  mutable total_dur_ms : int;
-  mutable timed_count : int;
-  mutable max_dur_ms : int;
+  msg_count : int;
+  success_count : int;
+  err_count : int;
+  last_ts : float;
+  last_success_ts : float;
+  last_error_ts : float;
+  keeper : string;
+  last_error : string;
+  last_error_kind : error_kind;
+  last_outcome : string;
+  total_dur_ms : int;
+  timed_count : int;
+  max_dur_ms : int;
 }
 
 type stats_acc = {
-  mutable msg_count : int;
-  mutable success_count : int;
-  mutable err_count : int;
-  mutable validation_error_count : int;
-  mutable keeper_error_count : int;
-  mutable dispatch_unavailable_count : int;
-  mutable internal_error_count : int;
-  mutable last_ts : float;
-  mutable last_success_ts : float;
-  mutable last_error_ts : float;
-  mutable last_keeper : string;
-  mutable last_workspace_id : string;
-  mutable last_error : string;
-  mutable last_error_kind : error_kind;
-  mutable last_outcome : string;
-  mutable total_dur_ms : int;
-  mutable timed_count : int;
-  mutable max_dur_ms : int;
-  mutable slow_count : int;
+  msg_count : int;
+  success_count : int;
+  err_count : int;
+  validation_error_count : int;
+  keeper_error_count : int;
+  dispatch_unavailable_count : int;
+  internal_error_count : int;
+  last_ts : float;
+  last_success_ts : float;
+  last_error_ts : float;
+  last_keeper : string;
+  last_workspace_id : string;
+  last_error : string;
+  last_error_kind : error_kind;
+  last_outcome : string;
+  total_dur_ms : int;
+  timed_count : int;
+  max_dur_ms : int;
+  slow_count : int;
   workspaces : (string, unit) Hashtbl.t;
   workspace_order : string Queue.t;
   bindings : (string, binding_acc) Hashtbl.t;
@@ -201,19 +201,25 @@ let outcome_name = function
   | Internal_error _ -> "internal_error"
 
 let update_error_fields acc ~now ~kind ~message =
-  acc.err_count <- acc.err_count + 1;
-  acc.last_error_ts <- now;
-  acc.last_error_kind <- kind;
-  acc.last_error <- message
+  { acc with
+    err_count = acc.err_count + 1
+  ; last_error_ts = now
+  ; last_error_kind = kind
+  ; last_error = message
+  }
 
 let update_binding_error_fields (acc : binding_acc) ~now ~kind ~message =
-  acc.err_count <- acc.err_count + 1;
-  acc.last_error_ts <- now;
-  acc.last_error_kind <- kind;
-  acc.last_error <- message
+  { acc with
+    err_count = acc.err_count + 1
+  ; last_error_ts = now
+  ; last_error_kind = kind
+  ; last_error = message
+  }
 
+(* The workspace set and its eviction queue are containers held by [acc];
+   they keep mutating in place. Only [last_workspace_id] is a field, so it
+   comes back on the returned record. *)
 let remember_workspace acc workspace_id =
-  acc.last_workspace_id <- workspace_id;
   if not (Hashtbl.mem acc.workspaces workspace_id) then begin
     if Hashtbl.length acc.workspaces >= max_tracked_workspaces
        && not (Queue.is_empty acc.workspace_order)
@@ -223,7 +229,8 @@ let remember_workspace acc workspace_id =
     end;
     Hashtbl.replace acc.workspaces workspace_id ();
      Queue.add workspace_id acc.workspace_order
-   end
+   end;
+  { acc with last_workspace_id = workspace_id }
 
 let get_or_create_binding acc workspace_id =
   match Hashtbl.find_opt acc.bindings workspace_id with
@@ -273,86 +280,117 @@ let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
         if trimmed_channel = "" then "unknown"
         else String.lowercase_ascii trimmed_channel
       in
+      (* [acc] and [binding] are values now, so every step below rebinds them
+         and the two tables are written once at the end. The nested [bindings]
+         / [workspaces] tables are shared handles carried by [{ acc with ... }],
+         so their in-place updates land whichever copy is held. *)
       let acc = get_or_create_acc channel_key in
       let now = Unix.gettimeofday () in
       let trimmed_keeper = String.trim keeper in
-      acc.msg_count <- acc.msg_count + 1;
-      acc.last_ts <- now;
-      acc.last_outcome <- outcome_name outcome;
-      if trimmed_keeper <> "" then acc.last_keeper <- trimmed_keeper;
+      let acc =
+        { acc with
+          msg_count = acc.msg_count + 1
+        ; last_ts = now
+        ; last_outcome = outcome_name outcome
+        ; last_keeper =
+            (if trimmed_keeper <> "" then trimmed_keeper else acc.last_keeper)
+        }
+      in
       let trimmed_workspace = String.trim workspace_id in
-      let binding =
-        if trimmed_workspace = "" then None
+      let acc, binding =
+        if trimmed_workspace = "" then acc, None
         else begin
-          remember_workspace acc trimmed_workspace;
+          let acc = remember_workspace acc trimmed_workspace in
           let binding = get_or_create_binding acc trimmed_workspace in
-          binding.msg_count <- binding.msg_count + 1;
-          binding.last_ts <- now;
-          binding.last_outcome <- outcome_name outcome;
-          if trimmed_keeper <> "" then binding.keeper <- trimmed_keeper;
-          Some binding
+          let binding =
+            { binding with
+              msg_count = binding.msg_count + 1
+            ; last_ts = now
+            ; last_outcome = outcome_name outcome
+            ; keeper =
+                (if trimmed_keeper <> "" then trimmed_keeper else binding.keeper)
+            }
+          in
+          acc, Some binding
         end
       in
-      if duration_ms > 0 then begin
-        acc.total_dur_ms <- acc.total_dur_ms + duration_ms;
-        acc.timed_count <- acc.timed_count + 1;
-        acc.max_dur_ms <- max acc.max_dur_ms duration_ms;
-        if duration_ms >= slow_threshold_ms () then
-          acc.slow_count <- acc.slow_count + 1
-      end;
+      let acc =
+        if duration_ms > 0 then
+          { acc with
+            total_dur_ms = acc.total_dur_ms + duration_ms
+          ; timed_count = acc.timed_count + 1
+          ; max_dur_ms = max acc.max_dur_ms duration_ms
+          ; slow_count =
+              (if duration_ms >= slow_threshold_ms () then acc.slow_count + 1
+               else acc.slow_count)
+          }
+        else acc
+      in
+      let binding =
+        match binding with
+        | Some binding when duration_ms > 0 ->
+            Some
+              { binding with
+                total_dur_ms = binding.total_dur_ms + duration_ms
+              ; timed_count = binding.timed_count + 1
+              ; max_dur_ms = max binding.max_dur_ms duration_ms
+              }
+        | (Some _ | None) as binding -> binding
+      in
+      let error_outcome (acc : stats_acc) (binding : binding_acc option)
+          ~kind ~message =
+        ( update_error_fields acc ~now ~kind ~message,
+          Option.map
+            (fun (binding : binding_acc) ->
+              update_binding_error_fields binding ~now ~kind ~message)
+            binding )
+      in
+      let acc, binding =
+        match outcome with
+        | Success ->
+            ( { acc with
+                success_count = acc.success_count + 1
+              ; last_success_ts = now
+              },
+              Option.map
+                (fun (binding : binding_acc) ->
+                  { binding with
+                    success_count = binding.success_count + 1
+                  ; last_success_ts = now
+                  })
+                binding )
+        | Validation_error message ->
+            error_outcome
+              { acc with validation_error_count = acc.validation_error_count + 1 }
+              binding
+              ~kind:Ek_validation
+              ~message
+        | Keeper_error message ->
+            error_outcome
+              { acc with keeper_error_count = acc.keeper_error_count + 1 }
+              binding
+              ~kind:Ek_keeper
+              ~message
+        | Dispatch_unavailable ->
+            error_outcome
+              { acc with
+                dispatch_unavailable_count = acc.dispatch_unavailable_count + 1
+              }
+              binding
+              ~kind:Ek_dispatch_unavailable
+              ~message:"keeper dispatch unavailable"
+        | Internal_error message ->
+            error_outcome
+              { acc with internal_error_count = acc.internal_error_count + 1 }
+              binding
+              ~kind:Ek_internal
+              ~message
+      in
       (match binding with
-       | Some binding when duration_ms > 0 ->
-           binding.total_dur_ms <- binding.total_dur_ms + duration_ms;
-           binding.timed_count <- binding.timed_count + 1;
-           binding.max_dur_ms <- max binding.max_dur_ms duration_ms
+       | Some binding when trimmed_workspace <> "" ->
+           Hashtbl.replace acc.bindings trimmed_workspace binding
        | Some _ | None -> ());
-      (match outcome with
-      | Success ->
-          acc.success_count <- acc.success_count + 1;
-          acc.last_success_ts <- now;
-          (match binding with
-           | Some binding ->
-               binding.success_count <- binding.success_count + 1;
-               binding.last_success_ts <- now
-           | None -> ())
-      | Validation_error message ->
-          acc.validation_error_count <- acc.validation_error_count + 1;
-          update_error_fields acc ~now
-            ~kind:(Ek_validation) ~message;
-          (match binding with
-           | Some binding ->
-               update_binding_error_fields binding ~now
-                 ~kind:(Ek_validation) ~message
-           | None -> ())
-      | Keeper_error message ->
-          acc.keeper_error_count <- acc.keeper_error_count + 1;
-          update_error_fields acc ~now ~kind:(Ek_keeper)
-            ~message;
-          (match binding with
-           | Some binding ->
-               update_binding_error_fields binding ~now
-                 ~kind:(Ek_keeper) ~message
-           | None -> ())
-      | Dispatch_unavailable ->
-          acc.dispatch_unavailable_count <- acc.dispatch_unavailable_count + 1;
-          update_error_fields acc ~now
-            ~kind:(Ek_dispatch_unavailable)
-            ~message:"keeper dispatch unavailable";
-          (match binding with
-           | Some binding ->
-               update_binding_error_fields binding ~now
-                 ~kind:(Ek_dispatch_unavailable)
-                 ~message:"keeper dispatch unavailable"
-           | None -> ())
-      | Internal_error message ->
-          acc.internal_error_count <- acc.internal_error_count + 1;
-          update_error_fields acc ~now ~kind:(Ek_internal)
-            ~message;
-          (match binding with
-           | Some binding ->
-               update_binding_error_fields binding ~now
-                 ~kind:(Ek_internal) ~message
-           | None -> ()));
+      Hashtbl.replace table channel_key acc;
       append_event ~channel:channel_key ~workspace_id:trimmed_workspace ~keeper:trimmed_keeper
         ~duration_ms outcome ~timestamp:now)
 

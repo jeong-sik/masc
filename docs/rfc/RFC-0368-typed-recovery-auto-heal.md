@@ -1,6 +1,6 @@
 # RFC-0368 — 판단 없는 recovery는 keeper의 다음 claim이 스스로 해제한다
 
-**Status**: Draft
+**Status**: Draft — §설계 1의 `Transport_interrupted` 재분류는 **철회됨** (아래 정정)
 **Author**: Claude Fable 5
 **Date**: 2026-08-10
 
@@ -35,7 +35,7 @@ type recovery_policy =
 
 let recovery_policy_of_failure = function
   | Epoch_changed -> Auto_heal_at_claim
-  | Transport_interrupted -> Auto_heal_at_claim   (* 오늘 4/4 retry_previous 성공 *)
+  | Transport_interrupted -> Auto_heal_at_claim   (* 철회 — 아래 정정 참조 *)
   | Protocol_failed | Provider_rejected -> Park_for_operator
 ```
 
@@ -91,6 +91,21 @@ dashboard의 session 스냅샷 디코더(`resolved_by` 소비처)가 새 variant
 | 운영자 선(先)해제 | auto-heal과 경합 없이 기존 conflict 가드(`recovery_id_changed`)로 정합 |
 
 테스트는 기존 wired 파일(`test_keeper_official_client_host` 계열) 확장으로 넣고, 뮤테이션 방향은 "auto-heal 분기 제거 시 epoch 시나리오가 red"로 고정한다.
+
+## 정정 (2026-08-10, 구현 시도 후)
+
+`Transport_interrupted`를 transient로 옮기는 §설계 1을 구현하자 **#28013이 같은 날 착지시킨 대조 단언에 걸렸다**: `"unexplained transport interruption stays ambiguous"` — "모든 failure를 transient로 만들면 통과하는 테스트"를 막으려고 액터가 넣어둔 control이다. 그 control이 옳다.
+
+이 스토어의 존재 이유는 `.mli` 첫 문단에 있다 — **"externally admitted turn을 조용히 중복시키지 않기 위해"**. transport가 끊겼다는 것은 반대편이 그 턴을 실행했는지 우리가 모른다는 뜻이고, 그것이 `Ambiguous`의 정의다. `Owner_stopped_turn`이 transient인 이유(#28012: 우리가 이유를 알고 스스로 멈췄다)가 여기엔 성립하지 않는다.
+
+내 근거였던 "4/4 retry_previous 성공"이 무엇을 측정했는지 다시 보면: **내 해제 선택이 기계적이었다는 것**이지, 그 선택이 안전했다는 것이 아니다. 반대편에서 턴이 이미 실행됐는지는 한 번도 확인하지 않았다 — 관측하지 않은 축을 "성공"으로 셌다.
+
+**대체 설계**: 모호함은 재분류로 없애는 게 아니라 **관측으로 붕괴시킨다.** codex app-server는 thread/turn 신원을 가지므로, recovery 시점에 "이 thread의 최신 turn id"를 조회해 `observed_turn_id`(이미 `recovery_required`에 있는 필드)와 대조하면 "실행됐다/안 됐다"가 사실이 된다. 사실이 확정되면 해제는 결정론이 되고, auto-heal은 모호함을 가정으로 지워서가 아니라 **모호함이 실제로 사라져서** 안전해진다.
+
+따라서 이 RFC의 유효 범위는:
+- 유지: 판단 없는 클래스의 문제 정의, 재발-승격(카운터 아닌 직전 1건 비교), Board attention 배선, `Park_for_operator`의 신호 기능 보존
+- 철회: `Transport_interrupted → Transient` 재분류
+- 후속: 반대편 turn 신원 조회 기반의 ambiguity 해소 (별도 설계, app-server 프로토콜 표면 확인 선행)
 
 ## Evidence
 

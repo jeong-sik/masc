@@ -34,6 +34,23 @@ max_context_tokens = 1000000
 max_output_tokens = 128000
 
 [[models]]
+# Claude Opus 5. Limits and effort ladder from the Claude Platform model
+# overview (checked 2026-08-10); pricing matches the Opus 4.8 tier it replaces.
+# thinking control: thinking is on by default and `disabled` is accepted only at
+# effort high or below. The vocab has no variant for that effort-gated form
+# (capability_vocab.ml:119-123), so this declares the nearest true value —
+# adaptive_only, i.e. `disabled` is accepted — and the effort gate stays
+# enforced by the API rather than by this row.
+id_prefix = "claude-opus-5"
+base = "anthropic"
+anthropic_thinking_control = "adaptive_only"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 5.0
+output_per_million = 25.0
+
+[[models]]
 id_prefix = "claude-opus-4-8"
 base = "anthropic"
 anthropic_thinking_control = "adaptive_only"
@@ -159,6 +176,19 @@ cache_read_multiplier = 0.1
 # OpenAI Responses API reasoning.effort reference, checked 2026-06-29:
 # gpt-5.1+ rows may declare none/minimal/low/medium/high/xhigh; the bare
 # gpt-5 row predates gpt-5.1 and therefore omits none/xhigh here.
+[[models]]
+# gpt-5.6-{sol,terra,luna}, served through the Codex ChatGPT subscription.
+# Without this row they prefix-match the generic "gpt-5" row, whose
+# accepted_reasoning_efforts omits both "none" and "xhigh". Values mirror the
+# declared gpt-5.5 sibling; no per-token rate is published for subscription
+# serving, so pricing is omitted as on gpt-5.3-codex-spark.
+id_prefix = "gpt-5.6"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_computer_use = true
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+
 [[models]]
 id_prefix = "gpt-5.5"
 base = "openai_chat_extended"
@@ -1208,6 +1238,23 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
+# gpt-oss-120b-medium, served through the Antigravity Google subscription. The
+# existing rows use the Ollama tag form ("gpt-oss:120b"), which does not prefix
+# the hyphenated subscription id, so that id resolves to no row at all.
+id_prefix = "gpt-oss-120b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "ollama_think"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
 id_prefix = "gpt-oss:120b"
 base = "ollama_cloud"
 max_context_tokens = 131072
@@ -1423,6 +1470,18 @@ base = "gemini"
 max_context_tokens = 1000000
 supports_reasoning_budget = true
 accepted_reasoning_efforts = []
+
+[[models]]
+# gemini-3.6-flash-{high,medium,low}, served through the Antigravity Google
+# subscription. Without this row they prefix-match the generic "gemini-3" row,
+# which declares no accepted_reasoning_efforts at all — so no effort level is
+# admitted. Values mirror the declared gemini-3.5-flash sibling.
+id_prefix = "gemini-3.6-flash"
+base = "gemini"
+max_context_tokens = 1000000
+max_output_tokens = 64000
+supports_reasoning_budget = false
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
 
 [[models]]
 id_prefix = "gemini-3.5-flash"

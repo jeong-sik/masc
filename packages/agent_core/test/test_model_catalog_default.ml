@@ -15,6 +15,83 @@ let with_clean_model_catalog_override f =
   Fun.protect ~finally:Model_catalog.clear_global f
 ;;
 
+(* Model ids masc declares in runtime.toml for the Claude Code, Codex and
+   Antigravity subscriptions. [Model_catalog.lookup] is a longest-prefix match,
+   so a missing row fails in one of two silent ways: an id that no row prefixes
+   resolves to [None] and [Runtime] disables that runtime at boot, while an id
+   that only a *shorter* row prefixes inherits that row's capabilities with no
+   error. Asserting the resolved [id_prefix] — rather than merely that the
+   lookup succeeded — is what separates "gpt-5.6-sol found its own row" from
+   "gpt-5.6-sol silently landed on gpt-5". *)
+let subscription_model_rows =
+  [ "claude-opus-5", "claude-opus-5"
+  ; "claude-fable-5", "claude-fable-5"
+  ; "claude-sonnet-5", "claude-sonnet-5"
+  ; "claude-haiku-4-5-20251001", "claude-haiku-4-5"
+  ; "gpt-5.6-sol", "gpt-5.6"
+  ; "gpt-5.6-terra", "gpt-5.6"
+  ; "gpt-5.6-luna", "gpt-5.6"
+  ; "gpt-5.3-codex-spark", "gpt-5.3-codex-spark"
+  ; "gemini-3.6-flash-high", "gemini-3.6-flash"
+  ; "gemini-3.6-flash-medium", "gemini-3.6-flash"
+  ; "gemini-3.6-flash-low", "gemini-3.6-flash"
+  ; "gemini-3.5-flash-high", "gemini-3.5-flash"
+  ; "gemini-3.1-pro-high", "gemini-3.1-pro"
+  ; "claude-sonnet-4-6", "claude-sonnet-4-6"
+  ; "claude-opus-4-6-thinking", "claude-opus-4-6"
+  ; "gpt-oss-120b-medium", "gpt-oss-120b"
+  ]
+;;
+
+let test_subscription_models_resolve_their_own_rows () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"subscription model rows"
+  in
+  List.iter
+    (fun (model_id, expected_prefix) ->
+       match Model_catalog.lookup catalog model_id with
+       | None ->
+         failf
+           "%s resolves to no catalog row; Runtime disables uncatalogued runtimes at boot"
+           model_id
+       | Some (entry : Model_catalog.model_entry) ->
+         check
+           string
+           (Printf.sprintf "%s resolves to its own row" model_id)
+           expected_prefix
+           entry.id_prefix)
+    subscription_model_rows
+;;
+
+(* The effort ladders are written out as literals rather than read back from the
+   row under test: a comparison that sources both sides from the catalog passes
+   whatever the catalog happens to say, including a row that admits nothing. *)
+let subscription_model_efforts =
+  [ "claude-opus-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
+  ; "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
+  ; "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
+  ]
+;;
+
+let test_subscription_models_admit_their_reasoning_efforts () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog
+      ~suite:"subscription model efforts"
+  in
+  List.iter
+    (fun (model_id, expected) ->
+       match Model_catalog.lookup catalog model_id with
+       | None -> failf "%s resolves to no catalog row" model_id
+       | Some (entry : Model_catalog.model_entry) ->
+         check
+           (option (list string))
+           (Printf.sprintf "%s admits its declared reasoning efforts" model_id)
+           (Some expected)
+           entry.accepted_reasoning_efforts)
+    subscription_model_efforts
+;;
+
 let test_load_default_catalog () =
   let expected =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"model catalog default"
@@ -284,6 +361,14 @@ let () =
             "partial serving evidence fails closed"
             `Quick
             test_serving_constraint_partial_group_fails_closed
+        ; test_case
+            "subscription models resolve their own rows"
+            `Quick
+            test_subscription_models_resolve_their_own_rows
+        ; test_case
+            "subscription models admit their reasoning efforts"
+            `Quick
+            test_subscription_models_admit_their_reasoning_efforts
         ] )
     ]
 ;;

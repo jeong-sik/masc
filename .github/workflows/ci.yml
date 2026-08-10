@@ -799,12 +799,6 @@ jobs:
           MASC_DEPLOYMENT_PREFLIGHT_HELPER: ${{ github.workspace }}/_build/default/bin/deployment_preflight_helper.exe
         run: scripts/check-runtime-deployment-preflight.sh --self-test
 
-      - name: Run Keeper chat cutover archive self-test
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          MASC_DEPLOYMENT_PREFLIGHT_HELPER: ${{ github.workspace }}/_build/default/bin/deployment_preflight_helper.exe
-        run: test/test_keeper_chat_cutover_archive.sh
-
       - name: Check keeper event queue projection boundary
         # This parser uses compiler-libs directly, so keep it beside the sole
         # OCaml toolchain instead of bootstrapping another toolchain in Lint.
@@ -1115,6 +1109,26 @@ jobs:
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_keeper_keepalive_launch_order_ast
+
+      - name: Run Keeper owner and chat operation suites
+        # #27962 put every Keeper mutation and chat turn behind one owner actor.
+        # @check compiles the suites and runs neither, so one-running-turn and
+        # restart settlement were assertions nothing executed. A gate that can
+        # hold a fleet out of ready has to run where a red result blocks the
+        # merge.
+        #
+        # The chat cutover preflight target left with the boot gate in #28007;
+        # dune hard-fails on an alias it cannot resolve, so the retired target
+        # cannot stay listed here.
+        #
+        # test_keeper_autoboot_single_owner is deliberately absent here: it is
+        # already invoked from scripts/ci-run-focused-tests.sh, the second CI
+        # target source, and audit-ci-test-targets.sh rejects a target that two
+        # manifests run.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_owner \
+            @test/runtest-test_keeper_chat_operation_http
 
       - name: Run memory journal suite
         # The journal is the only disk record of a librarian pass that produced

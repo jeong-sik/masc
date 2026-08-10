@@ -1025,19 +1025,29 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
     | Some _ | None -> Error Recovery_not_required
   in
   let apply directory (current : t) (recovery : recovery_required) =
-    let completed_turn_count = current.turn_count - 1 in
-    let* phase =
+    let* phase, turn_count =
       match resolution with
       | Retry_previous ->
+        (* The conversation is kept, so only the turn that failed is dropped and
+           the next claim re-attempts the same ordinal against it. *)
         (match recovery.previous_settlement with
          | None -> Error Retry_previous_unavailable
-         | Some settlement -> Ok (Settled settlement))
-      | Restart_fresh -> Ok Ready
+         | Some settlement -> Ok (Settled settlement, current.turn_count - 1))
+      | Restart_fresh ->
+        (* Restart abandons the conversation, so the ordinal restarts with it and
+           the next claim asks for ordinal 1 -- what a fresh provider conversation
+           reports. This is the same reset the automatic supersede already does
+           ([plan_claim]'s [Recovery_required] arm). Carrying
+           [current.turn_count - 1] across the discard left the operator's
+           explicit restart counting from a conversation that no longer exists,
+           and since the observed provider count became authoritative it also
+           made the next turn fail [mark_turn_started]'s regression guard. *)
+        Ok (Ready, 0)
     in
     let resolved =
       { current with
         phase
-      ; turn_count = completed_turn_count
+      ; turn_count
       ; last_recovery_resolution =
           Some
             { recovery_id

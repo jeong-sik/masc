@@ -506,7 +506,7 @@ let publish_open_journal writer journal =
       writer.journal_view <- Available journal;
       writer.pending_outcome <- None;
       writer.worker_phase <- Idle);
-    ignore (Eio.Promise.try_resolve writer.resolve_ready (Ok ())))
+    ignore (Eio.Promise.try_resolve writer.resolve_ready (Ok ()) : bool))
 ;;
 
 let reconcile_pending writer durable_writer journal pending =
@@ -618,8 +618,8 @@ let complete_actor writer =
     in
     if transitioned
     then (
-      ignore (Eio.Promise.try_resolve writer.resolve_ready (Ok ()));
-      ignore (Eio.Promise.try_resolve writer.resolve_closed (Ok ()))))
+      ignore (Eio.Promise.try_resolve writer.resolve_ready (Ok ()) : bool);
+      ignore (Eio.Promise.try_resolve writer.resolve_closed (Ok ()) : bool)))
 ;;
 
 let fail_actor writer failure =
@@ -658,7 +658,7 @@ let fail_actor writer failure =
     match pending with
     | None -> ()
     | Some (failure, in_flight, queued) ->
-      ignore (Eio.Promise.try_resolve writer.resolve_ready (Error failure));
+      ignore (Eio.Promise.try_resolve writer.resolve_ready (Error failure) : bool);
       let rec settle_all count = function
         | [] -> count
         | command :: rest ->
@@ -668,7 +668,7 @@ let fail_actor writer failure =
       in
       let newly_settled = settle_all (settle_all 0 in_flight) queued in
       record_settled writer newly_settled;
-      ignore (Eio.Promise.try_resolve writer.resolve_closed (Error failure)))
+      ignore (Eio.Promise.try_resolve writer.resolve_closed (Error failure) : bool))
 ;;
 
 let await_reconciliation_wake writer observed_wake =

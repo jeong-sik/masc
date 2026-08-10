@@ -428,7 +428,7 @@ let run_named
     ?sw
     ?net
     ()
-  : (Runtime_agent.run_result, Agent_core.Error.t) result =
+  : (named_run_result, Agent_core.Error.t) result =
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_core_error e)
   | Ok (sw, net) ->

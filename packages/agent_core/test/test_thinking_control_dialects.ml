@@ -1061,6 +1061,19 @@ let test_ollama_qwen_uses_native_think_bool () =
   check_member_absent "reasoning_effort" json
 ;;
 
+(* Absence is a third request state, not a synonym for [think:false]: with no
+   [think] key Ollama applies the model's own default, and for a reasoning
+   model that default is thinking-on. A caller that leaves [enable_thinking]
+   unset therefore gets reasoning, so a target that wants a judgment rather
+   than a reasoning trace has to declare the boolean rather than rely on the
+   omission. [test_ollama_gemma4_disabled_uses_native_think_false] pins the
+   [Some false] arm; this pins the [None] arm it is contrasted with. *)
+let test_ollama_qwen_unset_omits_think () =
+  let config = ollama_config "qwen3:32b" in
+  let json = BOL.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
+  check_member_absent "think" json
+;;
+
 let test_ollama_cloud_glm_uses_native_think_not_zai_thinking () =
   let config = ollama_cloud_config ~enable_thinking:true "glm-5.2" in
   let json = BOL.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
@@ -1468,6 +1481,10 @@ let () =
               "qwen uses native think bool"
               `Quick
               test_ollama_qwen_uses_native_think_bool
+          ; test_case
+              "qwen unset omits think"
+              `Quick
+              test_ollama_qwen_unset_omits_think
           ; test_case
               "cloud GLM uses native think not ZAI thinking"
               `Quick

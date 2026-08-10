@@ -156,6 +156,52 @@ let test_official_client_panelist_reaches_its_client () =
     check int "the panelist is accounted for in the outcomes" 1 (List.length outcomes))
 ;;
 
+(* The message has to name which handle is absent. It did not, and that cost a
+   build cycle: publishing Eio_context.set_env in bin/fusion_run left the text
+   identical, so the clock being the other half was invisible until the code was
+   read. Each arm is asserted separately — a single "some message came back"
+   check would pass with all three arms collapsed into one string. *)
+let detail_for ~env ~clock =
+  match
+    Masc.Fusion_official_client.For_testing.missing_handle_detail
+      ~env_present:env
+      ~clock_present:clock
+  with
+  | Some detail -> detail
+  | None -> "<none>"
+;;
+
+let test_both_handles_present_has_no_complaint () =
+  check
+    (option string)
+    "a resolvable context produces no failure detail"
+    None
+    (Masc.Fusion_official_client.For_testing.missing_handle_detail
+       ~env_present:true
+       ~clock_present:true)
+;;
+
+let test_each_absent_handle_is_named () =
+  let neither = detail_for ~env:false ~clock:false in
+  let env_missing = detail_for ~env:false ~clock:true in
+  let clock_missing = detail_for ~env:true ~clock:false in
+  check bool "the three arms are distinct" true
+    (neither <> env_missing && env_missing <> clock_missing && neither <> clock_missing);
+  let mentions haystack needle =
+    let n = String.length needle in
+    let rec scan i =
+      i + n <= String.length haystack
+      && (String.sub haystack i n = needle || scan (i + 1))
+    in
+    scan 0
+  in
+  check bool "a missing env names env" true (mentions env_missing "env");
+  check bool "a missing env does not blame the clock" false (mentions env_missing "clock");
+  check bool "a missing clock names clock" true (mentions clock_missing "clock");
+  check bool "both absent names both" true
+    (mentions neither "env" && mentions neither "clock")
+;;
+
 let () =
   run
     "fusion official-client panel"
@@ -172,6 +218,16 @@ let () =
             "unknown runtime is not claimed by the spawn path"
             `Quick
             test_unknown_runtime_is_not_claimed_by_the_spawn_path
+        ] )
+    ; ( "eio context diagnostics"
+      , [ test_case
+            "both handles present produces no complaint"
+            `Quick
+            test_both_handles_present_has_no_complaint
+        ; test_case
+            "each absent handle is named"
+            `Quick
+            test_each_absent_handle_is_named
         ] )
     ; ( "panel execution"
       , [ test_case

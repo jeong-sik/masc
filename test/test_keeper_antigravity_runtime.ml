@@ -188,6 +188,7 @@ let seed_ambiguous_resumed_session ~base_path ~tool =
       ~expected:starting
       ~session_id:"conversation-stale"
       ~turn_id:"conversation-stale:ordinal:1"
+      ~turn_count:1
       ~updated_at:4.0
     |> Result.get_ok
   in

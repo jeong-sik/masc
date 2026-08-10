@@ -189,6 +189,7 @@ let test_resume_requires_exact_identity_and_argv () =
 
 let test_resume_identity_mismatch_fails_closed () =
   with_fixture
+    ~require_resume:true
     [ init ~conversation_id:"different" (); result ~conversation_id:"different" () ]
     (fun path ->
        match

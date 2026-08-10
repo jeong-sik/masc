@@ -918,6 +918,7 @@ jobs:
             @test/runtest-test_keeper_path_ssot \
             @test/runtest-test_keeper_phase_drift_contract \
             @test/runtest-test_keeper_tool_error_text_bounded \
+            @test/runtest-test_keeper_transition_audit \
             @test/runtest-test_keeper_turn_fsm_tla_parity \
             @test/runtest-test_keepers_runtime_dir_ssot \
             @test/runtest-test_mcp_h1_h2_admission_parity \

@@ -2,8 +2,9 @@
 \* Boundary spec for RFC-0082: Keeper last_blocker auto-clear + recovery escalation.
 \*
 \* Runtime truth being modelled
-\* (lib/keeper/keeper_supervisor.ml:1485 stamps the blocker,
-\*  lib/keeper/keeper_execution_receipt.ml:475 derives the disposition,
+\* (lib/keeper/keeper_owner_reducer.ml apply_existing stamps the blocker,
+\*  lib/keeper/keeper_execution_receipt.ml emit_operator_broadcast_event
+\*  derives the disposition,
 \*  no code path clears the blocker after recovery — that's the bug):
 \*
 \*   - runtime_exhausted stamps keeper_meta.runtime.last_blocker.

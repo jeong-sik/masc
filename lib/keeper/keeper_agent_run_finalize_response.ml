@@ -203,18 +203,27 @@ let finalize
            ~keeper_name:meta.name
            ~detail:"missing AGENT_CORE checkpoint after run")
   in
-  let unexpected_agent_core_checkpoint () =
-    Log.Keeper.error ~keeper_name:meta.name
-      "runtime=%s official-client runtime returned an AGENT_CORE checkpoint"
+  (* An official-client runtime does return an AGENT_CORE checkpoint, and the
+     rest of the system already treats that as ordinary. keeper_turn_driver
+     meets the same combination on the way in and logs
+     official_client_checkpoint_not_replayed because the durable session store
+     owns resume (:726, :805, :875); #27945, which added the branch below, says
+     in its own PR body that it "preserved" that contract. On disk, taskmaster
+     and kidsnote each hold 12 agent-core snapshots -- the same count as the
+     agent_core keepers rondo and lane-smith.
+
+     Ending the turn over it stopped three keepers at 0% completion for half an
+     hour (#28050). The payload is dropped here for the same reason the driver
+     drops it on the way in, so this path now matches the [None] case below:
+     the session store, not this checkpoint, is what resumes an official
+     client. *)
+  let official_client_checkpoint_not_persisted () =
+    Log.Keeper.info ~keeper_name:meta.name
+      "runtime=%s official-client runtime returned an AGENT_CORE checkpoint; \
+       the payload is not persisted here because the durable session store owns \
+       resume"
       (Keeper_meta_contract.runtime_id_of_meta meta);
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string CheckpointFailures)
-      ~labels:[ "keeper", meta.name; "site", "owner_mismatch" ]
-      ();
-    Error
-      (checkpoint_persistence_error
-         ~keeper_name:meta.name
-         ~detail:"official-client runtime returned an AGENT_CORE checkpoint")
+    Ok None
   in
   let saved_checkpoint_result =
     match checkpoint_owner_result, result.checkpoint with
@@ -223,7 +232,7 @@ let finalize
       save_agent_core_checkpoint result_checkpoint
     | Ok Runtime_execution.Masc_agent_core, None -> missing_agent_core_checkpoint ()
     | Ok Runtime_execution.Official_client, Some _ ->
-      unexpected_agent_core_checkpoint ()
+      official_client_checkpoint_not_persisted ()
     | Ok Runtime_execution.Official_client, None -> Ok None
   in
   match saved_checkpoint_result with

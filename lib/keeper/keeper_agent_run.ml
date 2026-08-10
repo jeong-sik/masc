@@ -960,7 +960,11 @@ let run_turn
                  call_run_named ?raw_trace ~initial_messages:history_messages ()
                with
                | Error e -> Error e
-               | Ok result ->
+               | Ok selected_run ->
+                 let result = selected_run.Keeper_turn_driver.run_result in
+                 let selected_runtime_id = selected_run.selected_runtime_id in
+                 let selected_max_context = selected_run.selected_max_context in
+                 let checkpoint_owner = selected_run.checkpoint_owner in
                  let post_turn_t0 = Time_compat.now () in
                  (* Section 4: Result processing — parse response, handle tool calls, validate contracts. *)
                 (* RFC-MASC-004: AfterTurn hooks flush incrementally during
@@ -1030,7 +1034,7 @@ let run_turn
                      world_observation;
                      (match
                         normalize_response_text_for_finalization
-                          ~runtime_id:runtime_id_string
+                          ~runtime_id:selected_runtime_id
                           ~initial_messages:history_messages
                           ~run_result:result
                           ~text
@@ -1077,7 +1081,10 @@ let run_turn
                                !last_persisted_checkpoint_ref
                              ~final_agent_core_turn_ordinal
                              ~checkpoint_persistence_error
-                             ~post_turn_t0 ~runtime_id_string
+                             ~post_turn_t0
+                             ~runtime_id_string:selected_runtime_id
+                             ~max_context:selected_max_context
+                             ~checkpoint_owner
                              ~history_messages
                              ~prompt_metrics ~ctx_composition ~usage
                              ~receipt_response_text_present_ref
@@ -1129,13 +1136,18 @@ let run_turn
          | Some (_, reason) -> Some reason
          | None -> fallback_reason
        in
+       let settled_runtime_id, settled_max_context =
+         match turn_result with
+         | Ok result -> result.runtime_id, result.max_context
+         | Error _ -> runtime_id_string, max_context
+       in
        let receipt_result =
          Keeper_agent_run_receipt.finalize
            ~config
            ~meta
            ~generation
            ~manifest_keeper_turn_id
-           ~runtime_id
+           ~runtime_id:settled_runtime_id
            ~keeper_visible_sandbox_root
            ~receipt_started_at
            ~runtime_manifest_context
@@ -1241,7 +1253,7 @@ let run_turn
            — both option, None when the operator left runtime.toml unset, in
            which case the dashboard renders absence rather than a default). *)
         let (price_input_per_million, price_output_per_million) =
-          Runtime.pricing_of_runtime_id runtime_id_string
+          Runtime.pricing_of_runtime_id settled_runtime_id
         in
         let input_components =
           match !request_evidence_ref with
@@ -1295,13 +1307,13 @@ let run_turn
           ~turn_kind
           ~trace_id
           ~absolute_turn:manifest_keeper_turn_id
-          ~runtime_profile:runtime_id_string
+          ~runtime_profile:settled_runtime_id
           ~model:!receipt_model_used_ref
           ~finish_reason:
             (Option.map
                Keeper_execution_receipt.stop_reason_to_string
                !receipt_stop_reason_ref)
-          ~context_window:(Some max_context)
+          ~context_window:(Some settled_max_context)
           ~price_input_per_million
           ~price_output_per_million
           ~request_latency_ms
@@ -1313,7 +1325,7 @@ let run_turn
           ~raw_trace_run_ref
           ~sampling:
             { temperature = Some temperature
-            ; top_p = Runtime.top_p_of_runtime_id runtime_id_string
+            ; top_p = Runtime.top_p_of_runtime_id settled_runtime_id
             ; max_tokens = None
             ; thinking_budget = tctx.thinking_budget
             ; enable_thinking = tctx.thinking_enabled
@@ -1339,7 +1351,7 @@ let run_turn
                      (`List
                         (List.map Turn_record.prompt_block_to_json blocks))) )
             ; ( Otel_genai.Attr_key.masc_turn_profile
-              , `String runtime_id_string )
+              , `String settled_runtime_id )
             ; ( Otel_genai.Attr_key.masc_turn_execution_ids
               , `String
                   (String.concat ","

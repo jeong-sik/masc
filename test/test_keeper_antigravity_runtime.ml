@@ -320,7 +320,8 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ()
                   with
                   | Error error -> fail (Agent_core.Error.to_string error)
-                  | Ok turn ->
+                  | Ok selected ->
+                    let turn = selected.Keeper_turn_driver.run_result in
                     observed_trace_ref := turn.trace_ref;
                     check string
                       "response"

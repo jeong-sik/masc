@@ -206,14 +206,6 @@ module For_testing : sig
   (** Production-equivalent runtime config replacement with an injected
       parent-directory sync operation. *)
 
-  val lane_checkpoint_owner_conflict :
-    lane_id:string ->
-    (string * Runtime_execution.checkpoint_owner) list ->
-    string option
-  (** [None] when every candidate of the lane declares the same checkpoint
-      owner. [Some detail] names the first candidate pair that disagrees; the
-      loader turns it into a config error. Candidates are [(id, owner)] in
-      declared order. *)
 end
 
 val get_default_runtime : unit -> t option

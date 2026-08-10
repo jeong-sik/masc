@@ -52,7 +52,8 @@ type fixture_step =
   | Emit_and_read of string
   | Emit_after_closing_input of string
 
-let fixture_script ?prompt_marker ?(remove_after_auth = false) lines =
+let fixture_script ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
+    lines =
   let path = Filename.temp_file "masc-keeper-claude-code-" ".sh" in
   let output = open_out_bin path in
   output_string output "#!/bin/sh\n";
@@ -68,6 +69,10 @@ let fixture_script ?prompt_marker ?(remove_after_auth = false) lines =
   output_string output "  case \"$arg\" in\n";
   output_string output "    --session-id=*) session=${arg#--session-id=} ;;\n";
   output_string output "    --resume=*) session=${arg#--resume=} ;;\n";
+  if forbid_mcp
+  then
+    output_string output
+      "    --mcp-config|--strict-mcp-config|--allowedTools) exit 98 ;;\n";
   output_string output "  esac\n";
   output_string output "done\n";
   output_string output "[ -n \"$session\" ] || exit 94\n";
@@ -101,14 +106,14 @@ let fixture_script ?prompt_marker ?(remove_after_auth = false) lines =
   path
 ;;
 
-let with_fixture ?prompt_marker ?remove_after_auth lines f =
-  let path = fixture_script ?prompt_marker ?remove_after_auth lines in
+let with_fixture ?prompt_marker ?remove_after_auth ?forbid_mcp lines f =
+  let path = fixture_script ?prompt_marker ?remove_after_auth ?forbid_mcp lines in
   Fun.protect
     ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
     (fun () -> f path)
 ;;
 
-let runtime_toml cli_path =
+let runtime_toml ?(tools_support = true) cli_path =
   Printf.sprintf
     "[providers.claude]\n\
      protocol = \"claude-code\"\n\
@@ -118,18 +123,20 @@ let runtime_toml cli_path =
      [models.claude]\n\
      api-name = \"claude-fixture\"\n\
      max-context = 200000\n\
+     tools-support = %b\n\
      \n\
      [claude.claude]\n\
      \n\
      [runtime]\n\
      default = \"claude.claude\"\n"
     cli_path
+    tools_support
 ;;
 
-let with_runtime_config cli_path f =
+let with_runtime_config ?tools_support cli_path f =
   let path = Filename.temp_file "masc-keeper-claude-runtime-" ".toml" in
   let output = open_out_bin path in
-  output_string output (runtime_toml cli_path);
+  output_string output (runtime_toml ?tools_support cli_path);
   close_out output;
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
@@ -171,14 +178,14 @@ let content_of_wire_message raw =
   |> Yojson.Safe.Util.to_string
 ;;
 
-let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
+let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
     (fun () ->
-       with_runtime_config cli_path (fun runtime_path ->
+       with_runtime_config ~tools_support cli_path (fun runtime_path ->
          Eio_main.run (fun env ->
            Eio.Switch.run (fun sw ->
              Eio_context.set_env env;
@@ -197,22 +204,24 @@ let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
                       | _ :: _ -> Some (Agent_core.Context.create ())
                     in
                     let run () =
-                      Keeper_turn_driver.run_named
-                        ~runtime_id:"claude.claude"
-                        ~keeper_name:"claude-fixture"
-                        ~base_path
-                        ~goal
-                        ~tools
-                        ~initial_messages
-                        ?context
-                        ?event_bus
-                        ?agent_core_checkpoint
-                        ?runtime_manifest_context
-                        ?runtime_manifest_append
-                        ?raw_trace
-                        ~sw
-                        ~net:(Eio.Stdenv.net env)
-                        ()
+                      Result.map
+                        (fun selected -> selected.Keeper_turn_driver.run_result)
+                        (Keeper_turn_driver.run_named
+                           ~runtime_id:"claude.claude"
+                           ~keeper_name:"claude-fixture"
+                           ~base_path
+                           ~goal
+                           ~tools
+                           ~initial_messages
+                           ?context
+                           ?event_bus
+                           ?agent_core_checkpoint
+                           ?runtime_manifest_context
+                           ?runtime_manifest_append
+                           ?raw_trace
+                           ~sw
+                           ~net:(Eio.Stdenv.net env)
+                           ())
                     in
                     (match event_bus, event_capture with
                      | Some bus, Some capture ->
@@ -540,6 +549,45 @@ let test_keeper_projects_masc_tool () =
                (String_util.contains_substring raw "MASC_TOOL_RESULT")))
 ;;
 
+let test_tools_support_false_omits_mcp_bridge () =
+  let base_path = temp_workspace () in
+  let called = ref false in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Must not reach a tools-disabled Claude runtime"
+      ~parameters:[]
+      (fun _ ->
+        called := true;
+        Ok { Agent_core.Types.content = "unexpected"; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         ~forbid_mcp:true
+         [ Emit (assistant ~turn_id:"turn-no-mcp" "MASC_CLAUDE_NO_MCP")
+         ; Emit (result ~turn_id:"turn-no-mcp" "MASC_CLAUDE_NO_MCP")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~tools_support:false
+               ~base_path
+               ~cli_path
+               ~goal:"NO_MCP"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             check bool "tool callback not installed" false !called;
+             check string
+               "response"
+               "MASC_CLAUDE_NO_MCP"
+               (keeper_response_text turn)))
+;;
+
 let load_state base_path =
   match
     Keeper_official_client_session_store.load
@@ -730,6 +778,10 @@ let () =
             `Quick
             test_keeper_projects_typed_tool_history_and_lifecycle
         ; test_case "projects MASC tool" `Quick test_keeper_projects_masc_tool
+        ; test_case
+            "tools-support false omits MCP bridge"
+            `Quick
+            test_tools_support_false_omits_mcp_bridge
         ; test_case
             "post-effect transport enters recovery"
             `Quick

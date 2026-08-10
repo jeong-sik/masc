@@ -28,6 +28,8 @@ let finalize
     ~checkpoint_persistence_error
     ~post_turn_t0
     ~runtime_id_string
+    ~max_context
+    ~checkpoint_owner
     ~history_messages
     ~prompt_metrics
     ~ctx_composition
@@ -80,18 +82,6 @@ let finalize
           assistant_msg;
         capture_replay_response ~response_text;
         assistant_msg)
-  in
-  let checkpoint_owner_result =
-    match Runtime.get_runtime_by_id runtime_id_string with
-    | Some runtime -> Ok (Runtime_execution.checkpoint_owner runtime.execution)
-    | None ->
-      Error
-        (checkpoint_persistence_error
-           ~keeper_name:meta.name
-           ~detail:
-             (Printf.sprintf
-                "runtime disappeared before checkpoint finalization: %s"
-                runtime_id_string))
   in
   let save_agent_core_checkpoint result_checkpoint =
     let checkpoint, source_already_persisted =
@@ -169,7 +159,7 @@ let finalize
                 { incoming_turn_count; known_turn_count })) ->
          Log.Keeper.warn ~keeper_name:meta.name
            "runtime=%s AGENT_CORE checkpoint stale no-op: incoming turn_count=%d, last saved=%d"
-           (Keeper_meta_contract.runtime_id_of_meta meta)
+           runtime_id_string
            incoming_turn_count known_turn_count;
          Otel_metric_store.inc_counter
            "masc_keeper_checkpoint_stale_noop_total"
@@ -179,7 +169,7 @@ let finalize
        | Error e ->
          Log.Keeper.error ~keeper_name:meta.name
            "runtime=%s AGENT_CORE checkpoint save failed: %s"
-           (Keeper_meta_contract.runtime_id_of_meta meta)
+           runtime_id_string
            e;
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string CheckpointFailures)
@@ -193,7 +183,7 @@ let finalize
   let missing_agent_core_checkpoint () =
       Log.Keeper.error ~keeper_name:meta.name
         "runtime=%s missing AGENT_CORE checkpoint after run"
-        (Keeper_meta_contract.runtime_id_of_meta meta);
+        runtime_id_string;
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)
         ~labels:[ "keeper", meta.name; "site", "missing" ]
@@ -206,7 +196,7 @@ let finalize
   let unexpected_agent_core_checkpoint () =
     Log.Keeper.error ~keeper_name:meta.name
       "runtime=%s official-client runtime returned an AGENT_CORE checkpoint"
-      (Keeper_meta_contract.runtime_id_of_meta meta);
+      runtime_id_string;
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string CheckpointFailures)
       ~labels:[ "keeper", meta.name; "site", "owner_mismatch" ]
@@ -217,14 +207,13 @@ let finalize
          ~detail:"official-client runtime returned an AGENT_CORE checkpoint")
   in
   let saved_checkpoint_result =
-    match checkpoint_owner_result, result.checkpoint with
-    | Error error, _ -> Error error
-    | Ok Runtime_execution.Masc_agent_core, Some result_checkpoint ->
+    match checkpoint_owner, result.checkpoint with
+    | Runtime_execution.Masc_agent_core, Some result_checkpoint ->
       save_agent_core_checkpoint result_checkpoint
-    | Ok Runtime_execution.Masc_agent_core, None -> missing_agent_core_checkpoint ()
-    | Ok Runtime_execution.Official_client, Some _ ->
+    | Runtime_execution.Masc_agent_core, None -> missing_agent_core_checkpoint ()
+    | Runtime_execution.Official_client, Some _ ->
       unexpected_agent_core_checkpoint ()
-    | Ok Runtime_execution.Official_client, None -> Ok None
+    | Runtime_execution.Official_client, None -> Ok None
   in
   match saved_checkpoint_result with
   | Error e -> Error e
@@ -252,6 +241,8 @@ let finalize
       { response_text
       ; turn_outcome
       ; model_used = model
+      ; runtime_id = runtime_id_string
+      ; max_context
       ; prompt_metrics
       ; ctx_composition
       ; runtime_observation = result.runtime_observation

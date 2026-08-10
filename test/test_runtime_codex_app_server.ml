@@ -913,7 +913,9 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ?raw_trace
                       ~sw
                       ~net:(Eio.Stdenv.net env)
-                      ())))))
+                      ()
+                    |> Result.map (fun selected ->
+                      selected.Keeper_turn_driver.run_result))))))
 ;;
 
 let test_keeper_dispatches_codex_turn_runtime () =

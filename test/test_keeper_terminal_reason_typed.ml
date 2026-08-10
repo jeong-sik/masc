@@ -897,6 +897,8 @@ let () =
     { response_text = "completed"
     ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
     ; model_used = "test-model"
+    ; runtime_id = "test-runtime"
+    ; max_context = 1000
     ; prompt_metrics
     ; ctx_composition
     ; runtime_observation = None

@@ -27,7 +27,12 @@ let provider_error ~runtime_id detail : Fusion_types.panel_failure =
    other entry points publish them separately, so "the Eio runtime is not
    initialized" sends the reader to look at the wrong one. Split out as a pure
    function because Eio_context has no reset, so a test that drove the real
-   globals could only reach these arms in one fragile order. *)
+   globals could only reach these arms in one fragile order.
+
+   Its result is already carried to the caller as a typed
+   [Fusion_types.panel_failure] and lands in the fusion run record. *)
+(* TEL-OK: pure string selection, no effect; the failure it names is already
+   observable through the panel outcome. *)
 let missing_handle_detail ~env_present ~clock_present =
   match env_present, clock_present with
   | true, true -> None
@@ -160,5 +165,8 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ~prompt =
 ;;
 
 module For_testing = struct
+  (* Re-exported so a test can reach every arm without driving the
+     process-global Eio context, which has no reset. *)
+  (* TEL-OK: alias of a pure function; no behaviour of its own. *)
   let missing_handle_detail = missing_handle_detail
 end

@@ -67,6 +67,7 @@ let fixture_script
   output_string output "#!/bin/sh\n";
   output_string output
     "test -z \"${GEMINI_API_KEY+x}\" && test -z \"${GEMINI_API_KEY_WORK+x}\" && test -z \"${GOOGLE_API_TOKEN+x}\" && test -z \"${OPENAI_API_KEY+x}\" && test -z \"${OPENAI_API_KEY_MAIN+x}\" && test -z \"${ANTHROPIC_API_KEY+x}\" && test -z \"${ANTHROPIC_API_KEY_WORK+x}\" && test -z \"${AGY_ADC_AUTH+x}\" && test -z \"${MASC_PUBLIC_FIXTURE+x}\" || exit 92\n";
+  output_string output "case \" $* \" in *\" --print \"*) exit 98 ;; esac\n";
   if require_resume
   then (
     output_string
@@ -85,6 +86,7 @@ let fixture_script
         output
         "test -z \"${XDG_CACHE_HOME+x}\" && test -z \"${XDG_CONFIG_HOME+x}\" && test -z \"${XDG_DATA_HOME+x}\" || exit 95\n")
     required_home;
+  output_string output "cat >/dev/null\n";
   if sleep_s > 0.0 then output_string output (Printf.sprintf "sleep %.3f\n" sleep_s);
   List.iter
     (fun line -> output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
@@ -100,7 +102,14 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?exit_code lines f =
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
-let run_fixture ?conversation_mode ?home_dir ?on_conversation_ready ?(timeout_s = 2.0) path =
+let run_fixture
+    ?conversation_mode
+    ?home_dir
+    ?on_conversation_ready
+    ?(timeout_s = 2.0)
+    ?(prompt = "Return the fixture marker")
+    path
+  =
   Eio_main.run (fun env ->
     let config =
       { (Runtime_antigravity.default_config ~cwd:"/tmp" ~model:"gemini-fixture") with
@@ -116,7 +125,7 @@ let run_fixture ?conversation_mode ?home_dir ?on_conversation_ready ?(timeout_s 
       ~clock:(Eio.Stdenv.clock env)
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
       config
-      ~prompt:"Return the fixture marker")
+      ~prompt)
 ;;
 
 let test_successful_official_client_turn () =
@@ -146,6 +155,16 @@ let test_successful_official_client_turn () =
            (turn.permission_mode = Runtime_antigravity.Always_proceed);
          check bool "new conversation" false turn.resumed;
          check bool "measured wall duration" true (turn.wall_duration_s >= 0.0))
+;;
+
+let test_large_prompt_streams_over_stdin () =
+  let prompt = String.make 1_100_000 'x' in
+  with_fixture [ init (); result () ] (fun path ->
+    match run_fixture ~prompt path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok turn ->
+      check string "response" "MASC_ANTIGRAVITY_OK\n" turn.text;
+      check int "turn count" 1 turn.num_turns)
 ;;
 
 let test_child_environment_is_allowlisted () =
@@ -370,19 +389,6 @@ let test_admission_is_process_free () =
   | Ok () -> fail "invalid deterministic config passed admission"
 ;;
 
-let test_oversized_prompt_is_typed_before_spawn () =
-  let config =
-    Runtime_antigravity.default_config ~cwd:"/tmp" ~model:"gemini-fixture"
-  in
-  let prompt = String.make (Runtime_antigravity.max_prompt_bytes + 1) 'x' in
-  match Runtime_antigravity.validate_turn config ~prompt with
-  | Error (Runtime_antigravity.Prompt_too_large { bytes; limit }) ->
-    check int "measured bytes" (String.length prompt) bytes;
-    check int "declared argv limit" Runtime_antigravity.max_prompt_bytes limit
-  | Error error -> fail (Runtime_antigravity.error_to_string error)
-  | Ok () -> fail "oversized prompt reached the spawn boundary"
-;;
-
 let test_live_start_and_resume () =
   match Sys.getenv_opt "MASC_ANTIGRAVITY_LIVE", Sys.getenv_opt "MASC_ANTIGRAVITY_MODEL" with
   | Some "1", Some model ->
@@ -445,6 +451,10 @@ let () =
             `Quick
             test_resume_requires_exact_identity_and_argv
         ; test_case
+            "large prompt uses stdin"
+            `Quick
+            test_large_prompt_streams_over_stdin
+        ; test_case
             "resume mismatch"
             `Quick
             test_resume_identity_mismatch_fails_closed
@@ -481,10 +491,6 @@ let () =
             test_unknown_protocol_vocabulary_fails_closed
         ; test_case "typed timeout" `Quick test_timeout_is_typed
         ; test_case "process-free admission" `Quick test_admission_is_process_free
-        ; test_case
-            "oversized prompt is typed before spawn"
-            `Quick
-            test_oversized_prompt_is_typed_before_spawn
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

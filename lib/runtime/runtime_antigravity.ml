@@ -31,12 +31,6 @@ let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 8192
 let max_wire_line_bytes = 8 * 1024 * 1024
 
-(* [agy --print] accepts the prompt only as one argv member. Linux caps one
-   member below ARG_MAX and macOS charges it against the whole argv+environment
-   block, so a provider request-body budget cannot protect this spawn boundary.
-   Keep one cross-platform limit below both kernels and reject before execve. *)
-let max_prompt_bytes = 120 * 1024
-
 let default_config ~cwd ~model =
   { cli_path = "agy"
   ; cwd
@@ -88,10 +82,6 @@ type turn_result =
 
 type error =
   | Invalid_config of string
-  | Prompt_too_large of
-      { bytes : int
-      ; limit : int
-      }
   | Spawn_failed of string
   | Protocol_error of
       { stage : string
@@ -106,11 +96,6 @@ exception Runtime_error of error
 
 let error_to_string = function
   | Invalid_config detail -> "invalid Antigravity CLI config: " ^ detail
-  | Prompt_too_large { bytes; limit } ->
-    Printf.sprintf
-      "Antigravity prompt is %d bytes; the CLI argv boundary admits at most %d"
-      bytes
-      limit
   | Spawn_failed detail -> "failed to start Antigravity CLI: " ^ detail
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Antigravity stream-json protocol error during %s: %s" stage detail
@@ -395,10 +380,6 @@ let validate_config config ~conversation_mode ~prompt =
   then Error (Invalid_config "timeout_s must be positive and finite")
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
-  else if String.length prompt > max_prompt_bytes
-  then
-    Error
-      (Prompt_too_large { bytes = String.length prompt; limit = max_prompt_bytes })
   else
     match config.agent, conversation_mode with
     | Some agent, _ when String.trim agent = "" ->
@@ -466,11 +447,9 @@ let duration_argument seconds = Printf.sprintf "%.3fs" seconds
 
 let cli_timeout_s timeout_s = max 0.001 (timeout_s *. 0.95)
 
-let argv config ~conversation_mode ~prompt =
+let argv config ~conversation_mode =
   let base =
     [ config.cli_path
-    ; "--print"
-    ; prompt
     ; "--output-format"
     ; "stream-json"
     ; "--model"
@@ -660,12 +639,15 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
-        (argv config ~conversation_mode ~prompt)
+        (argv config ~conversation_mode)
     in
     Eio.Flow.close stdin_r;
-    Eio.Flow.close stdin_w;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
+    Eio.Fiber.fork ~sw (fun () ->
+      Fun.protect
+        ~finally:(fun () -> Eio.Flow.close stdin_w)
+        (fun () -> Eio.Flow.copy_string prompt stdin_w));
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let process_settled = ref false in

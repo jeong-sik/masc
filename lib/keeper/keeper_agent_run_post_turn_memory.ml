@@ -80,7 +80,6 @@ let run
         Keeper_memory_lane.submit
           ~base_path:config.Workspace.base_path
           ~keeper_name:meta.name
-          ~lane:Keeper_memory_lane.Librarian
           librarian_series
       in
       ()

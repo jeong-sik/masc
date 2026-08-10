@@ -267,6 +267,15 @@ let test_duplicate_keys_fail_closed () =
        | Ok _ -> fail "duplicate key was admitted")
 ;;
 
+(* A live init event announced request-review. It was not modelled, the parse
+   failed, and the resulting protocol error put the official-client session in
+   Recovery_required -- taskmaster, 110 turns in one hour (#28008).
+
+   Nothing branches on [permission_mode]: the only read of the field is its own
+   parse site. Naming the one member that stalled a keeper leaves the next one
+   to stall it again, so an unseen mode is carried in
+   [Unrecognized_permission_mode] -- the drift stays visible without ending a
+   turn. *)
 let test_observed_permission_modes_are_admitted () =
   List.iter
     (fun (wire, expected) ->
@@ -278,17 +287,48 @@ let test_observed_permission_modes_are_admitted () =
           fail (wire ^ " was rejected: " ^ Runtime_antigravity.error_to_string error)))
     [ "always-proceed", Runtime_antigravity.Always_proceed
     ; "request-review", Runtime_antigravity.Request_review
+    ; ( "supervised-2027"
+      , Runtime_antigravity.Unrecognized_permission_mode "supervised-2027" )
     ]
 ;;
 
+(* #28029 opened step_type with [Unrecognized] after Antigravity began emitting
+   "system_message" and taskmaster stopped. #28037 closed it again and named
+   [System_message] instead -- which admits the value that already stalled a
+   keeper and leaves the next one to stall it again. Nothing branches on
+   [System_message]: it appears at its declaration and at the parse site only.
+
+   This is the control for reopening it: a step_type no one has seen must not
+   end the turn.
+
+   It does not check that the value survives, because nothing surfaces it --
+   [step_type] is not in [turn_result], and every non-[Tool] value feeds the
+   same counters. Normalising an unseen value to [Internal] passes this test,
+   verified by mutation. [Unrecognized] is still the better carrier: it keeps a
+   future consumer from reading an unseen value as a known one. But "the drift
+   stays visible" is not true today, and no test here can make it so. *)
+let test_unseen_step_type_does_not_end_the_turn () =
+  with_fixture
+    [ init (); step ~step_type:"shell" (); result () ]
+    (fun path ->
+       match run_fixture path with
+       | Ok _ -> ()
+       | Error error ->
+         fail ("an unseen step_type ended the turn: "
+               ^ Runtime_antigravity.error_to_string error))
+;;
+
 let test_unknown_protocol_vocabulary_fails_closed () =
-  let unknown_permission =
-    {|{"event":"init","conversation_id":"conversation-1","init":{"model":"gemini-fixture","cwd":"/tmp","permission_mode":"unreviewed"}}|}
-  in
+  (* step_type left this list in #28027 and permission_mode followed: both are
+     vocabularies nothing branches on, so an unseen value carries no ambiguity
+     to fail closed over (see [test_observed_permission_modes_are_admitted] and
+     [test_unseen_step_type_does_not_end_the_turn]).
+
+     step state and result status stay: [Done] vs [Step_error] and [Success] vs
+     [Result_error] each select a different terminal outcome, so a value we
+     cannot place is a real ambiguity. *)
   let cases =
-    [ "permission mode", [ unknown_permission; result () ]
-    ; "step state", [ init (); step ~state:"PAUSED" (); result () ]
-    ; "step type", [ init (); step ~step_type:"shell" (); result () ]
+    [ "step state", [ init (); step ~state:"PAUSED" (); result () ]
     ; "result status", [ init (); result ~status:"PARTIAL" () ]
     ]
   in
@@ -413,6 +453,10 @@ let () =
             "observed permission modes are admitted"
             `Quick
             test_observed_permission_modes_are_admitted
+        ; test_case
+            "unseen step type does not end the turn"
+            `Quick
+            test_unseen_step_type_does_not_end_the_turn
         ; test_case
             "unknown protocol vocabulary fails closed"
             `Quick

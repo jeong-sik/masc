@@ -952,6 +952,42 @@ let commit_verdict_r
               task. *)
            (match new_status with
             | Masc_domain.Done { assignee; _ } ->
+              (* The observation surface has the same gap the completion metric
+                 below records: a verdict does not pass through the agent
+                 transition surface, so nothing emitted the audit entry or the
+                 [Task_completed] telemetry for a task finished this way. The
+                 audit trail stopped at [submit_for_verification] and never said
+                 who approved the completion. RFC-0323 G-3 already states that a
+                 Done produced by an approval verdict is a Done like any other,
+                 and the actor is the record's assignee — the authority is not an
+                 agent. [authority] rides in the details so the trail keeps the
+                 provenance the actor field cannot carry. *)
+              run_post_commit "transition_observation" (fun () ->
+                observe_task_transition
+                  config
+                  ~agent_name:assignee
+                  ~task_id
+                  ~transition:Masc_domain.Done_action
+                  ~details:
+                    (let base =
+                       task_transition_details
+                         ~from_status:task.task_status
+                         ~to_status:new_status
+                         ?notes:(if notes = "" then None else Some notes)
+                         ?duration_ms:
+                           (Some
+                              (max
+                                 0
+                                 (int_of_float
+                                    ((Time_compat.now ()
+                                      -. task_started_at_unix task.task_status)
+                                     *. 1000.0))))
+                         ()
+                     in
+                     match base with
+                     | `Assoc fields ->
+                       `Assoc (fields @ [ "authority", `String authority_actor ])
+                     | other -> other));
               run_post_commit "terminal_reconciliation" (fun () ->
                 match
                   (Atomic.get Workspace_hooks.task_terminal_committed_fn)

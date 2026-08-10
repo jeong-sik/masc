@@ -244,6 +244,45 @@ let runtime_manifest_json_without_field row_json field =
   | _ -> fail "runtime manifest row must encode as an object"
 ;;
 
+(* The scan record carries no mutable field, so folding a row must leave the
+   argument at its previous value and report the advance through the return.
+   This pins the property the fold buys: a caller can hold on to an earlier
+   scan without it drifting under them. It does not compile against the
+   in-place shape, where [update_runtime_manifest_scan] returned [unit]. *)
+let test_runtime_manifest_scan_fold_leaves_input_untouched () =
+  let scan =
+    Runtime_lens_scan.make_runtime_manifest_scan
+      ~path:"/tmp/immutable-runtime-manifest.jsonl"
+      ~limit:4
+      ~scan_line_limit:16
+      ~scan_scope:"test"
+  in
+  let row =
+    Keeper_runtime_manifest.make
+      ~keeper_name:"immutable-scan-keeper"
+      ~trace_id:"trace-immutable-scan"
+      ~keeper_turn_id:7
+      ~event:Keeper_runtime_manifest.Turn_finished
+      ~status:"finished"
+      ()
+  in
+  let advanced = Runtime_lens_scan.update_runtime_manifest_scan scan row in
+  check int "argument keeps its row count" 0 scan.total_rows;
+  check bool "argument keeps its terminal flag" false scan.has_terminal;
+  check
+    (list int)
+    "argument keeps its terminal turn ids"
+    []
+    scan.terminal_keeper_turn_ids;
+  check int "result counts the row" 1 advanced.total_rows;
+  check bool "result observes the terminal event" true advanced.has_terminal;
+  check
+    (list int)
+    "result records the terminal turn id"
+    [ 7 ]
+    advanced.terminal_keeper_turn_ids
+;;
+
 let test_runtime_manifest_scan_surfaces_diagnostics_without_repeat_warnings () =
   with_temp_dir @@ fun dir ->
   let config = Workspace.default_config dir in
@@ -699,6 +738,10 @@ let () =
             "surfaces unsupported rows without repeated warnings"
             `Quick
             test_runtime_manifest_scan_surfaces_diagnostics_without_repeat_warnings
+        ; test_case
+            "folding a row leaves the argument scan untouched"
+            `Quick
+            test_runtime_manifest_scan_fold_leaves_input_untouched
         ] )
     ; ( "checkpoint_inventory"
       , [ test_case

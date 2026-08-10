@@ -401,6 +401,36 @@ let test_server_request_fails_closed () =
       | Ok _ -> fail "unsupported server request incorrectly admitted")
 ;;
 
+(* A live keeper failed every turn on a context overflow the server reported,
+   and the receipt carried only the sentence: nothing downstream could tell that
+   failure class from any other Turn_failed (#28071). The server's own error
+   object is the only place a typed field could come from, and this function was
+   dropping everything but [message]. The expectation names the annotation
+   literally rather than re-rendering the function, so it fails if the field
+   stops being carried. *)
+let test_failed_turn_keeps_typed_error_fields () =
+  let failed =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"ran out of room in the model's context window","code":"context_length_exceeded"}}}}|}
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; failed ]
+    (fun path ->
+      match run_fixture path with
+      | Error (Runtime_codex_app_server.Turn_failed detail) ->
+        check
+          bool
+          "provider sentence survives"
+          true
+          (Astring.String.is_infix ~affix:"ran out of room" detail);
+        check
+          bool
+          "typed code survives"
+          true
+          (Astring.String.is_infix ~affix:"code=context_length_exceeded" detail)
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "failed turn incorrectly reported as completed")
+;;
+
 let test_failed_turn_is_not_completion () =
   let failed =
     {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"fixture failure"}}}}|}
@@ -2151,6 +2181,8 @@ let () =
             `Quick
             test_notification_without_params_fails_closed
         ; test_case "server request fails closed" `Quick test_server_request_fails_closed
+        ; test_case "failed turn keeps typed error fields" `Quick
+            test_failed_turn_keeps_typed_error_fields
         ; test_case "failed turn stays failed" `Quick test_failed_turn_is_not_completion
         ; test_case
             "retry notifications are observational"

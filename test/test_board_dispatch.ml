@@ -628,6 +628,31 @@ let test_dashboard_projection_does_not_produce_attention_candidate () =
          (Atomic.get entry.fiber_wakeup))
 ;;
 
+(* [vote] returns the post's score after the vote, not the amount this vote
+   changed it. The two are equal for the first voter, which is why the field
+   could sit under the name [delta] and read correctly everywhere it was tried
+   (#27675). A second voter separates them: the total is 2, a change is 1. *)
+let test_vote_returns_total_score_not_change () =
+  let post =
+    match
+      Board_dispatch.create_post ~author:"score-author"
+        ~content:"two voters separate a total from a change" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let vote_exn ~voter =
+    match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+    | Ok score -> score
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let first = vote_exn ~voter:"score-voter-a" in
+  let second = vote_exn ~voter:"score-voter-b" in
+  Alcotest.(check int) "first vote: total and change agree" 1 first;
+  Alcotest.(check int) "second vote returns the total, not the change" 2 second
+;;
+
 let test_recent_sort_bypasses_hot_cutoff () =
   let create_post_exn ~author ~content =
     match
@@ -2195,6 +2220,8 @@ let () =
         (with_eio test_reaction_rejects_unsupported_emoji);
     ];
     "misc", [
+      Alcotest.test_case "vote returns total score, not change" `Quick
+        (with_eio test_vote_returns_total_score_not_change);
       Alcotest.test_case "stats" `Quick (with_eio test_stats);
       Alcotest.test_case "search" `Quick (with_eio test_search);
       Alcotest.test_case "hearths" `Quick (with_eio test_hearths);

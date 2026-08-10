@@ -147,6 +147,7 @@ type model_spec =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
        [@equal fun a b -> a = b]
   ; turn_timeout_s : float option
+  ; max_prompt_bytes : int option
   ; capabilities : model_capabilities option
   }
 [@@deriving show, eq]

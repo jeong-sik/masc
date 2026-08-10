@@ -139,6 +139,7 @@ type prepared_turn =
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
+  ; seed_dropped_atoms : int
   }
 
 let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
@@ -151,8 +152,19 @@ let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
   | None -> Ok reasoning_effort
 ;;
 
+(* The canonical MASC message encoder, the same one the Agent_core budget path
+   measures with. It is not any adapter's own rendering: antigravity renders
+   "ROLE:\ntext" and the JSON form of that message is strictly larger, so the
+   measure is at or above what each adapter actually sends and the ceiling
+   cannot be exceeded by measuring here. *)
+let measure_message_bytes (message : Agent_core.Types.message) =
+  String.length
+    (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
+;;
+
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
-    ~initial_messages ~model_input_projection ~hooks ~configured_reasoning_effort =
+    ~initial_messages ~model_input_projection ~hooks ~configured_reasoning_effort
+    ~max_prompt_bytes =
   let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
   let before_turn =
     invoke_turn_hook
@@ -234,6 +246,56 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
   let system_prompt =
     Option.value turn_params.system_prompt_override ~default:system_prompt
   in
+  (* An official-client turn 1 seeds the vendor conversation with the whole
+     projected history; from turn 2 the client owns the transcript and the
+     adapters send only the goal. So an unbounded seed does not fail once — it
+     fails on turn 1, never reaches turn 2, and re-renders a larger history on
+     the next cycle. Recovery closes the loop rather than breaking it: a fresh
+     session resets the counter, which makes the next turn a start turn again.
+     Measured on the live fleet with three keepers pinned at turn_count = 1,
+     one of them auto-superseding to a fresh session 293 times in a single log.
+
+     The newest messages are kept, since the goal answers the most recent turn
+     and trimming the tail would drop exactly the context it refers to.
+     [dropped_atoms] is returned to the caller rather than logged here so the
+     loss lands on the keeper's own line; a silent window would read as "the
+     model saw everything".
+
+     Applied here rather than in each adapter because all three consume
+     [messages] for the same purpose and would otherwise carry three copies of
+     one rule. Resume paths ignore [messages] entirely, so windowing is a no-op
+     for them. *)
+  let* messages, seed_dropped_atoms =
+    match max_prompt_bytes with
+    | None -> Ok (messages, 0)
+    | Some capacity_bytes ->
+      let reserved_bytes = String.length system_prompt in
+      (match
+         Runtime_model_input_tail_window.project_with_drop
+           ~measure_message_bytes
+           ~capacity_bytes
+           ~reserved_bytes
+           messages
+       with
+       | Ok projection ->
+         let dropped = projection.Runtime_model_input_tail_window.dropped_atoms in
+         if dropped > 0
+         then
+           Log.Keeper.warn
+             "%s: %s start-turn seed dropped %d oldest message atom(s) to fit               the declared %d-byte prompt budget"
+             keeper_name
+             runtime_label
+             dropped
+             capacity_bytes;
+         Ok (projection.Runtime_model_input_tail_window.messages, dropped)
+       | Error error ->
+         Error
+           (config_error
+              ~field:"max_prompt_bytes"
+              (runtime_label
+               ^ " start-turn seed does not fit the declared prompt budget: "
+               ^ Runtime_model_input_tail_window.budget_error_to_string error)))
+  in
   let unsupported_parameter field value =
     match value with
     | None -> Ok ()
@@ -266,7 +328,13 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
               (Yojson.Safe.to_string
                  (Agent_core.Types.tool_choice_to_json choice))))
   in
-  Ok { messages; system_prompt; tools; reasoning_effort }
+  Ok
+    { messages
+    ; system_prompt
+    ; tools
+    ; reasoning_effort
+    ; seed_dropped_atoms
+    }
 ;;
 
 type dynamic_tool_result =

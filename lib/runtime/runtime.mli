@@ -357,6 +357,10 @@ val reasoning_effort_of_runtime_id : string -> Llm_provider.Reasoning_effort.t o
     {!Runtime_inference.resolve_reasoning_effort}. *)
 
 val turn_timeout_s_of_runtime_id : string -> float option
+
+val max_prompt_bytes_of_runtime_id : string -> int option
+(** Declared [max-prompt-bytes] for the model bound to this runtime id, or
+    [None] when the model declares none. *)
 (** Per-model [turn-timeout-s] from runtime.toml, or [None] when unset or the
     runtime id is unknown. [None] means "keep whatever bound the caller already
     has" — the antigravity provider [timeout-s] or the adapter default — so an

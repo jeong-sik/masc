@@ -202,6 +202,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       Host.prepare_turn
         ~configured_reasoning_effort:
           (Runtime_inference.resolve_reasoning_effort ~runtime_id)
+        ~max_prompt_bytes:
+          (Runtime_inference.resolve_max_prompt_bytes ~runtime_id)
         ~runtime_label
         ~keeper_name
         ~turn_count

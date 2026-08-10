@@ -38,6 +38,7 @@ type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
 type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
   | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
@@ -751,6 +752,28 @@ let terminalize_pending_turn_attempt_result
     ~applied_at
     ~selection
     ~detail
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+  |> Result.map (function
+    | Transition_applied receipt -> Acked receipt
+    | Transition_already_applied receipt -> Already_acked receipt
+    | Transition_committed_followup_failed { receipt; stage; detail } ->
+      Ack_committed_followup_failed { receipt; stage; detail })
+;;
+
+let terminalize_pending_turn_completed_result
+      ~base_path
+      name
+      ~current_owner_nonce
+      ~applied_at
+      ~selection
+  =
+  Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_nonce
+    ~applied_at
+    ~selection
     ~after_commit:(publish_pending ~base_path name)
     ()
   |> Result.map (function

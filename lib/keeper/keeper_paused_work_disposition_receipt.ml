@@ -149,6 +149,7 @@ let transfer_owner_to_yojson transfer =
 let source_terminal_receipt_kind = function
   | Keeper_event_queue_state.Fusion_terminal _ -> "fusion_terminal"
   | Keeper_event_queue_state.Hitl_terminal _ -> "hitl_terminal"
+  | Keeper_event_queue_state.Turn_completed -> "turn_completed"
   | Keeper_event_queue_state.Turn_attempt_terminal _ ->
     "turn_attempt_terminal"
 ;;

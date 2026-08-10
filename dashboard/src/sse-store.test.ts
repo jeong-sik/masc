@@ -43,7 +43,6 @@ const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const hydrateTransportHealthFromSSE = vi.fn<(payload: unknown) => void>()
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
 const refreshActiveKeeperChatHistory = vi.fn<(opts?: { force?: boolean }) => void>()
-const reconcileKeeperChatReceipts = vi.fn<(name: string) => Promise<void>>(async () => {})
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -103,7 +102,6 @@ async function loadSseStore() {
   }))
   vi.doMock('./keeper-runtime', () => ({
     noteKeeperChatAppended,
-    reconcileKeeperChatReceipts,
     refreshActiveKeeperChatHistory,
   }))
   vi.doMock('./router', () => ({ route }))
@@ -138,8 +136,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     replayAgentCoreRuntimeTelemetry.mockResolvedValue(undefined)
     hydrateAgentCoreTelemetrySample.mockClear()
     refreshActiveKeeperChatHistory.mockReset()
-    reconcileKeeperChatReceipts.mockReset()
-    reconcileKeeperChatReceipts.mockResolvedValue(undefined)
     hydrateFleetCompositeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockReturnValue(true)
@@ -754,7 +750,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined, undefined)
   })
 
-  it('delivers every Keeper inventory invalidation immediately while coalescing receipt reads', async () => {
+  it('delivers every Keeper chat-operation inventory invalidation immediately', async () => {
     const { sseStore } = await loadSseStore()
     const refreshQueue = vi.fn()
     sseStore.registerKeeperWaitingInventoryRefresh(refreshQueue)
@@ -772,15 +768,9 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshQueue).toHaveBeenCalledTimes(2)
     expect(refreshQueue).toHaveBeenNthCalledWith(1, 'echo')
     expect(refreshQueue).toHaveBeenNthCalledWith(2, 'echo')
-    expect(reconcileKeeperChatReceipts).not.toHaveBeenCalled()
-    vi.advanceTimersByTime(1_000)
-    await flushAsyncWork()
-
-    expect(reconcileKeeperChatReceipts).toHaveBeenCalledTimes(1)
-    expect(reconcileKeeperChatReceipts).toHaveBeenCalledWith('echo')
   })
 
-  it('refreshes waiting inventory for event-queue changes without reading Admin chat receipts', async () => {
+  it('refreshes waiting inventory for event-queue changes', async () => {
     const { sseStore } = await loadSseStore()
     const refreshQueue = vi.fn()
     sseStore.registerKeeperWaitingInventoryRefresh(refreshQueue)
@@ -792,10 +782,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     })
     expect(refreshQueue).toHaveBeenCalledTimes(1)
     expect(refreshQueue).toHaveBeenCalledWith('echo')
-    vi.advanceTimersByTime(1_000)
-    await flushAsyncWork()
-
-    expect(reconcileKeeperChatReceipts).not.toHaveBeenCalled()
   })
 
   it('forces compaction hydration from the typed source event, then re-reads on cache completion', async () => {

@@ -248,10 +248,14 @@ describe('Keeper chat custom-event cross-language parity', () => {
     resolve(process.cwd(), '../lib/server/server_keeper_chat_agui_projection.ml'),
     'utf8',
   )
+  const streamRouteSource = readFileSync(
+    resolve(process.cwd(), '../lib/server/server_routes_http_keeper_stream.ml'),
+    'utf8',
+  )
   const mappingStart = projectorSource.indexOf('let custom_event_name_to_string = function')
   const mappingEnd = projectorSource.indexOf('\nlet custom ', mappingStart)
   const mappingSource = projectorSource.slice(mappingStart, mappingEnd)
-  const ocamlNames = [...mappingSource.matchAll(/"(KEEPER_[A-Z_]+)"/g)]
+  const ocamlNames = [...`${mappingSource}\n${streamRouteSource}`.matchAll(/"(KEEPER_[A-Z_]+)"/g)]
     .map(match => match[1])
     .filter((name): name is string => name !== undefined)
 

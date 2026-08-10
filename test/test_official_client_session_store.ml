@@ -88,6 +88,18 @@ let test_roundtrip_and_settlement () =
         ~updated_at:3.0
       |> Result.get_ok
     in
+    (match
+       mark_turn_started
+         ~base_path
+         ~keeper_name
+         ~expected:starting
+         ~session_id:"session-1"
+         ~turn_id:"turn-regressed"
+         ~turn_count:(starting.turn_count - 1)
+         ~updated_at:3.5
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "a regressed provider turn count mutated the durable claim");
     let inflight =
       mark_turn_started
         ~base_path
@@ -95,6 +107,7 @@ let test_roundtrip_and_settlement () =
         ~expected:starting
         ~session_id:"session-1"
         ~turn_id:"turn-1"
+        ~turn_count:starting.turn_count
         ~updated_at:4.0
       |> Result.get_ok
     in
@@ -233,6 +246,7 @@ let test_moved_tool_surface_starts_fresh () =
         ~expected:inflight
         ~session_id:"session-1"
         ~turn_id:"turn-1"
+        ~turn_count:inflight.turn_count
         ~updated_at:4.0
       |> Result.get_ok
     in
@@ -354,6 +368,7 @@ let test_terminal_identity_switch_starts_fresh () =
         ~expected:starting
         ~session_id:"codex-session"
         ~turn_id:"codex-turn"
+        ~turn_count:starting.turn_count
         ~updated_at:4.0
       |> Result.get_ok
     in
@@ -588,6 +603,7 @@ let test_retry_previous_restores_exact_settlement () =
         ~expected:starting
         ~session_id:"session-1"
         ~turn_id:"turn-1"
+        ~turn_count:starting.turn_count
         ~updated_at:4.0
       |> Result.get_ok
     in

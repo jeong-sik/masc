@@ -418,17 +418,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             then Ok ()
             else Error (internal_error "Antigravity resumed flag differs from durable plan")
           in
-          let* () =
-            if turn.num_turns = turn_count
-            then Ok ()
-            else
-              Error
-                (internal_error
-                   (Printf.sprintf
-                      "Antigravity reported turn %d; durable session expected %d"
-                      turn.num_turns
-                      turn_count))
-          in
           let turn_id =
             provider_turn_identity
               ~conversation_id:turn.conversation_id
@@ -442,6 +431,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                 ~expected
                 ~session_id:turn.conversation_id
                 ~turn_id
+                ~turn_count:turn.num_turns
                 ~updated_at:(Time_compat.now ()))
             |> Result.map_error internal_error
           in
@@ -478,10 +468,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             match
               Host.invoke_turn_hook
                 ~keeper_name
-                ~turn_count
+                ~turn_count:turn.num_turns
                 ~hook_name:"after_turn"
                 hooks.after_turn
-                (Agent_core.Hooks.AfterTurn { turn = turn_count; response })
+                (Agent_core.Hooks.AfterTurn { turn = turn.num_turns; response })
             with
             | Continue -> Ok ()
             | HookFailed { stage; detail } ->
@@ -493,7 +483,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             match
               Host.invoke_turn_hook
                 ~keeper_name
-                ~turn_count
+                ~turn_count:turn.num_turns
                 ~hook_name:"on_stop"
                 hooks.on_stop
                 (Agent_core.Hooks.OnStop { reason = response.stop_reason; response })
@@ -549,7 +539,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             { Runtime_agent.response
             ; checkpoint = None
             ; session_id = turn.conversation_id
-            ; turns = turn_count
+            ; turns = turn.num_turns
             ; trace_ref = None
             ; run_validation = None
             ; runtime_observation = Some runtime_observation

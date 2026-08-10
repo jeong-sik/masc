@@ -406,6 +406,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                    ~expected
                    ~session_id
                    ~turn_id
+                   ~turn_count
                    ~updated_at:(Time_compat.now ())))
              client_config
              ~prompt

@@ -186,6 +186,7 @@ val mark_turn_started :
   expected:t ->
   session_id:string ->
   turn_id:string ->
+  turn_count:int ->
   updated_at:float ->
   (t, string) result
 

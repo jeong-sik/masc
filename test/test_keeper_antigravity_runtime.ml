@@ -52,7 +52,7 @@ for arg in "$@"; do
     --sandbox) sandbox=1 ;;
     --disable-slash-commands) slash_commands_disabled=1 ;;
     --conversation) expect_conversation=1 ;;
-    conversation-antigravity-fixture) turns=2 ;;
+    conversation-antigravity-fixture) turns=73 ;;
   esac
 done
 test "$expect_mode" -eq 0
@@ -159,6 +159,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
         |> Result.get_ok
       in
       let observed_trace_ref = ref None in
+      let observed_initial_prompt = ref None in
       let cli_path = fixture_script ~base_path in
       let runtime_path = Filename.concat base_path "runtime.toml" in
       write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
@@ -232,13 +233,42 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       "response"
                       "MASC_ANTIGRAVITY_KEEPER_OK"
                       (keeper_response_text turn);
-                    check int "turn count" 1 turn.turns))));
+                    check int "turn count" 1 turn.turns;
+                    observed_initial_prompt :=
+                      Some
+                        (In_channel.with_open_bin
+                           (Filename.concat base_path "antigravity-prompt.txt")
+                           In_channel.input_all);
+                    match
+                      Keeper_turn_driver.run_named
+                        ~runtime_id:"antigravity.gemini"
+                        ~keeper_name:"antigravity-fixture"
+                        ~base_path
+                        ~goal:"Call masc_probe once"
+                        ~tools:[ tool ]
+                        ~initial_messages:[ tool_history ]
+                        ~context:(Agent_core.Context.create ())
+                        ~raw_trace
+                        ~sw
+                        ~net:(Eio.Stdenv.net env)
+                        ()
+                    with
+                    | Error error -> fail (Agent_core.Error.to_string error)
+                    | Ok resumed ->
+                      observed_trace_ref := resumed.trace_ref;
+                      check int
+                        "provider cumulative turn count"
+                        73
+                        resumed.turns))));
       check string
         "tool arguments"
         {|{"marker":"from-antigravity"}|}
         (Yojson.Safe.to_string !observed);
-      let prompt_path = Filename.concat base_path "antigravity-prompt.txt" in
-      let prompt = In_channel.with_open_bin prompt_path In_channel.input_all in
+      let prompt =
+        match !observed_initial_prompt with
+        | Some prompt -> prompt
+        | None -> fail "initial Antigravity prompt was not captured"
+      in
       check bool
         "prompt preserves prior tool role"
         true
@@ -277,9 +307,18 @@ let test_keeper_projects_mcp_tool_and_settles () =
       (match session.phase with
        | Settled
            { session_id = "conversation-antigravity-fixture"
-           ; turn_id = "conversation-antigravity-fixture:ordinal:1"
+           ; turn_id = "conversation-antigravity-fixture:ordinal:73"
            } -> ()
        | _ -> fail "Antigravity Keeper turn did not settle");
+      check int "durable provider turn count" 73 session.turn_count;
+      let next_plan =
+        Keeper_official_client_session_store.plan_claim
+          ~expected:(Some session)
+          ~client_kind:Keeper_official_client_session_store.Antigravity
+          ~runtime_id:"antigravity.gemini"
+        |> Result.get_ok
+      in
+      check int "next durable turn count" 74 next_plan.turn_count;
       let mcp_path =
         Filename.concat
           mascot_root

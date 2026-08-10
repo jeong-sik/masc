@@ -78,7 +78,7 @@ type error =
 type operation_execution =
   | Operation_succeeded of { outcome_ref : string }
   | Operation_failed of
-      { kind : string
+      { kind : Chat_operation.failure_kind
       ; detail : string
       ; outcome_ref : string option
       }
@@ -523,7 +523,7 @@ let start
                   if (Atomic.get t.projection).Keeper_owner_reducer.stopping
                   then
                     Operation_failed
-                      { kind = "Turn_cancelled"
+                      { kind = Chat_operation.Turn_cancelled
                       ; detail = "Keeper owner is stopping"
                       ; outcome_ref = None
                       }
@@ -531,19 +531,19 @@ let start
               with
               | Stop_active_child ->
                 Operation_failed
-                  { kind = "Turn_cancelled"
+                  { kind = Chat_operation.Turn_cancelled
                   ; detail = "Keeper owner stopped the active turn"
                   ; outcome_ref = None
                   }
               | Eio.Cancel.Cancelled cause ->
                 Operation_failed
-                  { kind = "Turn_cancelled"
+                  { kind = Chat_operation.Turn_cancelled
                   ; detail = Printexc.to_string cause
                   ; outcome_ref = None
                   }
               | exn ->
                 Operation_failed
-                  { kind = "Turn_exception"
+                  { kind = Chat_operation.Turn_exception
                   ; detail = Printexc.to_string exn
                   ; outcome_ref = None
                   }

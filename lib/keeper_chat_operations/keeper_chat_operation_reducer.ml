@@ -109,13 +109,12 @@ let apply (operation : Operation.t) command =
   | Fail_running { completed_at; failure }, Running _ ->
     (match
        validate_terminal_time completed_at,
-       Operation.validate_nonblank ~field:"failure.kind" failure.kind,
        Operation.validate_nonblank ~field:"failure.detail" failure.detail
      with
-     | Error error, _, _ -> Error error
-     | _, Error detail, _ | _, _, Error detail -> Error (Invalid_input detail)
-     | Ok (), Ok kind, Ok detail ->
-       let failure = { failure with kind; detail } in
+     | Error error, _ -> Error error
+     | _, Error detail -> Error (Invalid_input detail)
+     | Ok (), Ok detail ->
+       let failure = { failure with detail } in
        Ok
          (transition
             { operation with

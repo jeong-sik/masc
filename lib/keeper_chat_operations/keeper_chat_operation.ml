@@ -29,8 +29,49 @@ module Operation_id = struct
   let equal = String.equal
 end
 
+type failure_kind =
+  | Interrupted_by_restart
+  | Turn_cancelled
+  | Turn_exception
+  | Store_unavailable
+  | No_queued_operation
+  | Invalid_input
+  | Turn_invariant
+
+let all_failure_kinds =
+  [ Interrupted_by_restart
+  ; Turn_cancelled
+  ; Turn_exception
+  ; Store_unavailable
+  ; No_queued_operation
+  ; Invalid_input
+  ; Turn_invariant
+  ]
+;;
+
+let failure_kind_to_string = function
+  | Interrupted_by_restart -> "Interrupted_by_restart"
+  | Turn_cancelled -> "Turn_cancelled"
+  | Turn_exception -> "Turn_exception"
+  | Store_unavailable -> "Store_unavailable"
+  | No_queued_operation -> "No_queued_operation"
+  | Invalid_input -> "Invalid_input"
+  | Turn_invariant -> "Turn_invariant"
+;;
+
+let failure_kind_of_string = function
+  | "Interrupted_by_restart" -> Ok Interrupted_by_restart
+  | "Turn_cancelled" -> Ok Turn_cancelled
+  | "Turn_exception" -> Ok Turn_exception
+  | "Store_unavailable" -> Ok Store_unavailable
+  | "No_queued_operation" -> Ok No_queued_operation
+  | "Invalid_input" -> Ok Invalid_input
+  | "Turn_invariant" -> Ok Turn_invariant
+  | value -> Error (Printf.sprintf "unknown Keeper chat operation failure kind %S" value)
+;;
+
 type failure =
-  { kind : string
+  { kind : failure_kind
   ; detail : string
   ; outcome_ref : string option
   }
@@ -86,7 +127,7 @@ let to_json operation =
     | Failed { completed_at; failure = { kind; detail; outcome_ref } } ->
       [ "state", `String "Failed"
       ; "completed_at", `Float completed_at
-      ; "failure_kind", `String kind
+      ; "failure_kind", `String (failure_kind_to_string kind)
       ; "failure_detail", `String detail
       ; ( "outcome_ref"
         , match outcome_ref with

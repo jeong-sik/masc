@@ -218,7 +218,8 @@ let test_restart_interrupts_running_once_and_preserves_queued () =
          (store_ok (Store.settle_running_after_restart reopened ~now:5.0));
        let interrupted = get_exn reopened running_id in
        (match interrupted.state with
-        | Operation.Failed { failure = { kind = "Interrupted_by_restart"; _ }; _ } -> ()
+        | Operation.Failed
+            { failure = { kind = Operation.Interrupted_by_restart; _ }; _ } -> ()
         | _ -> fail "running operation was not interrupted");
        check bool "interrupted input scrubbed" true (Option.is_none interrupted.input);
        let queued = get_exn reopened queued_id in

@@ -37,8 +37,16 @@ let metadata_table_sql =
   "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v1'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT"
 ;;
 
+let failure_kind_database_values =
+  Operation.all_failure_kinds
+  |> List.map (fun kind -> "'" ^ Operation.failure_kind_to_string kind ^ "'")
+  |> String.concat ", "
+;;
+
 let operations_table_sql =
-  "CREATE TABLE operations (operation_id TEXT PRIMARY KEY, admission_digest TEXT NOT NULL CHECK (length(admission_digest) = 64), execution_digest TEXT NOT NULL CHECK (length(execution_digest) = 64), sequence INTEGER NOT NULL UNIQUE CHECK (sequence >= 0), source_json TEXT NOT NULL, input_json TEXT, state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')), created_at REAL NOT NULL CHECK (created_at >= 0), started_at REAL, completed_at REAL, outcome_ref TEXT, failure_kind TEXT, failure_detail TEXT, CHECK ((state = 'queued' AND input_json IS NOT NULL AND started_at IS NULL AND completed_at IS NULL AND outcome_ref IS NULL AND failure_kind IS NULL AND failure_detail IS NULL) OR (state = 'running' AND input_json IS NOT NULL AND started_at IS NOT NULL AND completed_at IS NULL AND outcome_ref IS NULL AND failure_kind IS NULL AND failure_detail IS NULL) OR (state = 'succeeded' AND input_json IS NULL AND started_at IS NOT NULL AND completed_at IS NOT NULL AND outcome_ref IS NOT NULL AND failure_kind IS NULL AND failure_detail IS NULL) OR (state = 'failed' AND input_json IS NULL AND started_at IS NOT NULL AND completed_at IS NOT NULL AND failure_kind IS NOT NULL AND failure_detail IS NOT NULL) OR (state = 'cancelled' AND input_json IS NULL AND started_at IS NULL AND completed_at IS NOT NULL AND outcome_ref IS NULL AND failure_kind IS NULL AND failure_detail IS NULL))) STRICT"
+  Printf.sprintf
+    "CREATE TABLE operations (operation_id TEXT PRIMARY KEY, admission_digest TEXT NOT NULL CHECK (length(admission_digest) = 64), execution_digest TEXT NOT NULL CHECK (length(execution_digest) = 64), sequence INTEGER NOT NULL UNIQUE CHECK (sequence >= 0), source_json TEXT NOT NULL, input_json TEXT, state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')), created_at REAL NOT NULL CHECK (created_at >= 0), started_at REAL, completed_at REAL, outcome_ref TEXT, failure_kind TEXT CHECK (failure_kind IS NULL OR failure_kind IN (%s)), failure_detail TEXT, CHECK ((state = 'queued' AND input_json IS NOT NULL AND started_at IS NULL AND completed_at IS NULL AND outcome_ref IS NULL AND failure_kind IS NULL AND failure_detail IS NULL) OR (state = 'running' AND input_json IS NOT NULL AND started_at IS NOT NULL AND completed_at IS NULL AND outcome_ref IS NULL AND failure_kind IS NULL AND failure_detail IS NULL) OR (state = 'succeeded' AND input_json IS NULL AND started_at IS NOT NULL AND completed_at IS NOT NULL AND outcome_ref IS NOT NULL AND failure_kind IS NULL AND failure_detail IS NULL) OR (state = 'failed' AND input_json IS NULL AND started_at IS NOT NULL AND completed_at IS NOT NULL AND failure_kind IS NOT NULL AND failure_detail IS NOT NULL) OR (state = 'cancelled' AND input_json IS NULL AND started_at IS NULL AND completed_at IS NOT NULL AND outcome_ref IS NULL AND failure_kind IS NULL AND failure_detail IS NULL))) STRICT"
+    failure_kind_database_values
 ;;
 
 let operations_state_sequence_index_sql =
@@ -322,6 +330,10 @@ let decode_operation stmt =
       | "failed" ->
         let* completed_at = required_option "completed_at" completed_at in
         let* kind = required_option "failure_kind" failure_kind in
+        let* kind =
+          Operation.failure_kind_of_string kind
+          |> Result.map_error (fun detail -> Integrity_error detail)
+        in
         let* detail = required_option "failure_detail" failure_detail in
         Ok
           (Operation.Failed
@@ -967,7 +979,14 @@ let fail_running store ~now ~operation_id ~kind ~detail ~outcome_ref =
     (fun stmt ->
        let* () = bind_float store.db stmt ~operation:"bind failure time" 1 now in
        let* () = bind_optional_text store.db stmt ~operation:"bind failure outcome" 2 outcome_ref in
-       let* () = bind_text store.db stmt ~operation:"bind failure kind" 3 kind in
+       let* () =
+         bind_text
+           store.db
+           stmt
+           ~operation:"bind failure kind"
+           3
+           (Operation.failure_kind_to_string kind)
+       in
        let* () = bind_text store.db stmt ~operation:"bind failure detail" 4 detail in
        bind_text store.db stmt ~operation:"bind failed operation" 5 (Id.to_string operation_id))
 ;;
@@ -982,9 +1001,17 @@ let settle_running_after_restart store ~now =
     with_statement
       store.db
       ~operation:"settle interrupted operations"
-      "UPDATE operations SET state = 'failed', input_json = NULL, completed_at = ?, failure_kind = 'Interrupted_by_restart', failure_detail = 'process restarted before terminal operation commit' WHERE state = 'running'"
+      "UPDATE operations SET state = 'failed', input_json = NULL, completed_at = ?, failure_kind = ?, failure_detail = 'process restarted before terminal operation commit' WHERE state = 'running'"
       (fun stmt ->
          let* () = bind_float store.db stmt ~operation:"bind restart settlement time" 1 now in
+         let* () =
+           bind_text
+             store.db
+             stmt
+             ~operation:"bind restart failure kind"
+             2
+             (Operation.failure_kind_to_string Operation.Interrupted_by_restart)
+         in
          let* () = expect_done store.db stmt ~operation:"settle interrupted operations" in
          Ok (Sqlite3.changes store.db)))
 ;;

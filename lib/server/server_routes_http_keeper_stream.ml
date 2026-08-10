@@ -1836,13 +1836,17 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
   let execute_admitted admission_token =
     match claim () with
     | Error error ->
-      failed "Store_unavailable" (Keeper_owner.error_to_string error)
+      failed Keeper_chat_operation.Store_unavailable (Keeper_owner.error_to_string error)
     | Ok None ->
-      failed "No_queued_operation" "Owner FIFO head disappeared before claim"
+      failed
+        Keeper_chat_operation.No_queued_operation
+        "Owner FIFO head disappeared before claim"
     | Ok (Some operation) ->
       (match operation.input with
        | None ->
-         failed "Invalid_input" "Running Keeper chat operation has no execution input"
+         failed
+           Keeper_chat_operation.Invalid_input
+           "Running Keeper chat operation has no execution input"
        | Some input ->
          (match
             operation_payload_of_json
@@ -1851,7 +1855,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
               ~source:operation.source
               ~input
           with
-          | Error detail -> failed "Invalid_input" detail
+          | Error detail -> failed Keeper_chat_operation.Invalid_input detail
           | Ok operation_payload ->
             let payload = operation_payload.payload in
             let operation_id =
@@ -2003,7 +2007,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
              | Some (Failed { kind; detail }), _ ->
                failed (queued_turn_failure_kind_to_string kind) detail
              | None, _ ->
-               failed "Turn_invariant" "Owner operation returned no terminal turn outcome")))
+               failed
+                 Keeper_chat_operation.Turn_invariant
+                 "Owner operation returned no terminal turn outcome")))
   in
   match
     Keeper_turn_dispatch_authority.run execute_admitted

@@ -76,7 +76,7 @@ val fail_running
   :  t
   -> now:float
   -> operation_id:Operation.Operation_id.t
-  -> kind:string
+  -> kind:Operation.failure_kind
   -> detail:string
   -> outcome_ref:string option
   -> (Operation.t, error) result

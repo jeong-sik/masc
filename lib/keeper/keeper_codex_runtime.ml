@@ -79,6 +79,58 @@ let project_messages messages =
   loop [] [] messages
 ;;
 
+let unbounded_model_input_capacity_bytes = max_int
+
+let measure_model_input_message_bytes (message : Agent_core.Types.message) =
+  String.length (Host.encode_history_message message)
+;;
+
+(* Keep the first official-client attempt byte-identical. Only the provider's
+   exact typed overflow opens a bounded retry, and that retry windows the
+   provider-bound copy without rewriting the durable conversation. *)
+let model_input_projection_for_capacity
+    ~capacity_bytes
+    ~observed_full_bytes
+    ~observed_history_atoms
+    source_projection
+    messages =
+  let windowed =
+    if capacity_bytes = unbounded_model_input_capacity_bytes
+    then Ok messages
+    else
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        match
+          Runtime_model_input_tail_window.project
+            ~measure_message_bytes:measure_model_input_message_bytes
+            ~capacity_bytes
+            ~reserved_bytes:0
+            messages
+        with
+        | Ok projected -> Ok projected
+        | Error error ->
+          Error
+            (Runtime_model_input_tail_window.budget_error_to_string error))
+  in
+  let* windowed = windowed in
+  let* projected =
+    match source_projection with
+    | None -> Ok windowed
+    | Some project -> project windowed
+  in
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    let _, history_atoms = Runtime_model_input_tail_window.annotate projected in
+    let full_bytes =
+      List.fold_left
+        (fun total message ->
+           total + measure_model_input_message_bytes message)
+        0
+        projected
+    in
+    observed_full_bytes := Some full_bytes;
+    observed_history_atoms := Some history_atoms);
+  Ok projected
+;;
+
 let codex_dynamic_tool (tool : Host.dynamic_tool) :
     Runtime_codex_app_server.dynamic_tool =
   { name = tool.name
@@ -620,21 +672,67 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~event_bus ~raw_trace ~config =
-  Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-    run_without_lifecycle
-      ~runtime_id
+  let observed_full_bytes = ref None in
+  let observed_history_atoms = ref None in
+  let starting_capacity_bytes =
+    Keeper_context_overflow_shrink_state.starting_capacity_bytes
       ~keeper_name
-      ~base_path
-      ~goal
-      ~goal_blocks
-      ~system_prompt
-      ~tools
-      ~initial_messages
-      ~model_input_projection
-      ~hooks
-      ~context_injector
-      ~context
-      ~event_bus
-      ~raw_trace
-      ~config)
+      ~runtime_id
+      ~max_capacity_bytes:unbounded_model_input_capacity_bytes
+  in
+  Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+    Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
+      ~starting_capacity_bytes
+      (* The newest atom is indivisible. With fewer than two atoms there is
+         no older provider-bound history for the tail window to remove. *)
+      ~same_run_retry_authorized:(fun () ->
+        match !observed_history_atoms with
+        | Some history_atoms -> history_atoms > 1
+        | None -> false)
+      ~shrink_capacity:(fun ~capacity_bytes ~default_capacity_bytes ->
+        if capacity_bytes <> unbounded_model_input_capacity_bytes
+        then max 1 default_capacity_bytes
+        else
+          match !observed_full_bytes with
+          | Some full_bytes -> max 1 (full_bytes / 2)
+          | None -> max 1 default_capacity_bytes)
+      ~record_success:(fun ~capacity_bytes ->
+        if capacity_bytes <> unbounded_model_input_capacity_bytes
+        then
+          Keeper_context_overflow_shrink_state.record_success
+            ~keeper_name
+            ~runtime_id
+            ~capacity_bytes)
+      ~on_shrink_retry:
+        (fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
+          Log.Keeper.warn
+            ~keeper_name
+            "Codex typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
+            shrink_attempt
+            previous_capacity_bytes
+            capacity_bytes)
+      ~attempt:(fun ~capacity_bytes ->
+        run_without_lifecycle
+          ~runtime_id
+          ~keeper_name
+          ~base_path
+          ~goal
+          ~goal_blocks
+          ~system_prompt
+          ~tools
+          ~initial_messages
+          ~model_input_projection:
+            (Some
+               (model_input_projection_for_capacity
+                  ~capacity_bytes
+                  ~observed_full_bytes
+                  ~observed_history_atoms
+                  model_input_projection))
+          ~hooks
+          ~context_injector
+          ~context
+          ~event_bus
+          ~raw_trace
+          ~config)
+      ())
 ;;

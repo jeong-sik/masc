@@ -91,6 +91,39 @@ let with_fixture ?capture_path lines f =
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
+let with_fixture_sequence ?capture_path first_lines second_lines f =
+  let first_path = fixture_script ?capture_path first_lines in
+  let second_path = fixture_script ?capture_path second_lines in
+  let counter_path = Filename.temp_file "masc-codex-fixture-count-" ".txt" in
+  Sys.remove counter_path;
+  let path = Filename.temp_file "masc-codex-fixture-sequence-" ".sh" in
+  let output = open_out_bin path in
+  output_string output "#!/bin/sh\n";
+  output_string output "count=0\n";
+  output_string output
+    ("if [ -f " ^ shell_quote counter_path ^ " ]; then\n"
+     ^ "  IFS= read -r count < " ^ shell_quote counter_path ^ "\n"
+     ^ "fi\n");
+  output_string output "count=$((count + 1))\n";
+  output_string output
+    ("printf '%s\\n' \"$count\" > " ^ shell_quote counter_path ^ "\n");
+  output_string output
+    ("if [ \"$count\" -eq 1 ]; then\n"
+     ^ "  exec " ^ shell_quote first_path ^ "\n"
+     ^ "else\n"
+     ^ "  exec " ^ shell_quote second_path ^ "\n"
+     ^ "fi\n");
+  close_out output;
+  Unix.chmod path 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun candidate ->
+           if Sys.file_exists candidate then Sys.remove candidate)
+        [ path; first_path; second_path; counter_path ])
+    (fun () -> f path)
+;;
+
 let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp") path =
   Eio_main.run (fun env ->
     let config =
@@ -1139,6 +1172,84 @@ let test_keeper_maps_official_context_error_to_typed_core_error () =
          ()
        | Error error -> fail (Agent_core.Error.to_string error)
        | Ok _ -> fail "Keeper erased the typed Codex context overflow")
+;;
+
+let test_keeper_shrinks_history_after_typed_context_error () =
+  let capture_path = Filename.temp_file "masc-codex-shrink-requests-" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove capture_path)
+    (fun () ->
+       let injected = {|{"id":4,"result":{}}|} in
+       let turn_after_injection =
+         {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
+       in
+       let overflow =
+         {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+       in
+       let initial_messages =
+         List.init 64 (fun index ->
+           Agent_core.Types.user_msg
+             (Printf.sprintf "%02d:%s" index (String.make 4_096 'x')))
+       in
+       with_fixture_sequence
+         ~capture_path
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; injected
+         ; turn_after_injection
+         ; overflow
+         ]
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; injected
+         ; turn_after_injection
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~initial_messages
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok result ->
+              check
+                string
+                "Keeper response"
+                "MASC_SUBSCRIPTION_OK"
+                (keeper_response_text result));
+       let injected_item_counts =
+         In_channel.with_open_bin capture_path (fun input ->
+           In_channel.input_lines input
+           |> List.map Yojson.Safe.from_string
+           |> List.filter_map (fun request ->
+             if
+               Yojson.Safe.Util.member "method" request
+               = `String "thread/inject_items"
+             then
+               Some
+                 (request
+                  |> Yojson.Safe.Util.member "params"
+                  |> Yojson.Safe.Util.member "items"
+                  |> Yojson.Safe.Util.to_list
+                  |> List.length)
+             else None))
+       in
+       match injected_item_counts with
+       | [ full_count; shrunk_count ] ->
+         check int "first attempt keeps full history" 64 full_count;
+         check bool "retry keeps non-empty history" true (shrunk_count > 0);
+         check bool "retry shrinks provider-bound history" true
+           (shrunk_count < full_count)
+       | counts ->
+         failf
+           "expected two history injections, got counts=[%s]"
+           (counts |> List.map string_of_int |> String.concat ","))
 ;;
 
 let test_keeper_does_not_retry_context_error_after_tool_effect () =
@@ -2473,6 +2584,10 @@ let () =
             "Keeper maps official context error to typed core error"
             `Quick
             test_keeper_maps_official_context_error_to_typed_core_error
+        ; test_case
+            "Keeper shrinks history after typed context error"
+            `Quick
+            test_keeper_shrinks_history_after_typed_context_error
         ; test_case
             "Keeper does not retry context error after tool effect"
             `Quick

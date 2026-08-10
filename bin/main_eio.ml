@@ -1041,11 +1041,17 @@ let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)
   | _ ->
       (match List.filter (fun (binding : Runtime_schema.binding) -> binding.wizard_default) bindings with
        | [ binding ] -> Ok binding
+       (* One enabled binding is the default by arithmetic: there is nothing
+          else the wizard could install, so requiring the operator to say so
+          rejects a config the server boots from (#27991, live glm-coding).
+          Two or more without a flag stays an error -- that one is a real
+          choice and guessing it would install a model nobody picked. *)
+       | [] when List.length bindings = 1 -> Ok (List.hd bindings)
        | [] ->
            Error
              (Printf.sprintf
-                "provider %s has no install wizard default binding; set wizard-default = true on exactly one [%s.<model>] binding"
-                provider.id provider.id)
+                "provider %s has %d enabled bindings and no install wizard default; set wizard-default = true on exactly one [%s.<model>] binding"
+                provider.id (List.length bindings) provider.id)
        | defaults ->
            Error
              (Printf.sprintf

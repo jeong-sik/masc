@@ -1825,6 +1825,7 @@
 (include stanzas/test_keeper_turn_dispatch_authority.inc)
 (include stanzas/test_keeper_owner.inc)
 (include stanzas/test_keeper_chat_operation_http.inc)
+(include stanzas/test_keeper_chat_cutover_preflight.inc)
 
 
 

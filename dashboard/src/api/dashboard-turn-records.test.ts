@@ -242,7 +242,7 @@ describe('keeper turn record cache token counts', () => {
   })
 
   it('rejects fields outside the exact current nested record', async () => {
-    getMock.mockResolvedValue(payload(entry({ lease_id: 'retired' })))
+    getMock.mockResolvedValue(payload(entry({ retired_field: 'invalid' })))
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',

@@ -9,8 +9,8 @@
     2. For each triggered [Message_create] / [App_mention] event, looks up the
        channel→keeper binding and durably accepts the exact source event before
        the socket callback returns. Network ACK delivery then runs on the
-       Keeper-scoped connector lane; the durable chat-queue consumer owns the
-       eventual Keeper turn and connector reply.
+       Keeper-scoped connector lane; the Keeper Owner operation owns the
+       eventual turn and connector reply.
 
     Ambient parity with the Discord gateway (RFC-0226): a human message that
     fails the trigger policy is persisted as durable external attention plus a

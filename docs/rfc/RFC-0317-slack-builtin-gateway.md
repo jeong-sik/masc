@@ -122,7 +122,7 @@ turn-starter). `App_mention` always emits (it is, by definition, a mention).
 - `SLACK_BOT_TOKEN` (`xoxb-...`) — REST outbound (`chat.postMessage` /
   `chat.update`) and `auth.test` (bot identity). Resolved via
   `Env_config_slack` at send time — one boundary shared with the keeper
-  surface-post tool and the chat-queue consumer — not by the inbound client.
+surface-post tool and Owner connector delivery — not by the inbound client.
 
 Tokens are **unprefixed** (not `MASC_SLACK_*`): this matches the Slack SDK
 convention, the Python sidecar, the dashboard setup guide, and the Discord

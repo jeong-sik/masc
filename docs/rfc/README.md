@@ -217,7 +217,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0342 | Capability catalog overlay, deployment capability declarations, and boot posture | Draft | - |
 | 0343 | Repo location SSOT (collapse dual-authority, attribute by git-remote) | Draft | - |
 | 0345 | Streaming idle-timeout fail-safe floor (#25128) | Draft | - |
-| 0346 | Gateway redelivery dedup: transcript single-authority, attention as wake-hint | Draft | - |
 | 0348 | Bounded lane acquisition for durable keeper_msg writes (#25398) | Draft | - |
 | 0349 | Restore a reachable compaction admission path | Draft | - |
 | 0350 | Unbounded request-fiber admission (durable queue + lifecycle-sibling worker +... | Draft | - |
@@ -238,7 +237,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-compaction-deterministic-floor | Compaction must never deadlock: a deterministic structural floor, typed outco... | Draft | - |
 | RFC-connector-ambient-attention-wake | Connector ambient attention wake: drive an idle keeper turn from external-att... | Draft | - |
-| RFC-connector-deferred-reply-via-chat-queue | Durable Keeper chat receipts and connector delivery settlement | Active | - |
 | RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Draft | - |
 | RFC-keeper-memory-consolidation | Keeper durable memory consolidation — deprecate memory_bank into Memory OS | Implemented | - |
 | RFC-keeper-runtime-context-observation-phase0 | Keeper runtime context observation Phase 0 | Draft | - |

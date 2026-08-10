@@ -126,7 +126,7 @@ let recovery_failure_of_client_error = function
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus
+    ~context ~event_bus ~raw_trace
     ~(config : Runtime_execution.claude_code) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -266,6 +266,32 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       | Ok subscription -> Ok subscription
       | Error error -> Error (claude_error_to_core_error error)
     in
+    let raw_trace_run =
+      Host.start_raw_trace
+        ~keeper_name
+        ~raw_trace
+        ~prompt
+        ?model:config.model
+        ?reasoning_effort:
+          (Option.map
+             Llm_provider.Reasoning_effort.to_string
+             prepared.reasoning_effort)
+        ()
+    in
+    let* host_dynamic_tools =
+      Host.dynamic_tools
+        ~runtime_label
+        ~keeper_name
+        ~turn_count
+        ~tools:prepared.tools
+        ~hooks
+        ~event_bus
+        ~context_injector
+        ~context
+        ~terminal_error
+        ~raw_trace_run
+    in
+    let dynamic_tools = List.map claude_dynamic_tool host_dynamic_tools in
     let* claimed_session =
       match
         Session_store.claim
@@ -280,7 +306,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       with
       | Ok session -> Ok session
       | Error detail ->
-        Error (internal_error ("Claude Code session claim failed: " ^ detail))
+        let error = internal_error ("Claude Code session claim failed: " ^ detail) in
+        Host.finish_raw_error ~keeper_name raw_trace_run error;
+        Error error
     in
     let session_state = ref claimed_session in
     let recovery_failure = ref Session_store.Transport_interrupted in
@@ -543,7 +571,16 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              ~keeper_name
              "Claude Code cancellation recovery persistence failed: %s"
              recovery_detail);
+        Eio.Cancel.protect (fun () ->
+          Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
         Printexc.raise_with_backtrace exn backtrace
+    in
+    let turn_result =
+      match turn_result with
+      | Ok result -> Ok (Host.finish_raw_success ~keeper_name raw_trace_run result)
+      | Error error ->
+        Host.finish_raw_error ~keeper_name raw_trace_run error;
+        Error error
     in
     (match turn_result with
      | Ok _ -> turn_result
@@ -562,7 +599,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~config =
+    ~context ~event_bus ~raw_trace ~config =
   Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
     run_without_lifecycle
       ~runtime_id
@@ -578,5 +615,6 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
       ~context_injector
       ~context
       ~event_bus
+      ~raw_trace
       ~config)
 ;;

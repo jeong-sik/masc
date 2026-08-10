@@ -210,6 +210,9 @@ and step_state =
 and step_type =
   | Agent_response
   | Tool
+  | User_input
+  | Internal
+  | Checkpoint
 
 and result_status =
   | Success
@@ -251,6 +254,9 @@ let parse_step_type stage value =
     (function
       | "agent_response" -> Some Agent_response
       | "tool" -> Some Tool
+      | "user_input" -> Some User_input
+      | "unknown" -> Some Internal
+      | "checkpoint" -> Some Checkpoint
       | _ -> None)
     value
 ;;
@@ -389,11 +395,22 @@ let allowed_environment_key key =
     ]
 ;;
 
-let official_client_environment () =
-  Unix.environment ()
-  |> Array.to_list
-  |> List.filter (fun entry -> allowed_environment_key (env_key entry))
-  |> Array.of_list
+let official_client_environment ?home_dir () =
+  let overridden_keys =
+    match home_dir with
+    | None -> []
+    | Some _ -> [ "HOME"; "XDG_CACHE_HOME"; "XDG_CONFIG_HOME"; "XDG_DATA_HOME" ]
+  in
+  let inherited =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun entry ->
+      let key = env_key entry in
+      allowed_environment_key key && not (List.mem key overridden_keys))
+  in
+  match home_dir with
+  | None -> Array.of_list inherited
+  | Some home_dir -> Array.of_list (("HOME=" ^ home_dir) :: inherited)
 ;;
 
 let duration_argument seconds = Printf.sprintf "%.3fs" seconds
@@ -460,26 +477,28 @@ let drain_stderr flow tail =
       (Printexc.to_string exn)
 ;;
 
-let terminate_spawned_process ~clock proc stdin_w =
-  let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
+let signal_spawned_process proc stdin_w =
   Eio.Cancel.protect (fun () ->
     (try Eio.Flow.close stdin_w with
      | _ -> ());
     (try Eio.Process.signal proc Sys.sigterm with
-     | _ -> ());
-    if not owning_switch_cancelled
-    then
-      try
-        Eio.Time.with_timeout_exn clock process_termination_grace_s (fun () ->
-          Eio.Process.await proc |> ignore)
-      with
-      | Eio.Time.Timeout ->
-        (try
-           Eio.Process.signal proc Sys.sigkill;
-           Eio.Process.await proc |> ignore
-         with
-         | _ -> ())
-      | _ -> ())
+     | _ -> ()))
+;;
+
+let terminate_spawned_process ~clock proc stdin_w =
+  signal_spawned_process proc stdin_w;
+  Eio.Cancel.protect (fun () ->
+    try
+      Eio.Time.with_timeout_exn clock process_termination_grace_s (fun () ->
+        Eio.Process.await proc |> ignore)
+    with
+    | Eio.Time.Timeout ->
+      (try
+         Eio.Process.signal proc Sys.sigkill;
+         Eio.Process.await proc |> ignore
+       with
+       | _ -> ())
+    | _ -> ())
 ;;
 
 type protocol_state =
@@ -576,7 +595,8 @@ let status_to_string = function
   | `Signaled signal -> Printf.sprintf "signal %d" signal
 ;;
 
-let run_spawned ~mgr ~clock ~cwd config ~conversation_mode ~prompt ~on_conversation_ready =
+let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
+    ~on_conversation_ready =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -587,7 +607,7 @@ let run_spawned ~mgr ~clock ~cwd config ~conversation_mode ~prompt ~on_conversat
         ~sw
         mgr
         ~cwd
-        ~env:(official_client_environment ())
+        ~env:(official_client_environment ?home_dir ())
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
@@ -599,55 +619,66 @@ let run_spawned ~mgr ~clock ~cwd config ~conversation_mode ~prompt ~on_conversat
     Eio.Flow.close stderr_w;
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
-    let process_status = ref None in
+    let process_settled = ref false in
+    let settle_failed_process () =
+      if not !process_settled
+      then (
+        Eio.Cancel.protect (fun () -> terminate_spawned_process ~clock proc stdin_w);
+        process_settled := true)
+    in
     let abort_with_runtime_error error =
-      (* SIL-OK: the typed protocol error remains authoritative; the finalizer
-         retries termination and awaits the child if this immediate kill races. *)
-      (try Eio.Process.signal proc Sys.sigkill with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | _ -> ());
+      settle_failed_process ();
       raise (Runtime_error error)
     in
-    Fun.protect
-      ~finally:(fun () ->
-        match !process_status with
-        | Some _ -> ()
-        | None -> terminate_spawned_process ~clock proc stdin_w)
-      (fun () ->
-        let state = ref initial_protocol_state in
-        (try
-           while true do
-             let line = Eio.Buf_read.line reader in
-             match parse_wire_line line with
-             | Error error -> abort_with_runtime_error error
-             | Ok event ->
-               (match
-                  apply_event
-                    config
-                    ~conversation_mode
-                    ~on_conversation_ready
-                    !state
-                    event
-                with
-                | Error error -> abort_with_runtime_error error
-                | Ok next -> state := next)
-           done
-         with
-         | End_of_file -> ()
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | Runtime_error _ as exn -> raise exn
-         | exn ->
-           raise
-             (Runtime_error
-                (Protocol_error
-                   { stage = "stdout read"; detail = Printexc.to_string exn })));
-        let status = Eio.Process.await proc in
-        process_status := Some status;
-        status, !state, String.trim !stderr_tail))
+    (* This handler runs before Eio's process release handler (LIFO). It must
+       only signal: awaiting here would race the release handler's reap and
+       deadlock timeout cancellation. Typed non-cancellation failures reap in
+       [settle_failed_process] before leaving the switch. *)
+    Eio.Switch.on_release sw (fun () ->
+      if not !process_settled then signal_spawned_process proc stdin_w);
+    let state = ref initial_protocol_state in
+    (try
+       while true do
+         let line = Eio.Buf_read.line reader in
+         match parse_wire_line line with
+         | Error error -> abort_with_runtime_error error
+         | Ok event ->
+           (match
+              apply_event
+                config
+                ~conversation_mode
+                ~on_conversation_ready
+                !state
+                event
+            with
+            | Error error -> abort_with_runtime_error error
+            | Ok next -> state := next)
+       done
+     with
+     | End_of_file -> ()
+     | Eio.Cancel.Cancelled _ as exn ->
+       signal_spawned_process proc stdin_w;
+       process_settled := true;
+       raise exn
+     | Runtime_error _ as exn -> raise exn
+     | exn ->
+       abort_with_runtime_error
+         (Protocol_error
+            { stage = "stdout read"; detail = Printexc.to_string exn }));
+    let status = Eio.Process.await proc in
+    process_settled := true;
+    status, !state, String.trim !stderr_tail)
 ;;
 
-let run_turn ?(conversation_mode = Start) ~mgr ~clock ~cwd
+let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
     ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) config ~prompt =
+  let* () =
+    match home_dir with
+    | None -> Ok ()
+    | Some path when String.trim path = "" || Filename.is_relative path ->
+      Error (Invalid_config "home_dir must be an absolute non-empty path")
+    | Some _ -> Ok ()
+  in
   let* () = validate_config config ~conversation_mode ~prompt in
   let started_at = Eio.Time.now clock in
   let run_result =
@@ -655,6 +686,7 @@ let run_turn ?(conversation_mode = Start) ~mgr ~clock ~cwd
       Ok
         (Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
            run_spawned
+             ?home_dir
              ~mgr
              ~clock
              ~cwd

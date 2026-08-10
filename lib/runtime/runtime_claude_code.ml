@@ -239,6 +239,7 @@ let optional_int stage name fields =
 let subscription_only_environment () =
   let inherited_names =
     [ "HOME"
+    ; "USER"
     ; "PATH"
     ; "TMPDIR"
     ; "XDG_CONFIG_HOME"

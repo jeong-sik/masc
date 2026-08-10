@@ -46,6 +46,7 @@ type accepted_transfer = State.accepted_transfer =
 type source_terminal_receipt = State.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
   | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = State.accepted_source_terminal =
@@ -1088,14 +1089,11 @@ let ack_pending_source_terminal_result
             (Printexc.to_string exn)))
 ;;
 
-let terminalize_pending_turn_attempt_result
+let terminalize_pending_turn_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_nonce
-      ~applied_at
-      ~selection
-      ~detail
+      ~transition
       ()
   =
   match resolve_owner ~base_path ~keeper_name with
@@ -1109,11 +1107,7 @@ let terminalize_pending_turn_attempt_result
            commit_transition_unlocked
              owner
              ~after_commit
-             (State.terminalize_pending_turn_attempt
-                ~current_owner_nonce
-                ~applied_at
-                ~selection
-                ~detail)
+             transition
              state
            |> Result.map fst)
      with
@@ -1121,9 +1115,53 @@ let terminalize_pending_turn_attempt_result
      | exn ->
        Error
          (Printf.sprintf
-            "event queue pending turn-attempt terminalization raised keeper=%s: %s"
+            "event queue pending turn terminalization raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
+;;
+
+let terminalize_pending_turn_attempt_result
+      ?after_commit
+      ~base_path
+      ~keeper_name
+      ~current_owner_nonce
+      ~applied_at
+      ~selection
+      ~detail
+      ()
+  =
+  terminalize_pending_turn_result
+    ?after_commit
+    ~base_path
+    ~keeper_name
+    ~transition:
+      (State.terminalize_pending_turn_attempt
+         ~current_owner_nonce
+         ~applied_at
+         ~selection
+         ~detail)
+    ()
+;;
+
+let terminalize_pending_turn_completed_result
+      ?after_commit
+      ~base_path
+      ~keeper_name
+      ~current_owner_nonce
+      ~applied_at
+      ~selection
+      ()
+  =
+  terminalize_pending_turn_result
+    ?after_commit
+    ~base_path
+    ~keeper_name
+    ~transition:
+      (State.terminalize_pending_turn_completed
+         ~current_owner_nonce
+         ~applied_at
+         ~selection)
+    ()
 ;;
 
 let mark_transition_projected_result state ~transition_id =

@@ -227,6 +227,8 @@ val load_owned_regular_file
 type owned_regular_file_snapshot =
   { device : int
   ; inode : int
+  ; owner_uid : int
+  ; permissions : int
   ; file_size : int
   ; modified_at : float
   ; changed_at : float

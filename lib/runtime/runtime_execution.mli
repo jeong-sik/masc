@@ -18,9 +18,7 @@ type antigravity_cli =
   ; model : string
   ; agent : string option
   ; effort : Runtime_antigravity.effort option
-  ; execution_mode : Runtime_antigravity.execution_mode
-  ; sandbox : bool
-  ; disable_slash_commands : bool
+  ; oauth_source : string
   ; timeout_s : float
   }
 

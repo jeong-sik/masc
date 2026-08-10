@@ -24,10 +24,22 @@ type tool_call_policy =
   | Reject_tool_calls
   | Allow_tool_calls
 
+type phase =
+  | Awaiting_initialize
+  | Awaiting_initialized
+  | Ready
+
+type session_snapshot =
+  { phase : phase
+  ; negotiated_protocol_version : string option
+  }
+
 type session
 
 val create_session : unit -> session
 (** Fresh closed lifecycle: initialize, initialized notification, then Ready. *)
+
+val snapshot_session : session -> session_snapshot
 
 val handle_message :
   session:session ->

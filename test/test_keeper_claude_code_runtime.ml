@@ -173,7 +173,7 @@ let content_of_wire_message raw =
 
 let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
     ?event_capture ?agent_core_checkpoint ?runtime_manifest_context
-    ?runtime_manifest_append ~base_path ~cli_path ~goal () =
+    ?runtime_manifest_append ?raw_trace ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -209,6 +209,7 @@ let run_keeper_turn ?(tools = []) ?(initial_messages = []) ?event_bus
                         ?agent_core_checkpoint
                         ?runtime_manifest_context
                         ?runtime_manifest_append
+                        ?raw_trace
                         ~sw
                         ~net:(Eio.Stdenv.net env)
                         ()
@@ -465,6 +466,12 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
 
 let test_keeper_projects_masc_tool () =
   let base_path = temp_workspace () in
+  let raw_trace_path = Filename.concat base_path "claude-raw-trace.jsonl" in
+  let raw_trace =
+    Agent_core.Raw_trace.create ~path:raw_trace_path ()
+    |> Result.map_error (fun error -> fail (Agent_core.Error.to_string error))
+    |> Result.get_ok
+  in
   let observed = ref `Null in
   let marker_param : Agent_core.Types.tool_param =
     { name = "marker"
@@ -500,6 +507,7 @@ let test_keeper_projects_masc_tool () =
                ~base_path
                ~cli_path
                ~goal:"USE_TOOL"
+               ~raw_trace
                ()
            with
            | Error error -> fail (Agent_core.Error.to_string error)
@@ -511,7 +519,25 @@ let test_keeper_projects_masc_tool () =
              check string
                "tool arguments"
                {|{"marker":"from-claude"}|}
-               (Yojson.Safe.to_string !observed)))
+               (Yojson.Safe.to_string !observed);
+             (match turn.trace_ref with
+              | Some trace_ref ->
+                check string "RAW trace path" raw_trace_path trace_ref.path
+              | None -> fail "Claude Code turn did not expose its RAW trace reference");
+             let input = open_in_bin raw_trace_path in
+             let raw =
+               Fun.protect
+                 ~finally:(fun () -> close_in input)
+                 (fun () -> really_input_string input (in_channel_length input))
+             in
+             check bool
+               "RAW trace contains tool input"
+               true
+               (String_util.contains_substring raw "from-claude");
+             check bool
+               "RAW trace contains tool output"
+               true
+               (String_util.contains_substring raw "MASC_TOOL_RESULT")))
 ;;
 
 let load_state base_path =

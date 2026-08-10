@@ -354,6 +354,33 @@ let test_dynamic_tool_callback () =
 
    Emit_and_expect_request_id makes the fixture wait and exit 96 unless the
    response carries the id, so this now fails if the ack is dropped again. *)
+let result_api_error =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-api-error-1","result":"messages.0.content.1: unexpected tool_use_id","api_error_status":400}|}
+;;
+
+(* A failed turn used to reach the operator as "terminal subtype=success
+   api_status=400" and nothing else. The client's own account of the failure was
+   parsed off the terminal message and then dropped, so a 400 could not be
+   diagnosed without reproducing the run outside MASC — which is what it cost to
+   find this. The provider's reason is the whole value of the error. *)
+let test_turn_failure_carries_the_client_reason () =
+  with_fixture [ Emit result_api_error ] (fun path ->
+    match run_fixture path with
+    | Ok _ -> fail "a terminal is_error result must not settle as success"
+    | Error error ->
+      let text = Runtime_claude_code.error_to_string error in
+      let contains needle =
+        let n = String.length needle in
+        let rec scan i =
+          i + n <= String.length text && (String.sub text i n = needle || scan (i + 1))
+        in
+        scan 0
+      in
+      check bool "keeps the status code" true (contains "api_status=400");
+      check bool "carries the provider reason" true
+        (contains "unexpected tool_use_id"))
+;;
+
 let test_mcp_notification_is_acknowledged_on_the_control_channel () =
   with_fixture
     [ Emit_and_read mcp_initialize
@@ -825,6 +852,10 @@ let () =
             "shared protocol is negotiated"
             `Quick
             test_shared_mcp_protocol_is_negotiated
+        ; test_case
+            "turn failure carries the client reason"
+            `Quick
+            test_turn_failure_carries_the_client_reason
         ; test_case
             "notification is acknowledged on the control channel"
             `Quick

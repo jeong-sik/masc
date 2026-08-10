@@ -667,15 +667,23 @@ let parse_result ~expected_session_id ~rate_limit fields =
     then Error (Quota_blocked { api_error_status; rate_limit })
     else if is_error
     then
+      (* The terminal message's [result] is the client's own account of what
+         went wrong — for an api_status=400 it is the only place the provider's
+         reason appears. It was parsed and then dropped, so every failed turn
+         reached the operator as a status code with no cause and could not be
+         diagnosed without reproducing the run outside MASC. Carry it. *)
       Error
         (Turn_failed
            (Printf.sprintf
-              "terminal subtype=%s api_status=%s"
+              "terminal subtype=%s api_status=%s%s"
               subtype
               (Option.fold
                  ~none:"unknown"
                  ~some:string_of_int
-                 api_error_status)))
+                 api_error_status)
+              (match Option.map String.trim result with
+               | Some detail when detail <> "" -> ": " ^ detail
+               | Some _ | None -> "")))
     else if subtype <> "success"
     then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
     else Ok (turn_id, result)

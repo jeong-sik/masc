@@ -91,7 +91,9 @@ let metrics_of_probe probe =
   ; on_cache_miss = (fun ~model_id:_ -> probe.cache_misses <- probe.cache_misses + 1)
   ; on_request_start = (fun ~model_id:_ -> probe.starts <- probe.starts + 1)
   ; on_request_end = (fun ~model_id:_ ~latency_ms:_ -> probe.ends <- probe.ends + 1)
-  ; on_error = (fun ~model_id:_ ~error -> probe.errors <- error :: probe.errors)
+  ; on_error =
+      (fun ~model_id:_ ~message ~reason:_ ->
+        probe.errors <- message :: probe.errors)
   ; on_http_status =
       (fun ~provider:_ ~model_id:_ ~status -> probe.statuses <- status :: probe.statuses)
   ; on_token_usage =

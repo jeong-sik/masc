@@ -18,7 +18,11 @@ val emit_request_latency
   -> unit
 
 val emit_cache_hit : model_id:string -> unit
-val emit_error : model_id:string -> error:string -> unit
+val emit_error
+  :  model_id:string
+  -> message:string
+  -> reason:Llm_provider.Metrics.error_reason
+  -> unit
 val emit_token_usage
   :  provider:string
   -> model_id:string

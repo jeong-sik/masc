@@ -381,9 +381,9 @@ let runtime_metrics_for_candidates ~candidate_count:(_ : int) () =
         record_attempt_start capture ~model_id);
       on_request_end = (fun ~model_id ~latency_ms ->
         ensure_terminal_attempt capture ~model_id ~latency_ms ~error:None);
-      on_error = (fun ~model_id ~error ->
+      on_error = (fun ~model_id ~message ~reason:_ ->
         ensure_terminal_attempt capture ~model_id ~latency_ms:None
-          ~error:(Some error));
+          ~error:(Some message));
       on_capability_drop = (fun ~model_id:_ ~field:_ -> ());
       on_http_status = (fun ~provider:_ ~model_id:_ ~status:_ -> ());
       on_circuit_state =

@@ -17,12 +17,23 @@ let circuit_state_to_string = function
   | Circuit_half_open -> "half_open"
 ;;
 
+type error_reason =
+  | Rate_limit
+  | Timeout
+  | Unknown
+
+let error_reason_to_string = function
+  | Rate_limit -> "rate_limit"
+  | Timeout -> "timeout"
+  | Unknown -> "unknown"
+;;
+
 type t =
   { on_cache_hit : model_id:string -> unit
   ; on_cache_miss : model_id:string -> unit
   ; on_request_start : model_id:string -> unit
   ; on_request_end : model_id:string -> latency_ms:int option -> unit
-  ; on_error : model_id:string -> error:string -> unit
+  ; on_error : model_id:string -> message:string -> reason:error_reason -> unit
   ; on_http_status : provider:string -> model_id:string -> status:int -> unit
   ; on_circuit_state :
       provider:string
@@ -60,7 +71,7 @@ let noop =
   ; on_cache_miss = (fun ~model_id:_ -> ())
   ; on_request_start = (fun ~model_id:_ -> ())
   ; on_request_end = (fun ~model_id:_ ~latency_ms:_ -> ())
-  ; on_error = (fun ~model_id:_ ~error:_ -> ())
+  ; on_error = (fun ~model_id:_ ~message:_ ~reason:_ -> ())
   ; on_http_status = (fun ~provider:_ ~model_id:_ ~status:_ -> ())
   ; on_circuit_state = (fun ~provider:_ ~model_id:_ ~provider_key:_ ~state:_ -> ())
   ; on_capability_drop = (fun ~model_id:_ ~field:_ -> ())
@@ -303,8 +314,8 @@ module Aggregating = struct
               s.latency_ms_count <- s.latency_ms_count + 1)
           | None -> ())
     ; on_error =
-        (fun ~model_id ~error ->
-          agg.hooks.on_error ~model_id ~error;
+        (fun ~model_id ~message ~reason ->
+          agg.hooks.on_error ~model_id ~message ~reason;
           with_state agg ("unknown/" ^ model_id) (fun s ->
             s.error_total <- s.error_total + 1))
     ; on_http_status =

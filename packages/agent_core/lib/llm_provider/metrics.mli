@@ -19,6 +19,15 @@ type circuit_state =
 val circuit_state_to_int : circuit_state -> int
 val circuit_state_to_string : circuit_state -> string
 
+(** Bounded failure classification supplied by the typed transport boundary.
+    Metric consumers must not infer this value from the diagnostic message. *)
+type error_reason =
+  | Rate_limit
+  | Timeout
+  | Unknown
+
+val error_reason_to_string : error_reason -> string
+
 (** Metrics callback interface. All callbacks are optional — provide [noop]
     as a default that does nothing.
 
@@ -33,7 +42,9 @@ type t =
   ; on_cache_miss : model_id:string -> unit
   ; on_request_start : model_id:string -> unit
   ; on_request_end : model_id:string -> latency_ms:int option -> unit
-  ; on_error : model_id:string -> error:string -> unit
+  ; on_error : model_id:string -> message:string -> reason:error_reason -> unit
+    (** Fired for a failed request. [message] is diagnostic text only; control
+        flow and metric labels must use [reason]. *)
   ; on_http_status : provider:string -> model_id:string -> status:int -> unit
   ; on_circuit_state :
       provider:string

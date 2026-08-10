@@ -94,7 +94,7 @@ let test_aggregating_on_circuit_state () =
 let test_aggregating_on_error () =
   let agg = Agg.create () in
   let hooks = Agg.to_hooks agg in
-  hooks.on_error ~model_id:"bad-model" ~error:"timeout";
+  hooks.on_error ~model_id:"bad-model" ~message:"timeout" ~reason:M.Timeout;
   let snap = Agg.snapshot agg in
   let entry = List.hd snap in
   check int "error_total" 1 entry.M.error_total
@@ -153,7 +153,7 @@ let test_aggregating_reset () =
   let agg = Agg.create () in
   let hooks = Agg.to_hooks agg in
   hooks.on_request_start ~model_id:"x";
-  hooks.on_error ~model_id:"x" ~error:"err";
+  hooks.on_error ~model_id:"x" ~message:"err" ~reason:M.Unknown;
   Agg.reset agg;
   let snap = Agg.snapshot agg in
   check int "empty after reset" 0 (List.length snap)

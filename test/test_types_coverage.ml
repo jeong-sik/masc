@@ -1151,11 +1151,23 @@ let test_masc_error_agent_invalid_name () =
   in
   check bool "nonempty" true (String.length s > 0)
 
+(* The message named the next tool to call ("Claim/start it first") until
+   #26123 stopped the runtime choosing the agent's next tool. It now reports the
+   task and the state it is in and leaves the choice to the caller. Assert that
+   shape - identifier plus state - rather than the prescription, and assert the
+   prescription stays out so re-adding it fails here. *)
 let test_masc_error_task_not_claimed () =
   let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.NotClaimed "t1")) in
-  check bool "contains claim guidance" true
-    (try let _ = Str.search_forward (Str.regexp "Claim/start it first") s 0 in true
-     with Not_found -> false)
+  let contains needle =
+    try
+      let _ = Str.search_forward (Str.regexp_string needle) s 0 in
+      true
+    with
+    | Not_found -> false
+  in
+  check bool "names the task" true (contains "t1");
+  check bool "names the state" true (contains "todo");
+  check bool "does not prescribe the next tool" false (contains "Claim/start it first")
 
 let test_masc_error_task_invalid_state () =
   let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.InvalidState "cancelled")) in

@@ -1712,20 +1712,55 @@ let test_task_transitions_emit_observability () =
            ; "transition", "start"
            ; "task_id", "task-001"
            ]);
+    (* The done transition is recorded under the acting agent. Nothing
+       synthesises a board-keeper approval: [Approve] is not a task action
+       ([Masc_domain.task_action] is Claim | Start | Done_action | Cancel |
+       Release | Submit_for_verification), and [task_action_of_transition] maps
+       every one of them, so [Custom "task_approve"] has no producer. Asserting
+       its absence alongside the real entry keeps a re-introduced self-approval
+       failing here, which is the boundary types_core.ml states as "A Keeper is
+       not a verifier". *)
+    (* [transition_done_r] routes a live task through [Submit_for_verification]
+       and then a completion authority's verdict, so the actor's last audited
+       transition is the submission. Nothing synthesises a board-keeper
+       approval: [Approve] is not a task action ([Masc_domain.task_action] is
+       Claim | Start | Done_action | Cancel | Release |
+       Submit_for_verification) and [task_action_of_transition] maps every one
+       of them, so [Custom "task_approve"] has no producer. Asserting its
+       absence keeps a re-introduced self-approval failing here, which is the
+       boundary types_core.ml states as "A Keeper is not a verifier". *)
     Alcotest.(check bool)
-      "audit verifier approval recorded"
+      "audit submission recorded"
       true
       (audit_has_entry
          audit_entries
-         ~agent_id:"admin-board-keeper"
+         ~agent_id:claude
          ~action_pred:(function
-           | Audit_log.Custom "task_approve" -> true
+           | Audit_log.Custom "task_submit_for_verification" -> true
            | _ -> false)
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "approve"
+           ; "transition", "submit_for_verification"
            ; "task_id", "task-001"
            ]);
+    Alcotest.(check bool)
+      "no approval is synthesised for the actor"
+      false
+      (List.exists
+         (fun (entry : Audit_log.audit_entry) ->
+            match entry.action with
+            | Audit_log.Custom "task_approve" -> true
+            | _ -> false)
+         audit_entries);
+    Alcotest.(check bool)
+      "no approval is synthesised for a done transition"
+      false
+      (List.exists
+         (fun (entry : Audit_log.audit_entry) ->
+            match entry.action with
+            | Audit_log.Custom "task_approve" -> true
+            | _ -> false)
+         audit_entries);
     let telemetry_events = Telemetry_eio.read_all_events config in
     let has_started =
       List.exists
@@ -1863,20 +1898,37 @@ let test_transition_done_from_claimed_emits_observability () =
     in
     Alcotest.(check bool) "claimed done succeeds" true (contains_check done_result);
     let audit_entries = Audit_log.read_entries ~n:50 config in
+    (* The done transition is recorded under the acting agent. Nothing
+       synthesises a board-keeper approval: [Approve] is not a task action
+       ([Masc_domain.task_action] is Claim | Start | Done_action | Cancel |
+       Release | Submit_for_verification), and [task_action_of_transition] maps
+       every one of them, so [Custom "task_approve"] has no producer. Asserting
+       its absence alongside the real entry keeps a re-introduced self-approval
+       failing here, which is the boundary types_core.ml states as "A Keeper is
+       not a verifier". *)
     Alcotest.(check bool)
-      "claimed task approval audit recorded"
+      "audit submission recorded"
       true
       (audit_has_entry
          audit_entries
-         ~agent_id:"admin-board-keeper"
+         ~agent_id:claude
          ~action_pred:(function
-           | Audit_log.Custom "task_approve" -> true
+           | Audit_log.Custom "task_submit_for_verification" -> true
            | _ -> false)
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "approve"
+           ; "transition", "submit_for_verification"
            ; "task_id", "task-001"
            ]);
+    Alcotest.(check bool)
+      "no approval is synthesised for a done transition"
+      false
+      (List.exists
+         (fun (entry : Audit_log.audit_entry) ->
+            match entry.action with
+            | Audit_log.Custom "task_approve" -> true
+            | _ -> false)
+         audit_entries);
     let telemetry_events = Telemetry_eio.read_all_events config in
     let has_completed =
       List.exists

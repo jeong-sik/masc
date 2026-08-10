@@ -51,6 +51,12 @@ type rate_limit =
   ; overage_disabled_reason : string option
   }
 
+type turn_usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; cache_read_tokens : int
+  }
+
 type turn_result =
   { session_id : string
   ; turn_id : string
@@ -60,6 +66,7 @@ type turn_result =
   ; subscription : subscription
   ; rate_limit : rate_limit option
   ; resumed : bool
+  ; usage : turn_usage option
   }
 
 type dynamic_tool_result =
@@ -657,6 +664,33 @@ let parse_result ~expected_session_id ~rate_limit fields =
       | Some _ -> protocol_error stage "field \"result\" must be a string or null"
     in
     let* result = result in
+    (* The keeper side of this runtime hardcoded [usage = None] while the
+       antigravity runtime fills the same slot from its CLI stream, which is why
+       official-client turns carry no input_tokens (#28023) and why a turn that
+       exceeds the window is only discoverable from the provider's prose
+       (#27427). Read leniently: a turn must not fail because its usage block is
+       absent or shaped differently than expected, and an absent value after
+       this lands means the CLI does not send one. *)
+    let usage =
+      match List.assoc_opt "usage" fields with
+      | None | Some `Null -> None
+      | Some (`Assoc usage_fields) ->
+        let int_field name =
+          match List.assoc_opt name usage_fields with
+          | Some (`Int value) when value >= 0 -> Some value
+          | _ -> None
+        in
+        (match int_field "input_tokens", int_field "output_tokens" with
+         | Some input_tokens, Some output_tokens ->
+           Some
+             { input_tokens
+             ; output_tokens
+             ; cache_read_tokens =
+                 Option.value (int_field "cache_read_input_tokens") ~default:0
+             }
+         | Some _, None | None, Some _ | None, None -> None)
+      | Some _ -> None
+    in
     let structurally_quota_blocked =
       Option.equal Int.equal api_error_status (Some 429)
       || Option.exists
@@ -689,7 +723,7 @@ let parse_result ~expected_session_id ~rate_limit fields =
                | Some _ | None -> "")))
     else if subtype <> "success"
     then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
-    else Ok (turn_id, result)
+    else Ok (turn_id, result, usage)
 ;;
 
 let max_ignored_messages = 256
@@ -729,7 +763,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~on_turn_started ~ignored
   | "result" ->
-    let* turn_id, result =
+    let* turn_id, result, usage =
       parse_result ~expected_session_id ~rate_limit fields
     in
     let* () =
@@ -764,6 +798,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
       ; subscription
       ; rate_limit
       ; resumed
+      ; usage
       }
   | ("system" | "user") when ignored < max_ignored_messages ->
     await_terminal

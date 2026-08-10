@@ -444,7 +444,17 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              ; model = turn.model
              ; stop_reason = EndTurn
              ; content = [ Text turn.text ]
-             ; usage = None
+             ; usage =
+                 Option.map
+                   (fun (usage : Runtime_claude_code.turn_usage) :
+                        Agent_core.Types.api_usage ->
+                      { input_tokens = usage.input_tokens
+                      ; output_tokens = usage.output_tokens
+                      ; cache_creation_input_tokens = 0
+                      ; cache_read_input_tokens = usage.cache_read_tokens
+                      ; cost_usd = None
+                      })
+                   turn.usage
              ; telemetry =
                  Some
                    { Agent_core.Types.default_inference_telemetry with

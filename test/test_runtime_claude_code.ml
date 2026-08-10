@@ -17,6 +17,14 @@ let result =
   {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-fixture-1","result":"MASC_CLAUDE_OK","api_error_status":null}|}
 ;;
 
+let result_with_usage =
+  {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-usage-1","result":"MASC_CLAUDE_OK","api_error_status":null,"usage":{"input_tokens":123456,"output_tokens":789,"cache_read_input_tokens":42}}|}
+;;
+
+let result_with_partial_usage =
+  {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-usage-2","result":"MASC_CLAUDE_OK","api_error_status":null,"usage":{"output_tokens":789}}|}
+;;
+
 type fixture_step =
   | Emit of string
   | Emit_and_read of string
@@ -161,7 +169,38 @@ let test_subscription_turn_and_env_scrub () =
       check string "turn" "turn-fixture-1" turn.turn_id;
       check string "model" "claude-fixture" turn.model;
       check string "subscription" "team" turn.subscription.subscription_type;
-      check bool "new session" false turn.resumed)
+      check bool "new session" false turn.resumed;
+      check bool "no usage block yields none" true (Option.is_none turn.usage))
+;;
+
+(* The keeper side of this runtime hardcoded [usage = None] while the
+   antigravity runtime fills the same slot from its CLI stream, which is why
+   official-client turns carry no input_tokens (#28023). Reading it here is what
+   lets a turn record the size it actually sent. *)
+let test_result_usage_is_carried () =
+  with_fixture [ Emit assistant; Emit result_with_usage ] (fun path ->
+    match run_fixture path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      (match turn.usage with
+       | None -> fail "usage block was dropped"
+       | Some usage ->
+         check int "input tokens" 123456 usage.input_tokens;
+         check int "output tokens" 789 usage.output_tokens;
+         check int "cache read tokens" 42 usage.cache_read_tokens))
+;;
+
+(* A usage block the CLI shapes differently must not fail the turn: the text is
+   the turn's product and the counts are an observation of it. An absent value
+   after this lands means the CLI sent nothing usable, which is the measurement
+   #27427 needs. *)
+let test_partial_result_usage_does_not_fail_the_turn () =
+  with_fixture [ Emit assistant; Emit result_with_partial_usage ] (fun path ->
+    match run_fixture path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      check string "text survives" "MASC_CLAUDE_OK" turn.text;
+      check bool "partial usage yields none" true (Option.is_none turn.usage))
 ;;
 
 let test_non_subscription_auth_is_rejected () =
@@ -838,6 +877,11 @@ let () =
             test_rejected_rate_limit_overrides_success_flag
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case "duplicate keys fail closed" `Quick test_duplicate_keys_fail_closed
+        ; test_case "result usage is carried" `Quick test_result_usage_is_carried
+        ; test_case
+            "partial usage does not fail the turn"
+            `Quick
+            test_partial_result_usage_does_not_fail_the_turn
         ] )
     ; ( "mcp"
       , [ test_case "dynamic tool callback" `Quick test_dynamic_tool_callback

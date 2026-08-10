@@ -361,69 +361,35 @@ let with_deployment_agent_core_model_catalog f =
          | None -> fail "embedded plus deployment overlay catalog should load"
          | Some catalog -> f catalog)
 
-let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
-  with_deployment_agent_core_model_catalog @@ fun catalog ->
-  let runpod_model_id = "qwen36-35b-a3b-mtp" in
-  let provider_labels = [ "runpod_mtp"; "vllm-qwen3-mtp" ] in
-  let expect_provider_lookup provider_name =
-    match
-      Llm_provider.Model_catalog.lookup_for_provider
-        catalog
-        ~provider_name
-        ~model_id:runpod_model_id
-    with
-    | None ->
-      failf
-        "expected deployment AGENT_CORE catalog row for provider=%s model=%s"
-        provider_name
-        runpod_model_id
-    | Some entry ->
-      check (option string) (provider_name ^ " base") (Some "openai_chat")
-        entry.base_label;
-      check (option int) (provider_name ^ " context") (Some 131072)
-        entry.max_context_tokens
+let test_retired_runtime_providers_are_absent_from_deployment_config () =
+  let assert_source_absent path needles =
+    let source = Fs_compat.load_file path in
+    List.iter
+      (fun needle ->
+         check bool (Filename.basename path ^ " excludes " ^ needle) false
+           (String_util.contains_substring source needle))
+      needles
   in
-  let expect_runpod_caps
-        name
-      (caps : Llm_provider.Capabilities.capabilities)
-    =
-    check bool (name ^ " tools") true caps.supports_tools;
-    check bool (name ^ " tool choice") true caps.supports_tool_choice;
-    check bool (name ^ " extended thinking") true
-      caps.supports_extended_thinking;
-    check bool (name ^ " chat-template thinking") true
-      (Llm_provider.Capabilities.(
-         caps.thinking_control_format = Chat_template_kwargs))
-  in
-  List.iter expect_provider_lookup provider_labels;
-  List.iter
-    (fun provider_label ->
-       match
-         Llm_provider.Capabilities.for_provider_model_id
-           ~allow_bare_fallback:false
-           ~provider_label
-           ~model_id:runpod_model_id
-       with
-       | None ->
-         failf "expected RunPod qwen3.6 capability lookup for %s" provider_label
-       | Some caps -> expect_runpod_caps provider_label caps)
-    provider_labels;
-  (* Verify both the deployment transport alias and the upstream serving
-     contract without bare fallback. *)
-  List.iter
-    (fun provider_label ->
-       let name = "RunPod qwen3.6 gate " ^ provider_label in
-       match
-         Llm_provider.Capabilities.for_provider_model_id
-           ~allow_bare_fallback:false
-           ~provider_label
-           ~model_id:runpod_model_id
-       with
-       | None ->
-         failf "RunPod qwen3.6 must resolve via gate path (%s)"
-           provider_label
-       | Some gate_caps -> expect_runpod_caps name gate_caps)
-    provider_labels
+  let root = repo_root () in
+  assert_source_absent
+    (Filename.concat root "config/runtime.toml")
+    [ "[providers.deepseek]"
+    ; "[deepseek."
+    ; "kimi_code"
+    ; "kimi-for-coding"
+    ; "runpod"
+    ; "qwen36-35b-a3b-mtp"
+    ; "mimo-v2.5"
+    ; "gemma4-coder-fable5"
+    ];
+  assert_source_absent
+    (Filename.concat root "config/agent-core-models-overlay.toml")
+    [ "provider_name = \"kimi_code\""
+    ; "provider_name = \"runpod_mtp\""
+    ; "provider_ref = \"deepseek\""
+    ; "qwen36-35b-a3b-mtp"
+    ; "gemma4-coder-fable5"
+    ]
 
 let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
@@ -449,45 +415,6 @@ let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
               caps.reasoning_streaming_format
               = Delta_reasoning_field "reasoning_content")))
     [ "glm-coding"; "glm-coding-sb-exact" ]
-
-let test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma () =
-  with_deployment_agent_core_model_catalog @@ fun catalog ->
-  let model_id = "gemma4-coder-fable5-q4km" in
-  let provider_name = "runpod_rtxa6000" in
-  (match
-     Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
-   with
-   | None ->
-     failf
-       "expected deployment AGENT_CORE catalog row for provider=%s model=%s"
-       provider_name
-       model_id
-   | Some entry ->
-     check (option string) (provider_name ^ " base") (Some "openai_chat")
-       entry.base_label;
-     check (option int) (provider_name ^ " context") (Some 262144)
-       entry.max_context_tokens);
-  match
-    Llm_provider.Capabilities.for_provider_model_id
-      ~allow_bare_fallback:false
-      ~provider_label:"runpod_rtxa6000"
-      ~model_id
-  with
-  | None ->
-    failf
-      "live RunPod RTX A6000 Gemma runtime must resolve via raw \
-       deployment provider gate path"
-  | Some caps ->
-    check bool "RunPod RTX A6000 Gemma tools" true caps.supports_tools;
-    check bool "RunPod RTX A6000 Gemma tool choice" true
-      caps.supports_tool_choice;
-    check bool "RunPod RTX A6000 Gemma extended thinking" true
-      caps.supports_extended_thinking;
-    check bool "RunPod RTX A6000 Gemma top_k" true caps.supports_top_k;
-    check bool "RunPod RTX A6000 Gemma seed" true caps.supports_seed;
-    check bool "RunPod RTX A6000 Gemma chat-template token thinking" true
-      (Llm_provider.Capabilities.(
-         caps.thinking_control_format = Chat_template_token "<|think|>"))
 
 let test_deployment_agent_core_model_catalog_covers_local_gemma4_e2b_qat () =
   with_deployment_agent_core_model_catalog @@ fun catalog ->
@@ -563,27 +490,6 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
       check (option string) (provider_name ^ " " ^ field_name) (Some expected)
         (get entry)
   in
-  let expect_request_side_preserve ~provider_name ~model_id =
-    expect_provider_catalog_field
-      ~field_name:"preserve_thinking_control_format"
-      ~get:(fun entry -> entry.preserve_thinking_control_format)
-      ~provider_name
-      ~model_id
-      "chat_template_kwargs_preserve_thinking";
-    match
-      Llm_provider.Capabilities.for_provider_model_id
-        ~allow_bare_fallback:false
-        ~provider_label:provider_name
-        ~model_id
-    with
-    | None ->
-      failf "expected AGENT_CORE capabilities for provider=%s model=%s" provider_name model_id
-    | Some caps ->
-      check bool (provider_name ^ " request-side preserve capability") true
-        (Llm_provider.Capabilities.(
-           caps.preserve_thinking_control_format
-           = Chat_template_kwargs_preserve_thinking))
-  in
   let expect_preserve_always_replay ~provider_name ~model_id =
     expect_provider_catalog_field
       ~field_name:"reasoning_replay"
@@ -632,9 +538,6 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
         (Llm_provider.Capabilities.(
            caps.reasoning_replay_override = Force_preserve_always))
   in
-  expect_request_side_preserve
-    ~provider_name:"runpod_mtp"
-    ~model_id:"qwen36-35b-a3b-mtp";
   expect_preserve_always_replay
     ~provider_name:"ollama_cloud"
     ~model_id:"kimi-k2.7-code";
@@ -910,35 +813,10 @@ List.iter
           check bool "GLM Coding Plan extended thinking" true
             caps.supports_extended_thinking
         | None -> fail "expected GLM Coding Plan capabilities"));
-    (match
-       List.find_opt
-         (fun (runtime : Runtime.t) ->
-            String.equal runtime.id "deepseek.deepseek-v4-pro")
-         runtimes
-     with
-     | None -> fail "expected DeepSeek Pro runtime in seed"
-     | Some runtime ->
-       check (option (float 0.0)) "DeepSeek keeps AGENT_CORE connect timeout default"
-         None
-         (agent_core_provider_config runtime).connect_timeout_s;
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "DeepSeek Pro structured output disabled" false
-            caps.supports_structured_output
-        | None -> fail "expected DeepSeek Pro capabilities"));
-    (match
-       List.find_opt
-         (fun (runtime : Runtime.t) ->
-            String.equal runtime.id "deepseek.deepseek-v4-flash")
-         runtimes
-     with
-     | None -> fail "expected DeepSeek Flash runtime in seed"
-     | Some runtime ->
-       (match runtime.model.capabilities with
-        | Some caps ->
-          check bool "DeepSeek Flash structured output disabled" false
-            caps.supports_structured_output
-        | None -> fail "expected DeepSeek Flash capabilities"));
+    check bool "direct DeepSeek runtimes are absent" false
+      (List.exists
+         (fun (runtime : Runtime.t) -> has_prefix ~prefix:"deepseek." runtime.id)
+         runtimes);
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->
@@ -3361,15 +3239,12 @@ let () =
             test_antigravity_cli_rejects_declared_credentials;
           test_case "antigravity options are protocol-scoped" `Quick
             test_antigravity_options_are_protocol_scoped;
-          test_case "deployment AGENT_CORE catalog covers live RunPod MTP runtime" `Quick
-            test_deployment_agent_core_model_catalog_covers_live_runpod_mtp;
+          test_case "retired runtime providers are absent from deployment config" `Quick
+            test_retired_runtime_providers_are_absent_from_deployment_config;
           test_case
             "deployment AGENT_CORE catalog covers GLM typed streaming reasoning"
             `Quick
             test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning;
-          test_case
-            "deployment AGENT_CORE catalog covers live RunPod RTX A6000 Gemma runtime"
-            `Quick test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma;
           test_case
             "deployment AGENT_CORE catalog covers local Gemma4 E2B QAT runtime"
             `Quick test_deployment_agent_core_model_catalog_covers_local_gemma4_e2b_qat;

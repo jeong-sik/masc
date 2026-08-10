@@ -12,17 +12,17 @@
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
 # Anti-rationalization/cross-verifier work uses a typed verdict tool call.
-# Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
-# this explicit smart lane.
-cross_verifier = "deepseek.deepseek-v4-pro"
+# Keep normal keeper turns on the fleet default flash runtime; use the typed
+# GLM coding runtime for this explicit smart lane.
+cross_verifier = "glm-coding.glm-5-turbo"
 
 # Existing workspaces are not overwritten by this seed. Copy the required lane
 # declarations into the live runtime.toml before enabling their consumers.
 [runtime.exact_output_lanes.librarian_exact]
-slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
+slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 
 [runtime.exact_output_lanes.compaction_exact]
-slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
+slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
@@ -67,18 +67,6 @@ path = "/api/tags"
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
-[providers.deepseek]
-display-name = "DeepSeek API"
-protocol = "openai-compatible-http"
-endpoint = "https://api.deepseek.com"
-
-[providers.deepseek.healthcheck]
-path = "/models"
-
-[providers.deepseek.credentials]
-type = "env"
-key = "DEEPSEEK_API_KEY"
-
 [providers.glm-coding]
 display-name = "GLM Coding Plan"
 protocol = "openai-compatible-http"
@@ -114,22 +102,6 @@ path = "/api/tags"
 # max-context = 200000
 #
 # [claude_code.claude-code-sonnet]
-
-[models.deepseek-v4-pro]
-api-name = "deepseek-v4-pro"
-max-context = 1000000
-tools-support = true
-thinking-support = true
-streaming = true
-
-[models.deepseek-v4-pro.capabilities]
-max-output-tokens = 384000
-supports-tool-choice = true
-supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-supports-response-format-json = true
-supports-structured-output = false
 
 [models.deepseek-v4-flash]
 api-name = "deepseek-v4-flash"
@@ -218,13 +190,6 @@ wizard-default = true
 # remain bounded so durable canonical history cannot become an n,n+1,... wire
 # replay. AGENT_CORE rejects an oversized serialized body locally before POST; the
 # Keeper turn policy owns any subsequent recovery decision.
-max-request-body-bytes = 524288
-
-[deepseek.deepseek-v4-pro]
-max-request-body-bytes = 524288
-
-[deepseek.deepseek-v4-flash]
-wizard-default = true
 max-request-body-bytes = 524288
 
 [glm-coding.glm-4-7-coding]
@@ -396,11 +361,9 @@ max-request-body-bytes = 524288
 # deepseek4.context_length 1048576 with capabilities [completion tools thinking].
 #
 # It gets its own entry instead of retagging an existing block because
-# [models.deepseek-v4-flash] is bound to BOTH providers
-# ([ollama_cloud.deepseek-v4-flash] and [deepseek.deepseek-v4-flash]) and the
-# `:0731` suffix is an Ollama tag convention — api.deepseek.com/models serves
-# only `deepseek-v4-flash` and `deepseek-v4-pro`, so an in-place retag would
-# 404 the direct lane.
+# [models.deepseek-v4-flash] is bound to the untagged Ollama Cloud runtime and
+# the `:0731` suffix selects a distinct Ollama tag, so an in-place retag would
+# silently change the selected model.
 [models.ollama-cloud-deepseek-v4-flash-0731]
 api-name = "deepseek-v4-flash:0731"
 max-context = 1048576
@@ -990,7 +953,7 @@ max-concurrent = 1
 strategy = "ordered"
 candidates = [
   "ollama_cloud.deepseek-v4-flash",
-  "deepseek.deepseek-v4-pro",
+  "glm-coding.glm-5-turbo",
 ]
 
 # ── Keeper assignments ──────────────────────────────────────────────
@@ -1011,7 +974,7 @@ candidates = [
 # on collision).
 [runtime.assignments]
 # example: pin a test keeper to an explicit runtime
-# canary = "deepseek.deepseek-v4-pro"
+# canary = "glm-coding.glm-5-turbo"
 
 # ── Discord ──────────────────────────────────────────────────────────
 # Trigger policy controls which inbound Discord events the bot responds to.

@@ -30,6 +30,9 @@ val default_config : cwd:string -> model:string -> config
 type conversation_mode =
   | Start
   | Resume of { conversation_id : string }
+(** [Start] asks the official client to create a new project so cached
+    workspace state cannot select an earlier conversation. [Resume] names the
+    exact durable conversation and never creates a project. *)
 
 type usage =
   { input_tokens : int

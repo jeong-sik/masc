@@ -477,7 +477,7 @@ let argv config ~conversation_mode ~prompt =
     if config.disable_slash_commands then values @ [ "--disable-slash-commands" ] else values)
   |> (fun values ->
     match conversation_mode with
-    | Start -> values
+    | Start -> values @ [ "--new-project" ]
     | Resume { conversation_id } -> values @ [ "--conversation"; conversation_id ])
 ;;
 

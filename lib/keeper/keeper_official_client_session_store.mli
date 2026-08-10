@@ -161,8 +161,8 @@ val claim :
     declared client kind or runtime id changes. Resuming the same settled
     client/runtime requires an identical tool surface. A same-process Start,
     Active, or Turn_inflight phase rejects a concurrent claim. A completed
-    failure observation is superseded atomically by the next claim and never
-    requires operator resolution before execution. *)
+    failure observation is superseded atomically by a fresh-session claim and
+    never requires operator resolution before execution. *)
 
 val mark_active :
   base_path:string ->

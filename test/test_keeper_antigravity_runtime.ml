@@ -40,6 +40,7 @@ turns=1
 mode=
 sandbox=0
 slash_commands_disabled=0
+new_project=0
 expect_mode=0
 for arg in "$@"; do
   if [ "$expect_mode" -eq 1 ]; then
@@ -51,6 +52,7 @@ for arg in "$@"; do
     --mode) expect_mode=1 ;;
     --sandbox) sandbox=1 ;;
     --disable-slash-commands) slash_commands_disabled=1 ;;
+    --new-project) new_project=1 ;;
     --conversation) expect_conversation=1 ;;
     conversation-antigravity-fixture) turns=73 ;;
   esac
@@ -59,6 +61,7 @@ test "$expect_mode" -eq 0
 test "$mode" = plan
 test "$sandbox" -eq 1
 test "$slash_commands_disabled" -eq 1
+if [ "$turns" -eq 1 ]; then test "$new_project" -eq 1; else test "$new_project" -eq 0; fi
 printf '%%s' "$2" > %s
 printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture","cwd":%s,"tools":["call_mcp_tool"],"permission_mode":"always-proceed"}}\n' "$conversation"
 python3 - <<'PY'
@@ -143,6 +146,84 @@ let keeper_response_text (result : Runtime_agent.run_result) =
   |> String.concat ""
 ;;
 
+let seed_ambiguous_resumed_session ~base_path ~tool =
+  let module Store = Keeper_official_client_session_store in
+  let owner_epoch = "11111111-1111-4111-8111-111111111111" in
+  let runtime_id = "antigravity.gemini" in
+  let tool_surface_sha256 = Store.tool_surface_sha256 [ tool ] in
+  let claimed =
+    Store.claim
+      ~base_path
+      ~keeper_name:"antigravity-fixture"
+      ~expected:None
+      ~client_kind:Antigravity
+      ~owner_epoch
+      ~runtime_id
+      ~tool_surface_sha256
+      ~updated_at:1.0
+    |> Result.get_ok
+  in
+  let active =
+    Store.mark_active
+      ~base_path
+      ~keeper_name:"antigravity-fixture"
+      ~expected:claimed
+      ~session_id:"conversation-stale"
+      ~updated_at:2.0
+    |> Result.get_ok
+  in
+  let starting =
+    Store.mark_turn_starting
+      ~base_path
+      ~keeper_name:"antigravity-fixture"
+      ~expected:active
+      ~session_id:"conversation-stale"
+      ~updated_at:3.0
+    |> Result.get_ok
+  in
+  let inflight =
+    Store.mark_turn_started
+      ~base_path
+      ~keeper_name:"antigravity-fixture"
+      ~expected:starting
+      ~session_id:"conversation-stale"
+      ~turn_id:"conversation-stale:ordinal:1"
+      ~updated_at:4.0
+    |> Result.get_ok
+  in
+  let settled =
+    Store.settle
+      ~base_path
+      ~keeper_name:"antigravity-fixture"
+      ~expected:inflight
+      ~session_id:"conversation-stale"
+      ~turn_id:"conversation-stale:ordinal:1"
+      ~updated_at:5.0
+    |> Result.get_ok
+  in
+  let resumed =
+    Store.claim
+      ~base_path
+      ~keeper_name:"antigravity-fixture"
+      ~expected:(Some settled)
+      ~client_kind:Antigravity
+      ~owner_epoch
+      ~runtime_id
+      ~tool_surface_sha256
+      ~updated_at:6.0
+    |> Result.get_ok
+  in
+  Store.require_recovery
+    ~base_path
+    ~keeper_name:"antigravity-fixture"
+    ~expected:resumed
+    ~failure:Protocol_failed
+    ~detail:"provider conversation advanced without a local settlement"
+    ~required_at:7.0
+  |> Result.get_ok
+  |> ignore
+;;
+
 let test_keeper_projects_mcp_tool_and_settles () =
   let base_path = temp_workspace () |> Unix.realpath in
   Fun.protect
@@ -180,6 +261,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
             observed := input;
             Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
       in
+      seed_ambiguous_resumed_session ~base_path ~tool;
       let tool_history : Agent_core.Types.message =
         { role = Tool
         ; content =

@@ -68,10 +68,14 @@ let fixture_script
   output_string output
     "test -z \"${GEMINI_API_KEY+x}\" && test -z \"${GEMINI_API_KEY_WORK+x}\" && test -z \"${GOOGLE_API_TOKEN+x}\" && test -z \"${OPENAI_API_KEY+x}\" && test -z \"${OPENAI_API_KEY_MAIN+x}\" && test -z \"${ANTHROPIC_API_KEY+x}\" && test -z \"${ANTHROPIC_API_KEY_WORK+x}\" && test -z \"${AGY_ADC_AUTH+x}\" && test -z \"${MASC_PUBLIC_FIXTURE+x}\" || exit 92\n";
   if require_resume
-  then
+  then (
     output_string
       output
       "case \" $* \" in *\" --conversation conversation-1 \"*) ;; *) exit 93 ;; esac\n";
+    output_string output "case \" $* \" in *\" --new-project \"*) exit 96 ;; esac\n")
+  else (
+    output_string output "case \" $* \" in *\" --new-project \"*) ;; *) exit 96 ;; esac\n";
+    output_string output "case \" $* \" in *\" --conversation \"*) exit 97 ;; esac\n");
   Option.iter
     (fun expected ->
       output_string

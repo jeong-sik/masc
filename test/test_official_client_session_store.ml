@@ -651,6 +651,24 @@ let test_retry_previous_restores_exact_settlement () =
       | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
         fail "resumed claim did not enter recovery"
     in
+    let automatic_plan =
+      plan_claim
+        ~expected:(Some recovery)
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+      |> Result.get_ok
+    in
+    check int "automatic recovery restarts ordinal" 1 automatic_plan.turn_count;
+    check
+      (option string)
+      "automatic recovery drops surface requirement"
+      None
+      automatic_plan.required_tool_surface_sha256;
+    check
+      bool
+      "automatic recovery does not resume an ambiguous provider conversation"
+      true
+      (Option.is_none automatic_plan.previous_settlement);
     let restored, application =
       resolve_recovery
         ~base_path

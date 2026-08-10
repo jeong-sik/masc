@@ -744,16 +744,7 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       Error "official-client session has an active unsettled attempt; refusing duplicate execution"
     | Some { phase = Turn_inflight _; _ } ->
       Error "official-client session has an in-flight turn; refusing duplicate execution"
-    | Some
-        { phase = Recovery_required recovery
-        ; turn_count
-        ; tool_surface_sha256
-        ; _
-        } ->
-      Ok
-        ( recovery.previous_settlement
-        , turn_count
-        , Option.map (fun _ -> tool_surface_sha256) recovery.previous_settlement )
+    | Some { phase = Recovery_required _; _ } -> Ok (None, 1, None)
   in
   Ok { previous_settlement; turn_count; required_tool_surface_sha256 }
 ;;
@@ -806,7 +797,7 @@ let claim ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_i
    | Some { phase = Recovery_required recovery; _ } ->
      Log.Keeper.info
        ~keeper_name
-       "auto-superseded official-client recovery=%s failure=%s owner_epoch=%s"
+       "auto-superseded official-client recovery=%s failure=%s with a fresh session owner_epoch=%s"
        recovery.recovery_id
        (recovery_failure_to_string recovery.failure)
        owner_epoch

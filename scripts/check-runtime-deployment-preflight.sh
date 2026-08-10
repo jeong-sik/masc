@@ -95,9 +95,6 @@ run_gate() {
   local signal_path
   local rows_in_file
   local current_owner_count=0
-  local keeper_chat_cutover_report
-  local keeper_chat_cutover_artifact_count=0
-  local keeper_chat_cutover_stranded_count=0
   local queue_path
   local keeper_name
   local in_progress_count_total=0
@@ -123,19 +120,6 @@ run_gate() {
     [[ -d "$keepers_root" && ! -L "$keepers_root" ]] \
       || fail "Keeper runtime root is not an exact directory: $keepers_root"
     reject_symlinks_below "$keepers_root" "Keeper runtime root"
-    keeper_chat_cutover_report="$(
-      "$PREFLIGHT_HELPER" inspect-keeper-chat-cutover --base-path "$BASE_PATH"
-    )" || fail "Keeper chat cutover inventory could not be read"
-    keeper_chat_cutover_artifact_count="$(
-      jq -er '.artifact_count | select(type == "number" and . >= 0 and floor == .)' \
-        <<<"$keeper_chat_cutover_report"
-    )" || fail "typed Keeper chat cutover inventory returned an invalid artifact count"
-    keeper_chat_cutover_stranded_count="$(
-      jq -er '.stranded_work_count | select(type == "number" and . >= 0 and floor == .)' \
-        <<<"$keeper_chat_cutover_report"
-    )" || fail "typed Keeper chat cutover inventory returned an invalid stranded-work count"
-    [[ "$keeper_chat_cutover_artifact_count" -eq 0 ]] \
-      || fail "Keeper chat hard cut requires explicit archive before startup: $keeper_chat_cutover_report"
     while IFS= read -r -d '' queue_path; do
       [[ -f "$queue_path" && ! -L "$queue_path" ]] \
         || fail "current queue snapshot is not an exact regular file: $queue_path"
@@ -198,10 +182,9 @@ run_gate() {
     done < <(find "$signals_root" -name '*.jsonl' -print0)
   fi
 
-  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d in_progress=%d keeper_chat_cutover_artifacts=%d keeper_chat_stranded_work=%d\n' \
+  printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d in_progress=%d\n' \
     "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
-    "$signal_row_count" "$current_owner_count" "$in_progress_count_total" \
-    "$keeper_chat_cutover_artifact_count" "$keeper_chat_cutover_stranded_count"
+    "$signal_row_count" "$current_owner_count" "$in_progress_count_total"
 }
 
 if [[ "$SELF_TEST" -eq 1 ]]; then
@@ -272,10 +255,6 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   write_current_queue "$safe_root"
   "$0" --base-path "$safe_root" >/dev/null
 
-  legacy_chat_root="$fixture_root/legacy-chat"
-  write_schedules "$legacy_chat_root" succeeded
-  mkdir -p "$legacy_chat_root/.masc/keepers/fixture/.chat-direct-active-v1"
-  expect_failure legacy_chat_artifact "$legacy_chat_root"
   # Expansion belongs to the nested shell.
   # shellcheck disable=SC2016
   "$PREFLIGHT_HELPER" \

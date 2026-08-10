@@ -14,7 +14,7 @@ import { route } from '../../router'
 import { createPost } from '../../api'
 import { requestBoardContextInference } from '../../api/board'
 import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
-import { PAGE_SIZE, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, categoryVisibleLimits, contentCategory, selectedBoardPostId, boardFilterMode, boardComposerMode } from './board-state'
+import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardFilterMode, boardComposerMode } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost, OperatorSnapshot } from '../../types'
 
@@ -209,6 +209,7 @@ describe('BoardSurface Component', () => {
     await Promise.resolve()
     vi.unstubAllGlobals()
     resetBoardLatencyMetrics()
+    feedVisibleLimit.value = PAGE_SIZE
     clearLocalStorage()
   })
 
@@ -248,12 +249,6 @@ describe('BoardSurface Component', () => {
     ]
     boardFlairsError.value = false
     resetBoardLatencyMetrics()
-    categoryVisibleLimits.value = {
-      article: PAGE_SIZE,
-      review: PAGE_SIZE,
-      notice: PAGE_SIZE,
-      system: PAGE_SIZE,
-    }
     selectedBoardPostId.value = null
     boardFilterMode.value = 'all'
     boardComposerMode.value = 'post'
@@ -396,21 +391,18 @@ describe('BoardSurface Component', () => {
     expect(screen.queryByTestId('bd-mention-detail')).toBeNull()
   })
 
-  it('keeps v2 workspace panels for category cards', () => {
+  it('renders one unified feed in server order instead of fixed category sections', () => {
     boardPosts.value = [
-      makePost({ id: 'post-1', title: '기술 탐색: test topic', body: 'content', author: 'keeper' }),
+      makePost({ id: 'notice-first', title: '먼저 온 알림', author: 'keeper', post_kind: 'automation' }),
+      makePost({ id: 'article-second', title: '나중에 온 글', author: 'keeper', post_kind: 'direct' }),
     ]
-    const { container } = render(h(BoardSurface, null))
-    expect(container.querySelectorAll('.v2-workspace-panel').length).toBeGreaterThanOrEqual(1)
-  })
 
-  it('applies StyleSeed surface/card classes', () => {
-    boardPosts.value = [
-      makePost({ id: 'post-1', title: '기술 탐색: test topic', body: 'content', author: 'keeper' }),
-    ]
-    const { container } = render(h(BoardSurface, null))
-    expect(container.querySelector('.v2-board-surface.ss-surface.bg-surface-page.text-text-primary')).not.toBeNull()
-    expect(container.querySelectorAll('.v2-workspace-panel.ss-card').length).toBeGreaterThanOrEqual(1)
+    render(h(BoardSurface, null))
+
+    const feed = screen.getByTestId('bd-unified-feed')
+    const titles = Array.from(feed.querySelectorAll('.bd-post-title')).map(node => node.textContent)
+    expect(titles).toEqual(['먼저 온 알림', '나중에 온 글'])
+    expect(screen.queryByRole('navigation', { name: '글/분석 게시글 페이지' })).not.toBeInTheDocument()
   })
 
   it('applies the v2 board summary class on focus surfaces', () => {
@@ -656,7 +648,6 @@ describe('BoardSurface Component', () => {
     fireEvent.change(sort, { target: { value: 'discussed' } })
 
     expect(boardSortMode.value).toBe('discussed')
-    expect(categoryVisibleLimits.value.article).toBe(PAGE_SIZE)
   })
 
   it('renders permalink, trackback, context inference, and X share actions for a post', () => {
@@ -958,44 +949,37 @@ describe('BoardSurface Component', () => {
     expect(screen.queryByText('System Post')).not.toBeInTheDocument()
   })
 
-  it('uses shared cursor pagination for category expansion', () => {
+  it('uses one shared cursor pagination for the unified feed', () => {
     boardPosts.value = Array.from({ length: PAGE_SIZE + 1 }, (_, index) => makePost({
       id: `post-${index}`,
-      title: `기술 탐색: topic ${index}`,
-      body: 'exploration content here',
+      title: `post ${index}`,
+      body: 'content',
       author: 'keeper',
-      post_kind: 'direct',
+      post_kind: index % 2 === 0 ? 'direct' : 'automation',
     }))
 
     render(h(BoardSurface, null))
 
-    const nav = screen.getByRole('navigation', { name: '글/분석 게시글 페이지' })
-    expect(nav).toBeInTheDocument()
-    expect(nav.textContent).toContain('표시')
+    expect(screen.getByRole('navigation', { name: '전체 게시글 페이지' }).textContent)
+      .toContain(`${PAGE_SIZE} / ${PAGE_SIZE + 1}`)
     fireEvent.click(screen.getByRole('button', { name: /더 보기/ }))
-
-    expect(categoryVisibleLimits.value.article).toBe(PAGE_SIZE * 2)
+    expect(feedVisibleLimit.value).toBe(PAGE_SIZE * 2)
   })
 
-  it('lets category pagination collapse an expanded category', () => {
-    categoryVisibleLimits.value = {
-      article: PAGE_SIZE * 2,
-      review: PAGE_SIZE,
-      notice: PAGE_SIZE,
-      system: PAGE_SIZE,
-    }
+  it('lets unified feed pagination collapse after expansion', () => {
+    feedVisibleLimit.value = PAGE_SIZE * 2
     boardPosts.value = Array.from({ length: PAGE_SIZE * 2 + 1 }, (_, index) => makePost({
       id: `post-${index}`,
-      title: `기술 탐색: topic ${index}`,
-      body: 'exploration content here',
+      title: `post ${index}`,
+      body: 'content',
       author: 'keeper',
       post_kind: 'direct',
     }))
 
     render(h(BoardSurface, null))
-    fireEvent.click(screen.getByRole('button', { name: '줄이기' }))
 
-    expect(categoryVisibleLimits.value.article).toBe(PAGE_SIZE)
+    fireEvent.click(screen.getByRole('button', { name: '줄이기' }))
+    expect(feedVisibleLimit.value).toBe(PAGE_SIZE)
   })
 
   it('renders the operator author sigil with the "OP" glyph and .op modifier', () => {

@@ -1,6 +1,7 @@
 module Queue = Keeper_event_queue
 module State = Keeper_event_queue_state
 module Persistence = Keeper_event_queue_persistence
+module Keeper_reaction_ledger = Masc.Keeper_reaction_ledger
 
 let require_ok label = function
   | Ok value -> value

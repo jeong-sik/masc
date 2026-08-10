@@ -340,19 +340,25 @@ let with_store_transition_lock ~base_path ~request_id f =
         Store_transition_table.add store_transition_locks key lock;
         lock)
   in
-  (* fun-protect-finally-ok: the registry user-count cleanup acquires only the
-     cancellation-protected bookkeeping mutex; it awaits no external event and
-     cannot strand the protected exception behind cancellable cleanup. *)
+  (* fun-protect-finally-ok: the user-count decrement runs under
+     [Eio.Cancel.protect], so it completes even when [f] raised because this
+     fiber is being cancelled. [Eio.Mutex.use_rw ~protect:true] is not enough on
+     its own: Eio documents [protect] as covering the critical section, not the
+     wait for the lock, so a contended [mu] would abort the cleanup and leave
+     [lock.users] above zero — the entry keyed by request id would then never be
+     removed from [store_transition_locks]. [with_keeper_lane_lock] below already
+     protects its cleanup the same way. *)
   Fun.protect
     ~finally:(fun () ->
-      Eio.Mutex.use_rw ~protect:true mu (fun () ->
-        lock.users <- lock.users - 1;
-        if lock.users = 0
-        then
-          match Store_transition_table.find_opt store_transition_locks key with
-          | Some current when current == lock ->
-            Store_transition_table.remove store_transition_locks key
-          | Some _ | None -> ()))
+      Eio.Cancel.protect (fun () ->
+        Eio.Mutex.use_rw ~protect:true mu (fun () ->
+          lock.users <- lock.users - 1;
+          if lock.users = 0
+          then
+            match Store_transition_table.find_opt store_transition_locks key with
+            | Some current when current == lock ->
+              Store_transition_table.remove store_transition_locks key
+            | Some _ | None -> ())))
     (fun () -> Eio.Mutex.use_rw ~protect:true lock.mutex f)
 ;;
 

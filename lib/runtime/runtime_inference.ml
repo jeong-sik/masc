@@ -22,6 +22,8 @@ let resolve_temperature ~runtime_id ~fallback =
 let resolve_reasoning_effort ~runtime_id =
   Runtime.reasoning_effort_of_runtime_id runtime_id
 
+let resolve_turn_timeout_s ~runtime_id = Runtime.turn_timeout_s_of_runtime_id runtime_id
+
 (* masc#24067 / agent-core boundary: MASC must not synthesize a request [max_tokens]
    value. The former resolver invented one from either a model capability
    ceiling or a flat fallback. Callers now carry explicit intent as [int

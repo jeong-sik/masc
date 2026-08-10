@@ -4,6 +4,11 @@ val resolve_reasoning_effort :
     when the model leaves it unset. Official-client runtimes have no other
     declared reasoning control. *)
 
+val resolve_turn_timeout_s : runtime_id:string -> float option
+(** The per-model [turn-timeout-s] declared for [runtime_id], or [None] when
+    the model leaves it unset. Callers keep their existing bound on [None]:
+    this overrides a timeout, it does not supply one. *)
+
 val resolve_temperature :
   runtime_id:string -> fallback:(unit -> float) -> float
 (** Use the runtime.toml model override when present; evaluate [fallback] only

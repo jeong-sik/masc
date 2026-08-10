@@ -143,6 +143,7 @@ type model_spec =
   ; min_p : float option
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
        [@equal fun a b -> a = b]
+  ; turn_timeout_s : float option
   ; capabilities : model_capabilities option
   }
 [@@deriving show, eq]

@@ -247,7 +247,13 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       ; execution_mode = Plan
       ; sandbox = true
       ; disable_slash_commands = true
-      ; timeout_s = config.timeout_s
+      ; (* A per-model [turn-timeout-s] overrides the admission-time bound.
+           Absent, [config.timeout_s] stands, so a config that declares none
+           behaves exactly as before. *)
+        timeout_s =
+          Option.value
+            (Runtime_inference.resolve_turn_timeout_s ~runtime_id)
+            ~default:config.timeout_s
       }
     in
     let* () =

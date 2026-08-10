@@ -1323,6 +1323,12 @@ let reasoning_effort_of_runtime_id (id : string)
   | None -> None
 ;;
 
+let turn_timeout_s_of_runtime_id (id : string) : float option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.model.turn_timeout_s
+  | None -> None
+;;
+
 let default_preserve_thinking_for_model (_rt : t) : bool option =
   (* AGENT_CORE owns provider/model capability truth and can preserve reasoning when
      the provider contract requires it. MASC must not turn "request-side

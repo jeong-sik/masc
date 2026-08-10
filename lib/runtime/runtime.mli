@@ -355,6 +355,13 @@ val reasoning_effort_of_runtime_id : string -> Llm_provider.Reasoning_effort.t o
     the runtime id is unknown. Consumed by
     {!Runtime_inference.resolve_reasoning_effort}. *)
 
+val turn_timeout_s_of_runtime_id : string -> float option
+(** Per-model [turn-timeout-s] from runtime.toml, or [None] when unset or the
+    runtime id is unknown. [None] means "keep whatever bound the caller already
+    has" — the antigravity provider [timeout-s] or the adapter default — so an
+    unknown id degrades to current behaviour rather than to an invented bound.
+    Consumed by {!Runtime_inference.resolve_turn_timeout_s}. *)
+
 val top_p_of_runtime_id : string -> float option
 (** Request [top_p] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when the runtime is not configured or no explicit value is

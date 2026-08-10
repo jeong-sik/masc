@@ -22,8 +22,8 @@
     - {b Vote log persistence}: [append_vote_log],
       [save_vote_log_jsonl].
     - {b Internal vote outcome}: the [vote_outcome] record
-      carries the score delta and post-lock vote log / feedback
-      side effects.
+      carries the post-vote total score and post-lock vote log /
+      feedback side effects.
     - {b Persistence loaders}: [load_persisted_posts],
       [load_persisted_comments], [load_persisted_votes],
       [recalculate_reply_counts].
@@ -83,10 +83,10 @@ val vote :
   direction:vote_direction ->
   (int, board_error) Result.t
 (** Casts a vote on the post identified by [post_id].
-    Returns [Ok delta] where [delta] is the new
-    [(votes_up - votes_down)] score.  Validates [voter] +
-    [post_id] before taking the lock; rejects duplicate
-    votes in the same direction with [Already_voted].
+    Returns [Ok total_score] — the post's [(votes_up - votes_down)]
+    score {b after} this vote, not the amount this vote changed it.
+    Validates [voter] + [post_id] before taking the lock; rejects
+    duplicate votes in the same direction with [Already_voted].
 
     Vote flips swap up↔down without re-counting (and
     {b without} earning credits, to prevent down/up

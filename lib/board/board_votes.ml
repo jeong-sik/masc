@@ -113,9 +113,14 @@ let persisted_vote_row_of_yojson = function
        | _ -> None)
   | _ -> None
 
-(* [vote_outcome] carries the information needed to run post-lock vote hooks. *)
+(* [vote_outcome] carries the information needed to run post-lock vote hooks.
+
+   [total_score] is the post's score after this vote, not the change this vote
+   made. It was called [delta] and read as a change by every caller name around
+   it; the file's other [delta] (karma_score_for_direction) really is a change,
+   so one word meant both. *)
 type vote_outcome = {
-  delta : int;
+  total_score : int;
   vote_target : string;
   vote_voter : string;
   vote_direction : vote_direction;
@@ -181,7 +186,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                   Hashtbl.replace store.vote_log vote_key (direction, now);
                   mark_dirty_post store (Post_id.to_string pid);
                   invalidate_post_caches store;
-                  Ok { delta = flipped.votes_up - flipped.votes_down;
+                  Ok { total_score = flipped.votes_up - flipped.votes_down;
                        vote_target = vote_key;
                        vote_voter = voter;
                        vote_direction = direction;
@@ -196,7 +201,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                   Hashtbl.replace store.vote_log vote_key (direction, now);
                   mark_dirty_post store (Post_id.to_string pid);
                   invalidate_post_caches store;
-                  Ok { delta = updated.votes_up - updated.votes_down;
+                  Ok { total_score = updated.votes_up - updated.votes_down;
                        vote_target = vote_key;
                        vote_voter = voter;
                        vote_direction = direction;
@@ -208,9 +213,9 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
          so holding [store.mutex] across their I/O would be gratuitous
          contention with every other reader/writer. *)
       (match board_result with
-       | Ok ({ delta; _ } as outcome) ->
+       | Ok ({ total_score; _ } as outcome) ->
            record_vote_side_effect store outcome;
-           Ok delta
+           Ok total_score
        | Error _ as e -> e)
 
 let current_vote_for_comment store ~voter ~comment_id
@@ -266,7 +271,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                 mark_dirty_comment store (Comment_id.to_string cid);
                 invalidate_comment_caches store;
                 Ok {
-                  delta = flipped.votes_up - flipped.votes_down;
+                  total_score = flipped.votes_up - flipped.votes_down;
                   vote_target = vote_key;
                   vote_voter = voter;
                   vote_direction = direction;
@@ -282,7 +287,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                 mark_dirty_comment store (Comment_id.to_string cid);
                 invalidate_comment_caches store;
                 Ok {
-                  delta = updated.votes_up - updated.votes_down;
+                  total_score = updated.votes_up - updated.votes_down;
                   vote_target = vote_key;
                   vote_voter = voter;
                   vote_direction = direction;
@@ -291,7 +296,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
       )
       |> Result.map (fun outcome ->
              record_vote_side_effect store outcome;
-             outcome.delta)
+             outcome.total_score)
 
 (** {1 Stats} *)
 

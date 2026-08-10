@@ -191,6 +191,16 @@ let optional_string stage name fields =
   | Some _ -> protocol_error stage (Printf.sprintf "field %S must be a string or null" name)
 ;;
 
+(* Present and a string, with no constraint on its contents. For payload
+   fields whose value this decoder does not read: an emptiness rule there
+   ends the turn over a byte nobody looks at. *)
+let required_string_any stage name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Ok value
+  | Some _ -> protocol_error stage (Printf.sprintf "field %S must be a string" name)
+  | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
+;;
+
 let required_bool stage name fields =
   match List.assoc_opt name fields with
   | Some (`Bool value) -> Ok value
@@ -509,12 +519,23 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params =
 
 let max_retry_notifications = 3
 
+(* What this decides is identity: does this delta belong to the turn we are
+   awaiting. threadId, turnId and itemId are identifiers, so emptiness in one
+   of them is malformed and stays rejected.
+
+   delta carries stream payload this function never reads, and an empty or
+   whitespace chunk is ordinary in a streaming protocol. Requiring it to be
+   non-empty turned such a chunk into a terminal protocol error, which put the
+   official-client session into Recovery_required and made every later turn for
+   that keeper fail closed on `official_client_session.claim` until an operator
+   resolved it by hand. Three such chunks accounted for 3,236 rejected turns
+   across sangsu, kidsnote and taskmaster in one retained log window (#27967). *)
 let validate_item_delta_notification ~method_ ~thread_id ~turn_id params =
   let* fields = assoc_at method_ params in
   let* notification_thread_id = required_string method_ "threadId" fields in
   let* notification_turn_id = required_string method_ "turnId" fields in
   let* _item_id = required_string method_ "itemId" fields in
-  let* _delta = required_string method_ "delta" fields in
+  let* _delta = required_string_any method_ "delta" fields in
   if notification_thread_id <> thread_id || notification_turn_id <> turn_id
   then protocol_error method_ "item delta identity does not match the active turn"
   else Ok ()

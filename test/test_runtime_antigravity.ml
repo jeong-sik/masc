@@ -115,6 +115,30 @@ let run_fixture ?conversation_mode ?home_dir ?on_conversation_ready ?(timeout_s 
       ~prompt:"Return the fixture marker")
 ;;
 
+(* The installed agy emits step_type="system_message" on turns that carry tool
+   work, and the closed parser rejected it, which fails the whole turn — a
+   progress label killing an answer that had already been produced. Measured
+   2026-08-10 on the live fleet: 66 consecutive taskmaster turns died on this
+   one value, with the same runtime answering a trivial prompt fine because
+   that path emits only agent_response / checkpoint / unknown / user_input.
+
+   The step list here is the one the failing turns carried. Asserting the turn
+   text is what makes this a coverage test rather than a parse test: the point
+   is that the answer survives the step, not merely that the step parses. *)
+let test_system_message_step_does_not_fail_the_turn () =
+  with_fixture
+    [ init ()
+    ; step ~index:0 ~step_type:"user_input" ()
+    ; step ~index:1 ~step_type:"system_message" ()
+    ; step ~index:2 ~step_type:"agent_response" ()
+    ; result ()
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok turn -> check string "text" "MASC_ANTIGRAVITY_OK\n" turn.text)
+;;
+
 let test_successful_official_client_turn () =
   with_fixture
     [ init ()
@@ -424,6 +448,10 @@ let () =
             test_unknown_protocol_vocabulary_fails_closed
         ; test_case "typed timeout" `Quick test_timeout_is_typed
         ; test_case "process-free admission" `Quick test_admission_is_process_free
+        ; test_case
+            "a system_message step does not fail the turn"
+            `Quick
+            test_system_message_step_does_not_fail_the_turn
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

@@ -226,6 +226,7 @@ and step_type =
   | User_input
   | Internal
   | Checkpoint
+  | System_message
 
 and result_status =
   | Success
@@ -271,6 +272,7 @@ let parse_step_type stage value =
       | "user_input" -> Some User_input
       | "unknown" -> Some Internal
       | "checkpoint" -> Some Checkpoint
+      | "system_message" -> Some System_message
       | _ -> None)
     value
 ;;

@@ -561,7 +561,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
        (match enabled_result, healthcheck_result, connect_timeout_result with
         | Error errs, _, _ | _, Error errs, _ | _, _, Error errs -> Error errs
         | Ok enabled_opt, Ok healthcheck_path, Ok connect_timeout_s ->
-          let enabled = Option.value enabled_opt ~default:true in
+          let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id
             ; enabled
@@ -1116,7 +1116,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let num_ctx_result = typed_find "an integer" path tbl "num-ctx" Otoml.get_integer in
   let ( let* ) = Result.bind in
   let* enabled_opt = enabled_result in
-  let enabled = Option.value enabled_opt ~default:true in
+  let enabled = match enabled_opt with Some value -> value | None -> true in
   let* is_default_opt = is_default_result in
   let is_default = Option.value is_default_opt ~default:false (* DET-OK: fallback to false if omitted *) in
   let* wizard_default_opt = wizard_default_result in

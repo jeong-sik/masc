@@ -594,6 +594,52 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
      Alcotest.failf
        "expected one typed rejected slot, got %d"
        (List.length rejected));
+  write_file replacement_path replacement_catalog_with_unbound_target;
+  write_file
+    runtime_path
+    (runtime_toml
+       ~compaction_slots:[ unbound_target; replacement_target ]
+       replacement_target);
+  create_server_state ();
+  let unbound_optional_registry =
+    current_registry "unbound optional exact-output target bootstrap"
+  in
+  require_lane_slots
+    "unbound optional target is excluded while admitted fallback remains"
+    ~lane_id:"compaction_exact"
+    ~expected:[ replacement_target ]
+    unbound_optional_registry;
+  (match Registry.rejected_slots unbound_optional_registry with
+   | [ rejected ] ->
+     Alcotest.(check string) "unbound rejected slot" unbound_target rejected.slot_id
+   | rejected ->
+     Alcotest.failf
+       "expected one unbound rejected slot, got %d"
+       (List.length rejected));
+  let stable_generation = Registry.generation unbound_optional_registry in
+  write_file
+    runtime_path
+    (runtime_toml
+       ~hitl_slots:[ unbound_target ]
+       replacement_target);
+  (match create_server_state () with
+   | exception Env_config_core.Config_error _ -> ()
+   | () -> Alcotest.fail "an entirely unbound mandatory lane must block startup"
+   | exception exn ->
+     Alcotest.failf
+       "unbound mandatory lane returned the wrong exception: %s"
+       (Printexc.to_string exn));
+  (match Registry.current () with
+   | Ok registry ->
+     Alcotest.(check int64)
+       "failed mandatory admission preserves the published registry"
+       stable_generation
+       (Registry.generation registry)
+   | Error error ->
+     Alcotest.failf
+       "failed mandatory admission lost the published registry: %s"
+       (Registry.publication_error_to_string error));
+  write_file replacement_path replacement_catalog;
   let runtime_lane_candidates =
     [ replacement_runtime_target
     ; replacement_secondary_runtime_target

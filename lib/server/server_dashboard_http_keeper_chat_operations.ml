@@ -72,6 +72,7 @@ let error_json error =
 ;;
 
 let respond_error request reqd error =
+  Log.Dashboard.warn "keeper_chat_operation_api error=%s" error.code;
   Server_auth.respond_json_value_with_cors
     ~status:error.status
     request
@@ -146,6 +147,11 @@ let handle_get state request reqd = function
             (unknown_operation
                ("unknown Keeper chat operation: " ^ Operation_id.to_string operation_id))
         | Ok (Some operation) ->
+          Log.Dashboard.debug
+            "keeper_chat_operation_get keeper=%s operation_id=%s state=%s"
+            keeper_name
+            (Operation_id.to_string operation.operation_id)
+            (Operation.state_to_string operation.state);
           Server_auth.respond_json_value_with_cors
             request
             reqd
@@ -166,6 +172,10 @@ let handle_get state request reqd = function
         with
         | Error error -> respond_error request reqd (api_error_of_command_error error)
         | Ok operations ->
+          Log.Dashboard.debug
+            "keeper_chat_operation_list keeper=%s state=queued count=%d"
+            keeper_name
+            (List.length operations);
           Server_auth.respond_json_value_with_cors
             request
             reqd
@@ -208,6 +218,12 @@ let parse_empty mutation body =
   | Error _ as error -> error
 ;;
 
+let mutation_to_string = function
+  | Edit -> "edit"
+  | Move_to_end -> "move_to_end"
+  | Cancel -> "cancel"
+;;
+
 let handle_mutation state request reqd route body =
   match operation_id route.raw_operation_id with
   | Error error -> respond_error request reqd error
@@ -246,6 +262,12 @@ let handle_mutation state request reqd route body =
     (match result with
      | Error error -> respond_error request reqd error
      | Ok operation ->
+       Log.Dashboard.info
+         "keeper_chat_operation_mutation keeper=%s operation_id=%s action=%s state=%s"
+         route.keeper_name
+         (Operation_id.to_string operation.operation_id)
+         (mutation_to_string route.mutation)
+         (Operation.state_to_string operation.state);
        Server_auth.respond_json_value_with_cors
          request
          reqd

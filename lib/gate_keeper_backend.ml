@@ -337,6 +337,9 @@ let accept_connector ~delivery ~clock:_ ~config ~channel ~channel_user_id
                ; message_request = Some message_request
                })))
 
+(* [Channel_gate.handle_inbound_with] records every dispatch outcome and
+   duration through [Channel_gate_metrics.record_attempt]. TEL-OK: recording
+   again in this adapter would double-count the same connector attempt. *)
 let dispatch ~clock ~config ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
     ~idempotency_key ~metadata ~content =

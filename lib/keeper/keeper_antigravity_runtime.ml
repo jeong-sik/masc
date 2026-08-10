@@ -418,17 +418,16 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             then Ok ()
             else Error (internal_error "Antigravity resumed flag differs from durable plan")
           in
-          let* () =
-            if turn.num_turns = turn_count
-            then Ok ()
-            else
-              Error
-                (internal_error
-                   (Printf.sprintf
-                      "Antigravity reported turn %d; durable session expected %d"
-                      turn.num_turns
-                      turn_count))
-          in
+          (* [turn_count] and [turn.num_turns] count different things and are
+             allowed to disagree. [turn_count] is masc's claim ordinal for this
+             durable binding; [turn.num_turns] is the provider's ordinal inside
+             the CLI conversation, which masc does not own -- it survives removal
+             of the session file and advances on the provider's terms. Turn
+             identity below is built from the provider's own pair
+             (conversation_id, num_turns), so it stays unique without the two
+             counters agreeing. Asserting equality here turned every divergence
+             into a failed turn, and a failed turn does not realign the counters,
+             so the keeper stayed down until the binding was rebuilt by hand. *)
           let turn_id =
             provider_turn_identity
               ~conversation_id:turn.conversation_id

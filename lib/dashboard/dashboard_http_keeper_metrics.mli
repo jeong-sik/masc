@@ -21,14 +21,14 @@ val normalize_model_name : string -> string
 (** {1 Per-keeper window statistics (runtime-visible)} *)
 
 type keeper_gen_window_stats = {
-  mutable turns : int;
-  mutable usage_points : int;
-  mutable input_tokens : int;
-  mutable output_tokens : int;
-  mutable total_tokens : int;
-  mutable handoffs : int;
-  mutable first_ts : float;
-  mutable last_ts : float;
+  turns : int;
+  usage_points : int;
+  input_tokens : int;
+  output_tokens : int;
+  total_tokens : int;
+  handoffs : int;
+  first_ts : float;
+  last_ts : float;
   tools : (string, int) Hashtbl.t;
 }
 (** Per-keeper rolling-window statistics record.  All counters

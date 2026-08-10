@@ -192,34 +192,48 @@ let compute_metrics_window
                  let generation_stats_row =
                    match Hashtbl.find_opt generation_stats generation with
                    | Some stats -> stats
-                   | None ->
-                       let stats = create_keeper_gen_window_stats () in
-                       Hashtbl.add generation_stats generation stats;
-                       stats
+                   | None -> create_keeper_gen_window_stats ()
                  in
-                 generation_stats_row.turns <-
-                   generation_stats_row.turns + 1;
-                 (match usage with
-                  | Some (input, output, total) ->
-                      generation_stats_row.usage_points <-
-                        generation_stats_row.usage_points + 1;
-                      generation_stats_row.input_tokens <-
-                        generation_stats_row.input_tokens + input;
-                      generation_stats_row.output_tokens <-
-                        generation_stats_row.output_tokens + output;
-                      generation_stats_row.total_tokens <-
-                        generation_stats_row.total_tokens + total
-                  | None -> ());
-                 if handoff_performed
-                 then
-                   generation_stats_row.handoffs <-
-                     generation_stats_row.handoffs + 1;
-                 if
-                   generation_stats_row.first_ts <= 0.0
-                   || ts_unix < generation_stats_row.first_ts
-                 then generation_stats_row.first_ts <- ts_unix;
-                 if ts_unix > generation_stats_row.last_ts
-                 then generation_stats_row.last_ts <- ts_unix;
+                 let usage_points, input_tokens, output_tokens, total_tokens =
+                   match usage with
+                   | Some (input, output, total) ->
+                       ( generation_stats_row.usage_points + 1,
+                         generation_stats_row.input_tokens + input,
+                         generation_stats_row.output_tokens + output,
+                         generation_stats_row.total_tokens + total )
+                   | None ->
+                       ( generation_stats_row.usage_points,
+                         generation_stats_row.input_tokens,
+                         generation_stats_row.output_tokens,
+                         generation_stats_row.total_tokens )
+                 in
+                 (* [Hashtbl.replace] inserts when the generation is new, so
+                    the row no longer has to be added before it is filled in.
+                    [tools] is the same table either way — the record update
+                    copies the handle, not the contents. *)
+                 Hashtbl.replace generation_stats generation
+                   {
+                     generation_stats_row with
+                     turns = generation_stats_row.turns + 1;
+                     usage_points;
+                     input_tokens;
+                     output_tokens;
+                     total_tokens;
+                     handoffs =
+                       (if handoff_performed
+                        then generation_stats_row.handoffs + 1
+                        else generation_stats_row.handoffs);
+                     first_ts =
+                       (if
+                          generation_stats_row.first_ts <= 0.0
+                          || ts_unix < generation_stats_row.first_ts
+                        then ts_unix
+                        else generation_stats_row.first_ts);
+                     last_ts =
+                       (if ts_unix > generation_stats_row.last_ts
+                        then ts_unix
+                        else generation_stats_row.last_ts);
+                   };
                  List.iter
                    (count_table_incr generation_stats_row.tools)
                    tools_used;

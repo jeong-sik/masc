@@ -5,11 +5,11 @@ open Activity_graph_types
 type node_acc = {
   node_id : string;
   node_kind : string;
-  mutable label : string;
-  mutable status : node_status;
-  mutable weight : int;
-  mutable last_event_at : string;
-  mutable meta : Yojson.Safe.t;
+  label : string;
+  status : node_status;
+  weight : int;
+  last_event_at : string;
+  meta : Yojson.Safe.t;
 }
 
 type edge_acc = {
@@ -17,10 +17,10 @@ type edge_acc = {
   source : string;
   target : string;
   edge_kind : string;
-  mutable weight : int;
-  mutable active : bool;
-  mutable last_event_at : string;
-  mutable meta : Yojson.Safe.t;
+  weight : int;
+  active : bool;
+  last_event_at : string;
+  meta : Yojson.Safe.t;
 }
 
 let entity_node_id (value : entity_ref) = value.kind ^ ":" ^ value.id
@@ -41,14 +41,25 @@ let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
     ~(status : node_status) ~(ts_iso : string) ~(meta : Yojson.Safe.t) =
   match Hashtbl.find_opt nodes id with
   | Some node ->
-      node.weight <- node.weight + 1;
-      node.last_event_at <- ts_iso;
-      if node.label = id || node.label = "" then node.label <- label;
-      if status <> Unset
-         && (not (is_generic_status status) || is_generic_status node.status)
-      then
-        node.status <- status;
-      if meta <> default_meta then node.meta <- meta
+      (* The table owns the node, so an update is a rebind rather than an
+         in-place write. Every field below reads [node] from before this
+         event, which is what the in-place form observed too. *)
+      Hashtbl.replace nodes id
+        {
+          node with
+          weight = node.weight + 1;
+          last_event_at = ts_iso;
+          label =
+            (if node.label = id || node.label = "" then label else node.label);
+          status =
+            (if
+               status <> Unset
+               && (not (is_generic_status status)
+                  || is_generic_status node.status)
+             then status
+             else node.status);
+          meta = (if meta <> default_meta then meta else node.meta);
+        }
   | None ->
       Hashtbl.add nodes id
         {
@@ -78,10 +89,14 @@ let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
   let edge_id = source ^ "|" ^ kind ^ "|" ^ target in
   match Hashtbl.find_opt edges edge_id with
   | Some edge ->
-      edge.weight <- edge.weight + 1;
-      edge.active <- active;
-      edge.last_event_at <- ts_iso;
-      if meta <> default_meta then edge.meta <- meta
+      Hashtbl.replace edges edge_id
+        {
+          edge with
+          weight = edge.weight + 1;
+          active;
+          last_event_at = ts_iso;
+          meta = (if meta <> default_meta then meta else edge.meta);
+        }
   | None ->
       Hashtbl.add edges edge_id
         {
@@ -127,7 +142,7 @@ let reduce_event ~nodes ~edges (value : event) =
     match subject_id with
     | Some id -> (
         match Hashtbl.find_opt nodes id with
-        | Some node -> node.status <- status
+        | Some node -> Hashtbl.replace nodes id { node with status }
         | None -> ())
     | None -> ()
   in
@@ -135,7 +150,7 @@ let reduce_event ~nodes ~edges (value : event) =
     match actor_id with
     | Some id -> (
         match Hashtbl.find_opt nodes id with
-        | Some node -> node.status <- status
+        | Some node -> Hashtbl.replace nodes id { node with status }
         | None -> ())
     | None -> ()
   in

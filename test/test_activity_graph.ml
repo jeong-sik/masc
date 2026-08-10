@@ -734,6 +734,50 @@ let test_span_status_of_string_opt_returns_none_for_unknown () =
     (Activity_graph.span_status_of_string_opt "open"
      |> Option.map Activity_graph.span_status_to_string)
 
+
+(* Node accumulators are values, not cells. A record read out of the table
+   before a later event keeps what it was read with, while the table itself
+   advances. Against the previous in-place form both checks on [first] would
+   fail, because [first] and the table entry were the same physical record. *)
+let test_reducer_replaces_node_entries_instead_of_writing_through () =
+  let nodes = Hashtbl.create 8 in
+  let edges = Hashtbl.create 8 in
+  let event seq ts_iso : Activity_graph_types.event =
+    {
+      seq;
+      ts_ms = seq * 1000;
+      ts_iso;
+      workspace_id = "ws-immutable-reducer";
+      kind = "task.assigned";
+      actor = Some { kind = "agent"; id = "a1" };
+      subject = Some { kind = "task"; id = "t1" };
+      payload = `Assoc [];
+      tags = [];
+    }
+  in
+  Activity_graph_reducer.reduce_event ~nodes ~edges
+    (event 1 "2026-01-01T00:00:00Z");
+  let first : Activity_graph_reducer.node_acc =
+    match Hashtbl.find_opt nodes "agent:a1" with
+    | Some node -> node
+    | None -> fail "actor node missing after the first event"
+  in
+  check int "first read sees one hit" 1 first.weight;
+  Activity_graph_reducer.reduce_event ~nodes ~edges
+    (event 2 "2026-01-02T00:00:00Z");
+  check int "the earlier record keeps its weight" 1 first.weight;
+  check string "the earlier record keeps its timestamp" "2026-01-01T00:00:00Z"
+    first.last_event_at;
+  let second : Activity_graph_reducer.node_acc =
+    match Hashtbl.find_opt nodes "agent:a1" with
+    | Some node -> node
+    | None -> fail "actor node missing after the second event"
+  in
+  check int "the table advances the weight" 2 second.weight;
+  check string "the table advances the timestamp" "2026-01-02T00:00:00Z"
+    second.last_event_at
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -783,5 +827,10 @@ let () =
             test_current_day_cache_rescans_from_zero_on_truncation;
           test_case "past-day cache evicts entries for deleted files" `Quick
             test_past_day_cache_evicts_entries_for_deleted_files;
+        ] );
+      ( "reducer",
+        [
+          test_case "a later event replaces the node entry rather than writing through"
+            `Quick test_reducer_replaces_node_entries_instead_of_writing_through;
         ] );
     ]

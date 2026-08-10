@@ -517,8 +517,6 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback params =
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
 
-let max_retry_notifications = 3
-
 (* What this decides is identity: does this delta belong to the turn we are
    awaiting. threadId, turnId and itemId are identifiers, so emptiness in one
    of them is malformed and stays rejected.
@@ -542,7 +540,7 @@ let validate_item_delta_notification ~method_ ~thread_id ~turn_id params =
 ;;
 
 let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
-    ~seen_fallback ~retry_notifications =
+    ~seen_fallback =
   let* message = io.receive () in
   match message with
   | Response _ | Response_error _ ->
@@ -566,7 +564,6 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
-      ~retry_notifications
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
@@ -589,7 +586,6 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
-      ~retry_notifications
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
     let* fields = assoc_at stage params in
@@ -614,12 +610,18 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~turn_id
         ~seen_final
         ~seen_fallback
-        ~retry_notifications
   | Notification { method_ = "error"; params } ->
+    (* willRetry:true is a progress signal — the app-server itself is retrying
+       upstream, so the turn is alive. Counting these and failing the turn at a
+       cap preempted the declared liveness boundary below and, under one
+       upstream degradation window, drove three keepers into
+       Recovery_required twice in two hours. The enclosing turn timeout
+       remains the only liveness boundary; willRetry:false still carries the
+       provider's terminal error. *)
     let stage = "error notification" in
     let* fields = assoc_at stage params in
     let* will_retry = required_bool stage "willRetry" fields in
-    if will_retry && retry_notifications < max_retry_notifications
+    if will_retry
     then
       await_turn_terminal
         io
@@ -629,9 +631,6 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~turn_id
         ~seen_final
         ~seen_fallback
-        ~retry_notifications:(retry_notifications + 1)
-    else if will_retry
-    then Error (Turn_failed "app-server retry notification limit exceeded")
     else
       let* error_json = required_member stage "error" fields in
       let* error_fields = assoc_at stage error_json in
@@ -651,7 +650,6 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
-      ~retry_notifications
 ;;
 
 let optional_field name = function
@@ -802,7 +800,6 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       ~turn_id
       ~seen_final:None
       ~seen_fallback:None
-      ~retry_notifications:0
   in
   Ok
     { thread_id

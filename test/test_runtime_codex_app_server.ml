@@ -414,25 +414,31 @@ let test_failed_turn_is_not_completion () =
       | Ok _ -> fail "failed turn incorrectly reported as completed")
 ;;
 
-let test_retry_notifications_are_bounded () =
+let test_retry_notifications_are_observational () =
+  (* Live incident 2026-08-10 (masc#27953): one upstream degradation window
+     drove three keepers into Recovery_required twice in two hours because the
+     turn died at the fourth willRetry:true. The app-server retrying upstream
+     is progress, not failure; the turn deadline is the liveness boundary. *)
   let retry = {|{"method":"error","params":{"willRetry":true}}|} in
   with_fixture
-    [ init_result
-    ; account_chatgpt
-    ; thread_result
-    ; turn_result
-    ; retry
-    ; retry
-    ; retry
-    ; retry
-    ]
+    ([ init_result; account_chatgpt; thread_result; turn_result ]
+     @ List.init 10 (fun _ -> retry)
+     @ [ item_completed; turn_completed ])
     (fun path ->
        match run_fixture path with
-       | Error
-           (Runtime_codex_app_server.Turn_failed
-             "app-server retry notification limit exceeded") -> ()
+       | Ok turn ->
+         check string "completed after retries" "MASC_SUBSCRIPTION_OK" turn.text
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error));
+  let terminal =
+    {|{"method":"error","params":{"willRetry":false,"error":{"message":"provider gave up"}}}|}
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; terminal ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_codex_app_server.Turn_failed "provider gave up") -> ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-       | Ok _ -> fail "retry notifications were unbounded")
+       | Ok _ -> fail "terminal error notification did not fail the turn")
 ;;
 
 let test_nonterminal_notifications_do_not_preempt_completion () =
@@ -2006,9 +2012,9 @@ let () =
         ; test_case "server request fails closed" `Quick test_server_request_fails_closed
         ; test_case "failed turn stays failed" `Quick test_failed_turn_is_not_completion
         ; test_case
-            "retry notifications are bounded"
+            "retry notifications are observational"
             `Quick
-            test_retry_notifications_are_bounded
+            test_retry_notifications_are_observational
          ; test_case
              "nonterminal notifications do not preempt completion"
              `Quick

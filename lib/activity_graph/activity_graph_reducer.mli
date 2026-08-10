@@ -1,5 +1,5 @@
 (** Activity_graph_reducer — graph reducer that folds {!event}s
-    into mutable node / edge accumulators.
+    into node / edge accumulators held by the caller's tables.
 
     The reducer is the single seam between the append-only event
     log and the live graph view.  {!Activity_graph} consumes
@@ -15,30 +15,32 @@
 type node_acc = {
   node_id : string;
   node_kind : string;
-  mutable label : string;
-  mutable status : Activity_graph_types.node_status;
-  mutable weight : int;
-  mutable last_event_at : string;
-  mutable meta : Yojson.Safe.t;
+  label : string;
+  status : Activity_graph_types.node_status;
+  weight : int;
+  last_event_at : string;
+  meta : Yojson.Safe.t;
 }
-(** Per-node accumulator.  Mutable fields for in-place update —
-    each event hit on the same [node_id] increments [weight] and
-    refreshes [last_event_at] / [meta] in place. *)
+(** Per-node accumulator.  Immutable: each event hit on the same
+    [node_id] rebinds the table entry to a record with [weight]
+    incremented and [last_event_at] / [meta] refreshed.  A record read
+    out of the table before a later event keeps the values it was read
+    with. *)
 
 type edge_acc = {
   edge_id : string;
   source : string;
   target : string;
   edge_kind : string;
-  mutable weight : int;
-  mutable active : bool;
-  mutable last_event_at : string;
-  mutable meta : Yojson.Safe.t;
+  weight : int;
+  active : bool;
+  last_event_at : string;
+  meta : Yojson.Safe.t;
 }
-(** Per-edge accumulator.  Mutable fields for in-place update —
-    each event hit on the same [(source, kind, target)] tuple
-    increments [weight] and updates [active] / [last_event_at] /
-    [meta] in place.
+(** Per-edge accumulator.  Immutable, like {!node_acc}: each event hit
+    on the same [(source, kind, target)] tuple rebinds the table entry
+    with [weight] incremented and [active] / [last_event_at] / [meta]
+    refreshed.
 
     [edge_id] format pinned: ["<source>|<kind>|<target>"]. *)
 
@@ -50,7 +52,8 @@ val reduce_event :
   Activity_graph_types.event ->
   unit
 (** [reduce_event ~nodes ~edges value] folds [value] into the
-    accumulators in place.  Effects (in order):
+    accumulator tables.  The tables are mutated; the records they hold
+    are replaced, not written through.  Effects (in order):
 
     + Ensure a [workspace:<workspace_id>] node exists with status [Workspace]
       and the event's [ts_iso].

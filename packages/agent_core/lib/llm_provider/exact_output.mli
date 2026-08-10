@@ -87,6 +87,15 @@ type resolver_binding_component =
   | Target_provider
   | Target_model
 
+type target_binding_policy =
+  | Require_all_target_bindings
+  | Exclude_unbound_targets
+
+type rejected_target_binding =
+  { target_ref : string
+  ; component : resolver_binding_component
+  }
+
 type resolver_endpoint_error =
   | Malformed_base_url
   | Base_url_userinfo_not_allowed
@@ -354,19 +363,27 @@ val snapshot_flow
     suppresses every embedded and overlay row; the input type provides no way
     to combine a full replacement with an overlay.
     [io.getenv] is observed exactly once per referenced environment name during
-    this call and is never retained. Invalid paths, syntax, bindings,
-    collisions, base-URL environment reads, and endpoint declarations fail
-    closed; missing, invalid, or read-failed credentials are instead frozen as
-    per-target outcomes for [resolve_target]. No source falls back to the
-    embedded catalog. *)
+    this call and is never retained. Invalid paths, syntax, collisions,
+    base-URL environment reads, and endpoint declarations fail closed.
+    [Require_all_target_bindings] also rejects the snapshot when any target has
+    no exact provider/model join. [Exclude_unbound_targets] instead records and
+    excludes only those targets; callers must inspect
+    [resolver_rejected_target_bindings] and decide whether their required target
+    set remains available. Missing, invalid, or read-failed credentials are
+    frozen as per-target outcomes for [resolve_target]. No source falls back to
+    the embedded catalog. *)
 val load_resolver_snapshot
   :  io:resolver_io
+  -> ?target_binding_policy:target_binding_policy
   -> ?catalog:resolver_catalog_input
   -> unit
   -> (resolver_snapshot, resolver_snapshot_error) result
 
 val resolver_catalog_generation : resolver_snapshot -> catalog_generation
 val resolver_catalog_evidence : resolver_snapshot -> catalog_evidence
+val resolver_rejected_target_bindings
+  :  resolver_snapshot
+  -> rejected_target_binding list
 val catalog_generation_fingerprint : catalog_generation -> string
 val catalog_evidence_sha256 : catalog_evidence -> string
 val target_identity_fingerprint : target_identity -> string

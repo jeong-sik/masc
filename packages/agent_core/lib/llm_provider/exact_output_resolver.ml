@@ -51,6 +51,15 @@ type resolver_binding_component =
   | Target_provider
   | Target_model
 
+type target_binding_policy =
+  | Require_all_target_bindings
+  | Exclude_unbound_targets
+
+type rejected_target_binding =
+  { target_ref : string
+  ; component : resolver_binding_component
+  }
+
 type resolver_endpoint_error = Binding.endpoint_error =
   | Malformed_base_url
   | Base_url_userinfo_not_allowed
@@ -114,6 +123,7 @@ type resolver_snapshot =
   { targets : frozen_target String_map.t
   ; generation : catalog_generation
   ; evidence : catalog_evidence
+  ; rejected_target_bindings : rejected_target_binding list
   }
 
 type admitted_target =
@@ -194,6 +204,7 @@ let catalog_generation_fingerprint (Catalog_generation value) = value
 let catalog_evidence_sha256 (Catalog_evidence value) = value
 let resolver_catalog_generation (snapshot : resolver_snapshot) = snapshot.generation
 let resolver_catalog_evidence (snapshot : resolver_snapshot) = snapshot.evidence
+let resolver_rejected_target_bindings snapshot = snapshot.rejected_target_bindings
 let target_identity_fingerprint identity = identity.fingerprint
 let selected_target_identity (target : selected_target) = target.identity
 let selected_target_catalog_generation (target : selected_target) = target.generation
@@ -666,7 +677,12 @@ let read_full_replacement_file path =
       Error (Catalog_read_failed { path; detail = Printexc.to_string exn }))
 ;;
 
-let load_resolver_snapshot ~io ?(catalog = Embedded_default) () =
+let load_resolver_snapshot
+      ~io
+      ?(target_binding_policy = Require_all_target_bindings)
+      ?(catalog = Embedded_default)
+      ()
+  =
   let parse_model_catalog ~source ~parser_source contents =
     match Model_catalog.of_toml_string ~source:parser_source contents with
     | Ok catalog -> Ok catalog
@@ -724,10 +740,21 @@ let load_resolver_snapshot ~io ?(catalog = Embedded_default) () =
         , merge_target_declarations ~base:base_targets ~overlay:overlay_targets )
   in
   let catalog, model_entries, target_declarations = catalog_models_and_targets in
-  let* structural =
+  let* structural, rejected_target_bindings =
     List.fold_left
       (fun result (target : target_declaration) ->
-         let* bindings = result in
+         let* bindings, rejected = result in
+         let reject component =
+           let rejection =
+             { target_ref = target_ref_id target.target_ref; component }
+           in
+           match target_binding_policy with
+           | Require_all_target_bindings ->
+             Error
+               (Target_binding_missing
+                  { target_ref = rejection.target_ref; component })
+           | Exclude_unbound_targets -> Ok (bindings, rejection :: rejected)
+         in
          match
            Binding.resolve_exact
              ~catalog
@@ -735,20 +762,14 @@ let load_resolver_snapshot ~io ?(catalog = Embedded_default) () =
              ~provider_ref:target.provider_ref
              ~model_id:target.model_id
          with
-         | Error Binding.Provider_missing ->
-           Error
-             (Target_binding_missing
-                { target_ref = target_ref_id target.target_ref
-                ; component = Target_provider
-                })
-         | Error Binding.Model_missing ->
-           Error
-             (Target_binding_missing
-                { target_ref = target_ref_id target.target_ref; component = Target_model })
-         | Ok (provider, model) -> Ok ((target, provider, model) :: bindings))
-      (Ok [])
+         | Error Binding.Provider_missing -> reject Target_provider
+         | Error Binding.Model_missing -> reject Target_model
+         | Ok (provider, model) ->
+           Ok ((target, provider, model) :: bindings, rejected))
+      (Ok ([], []))
       target_declarations
   in
+  let rejected_target_bindings = List.rev rejected_target_bindings in
   let environment_names =
     List.fold_left
       (fun names
@@ -897,7 +918,7 @@ let load_resolver_snapshot ~io ?(catalog = Embedded_default) () =
     canonical_catalog_evidence catalog model_entries target_declarations
   in
   let evidence = Catalog_evidence (hash_parts evidence_material) in
-  Ok { targets; generation; evidence }
+  Ok { targets; generation; evidence; rejected_target_bindings }
 ;;
 
 let admit_target_ref snapshot value =

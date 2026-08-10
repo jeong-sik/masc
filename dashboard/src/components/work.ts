@@ -18,6 +18,7 @@ import { VerificationRequestsPanel } from './verification-requests-panel'
 import { VerificationRunsPanel } from './verification-runs-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
+import { SectionNav } from './common/section-nav'
 import { VirtualList } from './common/virtual-list'
 import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
@@ -1636,6 +1637,7 @@ export function Work() {
 
   return html`
     <div class="v2-workspace-surface flex min-w-0 flex-col gap-3">
+      <${SectionNav} tab="workspace" current=${current} />
       <${ErrorBoundary} label=${current}>
         ${current === 'work' ? html`<${WorkSurfaceV2} />`
           : current === 'board' ? html`<${BoardSurface} />`

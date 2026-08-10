@@ -215,8 +215,9 @@ let _installed : bool Atomic.t = Atomic.make false
 
 let publish evt =
   let p = Atomic.get _publisher in
-  try p evt
-  with exn ->
+  try p evt with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     (* Swallow + log: a failing observer must not break the eviction
        path. The whole point of PR-3 is that transport teardown
        remains predictable regardless of subscriber state. *)

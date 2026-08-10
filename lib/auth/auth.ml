@@ -132,7 +132,9 @@ let verify_workspace_secret config ~cached_hash secret : bool =
        if Sys.file_exists file
        then constant_time_string_equal hash (String.trim (In_channel.with_open_text file In_channel.input_all))
        else false
-     with _ -> false)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | _ -> false)
 ;;
 
 let check_permission config ~agent_name ~token ~permission : (unit, masc_error) result =

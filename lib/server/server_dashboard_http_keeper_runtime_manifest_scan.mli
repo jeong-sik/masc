@@ -28,8 +28,8 @@ type runtime_manifest_scan =
   ; mutable latest_provider_lane_decision : Yojson.Safe.t option
   ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
   ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
-  ; mutable payload_role_counts : (string, int) Hashtbl.t
-  ; mutable source_clock_counts : (string, int) Hashtbl.t
+  ; payload_role_counts : (string, int) Hashtbl.t
+  ; source_clock_counts : (string, int) Hashtbl.t
   ; mutable context_injected_count : int
   ; mutable context_compacted_event_count : int
   ; mutable provider_started_count : int

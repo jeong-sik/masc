@@ -12,7 +12,6 @@ type lsp_process =
   ; stdin_w : [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Std.r
   ; stdout_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r
   ; stderr_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r
-  ; mutable next_id : int
   }
 
 type spawn_error =
@@ -199,7 +198,7 @@ let spawn ~sw ~lang_id ~workspace_root (proc_mgr : Eio_unix.Process.mgr_ty Eio.R
               "LSP %s stderr reader ended: %s"
               lang_id
               (Printexc.to_string exn));
-        Ok { lang_id; proc; stdin_w; stdout_r; stderr_r; next_id = 1 }
+        Ok { lang_id; proc; stdin_w; stdout_r; stderr_r }
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Process_error (Printexc.to_string exn)))

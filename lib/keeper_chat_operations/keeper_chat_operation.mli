@@ -13,8 +13,21 @@ module Operation_id : sig
   val equal : t -> t -> bool
 end
 
+type failure_kind =
+  | Interrupted_by_restart
+  | Turn_cancelled
+  | Turn_exception
+  | Store_unavailable
+  | No_queued_operation
+  | Invalid_input
+  | Turn_invariant
+
+val all_failure_kinds : failure_kind list
+val failure_kind_to_string : failure_kind -> string
+val failure_kind_of_string : string -> (failure_kind, string) result
+
 type failure =
-  { kind : string
+  { kind : failure_kind
   ; detail : string
   ; outcome_ref : string option
   }

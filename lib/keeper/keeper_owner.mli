@@ -84,7 +84,7 @@ type error =
 type operation_execution =
   | Operation_succeeded of { outcome_ref : string }
   | Operation_failed of
-      { kind : string
+      { kind : Chat_operation.failure_kind
       ; detail : string
       ; outcome_ref : string option
       }
@@ -220,7 +220,7 @@ val succeed_running_operation
 val fail_running_operation
   :  t
   -> operation_id:Chat_operation.Operation_id.t
-  -> kind:string
+  -> kind:Chat_operation.failure_kind
   -> detail:string
   -> outcome_ref:string option
   -> (Chat_operation.t, error) result

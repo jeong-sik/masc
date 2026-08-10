@@ -735,7 +735,10 @@ let test_stopping_cancels_and_joins_active_child () =
   let operation = Option.get (owner_ok (Owner.exact_operation owner operation_id)) in
   match operation.state with
   | Chat_operation.Failed { failure = { kind; _ }; _ } ->
-    check string "stopped active child is terminal" "Turn_cancelled" kind
+    check string
+      "stopped active child is terminal"
+      "Turn_cancelled"
+      (Chat_operation.failure_kind_to_string kind)
   | state ->
     fail
       ("stopping returned before terminal persistence: "
@@ -868,13 +871,16 @@ let test_operation_executor_claims_latest_input_and_drains_fifo () =
     match claim () with
     | Error error ->
       Owner.Operation_failed
-        { kind = "Claim_failed"
+        { kind = Chat_operation.Store_unavailable
         ; detail = Owner.error_to_string error
         ; outcome_ref = None
         }
     | Ok None ->
       Owner.Operation_failed
-        { kind = "No_operation"; detail = "missing FIFO head"; outcome_ref = None }
+        { kind = Chat_operation.No_queued_operation
+        ; detail = "missing FIFO head"
+        ; outcome_ref = None
+        }
     | Ok (Some (operation : Chat_operation.t)) ->
       seen_inputs := operation.input :: !seen_inputs;
       Owner.Operation_succeeded
@@ -937,7 +943,7 @@ let test_operation_executor_exception_is_terminal_and_next_runs () =
     match claim () with
     | Error error ->
       Owner.Operation_failed
-        { kind = "Claim_failed"
+        { kind = Chat_operation.Store_unavailable
         ; detail = Owner.error_to_string error
         ; outcome_ref = None
         }
@@ -980,7 +986,10 @@ let test_operation_executor_exception_is_terminal_and_next_runs () =
   let second = await_terminal owner second_id 1_000 in
   (match first.state with
    | Chat_operation.Failed { failure = { kind; detail; _ }; _ } ->
-     check string "exception failure kind" "Turn_exception" kind;
+     check string
+       "exception failure kind"
+       "Turn_exception"
+       (Chat_operation.failure_kind_to_string kind);
      check bool "exception detail is retained" true (String.length detail > 0)
    | _ -> fail "child exception did not fail the first operation");
   (match second.state with
@@ -1029,7 +1038,10 @@ let test_startup_interrupts_running_without_requeue () =
        let settled = Option.get (owner_ok (Owner.exact_operation owner operation_id)) in
        (match settled.state with
         | Chat_operation.Failed { failure = { kind; _ }; _ } ->
-          check string "restart failure kind" "Interrupted_by_restart" kind
+          check string
+            "restart failure kind"
+            "Interrupted_by_restart"
+            (Chat_operation.failure_kind_to_string kind)
         | state -> fail ("restart did not interrupt Running: " ^ Chat_operation.state_to_string state));
        check bool "interrupted input is scrubbed" true (Option.is_none settled.input);
        check bool

@@ -191,6 +191,18 @@ let optional_string stage name fields =
   | Some _ -> protocol_error stage (Printf.sprintf "field %S must be a string or null" name)
 ;;
 
+(* Streamed content chunks: the wire type must be a string, but emptiness is a
+   value-level non-issue — command output legitimately streams ""- and
+   whitespace-only chunks (String.trim would reject a lone "\n"), and the
+   observational delta consumers discard the value. Identity fields keep
+   [required_string]. *)
+let required_content_string stage name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Ok value
+  | Some _ -> protocol_error stage (Printf.sprintf "field %S must be a string" name)
+  | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
+;;
+
 let required_bool stage name fields =
   match List.assoc_opt name fields with
   | Some (`Bool value) -> Ok value
@@ -514,7 +526,7 @@ let validate_item_delta_notification ~method_ ~thread_id ~turn_id params =
   let* notification_thread_id = required_string method_ "threadId" fields in
   let* notification_turn_id = required_string method_ "turnId" fields in
   let* _item_id = required_string method_ "itemId" fields in
-  let* _delta = required_string method_ "delta" fields in
+  let* _delta = required_content_string method_ "delta" fields in
   if notification_thread_id <> thread_id || notification_turn_id <> turn_id
   then protocol_error method_ "item delta identity does not match the active turn"
   else Ok ()

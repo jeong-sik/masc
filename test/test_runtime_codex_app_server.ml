@@ -467,6 +467,36 @@ let test_item_output_deltas_are_typed_and_unbounded () =
       | Ok result ->
         check string "terminal text" "MASC_SUBSCRIPTION_OK" result.text
       | Error error -> fail (Runtime_codex_app_server.error_to_string error));
+  (* Live incident 2026-08-10 (masc#27953): command output legitimately streams
+     empty and whitespace-only chunks; a lone "\n" trims to "" and killed the
+     turn as a protocol error. Content chunks are typed string, not
+     non-empty-after-trim. *)
+  let content_delta value =
+    Printf.sprintf
+      {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"command-1","delta":%s}}|}
+      value
+  in
+  with_fixture
+    ([ init_result; account_chatgpt; thread_result; turn_result ]
+     @ [ content_delta {|""|}; content_delta {|"\n"|}; content_delta {|"   "|} ]
+     @ [ item_completed; turn_completed ])
+    (fun path ->
+      match run_fixture path with
+      | Ok result ->
+        check string "empty and whitespace deltas admitted" "MASC_SUBSCRIPTION_OK" result.text
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error));
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; content_delta "7"
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "non-string delta was admitted");
   let wrong_identity =
     {|{"method":"item/commandExecution/outputDelta","params":{"threadId":"thread-other","turnId":"turn-1","itemId":"command-1","delta":"chunk"}}|}
   in

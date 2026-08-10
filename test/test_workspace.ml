@@ -2100,10 +2100,16 @@ let test_heartbeat_concurrent_start_stop () =
   (* List should be empty now *)
   Alcotest.(check int) "list empty after cleanup" 0 (List.length (Heartbeat.list ()))
 
-(** BUG-006: Task transitions should succeed when the caller uses the unsuffixed
-    keeper name (e.g. "keeper-bob") but the task was claimed under the
-    canonical "-agent" form (e.g. "keeper-bob-agent").  Reproduces the
-    identity mismatch: "claimed by 'keeper-X-agent', caller is 'keeper-X'". *)
+(** The task surface compares actors by exact identity: a task claimed under the
+    canonical "keeper-bob-agent" is not transitionable by the alias
+    "keeper-bob". BUG-006 once folded the two spellings, and these cases asserted
+    that fold; the contract since moved the other way, and
+    [test_tool_task_coverage]'s [handle_transition_submit_rejects_registered_keeper_alias]
+    pins the rejection on a CI-wired path. Callers reach the surface through
+    [Keeper_tool_shared_runtime.keeper_agent_sender], which yields
+    [meta.agent_name], so the canonical spelling is what a keeper actually
+    passes. These assert the rejection rather than the fold, and name the owning
+    identity so an ownership refusal reads differently from an FSM one. *)
 let test_bug006_transition_with_unsuffixed_name () =
   with_test_env (fun config ->
     (* Join with canonical agent name to establish the identity recorded at claim time *)
@@ -2113,20 +2119,15 @@ let test_bug006_transition_with_unsuffixed_name () =
     (match Workspace.claim_task_r config ~agent_name:"keeper-bob-agent" ~task_id:"task-001" () with
      | Ok _ -> ()
      | Error e -> Alcotest.failf "claim failed: %s" (Masc_domain.show_masc_error e));
-    (* Transition (start) using the unsuffixed name — should resolve to "keeper-bob-agent" *)
     (match Workspace.transition_task_r config ~agent_name:"keeper-bob" ~task_id:"task-001"
              ~action:Masc_domain.Start () with
-     | Ok _ -> ()
+     | Ok _ -> Alcotest.fail "alias start was accepted for a canonically claimed task"
      | Error e ->
-         Alcotest.failf "start with unsuffixed name failed (BUG-006): %s"
-           (Masc_domain.show_masc_error e));
-    (* Complete using the unsuffixed name — same resolution path *)
-    (match transition_done_r config ~agent_name:"keeper-bob" ~task_id:"task-001"
-             ~notes:"done" with
-     | Ok _ -> ()
-     | Error e ->
-         Alcotest.failf "complete with unsuffixed name failed (BUG-006): %s"
-           (Masc_domain.show_masc_error e))
+       let message = Masc_domain.show_masc_error e in
+       Alcotest.(check bool)
+         "refusal names the owning identity"
+         true
+         (str_contains message "keeper-bob-agent"))
   )
 
 let test_bug006_cancel_with_unsuffixed_name () =
@@ -2136,22 +2137,32 @@ let test_bug006_cancel_with_unsuffixed_name () =
     (match Workspace.claim_task_r config ~agent_name:"keeper-bob-agent" ~task_id:"task-001" () with
      | Ok _ -> ()
      | Error e -> Alcotest.failf "claim failed: %s" (Masc_domain.show_masc_error e));
-    (* Cancel using the unsuffixed name — should resolve to "keeper-bob-agent" *)
     (match Workspace.transition_task_r config ~agent_name:"keeper-bob" ~task_id:"task-001"
              ~action:Masc_domain.Cancel ~reason:"test" () with
-     | Ok _ -> ()
+     | Ok _ -> Alcotest.fail "alias cancel was accepted for a canonically claimed task"
      | Error e ->
-         Alcotest.failf "cancel with unsuffixed name failed (BUG-006): %s"
-           (Masc_domain.show_masc_error e))
+       let message = Masc_domain.show_masc_error e in
+       Alcotest.(check bool)
+         "refusal names the owning identity"
+         true
+         (str_contains message "keeper-bob-agent"))
   )
 
 (* === Idle loop stop signal tests === *)
 
+(* #26123 stopped the runtime choosing the agent's next tool, and the prose
+   "STOP calling keeper_tasks_list" went with it. The listing states what is
+   there and leaves the next call to the caller; the sibling test below already
+   reads the typed variant for an empty claim pool. Assert the fact and assert
+   the prescription stays out, so re-adding it fails here. *)
 let test_empty_backlog_stop_signal () =
   with_test_env (fun config ->
     let result = Workspace.list_tasks config in
-    Alcotest.(check bool) "contains STOP signal"
-      true (str_contains result "STOP calling keeper_tasks_list"))
+    Alcotest.(check string) "empty backlog states the fact" "No tasks." result;
+    Alcotest.(check bool)
+      "listing does not prescribe the next call"
+      false
+      (str_contains result "STOP calling"))
 
 let test_no_active_tasks_stop_signal () =
   with_test_env (fun config ->
@@ -2159,8 +2170,14 @@ let test_no_active_tasks_stop_signal () =
     let _ = Workspace.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
     let _ = transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done" in
     let result = Workspace.list_tasks config in
-    Alcotest.(check bool) "contains STOP signal"
-      true (str_contains result "STOP calling keeper_tasks_list"))
+    Alcotest.(check string)
+      "no active tasks states the fact"
+      "No active tasks (all done/cancelled)."
+      result;
+    Alcotest.(check bool)
+      "listing does not prescribe the next call"
+      false
+      (str_contains result "STOP calling"))
 
 let test_no_unclaimed_tasks_stop_signal () =
   with_test_env (fun config ->

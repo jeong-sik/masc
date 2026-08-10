@@ -136,6 +136,16 @@ val plan_claim :
     the SSOT for fresh versus resumed execution, the next turn ordinal, and
     whether the prepared tool surface must match a settled session. *)
 
+val reconcile_tool_surface : claim_plan -> tool_surface_sha256:string -> claim_plan
+(** Fold a moved tool surface into the plan. A settled session whose stored
+    digest differs from the prepared one is not resumable and cannot be
+    recovered -- [Settled] never becomes [Recovery_required], so no id exists
+    for the resolve endpoint. Rather than refusing the turn, the plan becomes
+    the fresh-session plan [plan_claim] already produces for a changed
+    [client_kind] or [runtime_id]: what the prior session settled against no
+    longer describes this execution. Every adapter must apply this before
+    [claim], and [claim] applies it again so a caller cannot skip it. *)
+
 val claim :
   base_path:string ->
   keeper_name:string ->

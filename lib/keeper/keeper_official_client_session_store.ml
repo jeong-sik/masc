@@ -740,16 +740,32 @@ let plan_claim ~expected ~client_kind ~runtime_id =
   Ok { previous_settlement; turn_count; required_tool_surface_sha256 }
 ;;
 
+(* A settled session whose tool surface has moved is not resumable, and it was
+   not recoverable either: [Settled] is a healthy phase, so nothing marks it
+   [Recovery_required], and the resolve endpoint has no id to act on. Every
+   turn ended in config_error until an operator deleted the durable file.
+
+   [plan_claim] already treats a changed [client_kind] or [runtime_id] as a
+   fresh session rather than a refusal, on the same reasoning: what the prior
+   session settled against no longer describes this execution. A changed tool
+   surface is that same change, so it takes that same branch.
+
+   Deployments move this digest. Adding a tool, or editing a descriptor, is
+   enough -- which is why a refusal here strands every settled session on the
+   next release (#27992). *)
+let reconcile_tool_surface plan ~tool_surface_sha256 =
+  match plan.required_tool_surface_sha256 with
+  | None -> plan
+  | Some stored when String.equal stored tool_surface_sha256 -> plan
+  | Some _ ->
+    { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None }
+;;
+
 let claim ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_id
     ~tool_surface_sha256 ~updated_at =
   let* () = validate_uuid "owner_epoch" owner_epoch in
   let* plan = plan_claim ~expected ~client_kind ~runtime_id in
-  let* () =
-    match plan.required_tool_surface_sha256 with
-    | None -> Ok ()
-    | Some stored when String.equal stored tool_surface_sha256 -> Ok ()
-    | Some _ -> Error "official-client tool surface changed before session resume"
-  in
+  let plan = reconcile_tool_surface plan ~tool_surface_sha256 in
   let last_recovery_resolution =
     Option.bind expected (fun binding -> binding.last_recovery_resolution)
   in

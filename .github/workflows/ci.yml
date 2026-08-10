@@ -857,6 +857,16 @@ jobs:
           opam exec -- dune exec --root . test/test_workspace_coverage.exe -- test revision
           opam exec -- dune exec --root . test/test_workspace_coverage.exe -- test claim_next
 
+      - name: Run fusion official-client panel routing suite
+        # @check compiles this suite but never runs it, and its whole point is
+        # a wiring assertion: the execution case spawns a stub client and fails
+        # if the panelist never reached it. Compiled-but-unrun, it would keep
+        # passing with the split deleted from fusion_panel.ml — which is the
+        # regression it exists to catch.
+        # See: test/test_fusion_official_client_panel.ml.
+        run: |
+          opam exec -- dune build --root . @test/runtest-test_fusion_official_client_panel
+
       - name: Run MCP authentication contract suites
         # @check compiles these suites but never runs them. Exercise both the
         # dual-auth admission path and the typed HTTP/JSON-RPC auth envelope so

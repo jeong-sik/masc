@@ -149,8 +149,10 @@ let print_judge_arm ~(tag : string)
       , u.Fusion_types.input_tokens
       , u.Fusion_types.output_tokens )
 
-let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.preset)
-    ~(prompt : string) ~(config_path : string) : unit =
+let run_harness ~sw ~net ~(base_path : string) ~(policy : Fusion_policy.t)
+    ~(preset : Fusion_policy.preset) ~(prompt : string) ~(config_path : string)
+  : unit
+  =
   let models_all = Fusion_policy.preset_models preset in
   let n = List.length models_all in
   (* 하네스는 동질 arm 비교 도구다(RFC-0252 §11). 이종 preset이면 첫 그룹의 plumbing
@@ -174,6 +176,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
   let run_panel ~models =
     let groups = [ { g0 with Fusion_policy.models } ] in
     Masc.Fusion_panel.run
+      ~base_dir:base_path
       ~sw
       ~net
       ~groups
@@ -417,4 +420,4 @@ let () =
        (* RFC-0280: find_preset가 검증된 preset을 돌려준다. 하네스는 raw preset으로
           coerce해 arm을 구성한다(read-only). *)
        let preset = Fusion_policy.Validated_preset.preset vp in
-       run_harness ~sw ~net ~policy ~preset ~prompt ~config_path)
+       run_harness ~sw ~net ~base_path ~policy ~preset ~prompt ~config_path)

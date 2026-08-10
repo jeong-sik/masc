@@ -66,34 +66,46 @@ let bridge_failure_of_error (error : Agent_core.Error.t) : Fusion_types.panel_fa
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> Fusion_types.Timeout
   | _ -> Fusion_types.Bridge_error (Agent_core.Error.to_string error)
 
-let run ~sw ~net ~groups ~prompt ()
+let run ~base_dir ~sw ~net ~groups ~prompt ()
   : Fusion_types.panel_outcome list
   =
   (* 1. 각 그룹의 모델을 그 그룹 설정(system_prompt/tools/timeout)으로
         에이전트 빌드. 빌드 실패는 격리. 그룹순 × 그룹내 모델순으로 평탄화 —
         순서 보존(단일 그룹이면 원 모델 순서 = 오늘과 동일). *)
-  let built, build_failures =
+  let built, official, build_failures =
     List.fold_left
       (fun acc (g : Fusion_policy.panel_group) ->
         let tools = if g.web_tools then Fusion_agent_core.web_tool_bundle () else [] in
         List.fold_left
-          (fun (oks, fails) model ->
+          (fun (oks, officials, fails) model ->
             (* 정체성은 그룹 라벨 + model로 derive. 카드명(=정체성)으로 빌드하되 provider
                라우팅은 build_agent 내부에서 원 model로 한다 (RFC-0278). *)
             let panelist = Fusion_policy.panelist_id ~label:g.label ~model in
-            match
-              Fusion_agent_core.build_agent ~sw ~net ~system_prompt:g.system_prompt ~tools
-                ?max_tokens:g.max_output_tokens
-                ~name:panelist model
-            with
-            | Ok agent -> ((agent, panelist, model) :: oks, fails)
-            | Error reason ->
-              (oks, Fusion_types.Failed { failed_model = panelist; reason } :: fails))
+            (* official-client 런타임은 spawn 프로세스라 Agent_core agent 가 될 수
+               없다. [build_agent] 는 이들에서 provider 해석 단계에 실패하므로,
+               이전에는 패널리스트가 답을 낼 기회 자체가 없었다 — 전원이 그쪽이면
+               [Panels_unavailable], 섞이면 정족수로 완료되면서 그 자리는 조용히
+               비었다. 여기서 갈라 별도 실행 경로로 보낸다. *)
+            if Fusion_official_client.is_official_client ~runtime_id:model
+            then (oks, (panelist, model, g.system_prompt) :: officials, fails)
+            else (
+              match
+                Fusion_agent_core.build_agent ~sw ~net ~system_prompt:g.system_prompt
+                  ~tools
+                  ?max_tokens:g.max_output_tokens
+                  ~name:panelist model
+              with
+              | Ok agent -> ((agent, panelist, model) :: oks, officials, fails)
+              | Error reason ->
+                ( oks
+                , officials
+                , Fusion_types.Failed { failed_model = panelist; reason } :: fails )))
           acc g.models)
-      ([], [])
+      ([], [], [])
       groups
   in
   let built = List.rev built in
+  let official = List.rev official in
   let build_failures = List.rev build_failures in
   (* 2. 모든 그룹을 하나의 Async_agent.all에 union으로 던진다 — 이종 설정은 이미 각
         agent에 baked되어 있으므로 단일 fan-out으로 충분. [run_safe]는 예외/취소
@@ -123,7 +135,36 @@ let run ~sw ~net ~groups ~prompt ()
           Fusion_types.Failed { failed_model = panelist; reason })
         built
   in
-  build_failures @ answered
+  (* official-client 패널리스트는 Agent_core fan-out 과 동시에 돈다. 각 어댑터가
+     자기 timeout 을 소유하므로 여기서 두 번째 데드라인을 걸지 않는다 —
+     [Async_agent.all] 쪽과 같은 규약이다.
+
+     usage 는 [zero_usage] 다. 공식 클라이언트는 토큰 회계를 돌려주지 않으므로,
+     추정치를 지어내는 대신 "측정하지 않음" 을 0 으로 남긴다. *)
+  let official_answered =
+    Eio.Fiber.List.map
+      (fun (panelist, model, system_prompt) ->
+        match
+          Fusion_official_client.run_panelist ~base_dir ~runtime_id:model ~system_prompt
+            ~prompt
+        with
+        | Error reason -> Fusion_types.Failed { failed_model = panelist; reason }
+        | Ok text ->
+          let answer = String.trim text in
+          if String.length answer = 0
+          then
+            Fusion_types.Failed
+              { failed_model = panelist
+              ; reason =
+                  Fusion_types.Empty_response
+                    (model ^ ": official client returned no text")
+              }
+          else
+            Fusion_types.Answered
+              { model = panelist; answer; usage = Fusion_types.zero_usage })
+      official
+  in
+  build_failures @ answered @ official_answered
 
 module For_testing = struct
   let outcome_of_result = outcome_of_result

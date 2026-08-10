@@ -698,6 +698,17 @@
  (libraries masc_test_deps)
  (deps ../dashboard/src/api/schemas/keeper-composite.ts))
 
+; Focused CI gate: the operation failure vocabulary must still read what the
+; writing side has already written. #27981 closed it to seven constructors and
+; left six out, so failure_kind_of_string began rejecting kinds already in the
+; live receipts (turn_failed 52, no_visible_reply 15, cancelled 9,
+; transcript_persist_failed 1).
+
+(test
+ (name test_keeper_chat_operation_failure_kind)
+ (modules test_keeper_chat_operation_failure_kind)
+ (libraries masc_test_deps))
+
 ; Focused CI gate for runtime TOML validity.
 
 (test

@@ -911,6 +911,7 @@ jobs:
             @test/runtest-test_fs_compat_home_guard \
             @test/runtest-test_guarded_dispatch_telemetry \
             @test/runtest-test_keeper_checkpoint_stale_guard \
+            @test/runtest-test_keeper_chat_operation_failure_kind \
             @test/runtest-test_keeper_contract_classifier_pure \
             @test/runtest-test_keeper_conditions_wire_parity \
             @test/runtest-test_keeper_fsm_guard_actions \

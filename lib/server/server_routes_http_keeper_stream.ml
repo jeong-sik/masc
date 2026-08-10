@@ -931,6 +931,19 @@ let queued_turn_failure_kind_to_string = function
   | Transcript_persist_failed -> "transcript_persist_failed"
   | Stream_projection_failed -> "stream_projection_failed"
 
+(* One arm per queued kind rather than a hop through the string form above: a
+   kind added on either side becomes a compile error here instead of a value
+   the operation vocabulary refuses to parse later. *)
+let operation_failure_kind_of_queued_turn_failure_kind
+  : queued_turn_failure_kind -> Keeper_owner.Chat_operation.failure_kind
+  = function
+  | Turn_failed -> Keeper_owner.Chat_operation.Turn_failed
+  | Turn_cancelled -> Keeper_owner.Chat_operation.Turn_cancelled
+  | No_visible_reply -> Keeper_owner.Chat_operation.No_visible_reply
+  | Missing_turn_ref -> Keeper_owner.Chat_operation.Missing_turn_ref
+  | Transcript_persist_failed -> Keeper_owner.Chat_operation.Transcript_persist_failed
+  | Stream_projection_failed -> Keeper_owner.Chat_operation.Stream_projection_failed
+
 let queued_delivery_outcome_of_turn_ref = function
   | Some turn_ref ->
       Delivered { outcome_ref = Ids.Turn_ref.to_string turn_ref }
@@ -1836,16 +1849,16 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
   let execute_admitted admission_token =
     match claim () with
     | Error error ->
-      failed Keeper_chat_operation.Store_unavailable (Keeper_owner.error_to_string error)
+      failed Keeper_owner.Chat_operation.Store_unavailable (Keeper_owner.error_to_string error)
     | Ok None ->
       failed
-        Keeper_chat_operation.No_queued_operation
+        Keeper_owner.Chat_operation.No_queued_operation
         "Owner FIFO head disappeared before claim"
     | Ok (Some operation) ->
       (match operation.input with
        | None ->
          failed
-           Keeper_chat_operation.Invalid_input
+           Keeper_owner.Chat_operation.Invalid_input
            "Running Keeper chat operation has no execution input"
        | Some input ->
          (match
@@ -1855,7 +1868,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
               ~source:operation.source
               ~input
           with
-          | Error detail -> failed Keeper_chat_operation.Invalid_input detail
+          | Error detail -> failed Keeper_owner.Chat_operation.Invalid_input detail
           | Ok operation_payload ->
             let payload = operation_payload.payload in
             let operation_id =
@@ -2003,12 +2016,12 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
              | Some (Delivered { outcome_ref }), Ok () ->
                Keeper_owner.Operation_succeeded { outcome_ref }
              | Some (Delivered { outcome_ref }), Error detail ->
-               failed ~outcome_ref "Delivery_failed" detail
+               failed ~outcome_ref Keeper_owner.Chat_operation.Delivery_failed detail
              | Some (Failed { kind; detail }), _ ->
-               failed (queued_turn_failure_kind_to_string kind) detail
+               failed (operation_failure_kind_of_queued_turn_failure_kind kind) detail
              | None, _ ->
                failed
-                 Keeper_chat_operation.Turn_invariant
+                 Keeper_owner.Chat_operation.Turn_invariant
                  "Owner operation returned no terminal turn outcome")))
   in
   match

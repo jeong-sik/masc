@@ -141,7 +141,7 @@ type _ command =
       -> (Chat_operation.t, error) result command
   | Fail_running_operation :
       { operation_id : Operation_id.t
-      ; kind : string
+      ; kind : Chat_operation.failure_kind
       ; detail : string
       ; outcome_ref : string option
       }

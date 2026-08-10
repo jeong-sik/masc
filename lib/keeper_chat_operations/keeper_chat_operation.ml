@@ -29,6 +29,13 @@ module Operation_id = struct
   let equal = String.equal
 end
 
+(* Every kind a producer actually writes. #27981 closed this vocabulary to
+   seven and left six out, which broke two ways at once: three call sites
+   stopped compiling, and [failure_kind_of_string] began rejecting kinds that
+   are already on disk -- 77 failed receipts in the live queues carry
+   turn_failed (52), no_visible_reply (15), cancelled (9) and
+   transcript_persist_failed (1). A decoder that refuses its own history is
+   the #27393 shape (see #27401): the record is not wrong, it is unreadable. *)
 type failure_kind =
   | Interrupted_by_restart
   | Turn_cancelled
@@ -37,6 +44,12 @@ type failure_kind =
   | No_queued_operation
   | Invalid_input
   | Turn_invariant
+  | Turn_failed
+  | No_visible_reply
+  | Missing_turn_ref
+  | Transcript_persist_failed
+  | Stream_projection_failed
+  | Delivery_failed
 
 let all_failure_kinds =
   [ Interrupted_by_restart
@@ -46,6 +59,12 @@ let all_failure_kinds =
   ; No_queued_operation
   ; Invalid_input
   ; Turn_invariant
+  ; Turn_failed
+  ; No_visible_reply
+  ; Missing_turn_ref
+  ; Transcript_persist_failed
+  ; Stream_projection_failed
+  ; Delivery_failed
   ]
 ;;
 
@@ -57,6 +76,12 @@ let failure_kind_to_string = function
   | No_queued_operation -> "No_queued_operation"
   | Invalid_input -> "Invalid_input"
   | Turn_invariant -> "Turn_invariant"
+  | Turn_failed -> "Turn_failed"
+  | No_visible_reply -> "No_visible_reply"
+  | Missing_turn_ref -> "Missing_turn_ref"
+  | Transcript_persist_failed -> "Transcript_persist_failed"
+  | Stream_projection_failed -> "Stream_projection_failed"
+  | Delivery_failed -> "Delivery_failed"
 ;;
 
 let failure_kind_of_string = function
@@ -67,6 +92,21 @@ let failure_kind_of_string = function
   | "No_queued_operation" -> Ok No_queued_operation
   | "Invalid_input" -> Ok Invalid_input
   | "Turn_invariant" -> Ok Turn_invariant
+  | "Turn_failed" -> Ok Turn_failed
+  | "No_visible_reply" -> Ok No_visible_reply
+  | "Missing_turn_ref" -> Ok Missing_turn_ref
+  | "Transcript_persist_failed" -> Ok Transcript_persist_failed
+  | "Stream_projection_failed" -> Ok Stream_projection_failed
+  | "Delivery_failed" -> Ok Delivery_failed
+  (* The queued-turn writer spells these lowercase, and receipts on disk carry
+     that spelling. Reading is where history arrives, so both are accepted;
+     [failure_kind_to_string] still emits one form. *)
+  | "turn_failed" -> Ok Turn_failed
+  | "turn_cancelled" | "cancelled" -> Ok Turn_cancelled
+  | "no_visible_reply" -> Ok No_visible_reply
+  | "missing_turn_ref" -> Ok Missing_turn_ref
+  | "transcript_persist_failed" -> Ok Transcript_persist_failed
+  | "stream_projection_failed" -> Ok Stream_projection_failed
   | value -> Error (Printf.sprintf "unknown Keeper chat operation failure kind %S" value)
 ;;
 

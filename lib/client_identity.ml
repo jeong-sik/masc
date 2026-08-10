@@ -137,7 +137,7 @@ type t = {
   user_id : string option;        (** User ID from channel (e.g., telegram user id) *)
   capabilities : string list;     (** Declared agent capabilities *)
   registered_at : float;          (** Unix timestamp *)
-  mutable last_seen : float;      (** Last activity timestamp *)
+  last_seen : float;              (** Last activity timestamp *)
   metadata : (string * string) list;  (** Additional metadata *)
 }
 [@@deriving to_yojson]
@@ -262,7 +262,13 @@ module Registry = struct
     with_lock reg (fun () ->
       match StringMap.find_opt session_key !(reg.identities) with
       | Some identity ->
-          identity.last_seen <- Time_compat.now ()
+          (* The map owns the identity, so a touch rebinds the entry. Only
+             [identities] holds the record — [by_agent_name] maps a name to a
+             session key — so one rebind is the whole update. *)
+          reg.identities :=
+            StringMap.add session_key
+              { identity with last_seen = Time_compat.now () }
+              !(reg.identities)
       | None -> ()
     )
 

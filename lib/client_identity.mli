@@ -30,7 +30,7 @@ type t = {
   user_id : string option;
   capabilities : string list;
   registered_at : float;
-  mutable last_seen : float;
+  last_seen : float;
   metadata : (string * string) list;
 }
 

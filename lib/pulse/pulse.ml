@@ -63,7 +63,10 @@ type t = {
   (* engine state *)
   mutable seq         : int;
   mutable last_beat_v : beat option;
-  mutable alive       : bool;
+  (* Written by the loop and by the daemon's release handler, read by
+     [nudge] from arbitrary fibers. [Atomic] states that crossing and keeps
+     the flag correct if the engine ever runs off the main domain. *)
+  alive       : bool Atomic.t;
   mutable total_nudges: int;
   mutable start_ts    : float;
 }
@@ -221,7 +224,7 @@ let loop t =
   done;
   (* Final beat: shutdown demand *)
   let _shutdown_beat = tick t Demand in
-  t.alive <- false;
+  Atomic.set t.alive false;
   Log.Pulse.info "stopped after %d beats" t.seq
 
 (* ── Public API ──────────────────────────────────────────────── *)
@@ -240,13 +243,13 @@ let create ~clock ~rhythm ~lifecycle ~consumers =
     shutdown_r;
     seq         = 0;
     last_beat_v = None;
-    alive       = false;
+    alive       = Atomic.make false;
     total_nudges= 0;
     start_ts    = now ac;
   }
 
 let run ~sw t =
-  t.alive    <- true;
+  Atomic.set t.alive true;
   t.start_ts <- now t.clock;
   match t.lifecycle with
   | Always_on ->
@@ -254,19 +257,19 @@ let run ~sw t =
       (* Safe: finally is mutable field write — no I/O, no exception risk *)
       Fun.protect
         (fun () -> loop t; `Stop_daemon)
-        ~finally:(fun () -> t.alive <- false)
+        ~finally:(fun () -> Atomic.set t.alive false)
     )
   | Bounded _ ->
     Eio.Fiber.fork ~sw (fun () ->
       (* Safe: finally is mutable field write — no I/O, no exception risk *)
       Fun.protect
         (fun () -> loop t)
-        ~finally:(fun () -> t.alive <- false)
+        ~finally:(fun () -> Atomic.set t.alive false)
     )
 
 let nudge t ~reason =
   Eio.Mutex.use_rw ~protect:true t.nudge_mutex (fun () ->
-    if t.alive && Eio.Stream.is_empty t.nudge_stream then
+    if Atomic.get t.alive && Eio.Stream.is_empty t.nudge_stream then
       (* Capacity-1 mailbox: buffer one nudge. If already pending, coalesce
          (skip the new one — the loop will fire a Nudge beat soon anyway).
          The is_empty guard avoids blocking on a full stream.
@@ -299,7 +302,7 @@ let stats t =
   }
 
 let last_beat t = t.last_beat_v
-let is_alive t  = t.alive
+let is_alive t  = Atomic.get t.alive
 
 let add_consumer t consumer =
   t.consumers <- t.consumers @ [consumer]

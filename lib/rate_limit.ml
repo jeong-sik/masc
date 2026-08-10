@@ -14,8 +14,8 @@ module StringMap = Set_util.StringMap
 (** {1 Token Bucket Algorithm} *)
 
 type bucket = {
-  mutable tokens: float;
-  mutable last_update: float;
+  tokens: float;
+  last_update: float;
 }
 
 type t = {
@@ -68,23 +68,20 @@ let with_lock limiter f =
 let check limiter ~key =
   with_lock limiter (fun () ->
     let now = Time_compat.now () in
+    (* The map already rebinds on every write, so the bucket is stored once
+       with its post-refill state instead of being inserted and then mutated. *)
     let bucket = match StringMap.find_opt key !(limiter.buckets) with
       | Some b -> b
-      | None ->
-          let b = { tokens = float_of_int limiter.burst; last_update = now } in
-          limiter.buckets := StringMap.add key b !(limiter.buckets);
-          b
+      | None -> { tokens = float_of_int limiter.burst; last_update = now }
     in
     let elapsed = now -. bucket.last_update in
     let new_tokens = bucket.tokens +. (elapsed *. limiter.rate) in
-    bucket.tokens <- min (float_of_int limiter.burst) new_tokens;
-    bucket.last_update <- now;
-
-    if bucket.tokens >= 1.0 then begin
-      bucket.tokens <- bucket.tokens -. 1.0;
-      true
-    end else
-      false
+    let refilled = min (float_of_int limiter.burst) new_tokens in
+    let granted = refilled >= 1.0 in
+    let tokens = if granted then refilled -. 1.0 else refilled in
+    limiter.buckets :=
+      StringMap.add key { tokens; last_update = now } !(limiter.buckets);
+    granted
   )
 
 let remaining limiter ~key =

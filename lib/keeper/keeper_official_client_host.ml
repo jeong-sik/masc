@@ -144,7 +144,7 @@ let lifecycle_outcome = function
        Agent_core.Agent_lifecycle_events.Completed response
      | Runtime_agent.InputRequired { request; _ } ->
        Agent_core.Agent_lifecycle_events.Input_required request
-     | Runtime_agent.Yielded_to_chat_waiting { turns_used }
+     | Runtime_agent.Yielded_to_operation_queued { turns_used }
      | Runtime_agent.Yielded_to_durable_stimulus { turns_used }
      | Runtime_agent.Awaiting_external_effect { turns_used }
      | Runtime_agent.Yielded_after_repeated_tool_call { turns_used; _ } ->

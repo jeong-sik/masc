@@ -2034,11 +2034,12 @@ let test_terminal_shutdown_recovery_releases_admission () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir "terminal-shutdown-recovery-release" in
   Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
-      cleanup_dir base_dir)
+    ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "tester")
+      in
       let meta = make_meta "terminal-recovery-owner" in
       let now = Masc_domain.now_iso () in
       let terminal =
@@ -2062,15 +2063,18 @@ let test_terminal_shutdown_recovery_releases_admission () =
         ; updated_at = now
         }
       in
+      Eio.Switch.run @@ fun sw ->
+      install_owner_inventory_exn ~sw config;
+      ensure_owner_meta_exn config meta;
       (match
-         Masc.Keeper_turn_admission.restore_shutdown
+         restore_owner_shutdown_exn
            ~base_path:config.base_path
            ~keeper_name:terminal.keeper_name
            ~operation_id:terminal.operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_restored
-       | Masc.Keeper_turn_admission.Shutdown_restore_conflict _ ->
+       | Masc.Keeper_owner.Shutdown_restored -> ()
+       | Masc.Keeper_owner.Shutdown_already_restored
+       | Masc.Keeper_owner.Shutdown_restore_conflict _ ->
          fail "terminal recovery fixture could not restore exact admission");
       (match
          Shutdown_runtime.recover_operation_with_corrupt_owner_fence
@@ -2090,10 +2094,9 @@ let test_terminal_shutdown_recovery_releases_admission () =
         None
         (Option.map
            Shutdown_types.Operation_id.to_string
-           (Masc.Keeper_turn_admission.snapshot_for
+           (owner_shutdown_operation_id_exn
               ~base_path:config.base_path
-              ~keeper_name:terminal.keeper_name)
-             .snapshot_shutdown_operation_id))
+              ~keeper_name:terminal.keeper_name)))
 
 let test_unsupported_shutdown_schema_retains_exact_fence () =
   Eio_main.run @@ fun env ->

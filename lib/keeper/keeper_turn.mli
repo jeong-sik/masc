@@ -128,8 +128,8 @@ val surface_context_to_instructions : Yojson.Safe.t -> string option
 val handle_keeper_msg_admitted :
   admission_token:Keeper_turn_dispatch_authority.token ->
   ?on_text_delta:(string -> unit) ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
-  ?event_bus:Agent_sdk.Event_bus.t ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
+  ?event_bus:Agent_core.Event_bus.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   _ Keeper_types_profile.context ->
   Keeper_invocation_contract.direct_message ->

@@ -866,8 +866,8 @@ export function applyKeeperStreamEvent(
     }
     case 'RUN_FINISHED':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-      clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
+      clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
+      clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       if (source.kind !== 'operation') return null
       updateThreadEntry(keeperName, assistantEntryId, entry => {
         if (entry.requestId !== source.operationId) return entry

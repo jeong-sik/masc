@@ -481,6 +481,65 @@ let test_failed_turn_keeps_unnamed_error_scalars () =
       | Ok _ -> fail "failed turn incorrectly reported as completed")
 ;;
 
+(* These two sizes are the only report of what a turn actually sends: the
+   keeper log's [system_and_user_bytes] sums the prompt strings and omits both
+   the history and the tool declarations (#28071). The expectations are computed
+   literals, not a second call to the function under test — that would pass for
+   any implementation. *)
+let test_history_bytes_sums_text_only () =
+  let messages =
+    [ { Runtime_codex_app_server.role = Runtime_codex_app_server.User
+      ; text = "abcde"
+      }
+    ; { Runtime_codex_app_server.role = Runtime_codex_app_server.Assistant
+      ; text = "fghijklmno"
+      }
+    ]
+  in
+  check int "sum of both texts" 15 (Runtime_codex_app_server.history_bytes messages);
+  check int "empty history is zero" 0 (Runtime_codex_app_server.history_bytes []);
+  (* The role is not part of the payload size: two messages differing only in
+     role must measure the same, or the number would drift with the split
+     between user and assistant turns rather than with the bytes sent. *)
+  check
+    int
+    "role does not change the size"
+    (Runtime_codex_app_server.history_bytes
+       [ { Runtime_codex_app_server.role = Runtime_codex_app_server.User
+         ; text = "same"
+         }
+       ])
+    (Runtime_codex_app_server.history_bytes
+       [ { Runtime_codex_app_server.role = Runtime_codex_app_server.Assistant
+         ; text = "same"
+         }
+       ])
+;;
+
+let test_dynamic_tool_bytes_counts_name_description_and_schema () =
+  let tool name description schema =
+    { Runtime_codex_app_server.name
+    ; description
+    ; input_schema = schema
+    ; call = (fun ~call_id:_ _ -> { Runtime_codex_app_server.success = true; content = "" })
+    }
+  in
+  (* {"type":"object"} serializes to 17 bytes; name 2 + description 3 + 17 = 22. *)
+  let schema = `Assoc [ "type", `String "object" ] in
+  check
+    int
+    "one tool: name + description + serialized schema"
+    22
+    (Runtime_codex_app_server.dynamic_tool_bytes [ tool "ab" "cde" schema ]);
+  check int "no tools is zero" 0 (Runtime_codex_app_server.dynamic_tool_bytes []);
+  check
+    int
+    "two tools add up"
+    44
+    (Runtime_codex_app_server.dynamic_tool_bytes
+       [ tool "ab" "cde" schema; tool "xy" "zzz" schema ])
+;;
+
 let test_failed_turn_is_not_completion () =
   let failed =
     {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"fixture failure"}}}}|}
@@ -2235,6 +2294,10 @@ let () =
             test_failed_turn_keeps_typed_error_fields
         ; test_case "failed turn keeps unnamed error scalars" `Quick
             test_failed_turn_keeps_unnamed_error_scalars
+        ; test_case "history bytes sum text only" `Quick
+            test_history_bytes_sums_text_only
+        ; test_case "dynamic tool bytes count name, description, schema" `Quick
+            test_dynamic_tool_bytes_counts_name_description_and_schema
         ; test_case "failed turn stays failed" `Quick test_failed_turn_is_not_completion
         ; test_case
             "retry notifications are observational"

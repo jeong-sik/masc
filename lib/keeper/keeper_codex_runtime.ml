@@ -263,23 +263,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
        context" — the mode is recorded because the injection only happens on
        that branch. Sizes are the bytes this process holds, not provider
        tokens; they bound the request, they do not price it. *)
-    let history_bytes =
-      List.fold_left
-        (fun acc (message : Runtime_codex_app_server.history_message) ->
-          acc + String.length message.text)
-        0
-        history
-    in
-    let tool_surface_bytes =
-      List.fold_left
-        (fun acc (tool : Runtime_codex_app_server.dynamic_tool) ->
-          acc
-          + String.length tool.name
-          + String.length tool.description
-          + String.length (Yojson.Safe.to_string tool.input_schema))
-        0
-        dynamic_tools
-    in
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d developer_instructions_bytes=%d \
@@ -291,9 +274,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       (String.length prompt)
       (Option.fold ~none:0 ~some:String.length client_config.developer_instructions)
       (List.length history)
-      history_bytes
+      (Runtime_codex_app_server.history_bytes history)
       (List.length dynamic_tools)
-      tool_surface_bytes;
+      (Runtime_codex_app_server.dynamic_tool_bytes dynamic_tools);
     let* () =
       match
         Runtime_codex_app_server.validate_turn

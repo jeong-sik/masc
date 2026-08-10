@@ -168,6 +168,13 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       |> Result.map_error (fun detail ->
         config_error ~field:"official_client_session.claim" detail)
     in
+    (* Before the plan is read; see the note in keeper_codex_runtime.ml. A
+       moved surface has to change conversation_mode and the ordinal too, not
+       just what the store writes. *)
+    let tool_surface_sha256 = Session_store.tool_surface_sha256 tools in
+    let claim_plan =
+      Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
+    in
     let conversation_mode =
       match claim_plan.previous_settlement with
       | None -> Runtime_antigravity.Start
@@ -220,20 +227,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~context
         ~terminal_error
         ~raw_trace_run:None
-    in
-    let tool_surface_sha256 = Session_store.tool_surface_sha256 prepared.tools in
-    let* () =
-      match claim_plan.required_tool_surface_sha256 with
-      | None -> Ok ()
-      | Some stored when String.equal stored tool_surface_sha256 -> Ok ()
-      | Some stored ->
-        Error
-          (config_error
-             ~field:"official_client_session.tool_surface_sha256"
-             (Printf.sprintf
-                "stored official-client tool surface %s does not match current surface %s"
-                stored
-                tool_surface_sha256))
     in
     let runtime_root = Common.masc_dir_from_base_path ~base_path in
     let* home =

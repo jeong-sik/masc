@@ -191,6 +191,110 @@ let test_duplicate_claim_and_cas_are_fail_closed () =
     | Ok None -> fail "CAS failure removed durable state")
 ;;
 
+(* A deployment that adds a tool or edits a descriptor moves the surface
+   digest. Before this, a settled session then refused every turn with
+   "tool surface changed before session resume", and had no way out: [Settled]
+   never becomes [Recovery_required], so the resolve endpoint had no id to act
+   on. Live fleet went 99.0% -> 71.4% on one such deploy (#27992). *)
+let test_moved_tool_surface_starts_fresh () =
+  with_workspace "masc-official-client-store-surface-" (fun base_path ->
+    let keeper_name = "surface" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let active =
+      mark_active
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~session_id:"session-1"
+        ~updated_at:2.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_starting
+        ~base_path
+        ~keeper_name
+        ~expected:active
+        ~session_id:"session-1"
+        ~updated_at:3.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_started
+        ~base_path
+        ~keeper_name
+        ~expected:inflight
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~updated_at:4.0
+      |> Result.get_ok
+    in
+    let settled =
+      settle
+        ~base_path
+        ~keeper_name
+        ~expected:inflight
+        ~session_id:"session-1"
+        ~turn_id:"turn-1"
+        ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let plan =
+      plan_claim
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~runtime_id:"codex.default"
+      |> Result.get_ok
+    in
+    (* Control: an unchanged surface still resumes, so the case below cannot
+       pass by making every plan fresh. *)
+    let same = reconcile_tool_surface plan ~tool_surface_sha256:empty_surface in
+    check int "unchanged surface resumes" 2 same.turn_count;
+    check bool
+      "unchanged surface keeps the settlement"
+      true
+      (same.previous_settlement <> None);
+    (* A real digest of a different surface, not a decorated string: the store
+       validates the format, so a synthetic value would fail for that reason
+       instead of exercising the mismatch. *)
+    let moved_surface =
+      String.map (fun c -> if c = 'a' then 'b' else c) empty_surface
+    in
+    check bool "moved digest differs" true (moved_surface <> empty_surface);
+    let moved = reconcile_tool_surface plan ~tool_surface_sha256:moved_surface in
+    check int "moved surface starts at ordinal 1" 1 moved.turn_count;
+    check bool
+      "moved surface drops the settlement"
+      true
+      (moved.previous_settlement = None);
+    check
+      (option string)
+      "moved surface requires nothing"
+      None
+      moved.required_tool_surface_sha256;
+    (* And the claim itself goes through rather than erroring. *)
+    match
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~owner_epoch
+        ~runtime_id:"codex.default"
+        ~tool_surface_sha256:moved_surface
+        ~updated_at:6.0
+    with
+    | Ok _ -> ()
+    | Error detail -> fail ("claim after a moved surface must succeed: " ^ detail))
+;;
+
 let test_terminal_identity_switch_starts_fresh () =
   with_workspace "masc-official-client-store-switch-" (fun base_path ->
     let keeper_name = "switch" in
@@ -241,19 +345,6 @@ let test_terminal_identity_switch_starts_fresh () =
         ~updated_at:5.0
       |> Result.get_ok
     in
-    (match
-       claim
-         ~base_path
-         ~keeper_name
-         ~expected:(Some settled)
-         ~client_kind:Codex
-         ~owner_epoch
-         ~runtime_id:"codex.default"
-         ~tool_surface_sha256:(String.make 64 'a')
-         ~updated_at:6.0
-     with
-     | Error _ -> ()
-     | Ok _ -> fail "same settled session resumed with a changed tool surface");
     let switched =
       claim
         ~base_path
@@ -653,6 +744,10 @@ let () =
             "duplicate claim and CAS fail closed"
             `Quick
             test_duplicate_claim_and_cas_are_fail_closed
+        ; test_case
+            "moved tool surface starts fresh"
+            `Quick
+            test_moved_tool_surface_starts_fresh
         ; test_case
             "terminal identity switch starts fresh"
             `Quick

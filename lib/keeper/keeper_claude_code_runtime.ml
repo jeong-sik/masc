@@ -180,6 +180,11 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       | Error detail ->
         Error (config_error ~field:"official_client_session.claim" detail)
     in
+    (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
+    let tool_surface_sha256 = Session_store.tool_surface_sha256 tools in
+    let claim_plan =
+      Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
+    in
     let session_mode =
       match claim_plan.previous_settlement with
       | None -> Runtime_claude_code.Start
@@ -196,20 +201,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~initial_messages
         ~model_input_projection
         ~hooks:(Some hooks)
-    in
-    let tool_surface_sha256 = Session_store.tool_surface_sha256 prepared.tools in
-    let* () =
-      match claim_plan.required_tool_surface_sha256 with
-      | None -> Ok ()
-      | Some stored when String.equal stored tool_surface_sha256 -> Ok ()
-      | Some stored ->
-        Error
-          (config_error
-             ~field:"official_client_session.tool_surface_sha256"
-             (Printf.sprintf
-                "stored official-client tool surface %s does not match current surface %s"
-                stored
-                tool_surface_sha256))
     in
     let* system_messages, history = project_messages prepared.messages in
     let* goal =

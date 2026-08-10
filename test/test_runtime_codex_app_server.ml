@@ -1431,14 +1431,26 @@ let test_keeper_resumes_persisted_codex_thread () =
        | Ok (Some binding) -> check int "stored turns" 2 binding.turn_count)
 ;;
 
-let test_keeper_rejects_changed_tool_surface_on_resume () =
+(* A changed tool surface must not RESUME the settled thread. It used to be
+   pinned as "the turn fails", which also left the session with no way forward:
+   Settled never becomes Recovery_required, so no operator action cleared it
+   and every later turn returned the same config error (#27992). The turn now
+   proceeds as a fresh session -- new thread, ordinal back to 1 -- which keeps
+   the property and drops the dead end. *)
+let test_keeper_starts_fresh_on_changed_tool_surface () =
   let base_path = temp_workspace "masc-codex-tool-change-" in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        with_fixture
+         (* Two turns' worth: the second is a fresh session, so it starts a
+            thread of its own rather than resuming thread-1. *)
          [ init_result
          ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
          ; thread_result
          ; turn_result
          ; item_completed
@@ -1455,23 +1467,30 @@ let test_keeper_rejects_changed_tool_surface_on_resume () =
              | Error error -> fail (Agent_core.Error.to_string error)
              | Ok _ -> ());
             let tool = fixture_tool ~name:"new_tool" ~description:"new surface" () in
+            (match
+               run_keeper_turn
+                 ~base_path
+                 ~tools:[ tool ]
+                 ~cli_path
+                 ~model:"gpt-fixture"
+                 ()
+             with
+             | Error error ->
+               fail
+                 ("changed tool surface must start a fresh session, not fail: "
+                  ^ Agent_core.Error.to_string error)
+             | Ok _ -> ());
+            (* The store is where resume-versus-fresh is visible: a resumed
+               session would carry ordinal 2 and the previous settlement. *)
             match
-              run_keeper_turn
+              Keeper_official_client_session_store.load
                 ~base_path
-                ~tools:[ tool ]
-                ~cli_path
-                ~model:"gpt-fixture"
-                ()
+                ~keeper_name:"codex-fixture"
             with
-            | Error
-                (Agent_core.Error.Config
-                  (Agent_core.Error.InvalidConfig { field; _ })) ->
-              check string
-                "fingerprint field"
-                "official_client_session.tool_surface_sha256"
-                field
-            | Error error -> fail (Agent_core.Error.to_string error)
-            | Ok _ -> fail "changed tool surface silently resumed the Codex thread"))
+            | Error detail -> fail detail
+            | Ok None -> fail "binding disappeared after a changed tool surface"
+            | Ok (Some binding) ->
+              check int "changed surface restarts the ordinal" 1 binding.turn_count))
 ;;
 
 let assert_production_keeper_result result =
@@ -2066,9 +2085,9 @@ let () =
             `Quick
             test_keeper_resumes_persisted_codex_thread
         ; test_case
-            "Keeper rejects changed Codex tool surface"
+            "Keeper starts fresh on a changed Codex tool surface"
             `Quick
-            test_keeper_rejects_changed_tool_surface_on_resume
+            test_keeper_starts_fresh_on_changed_tool_surface
         ; test_case
             "production Keeper dispatches Codex runtime"
             `Quick

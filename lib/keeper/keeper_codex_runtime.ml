@@ -183,6 +183,20 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              ~field:"official_client_session.claim"
              detail)
     in
+    (* Before the plan is read. A moved surface has to change thread_mode and
+       the ordinal too, not just what the store writes, or the adapter asks the
+       provider to resume a thread the store has already replaced.
+       [Host.prepare_turn] returns the same list it was given -- it only
+       validates forced tool choice -- so hashing the input here is the digest
+       that reaches [claim]. *)
+    let tool_surface_sha256 =
+      Keeper_official_client_session_store.tool_surface_sha256 tools
+    in
+    let claim_plan =
+      Keeper_official_client_session_store.reconcile_tool_surface
+        claim_plan
+        ~tool_surface_sha256
+    in
     let thread_mode =
       match claim_plan.previous_settlement with
       | None -> Runtime_codex_app_server.Start
@@ -200,24 +214,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~initial_messages
         ~model_input_projection
         ~hooks:(Some hooks)
-    in
-    let tool_surface_sha256 =
-      Keeper_official_client_session_store.tool_surface_sha256 prepared.tools
-    in
-    let* () =
-      match claim_plan.required_tool_surface_sha256 with
-      | None -> Ok ()
-      | Some stored_tool_surface_sha256
-        when String.equal stored_tool_surface_sha256 tool_surface_sha256 ->
-        Ok ()
-      | Some stored_tool_surface_sha256 ->
-        Error
-          (config_error
-             ~field:"official_client_session.tool_surface_sha256"
-             (Printf.sprintf
-                "stored official-client tool surface %s does not match current surface %s"
-                stored_tool_surface_sha256
-                tool_surface_sha256))
     in
     let* developer_messages, history = project_messages prepared.messages in
     let* prompt =

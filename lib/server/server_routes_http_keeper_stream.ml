@@ -26,7 +26,9 @@ let register_operation_live_sink ~operation_id sink =
   let sink_id = Atomic.fetch_and_add next_operation_live_sink_id 1 in
   Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
     let current =
-      Option.value ~default:[] (Hashtbl.find_opt operation_live_sinks operation_id)
+      match Hashtbl.find_opt operation_live_sinks operation_id with
+      | None -> []
+      | Some sinks -> sinks
     in
     Hashtbl.replace operation_live_sinks operation_id ((sink_id, sink) :: current));
   fun () ->
@@ -43,7 +45,9 @@ let register_operation_live_sink ~operation_id sink =
 let publish_operation_live_event ~operation_id event =
   let sinks =
     Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
-      Option.value ~default:[] (Hashtbl.find_opt operation_live_sinks operation_id))
+      match Hashtbl.find_opt operation_live_sinks operation_id with
+      | None -> []
+      | Some sinks -> sinks)
   in
   List.iter
     (fun (_, sink) ->

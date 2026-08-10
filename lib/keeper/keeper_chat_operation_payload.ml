@@ -48,7 +48,8 @@ let input_to_json ~message ~user_blocks ~turn_instructions ~surface_context
     ; "user_blocks", Keeper_multimodal_input.user_blocks_to_yojson user_blocks
     ; ( "turn_instructions"
       , match turn_instructions with None -> `Null | Some value -> `String value )
-    ; "surface_context", Option.value ~default:`Null surface_context
+    ; ( "surface_context"
+      , match surface_context with None -> `Null | Some value -> value )
     ; "attachments", Keeper_multimodal_input.attachments_to_yojson attachments
     ]
 ;;

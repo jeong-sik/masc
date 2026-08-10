@@ -163,6 +163,7 @@ let start_owner pool ~keeper_name ~initial_meta =
       ~sw:pool.sw
       ~store:(store_for pool keeper_name)
       ~operation_store_path
+      (* NDT-OK: wall time is injected once at the Owner persistence boundary. *)
       ~now:Unix.gettimeofday
       ~operation_executor:pool.operation_executor
       ~keeper_name

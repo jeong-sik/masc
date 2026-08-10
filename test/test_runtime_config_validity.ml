@@ -425,30 +425,57 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
        | Some gate_caps -> expect_runpod_caps name gate_caps)
     provider_labels
 
+(* Every GLM row that claims reasoning and native streaming must also name the
+   delta field, because a row that leaves [reasoning_streaming_format] out
+   resolves to [Default_reasoning_streaming], and for this family the derived
+   dialect is [No_streaming_reasoning] -- which makes [Streaming] discard the
+   provider's reasoning_content deltas instead of forwarding them. Enumerating
+   the catalog rather than naming one model keeps a newly added GLM row from
+   re-opening that hole: #26329 declared the field on GLM-5-Turbo only, and the
+   sibling glm-4.7 rows sat undeclared behind an assertion that could not see
+   them. *)
 let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
-  with_deployment_agent_core_model_catalog @@ fun _catalog ->
-  let model_id = "GLM-5-Turbo" in
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
+  let glm_rows =
+    List.filter
+      (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+         match entry.provider_name with
+         | Some provider_label ->
+           String.starts_with ~prefix:"glm-coding" provider_label
+         | None -> false)
+      (Llm_provider.Model_catalog.model_entries catalog)
+  in
+  check bool "deployment catalog carries GLM rows" true (glm_rows <> []);
   List.iter
-    (fun provider_label ->
+    (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+       let provider_label = Option.value entry.provider_name ~default:"" in
+       let model_id = entry.id_prefix in
+       let label = provider_label ^ "/" ^ model_id in
        match
          Llm_provider.Capabilities.for_provider_model_id
            ~allow_bare_fallback:false
            ~provider_label
            ~model_id
        with
-       | None ->
-         failf
-           "expected deployment GLM streaming capability for provider=%s model=%s"
-           provider_label
-           model_id
+       | None -> failf "expected deployment GLM capability for %s" label
        | Some caps ->
-         check bool (provider_label ^ " native streaming") true
-           caps.supports_native_streaming;
-         check bool (provider_label ^ " typed reasoning delta") true
-           (Llm_provider.Capabilities.(
-              caps.reasoning_streaming_format
-              = Delta_reasoning_field "reasoning_content")))
-    [ "glm-coding"; "glm-coding-sb-exact" ]
+         if caps.supports_reasoning && caps.supports_native_streaming
+         then (
+           check bool (label ^ " typed reasoning delta") true
+             (Llm_provider.Capabilities.(
+                caps.reasoning_streaming_format
+                = Delta_reasoning_field "reasoning_content"));
+           match
+             (Llm_provider.Reasoning_dialect.of_capabilities caps)
+               .Llm_provider.Reasoning_dialect.streaming
+           with
+           | Delta_field "reasoning_content" -> ()
+           | No_streaming_reasoning
+           | Delta_field _
+           | Delta_reasoning_details
+           | Template_parser ->
+             failf "%s resolves to a dialect that drops reasoning deltas" label))
+    glm_rows
 
 let test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma () =
   with_deployment_agent_core_model_catalog @@ fun catalog ->

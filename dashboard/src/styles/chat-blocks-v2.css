@@ -68,6 +68,20 @@
   border-top-left-radius: var(--r-0);
 }
 
+/* A run of autonomous turns. The nested turns are indented and separated so
+   the run header reads as their parent rather than as a sibling row. */
+.chat-auto-run-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px 8px 20px;
+  border-top: 1px solid var(--color-border-default);
+}
+
+.chat-auto-run-turns .chat-block-trace {
+  background: var(--color-bg-surface);
+}
+
 .chat-block-trace-hd {
   display: flex;
   align-items: center;

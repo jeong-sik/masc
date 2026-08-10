@@ -119,6 +119,12 @@ blocking_pr_lints() {
     python3 scripts/ci/test_check_stale_base_revert.py
   run_lint "Stale-base revert guard (RFC-0235)" \
     python3 scripts/ci/check-stale-base-revert.py --base "${base}" --head HEAD
+  # A wildcard catch that swallows Eio.Cancel.Cancelled is the bug this repo
+  # modelled in TLA+ (CancelledAbsorbed / CancelledNeverAbsorbed) and hit at
+  # runtime as an Assert_failure. The lint existed but no workflow ran it, so
+  # the count drifted to 32 and back to 0 without anyone seeing either move.
+  # Blocking at 0 keeps the next one from landing unnoticed.
+  run_lint "Cancel guard on wildcard catches" bash scripts/lint-cancel-guard.sh
 }
 
 advisory_lints() {

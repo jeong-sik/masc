@@ -1481,7 +1481,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
                 | Some _ -> Some `Null
                 | None -> None)
             | _ -> None
-            | exception _ -> None
+            | exception _ -> None (* cancel-guard-ok: the scrutinee is a decoded JSON value and the arms only pattern-match on it, so no fiber work runs under this handler *)
           in
           let send_overloaded_response rejection =
             Log.Server.debug

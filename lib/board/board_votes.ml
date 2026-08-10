@@ -493,16 +493,20 @@ let load_persisted_sub_boards store =
 
 (** {1 Hearth (topic) operations} *)
 
-(** List active hearths with post counts *)
-let list_hearths store : (string * int) list =
+(** List active hearths with post counts for the requested post-kind axis. *)
+let list_hearths store ?(exclude_system = false) ?(exclude_automation = false) ()
+    : (string * int) list =
   with_lock store (fun () ->
     let counts = Hashtbl.create 16 in
     Hashtbl.iter (fun _ (p : post) ->
-      match p.hearth with
-      | Some h ->
-          let c = Hashtbl.find_opt counts h |> Option.value ~default:0 in
-          Hashtbl.replace counts h (c + 1)
-      | None -> ()
+      if Board_core_classify.post_matches_filters
+           ~exclude_system ~exclude_automation p
+      then
+        match p.hearth with
+        | Some h ->
+            let c = Hashtbl.find_opt counts h |> Option.value ~default:0 in
+            Hashtbl.replace counts h (c + 1)
+        | None -> ()
     ) store.posts;
     Hashtbl.fold (fun k v acc -> (k, v) :: acc) counts []
     |> List.sort (fun (_, a) (_, b) -> compare b a)

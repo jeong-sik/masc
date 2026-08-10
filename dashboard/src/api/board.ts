@@ -1011,9 +1011,16 @@ export async function fetchBoard(
   }))
 }
 
-export async function fetchBoardHearths(): Promise<BoardHearth[]> {
+export async function fetchBoardHearths(options: {
+  excludeSystem?: boolean
+  excludeAutomation?: boolean
+} = {}): Promise<BoardHearth[]> {
   return withRetries('fetchBoardHearths', async () => {
-    const raw = await get<{ hearths?: unknown[] }>('/api/v1/board/hearths')
+    const params = new URLSearchParams()
+    if (options.excludeSystem) params.set('exclude_system', 'true')
+    if (options.excludeAutomation) params.set('exclude_automation', 'true')
+    const qs = params.toString()
+    const raw = await get<{ hearths?: unknown[] }>(`/api/v1/board/hearths${qs ? `?${qs}` : ''}`)
     return Array.isArray(raw.hearths)
       ? raw.hearths.map(normalizeBoardHearth).filter((row): row is BoardHearth => row !== null)
       : []

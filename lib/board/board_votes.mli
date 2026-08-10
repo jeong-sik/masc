@@ -136,9 +136,15 @@ val comment_of_yojson : Yojson.Safe.t -> comment option
 
 (** {1 Hearth aggregation} *)
 
-val list_hearths : store -> (string * int) list
+val list_hearths
+  :  store
+  -> ?exclude_system:bool
+  -> ?exclude_automation:bool
+  -> unit
+  -> (string * int) list
 (** Returns [(hearth, post_count)] pairs sorted by count
-    descending.  Posts with no [hearth] are skipped. *)
+    descending. Posts with no [hearth] are skipped. Optional post-kind filters
+    use the same classification contract as Board post listing. *)
 
 (** {1 Mutation helpers} *)
 

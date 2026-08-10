@@ -724,6 +724,10 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       when binding.client_kind <> client_kind
            || not (String.equal binding.runtime_id runtime_id) ->
       Ok (None, 1, None)
+    | Some ({ phase = Recovery_required _; _ } as binding)
+      when binding.client_kind <> client_kind
+           || not (String.equal binding.runtime_id runtime_id) ->
+      Ok (None, 1, None)
     | Some
         { phase = Settled settlement
         ; turn_count
@@ -740,11 +744,16 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       Error "official-client session has an active unsettled attempt; refusing duplicate execution"
     | Some { phase = Turn_inflight _; _ } ->
       Error "official-client session has an in-flight turn; refusing duplicate execution"
-    | Some { phase = Recovery_required recovery; _ } ->
-      Error
-        (Printf.sprintf
-           "official-client session recovery %s must be resolved before another execution"
-           recovery.recovery_id)
+    | Some
+        { phase = Recovery_required recovery
+        ; turn_count
+        ; tool_surface_sha256
+        ; _
+        } ->
+      Ok
+        ( recovery.previous_settlement
+        , turn_count
+        , Option.map (fun _ -> tool_surface_sha256) recovery.previous_settlement )
   in
   Ok { previous_settlement; turn_count; required_tool_surface_sha256 }
 ;;
@@ -778,19 +787,31 @@ let claim ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_i
   let last_recovery_resolution =
     Option.bind expected (fun binding -> binding.last_recovery_resolution)
   in
-  transition
-    ~base_path
-    ~keeper_name
-    ~expected
-    { client_kind
-    ; runtime_id
-    ; phase = Start { owner_epoch; previous_settlement = plan.previous_settlement }
-    ; turn_count = plan.turn_count
-    ; tool_surface_sha256
-    ; last_recovery_resolution
-    ; last_transient_release = Option.bind expected (fun binding -> binding.last_transient_release)
-    ; updated_at
-    }
+  let* claimed =
+    transition
+      ~base_path
+      ~keeper_name
+      ~expected
+      { client_kind
+      ; runtime_id
+      ; phase = Start { owner_epoch; previous_settlement = plan.previous_settlement }
+      ; turn_count = plan.turn_count
+      ; tool_surface_sha256
+      ; last_recovery_resolution
+      ; last_transient_release = Option.bind expected (fun binding -> binding.last_transient_release)
+      ; updated_at
+      }
+  in
+  (match expected with
+   | Some { phase = Recovery_required recovery; _ } ->
+     Log.Keeper.info
+       ~keeper_name
+       "auto-superseded official-client recovery=%s failure=%s owner_epoch=%s"
+       recovery.recovery_id
+       (recovery_failure_to_string recovery.failure)
+       owner_epoch
+   | Some _ | None -> ());
+  Ok claimed
 ;;
 
 let mark_active ~base_path ~keeper_name ~expected ~session_id ~updated_at =

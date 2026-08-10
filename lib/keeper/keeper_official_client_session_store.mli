@@ -159,8 +159,10 @@ val claim :
   (t, string) result
 (** Claim the next exact turn. A terminal binding may start fresh when its
     declared client kind or runtime id changes. Resuming the same settled
-    client/runtime requires an identical tool surface. Incomplete and recovery
-    phases always reject another claim regardless of configuration changes. *)
+    client/runtime requires an identical tool surface. A same-process Start,
+    Active, or Turn_inflight phase rejects a concurrent claim. A completed
+    failure observation is superseded atomically by the next claim and never
+    requires operator resolution before execution. *)
 
 val mark_active :
   base_path:string ->
@@ -204,8 +206,9 @@ val require_recovery :
   detail:string ->
   required_at:float ->
   (t, string) result
-(** Convert the exact incomplete claim into an explicit operator-visible
-    recovery state. This never retries or clears a possibly executed turn. *)
+(** Convert the exact incomplete claim into an operator-visible failure
+    observation. The next claim may supersede it atomically; an operator may
+    still resolve it first to choose the previous settlement or a fresh start. *)
 
 val release_transient :
   base_path:string ->

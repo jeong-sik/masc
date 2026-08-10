@@ -296,11 +296,10 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
-  it('rejects the removed receipt-keyed event contract', () => {
+  it('rejects the removed Keeper turn event contract', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'keeper_chat_turn_event',
       name: 'sangsu',
-      receipt_id: 'chatq_legacy',
       ag_ui_event: {
         type: 'RUN_STARTED',
         threadId: 'keeper-consumer:sangsu',

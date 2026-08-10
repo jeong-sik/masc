@@ -210,10 +210,10 @@ let rec settle_tasks ~config ~meta operation settled_task_ids =
              | None -> false)
           outstanding_ids
       in
-      let outstanding_accounted_for receipt_ids =
+      let outstanding_accounted_for accounted_task_ids =
         List.for_all
           (fun task_id ->
-             task_id_mem task_id receipt_ids || task_id_mem task_id active_ids)
+             task_id_mem task_id accounted_task_ids || task_id_mem task_id active_ids)
           outstanding_ids
       in
       if Int.equal active_snapshot.backlog_version operation.expected_backlog_version

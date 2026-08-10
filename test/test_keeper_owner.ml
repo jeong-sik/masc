@@ -180,11 +180,11 @@ let test_operation_payload_preserves_connector_route () =
     (Result.is_error (Keeper_chat_operation_payload.source_of_json mismatched));
   let unknown =
     match encoded with
-    | `Assoc fields -> `Assoc (("legacy_receipt_id", `String "chatq-old") :: fields)
+    | `Assoc fields -> `Assoc (("obsolete_identity", `String "old-id") :: fields)
     | _ -> fail "source encoder returned a non-object"
   in
   check bool
-    "unknown legacy field is rejected"
+    "unknown field is rejected"
     true
     (Result.is_error (Keeper_chat_operation_payload.source_of_json unknown))
 ;;

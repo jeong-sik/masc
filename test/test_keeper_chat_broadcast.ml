@@ -35,10 +35,10 @@ let test_operation_event_has_singular_identity () =
     "operation id"
     (Some (`String "kmsg-operation-1"))
     (List.assoc_opt "operation_id" fields);
-  Alcotest.(check (option yojson_testable))
-    "receipt identity absent"
-    None
-    (List.assoc_opt "receipt_id" fields)
+  Alcotest.(check (list string))
+    "closed envelope keys"
+    [ "ag_ui_event"; "name"; "operation_id"; "type" ]
+    (fields |> List.map fst |> List.sort String.compare)
 ;;
 
 let project state event =

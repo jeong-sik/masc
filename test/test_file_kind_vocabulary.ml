@@ -1,11 +1,9 @@
 (** The single vocabulary for rendering [Unix.file_kind] in diagnostics.
 
     Four sites rendered this type independently and three spellings were
-    in play: [S_REG] was "regular_file" here but "regular" in
-    keeper_chat_queue, server_base_path_diagnostics and an inline match
-    inside fs_compat itself; [S_LNK] was "symbolic_link", "symlink" and
-    "symbolic-link". An operator reading two messages about the same path
-    saw its kind named differently.
+    in play: [S_REG] was both "regular_file" and "regular"; [S_LNK] was
+    "symbolic_link", "symlink" and "symbolic-link". An operator reading
+    two messages about the same path saw its kind named differently.
 
     The three copies now call {!Fs_compat.file_kind_to_string}. The labels
     are pinned here because nothing else does: they are operator-facing

@@ -25,17 +25,16 @@ let test_exact_routes () =
     [ "edit", Api.Edit; "move-to-end", Api.Move_to_end; "cancel", Api.Cancel ]
 ;;
 
-let test_legacy_routes_do_not_match () =
+let test_unknown_routes_do_not_match () =
   List.iter
     (fun path ->
        check bool
-         ("legacy route rejected: " ^ path)
+         ("unknown route rejected: " ^ path)
          true
          (Option.is_none (Api.get_route path)
           && Option.is_none (Api.mutation_route path)))
-    [ "/api/v1/keepers/sangsu/chat/receipts/chatq-1/edit"
-    ; "/api/v1/keepers/sangsu/chat/recovery/chatq-1"
-    ; "/api/v1/keepers/sangsu/chat/pending"
+    [ "/api/v1/keepers/sangsu/chat/operations/kmsg-1/retry"
+    ; "/api/v1/keepers/sangsu/chat/tasks/kmsg-1"
     ]
 ;;
 
@@ -60,8 +59,8 @@ let test_mutation_bodies_are_closed () =
        match Api.For_testing.parse_mutation_body Api.Edit body with
        | Error "invalid_input" -> ()
        | Error code -> fail ("wrong edit error: " ^ code)
-       | Ok _ -> fail ("legacy edit body accepted: " ^ body))
-    [ {|{"input":{"message":"edited"},"expected_revision":"7"}|}
+       | Ok _ -> fail ("invalid edit body accepted: " ^ body))
+    [ {|{"input":{"message":"edited"},"obsolete_authority":"old"}|}
     ; {|{"input":{"message":"edited"}}|}
     ; {|{"input":{},"input":{}}|}
     ; {|{"message":"flattened legacy body"}|}
@@ -77,8 +76,8 @@ let test_mutation_bodies_are_closed () =
             match Api.For_testing.parse_mutation_body mutation body with
             | Error "invalid_input" -> ()
             | Error code -> fail ("wrong closed mutation error: " ^ code)
-            | Ok _ -> fail ("legacy mutation authority accepted: " ^ body))
-         [ {|{"expected_revision":"7"}|}; {|{"lease_id":"lease-1"}|} ])
+            | Ok _ -> fail ("unknown mutation field accepted: " ^ body))
+         [ {|{"obsolete_authority":"old"}|}; {|{"input":null}|} ])
     [ Api.Move_to_end; Api.Cancel ]
 ;;
 
@@ -87,7 +86,7 @@ let () =
     "keeper chat operation http"
     [ ( "routes"
       , [ test_case "exact operation routes" `Quick test_exact_routes
-        ; test_case "legacy routes do not match" `Quick test_legacy_routes_do_not_match
+        ; test_case "unknown routes do not match" `Quick test_unknown_routes_do_not_match
         ; test_case "mutation bodies are closed" `Quick test_mutation_bodies_are_closed
         ] )
     ]

@@ -111,7 +111,7 @@ describe('Keeper operation stream projection', () => {
     expect(activeStreamRequestId('sangsu')).toBe('kmsg-operation-2')
   })
 
-  it('accepts the singular operation SSE envelope and rejects receipt identity', () => {
+  it('accepts the singular operation SSE envelope and rejects the removed event type', () => {
     expect(parseSSEMessage({
       type: 'keeper_chat_operation_event',
       name: 'sangsu',
@@ -128,7 +128,6 @@ describe('Keeper operation stream projection', () => {
     expect(parseSSEMessage({
       type: 'keeper_chat_turn_event',
       name: 'sangsu',
-      receipt_id: 'chatq_legacy',
       ts_unix: 1,
       ag_ui_event: {},
     })).toBeNull()

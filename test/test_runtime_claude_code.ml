@@ -186,8 +186,7 @@ let test_result_usage_is_carried () =
        | None -> fail "usage block was dropped"
        | Some usage ->
          check int "input tokens" 123456 usage.input_tokens;
-         check int "output tokens" 789 usage.output_tokens;
-         check int "cache read tokens" 42 usage.cache_read_tokens))
+         check int "output tokens" 789 usage.output_tokens))
 ;;
 
 (* A usage block the CLI shapes differently must not fail the turn: the text is

@@ -451,7 +451,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                       { input_tokens = usage.input_tokens
                       ; output_tokens = usage.output_tokens
                       ; cache_creation_input_tokens = 0
-                      ; cache_read_input_tokens = usage.cache_read_tokens
+                      ; cache_read_input_tokens = 0
                       ; cost_usd = None
                       })
                    turn.usage

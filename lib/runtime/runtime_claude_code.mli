@@ -43,7 +43,6 @@ type rate_limit =
 type turn_usage =
   { input_tokens : int
   ; output_tokens : int
-  ; cache_read_tokens : int
   }
 
 type turn_result =

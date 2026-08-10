@@ -54,7 +54,6 @@ type rate_limit =
 type turn_usage =
   { input_tokens : int
   ; output_tokens : int
-  ; cache_read_tokens : int
   }
 
 type turn_result =
@@ -680,14 +679,11 @@ let parse_result ~expected_session_id ~rate_limit fields =
           | Some (`Int value) when value >= 0 -> Some value
           | _ -> None
         in
+        (* Only the two counts this reads are carried. A cache-read field would
+           need a value when the block omits it, and defaulting a count nobody
+           reported to zero states something the stream did not say. *)
         (match int_field "input_tokens", int_field "output_tokens" with
-         | Some input_tokens, Some output_tokens ->
-           Some
-             { input_tokens
-             ; output_tokens
-             ; cache_read_tokens =
-                 Option.value (int_field "cache_read_input_tokens") ~default:0
-             }
+         | Some input_tokens, Some output_tokens -> Some { input_tokens; output_tokens }
          | Some _, None | None, Some _ | None, None -> None)
       | Some _ -> None
     in

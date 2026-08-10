@@ -232,6 +232,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0364 | keeper 당 체크아웃 하나 (`repos/` 중간 디렉터리 폐기) | Draft | - |
 | 0365 | handoff_context must survive the ownership boundary | Draft | - |
 | 0366 | 운영자가 다음 턴의 컨텍스트에 한 문장을 넣는다 | Draft | - |
+| 0368 | 판단 없는 recovery는 keeper의 다음 claim이 스스로 해제한다 | Draft | - |
 | RFC-0034d-stale-agent-sync | d — release_stale_claims agent-side sync | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |

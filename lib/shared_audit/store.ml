@@ -1,5 +1,13 @@
 type t = {
   base_dir : string;
+  (* [append] reads this as the next entry's [prev_hash], writes the file,
+     then stores the new hash. Two appends interleaving between the read and
+     the store would chain both entries onto the same predecessor and fork
+     the chain that [verify] walks. [append_mu] makes the three steps one
+     step. Today the write goes through [Fs_compat.append_jsonl], which uses
+     blocking stdlib I/O and so never yields to another fiber — the chain
+     holds by accident of that choice, not by construction. *)
+  append_mu : Stdlib.Mutex.t;
   mutable latest_hash : string option;
 }
 
@@ -74,20 +82,21 @@ let load_latest_hash ~base_dir =
 let create ~base_dir =
   if not (Sys.file_exists base_dir) then Fs_compat.mkdir_p base_dir;
   let latest_hash = load_latest_hash ~base_dir in
-  { base_dir; latest_hash }
+  { base_dir; append_mu = Stdlib.Mutex.create (); latest_hash }
 
 let base_dir t = t.base_dir
 
 let append t ~category ~payload =
-  let entry = Envelope.make ~category ~payload ~prev_hash:t.latest_hash in
-  ignore
-    (Jsonl_writer.append_dated_jsonl
-       ~base_dir:t.base_dir
-       ~ts:entry.ts
-       (Envelope.to_json entry)
-      : Jsonl_writer.dated_path);
-  t.latest_hash <- Some (Envelope.hash_for_chain entry);
-  entry
+  Stdlib.Mutex.protect t.append_mu (fun () ->
+    let entry = Envelope.make ~category ~payload ~prev_hash:t.latest_hash in
+    ignore
+      (Jsonl_writer.append_dated_jsonl
+         ~base_dir:t.base_dir
+         ~ts:entry.ts
+         (Envelope.to_json entry)
+        : Jsonl_writer.dated_path);
+    t.latest_hash <- Some (Envelope.hash_for_chain entry);
+    entry)
 
 let read_all_entries t =
   if not (Sys.file_exists t.base_dir) then []

@@ -55,16 +55,25 @@ async function bestEffortReportToolHostFailure(payload: {
   }
 }
 
-function shouldReportToolHostFailure(message: string): boolean {
-  const normalized = message.toLowerCase()
-  return (
-    normalized.includes('timeout after')
-    || normalized.includes('timed out awaiting tools/call')
-    || normalized.includes('failed to fetch')
-    || normalized.includes('networkerror')
-    || normalized.includes('load failed')
-    || normalized.includes('error decoding response body')
-  )
+/* A tool-host failure means the request never reached a tool, so the transport
+   already knows: fetchWithTimeout converts an abort into ApiRequestError with
+   timeout set, and a fetch that cannot reach the host rejects with TypeError.
+   Both are answers this function can read off the thrown value.
+
+   It used to lowercase the message and look for six substrings, which decided
+   transport health from prose the transport does not own. That misclassifies
+   a normal MCP error whose tool message happens to contain "load failed", and
+   misses a network failure worded differently by another browser or locale.
+   Two of the six arms could never fire: "timed out awaiting tools/call" exists
+   only in an OCaml fixture describing the payload this file *sends*, and
+   "error decoding response body" appears nowhere in the tree at all. A string
+   classifier has no exhaustiveness, so nothing said so. */
+function shouldReportToolHostFailure(err: unknown): boolean {
+  if (err instanceof ApiRequestError) return err.timeout === true
+  // Browser fetch rejects with TypeError when the host is unreachable
+  // (connection refused, DNS failure, CORS preflight failure). The wording
+  // varies by engine; the class does not.
+  return err instanceof TypeError
 }
 
 function explicitToolActor(args: Record<string, unknown>): string | null {
@@ -308,7 +317,7 @@ async function callMcpToolInternal(
       return callMcpToolInternal(toolName, args, false)
     }
     const message = errorToString(err)
-    if (shouldReportToolHostFailure(message)) {
+    if (shouldReportToolHostFailure(err)) {
       await bestEffortReportToolHostFailure({
         toolName,
         message,

@@ -14,15 +14,34 @@ const {
   isRemoteAccess,
   setStoredToken,
 } = vi.hoisted(() => ({
+  // Carries timeout/timeoutMs like the real one in ./core. The double used to
+  // drop them, so every case that "tested a timeout" actually threw an error
+  // with no timeout field and a hand-written message -- which is why a
+  // message-substring classifier looked correct here.
   ApiRequestError: class ApiRequestError extends Error {
     status?: number
     authErrorCode?: string
+    timeout?: boolean
+    timeoutMs?: number
 
-    constructor(opts: { status?: number; detail?: string; authErrorCode?: string }) {
-      super(opts.detail ?? 'API request failed')
+    constructor(opts: {
+      status?: number
+      detail?: string
+      authErrorCode?: string
+      timeout?: boolean
+      timeoutMs?: number
+      method?: string
+      path?: string
+    }) {
+      super(
+        opts.timeout === true
+          ? `${opts.method ?? 'POST'} ${opts.path ?? '/mcp'}: timeout after ${opts.timeoutMs ?? 0}ms`
+          : opts.detail ?? 'API request failed')
       this.name = 'ApiRequestError'
       this.status = opts.status
       this.authErrorCode = opts.authErrorCode
+      this.timeout = opts.timeout
+      this.timeoutMs = opts.timeoutMs
     }
   },
   apiRequestErrorFromResponse: vi.fn(async (method: string, path: string, res: Response) =>
@@ -226,7 +245,8 @@ describe('MCP 2026-07-28 dashboard client', () => {
   })
 
   it('reports transport failures without legacy session telemetry', async () => {
-    fetchWithTimeout.mockRejectedValueOnce(new Error('POST /mcp: timeout after 30000ms'))
+    fetchWithTimeout.mockRejectedValueOnce(
+      new ApiRequestError({ method: 'POST', path: '/mcp', timeout: true, timeoutMs: 30000 }))
 
     const { callMcpTool } = await import('./mcp')
     await expect(callMcpTool('masc_keeper_msg', { message: 'ping' }))
@@ -240,6 +260,42 @@ describe('MCP 2026-07-28 dashboard client', () => {
       timeout_ms: 30000,
     }))
     expect(reportToolHostFailure.mock.calls[0]![0].session_id).toBeUndefined()
+  })
+
+  // The transport says whether a request reached a tool. These cases pin that
+  // the decision reads the thrown value, not its prose.
+  it('reports a fetch that never reached the host', async () => {
+    fetchWithTimeout.mockRejectedValueOnce(new TypeError('Load failed'))
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_keeper_msg', { message: 'ping' })).rejects.toThrow()
+
+    expect(reportToolHostFailure).toHaveBeenCalledWith(expect.objectContaining({
+      tool_name: 'masc_keeper_msg',
+      phase: 'tools/call',
+    }))
+  })
+
+  it('does not report a non-timeout ApiRequestError', async () => {
+    fetchWithTimeout.mockRejectedValueOnce(
+      new ApiRequestError({ status: 500, detail: 'internal error' }))
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_keeper_msg', { message: 'ping' })).rejects.toThrow()
+
+    expect(reportToolHostFailure).not.toHaveBeenCalled()
+  })
+
+  // The regression the typed check removes: a tool error whose own text
+  // contains transport wording was reported as a host failure.
+  it('does not report a tool error whose message reads like a transport failure', async () => {
+    fetchWithTimeout.mockRejectedValueOnce(
+      new Error('tool refused: load failed while parsing the uploaded fixture'))
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_keeper_msg', { message: 'ping' })).rejects.toThrow()
+
+    expect(reportToolHostFailure).not.toHaveBeenCalled()
   })
 
   it('fails closed after a 403 until client state is reset', async () => {

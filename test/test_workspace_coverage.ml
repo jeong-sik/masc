@@ -1805,14 +1805,17 @@ let test_task_transitions_emit_observability () =
            ; "transition", "start"
            ; "task_id", "task-001"
            ]);
+    (* A verdict-produced Done is observed as the Done it is; "approve" was
+       never a [task_action] and so never a transition value. The authority
+       rides in the details, not in the transition name. *)
     Alcotest.(check bool)
-      "ring verifier approval recorded"
+      "ring completion recorded"
       true
       (ring_has_entry
          ring_entries
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "approve"
+           ; "transition", "done"
            ; "task_id", "task-001"
            ]))
 ;;
@@ -1944,13 +1947,13 @@ let test_transition_done_from_claimed_emits_observability () =
       Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
     in
     Alcotest.(check bool)
-      "claimed task ring approval recorded"
+      "claimed task ring completion recorded"
       true
       (ring_has_entry
          ring_entries
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "approve"
+           ; "transition", "done"
            ; "task_id", "task-001"
            ]))
 ;;

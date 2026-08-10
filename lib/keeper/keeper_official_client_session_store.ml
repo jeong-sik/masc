@@ -40,6 +40,35 @@ let failure_disposition = function
   | Provider_rejected -> Fatal
 ;;
 
+(* The operator gate on [Recovery_required] did two things, and #28016 removed
+   both. It stopped the keeper -- costly, and the reason it went: 38 recoveries
+   blocked 1,233 turns on 2026-08-10, a 32:1 amplification that took fleet
+   completion from 97.7% to 73.6%. It also made a failure visible, which is how
+   three code bugs were found (RFC-0368 §problem: unknown-notification cap ->
+   #27954, empty-delta -> #27969, retry-cap -> #27990). Superseding every class
+   keeps the first fix and drops the second: the same bugs now emit one info
+   line per turn that nothing reads, while the fleet runs on a degraded path.
+
+   RFC-0368's design separates the two by failure class, and this is that
+   mapping. A class whose resolution carried no human judgement supersedes; the
+   two classes whose park revealed a code bug keep it. Deciding per class also
+   means a new [recovery_failure] constructor cannot silently inherit
+   auto-supersede -- the compiler asks. *)
+type recovery_policy =
+  | Supersede_at_claim
+  | Park_for_operator
+
+let recovery_policy_of_failure = function
+  | Transient_spawn_failed
+  | Owner_stopped_turn
+  | Transport_interrupted
+  | Host_hook_failed
+  | State_persistence_failed
+  | Process_restarted ->
+    Supersede_at_claim
+  | Protocol_failed | Provider_rejected -> Park_for_operator
+;;
+
 type recovery_required =
   { recovery_id : string
   ; previous_settlement : settlement option
@@ -750,10 +779,19 @@ let plan_claim ~expected ~client_kind ~runtime_id =
         ; tool_surface_sha256
         ; _
         } ->
-      Ok
-        ( recovery.previous_settlement
-        , turn_count
-        , Option.map (fun _ -> tool_surface_sha256) recovery.previous_settlement )
+      (match recovery_policy_of_failure recovery.failure with
+       | Supersede_at_claim ->
+         Ok
+           ( recovery.previous_settlement
+           , turn_count
+           , Option.map (fun _ -> tool_surface_sha256) recovery.previous_settlement )
+       | Park_for_operator ->
+         Error
+           (Printf.sprintf
+              "official-client session recovery %s (%s) must be resolved before \
+               another execution"
+              recovery.recovery_id
+              (recovery_failure_to_string recovery.failure)))
   in
   Ok { previous_settlement; turn_count; required_tool_surface_sha256 }
 ;;

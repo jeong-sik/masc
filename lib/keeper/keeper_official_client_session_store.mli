@@ -32,6 +32,18 @@ type failure_disposition =
 
 val failure_disposition : recovery_failure -> failure_disposition
 
+(** What the next claim does with a durable [Recovery_required] record.
+
+    [Supersede_at_claim] replaces the observation and proceeds; the failure
+    carried no decision an operator could make. [Park_for_operator] refuses,
+    keeping the failure visible -- the classes where a park has caught a code
+    bug rather than an environment fault (RFC-0368). *)
+type recovery_policy =
+  | Supersede_at_claim
+  | Park_for_operator
+
+val recovery_policy_of_failure : recovery_failure -> recovery_policy
+
 type recovery_required =
   { recovery_id : string
   ; previous_settlement : settlement option

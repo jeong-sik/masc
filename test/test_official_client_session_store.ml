@@ -461,6 +461,92 @@ let test_restart_recovery_and_transient_release () =
     | None -> fail "transient release evidence was not persisted")
 ;;
 
+(* #28016 let the next claim supersede a Recovery_required record for every
+   failure class. That removed a 32:1 amplification -- 38 recoveries blocked
+   1,233 turns on 2026-08-10 -- and with it the only surface that made a
+   protocol-level code bug visible: three were found because the fleet stopped
+   (RFC-0368 §problem). These two cases pin the split. They fail together if
+   recovery_policy_of_failure is bypassed, and the pair is the point: parking
+   everything reinstates the amplification, superseding everything hides the
+   bugs. *)
+let test_protocol_failure_parks_for_operator () =
+  with_workspace "masc-official-client-store-park-" (fun base_path ->
+    let keeper_name = "park" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Claude_code
+        ~runtime_id:"claude-code.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let recovery =
+      require_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~failure:Protocol_failed
+        ~detail:"client sent a frame the protocol does not allow"
+        ~required_at:2.0
+      |> Result.get_ok
+    in
+    match
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some recovery)
+        ~client_kind:Claude_code
+        ~owner_epoch:"22222222-2222-4222-8222-222222222222"
+        ~runtime_id:"claude-code.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:3.0
+    with
+    | Ok _ -> fail "a protocol failure was superseded; the code-bug signal is gone"
+    | Error _ -> ())
+;;
+
+let test_transport_interruption_supersedes_at_claim () =
+  with_workspace "masc-official-client-store-supersede-" (fun base_path ->
+    let keeper_name = "supersede" in
+    let claimed =
+      claim_new
+        ~base_path
+        ~keeper_name
+        ~client_kind:Claude_code
+        ~runtime_id:"claude-code.default"
+        ~owner_epoch
+        ~at:1.0
+    in
+    let recovery =
+      require_recovery
+        ~base_path
+        ~keeper_name
+        ~expected:claimed
+        ~failure:Transport_interrupted
+        ~detail:"Timeout: Claude Code turn timed out after 300.000s"
+        ~required_at:2.0
+      |> Result.get_ok
+    in
+    match
+      claim
+        ~base_path
+        ~keeper_name
+        ~expected:(Some recovery)
+        ~client_kind:Claude_code
+        ~owner_epoch:"22222222-2222-4222-8222-222222222222"
+        ~runtime_id:"claude-code.default"
+        ~tool_surface_sha256:empty_surface
+        ~updated_at:3.0
+    with
+    | Error message ->
+      fail
+        (Printf.sprintf
+           "a turn timeout still needs an operator; the amplification is back: %s"
+           message)
+    | Ok _ -> ())
+;;
+
 let test_exact_recovery_restart () =
   with_workspace "masc-official-client-store-resolution-" (fun base_path ->
     let keeper_name = "resolution" in
@@ -768,6 +854,14 @@ let () =
             "restart recovery and transient release"
             `Quick
             test_restart_recovery_and_transient_release
+        ; test_case
+            "protocol failure parks for operator"
+            `Quick
+            test_protocol_failure_parks_for_operator
+        ; test_case
+            "transport interruption supersedes at claim"
+            `Quick
+            test_transport_interruption_supersedes_at_claim
         ; test_case "exact recovery restart" `Quick test_exact_recovery_restart
         ; test_case
             "retry previous restores exact settlement"

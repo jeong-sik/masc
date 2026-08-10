@@ -170,10 +170,25 @@ let test_second_tool_snapshot_contains_first_tool_result () =
       "tool_read_file"
       Yojson.Safe.Util.(call |> member "operation" |> to_string);
     check yojson "first input" first_input Yojson.Safe.Util.(call |> member "input");
-    check yojson
-      "first result"
-      (Tool_result.data first_result)
-      Yojson.Safe.Util.(call |> member "result")
+    check
+      string
+      "first disposition"
+      (Tool_result.string_of_disposition first_result)
+      Yojson.Safe.Util.(call |> member "disposition" |> to_string);
+    (* [result] is deliberately absent from this rendering. The cell records the
+       typed result, but the judge is asked to weigh operation identity and
+       input, never the payload a previous tool returned; rendering it put whole
+       tool outputs into a prompt about a different call and the judge slot
+       refused them. [disposition] carries the part the judgment turns on.
+       Asserting absence rather than dropping the check keeps a re-added
+       [result] failing here instead of silently restoring that shape. *)
+    check
+      bool
+      "first result stays out of the judge rendering"
+      true
+      (match Yojson.Safe.Util.(call |> member "result") with
+       | `Null -> true
+       | _ -> false)
   | _ -> failf "expected one completed call, got %d" (List.length calls)
 ;;
 

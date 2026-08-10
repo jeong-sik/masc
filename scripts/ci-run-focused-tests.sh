@@ -46,6 +46,11 @@ normal_targets=(
   @test/runtest-test_keeper_approval_queue
   @test/runtest-test_keeper_hitl_resolution_prompt
   @test/runtest-test_keeper_approval_audit_timeline
+  @test/runtest-test_keeper_approval_queue_rules
+  @test/runtest-test_keeper_approval_queue_rules_types
+  @test/runtest-test_keeper_approval_resolved_history
+  @test/runtest-test_keeper_gate_effect_coverage
+  @test/runtest-test_keeper_gate_replay
   @test/runtest-test_verification
   @test/runtest-test_tool_schema_constraint_enforcement
   @test/runtest-test_keeper_artifact_read_request

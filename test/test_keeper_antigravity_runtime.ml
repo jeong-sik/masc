@@ -288,6 +288,50 @@ let test_keeper_projects_mcp_tool_and_settles () =
       check bool "turn capability cleared" false (Sys.file_exists mcp_path))
 ;;
 
+let user_message text =
+  { Agent_core.Types.role = Agent_core.Types.User
+  ; content = [ Agent_core.Types.Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+(* Live 2026-08-10 (#28051): a fresh Antigravity session re-seeds the CLI with
+   the rendered history, and the CLI takes the prompt as one command-line
+   argument, so an unbounded history made the spawn fail outright. History is
+   now fitted newest-first and the shortfall is counted rather than silently
+   cut. *)
+let test_history_is_fitted_newest_first_with_a_count () =
+  let messages =
+    [ user_message (String.make 400 'o')
+    ; user_message (String.make 400 'm')
+    ; user_message (String.make 400 'n')
+    ]
+  in
+  let rendered, kept, dropped =
+    Keeper_antigravity_runtime.For_testing.fit_history_to_budget ~budget:900 messages
+  in
+  check int "kept" 2 kept;
+  check int "dropped" 1 dropped;
+  check bool "newest message survives" true (String_util.contains_substring rendered "n");
+  check
+    bool
+    "oldest message is the one left out"
+    false
+    (String_util.contains_substring rendered (String.make 400 'o'));
+  check bool "kept text fits the budget" true (String.length rendered <= 900);
+  (* Control: a budget that fits everything drops nothing, so this cannot pass
+     by always dropping. *)
+  let _, kept_all, dropped_none =
+    Keeper_antigravity_runtime.For_testing.fit_history_to_budget
+      ~budget:100_000
+      messages
+  in
+  check int "all kept when the budget allows" 3 kept_all;
+  check int "none dropped when the budget allows" 0 dropped_none
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -296,6 +340,10 @@ let () =
             "projects MCP tool and settles"
             `Quick
             test_keeper_projects_mcp_tool_and_settles
+        ; test_case
+            "history fitted newest-first with a count"
+            `Quick
+            test_history_is_fitted_newest_first_with_a_count
         ] )
     ]
 ;;

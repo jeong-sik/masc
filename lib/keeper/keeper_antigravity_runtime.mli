@@ -17,3 +17,12 @@ val run :
   raw_trace:Agent_core.Raw_trace.t option ->
   config:Runtime_execution.antigravity_cli ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
+
+module For_testing : sig
+  val fit_history_to_budget :
+    budget:int -> Agent_core.Types.message list -> string * int * int
+  (** Fit rendered history newest-first into [budget] bytes, returning the
+      rendered text, how many messages were kept, and how many were left out.
+      Exposed because the CLI prompt budget is a kernel limit rather than a
+      provider one, so the fitting rule is worth pinning directly. *)
+end

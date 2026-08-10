@@ -14,6 +14,14 @@ let internal_error detail = Agent_core.Error.Internal detail
 let runtime_error_to_core_error = function
   | Runtime_antigravity.Invalid_config detail ->
     config_error ~field:"antigravity_cli" detail
+  | Runtime_antigravity.Prompt_too_large { bytes; limit } ->
+    (* The prompt is assembled here, so a prompt this runtime cannot spawn is
+       this layer's own construction error, not the provider's. *)
+    internal_error
+      (Printf.sprintf
+         "Antigravity prompt was %d bytes against a %d byte command-line budget"
+         bytes
+         limit)
   | Runtime_antigravity.Turn_failed detail ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
@@ -46,6 +54,10 @@ let recovery_failure_of_runtime_error = function
   | Runtime_antigravity.Invalid_config _
   | Runtime_antigravity.Protocol_error _ ->
     Session_store.Protocol_failed
+  | Runtime_antigravity.Prompt_too_large _ ->
+    (* Retrying the same claim rebuilds the same oversized prompt, so this is a
+       persistence-class stop for an operator, not a transient release. *)
+    Session_store.State_persistence_failed
   | Runtime_antigravity.State_callback_failed _ ->
     Session_store.State_persistence_failed
   | Runtime_antigravity.Turn_failed _ -> Session_store.Provider_rejected
@@ -66,29 +78,85 @@ let render_message (message : Agent_core.Types.message) =
   | Agent_core.Types.Tool -> Ok ("TOOL:\n" ^ text)
 ;;
 
-let render_messages messages =
-  let rec loop rendered = function
-    | [] -> Ok (String.concat "\n\n" (List.rev rendered))
-    | message :: rest ->
-      let* rendered_message = render_message message in
-      loop (rendered_message :: rendered) rest
+type prompt_projection =
+  { prompt : string
+  ; history_kept_messages : int
+  ; history_dropped_messages : int
+  }
+
+let section_separator = "\n\n"
+
+(* A resumed turn sends only the goal because the CLI still holds the
+   conversation. A fresh one has to re-seed it, and that seed is the whole
+   rendered history -- which the CLI takes as one command-line argument. Past
+   the kernel's cap the spawn fails outright, so a Keeper whose history had
+   grown could not start a fresh session at all (#28051, live 2026-08-10).
+
+   The system prompt and the current goal are what the turn is; they are never
+   dropped, and if they alone do not fit the turn is refused rather than
+   silently reshaped. History is the part that can be partial, so it is fitted
+   newest-first into whatever budget remains and the caller is told how many
+   messages did not fit. *)
+let fit_history_to_budget ~budget messages =
+  let rec loop kept kept_bytes = function
+    | [] -> kept, kept_bytes, 0
+    | message :: older ->
+      (match render_message message with
+       | Error _ -> kept, kept_bytes, List.length (message :: older)
+       | Ok rendered ->
+         let separator = if kept = [] then 0 else String.length section_separator in
+         let next_bytes = kept_bytes + separator + String.length rendered in
+         if next_bytes > budget
+         then kept, kept_bytes, List.length (message :: older)
+         else loop (rendered :: kept) next_bytes older)
   in
-  loop [] messages
+  let kept, _, dropped = loop [] 0 (List.rev messages) in
+  String.concat section_separator kept, List.length kept, dropped
 ;;
 
 let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
   if is_resume
-  then Ok goal
+  then
+    Ok { prompt = goal; history_kept_messages = 0; history_dropped_messages = 0 }
   else
-    let* history = render_messages prepared.messages in
-    Ok
-      ([ String_util.trim_to_option prepared.system_prompt
-         |> Option.map (fun value -> "SYSTEM INSTRUCTIONS:\n" ^ value)
-       ; String_util.trim_to_option history
-       ; Some ("CURRENT GOAL:\n" ^ goal)
-       ]
-       |> List.filter_map Fun.id
-       |> String.concat "\n\n")
+    let framed_system =
+      String_util.trim_to_option prepared.system_prompt
+      |> Option.map (fun value -> "SYSTEM INSTRUCTIONS:\n" ^ value)
+    in
+    let framed_goal = "CURRENT GOAL:\n" ^ goal in
+    let required =
+      [ framed_system; Some framed_goal ]
+      |> List.filter_map Fun.id
+      |> String.concat section_separator
+    in
+    let required_bytes = String.length required in
+    if required_bytes >= Runtime_antigravity.max_prompt_bytes
+    then
+      Error
+        (internal_error
+           (Printf.sprintf
+              "Antigravity fresh-session prompt needs %d bytes for the system \
+               prompt and goal alone; the CLI accepts at most %d"
+              required_bytes
+              Runtime_antigravity.max_prompt_bytes))
+    else
+      let budget =
+        Runtime_antigravity.max_prompt_bytes
+        - required_bytes
+        - String.length section_separator
+      in
+      let history, history_kept_messages, history_dropped_messages =
+        fit_history_to_budget ~budget prepared.messages
+      in
+      let prompt =
+        [ framed_system
+        ; String_util.trim_to_option history
+        ; Some framed_goal
+        ]
+        |> List.filter_map Fun.id
+        |> String.concat section_separator
+      in
+      Ok { prompt; history_kept_messages; history_dropped_messages }
 ;;
 
 let tool_spec (tool : Host.dynamic_tool) =
@@ -206,7 +274,19 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       | None -> Ok goal
       | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
     in
-    let* prompt = prompt_for_turn ~is_resume ~goal prepared in
+    let* projected_prompt = prompt_for_turn ~is_resume ~goal prepared in
+    let prompt = projected_prompt.prompt in
+    if projected_prompt.history_dropped_messages > 0
+    then
+      Log.Keeper.warn
+        ~keeper_name
+        "Antigravity fresh session seeded with %d of %d history message(s); %d \
+         did not fit the CLI's command-line prompt budget of %d bytes"
+        projected_prompt.history_kept_messages
+        (projected_prompt.history_kept_messages
+         + projected_prompt.history_dropped_messages)
+        projected_prompt.history_dropped_messages
+        Runtime_antigravity.max_prompt_bytes;
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools
@@ -621,3 +701,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
       ~raw_trace
       ~config)
 ;;
+
+module For_testing = struct
+  let fit_history_to_budget = fit_history_to_budget
+end

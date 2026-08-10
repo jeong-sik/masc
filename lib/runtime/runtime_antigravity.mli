@@ -27,6 +27,13 @@ type config =
 
 val default_config : cwd:string -> model:string -> config
 
+val max_prompt_bytes : int
+(** Largest prompt this runtime can spawn. The CLI has no stdin or file form
+    for the prompt, so it travels as one command-line argument and is bounded
+    by the kernel rather than by the provider. Callers that assemble a prompt
+    from unbounded material must fit it to this budget and account for what
+    they left out; [validate_turn] refuses anything larger. *)
+
 type conversation_mode =
   | Start
   | Resume of { conversation_id : string }
@@ -62,6 +69,14 @@ type turn_result =
 
 type error =
   | Invalid_config of string
+  | Prompt_too_large of
+      { bytes : int
+      ; limit : int
+      }
+      (** The CLI takes the prompt as one command-line argument, so a prompt
+          past the kernel's per-argument cap cannot be spawned at all. Refused
+          here so the caller sees the size instead of an opaque
+          [execve: Argument list too long] from the spawn. *)
   | Spawn_failed of string
   | Protocol_error of
       { stage : string

@@ -31,6 +31,21 @@ let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 8192
 let max_wire_line_bytes = 8 * 1024 * 1024
 
+(* The CLI takes the prompt as a command-line argument (`--print <prompt>`; it
+   has no stdin or file form), so an oversized prompt fails the spawn itself
+   with an opaque Unix error instead of anything a caller can act on. Live
+   2026-08-10: every fresh-session turn for one Keeper died on
+   Failure("execve: Argument list too long"), because a fresh prompt carries
+   the rendered history while a resumed one carries only the goal (#28051).
+
+   The binding constraint is per-argument, not total: Linux caps one argument
+   at MAX_ARG_STRLEN = 32 pages = 131072 bytes regardless of how large ARG_MAX
+   is, and macOS counts the prompt against a 1 MiB ARG_MAX shared with the
+   environment. The bound below stays under the smaller of the two so the same
+   prompt is accepted or refused identically on both, and it is checked here
+   rather than assumed by callers. *)
+let max_prompt_bytes = 120 * 1024
+
 let default_config ~cwd ~model =
   { cli_path = "agy"
   ; cwd
@@ -82,6 +97,10 @@ type turn_result =
 
 type error =
   | Invalid_config of string
+  | Prompt_too_large of
+      { bytes : int
+      ; limit : int
+      }
   | Spawn_failed of string
   | Protocol_error of
       { stage : string
@@ -96,6 +115,12 @@ exception Runtime_error of error
 
 let error_to_string = function
   | Invalid_config detail -> "invalid Antigravity CLI config: " ^ detail
+  | Prompt_too_large { bytes; limit } ->
+    Printf.sprintf
+      "Antigravity prompt is %d bytes; the CLI takes it as one command-line \
+       argument, which the kernel caps at %d bytes"
+      bytes
+      limit
   | Spawn_failed detail -> "failed to start Antigravity CLI: " ^ detail
   | Protocol_error { stage; detail } ->
     Printf.sprintf "Antigravity stream-json protocol error during %s: %s" stage detail
@@ -380,6 +405,10 @@ let validate_config config ~conversation_mode ~prompt =
   then Error (Invalid_config "timeout_s must be positive and finite")
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
+  else if String.length prompt > max_prompt_bytes
+  then
+    Error
+      (Prompt_too_large { bytes = String.length prompt; limit = max_prompt_bytes })
   else
     match config.agent, conversation_mode with
     | Some agent, _ when String.trim agent = "" ->

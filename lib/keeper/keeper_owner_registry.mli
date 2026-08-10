@@ -5,6 +5,7 @@
 
 type install_error =
   | Inventory_already_installed of string
+  | Keeper_chat_cutover_required of Keeper_chat_cutover_preflight.report
   | Inventory_load_failed of
       { keeper_name : string option
       ; detail : string
@@ -34,8 +35,9 @@ val install_from_store
     snapshot is reported and fenced under its exact Keeper name without
     preventing other owners from starting. The affected name cannot be read,
     created, or mutated until process restart re-audits durable state. Failure
-    to enumerate the inventory still fails installation. Returns the installed
-    owner count. *)
+    to enumerate the inventory still fails installation. Installation is also
+    refused until storage from the removed chat path has been explicitly
+    archived. Returns the installed owner count. *)
 
 val get
   :  base_path:string

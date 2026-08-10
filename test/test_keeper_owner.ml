@@ -1482,6 +1482,33 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        | Error error -> fail (Owner_registry.lookup_error_to_string error)))
 ;;
 
+let test_root_inventory_refuses_unarchived_chat_storage () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "owner-cutover-test"));
+       let keeper_dir =
+         Filename.concat (Workspace.keepers_runtime_dir config) "stranded"
+       in
+       let direct_dir = Filename.concat keeper_dir ".chat-direct-active-v1" in
+       Unix.mkdir keeper_dir 0o755;
+       Unix.mkdir direct_dir 0o755;
+       match Owner_registry.install_from_store ~sw ~operation_executor:None config with
+       | Error (Owner_registry.Keeper_chat_cutover_required report) ->
+         check int
+           "one explicit archive artifact"
+           1
+           (Keeper_chat_cutover_preflight.artifact_count report);
+         check int "empty marker directory has no work" 0 report.direct_marker_count
+       | Error error -> fail (Owner_registry.install_error_to_string error)
+       | Ok _ -> fail "Owner inventory ignored unarchived chat storage")
+;;
+
 let test_agent_delegate_submits_owner_operation_without_waiting () =
   init_runtime_default_for_tests ();
   Eio_main.run @@ fun env ->
@@ -2051,6 +2078,10 @@ let () =
             "root inventory loads and extends exactly once"
             `Quick
             test_root_inventory_loads_and_extends_exactly_once
+        ; test_case
+            "root inventory refuses unarchived chat storage"
+            `Quick
+            test_root_inventory_refuses_unarchived_chat_storage
         ; test_case
             "agent delegate submits owner operation without waiting"
             `Quick

@@ -267,6 +267,13 @@ let stimulus_identity_equal a b =
   match a.payload, b.payload with
   | Fusion_completed left, Fusion_completed right ->
     fusion_completion_identity_equal left right
+  | Schedule_due _, Schedule_due _ ->
+    (* [post_id] is the scheduler occurrence identity.  Pre-occurrence-id
+       durable rows decode with an empty payload [occurrence_id], while a
+       replay after upgrade carries the same occurrence in both places.  The
+       first committed row owns the payload, so comparing the payload again
+       would turn that representation upgrade into a second execution. *)
+    true
   | _ -> identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =

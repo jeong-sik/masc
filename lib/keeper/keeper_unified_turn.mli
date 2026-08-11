@@ -148,12 +148,17 @@ type continuation_delivery_state =
 
 type continuation_delivery_completion =
   | Continuation_delivery_not_required
+  | Continuation_delivery_settled_by_terminal_surface_post
   | Continuation_delivery_committed of
       { intent_id : Keeper_continuation_delivery_intent.Intent_id.t
       ; delivery_state : continuation_delivery_state
       }
   | Continuation_delivery_quarantined of { detail : string }
-(** [Continuation_delivery_committed] means the response and exact destination
+(** [Continuation_delivery_settled_by_terminal_surface_post] means the turn's
+    typed terminal-effect boundary and its exact successful
+    [keeper_surface_post] tool receipt proved that the continuation was already
+    delivered, so creating a second outbox intent would duplicate the reply.
+    [Continuation_delivery_committed] means the response and exact destination
     crossed the durable outbox boundary.  Connector settlement is deliberately
     separate: a failed, ambiguous, or recovery-pending projection must not keep
     the source at the active queue head or cause another model run.

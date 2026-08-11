@@ -186,7 +186,10 @@ let set_keeper_wake_result_delivery ~payload ~channel =
        (match List.assoc_opt "body" fields with
         | Some (`Assoc body) ->
           let channel =
-            Option.filter Keeper_continuation_channel.is_routable channel
+            match channel with
+            | Some channel when Keeper_continuation_channel.is_routable channel ->
+              Some channel
+            | Some _ | None -> None
           in
           let result_delivery =
             match channel with

@@ -22,7 +22,7 @@ module Tr = Keeper_terminal_reason
 module UTS = Masc.Keeper_unified_turn_success.For_testing
 module KTP = Masc.Keeper_terminal_effect_policy
 module KOAR = Masc.Keeper_observability_artifact_registry
-module Health_fleet = Masc.Server_routes_http_runtime_health_fleet
+module Health_fleet = Server_routes_http_runtime_health_fleet
 module KMC = Masc.Keeper_meta_contract
 module KMS = Masc.Keeper_meta_store
 module Keeper_identity = Masc.Keeper_identity
@@ -897,6 +897,7 @@ let () =
     { response_text = "completed"
     ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
     ; continuation_delivery_intent = None
+    ; terminal_effect_receipt = None
     ; model_used = "test-model"
     ; runtime_id = "test-runtime"
     ; max_context = 1000
@@ -1108,6 +1109,10 @@ let () =
       ; "transition_outbox_count", `Int 0
       ; "runnable_backlog_count", `Int count
       ; "runnable_oldest_age_seconds", oldest_age
+      ; "recoverable_backlog_count", `Int 0
+      ; "retained_disabled_backlog_count", `Int 0
+      ; "paused_dead_backlog_count", `Int 0
+      ; "shutdown_fenced_backlog_count", `Int 0
       ]
   in
   let stalled =
@@ -1133,6 +1138,39 @@ let () =
   check
     "fresh runnable backlog is explicit warning, not ok"
     (String.equal (string_member "status" fresh_backlog) "warning");
+  let recoverable =
+    match queue ~count:0 ~oldest_age:`Null with
+    | `Assoc fields ->
+      `Assoc
+        (("status", `String "degraded")
+         :: ("operator_action_required", `Bool true)
+         :: ("recoverable_backlog_count", `Int 2)
+         :: List.remove_assoc "status"
+              (List.remove_assoc "operator_action_required"
+                 (List.remove_assoc "recoverable_backlog_count" fields)))
+    | _ -> assert false
+  in
+  let recoverable =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      recoverable
+  in
+  check
+    "non-runnable actionable backlog carries an explicit reason"
+    (match member "status_reasons" recoverable with
+     | `List reasons -> List.mem (`String "recoverable_backlog") reasons
+     | _ -> false);
+  let immediate_backlog =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:0.0
+      (queue ~count:1 ~oldest_age:(`Float 0.0))
+  in
+  check
+    "zero-second threshold degrades runnable backlog immediately"
+    (String.equal (string_member "status" immediate_backlog) "degraded");
+  check
+    "zero-second threshold requires operator action immediately"
+    (member "operator_action_required" immediate_backlog = `Bool true);
   let unavailable =
     Health_fleet.keeper_event_queue_health_dimensions
       ~stale_after_sec:300.0

@@ -13,6 +13,12 @@ type keeper_persistence_report =
       ( Fusion_delivery_projector.recovery_report
       , Fusion_delivery_obligation.error )
         result
+  ; continuation_staging_cleanup :
+      ( string
+        * ( Fs_compat.atomic_orphan_cleanup_report
+          , Keeper_continuation_delivery_store.error )
+            result )
+        list
   }
 
 type keeper_persistence_failure_phase =

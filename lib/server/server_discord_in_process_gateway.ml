@@ -161,7 +161,13 @@ let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
        ; workspace_id = guild_id
        })
     (Keeper_continuation_channel.discord
-       ~guild_id ~channel_id ~parent_channel_id ~thread_id ~user_id:author_id)
+       ~guild_id
+       ~channel_id
+       ~parent_channel_id
+       ~thread_id
+       ~reply_to_message_id:message_id
+       ~user_id:author_id
+       ())
 
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
@@ -543,7 +549,9 @@ let handle_ambient ?resolved_keeper_name ~base_dir
                           ~channel_id
                           ~parent_channel_id
                           ~thread_id
+                          ~reply_to_message_id:message_id
                           ~user_id:author_id
+                          ()
                       with
                       | Ok channel -> channel
                       | Error message -> invalid_arg message)

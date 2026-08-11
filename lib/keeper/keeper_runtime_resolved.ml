@@ -74,7 +74,9 @@ let provider_call_deadline_sec_live () =
    (sub-second to low-seconds), so it fires only on genuine hangs. An explicit
    env/toml value still overrides it verbatim. RFC-0345 §3.2 (Option A) / §3.4;
    revisitable (a floor, not a tuning). *)
-let stream_idle_failsafe_floor_sec = 600.0
+let stream_idle_failsafe_floor_sec =
+  Env_config_keeper.KeeperKeepalive.stream_idle_failsafe_floor_sec
+;;
 
 let freeze_from_current () =
   let stream_idle_timeout_sec =

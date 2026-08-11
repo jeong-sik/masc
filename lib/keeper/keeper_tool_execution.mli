@@ -7,6 +7,10 @@ type deferred_kind =
   | Generic_deferred
   | External_effect_deferred
 
+type terminal_effect_receipt =
+  | Surface_post_completed of Keeper_surface_post.post_target
+(** Producer-owned proof of the concrete terminal effect that completed. *)
+
 (** [disposition] uses the canonical {!Tool_result.disposition}; this module
     deliberately defines no parallel outcome enum.  [raw_output] is opaque
     text. [data] and [metadata] exist only when the producer supplied them. *)
@@ -22,6 +26,7 @@ type t = private
   ; disposition :
       (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition
   ; deferred_kind : deferred_kind option
+  ; terminal_effect_receipt : terminal_effect_receipt option
   }
 
 val success : string -> t
@@ -55,6 +60,9 @@ val failure_data
 (** Preserve the already committed Gate authorization and its audit receipts
     on every disposition, including a later tool failure. *)
 val with_gate_authorization : Keeper_gate.authorization -> t -> t
+
+val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t
+(** Attach the resolved post target only to a completed execution. *)
 
 (** Preserve the authoritative {!Tool_result.disposition} from a normal MASC
     handler. A [`String] payload stays opaque and is never interpreted as

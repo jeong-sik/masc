@@ -5,6 +5,7 @@ let discord channel_id =
     ~parent_channel_id:None
     ~thread_id:None
     ~user_id:"user-1"
+    ()
   |> Result.get_ok
 ;;
 
@@ -55,6 +56,10 @@ let test_wake_origin_requires_exact_route_and_source () =
     (Masc.Keeper_heartbeat_loop.continuation_delivery_authorizes_source_ack
        ~source_requires:false
        Masc.Keeper_unified_turn.Continuation_delivery_not_required);
+  assert
+    (Masc.Keeper_heartbeat_loop.continuation_delivery_authorizes_source_ack
+       ~source_requires:true
+       Masc.Keeper_unified_turn.Continuation_delivery_settled_by_terminal_surface_post);
   assert
     (not
        (Masc.Keeper_heartbeat_loop.continuation_delivery_authorizes_source_ack
@@ -120,9 +125,21 @@ let test_wake_origin_requires_exact_route_and_source () =
     }
   in
   assert
-    (Result.is_error
+    (not
+       (Masc.Keeper_heartbeat_loop.source_requires_continuation_delivery
+          [ unrouted_stimulus ]));
+  assert
+    (Result.fold
+       ~ok:Option.is_none
+       ~error:(fun _ -> false)
        (Masc.Keeper_heartbeat_loop.continuation_delivery_origin_for_stimuli
           [ unrouted_stimulus ]));
+  assert
+    (Result.fold
+       ~ok:Option.is_none
+       ~error:(fun _ -> false)
+       (Masc.Keeper_heartbeat_loop.continuation_delivery_origin_for_stimuli
+          [ unrouted_stimulus; { unrouted_stimulus with post_id = "other" } ]));
   assert
     (Result.is_error
        (Masc.Keeper_heartbeat_loop.continuation_delivery_origin_for_stimuli
@@ -142,7 +159,7 @@ let test_schedule_delivery_requirement_is_persisted_policy () =
     ; result_delivery = None
     }
   in
-  let stimulus wake : Keeper_event_queue.stimulus =
+  let stimulus (wake : Keeper_event_queue.scheduled_wake) : Keeper_event_queue.stimulus =
     { post_id = wake.occurrence_id
     ; urgency = Keeper_event_queue.Normal
     ; arrived_at = 100.0

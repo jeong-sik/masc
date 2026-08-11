@@ -29,7 +29,8 @@ val make_keeper_tool_handler
   -> ?gate_grant:Keeper_gate.cycle_grant
   -> ?record_gate_result:
        (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
-  -> ?on_completed:(unit -> unit)
+  -> ?on_completed:
+       (Keeper_tool_execution.terminal_effect_receipt option -> unit)
   -> ?on_deferred:(unit -> unit)
   -> ?on_external_effect_deferred:(unit -> unit)
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)

@@ -130,6 +130,7 @@ type continuation_delivery_state =
 
 type continuation_delivery_completion =
   | Continuation_delivery_not_required
+  | Continuation_delivery_settled_by_terminal_surface_post
   | Continuation_delivery_committed of
       { intent_id : Keeper_continuation_delivery_intent.Intent_id.t
       ; delivery_state : continuation_delivery_state
@@ -1123,20 +1124,90 @@ let run_keeper_cycle
                          ; delivery_state
                          }
                      in
+                     let committed_delivery_of_recovered_intent intent =
+                       let delivery_state =
+                         match intent.Keeper_continuation_delivery_intent.state with
+                         | Keeper_continuation_delivery_intent.Delivered _ ->
+                           Delivery_delivered
+                         | Keeper_continuation_delivery_intent.Failed _ ->
+                           Delivery_failed
+                         | Keeper_continuation_delivery_intent.Ambiguous _ ->
+                           Delivery_ambiguous
+                         | Keeper_continuation_delivery_intent.Pending
+                         | Keeper_continuation_delivery_intent.Attempting _ ->
+                           Delivery_recovery_pending
+                       in
+                       committed_delivery intent delivery_state
+                     in
                      let delivery_settlement =
                        match
                          ( continuation_delivery_origin
                          , result.Keeper_agent_run.continuation_delivery_intent
-                         , result.Keeper_agent_run.stop_reason )
+                         , result.Keeper_agent_run.turn_outcome
+                         , result.Keeper_agent_run.stop_reason
+                         , result.Keeper_agent_run.terminal_effect_receipt )
                        with
-                       | Some _, None, Runtime_agent.Completed ->
+                       | ( Some origin
+                         , None
+                         , Keeper_turn_outcome.External_effect_completed
+                         , Runtime_agent.Completed
+                         , Some
+                             (Keeper_tool_execution.Surface_post_completed target) )
+                         when Keeper_surface_post.matches_continuation_route
+                                target
+                                origin.channel ->
+                         Continuation_delivery_settled_by_terminal_surface_post
+                       | Some _, None, _, Runtime_agent.Completed, _ ->
                          Continuation_delivery_quarantined
                            { detail =
                                "routable continuation completed without a visible delivery intent"
                            }
-                       | _, None, _ -> Continuation_delivery_not_required
-                       | _, Some intent, _ ->
+                       | _, None, _, _, _ -> Continuation_delivery_not_required
+                       | _, Some intent, _, _, _ ->
                          (match Keeper_continuation_delivery_store.persist ~config intent with
+                          | Error
+                              (Keeper_continuation_delivery_store.Persistence_failed
+                                { publication =
+                                    Keeper_continuation_delivery_store.Published_indeterminate
+                                ; detail
+                                }) ->
+                            (* Atomic rename made the publication outcome
+                               indeterminate.  Re-read the deterministic final
+                               path before classifying the source: the intent
+                               may already be the durable recovery token. *)
+                            (match
+                               Keeper_continuation_delivery_recovery.settle_existing
+                                 ~config
+                                 ~keeper_name:meta.name
+                                 ~origin:intent.origin
+                             with
+                             | Keeper_continuation_delivery_recovery.Obligation_committed
+                                 { intent = recovered; recovery_detail } ->
+                               Log.Keeper.warn
+                                 ~keeper_name:meta.name
+                                 "continuation outbox commit was indeterminate but the exact final record was recovered: intent_id=%s detail=%s%s"
+                                 (Keeper_continuation_delivery_intent.Intent_id.to_string
+                                    recovered.intent_id)
+                                 detail
+                                 (match recovery_detail with
+                                  | None -> ""
+                                  | Some recovery -> "; recovery: " ^ recovery);
+                               committed_delivery_of_recovered_intent recovered
+                             | Keeper_continuation_delivery_recovery.No_obligation ->
+                               Continuation_delivery_quarantined
+                                 { detail =
+                                     "continuation outbox commit was indeterminate and the final record is absent: "
+                                     ^ detail
+                                 }
+                             | Keeper_continuation_delivery_recovery.Quarantine_required
+                                 { detail = recovery; _ } ->
+                               Continuation_delivery_quarantined
+                                 { detail =
+                                     "continuation outbox commit was indeterminate and exact recovery failed: "
+                                     ^ detail
+                                     ^ "; recovery: "
+                                     ^ recovery
+                                 })
                           | Error error ->
                             Continuation_delivery_quarantined
                               { detail =

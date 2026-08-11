@@ -112,8 +112,9 @@ let mark_ambiguous ~adapter ~config ~detail intent =
 
 let connector_request_of_channel channel ~content =
   match channel with
-  | Keeper_continuation_channel.Discord { channel_id; _ } ->
-    Some (Discord { channel_id; content; reply_to_message_id = None })
+  | Keeper_continuation_channel.Discord
+      { channel_id; reply_to_message_id; _ } ->
+    Some (Discord { channel_id; content; reply_to_message_id })
   | Keeper_continuation_channel.Slack { channel_id; thread_ts; _ } ->
     Some
       (Slack

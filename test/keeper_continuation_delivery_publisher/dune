@@ -1,7 +1,7 @@
 (test
  (name test_keeper_continuation_delivery_publisher)
- (libraries alcotest eio_main masc yojson))
+ (libraries alcotest eio_main masc masc.fs_compat unix yojson))
 
 (test
  (name test_keeper_continuation_delivery_conformance)
- (libraries alcotest eio_main masc yojson))
+ (libraries alcotest eio_main masc masc.fs_compat unix yojson))

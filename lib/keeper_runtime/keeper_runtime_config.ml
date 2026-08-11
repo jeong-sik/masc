@@ -160,8 +160,16 @@ let owned_namespaces =
     Keeper_runtime_setting_registry.all
 ;;
 
+let is_direct_namespace_child key =
+  match String.split_on_char '.' key with
+  | [ namespace; _ ] -> List.exists (String.equal namespace) owned_namespaces
+  | _ -> false
+;;
+
 let is_owned_key key =
-  List.exists (String.equal (first_segment key)) owned_namespaces
+  String.equal key schema_version_key
+  || Option.is_some (Keeper_runtime_setting_registry.find_by_toml_key key)
+  || is_direct_namespace_child key
 ;;
 
 let numeric_value = function
@@ -341,7 +349,7 @@ let validate_doc doc =
 
 let validate_source_text source_text =
   match Keeper_toml_loader.parse_toml source_text with
-  | Error message -> Error message
+  | Result.Error message -> Result.Error message
   | Ok doc -> Ok (validate_doc doc)
 ;;
 
@@ -405,11 +413,190 @@ let application_status doc (row : Keeper_runtime_setting_registry.setting) =
     if Keeper_runtime_setting_registry.requires_restart row
     then "pending_restart"
     else "pending_effect_boundary"
+  | None, "toml" ->
+    (* The boot snapshot still serves the removed TOML value until restart.
+       Absence in the edited document is therefore a pending removal, not
+       "not configured". *)
+    "pending_restart"
   | None, _ ->
     (match row.exposure with
      | Keeper_runtime_setting_registry.Env_only -> "environment_only"
      | Keeper_runtime_setting_registry.Toml_and_env _ -> "not_configured")
   | Some _, _ -> "pending_restart"
+;;
+
+let display_bool value = if value then "true" else "false"
+let display_int = string_of_int
+let display_float value = Printf.sprintf "%g" value
+let display_string_option = Option.value ~default:"(none)"
+let display_float_option = Option.fold ~none:"(none)" ~some:display_float
+
+let bounded_int_from_env ~default ~min_value ~max_value env_name =
+  Env_config_core.get_int ~default env_name |> max min_value |> min max_value
+;;
+
+let bounded_float_from_env ~default ~min_value ~max_value env_name =
+  Env_config_core.get_float ~default env_name
+  |> Float.max min_value
+  |> Float.min max_value
+;;
+
+(** Read the same typed value exposed to the runtime consumer. This projection
+    deliberately does not echo [raw_value_opt]: malformed or clamped process
+    input must never be presented to operators as an effective value. *)
+let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
+  try
+    Result.Ok
+      (match row.env_name with
+       | "MASC_KEEPER_BOOTSTRAP_ENABLED" ->
+         display_bool Env_config_keeper.KeeperBootstrap.enabled
+       | "MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC" ->
+         display_float
+           Env_config_keeper.KeeperBootstrap.lazy_startup_poll_interval_sec
+       | "MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC" ->
+         display_float
+           Env_config_keeper.KeeperBootstrap.keeper_listener_retry_interval_sec
+       | "MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC" ->
+         display_float Env_config_keeper.KeeperBootstrap.post_startup_settle_sec
+       | "MASC_KEEPER_REACTIVE_ENABLED"
+       | "MASC_KEEPER_PROACTIVE_ENABLED"
+       | "MASC_KEEPER_AUTONOMOUS_ENABLED" ->
+         display_bool (Feature_flag_registry.get_bool row.env_name)
+       | "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" ->
+         display_int Env_config_keeper.KeeperKeepalive.interval_sec
+       | "MASC_KEEPER_MAX_SILENCE_SEC" ->
+         display_float Env_config_keeper.WorkAsHeartbeat.max_silence_sec
+       | "MASC_KEEPER_SNAPSHOT_SEC" ->
+         display_int Env_config_keeper.KeeperRuntime.snapshot_sec
+       | "MASC_KEEPER_WORK_AS_HEARTBEAT" ->
+         display_bool Env_config_keeper.WorkAsHeartbeat.enabled
+       | "MASC_KEEPER_SLEEP_CHUNK_SEC" ->
+         display_float Env_config_keeper.KeeperKeepalive.sleep_chunk_sec
+       | "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" ->
+         display_float (Env_config_keeper.KeeperHealth.durable_queue_stale_sec ())
+       | "MASC_KEEPER_WIRE_CAPTURE" ->
+         display_bool (Env_config_keeper.KeeperWireCapture.enabled ())
+       | "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" ->
+         display_int (Env_config_keeper.KeeperWireCapture.retention_days ())
+       | "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" ->
+         display_int (Env_config_keeper.KeeperWireCapture.max_bytes ())
+       | "MASC_KEEPER_DEBUG" ->
+         display_bool Env_config_keeper.KeeperRuntime.debug
+       | "MASC_KEEPER_BATCH_LIMIT" ->
+         display_int
+           (bounded_int_from_env
+              ~default:200
+              ~min_value:10
+              ~max_value:2000
+              row.env_name)
+       | "MASC_KEEPER_UNIFIED_TEMP" ->
+         display_float
+           (bounded_float_from_env
+              ~default:0.4
+              ~min_value:0.0
+              ~max_value:2.0
+              row.env_name)
+       | "MASC_KEEPER_ENABLE_THINKING" ->
+         display_bool (Env_config_core.get_bool ~default:false row.env_name)
+       | "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" ->
+         (match Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec () with
+          | Some value -> display_float value
+          | None ->
+            display_float
+              Env_config_keeper.KeeperKeepalive.stream_idle_failsafe_floor_sec)
+       | "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" ->
+         display_float_option
+           Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override
+       | "MASC_KEEPER_BODY_TIMEOUT_SEC" ->
+         display_float_option Env_config_keeper.KeeperKeepalive.body_timeout_sec_override
+       | "MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC" ->
+         display_float Env_config_keeper.KeeperPollIntervals.crash_persistence_drain_sec
+       | "MASC_KEEPER_STAGE_TIMING_RING_SIZE" ->
+         display_int Env_config_keeper.KeeperProactive.stage_timing_ring_size
+       | "MASC_KEEPER_SUPERVISOR_SWEEP_SEC" ->
+         display_float Env_config_keeper.KeeperSupervisor.sweep_interval_sec
+       | "MASC_KEEPER_DEAD_TTL_SEC" ->
+         display_float Env_config_keeper.KeeperSupervisor.dead_ttl_sec
+       | "MASC_KEEPER_METRICS_MAX_BYTES" ->
+         display_int Env_config_keeper.KeeperMetrics.max_file_bytes
+       | "MASC_KEEPER_METRICS_MAX_ROTATED" ->
+         display_int Env_config_keeper.KeeperMetrics.max_rotated_files
+       | "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS" ->
+         display_int (Env_config_keeper.KeeperMemoryOs.librarian_cadence_turns ())
+       | "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES" ->
+         display_int (Env_config_keeper.KeeperMemoryOs.librarian_max_messages ())
+       | "MASC_KEEPER_MEMORY_OS_RECALL_FACTS_MAX_BYTES" ->
+         display_int (Env_config_keeper.KeeperMemoryOs.recall_facts_max_bytes ())
+       | "MASC_KEEPER_MEMORY_OS_RECALL" ->
+         display_bool (Env_config_keeper.KeeperMemoryOs.recall_enabled ())
+       | "MASC_KEEPER_MEMORY_OS_LIBRARIAN" ->
+         (match Env_config_keeper.KeeperMemoryOs.librarian_config_state () with
+          | Env_config_keeper.KeeperMemoryOs.Enabled -> "true"
+          | Env_config_keeper.KeeperMemoryOs.Disabled -> "false"
+          | Env_config_keeper.KeeperMemoryOs.Invalid ->
+            raise
+              (Env_config_core.Config_error
+                 "MASC_KEEPER_MEMORY_OS_LIBRARIAN is malformed"))
+       | "MASC_KEEPER_COMPACTION_SNAPSHOT_DEFAULT_LIMIT" ->
+         display_int Env_config_keeper.KeeperCompactionSnapshots.default_limit
+       | "MASC_KEEPER_COMPACTION_SNAPSHOT_MAX_LIMIT" ->
+         display_int Env_config_keeper.KeeperCompactionSnapshots.max_limit
+       | "MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_MIN_FILES" ->
+         display_int Env_config_keeper.KeeperCompactionSnapshots.manifest_scan_min_files
+       | "MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_LIMIT_MULTIPLIER" ->
+         display_int
+           Env_config_keeper.KeeperCompactionSnapshots.manifest_scan_limit_multiplier
+       | "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" ->
+         display_int (Env_config_keeper.KeeperVision.max_image_bytes ())
+       | "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" ->
+         display_float (Env_config_keeper.KeeperVision.candidate_backoff_base_sec ())
+       | "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC" ->
+         display_float (Env_config_keeper.KeeperVision.candidate_backoff_max_sec ())
+       | "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" ->
+         display_int (Env_config_keeper.KeeperGeneratedMedia.max_bytes ())
+       | "MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES" ->
+         display_int (Env_config_keeper.KeeperGeneratedMedia.dir_max_bytes ())
+       | "MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC" ->
+         display_float (Env_config_keeper.KeeperGeneratedMedia.retention_seconds ())
+       | "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC" ->
+         display_float Env_config_keeper.KeeperGrpc.reconnect_backoff_sec
+       | "MASC_SEARXNG_URL" ->
+         let url =
+           match Env_config_core.raw_value_opt row.env_name with
+           | None -> Masc_network_defaults.searxng_default_url
+           | Some raw ->
+             let normalized =
+               raw |> String.trim |> Env_config_core.strip_trailing_slashes
+             in
+             if String.equal normalized ""
+             then Masc_network_defaults.searxng_default_url
+             else normalized
+         in
+         (match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
+          | Some ("http" | "https") -> url
+          | Some _ | None ->
+            raise
+              (Env_config_core.Config_error
+                 (Printf.sprintf
+                    "MASC_SEARXNG_URL must use http or https scheme (got: %s)"
+                    url)))
+       | "MASC_WEB_SEARCH_PROVIDER" ->
+         display_string_option (Env_config_runtime.Tools.web_search_provider_opt ())
+       | "MASC_WEB_SEARCH_PROVIDER_ORDER" ->
+         display_string_option
+           (Env_config_runtime.Tools.web_search_provider_order_opt ())
+       | "MASC_WEB_SEARCH_FALLBACKS" ->
+         display_string_option (Env_config_runtime.Tools.web_search_fallbacks_opt ())
+       | "MASC_WEB_SEARCH_TIMEOUT_SEC" ->
+         display_int (Env_config_runtime.Tools.web_search_timeout_sec ())
+       | "MASC_WEB_SEARCH_CACHE_TTL_SEC" ->
+         display_float (Env_config_runtime.Tools.web_search_cache_ttl_sec ())
+       | unsupported ->
+         raise
+           (Env_config_core.Config_error
+              ("no typed effective-value projector for " ^ unsupported)))
+  with
+  | Env_config_core.Config_error message -> Result.Error message
 ;;
 
 let settings_projection_to_yojson doc =
@@ -422,11 +609,7 @@ let settings_projection_to_yojson doc =
   let project (row : Keeper_runtime_setting_registry.setting) =
     let configured_value = configured_value doc row in
     let source = effective_source row.env_name in
-    let effective_value =
-      Option.value
-        ~default:row.default_display
-        (Env_config_core.raw_value_opt row.env_name)
-    in
+    let effective_value = effective_setting_value row in
     let application_status = application_status doc row in
     `Assoc
       [ ( "key"
@@ -439,7 +622,14 @@ let settings_projection_to_yojson doc =
           | Some value -> `String value
           | None -> `Null )
       ; "source", `String source
-      ; "effective_value", `String effective_value
+      ; ( "effective_value"
+        , match effective_value with
+          | Ok value -> `String value
+          | Result.Error _ -> `Null )
+      ; ( "effective_error"
+        , match effective_value with
+          | Ok _ -> `Null
+          | Result.Error message -> `String message )
       ; "applied_at", applied_at_json application_status
       ; "reload_class", `String (Keeper_runtime_setting_registry.reload_class_label row.reload_class)
       ; "requires_restart", `Bool (Keeper_runtime_setting_registry.requires_restart row)
@@ -455,12 +645,18 @@ let overlay_application_to_yojson doc =
     Keeper_runtime_setting_registry.active_toml
     |> List.filter (fun row -> Option.is_some (configured_value doc row))
   in
+  let application_rows =
+    Keeper_runtime_setting_registry.active_toml
+    |> List.filter (fun row ->
+      Option.is_some (configured_value doc row)
+      || String.equal (effective_source row.env_name) "toml")
+  in
   let classified =
     List.map
       (fun row ->
          Option.value ~default:row.env_name (Keeper_runtime_setting_registry.toml_key_opt row),
          application_status doc row)
-      configured
+      application_rows
   in
   let keys_with_status expected =
     classified
@@ -540,17 +736,17 @@ let load_and_apply ~base_path =
     Ok 0
   else
     match read_file path with
-    | Error msg ->
-      Error { kind = Read; message = Printf.sprintf "%s: %s" path msg }
+    | Result.Error msg ->
+      Result.Error { kind = Read; message = Printf.sprintf "%s: %s" path msg }
     | Ok content ->
       match Keeper_toml_loader.parse_toml content with
-      | Error msg ->
-        Error { kind = Parse; message = Printf.sprintf "%s: %s" path msg }
+      | Result.Error msg ->
+        Result.Error { kind = Parse; message = Printf.sprintf "%s: %s" path msg }
       | Ok doc ->
         let report = validate_doc doc in
         (match List.find_opt (fun issue -> issue.severity = Error) report.issues with
          | Some issue ->
-           Error
+           Result.Error
              { kind = Validate
              ; message = Printf.sprintf "%s: %s: %s" path issue.key issue.detail
              }

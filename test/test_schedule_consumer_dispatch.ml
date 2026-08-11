@@ -742,6 +742,21 @@ let test_routed_schedule_carries_occurrence_destination_to_keeper () =
   check string "result projection is bound to the exact occurrence"
     occurrence_id
     (row |> member "result_delivery" |> member "occurrence_id" |> to_string);
+  let public_destination = row |> member "result_delivery" |> member "destination" in
+  check string "public result destination exposes only connector kind" "slack"
+    (public_destination |> member "kind" |> to_string);
+  check string "public result destination coordinates are redacted" "redacted"
+    (public_destination |> member "coordinates" |> to_string);
+  let public_delivery_json =
+    row |> member "result_delivery" |> Yojson.Safe.to_string
+  in
+  List.iter
+    (fun private_coordinate ->
+       check bool
+         ("public delivery omits " ^ private_coordinate)
+         false
+         (String_util.contains_substring public_delivery_json private_coordinate))
+    [ "team-1"; "channel-1"; "1710000000.100"; "user-1" ];
   let origin =
     match
       Keeper_continuation_delivery_intent.origin_of_payload stimulus.payload

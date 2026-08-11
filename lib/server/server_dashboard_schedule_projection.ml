@@ -705,7 +705,7 @@ let result_delivery_state_fields
 ;;
 
 let schedule_result_delivery_dashboard_json
-  (config : Workspace.config)
+  ~delivery_inventory_by_keeper
   (request : Schedule_domain.schedule_request)
   (last_wake : Schedule_domain.wake_record option)
   =
@@ -758,7 +758,15 @@ let schedule_result_delivery_dashboard_json
          }) ->
           projection ~policy:"none" ~required:false "not_required"))
   | Ok (Some channel) ->
-    let destination = Keeper_continuation_channel.to_yojson channel in
+    (* This route is a public-read dashboard surface.  Connector coordinates
+       remain available to the internal delivery comparison below, but the
+       response exposes only the typed surface kind. *)
+    let destination =
+      `Assoc
+        [ "kind", `String (Keeper_continuation_channel.kind_label channel)
+        ; "coordinates", `String "redacted"
+        ]
+    in
     let routed_projection ?(extra_fields = []) status =
       projection
         ~policy:"reply_to_origin"
@@ -807,12 +815,14 @@ let schedule_result_delivery_dashboard_json
                              "dispatch receipt omitted required reply-to-origin policy" ) ])
                   "destination_conflict"
               | Server_schedule_consumers.Keeper_wake_result_delivery_reply_to_origin ->
-                (match
-                Keeper_continuation_delivery_store.inventory
-                  ~config
-                  ~keeper_name
-              with
-              | Error error ->
+                (match List.assoc_opt keeper_name delivery_inventory_by_keeper with
+              | None ->
+                routed_projection
+                  ~extra_fields:
+                    (occurrence_fields
+                     @ [ "detail", `String "continuation delivery inventory snapshot is missing" ])
+                  "read_error"
+              | Some (Error error) ->
                 routed_projection
                   ~extra_fields:
                     (occurrence_fields
@@ -821,10 +831,12 @@ let schedule_result_delivery_dashboard_json
                              (Keeper_continuation_delivery_store.error_to_string
                                 error) ) ])
                   "read_error"
-              | Ok
-                  { intents = _
-                  ; record_failures = (_ :: _ as record_failures)
-                  } ->
+              | Some
+                  (Ok
+                    Keeper_continuation_delivery_store.
+                      { intents = _
+                      ; record_failures = (_ :: _ as record_failures)
+                      }) ->
                 routed_projection
                   ~extra_fields:
                     (occurrence_fields
@@ -835,7 +847,10 @@ let schedule_result_delivery_dashboard_json
                          , result_delivery_record_failures_json record_failures )
                        ])
                   "read_error"
-              | Ok { intents; record_failures = [] } ->
+              | Some
+                  (Ok
+                    Keeper_continuation_delivery_store.
+                      { intents; record_failures = [] }) ->
                 let matching =
                   List.filter
                     (fun
@@ -888,7 +903,7 @@ let schedule_result_delivery_dashboard_json
 
 let schedule_request_dashboard_json
   ~now
-  ~config
+  ~delivery_inventory_by_keeper
   ~evidence_snapshot
   ?last_wake
   (request : Schedule_domain.schedule_request)
@@ -957,7 +972,10 @@ let schedule_request_dashboard_json
         | Some wake -> wake_record_dashboard_json wake )
     ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_wake
     ; ( "result_delivery"
-      , schedule_result_delivery_dashboard_json config request last_wake )
+      , schedule_result_delivery_dashboard_json
+          ~delivery_inventory_by_keeper
+          request
+          last_wake )
     ; ( "keeper_queue_evidence"
       , schedule_keeper_queue_evidence_dashboard_json
           ~now
@@ -1171,6 +1189,38 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
         ~config
         (List.map snd request_rows_with_wakes)
     in
+    let delivery_keeper_names =
+      request_rows_with_wakes
+      |> List.filter_map (fun (_, last_wake) ->
+        match last_wake with
+        | None | Some { Schedule_domain.detail = None; _ } -> None
+        | Some { Schedule_domain.detail = Some detail; _ } ->
+          (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+           | Ok
+               (Server_schedule_consumers.Keeper_wake_enqueued
+                 { keeper_name
+                 ; result_delivery_policy =
+                     Server_schedule_consumers.Keeper_wake_result_delivery_reply_to_origin
+                 ; _
+                 }) ->
+             Some keeper_name
+           | Error _
+           | Ok
+               (Server_schedule_consumers.Keeper_wake_enqueued
+                 { result_delivery_policy =
+                     Server_schedule_consumers.Keeper_wake_result_delivery_none
+                 ; _
+                 }) ->
+             None))
+      |> List.sort_uniq String.compare
+    in
+    let delivery_inventory_by_keeper =
+      List.map
+        (fun keeper_name ->
+           ( keeper_name
+           , Keeper_continuation_delivery_store.inventory ~config ~keeper_name ))
+        delivery_keeper_names
+    in
     `Assoc
       (base_fields
        @ [ "status", `String "ok"
@@ -1196,7 +1246,7 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
                   (fun (request, last_wake) ->
                      schedule_request_dashboard_json
                        ~now
-                       ~config
+                       ~delivery_inventory_by_keeper
                        ~evidence_snapshot
                        ?last_wake
                        request)

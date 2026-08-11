@@ -1045,9 +1045,20 @@ let run_turn
                       with
                       | Error e -> Error e
                       | Ok response_text ->
+                        let terminal_effect_state = s.terminal_effect_state () in
+                        let terminal_effect_receipt =
+                          match terminal_effect_state with
+                          | Keeper_tools_agent_core.Terminal_effect_completed receipt ->
+                            Some receipt
+                          | Keeper_tools_agent_core.Terminal_effect_open
+                          | Keeper_tools_agent_core.Deferred_tool_result
+                          | Keeper_tools_agent_core.External_effect_deferred
+                          | Keeper_tools_agent_core.Terminal_effect_failed _ ->
+                            None
+                        in
                         let turn_outcome =
-                          match s.terminal_effect_state () with
-                          | Keeper_tools_agent_core.Terminal_effect_completed ->
+                          match terminal_effect_state with
+                          | Keeper_tools_agent_core.Terminal_effect_completed _ ->
                             Ok Keeper_turn_outcome.External_effect_completed
                           | Keeper_tools_agent_core.Terminal_effect_failed failure ->
                             Error
@@ -1093,6 +1104,7 @@ let run_turn
                              ~history_assistant_source
                              ~raw_response_text:response_text
                              ~turn_outcome
+                             ~terminal_effect_receipt
                              ?continuation_channel
                              ?continuation_delivery_origin
                              ~capture_replay_response:

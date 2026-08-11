@@ -72,6 +72,7 @@ let channel =
     ~parent_channel_id:None
     ~thread_id:(Some "thread-1")
     ~user_id:"user-1"
+    ()
   |> function
   | Ok channel -> channel
   | Error detail -> fail detail

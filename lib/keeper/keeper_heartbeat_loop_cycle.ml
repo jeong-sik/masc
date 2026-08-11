@@ -196,7 +196,10 @@ let run_keeper_cycle_admitted
         meta_after_triage
     in
     Failed { meta; failure }
-  | Ok (Keeper_unified_turn.Turn_completed completion) -> Completed completion
+  | Ok
+      (Keeper_unified_turn.Turn_completed
+        { meta; continuation_delivery }) ->
+    Completed { meta; continuation_delivery }
   | Ok (Keeper_unified_turn.Turn_checkpointed updated) -> Checkpointed updated
   | Ok (Keeper_unified_turn.Turn_input_required updated) -> Input_required updated
   | Ok (Keeper_unified_turn.Turn_cancelled meta) -> Cancelled meta

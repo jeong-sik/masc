@@ -21,6 +21,7 @@ type t = private
       channel_id : string;
       parent_channel_id : string option;
       thread_id : string option;
+      reply_to_message_id : string option;
       user_id : string;
     }
   | Slack of {
@@ -38,7 +39,9 @@ val discord :
   channel_id:string ->
   parent_channel_id:string option ->
   thread_id:string option ->
+  ?reply_to_message_id:string ->
   user_id:string ->
+  unit ->
   (t, string) result
 
 (** [discord_thread_parent channel ~parent_channel_id] preserves a Discord

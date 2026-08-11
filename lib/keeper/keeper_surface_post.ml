@@ -110,6 +110,28 @@ let set_blocks target blocks_opt =
   | To_slack s -> To_slack { s with blocks = blocks_opt }
   | other -> other
 
+let matches_continuation_route target channel =
+  match target, channel with
+  | ( To_discord { channel_id = posted }
+    , Keeper_continuation_channel.Discord
+        { channel_id; reply_to_message_id = None; _ } ) ->
+    String.equal posted channel_id
+  | ( To_slack { channel_id = posted; _ }
+    , Keeper_continuation_channel.Slack
+        { channel_id; thread_ts = None; _ } ) ->
+    String.equal posted channel_id
+  | ( To_dashboard
+    , Keeper_continuation_channel.Dashboard _ ) ->
+    (* Dashboard posts are currently keeper-global ([session_id=None]), so
+       they cannot prove delivery to one exact continuation thread. *)
+    false
+  | ( To_dashboard | To_discord _ | To_slack _ )
+    , ( Keeper_continuation_channel.Dashboard _
+      | Keeper_continuation_channel.Discord _
+      | Keeper_continuation_channel.Slack _
+      | Keeper_continuation_channel.Unrouted _ ) ->
+    false
+
 let ok_json ~surface ?message_id () =
   let fields =
     [ ("status", `String "posted"); ("surface", `String surface) ]

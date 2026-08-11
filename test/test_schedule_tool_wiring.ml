@@ -676,7 +676,11 @@ let test_keeper_wake_target_validation_is_inside_creation_fence () =
   let ctx : Tool_schedule.context =
     { config
     ; agent_name = "scheduler-agent"
-    ; continuation_channel = None
+    ; stamp_keeper_wake_result_delivery =
+        (fun ~payload ->
+           Schedule_payload_projection.set_keeper_wake_result_delivery
+             ~payload
+             ~channel:None)
     ; admit_keeper_wake_creation
     }
   in

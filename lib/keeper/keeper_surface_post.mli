@@ -51,5 +51,12 @@ val set_blocks : post_target -> rich_block list option -> post_target
 (** [set_blocks target blocks] attaches [blocks] to a [To_slack] target and
     returns any other target unchanged. *)
 
+val matches_continuation_route :
+  post_target -> Keeper_continuation_channel.t -> bool
+(** True only when the completed post proves the same concrete delivery route.
+    Keeper-global dashboard posts, Discord replies, and Slack thread replies
+    are not treated as exact matches when the post transport did not carry
+    those coordinates. *)
+
 val ok_json : surface:string -> ?message_id:string -> unit -> string
 val error_json : string -> string

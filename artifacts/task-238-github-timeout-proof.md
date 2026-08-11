@@ -15,5 +15,7 @@ Verification:
 - bash scripts/dune-local.sh exec test/keeper_github_identity/test_keeper_github_identity.exe: 11 tests passed in 0.525s, including bounded capture/status and inherited logout timeout regressions.
 - bash scripts/dune-local.sh build lib/masc.cmxa exited 0.
 
-Bounded verifier snapshot:
-- `artifacts/task-238-dashboard-login-excerpt.md` contains the dashboard POST's explicit timeout call and is kept below the artifact read limit.
+Bounded verifier snapshots (each kept below the artifact read limit):
+- `artifacts/task-238-identity-timeout-excerpt.md` contains bounded capture/inherited wait and kill/reap behavior.
+- `artifacts/task-238-dashboard-login-excerpt.md` contains the dashboard POST's explicit timeout call.
+- `artifacts/task-238-timeout-regression-excerpt.md` contains the hanging status/logout regression tests.

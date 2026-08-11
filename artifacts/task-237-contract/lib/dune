@@ -1,0 +1,21 @@
+Source: lib/dune
+Commit under test: 23662748a1
+
+Bounded source excerpt (lines 1-7):
+
+    1 (include_subdirs unqualified)
+    2 (library
+    3  (name masc)
+    4  (flags :standard)
+    5  (modules
+    6   (:standard
+    7    keeper_github_identity))
+
+The root masc library explicitly includes keeper_github_identity while
+retaining the inferred module set through :standard.
+
+Generated build evidence from:
+dune build --root . --build-dir _build-task237-explicit lib/masc.cmxa bin/main_eio.exe
+
+_build-task237-explicit/default/lib/masc.ml-gen:483-484:
+module Keeper_github_identity = Masc__Keeper_github_identity

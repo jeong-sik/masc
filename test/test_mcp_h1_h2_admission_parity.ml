@@ -50,6 +50,16 @@ let assert_order label ~before ~after source =
   let after_idx = Str.search_forward (Str.regexp_string after) source 0 in
   check bool label true (before_idx < after_idx)
 
+let source_slice (source : string) (start_marker : string) (stop_marker : string) =
+  let start_idx =
+    Str.search_forward (Str.regexp_string start_marker) source 0
+  in
+  let body_start = start_idx + String.length start_marker in
+  let stop_idx =
+    Str.search_forward (Str.regexp_string stop_marker) source body_start
+  in
+  String.sub source body_start (stop_idx - body_start)
+
 let request ?(headers = []) ?(meth = `POST) target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) meth target
 
@@ -471,6 +481,54 @@ let test_h1_h2_delete_route_wiring_parity () =
       ("forgets session after termination", "forget_mcp_session session_id");
     ]
 
+let test_h2_board_reaction_mutation_uses_can_vote_gate () =
+  let h2 = source_file "lib/server/server_h2_gateway.ml" in
+  let auth_helper =
+    source_slice
+      h2
+      "    let with_h2_token_permission_auth h2_reqd ~permission f ="
+      "    (* H2 counterpart"
+  in
+  List.iter
+    (fun (label, needle) ->
+      assert_contains ("H2 reaction auth helper " ^ label) ~needle auth_helper)
+    [ ( "authorizes the token-bound permission"
+        , "authorize_token_bound_permission_request" )
+    ; ( "forwards the requested permission"
+        , "~permission\n            httpun_request" )
+    ; ( "rejects auth failures through the H2 response"
+        , "| Error err -> h2_respond_auth_error h2_reqd err" )
+    ];
+  let catalog_route =
+    source_slice
+      h2
+      {|      | `GET, "/api/v1/board/reactions/catalog" ->|}
+      {|
+
+      | `GET, "/api/v1/board/reactions" ->|}
+  in
+  assert_contains
+    "H2 reaction catalog stays on the anonymous public-read lane"
+    ~needle:"with_h2_public_read"
+    catalog_route;
+  let post_route =
+    source_slice
+      h2
+      {|      | `POST, "/api/v1/board/reactions" ->|}
+      "\n\n      (*"
+  in
+  List.iter
+    (fun (label, needle) ->
+      assert_contains ("H2 reaction mutation " ^ label) ~needle post_route)
+    [ ( "uses token permission auth", "with_h2_token_permission_auth" )
+    ; ( "requires CanVote", "~permission:Masc_domain.CanVote" )
+    ; ( "passes the authorized actor to toggle", "toggle_json ~actor" )
+    ];
+  assert_not_contains
+    "H2 reaction mutation is not public-read"
+    ~needle:"with_h2_public_read"
+    post_route
+
 let test_h2_oauth_route_and_authority_lifetime () =
   let h2 = source_file "lib/server/server_h2_gateway.ml" in
   List.iter
@@ -803,6 +861,8 @@ let () =
             test_h1_h2_post_route_wiring_parity;
           test_case "H1/H2 DELETE route uses the same admission gates" `Quick
             test_h1_h2_delete_route_wiring_parity;
+          test_case "H2 board reaction mutation uses CanVote gate" `Quick
+            test_h2_board_reaction_mutation_uses_can_vote_gate;
           test_case "H2 OAuth routes preserve admitted authority" `Quick
             test_h2_oauth_route_and_authority_lifetime;
           test_case "unconditionally guarded paths are not public-read" `Quick

@@ -222,8 +222,18 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
           h2_respond_empty h2_reqd ~status:`Internal_server_error ~extra_headers:cors
     in
     let with_h2_token_permission_auth h2_reqd ~permission f =
-      let _ = permission in
-      with_h2_public_read h2_reqd (fun state -> f state "dashboard")
+      with_server_state h2_reqd (fun state ->
+        match
+          authorize_token_bound_permission_request
+            ~base_path:(Mcp_server.workspace_config state).base_path
+            ~permission
+            httpun_request
+        with
+        | Error err -> h2_respond_auth_error h2_reqd err
+        | Ok agent_name ->
+            (match h2_check_agent_rate_limit h2_reqd with
+             | Ok () -> f state agent_name
+             | Error () -> ()))
     in
     (* H2 counterpart of [Server_auth.with_read_auth]: authorize on every
        request.  It remains distinct from [with_h2_public_read], which is an

@@ -215,6 +215,20 @@ let test_board_reaction_optional_auth_rejects_malformed_credentials () =
         , reaction_raw_auth_request "x-masc-internal-token" " " )
       ])
 
+let test_board_reaction_mutation_rejects_anonymous_auth () =
+  with_reaction_auth_base (fun base_path ->
+    match
+      Server_auth.authorize_token_bound_permission_request
+        ~base_path
+        ~permission:Masc_domain.CanVote
+        (reaction_auth_request ())
+    with
+    | Error error ->
+      check bool "anonymous reaction mutation is unauthorized" true
+        (Server_auth.http_status_of_auth_error error = `Unauthorized)
+    | Ok actor ->
+      failf "anonymous reaction mutation unexpectedly resolved actor %s" actor)
+
 let test_dashboard_dev_token_can_vote_as_credential_owner () =
   with_reaction_auth_base (fun base_path ->
     match
@@ -269,6 +283,10 @@ let () =
             "optional reaction auth rejects malformed credentials"
             `Quick
             test_board_reaction_optional_auth_rejects_malformed_credentials
+        ; test_case
+            "reaction mutation rejects anonymous auth"
+            `Quick
+            test_board_reaction_mutation_rejects_anonymous_auth
         ; test_case
             "dashboard dev-token can vote as credential owner"
             `Quick

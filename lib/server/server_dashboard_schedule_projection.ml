@@ -726,13 +726,19 @@ let schedule_result_delivery_dashboard_json
       ~extra_fields:[ "detail", `String detail ]
       "invalid_policy"
   | Ok None ->
-    (match
-       Option.bind last_wake (fun wake ->
-         Option.bind wake.Schedule_domain.detail (fun detail ->
-           Server_schedule_consumers.dispatch_receipt_of_detail detail
-           |> Result.to_option))
-     with
-     | Some
+    (match last_wake with
+     | None -> projection ~policy:"none" ~required:false "not_required"
+     | Some { Schedule_domain.detail = None; _ } ->
+       projection ~policy:"none" ~required:false "not_required"
+     | Some { Schedule_domain.detail = Some detail; _ } ->
+       (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+        | Error reason ->
+          projection
+            ~policy:"none"
+            ~required:false
+            ~extra_fields:[ "detail", `String reason ]
+            "unrecognized_dispatch_receipt"
+        | Ok
          (Server_schedule_consumers.Keeper_wake_enqueued
            { result_delivery_policy =
                Server_schedule_consumers.Keeper_wake_result_delivery_reply_to_origin
@@ -744,14 +750,13 @@ let schedule_result_delivery_dashboard_json
          ~extra_fields:
            [ "detail", `String "dispatch receipt contradicts no-delivery policy" ]
          "destination_conflict"
-     | None
-     | Some
+        | Ok
          (Server_schedule_consumers.Keeper_wake_enqueued
            { result_delivery_policy =
                Server_schedule_consumers.Keeper_wake_result_delivery_none
            ; _
-           }) ->
-       projection ~policy:"none" ~required:false "not_required")
+         }) ->
+          projection ~policy:"none" ~required:false "not_required"))
   | Ok (Some channel) ->
     let destination = Keeper_continuation_channel.to_yojson channel in
     let routed_projection ?(extra_fields = []) status =

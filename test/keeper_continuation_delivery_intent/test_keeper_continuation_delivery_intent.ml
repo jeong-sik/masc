@@ -121,12 +121,21 @@ let test_unrouted_fails_closed () =
       ; channel = unrouted
       }
   in
-  assert (origin_of_payload payload = None);
+  assert (Result.is_error (origin_of_payload payload));
   let routable_payload : Keeper_event_queue.stimulus_payload =
     Connector_attention
       { event_id = "event-1"; channel = discord "channel-1" }
   in
-  assert (Option.is_some (origin_of_payload routable_payload))
+  assert
+    (Result.fold
+       ~ok:Option.is_some
+       ~error:(fun _ -> false)
+       (origin_of_payload routable_payload));
+  let blank_source : Keeper_event_queue.stimulus_payload =
+    Connector_attention
+      { event_id = " "; channel = discord "channel-1" }
+  in
+  assert (Result.is_error (origin_of_payload blank_source))
 ;;
 
 let replace_field name replacement = function

@@ -102,12 +102,15 @@ val connector_attention_origin :
 val schedule_origin :
   occurrence_id:string -> Keeper_continuation_channel.t -> (origin, error) result
 
-val origin_of_payload : Keeper_event_queue.stimulus_payload -> origin option
+val origin_of_payload :
+  Keeper_event_queue.stimulus_payload -> (origin option, error) result
 (** Project the four continuation-bearing queue payload families.  A scheduled
     wake participates only when its creation boundary persisted an explicit
-    result destination. Non-continuation
-    payloads and an explicit [Unrouted] channel both return [None]; callers
-    therefore cannot accidentally fabricate a convenience destination. *)
+    result destination. Non-continuation payloads return [Ok None]. Invalid
+    source identity and an explicit [Unrouted] channel return a typed [Error]
+    rather than being collapsed into the same absence as a non-continuation
+    payload; callers therefore cannot silently lose a delivery obligation or
+    fabricate a convenience destination. *)
 
 val same_source : origin -> origin -> bool
 (** Compare only producer-owned source identity. Route changes for the same

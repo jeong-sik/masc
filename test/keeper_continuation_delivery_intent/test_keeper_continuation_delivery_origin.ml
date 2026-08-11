@@ -156,7 +156,7 @@ let test_schedule_delivery_requirement_is_persisted_policy () =
   assert
     (Keeper_continuation_delivery_intent.origin_of_payload
        (Keeper_event_queue.Schedule_due wake)
-     = None);
+     = Ok None);
   let routed = { wake with result_delivery = Some channel } in
   assert
     (Masc.Keeper_heartbeat_loop.source_requires_continuation_delivery
@@ -164,6 +164,7 @@ let test_schedule_delivery_requirement_is_persisted_policy () =
   let origin =
     Keeper_continuation_delivery_intent.origin_of_payload
       (Keeper_event_queue.Schedule_due routed)
+    |> Result.get_ok
     |> Option.get
   in
   assert

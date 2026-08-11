@@ -710,7 +710,7 @@ let test_routed_schedule_carries_occurrence_destination_to_keeper () =
      (match
         Keeper_continuation_delivery_intent.origin_of_payload stimulus.payload
       with
-      | Some origin ->
+      | Ok (Some origin) ->
         check bool "schedule occurrence creates the exact continuation origin" true
           (match origin.source with
            | Keeper_continuation_delivery_intent.Schedule_occurrence
@@ -721,7 +721,9 @@ let test_routed_schedule_carries_occurrence_destination_to_keeper () =
            | Keeper_continuation_delivery_intent.Hitl_resolution _
            | Keeper_continuation_delivery_intent.Connector_attention _ ->
              false)
-      | None -> fail "routed schedule did not create a delivery origin")
+      | Ok None -> fail "routed schedule did not create a delivery origin"
+      | Error error ->
+        fail (Keeper_continuation_delivery_intent.error_to_string error))
    | _ -> fail "expected Schedule_due payload");
   let dashboard =
     Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
@@ -744,8 +746,10 @@ let test_routed_schedule_carries_occurrence_destination_to_keeper () =
     match
       Keeper_continuation_delivery_intent.origin_of_payload stimulus.payload
     with
-    | Some origin -> origin
-    | None -> fail "routed schedule origin disappeared"
+    | Ok (Some origin) -> origin
+    | Ok None -> fail "routed schedule origin disappeared"
+    | Error error ->
+      fail (Keeper_continuation_delivery_intent.error_to_string error)
   in
   let pending =
     match

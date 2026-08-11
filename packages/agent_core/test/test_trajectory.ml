@@ -168,7 +168,10 @@ let test_tool_call_pairing () =
   match act_step with
   | Trajectory.Act { tool_call; _ } ->
     Alcotest.(check string) "tool name" "read_file" tool_call.tool_name;
-    Alcotest.(check string) "tool use id" "tu-1" tool_call.tool_use_id;
+    Alcotest.(check (option string))
+      "tool use id"
+      (Some "tu-1")
+      tool_call.tool_use_id;
     Alcotest.(check (option string))
       "tool result"
       (Some "file contents here")
@@ -276,6 +279,49 @@ let test_unfinished_tool () =
   | _ -> Alcotest.fail "expected Act step"
 ;;
 
+let test_missing_tool_ids_are_not_correlated () =
+  let records =
+    [ make_record
+        ~seq:1
+        ~ts:550.0
+        ~agent_name:"missing-id-agent"
+        ~record_type:Tool_execution_started
+        ~tool_name:"first"
+        ~tool_input:(`Assoc [])
+        ()
+    ; make_record
+        ~seq:2
+        ~ts:550.1
+        ~agent_name:"missing-id-agent"
+        ~record_type:Tool_execution_started
+        ~tool_use_id:""
+        ~tool_name:"second"
+        ~tool_input:(`Assoc [])
+        ()
+    ; make_record
+        ~seq:3
+        ~ts:550.2
+        ~agent_name:"missing-id-agent"
+        ~record_type:Tool_execution_finished
+        ~tool_use_id:""
+        ~tool_name:"finished-without-id"
+        ~tool_result:"unattributed"
+        ~tool_error:false
+        ()
+    ]
+  in
+  let trajectory = Trajectory.of_raw_trace_records records in
+  let _think, act, observe, _respond = Trajectory.count_steps trajectory in
+  Alcotest.(check int) "each uncorrelated record remains visible" 3 act;
+  Alcotest.(check int) "unattributed result is not attached to a start" 0 observe;
+  List.iter
+    (function
+      | Trajectory.Act { tool_call; _ } ->
+        Alcotest.(check (option string)) "missing id stays typed" None tool_call.tool_use_id
+      | _ -> ())
+    trajectory.steps
+;;
+
 (* ── JSON round-trip ─────────────────────────────────────────── *)
 
 let test_json_roundtrip () =
@@ -354,7 +400,7 @@ let test_json_roundtrip () =
 
 let test_step_json_roundtrip () =
   let tc : Trajectory.tool_call =
-    { tool_use_id = "tu-step"
+    { tool_use_id = Some "tu-step"
     ; tool_name = "grep"
     ; tool_input = `Assoc [ "pattern", `String "foo" ]
     ; tool_result = Some "match found"
@@ -451,6 +497,10 @@ let () =
         ; Alcotest.test_case "error run" `Quick test_error_run
         ; Alcotest.test_case "orphan tool finish" `Quick test_orphan_tool_finish
         ; Alcotest.test_case "unfinished tool" `Quick test_unfinished_tool
+        ; Alcotest.test_case
+            "missing tool ids are not correlated"
+            `Quick
+            test_missing_tool_ids_are_not_correlated
         ] )
     ; ( "json"
       , [ Alcotest.test_case "trajectory json roundtrip" `Quick test_json_roundtrip

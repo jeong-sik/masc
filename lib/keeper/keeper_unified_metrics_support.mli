@@ -74,13 +74,6 @@ val coverage_stage_of_no_result_outcome : string -> string
 val coverage_reason_of_no_result_outcome : string -> string
 val validated_evidence_preview : Agent_core.Raw_trace.run_validation -> string
 
-val accountability_evidence_refs :
-  trace_id:string ->
-  turn_number:int ->
-  result:Keeper_agent_run.run_result ->
-  validated_evidence:Agent_core.Raw_trace.run_validation option ->
-  string list
-
 val scheduled_autonomous_outcome_of_result :
   has_text:bool ->
   has_tool_calls:bool ->

@@ -178,6 +178,21 @@ else `Bad_gateway
 
 - `runtime_agent:259` (description 필드의 `"runtime:%s/runtime"` 밀수) 는 carrier 와 무관 — config 레코드에 typed `runtime_id` 필드를 추가하고 description 은 사람용으로 되돌린다.
 - B12 는 위 두 설계로 착수 가능하다.
+
+**(3) terminal-code 의 agent-core wire — RFC-0042 sub-sum 의 실행 설계 (구현 조사 2026-08-12).**
+
+잔여 2건(`keeper_agent_error:281`, `keeper_provider_runtime_boundary:155`)의 실측 사슬:
+
+```
+Agent_core.Error.t ─(terminal_reason_code_of_core_error: typed→wire 렌더)→ string
+  ─(of_core_error_wire = Agent_core_error wire: 문자열을 그대로 싸는 생성자)→ Keeper_turn_terminal_code.t
+  ─(to_wire)→ Keeper_registry.Provider_runtime_error.code : string   (execution-receipt 영속 축)
+  ─(:155 classify_provider_runtime_error_record: prefix 재파싱)→ 타임아웃/phase 관측
+```
+
+- `Keeper_turn_terminal_code.Agent_core_error of string` 과 `Provider_runtime_error of string` 이 opaque wire 를 나르므로, in-process 소비자(:155, status bridge blocker)는 문자열을 되파는 수밖에 없다. RFC-0042 PR-1 이 의도적으로 유예한 sub-sum 이 바로 이 지점이다.
+- **설계**: (a) 렌더 지점(`:281`, 유일하게 원본 `Error.t` 를 손에 쥔 곳)에서 typed 관측(`provider_timeout : { source; phase option } option` 등)을 함께 파생해 terminal code 에 병행 탑재 — `Agent_core_error of { wire : string; observation : boundary_observation option }`. **wire 필드는 바이트 불변**이므로 receipt 영속 포맷 무변경. (b) 사슬의 4개 타입(terminal_code → Keeper_turn_terminal.t → disposition 경유 → registry failure_reason)에 같은 방식으로 typed 관측을 스레딩. (c) `:155` 는 관측 `Some` 이면 typed 소비, `None`(영속 재수화·pre-변경 값)이면 기존 문자열 파스 — 문자열 경로는 영속 경계 파서로 수렴.
+- **한 배치 강제**: 4개 타입을 관통하므로 부분 스레딩(N-of-M)은 금지 — 생산 1곳·소비 2곳·타입 4개를 한 PR 로. 이 관통이 이 항목이 B12 본 배치에서 분리된 이유이며, 착수 시 이 설계 절을 인용한다.
 - permissive default 값 자체의 변경(예: tool_catalog unknown→true)은 동작 변화이므로 범위 밖 — 별도 이슈로.
 - 테스트 코드의 같은 패턴(에러 메시지 문구에 결합된 단언 ~142곳, fixture cwd 추측)은 프로덕션 정리 후 별도 트랙.
 

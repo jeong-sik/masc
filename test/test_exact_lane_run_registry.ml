@@ -205,7 +205,11 @@ let test_observation_reads_do_not_wait_for_durable_writer () =
     Unix.close ready_read;
     Fun.protect
       ~finally:(fun () ->
-        (match Unix.waitpid [] child with
+        let rec wait_child () =
+          try Unix.waitpid [] child with
+          | Unix.Unix_error (Unix.EINTR, _, _) -> wait_child ()
+        in
+        (match wait_child () with
          | _, Unix.WEXITED 0 -> ()
          | _, status ->
            failf

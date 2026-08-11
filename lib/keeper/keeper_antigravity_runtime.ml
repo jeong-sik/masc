@@ -204,6 +204,7 @@ let stream_projection ~turn_count on_event =
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~event_bus ~raw_trace ~on_event
+    ?on_pre_dispatch_failure
     ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -493,6 +494,16 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             client_config
             ~prompt
           |> Result.map_error (fun error ->
+            (match error with
+             | Runtime_antigravity.Spawn_failed _ ->
+               Option.iter (fun callback -> callback ()) on_pre_dispatch_failure
+             | Runtime_antigravity.Invalid_config _
+             | Runtime_antigravity.Turn_failed _
+             | Runtime_antigravity.Timeout _
+             | Runtime_antigravity.Process_exited _
+             | Runtime_antigravity.Protocol_error _
+             | Runtime_antigravity.State_callback_failed _ ->
+               ());
             recovery_failure := recovery_failure_of_runtime_error error;
             runtime_error_to_core_error error))
       in
@@ -682,7 +693,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~raw_trace ~on_event ~config =
+    ~context ~event_bus ~raw_trace ~on_event ?on_pre_dispatch_failure ~config =
   Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
     run_without_lifecycle
       ~runtime_id
@@ -700,5 +711,6 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
       ~event_bus
       ~raw_trace
       ~on_event
+      ?on_pre_dispatch_failure
       ~config)
 ;;

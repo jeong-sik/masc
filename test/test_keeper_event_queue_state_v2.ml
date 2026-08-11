@@ -2,6 +2,7 @@ module Queue = Keeper_event_queue
 module State = Keeper_event_queue_state
 module Persistence = Keeper_event_queue_persistence
 module Keeper_reaction_ledger = Masc.Keeper_reaction_ledger
+module Registry_event_queue = Masc.Keeper_registry_event_queue
 
 let require_ok label = function
   | Ok value -> value
@@ -816,6 +817,60 @@ let test_durable_completed_turn_projects_reaction_ack () =
         (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error))
 ;;
 
+let test_owner_terminalizes_consecutive_turns_without_projection_gap () =
+  with_temp_dir "keeper-owner-consecutive-terminal" (fun base_path ->
+    let keeper_name = "consecutive-turn-keeper" in
+    let first = stimulus "first" 1.0 in
+    let second = stimulus "second" 2.0 in
+    List.iter
+      (Keeper_reaction_ledger.record_event_queue_stimulus
+         ~base_path
+         ~keeper_name)
+      [ first; second ];
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue (Queue.enqueue pending first) second)
+    |> require_ok "seed consecutive turn sources";
+    let terminalize applied_at =
+      let selection =
+        Persistence.select_when_result
+          ~base_path
+          ~keeper_name
+          ~ready:(fun _ -> true)
+        |> require_ok "select consecutive turn source"
+        |> require_some "consecutive turn selection"
+      in
+      match
+        Registry_event_queue.terminalize_pending_turn_completed_result
+          ~base_path
+          keeper_name
+          ~current_owner_nonce:7
+          ~applied_at
+          ~selection
+      with
+      | Ok (Registry_event_queue.Acked _)
+      | Ok (Registry_event_queue.Already_acked _) -> ()
+      | Ok
+          (Registry_event_queue.Ack_committed_followup_failed
+             { detail; _ }) ->
+        Alcotest.fail detail
+      | Error detail -> Alcotest.fail detail
+    in
+    terminalize 3.0;
+    terminalize 4.0;
+    let settled =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "reload consecutive turn state"
+    in
+    Alcotest.(check int)
+      "both successful turns leave no pending source"
+      0
+      (Queue.length (State.pending settled));
+    Alcotest.(check int)
+      "owner projects each terminal receipt before the next turn"
+      0
+      (List.length (State.transition_outbox settled)))
+;;
+
 let () =
   Alcotest.run
     "keeper pending queue current schema"
@@ -866,6 +921,10 @@ let () =
             "durable completed turn projects reaction ACK"
             `Quick
             test_durable_completed_turn_projects_reaction_ack
+        ; Alcotest.test_case
+            "owner terminalizes consecutive turns without projection gap"
+            `Quick
+            test_owner_terminalizes_consecutive_turns_without_projection_gap
         ; Alcotest.test_case
             "durable in-flight selection rejects reinserted source"
             `Quick

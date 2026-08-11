@@ -239,16 +239,18 @@ let is_environment_source = function
   | Keyring | Config_default | Other_source _ -> false
 ;;
 
+(* Shadowing is decided by the presence of an environment-sourced row beside a
+   non-environment one, not by gh's "Active account" line. gh reads the
+   variable before any stored credential, so a row for it appearing at all
+   means that is the token in use. Every measured shape agrees — the
+   environment row is marked active in all four — but reading [active] here
+   would rest the verdict on a field never observed as [false] for that row,
+   and a future [false] would silently report Authenticated for a host whose
+   pushes go out under the variable. [active] stays on the record because the
+   endpoint reports it; it just does not decide. *)
 let verdict_of_entries entries =
-  let active_environment =
-    List.exists
-      (fun entry ->
-         is_environment_source entry.source
-         &&
-         match entry.active with
-         | Some true -> true
-         | Some false | None -> false)
-      entries
+  let has_environment =
+    List.exists (fun entry -> is_environment_source entry.source) entries
   in
   let has_non_environment =
     List.exists (fun entry -> not (is_environment_source entry.source)) entries
@@ -261,7 +263,7 @@ let verdict_of_entries entries =
          | Login_failed -> false)
       entries
   in
-  if active_environment && has_non_environment
+  if has_environment && has_non_environment
   then Shadowed
   else if has_logged_in
   then Authenticated

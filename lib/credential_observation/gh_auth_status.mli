@@ -43,11 +43,16 @@ type verdict =
   | Authenticated  (** At least one entry is logged in and none shadows it. *)
   | Unauthenticated  (** Parsed, and no entry is logged in. *)
   | Shadowed
-      (** An environment-sourced entry is the active one while the host also
-          carries a non-environment entry. gh resolves the environment token
-          first, so [gh auth login] and [gh auth refresh] silently no-op and
-          the operator's next action is to unset the variable, not to log in.
-          Reported whether or not the shadowed entry itself is still valid. *)
+      (** The host carries both an environment-sourced entry and a
+          non-environment one. gh resolves the environment token first, so
+          [gh auth login] and [gh auth refresh] silently no-op and the
+          operator's next action is to unset the variable, not to log in.
+
+          Decided by the presence of the environment row, not by gh's "Active
+          account" line and not by whether either credential is still valid.
+          All four measured shapes agree — an invalid variable over a valid
+          keyring, an invalid variable over an invalid config entry, and a
+          perfectly valid variable over a valid keyring are all shadowed. *)
   | Unknown
       (** The output matched neither the "not logged into any host" sentence
           nor any entry line. Never a stand-in for an authenticated or

@@ -48,6 +48,39 @@ let gh_token_shadow_output =
 |}
 ;;
 
+(* measured: a *valid* token in GITHUB_TOKEN over a logged-in host. Both rows
+   are ✓ and nothing is broken, yet the keyring credential is not the one in
+   use — the shape a verdict keyed on the logged-in mark would call
+   authenticated. *)
+let valid_env_token_shadow_output =
+  {|github.com
+  ✓ Logged in to github.com account jeong-sik (GITHUB_TOKEN)
+  - Active account: true
+  - Git operations protocol: https
+  - Token: gho_MASKED
+  - Token scopes: 'gist', 'read:org', 'repo', 'workflow'
+
+  ✓ Logged in to github.com account jeong-sik (keyring)
+  - Active account: false
+  - Git operations protocol: https
+  - Token: gho_MASKED
+  - Token scopes: 'gist', 'read:org', 'repo', 'workflow'
+|}
+;;
+
+(* constructed: gh 2.87.3 marked the environment row active in every measured
+   shape, so this one cannot be produced on the host. It exists to pin that the
+   verdict does not rest on that field. *)
+let inactive_env_row_output =
+  {|github.com
+  ✓ Logged in to github.com account octo (GITHUB_TOKEN)
+  - Active account: false
+
+  ✓ Logged in to github.com account octo (keyring)
+  - Active account: true
+|}
+;;
+
 (* measured: empty GH_CONFIG_DIR with both token variables cleared. *)
 let unauthenticated_output =
   {|You are not logged into any GitHub hosts. To log in, run: gh auth login
@@ -161,6 +194,48 @@ let test_gh_token_shadow_survives_both_entries_failing () =
   | entries -> failf "expected two entries, parsed %d" (List.length entries)
 ;;
 
+(* Nothing here is invalid. A verdict driven by the logged-in mark would call
+   this authenticated and hide that pushes go out under the variable. *)
+let test_valid_environment_token_still_shadows () =
+  let parsed = Gh_auth_status.parse valid_env_token_shadow_output in
+  check string "verdict" "shadowed" (verdict parsed);
+  List.iter
+    (fun entry ->
+       match entry.Gh_auth_status.outcome with
+       | Gh_auth_status.Logged_in -> ()
+       | Gh_auth_status.Login_failed -> fail "a measured-valid entry parsed as failed")
+    parsed.Gh_auth_status.entries;
+  match parsed.Gh_auth_status.entries with
+  | [ env_entry; _ ] ->
+    check
+      string
+      "environment variable is named"
+      "GITHUB_TOKEN"
+      (Gh_auth_status.token_source_to_string env_entry.Gh_auth_status.source)
+  | entries -> failf "expected two entries, parsed %d" (List.length entries)
+;;
+
+(* The verdict must not rest on gh's "Active account" line for the environment
+   row. Every measured shape marks it active, so a future [false] there would
+   otherwise report authenticated for a host whose pushes use the variable. *)
+let test_shadow_does_not_depend_on_the_active_line () =
+  let parsed = Gh_auth_status.parse inactive_env_row_output in
+  check string "verdict" "shadowed" (verdict parsed);
+  match parsed.Gh_auth_status.entries with
+  | [ env_entry; keyring_entry ] ->
+    check
+      (option bool)
+      "environment row is the inactive one"
+      (Some false)
+      env_entry.Gh_auth_status.active;
+    check
+      (option bool)
+      "keyring row is the active one"
+      (Some true)
+      keyring_entry.Gh_auth_status.active
+  | entries -> failf "expected two entries, parsed %d" (List.length entries)
+;;
+
 let test_no_hosts_is_unauthenticated () =
   let parsed = Gh_auth_status.parse unauthenticated_output in
   check string "verdict" "unauthenticated" (verdict parsed);
@@ -221,6 +296,14 @@ let () =
             "GH_TOKEN shadow survives both entries failing"
             `Quick
             test_gh_token_shadow_survives_both_entries_failing
+        ; test_case
+            "a valid environment token still shadows"
+            `Quick
+            test_valid_environment_token_still_shadows
+        ; test_case
+            "shadow does not depend on the active line"
+            `Quick
+            test_shadow_does_not_depend_on_the_active_line
         ; test_case "no hosts is unauthenticated" `Quick test_no_hosts_is_unauthenticated
         ; test_case
             "enterprise host is read verbatim"

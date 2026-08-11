@@ -265,6 +265,13 @@ let parse_json json =
   let* () = exact_fields ~context:"root" ~required:[ "hosts" ] ~optional:[] root in
   let* hosts_json = field "root" "hosts" root in
   let* hosts = object_fields "hosts" hosts_json in
+  let rec normalize_hosts acc = function
+    | [] -> Ok (List.rev acc)
+    | (host, entries) :: rest ->
+      let* host = observed_hostname "hosts map key" host in
+      normalize_hosts ((host, entries) :: acc) rest
+  in
+  let* hosts = normalize_hosts [] hosts in
   let host_names = List.map fst hosts in
   if List.length host_names <> List.length (List.sort_uniq String.compare host_names)
   then Error "hosts contains a duplicate hostname"

@@ -314,6 +314,14 @@ let test_host_identity_mismatch_is_unknown () =
   |> check_schema_declines "host mismatch"
 ;;
 
+let test_case_insensitive_duplicate_hosts_are_unknown () =
+  document
+    [ "github.com", `List [ keyring_entry () ]
+    ; "GITHUB.COM", `List [ keyring_entry ~host:"GITHUB.COM" ~active:false () ]
+    ]
+  |> check_schema_declines "case-insensitive duplicate host key"
+;;
+
 let test_invalid_json_is_unknown () =
   List.iter
     (fun (label, json) -> check_schema_declines label json)
@@ -356,6 +364,10 @@ let () =
             "host identity mismatch is unknown"
             `Quick
             test_host_identity_mismatch_is_unknown
+        ; test_case
+            "case-insensitive duplicate hosts are unknown"
+            `Quick
+            test_case_insensitive_duplicate_hosts_are_unknown
         ; test_case
             "schema errors redact JSON values"
             `Quick

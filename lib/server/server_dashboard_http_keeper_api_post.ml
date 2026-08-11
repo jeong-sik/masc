@@ -138,7 +138,7 @@ let handle_keeper_github_login_post state req reqd =
                         "error"
                         (`Assoc [ "message", `String message ])))
               | failed ->
-                let detail = String.trim (redact stderr) in
+                let detail = String.trim stderr in
                 let message =
                   if String.equal detail ""
                   then "gh auth login failed: " ^ github_login_process_status failed

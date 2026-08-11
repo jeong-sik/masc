@@ -159,10 +159,17 @@ val observe_snapshot_with_errors :
 (** Read-only operator projection of the pending queue. Unlike
     {!load_snapshot_with_errors}, this observer never acquires the canonical
     queue-owner transaction lock and never checkpoints or compacts the
-    transition WAL. Snapshot replacement and WAL reads remain atomic at their
-    individual file boundaries; a concurrent transition may therefore yield
-    an earlier coherent snapshot or an explicit read error, but cannot turn a
-    dashboard GET into queue-owner work. *)
+    transition WAL. It accepts only two identical full-state observations, so
+    a concurrent snapshot/WAL generation change is an explicit read error
+    rather than a healthy empty projection. *)
+
+module For_testing : sig
+  val observe_state_read_only_result_with_interleave :
+    between_samples:(unit -> unit) ->
+    base_path:string ->
+    keeper_name:string ->
+    (Keeper_event_queue_state.t, string) result
+end
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result

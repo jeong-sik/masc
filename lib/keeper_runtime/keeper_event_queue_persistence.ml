@@ -540,11 +540,31 @@ let validate_state_read_only_result_with ~require_existing ~base_path ~keeper_na
             (Printexc.to_string exn)))
 ;;
 
-let observe_state_read_only_result ~base_path ~keeper_name =
+let stable_read_only_observation ~keeper_name first second =
+  if State.to_yojson first = State.to_yojson second
+  then Ok second
+  else
+    Error
+      (Printf.sprintf
+         "event queue changed during lock-free observation keeper=%s first_revision=%Ld second_revision=%Ld"
+         keeper_name
+         (State.revision first)
+         (State.revision second))
+;;
+
+let observe_state_read_only_result_with ~between_samples ~base_path ~keeper_name =
   match resolve_owner ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok owner ->
-    (try read_state_read_only_unlocked ~require_existing:false owner with
+    (try
+       Result.bind
+         (read_state_read_only_unlocked ~require_existing:false owner)
+         (fun first ->
+            between_samples ();
+            Result.bind
+              (read_state_read_only_unlocked ~require_existing:false owner)
+              (stable_read_only_observation ~keeper_name))
+     with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Error
@@ -553,6 +573,13 @@ let observe_state_read_only_result ~base_path ~keeper_name =
             (keeper_name_of_owner owner)
             (snapshot_path_of_owner owner)
             (Printexc.to_string exn)))
+;;
+
+let observe_state_read_only_result ~base_path ~keeper_name =
+  observe_state_read_only_result_with
+    ~between_samples:(fun () -> ())
+    ~base_path
+    ~keeper_name
 ;;
 
 let validate_state_read_only_result ~base_path ~keeper_name =
@@ -632,6 +659,12 @@ let observe_snapshot_with_errors ~base_path ~keeper_name =
     ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
     }
 ;;
+
+module For_testing = struct
+  let observe_state_read_only_result_with_interleave =
+    observe_state_read_only_result_with
+  ;;
+end
 
 type durable_state_discovery =
   { keeper_names : string list

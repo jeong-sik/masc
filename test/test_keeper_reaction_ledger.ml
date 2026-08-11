@@ -635,6 +635,39 @@ let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
   check_member_string "durable queue parse error path" path "path" read_error
 ;;
 
+let test_lock_free_observation_rejects_generation_change () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "observation-generation-change" in
+  let first = schedule_due_stimulus ~schedule_id:"before-observation" () in
+  let second = schedule_due_stimulus ~schedule_id:"during-observation" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    first;
+  match
+    Keeper_event_queue_persistence.For_testing
+    .observe_state_read_only_result_with_interleave
+      ~between_samples:(fun () ->
+        Keeper_reaction_ledger.record_event_queue_stimulus
+          ~base_path
+          ~keeper_name
+          second)
+      ~base_path
+      ~keeper_name
+  with
+  | Error message ->
+    check bool
+      "concurrent generation change is typed unavailable"
+      true
+      (String_util.contains_substring
+         message
+         "event queue changed during lock-free observation")
+  | Ok state ->
+    failf
+      "concurrent generation change returned healthy revision %Ld"
+      (Keeper_event_queue_state.revision state)
+;;
+
 let test_unknown_reaction_is_quarantined_without_clearing_pending () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "unknown-reaction-keeper" in
@@ -1158,6 +1191,10 @@ let () =
             "fleet summary surfaces durable event queue parse errors"
             `Quick
             test_fleet_summary_surfaces_durable_event_queue_parse_error
+        ; test_case
+            "lock-free observation rejects generation change"
+            `Quick
+            test_lock_free_observation_rejects_generation_change
         ; test_case
             "unknown reaction is quarantined without clearing pending"
             `Quick

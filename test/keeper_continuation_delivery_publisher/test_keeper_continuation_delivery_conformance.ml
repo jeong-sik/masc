@@ -195,6 +195,27 @@ let assert_ack_policy outcome =
        completion)
 ;;
 
+let test_precommit_is_recoverable_before_response_finalization () =
+  with_temp_config "precommit" (fun config ->
+    let pending = intent_for Fusion (dashboard_channel Fusion) in
+    let committed =
+      Keeper_agent_run_finalize_response.precommit_continuation_delivery_intent
+        ~config
+        (Some pending)
+      |> Result.fold
+           ~ok:Fun.id
+           ~error:(fun error -> fail (Store.error_to_string error))
+    in
+    match committed with
+    | None -> fail "visible continuation lost its precommitted obligation"
+    | Some intent ->
+      let durable = stored config intent in
+      check string "pre-finalization recovery token is Pending" "pending"
+        (Intent.state_label durable.Intent.state);
+      check bool "pre-finalization token keeps exact source identity" true
+        (Intent.same_origin durable.Intent.origin pending.Intent.origin))
+;;
+
 let test_all_producers_leave_one_delivered_correlation_bundle () =
   with_temp_config "delivered" (fun config ->
     let append_count = ref 0 in
@@ -383,6 +404,10 @@ let () =
     "keeper continuation delivery conformance"
     [ ( "producer matrix"
       , [ test_case
+            "precommit is recoverable before response finalization"
+            `Quick
+            test_precommit_is_recoverable_before_response_finalization
+        ; test_case
             "all producers leave one delivered correlation bundle"
             `Quick
             test_all_producers_leave_one_delivered_correlation_bundle

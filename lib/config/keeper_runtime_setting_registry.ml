@@ -681,7 +681,12 @@ let duplicates ~identity rows =
   List.iter
     (fun row ->
        let key = identity row in
-       Hashtbl.replace counts key (1 + Option.value ~default:0 (Hashtbl.find_opt counts key)))
+       let next_count =
+         match Hashtbl.find_opt counts key with
+         | None -> 1
+         | Some count -> count + 1
+       in
+       Hashtbl.replace counts key next_count)
     rows;
   Hashtbl.fold
     (fun key count acc -> if count > 1 then key :: acc else acc)

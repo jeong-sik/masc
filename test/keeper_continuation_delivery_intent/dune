@@ -1,7 +1,9 @@
 (test
  (name test_keeper_continuation_delivery_intent)
+ (modules test_keeper_continuation_delivery_intent)
  (libraries masc.keeper_runtime yojson))
 
 (test
  (name test_keeper_continuation_delivery_origin)
+ (modules test_keeper_continuation_delivery_origin)
  (libraries masc masc.keeper_runtime))

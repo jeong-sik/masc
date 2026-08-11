@@ -428,7 +428,10 @@ let application_status doc (row : Keeper_runtime_setting_registry.setting) =
 let display_bool value = if value then "true" else "false"
 let display_int = string_of_int
 let display_float value = Printf.sprintf "%g" value
-let display_string_option = Option.value ~default:"(none)"
+let display_string_option = function
+  | Some value -> value
+  | None -> "(none)"
+;;
 let display_float_option = Option.fold ~none:"(none)" ~some:display_float
 
 let bounded_int_from_env ~default ~min_value ~max_value env_name =
@@ -654,8 +657,16 @@ let overlay_application_to_yojson doc =
   let classified =
     List.map
       (fun row ->
-         Option.value ~default:row.env_name (Keeper_runtime_setting_registry.toml_key_opt row),
-         application_status doc row)
+         let key =
+           match Keeper_runtime_setting_registry.toml_key_opt row with
+           | Some key -> key
+           | None ->
+             invalid_arg
+               (Printf.sprintf
+                  "active_toml row %s has no TOML key"
+                  row.env_name)
+         in
+         key, application_status doc row)
       application_rows
   in
   let keys_with_status expected =

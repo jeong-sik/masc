@@ -214,7 +214,11 @@ let delivery_key intent =
 ;;
 
 let discord_conversation_id ~guild_id ~channel_id =
-  let guild_label = Option.value ~default:"dm" guild_id in
+  let guild_label =
+    match guild_id with
+    | Some guild_id -> guild_id
+    | None -> "dm"
+  in
   Printf.sprintf "discord:%s:channel:%s" guild_label channel_id
 ;;
 

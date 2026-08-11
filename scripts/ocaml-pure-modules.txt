@@ -1,0 +1,6 @@
+# Modules whose implementations must remain free of external effects.
+lib/keeper_runtime/keeper_event_queue_state.ml
+lib/schedule/schedule_domain.ml
+lib/turn_fsm/turn_fsm.ml
+lib/types/masc_domain.ml
+lib/workspace/workspace_task_lifecycle.ml

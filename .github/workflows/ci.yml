@@ -272,7 +272,7 @@ jobs:
           # runtime.toml, so a fixture edit changes test input while matching
           # none of the suffixes above (.toml is not .ml/.json/.sh) and the
           # Build job would skip.
-          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|scripts/ocaml-boundary-baseline\.tsv$|scripts/ocaml-pure-modules\.txt$|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
             build=true
           fi
 
@@ -793,6 +793,19 @@ jobs:
           kill "${heartbeat_pid}" 2>/dev/null || true
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
+
+      - name: Check OCaml functional-core boundary
+        env:
+          BOUNDARY_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ -n "$BOUNDARY_BASE_SHA" ]]; then
+            bash scripts/ci/git-fetch-retry.sh origin "$BOUNDARY_BASE_SHA"
+            export OCAML_BOUNDARY_BASE_REF="$BOUNDARY_BASE_SHA"
+          elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            export OCAML_BOUNDARY_BASE_REF="HEAD^"
+          fi
+          opam exec -- dune build --root . @tools/ocaml_boundary_audit/runtest
+          bash scripts/ocaml-boundary-ratchet.sh
 
       - name: Run runtime deployment preflight self-test
         if: ${{ always() && steps.build_step.outcome == 'success' }}

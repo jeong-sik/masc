@@ -321,6 +321,33 @@ let test_store_resume_skips_empty_newer_partition () =
       (Some (Env.hash_for_chain first))
       next.prev_hash)
 
+let test_store_resume_scans_only_latest_non_empty_partition () =
+  let dir = unique_temp_dir "audit_latest_partition_only" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let old_month_dir = Filename.concat dir "2019-01" in
+    let latest_month_dir = Filename.concat dir "2020-01" in
+    Unix.mkdir old_month_dir 0o755;
+    Unix.mkdir latest_month_dir 0o755;
+    let old_path = Filename.concat old_month_dir "01.jsonl" in
+    let old_channel = open_out old_path in
+    output_string old_channel "{historical entry need not be materialized\n";
+    close_out old_channel;
+    let latest =
+      { (Env.make ~category:"X" ~payload:(`Int 1) ~prev_hash:None) with
+        ts = 1_577_836_800.0 }
+    in
+    let latest_path = Filename.concat latest_month_dir "01.jsonl" in
+    let latest_channel = open_out latest_path in
+    output_string latest_channel (Yojson.Safe.to_string (Env.to_json latest));
+    output_char latest_channel '\n';
+    close_out latest_channel;
+    let store = Store.create ~base_dir:dir in
+    let next = Store.append store ~category:"X" ~payload:(`Int 2) in
+    check (option string)
+      "cursor comes from latest non-empty partition"
+      (Some (Env.hash_for_chain latest))
+      next.prev_hash)
+
 let test_store_alias_keeps_canonical_io_target () =
   let root = unique_temp_dir "audit_canonical_io" in
   let actual = Filename.concat root "actual" in
@@ -343,6 +370,39 @@ let test_store_alias_keeps_canonical_io_target () =
         (List.length (Store.recent canonical_store ~n:10));
       check int "retargeted alias received no files" 0
         (Array.length (Sys.readdir redirected)))
+
+let test_store_rejects_replaced_canonical_directory () =
+  let root = unique_temp_dir "audit_replaced_directory" in
+  let active = Filename.concat root "audit" in
+  let rotated = Filename.concat root "audit.rotated" in
+  Unix.mkdir active 0o755;
+  Fun.protect ~finally:(fun () -> cleanup_dir root) (fun () ->
+    let old_store = Store.create ~base_dir:active in
+    ignore (Store.append old_store ~category:"old" ~payload:(`Int 1));
+    Unix.rename active rotated;
+    Unix.mkdir active 0o755;
+    let replacement_store = Store.create ~base_dir:active in
+    let replacement_entry =
+      Store.append replacement_store ~category:"new" ~payload:(`Int 1)
+    in
+    check (option string) "replacement starts its own chain" None
+      replacement_entry.prev_hash;
+    match Store.append old_store ~category:"old" ~payload:(`Int 2) with
+    | exception
+        Store.Base_directory_replaced
+          { path
+          ; expected_device_id
+          ; expected_inode_id
+          ; actual_device_id
+          ; actual_inode_id
+          } ->
+      check string "reports canonical path" (Unix.realpath active) path;
+      check bool "device or inode changed" true
+        (actual_device_id <> Some expected_device_id
+         || actual_inode_id <> Some expected_inode_id);
+      check int "old handle did not write into replacement" 1
+        (List.length (Store.recent replacement_store ~n:10))
+    | _ -> fail "expected Store.Base_directory_replaced")
 
 let test_store_rejects_malformed_jsonl_lines () =
   let dir = unique_temp_dir "audit_malformed" in
@@ -416,8 +476,12 @@ let () =
       test_case "instances share append cursor" `Quick test_store_instances_share_append_cursor;
       test_case "resume skips empty newer partition" `Quick
         test_store_resume_skips_empty_newer_partition;
+      test_case "resume scans only latest non-empty partition" `Quick
+        test_store_resume_scans_only_latest_non_empty_partition;
       test_case "alias keeps canonical I/O target" `Quick
         test_store_alias_keeps_canonical_io_target;
+      test_case "rejects replaced canonical directory" `Quick
+        test_store_rejects_replaced_canonical_directory;
       test_case "rejects malformed JSONL lines" `Quick test_store_rejects_malformed_jsonl_lines;
       test_case "rejects invalid envelope JSONL lines" `Quick test_store_rejects_invalid_envelope_jsonl_lines;
       test_case "resume rejects malformed JSONL lines" `Quick test_store_resume_rejects_malformed_jsonl_lines;

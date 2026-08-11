@@ -237,6 +237,8 @@ let attempt_runtime_candidates
              | Some provider_id ->
                Runtime_quota_window.note_exhausted
                  ~provider_id
+                 (* NDT-OK: [retry_after] is relative to the provider response;
+                    convert it to the wall-clock expiry at this ingress. *)
                  ~resets_at:(Unix.gettimeofday () +. retry_after_s)
              | None -> ())
           | _ -> ());
@@ -534,6 +536,8 @@ let run_named
            Runtime_lane_preference.prefer_order ~lane_id
              (Runtime_lane.ordered_candidates lane)
            |> Runtime_quota_window.demote_order
+                (* NDT-OK: scheduling intentionally compares the stored expiry
+                   with wall clock; [demote_order] stays pure via injected [now]. *)
                 ~now:(Unix.gettimeofday ())
                 ~provider_id_of:Runtime.provider_id_of_runtime_id ))
   in

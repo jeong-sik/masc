@@ -80,6 +80,26 @@ type turn_result =
   ; wall_duration_s : float
   }
 
+type stream_event =
+  | Turn_started of
+      { conversation_id : string
+      ; model : string
+      }
+  | Text_delta of string
+  | Turn_finished of { text : string }
+
+let emit_stream_event on_stream_event event =
+  match on_stream_event with
+  | None -> ()
+  | Some emit ->
+    (try emit event with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Runtime_agent.warn
+         "Antigravity stream callback raised (error=%s)"
+         (Printexc.to_string exn))
+;;
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -554,7 +574,8 @@ let verify_identity ~stage ~expected actual =
   | None | Some _ -> Ok ()
 ;;
 
-let apply_event (config : config) ~conversation_mode ~on_conversation_ready state = function
+let apply_event (config : config) ~conversation_mode ~on_conversation_ready
+    ~on_stream_event state = function
   | Init { conversation_id; model; cwd; permission_mode } ->
     let stage = "init event" in
     if Option.is_some state.init
@@ -587,6 +608,9 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready stat
         (match callback_result with
          | Error detail -> Error (State_callback_failed detail)
          | Ok () ->
+           emit_stream_event
+             on_stream_event
+             (Turn_started { conversation_id; model });
            Ok { state with init = Some (conversation_id, model, permission_mode) })
   | Step_update { conversation_id; state = step_state; step_type } ->
     let stage = "step_update event" in
@@ -615,7 +639,11 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready stat
        let* () = verify_identity ~stage ~expected:(Some expected) conversation_id in
        if Option.is_some state.result
        then protocol_error stage "received more than one result event"
-       else Ok { state with result = Some (status, response, error, num_turns, usage) })
+       else (
+         (match status with
+          | Success -> emit_stream_event on_stream_event (Text_delta response)
+          | Result_error -> ());
+         Ok { state with result = Some (status, response, error, num_turns, usage) }))
 ;;
 
 let status_to_string = function
@@ -624,7 +652,7 @@ let status_to_string = function
 ;;
 
 let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
-    ~on_conversation_ready =
+    ~on_conversation_ready ~on_stream_event =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -681,6 +709,7 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
                 config
                 ~conversation_mode
                 ~on_conversation_ready
+                ~on_stream_event
                 !state
                 event
             with
@@ -704,7 +733,8 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
 ;;
 
 let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
-    ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) config ~prompt =
+    ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) ?on_stream_event
+    config ~prompt =
   let* () =
     match home_dir with
     | None -> Ok ()
@@ -726,7 +756,8 @@ let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
              config
              ~conversation_mode
              ~prompt
-             ~on_conversation_ready))
+             ~on_conversation_ready
+             ~on_stream_event))
     with
     | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -744,6 +775,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
     Error (Turn_failed "successful result response has no deliverable content")
   | `Exited 0, Some (conversation_id, model, permission_mode),
     Some (Success, text, _, num_turns, usage) ->
+    emit_stream_event on_stream_event (Turn_finished { text });
     Ok
       { conversation_id
       ; model

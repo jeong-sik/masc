@@ -63,6 +63,14 @@ type turn_result =
   ; wall_duration_s : float
   }
 
+type stream_event =
+  | Turn_started of
+      { conversation_id : string
+      ; model : string
+      }
+  | Text_delta of string
+  | Turn_finished of { text : string }
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -90,6 +98,7 @@ val run_turn :
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   ?on_conversation_ready:(conversation_id:string -> (unit, string) result) ->
+  ?on_stream_event:(stream_event -> unit) ->
   config ->
   prompt:string ->
   (turn_result, error) result

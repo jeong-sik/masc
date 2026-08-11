@@ -106,6 +106,7 @@ let run_fixture
     ?conversation_mode
     ?home_dir
     ?on_conversation_ready
+    ?on_stream_event
     ?(timeout_s = 2.0)
     ?(prompt = "Return the fixture marker")
     path
@@ -121,11 +122,35 @@ let run_fixture
       ?conversation_mode
       ?home_dir
       ?on_conversation_ready
+      ?on_stream_event
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
       config
       ~prompt)
+;;
+
+let test_stream_events_preserve_available_wire_data () =
+  let events = ref [] in
+  with_fixture
+    [ init (); result () ]
+    (fun path ->
+       match
+         run_fixture
+           ~on_stream_event:(fun event -> events := event :: !events)
+           path
+       with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ ->
+         match List.rev !events with
+         | [ Runtime_antigravity.Turn_started
+               { conversation_id = "conversation-1"
+               ; model = "gemini-fixture"
+               }
+           ; Text_delta "MASC_ANTIGRAVITY_OK\n"
+           ; Turn_finished { text = "MASC_ANTIGRAVITY_OK\n" }
+           ] -> ()
+         | _ -> fail "Antigravity stream did not preserve available wire data")
 ;;
 
 let test_successful_official_client_turn () =
@@ -459,6 +484,10 @@ let () =
             "successful official-client turn"
             `Quick
             test_successful_official_client_turn
+        ; test_case
+            "stream preserves available wire data"
+            `Quick
+            test_stream_events_preserve_available_wire_data
         ; test_case
             "resume identity and argv"
             `Quick

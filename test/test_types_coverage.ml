@@ -1331,8 +1331,19 @@ let test_rate_limit_config_of_yojson_rejects_wrong_field_type () =
   match Masc_domain.rate_limit_config_of_yojson json with
   | Error message ->
     check bool "field is named" true
-      (String_util.contains_substring message "rate_limit.per_minute")
+      (String_util.contains_substring message "rate_limit.per_minute");
+    check bool "field type is named" true
+      (String_util.contains_substring message "must be integer")
   | Ok _ -> fail "wrongly typed rate-limit field silently used the default"
+
+let test_rate_limit_config_of_yojson_rejects_non_object () =
+  match Masc_domain.rate_limit_config_of_yojson (`String "not-an-object") with
+  | Error message ->
+    check bool "root type is named" true
+      (String_util.contains_substring message "rate_limit must be object");
+    check bool "root value type is named" true
+      (String_util.contains_substring message "string")
+  | Ok _ -> fail "non-object rate-limit JSON was accepted"
 
 let test_rate_limit_config_of_yojson_rejects_mixed_agent_array () =
   let json = `Assoc [ "priority_agents", `List [ `String "admin"; `Int 7 ] ] in
@@ -1821,6 +1832,8 @@ let () =
       test_case "of_yojson defaults" `Quick test_rate_limit_config_of_yojson_defaults;
       test_case "of_yojson rejects wrong type" `Quick
         test_rate_limit_config_of_yojson_rejects_wrong_field_type;
+      test_case "of_yojson rejects non-object" `Quick
+        test_rate_limit_config_of_yojson_rejects_non_object;
       test_case "of_yojson rejects mixed array" `Quick
         test_rate_limit_config_of_yojson_rejects_mixed_agent_array;
     ];

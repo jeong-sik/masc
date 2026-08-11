@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# CI test observer. The workflow job owns the outer execution boundary.
-# This script reports progress and diagnostics, but never terminates or retries
-# the command it observes.
+# CI test observer. Commands run exactly once. Callers may set a finite
+# CI_TEST_TIMEOUT_SEC; expiry captures the active process tree, terminates it,
+# and fails closed with exit 124. No retry path exists.
 
 mktemp_ci_log() {
   local tmp_dir="${TMPDIR:-/tmp}"
@@ -24,6 +24,8 @@ else
 fi
 
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
+TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-0}"
+TEST_TIMEOUT_GRACE_SEC=5
 START_EPOCH="$(date +%s)"
 TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp_ci_log)}"
 DUNE_SOURCEROOT="${DUNE_SOURCEROOT:-$(pwd -P)}"
@@ -41,6 +43,11 @@ DISK_PRESSURE_REPORTED=0
 if [[ -z "${HEARTBEAT_SEC}" || "${HEARTBEAT_SEC}" -le 0 ]]; then
   HEARTBEAT_SEC=30
 fi
+if [[ ! "${TEST_TIMEOUT_SEC}" =~ ^[0-9]+$ ]]; then
+  echo "[ci-run] ERROR: CI_TEST_TIMEOUT_SEC must be a non-negative integer" >&2
+  exit 2
+fi
+TEST_TIMEOUT_SEC="$((10#${TEST_TIMEOUT_SEC}))"
 if [[ -z "${CI_TEST_DISK_MIN_AVAILABLE_MB}" || "${CI_TEST_DISK_MIN_AVAILABLE_MB}" -lt 0 ]]; then
   CI_TEST_DISK_MIN_AVAILABLE_MB=1024
 fi
@@ -200,6 +207,18 @@ kill_active_cmd_tree() {
   done
 }
 
+terminate_active_cmd_tree() {
+  local deadline=$(( $(date +%s) + TEST_TIMEOUT_GRACE_SEC ))
+  kill_active_cmd_tree TERM
+  while kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1 \
+        && [[ "$(date +%s)" -lt "${deadline}" ]]; do
+    sleep 1
+  done
+  if kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; then
+    kill_active_cmd_tree KILL
+  fi
+}
+
 hb_pid=""
 cleanup() {
   if [[ -n "${ACTIVE_CMD_PID}" ]] && kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; then
@@ -216,6 +235,9 @@ trap 'cleanup; exit 143' TERM
 run_observed() {
   local cmd="$1"
   local status=0
+  local command_start_epoch
+  command_start_epoch="$(date +%s)"
+  local timed_out=0
   local next_disk_check=$(( $(date +%s) + CI_TEST_DISK_CHECK_SEC ))
 
   tail -n 0 -f "${TEST_LOG_FILE}" &
@@ -235,10 +257,23 @@ run_observed() {
         diag_dump "disk_pressure_observed"
       fi
     fi
+    if [[ "${TEST_TIMEOUT_SEC}" -gt 0 ]] \
+       && [[ $((now_epoch - command_start_epoch)) -ge "${TEST_TIMEOUT_SEC}" ]]; then
+      log_line "[ci-observe] timeout timeout_sec=${TEST_TIMEOUT_SEC}"
+      diag_dump "timeout_${TEST_TIMEOUT_SEC}s"
+      terminate_active_cmd_tree
+      timed_out=1
+      break
+    fi
     sleep 1
   done
 
-  wait "${ACTIVE_CMD_PID}" || status=$?
+  if [[ "${timed_out}" -eq 1 ]]; then
+    wait "${ACTIVE_CMD_PID}" >/dev/null 2>&1 || true
+    status=124
+  else
+    wait "${ACTIVE_CMD_PID}" || status=$?
+  fi
   kill "${ACTIVE_LOG_TAIL_PID}" >/dev/null 2>&1 || true
   wait "${ACTIVE_LOG_TAIL_PID}" >/dev/null 2>&1 || true
   ACTIVE_CMD_PID=""
@@ -249,6 +284,7 @@ run_observed() {
 
 log_line "[ci-run] command: ${TEST_CMD}"
 log_line "[ci-run] heartbeat_sec=${HEARTBEAT_SEC}"
+log_line "[ci-run] timeout_sec=${TEST_TIMEOUT_SEC}"
 log_line "[ci-run] disk_min_available_mb=${CI_TEST_DISK_MIN_AVAILABLE_MB} disk_check_sec=${CI_TEST_DISK_CHECK_SEC}"
 log_line "[ci-run] started_at=$(iso_now)"
 log_line "[ci-run] log_file=${TEST_LOG_FILE}"
@@ -260,8 +296,12 @@ hb_pid=$!
 status=0
 run_observed "$(effective_test_cmd)" || status=$?
 if [[ "${status}" -ne 0 ]]; then
-  diag_dump "nonzero_exit_${status}"
-  log_line "[ci-run] ERROR: test command failed with exit=${status}"
+  if [[ "${status}" -eq 124 ]]; then
+    log_line "[ci-run] ERROR: test command timed out after ${TEST_TIMEOUT_SEC}s"
+  else
+    diag_dump "nonzero_exit_${status}"
+    log_line "[ci-run] ERROR: test command failed with exit=${status}"
+  fi
   exit "${status}"
 fi
 

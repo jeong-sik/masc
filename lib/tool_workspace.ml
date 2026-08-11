@@ -55,9 +55,12 @@ let credential_state (ctx : context) ~actual_name =
     unique_trimmed_nonblank [ ctx.agent_name; actual_name ]
   in
   let internal_keeper_credential_available name =
+    (* Typed in-process read (RFC-0371 B11): this used to getenv the token
+       the process itself had putenv'd at boot — its own environment as an
+       in-memory channel, re-read per tool call. *)
     match
       ( Workspace_identity_backend.keeper_name_for_agent_name name
-      , Sys.getenv_opt Auth.internal_keeper_token_env_key )
+      , Auth.internal_keeper_token () )
     with
     | Some _, Some raw ->
       let token = String.trim raw in

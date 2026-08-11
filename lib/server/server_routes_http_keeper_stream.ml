@@ -1942,12 +1942,12 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                  in
                  loop Server_keeper_chat_agui_projection.initial)
              | Keeper_continuation_channel.Discord { channel_id; _ } ->
-               (match Sys.getenv_opt "DISCORD_BOT_TOKEN" with
-                | Some token when String.trim token <> "" ->
+               (match Env_config_discord.bot_token_opt () with
+                | Some token ->
                   fork_adapter (fun () ->
                     Keeper_chat_discord.adapter_loop
                       ~clock
-                      ~token:(String.trim token)
+                      ~token
                       ~channel_id
                       ~events
                       ~on_send_result:(fun result ->
@@ -1957,7 +1957,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                                 Format.asprintf "%a" Keeper_chat_discord.pp_error error)
                              result))
                       ())
-                | Some _ | None ->
+                | None ->
                   settle_delivery (Error "DISCORD_BOT_TOKEN is not configured");
                   fork_adapter drain_events)
              | Keeper_continuation_channel.Slack { channel_id; thread_ts; _ } ->

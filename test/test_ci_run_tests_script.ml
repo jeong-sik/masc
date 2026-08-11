@@ -175,6 +175,31 @@ let test_deadline_terminates_command_once () =
       check bool "timeout reported" true
         (contains_substring observed "test command timed out after 1s"))
 
+let test_deadline_kills_reparented_term_ignoring_child () =
+  with_temp_dir "ci-run-tests-descendant" (fun dir ->
+      let ci_log = Filename.concat dir "ci.log" in
+      let child_pid_file = Filename.concat dir "child.pid" in
+      let child_heartbeat_file = Filename.concat dir "child-heartbeat.log" in
+      let command =
+        Printf.sprintf
+          "trap 'exit 0' TERM; (trap '' TERM; while :; do printf x >> %s; sleep 1; \
+           done) & child=$!; printf '%%s' \"$child\" > %s; while :; do sleep 1; done"
+          (Filename.quote child_heartbeat_file)
+          (Filename.quote child_pid_file)
+      in
+      let env = ("CI_TEST_TIMEOUT_SEC", "1") :: base_env ci_log in
+      let code, _, _ = run_ci ~cwd:dir ~env command in
+      check int "timeout exit code" 124 code;
+      let child_pid = read_file child_pid_file |> String.trim |> int_of_string in
+      let heartbeat_bytes () = (Unix.stat child_heartbeat_file).Unix.st_size in
+      let bytes_after_timeout = heartbeat_bytes () in
+      Unix.sleep 2;
+      let bytes_after_observation = heartbeat_bytes () in
+      (try Unix.kill child_pid Sys.sigkill with Unix.Unix_error _ -> ());
+      check int "TERM-ignoring descendant stops making progress"
+        bytes_after_timeout
+        bytes_after_observation)
+
 let test_contract_harness_runs_once () =
   with_temp_dir "ci-run-tests-contract" (fun dir ->
       let ci_log = Filename.concat dir "ci.log" in
@@ -217,6 +242,8 @@ let () =
           test_case "failure is not retried" `Quick test_failure_is_not_retried;
           test_case "deadline terminates one command" `Quick
             test_deadline_terminates_command_once;
+          test_case "deadline kills a reparented TERM-ignoring child" `Quick
+            test_deadline_kills_reparented_term_ignoring_child;
           test_case "contract harness runs once" `Quick
             test_contract_harness_runs_once;
           test_case "retry layers are absent" `Quick

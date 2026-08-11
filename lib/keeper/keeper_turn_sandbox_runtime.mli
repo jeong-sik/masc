@@ -20,6 +20,11 @@ val create :
 
 val turn_id : t -> int
 val host_root : t -> string
+val prepare_github_identity_snapshot :
+  ?timeout_sec:float -> t -> (string, string) result
+(** Start the turn container if needed and return the exact host snapshot
+    mounted as its GitHub CLI config. Callers that authorize external effects
+    must invoke this only after authorization. *)
 
 val cleanup : t -> unit
 (** Best-effort teardown. Safe to call multiple times. *)

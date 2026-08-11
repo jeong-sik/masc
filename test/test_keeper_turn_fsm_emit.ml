@@ -1,13 +1,12 @@
-(** test_keeper_turn_fsm_emit — Step 4b marker.
+(** Tests for the keeper-side Turn FSM emission boundary.
 
     Pins the [Keeper_turn_fsm.emit_transition] surface so a future
     refactor that drops [?prev] or renames a cancel/failure
     variant fails compilation here, not at runtime.
 
-    The function emits via [Log.Keeper.info] which is fail-open;
-    we don't assert on the log ring contents (that would couple
-    the test to log buffer internals).  What we *do* pin:
+    The tests pin:
     - the function exists with the documented labels
+    - the log details carry the typed transition record
     - every cancel_reason and failure_reason variant is reachable
       via the public [turn_state_label] surface so that
       [bin/masc-trace] grouping does not silently lose a state
@@ -18,6 +17,11 @@ module F = Keeper_turn_fsm
 module P = Otel_metric_store
 
 let run_eio f = Eio_main.run (fun _env -> f ())
+
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
 
 (* ── Compile-time signature anchor ─────────────────────────── *)
 
@@ -40,6 +44,63 @@ let test_emit_transition_signature_stable () =
     "emit_transition accepts ?prev / labelled args / int turn_id"
     true
     true
+;;
+
+let test_emit_transition_carries_typed_record () =
+  let keeper_name = "typed-fsm-log-details" in
+  let turn_id = 92417 in
+  let baseline = latest_log_seq () in
+  let ctx =
+    { F.stop_signaled_before = false; stop_signaled_after = false }
+  in
+  run_eio (fun () ->
+    F.emit_transition
+      ~ctx
+      ~keeper_name
+      ~turn_id
+      ~prev:F.Streaming
+      F.Completing);
+  let entry =
+    Log.Ring.recent
+      ~limit:20
+      ~module_filter:"Keeper"
+      ~since_seq:baseline
+      ()
+    |> List.find_opt (fun (entry : Log.Ring.entry) ->
+      entry.keeper_name = Some keeper_name && entry.turn_id = Some turn_id)
+  in
+  match entry with
+  | None -> Alcotest.fail "typed FSM log entry not found"
+  | Some (entry : Log.Ring.entry) ->
+    let transition_json =
+      Yojson.Safe.Util.member "turn_fsm_transition" entry.details
+    in
+    (match
+       Keeper_transition_audit.turn_fsm_transition_of_json transition_json
+     with
+     | Error error -> Alcotest.fail error
+     | Ok transition ->
+       Alcotest.(check int) "turn id" turn_id transition.turn_fsm_turn_id;
+       Alcotest.(check string)
+         "previous state"
+         "streaming"
+         transition.turn_fsm_prev_state;
+       Alcotest.(check string)
+         "new state"
+         "completing"
+         transition.turn_fsm_new_state;
+       Alcotest.(check string)
+         "action"
+         "StreamComplete"
+         transition.turn_fsm_action;
+       Alcotest.(check (option bool))
+         "stop before"
+         (Some false)
+         transition.turn_fsm_stop_signaled_before;
+       Alcotest.(check (option bool))
+         "stop after"
+         (Some false)
+         transition.turn_fsm_stop_signaled_after)
 ;;
 
 (* ── Label coverage ────────────────────────────────────────── *)
@@ -222,12 +283,12 @@ let test_stop_signaled_blocks_forward_transitions () =
        (F.transition_action_label action))
 ;;
 
-let test_omitted_stop_context_keeps_legacy_stop_fallback () =
-  (* Older callers did not pass the orthogonal stop context.  Keep their
-     active-state self transition fallback as SupervisorRequestsStop. *)
+let test_omitted_stop_context_classifies_same_state_as_stop () =
+  (* Without the orthogonal stop context, an active-state self transition
+     classifies as [SupervisorRequestsStop]. *)
   match F.classify_transition ~from_state:F.Streaming ~to_state:F.Streaming () with
   | Some F.SupervisorRequestsStop -> ()
-  | None -> Alcotest.fail "omitted ctx should preserve SupervisorRequestsStop fallback"
+  | None -> Alcotest.fail "omitted ctx should classify as SupervisorRequestsStop"
   | Some action ->
     Alcotest.failf
       "omitted ctx should be SupervisorRequestsStop, got %s"
@@ -373,6 +434,10 @@ let () =
             "emit_transition surface stable"
             `Quick
             test_emit_transition_signature_stable
+        ; Alcotest.test_case
+            "emit_transition carries typed log details"
+            `Quick
+            test_emit_transition_carries_typed_record
         ] )
     ; ( "labels"
       , [ Alcotest.test_case
@@ -396,9 +461,9 @@ let () =
             `Quick
             test_stop_signaled_blocks_forward_transitions
         ; Alcotest.test_case
-            "omitted stop context keeps legacy fallback"
+            "omitted stop context classifies same state as stop"
             `Quick
-            test_omitted_stop_context_keeps_legacy_stop_fallback
+            test_omitted_stop_context_classifies_same_state_as_stop
         ; Alcotest.test_case
             "same-state with explicit no stop signal is None"
             `Quick

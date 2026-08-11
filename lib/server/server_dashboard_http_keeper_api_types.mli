@@ -14,6 +14,8 @@ val keeper_api_prefix : string
 (** Per-route URL suffixes for the keeper API. *)
 val keeper_suffix_config : string
 val keeper_suffix_secrets : string
+val keeper_suffix_github_identity : string
+val keeper_suffix_github_login : string
 val keeper_suffix_boot : string
 val keeper_suffix_shutdown : string
 val keeper_suffix_reset : string
@@ -60,6 +62,7 @@ type keeper_board_attention_quarantine_route =
 type keeper_post_route_kind =
   | Keeper_post_config
   | Keeper_post_secrets
+  | Keeper_post_github_login
   | Keeper_post_boot
   | Keeper_post_shutdown
   | Keeper_post_reset
@@ -113,7 +116,7 @@ val latest_preview_of_messages :
 (** {1 Keeper name validation} *)
 
 val is_valid_keeper_name : String.t -> bool
-(** [true] when [name] passes the shared keeper-name character class. *)
+(** [true] when [name] passes {!Keeper_config.validate_name}. *)
 
 val extract_keeper_name_for_post : string -> string -> string
 (** [extract_keeper_name_for_post path suffix]: variant used by the

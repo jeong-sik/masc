@@ -72,10 +72,6 @@ val serialized_bytes : working_context -> int
 
 val create_session : session_id:string -> base_dir:string -> session_context
 
-(** [true] iff [text] looks like a Current World State system
-    context block. *)
-val has_world_state_signature : string -> bool
-
 (** {1 JSONL persistence} *)
 
 (** Append [msg] to the keeper's history JSONL, choosing

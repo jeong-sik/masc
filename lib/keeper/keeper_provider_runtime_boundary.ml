@@ -114,9 +114,41 @@ type t =
   | Provider_timeout of provider_timeout
   | Not_provider_runtime_failure
 
-let timeout_phase_of_agent_core_phase phase =
-  Llm_provider.Http_client.timeout_phase_to_label phase
-  |> timeout_phase_of_label
+(* Direct variant-to-variant translation (RFC-0371 B12): this used to render
+   the agent-core phase to its label and re-parse the label into the MASC
+   vocabulary — a typed->string->typed round trip inside one function. Both
+   matches are exhaustive, so a new constructor on either side is a compile
+   error here instead of a silent [None]. *)
+let stream_idle_state_of_agent_core :
+      Llm_provider.Http_client.stream_idle_state -> stream_idle_state
+  = function
+  | Llm_provider.Http_client.Awaiting_first_event -> Awaiting_first_event
+  | Awaiting_first_delta -> Awaiting_first_delta
+  | Streaming_answer -> Streaming_answer
+  | Streaming_thinking -> Streaming_thinking
+  | Streaming_tool_call -> Streaming_tool_call
+  | Streaming_heartbeat -> Streaming_heartbeat
+  | Streaming_substrate -> Streaming_substrate
+  | Streaming_done -> Streaming_done
+  | Streaming_unknown -> Streaming_unknown
+;;
+
+let timeout_phase_of_agent_core_phase :
+      Llm_provider.Http_client.timeout_phase -> timeout_phase option
+  = function
+  | Llm_provider.Http_client.First_token -> Some First_token
+  | Http_operation -> Some Http_operation
+  | Non_streaming_body -> Some Non_streaming_body
+  | Stream_body -> Some Stream_body
+  | Stream_idle state -> Some (Stream_idle (stream_idle_state_of_agent_core state))
+  | Provider_step -> Some Provider_step
+  | Cli_stdout_idle -> Some Cli_stdout_idle
+  | Wall_clock -> Some Wall_clock
+  | Capacity_backpressure -> Some Capacity_backpressure
+  | Unknown_timeout -> Some Unknown_timeout
+  (* MASC's vocabulary has no pre-request phases; the label path dropped
+     them to [None] and the typed map preserves that. *)
+  | Admission | Queue -> None
 ;;
 
 let suffix_after_prefix text prefix =

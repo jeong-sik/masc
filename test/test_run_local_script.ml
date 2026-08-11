@@ -16,15 +16,6 @@ let build_dashboard_if_needed_script_path () =
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
@@ -181,17 +172,17 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
         (Sys.file_exists
            (Filename.concat target_abs ".masc/config/keepers/sangsu.toml"));
       check bool "base path set" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ target_abs));
+        (String_util.contains_substring captured ("MASC_BASE_PATH=" ^ target_abs));
       check bool "config dir set" true
-        (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat target_abs ".masc/config"));
+        (String_util.contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat target_abs ".masc/config"));
       check bool "grpc disabled by default" true
-        (contains_substring captured "MASC_GRPC_ENABLED=0");
+        (String_util.contains_substring captured "MASC_GRPC_ENABLED=0");
       check bool "ws disabled by default" true
-        (contains_substring captured "MASC_WS_ENABLED=0");
+        (String_util.contains_substring captured "MASC_WS_ENABLED=0");
       check bool "webrtc disabled by default" true
-        (contains_substring captured "MASC_WEBRTC_ENABLED=0");
+        (String_util.contains_substring captured "MASC_WEBRTC_ENABLED=0");
       check bool "port passed through" true
-        (contains_substring captured "ARGS=--host=127.0.0.1 --port=9955"))
+        (String_util.contains_substring captured "ARGS=--host=127.0.0.1 --port=9955"))
 
 let test_bootstrap_keepers_flag_is_opt_in () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -220,7 +211,7 @@ let test_bootstrap_keepers_flag_is_opt_in () =
       check bool "bootstrapped keeper copied with flag" true
         (Sys.file_exists (Filename.concat target ".masc/config/keepers/sangsu.toml"));
       check bool "keepers included message" true
-        (contains_substring stderr "keepers included"))
+        (String_util.contains_substring stderr "keepers included"))
 
 let test_print_port_is_stable_for_target_dir () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -325,9 +316,9 @@ esac
         failf "dashboard build helper failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code stdout stderr;
       check bool "stale generated index forced rebuild" true
-        (contains_substring (read_file pnpm_capture) "run build");
+        (String_util.contains_substring (read_file pnpm_capture) "run build");
       check bool "stale reason was explicit" true
-        (contains_substring stderr "remote startup resources"))
+        (String_util.contains_substring stderr "remote startup resources"))
 
 let test_existing_target_config_is_not_overwritten () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -372,7 +363,7 @@ let test_explicit_config_env_is_preserved_without_bootstrap () =
           code stdout stderr;
       let captured = read_file capture in
       check bool "explicit config dir preserved" true
-        (contains_substring captured ("MASC_CONFIG_DIR=" ^ override_root));
+        (String_util.contains_substring captured ("MASC_CONFIG_DIR=" ^ override_root));
       check bool "target config not bootstrapped" false
         (Sys.file_exists (Filename.concat target ".masc/config/runtime.toml")))
 
@@ -406,7 +397,7 @@ let test_bootstrap_only_materializes_state_without_exec () =
         (Sys.file_exists (Filename.concat target ".masc/config/runtime.json"));
       check bool "fake exe not invoked" false (Sys.file_exists capture);
       check bool "bootstrap ready message" true
-        (contains_substring stderr "[local-run] Bootstrap ready"))
+        (String_util.contains_substring stderr "[local-run] Bootstrap ready"))
 
 let () =
   run "run_local_script"

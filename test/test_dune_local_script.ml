@@ -13,17 +13,8 @@ let quote = Filename.quote
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let check_contains label haystack needle =
-  if not (contains_substring haystack needle) then
+  if not (String_util.contains_substring haystack needle) then
     failf "%s: missing %S in stderr:\n%s" label needle haystack
 
 let substring_index haystack needle =
@@ -336,7 +327,7 @@ exec "$@"
         if Sys.file_exists lockf_log then read_file lockf_log else ""
       in
       check bool "opam lockf not invoked" false
-        (contains_substring lock_log opam_lock_path);
+        (String_util.contains_substring lock_log opam_lock_path);
       check bool "dune was not invoked" false (Sys.file_exists dune_log))
 
 let test_dune_lock_wait_reports_holder () =
@@ -386,9 +377,9 @@ exit 1
       in
       check int "exits zero through lockf reexec" 0 code;
       check bool "reports Dune lock holders" true
-        (contains_substring stderr "Dune lock holder(s)");
+        (String_util.contains_substring stderr "Dune lock holder(s)");
       check bool "reports holder command" true
-        (contains_substring stderr "fake-dune-holder --target test");
+        (String_util.contains_substring stderr "fake-dune-holder --target test");
       check bool "dune was invoked after reexec" true
         (Sys.file_exists dune_log))
 
@@ -426,11 +417,11 @@ exit 1
       in
       check int "exits tempfail on live build-dir lock" 75 code;
       check bool "reports live build-dir lock" true
-        (contains_substring stderr "live Dune build-dir lock holder");
+        (String_util.contains_substring stderr "live Dune build-dir lock holder");
       check bool "reports holder command" true
-        (contains_substring stderr "dune build --root stale-worktree");
+        (String_util.contains_substring stderr "dune build --root stale-worktree");
       check bool "explains bare dune bypass" true
-        (contains_substring stderr "bare `dune` process");
+        (String_util.contains_substring stderr "bare `dune` process");
       check bool "dune was not invoked" false (Sys.file_exists dune_log))
 
 let write_bare_dune_ps bin_dir =
@@ -464,18 +455,18 @@ let test_bare_dune_bypass_aborts_before_dune () =
       in
       check int "exits tempfail on bare dune bypass" 75 code;
       check bool "reports unwrapped Dune" true
-        (contains_substring stderr "outside scripts/dune-local.sh");
+        (String_util.contains_substring stderr "outside scripts/dune-local.sh");
       check bool "reports bare dune command" true
-        (contains_substring stderr
+        (String_util.contains_substring stderr
            "dune exec --root . test/test_config_dir_resolver.exe");
       check bool "reports dune with leading global option" true
-        (contains_substring stderr "dune --root . build");
+        (String_util.contains_substring stderr "dune --root . build");
       check bool "reports opam exec dune with leading global option" true
-        (contains_substring stderr "opam exec -- dune --build-dir _build test");
+        (String_util.contains_substring stderr "opam exec -- dune --build-dir _build test");
       check bool "reports bare dune clean" true
-        (contains_substring stderr "dune clean --root .");
+        (String_util.contains_substring stderr "dune clean --root .");
       check bool "does not report wrapped child" false
-        (contains_substring stderr "wrapped-worktree");
+        (String_util.contains_substring stderr "wrapped-worktree");
       check bool "dune was not invoked" false (Sys.file_exists dune_log))
 
 let test_bare_dune_bypass_can_be_overridden () =
@@ -525,7 +516,7 @@ exec "$@"
       let lock_log = read_file lockf_log in
       let dune_lock_path = Filename.concat dir "dune-local.lock" in
       check bool "lock path passed to lockf" true
-        (contains_substring lock_log opam_lock_path);
+        (String_util.contains_substring lock_log opam_lock_path);
       check bool "dune lock acquired before opam lock" true
         (match
            ( substring_index lock_log dune_lock_path,
@@ -534,9 +525,9 @@ exec "$@"
         | Some dune_pos, Some opam_pos -> dune_pos < opam_pos
         | _ -> false);
       check bool "held env passed through argv" true
-        (contains_substring lock_log "MASC_OPAM_LOCK_HELD=1");
+        (String_util.contains_substring lock_log "MASC_OPAM_LOCK_HELD=1");
       check bool "dune held env passed through argv" true
-        (contains_substring lock_log "MASC_DUNE_LOCK_HELD=1");
+        (String_util.contains_substring lock_log "MASC_DUNE_LOCK_HELD=1");
       check bool "dune was invoked after reexec" true
         (Sys.file_exists dune_log))
 
@@ -577,7 +568,7 @@ exec "$@"
       in
       check int "opam lock timeout exits with lockf status" 75 code;
       check bool "timeout explains Dune lock release" true
-        (contains_substring stderr "releasing Dune lock");
+        (String_util.contains_substring stderr "releasing Dune lock");
       check bool "dune was not invoked after opam timeout" false
         (Sys.file_exists dune_log))
 
@@ -615,9 +606,9 @@ exec "$@"
       check int "unset timeout keeps historical wait-forever path" 0 code;
       let lock_log = read_file lockf_log in
       check bool "lockf timeout flag not used by default" false
-        (contains_substring lock_log "timeout=");
+        (String_util.contains_substring lock_log "timeout=");
       check bool "timeout message not emitted" false
-        (contains_substring stderr "releasing Dune lock");
+        (String_util.contains_substring stderr "releasing Dune lock");
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
 let test_zero_like_opam_lock_timeout_waits_forever () =
@@ -650,9 +641,9 @@ exec "$@"
       check int "zero-like timeout waits forever" 0 code;
       let lock_log = read_file lockf_log in
       check bool "lockf timeout flag not used for zero-like value" false
-        (contains_substring lock_log "timeout=");
+        (String_util.contains_substring lock_log "timeout=");
       check bool "timeout message not emitted for zero-like value" false
-        (contains_substring stderr "releasing Dune lock");
+        (String_util.contains_substring stderr "releasing Dune lock");
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
 let test_opam_lock_timeout_env_must_be_numeric () =
@@ -679,7 +670,7 @@ exec "$@"
       in
       check int "invalid timeout exits usage error" 2 code;
       check bool "invalid timeout named" true
-        (contains_substring stderr "invalid MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT");
+        (String_util.contains_substring stderr "invalid MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT");
       check bool "dune was not invoked" false (Sys.file_exists dune_log))
 
 let test_missing_lock_tools_warn_once () =
@@ -743,7 +734,7 @@ exit 1
       check bool "fake opam kept in PATH" true (Sys.file_exists opam_path);
       check bool "warning emitted exactly once" true only_once;
       check bool "opam lock warning suppressed" false
-        (contains_substring stderr
+        (String_util.contains_substring stderr
            "neither lockf nor flock found; opam switch checks are unlocked");
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
@@ -803,9 +794,9 @@ exec "$@"
       check bool "flock invoked" true (Sys.file_exists flock_log);
       let lock_log = read_file flock_log in
       check bool "lock path passed to flock" true
-        (contains_substring lock_log opam_lock_path);
+        (String_util.contains_substring lock_log opam_lock_path);
       check bool "held env passed through argv" true
-        (contains_substring lock_log "MASC_OPAM_LOCK_HELD=1");
+        (String_util.contains_substring lock_log "MASC_OPAM_LOCK_HELD=1");
       check bool "dune was invoked after flock reexec" true
         (Sys.file_exists dune_log))
 
@@ -875,9 +866,9 @@ exec "$@"
       check int "opam flock timeout exits with flock status" 1 code;
       let lock_log = read_file flock_log in
       check bool "flock timeout flag used" true
-        (contains_substring lock_log "timeout=2");
+        (String_util.contains_substring lock_log "timeout=2");
       check bool "timeout explains Dune lock release" true
-        (contains_substring stderr "releasing Dune lock");
+        (String_util.contains_substring stderr "releasing Dune lock");
       check bool "dune was not invoked after opam timeout" false
         (Sys.file_exists dune_log))
 
@@ -1044,14 +1035,14 @@ let test_missing_deps_aborts_build () =
     in
     check int "exits non-zero on missing deps" 1 code;
     check bool "missing deps message present" true
-      (contains_substring stderr "missing or incompatible findlib libraries");
+      (String_util.contains_substring stderr "missing or incompatible findlib libraries");
     check_contains "piaf stream is checked" stderr "piaf.stream";
     check_contains "OpenTelemetry API layout is checked" stderr
       "opentelemetry.client";
     check bool "repair hint present" true
-      (contains_substring stderr "opam-pin-external-deps.sh --install");
+      (String_util.contains_substring stderr "opam-pin-external-deps.sh --install");
     check bool "skip hint present" true
-      (contains_substring stderr "MASC_SKIP_DEPS_CHECK=1");
+      (String_util.contains_substring stderr "MASC_SKIP_DEPS_CHECK=1");
     check bool "dune not invoked" false (Sys.file_exists dune_log))
 
 let test_skip_deps_check_env_bypasses_guard () =
@@ -1144,9 +1135,9 @@ let test_ocaml_version_comes_from_dune_project () =
     in
     check int "exits non-zero on dune-project version mismatch" 1 code;
     check bool "live OCaml version message present" true
-      (contains_substring stderr "OCaml 5.5.0 detected");
+      (String_util.contains_substring stderr "OCaml 5.5.0 detected");
     check bool "dune-project exact version mentioned" true
-      (contains_substring stderr "exactly 5.6.0");
+      (String_util.contains_substring stderr "exactly 5.6.0");
     check bool "dune not invoked" false (Sys.file_exists dune_log))
 
 let test_split_opam_prefix_aborts_build () =

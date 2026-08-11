@@ -120,25 +120,8 @@ let string_starts_with ~prefix s =
   let slen = String.length s in
   slen >= plen && String.sub s 0 plen = prefix
 
-let contains_substring haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    if nlen = 0 then
-      true
-    else if idx + nlen > hlen then
-      false
-    else if String.sub haystack idx nlen = needle then
-      true
-    else
-      loop (idx + 1)
-  in
-  loop 0
-
 let contains_any haystack needles =
-  List.exists (fun needle -> contains_substring haystack needle) needles
+  List.exists (fun needle -> String_util.contains_substring haystack needle) needles
 
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -325,7 +308,7 @@ let ensure_bound fixture =
   if (Tool_result.is_success result) then ()
   else begin
     let body = (Tool_result.message result) in
-    if contains_substring body "already joined" then ()
+    if String_util.contains_substring body "already joined" then ()
     else failwith ("masc_start failed: " ^ body)
   end
 

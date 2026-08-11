@@ -40,11 +40,6 @@ let iso_now () = Masc_domain.now_iso ()
 let goals_recovery_path config =
   Goal_store.goals_path config ^ ".last-good"
 
-let contains_substring haystack needle =
-  let hl = String.length haystack and nl = String.length needle in
-  let rec scan i = i + nl <= hl && (String.sub haystack i nl = needle || scan (i + 1)) in
-  nl = 0 || scan 0
-
 let make_goal id title =
   let ts = iso_now () in
   {
@@ -213,7 +208,7 @@ let test_status_field_no_longer_decodes () =
    | Ok _ -> fail "upsert_goal wrote over an undecodable store"
    | Error msg ->
        check bool "refusal names the store path" true
-         (contains_substring msg (Goal_store.goals_path config)));
+         (String_util.contains_substring msg (Goal_store.goals_path config)));
   let on_disk_after = In_channel.with_open_bin (Goal_store.goals_path config)
     In_channel.input_all
   in

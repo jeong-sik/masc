@@ -1174,6 +1174,44 @@ let test_keeper_maps_official_context_error_to_typed_core_error () =
        | Ok _ -> fail "Keeper erased the typed Codex context overflow")
 ;;
 
+let test_keeper_does_not_retry_context_error_after_tool_effect () =
+  let tool =
+    fixture_tool
+      ~name:"masc_probe"
+      ~description:"Record one deterministic tool effect"
+      ()
+  in
+  let failed =
+    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+  in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; tool_call_request
+    ; failed
+    ]
+    (fun cli_path ->
+       match
+         run_keeper_turn
+           ~tools:[ tool ]
+           ~cli_path
+           ~model:"gpt-fixture"
+           ()
+       with
+       | Error
+           (Agent_core.Error.Provider
+              (Llm_provider.Error.ProviderReportedError
+                 { provider = "codex_app_server"
+                 ; error_type = Some "context_window_exceeded_after_tool_effect"
+                 ; _
+                 })) ->
+         ()
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
+;;
+
 let test_keeper_shrinks_history_after_typed_context_error () =
   let capture_path = Filename.temp_file "masc-codex-shrink-requests-" ".jsonl" in
   Fun.protect
@@ -1250,44 +1288,6 @@ let test_keeper_shrinks_history_after_typed_context_error () =
          failf
            "expected two history injections, got counts=[%s]"
            (counts |> List.map string_of_int |> String.concat ","))
-;;
-
-let test_keeper_does_not_retry_context_error_after_tool_effect () =
-  let tool =
-    fixture_tool
-      ~name:"masc_probe"
-      ~description:"Record one deterministic tool effect"
-      ()
-  in
-  let failed =
-    {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
-  in
-  with_fixture
-    [ init_result
-    ; account_chatgpt
-    ; thread_result
-    ; turn_result
-    ; tool_call_request
-    ; failed
-    ]
-    (fun cli_path ->
-       match
-         run_keeper_turn
-           ~tools:[ tool ]
-           ~cli_path
-           ~model:"gpt-fixture"
-           ()
-       with
-       | Error
-           (Agent_core.Error.Provider
-              (Llm_provider.Error.ProviderReportedError
-                 { provider = "codex_app_server"
-                 ; error_type = Some "context_window_exceeded_after_tool_effect"
-                 ; _
-                 })) ->
-         ()
-       | Error error -> fail (Agent_core.Error.to_string error)
-       | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;
 
 let test_keeper_dispatches_codex_turn_runtime () =
@@ -2160,10 +2160,13 @@ let test_keeper_projects_typed_tools_and_hooks () =
     projection_saw_context :=
       List.exists
         (fun (message : Agent_core.Types.message) ->
-          message.role = System
+          message.role = User
           && String.equal
-               "fixture-context"
-               (Agent_core.Types.text_of_content message.content))
+               "[system context] fixture-context"
+               (Agent_core.Types.text_of_content message.content)
+          && Agent_core.Types.Extra_system_context_provenance.classify
+               message.metadata
+             = Agent_core.Types.Extra_system_context_provenance.Present)
         messages;
     Ok messages
   in
@@ -2178,7 +2181,8 @@ let test_keeper_projects_typed_tools_and_hooks () =
     [ init_result
     ; account_chatgpt
     ; thread_result
-    ; turn_result
+    ; {|{"id":4,"result":{}}|}
+    ; {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
     ; tool_call_request
     ; item_completed
     ; turn_completed
@@ -2585,13 +2589,13 @@ let () =
             `Quick
             test_keeper_maps_official_context_error_to_typed_core_error
         ; test_case
-            "Keeper shrinks history after typed context error"
-            `Quick
-            test_keeper_shrinks_history_after_typed_context_error
-        ; test_case
             "Keeper does not retry context error after tool effect"
             `Quick
             test_keeper_does_not_retry_context_error_after_tool_effect
+        ; test_case
+            "Keeper shrinks history after typed context error"
+            `Quick
+            test_keeper_shrinks_history_after_typed_context_error
         ; test_case
             "Keeper preserves typed history on Codex wire"
             `Quick

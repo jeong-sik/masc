@@ -35,7 +35,6 @@ type pool_state = {
   runtimes : runtime list;
   fingerprint : string;
   parse_errors : string list;
-  measured_ceiling : int option;
 }
 
 let default_pool_label = "local64"
@@ -63,7 +62,6 @@ let empty_pool = {
   runtimes = [];
   fingerprint = "";
   parse_errors = [];
-  measured_ceiling = None;
 }
 
 let pool : pool_state Atomic.t = Atomic.make empty_pool
@@ -253,7 +251,7 @@ let ensure_loaded () =
           let state = Atomic.get pool in
           if not (String.equal fingerprint state.fingerprint) then begin
             Atomic.set pool
-              { state with runtimes = refreshed; fingerprint; parse_errors = errors };
+              { runtimes = refreshed; fingerprint; parse_errors = errors };
             true
           end else
             false)
@@ -282,41 +280,6 @@ let snapshots () =
   ensure_loaded ();
   with_pool_lock (fun () ->
     List.map runtime_to_snapshot (Atomic.get pool).runtimes)
-
-let configured_capacity () =
-  snapshots ()
-  |> List.fold_left
-       (fun acc (runtime : runtime_snapshot) -> acc + runtime.max_concurrency)
-       0
-
-let healthy_runtime_count () =
-  snapshots ()
-  |> List.fold_left
-       (fun acc (runtime : runtime_snapshot) ->
-         match runtime.cooldown_until with
-         | Some until_ts when until_ts > Time_compat.now () -> acc
-         | _ -> acc + 1)
-       0
-
-let allocated_slots () =
-  snapshots ()
-  |> List.fold_left
-       (fun acc (runtime : runtime_snapshot) -> acc + runtime.active_slots)
-       0
-
-let measured_ceiling () =
-  with_pool_lock (fun () -> (Atomic.get pool).measured_ceiling)
-
-let record_measured_ceiling value =
-  with_pool_lock (fun () ->
-    let state = Atomic.get pool in
-    let bounded = max 0 value in
-    let new_ceiling =
-      match state.measured_ceiling with
-      | Some current -> Some (max current bounded)
-      | None -> Some bounded
-    in
-    Atomic.set pool { state with measured_ceiling = new_ceiling })
 
 module For_testing = struct
   let install_pool runtimes =

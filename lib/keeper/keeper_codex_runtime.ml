@@ -145,6 +145,65 @@ let codex_dynamic_tool (tool : Host.dynamic_tool) :
   }
 ;;
 
+let codex_stream_callback on_event =
+  match on_event with
+  | None -> None
+  | Some emit ->
+    let next_tool_index = ref 1 in
+    let tool_indexes = Hashtbl.create 8 in
+    let streamed_text = Buffer.create 256 in
+    let turn_identity = ref None in
+    Some
+      (function
+        | Runtime_codex_app_server.Turn_started { turn_id; model } ->
+          turn_identity := Some (turn_id, model);
+          emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
+        | Runtime_codex_app_server.Text_delta text ->
+          Buffer.add_string streamed_text text;
+          emit
+            (Agent_core.Types.ContentBlockDelta
+               { index = 0; delta = Agent_core.Types.TextDelta text })
+        | Runtime_codex_app_server.Dynamic_tool_started
+            { call_id; tool_name; arguments } ->
+          let index = !next_tool_index in
+          incr next_tool_index;
+          Hashtbl.replace tool_indexes call_id index;
+          emit
+            (Agent_core.Types.ContentBlockStart
+               { index
+               ; content_type = "tool_use"
+               ; tool_id = Some call_id
+               ; tool_name = Some tool_name
+               });
+          emit
+            (Agent_core.Types.ContentBlockDelta
+               { index
+               ; delta =
+                   Agent_core.Types.InputJsonSnapshot
+                     (Yojson.Safe.to_string arguments)
+               })
+        | Runtime_codex_app_server.Dynamic_tool_finished { call_id } ->
+          Option.iter
+            (fun index ->
+               Hashtbl.remove tool_indexes call_id;
+               emit (Agent_core.Types.ContentBlockStop { index }))
+            (Hashtbl.find_opt tool_indexes call_id)
+        | Runtime_codex_app_server.Turn_finished { text } ->
+          emit Agent_core.Types.MessageStop;
+          if not (String.equal (Buffer.contents streamed_text) text)
+          then
+            Option.iter
+              (fun (turn_id, model) ->
+                 emit
+                   (Agent_core.Types.MessageStart
+                      { id = turn_id ^ "-terminal"
+                      ; model
+                      ; usage = None
+                      });
+                 emit Agent_core.Types.MessageStop)
+              !turn_identity)
+;;
+
 let codex_error_to_core_error = function
   | Runtime_codex_app_server.Invalid_config detail ->
     config_error ~field:"codex_app_server" detail
@@ -184,7 +243,7 @@ let recovery_failure_of_client_error = function
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
-    ~context_injector ~context ~event_bus ~raw_trace
+    ~context_injector ~context ~event_bus ~raw_trace ~on_event
     ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -464,6 +523,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     let started_at = Time_compat.now () in
     let turn_result =
       try
+        let on_stream_event = codex_stream_callback on_event in
         (match
        Runtime_codex_app_server.run_turn
          ~mgr:(Eio.Stdenv.process_mgr env)
@@ -473,6 +533,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          ?reasoning_effort:prepared.reasoning_effort
          ~thread_mode
          ~history
+         ?on_stream_event
          ~on_thread_ready:(fun ~thread_id ->
            update_session "active transition" (fun expected ->
              Keeper_official_client_session_store.mark_active
@@ -673,7 +734,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
-    ~context_injector ~context ~event_bus ~raw_trace ~config =
+    ~context_injector ~context ~event_bus ~raw_trace ~on_event ~config =
   let observed_full_bytes = ref None in
   let observed_history_atoms = ref None in
   let starting_capacity_bytes =
@@ -735,6 +796,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           ~context
           ~event_bus
           ~raw_trace
+          ~on_event
           ~config)
       ())
 ;;

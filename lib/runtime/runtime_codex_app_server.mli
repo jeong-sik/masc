@@ -51,6 +51,20 @@ type dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+type stream_event =
+  | Turn_started of
+      { turn_id : string
+      ; model : string
+      }
+  | Text_delta of string
+  | Dynamic_tool_started of
+      { call_id : string
+      ; tool_name : string
+      ; arguments : Yojson.Safe.t
+      }
+  | Dynamic_tool_finished of { call_id : string }
+  | Turn_finished of { text : string }
+
 type history_role =
   | User
   | Assistant
@@ -126,6 +140,7 @@ val run_turn :
   ?on_thread_ready:(thread_id:string -> (unit, string) result) ->
   ?on_turn_starting:(thread_id:string -> (unit, string) result) ->
   ?on_turn_started:(thread_id:string -> turn_id:string -> (unit, string) result) ->
+  ?on_stream_event:(stream_event -> unit) ->
   config ->
   prompt:string ->
   (turn_result, error) result

@@ -996,10 +996,37 @@ let test_cas_absent_version_is_legacy () =
     | Error msg -> failf "legacy delete without version must succeed: %s" msg)
 ;;
 
+(* 2020-01-01T00:00:00Z as epoch ms. A monotonic boot-relative clock — the
+   #28148 regression this pins against — yields values three orders of
+   magnitude below this floor on any realistic uptime, so the comparison
+   separates the two sources without depending on the test host's clock. *)
+let wall_clock_floor_ms = 1_577_836_800_000L
+
+let test_create_stamps_wall_clock_ms () =
+  with_temp_dir (fun base_dir ->
+    let created = make_cas_annotation base_dir in
+    check
+      bool
+      "created_at_ms is epoch wall clock, not boot-relative"
+      true
+      (Int64.compare created.Types.created_at_ms wall_clock_floor_ms > 0);
+    check
+      bool
+      "updated_at_ms (the CAS version token) uses the same source"
+      true
+      (Int64.compare created.Types.updated_at_ms wall_clock_floor_ms > 0))
+;;
+
 let () =
   run
     "ide_annotations"
-    [ ( "compact"
+    [ ( "clock"
+      , [ test_case
+            "create stamps epoch wall-clock ms"
+            `Quick
+            test_create_stamps_wall_clock_ms
+        ] )
+    ; ( "compact"
       , [ test_case
             "compact preserves annotations"
             `Quick

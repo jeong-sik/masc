@@ -33,7 +33,22 @@ implementation_prs: []
 
 ¹ string-roundtrip 검증 패스가 미완(연결 끊김)이라 unverified 로 표기. B12 착수 전 재검증이 선행 조건이다.
 
-계측 조건: 스캐너당 상위 15건 캡. 일부 스캐너는 "N건 더 있음"을 보고했으므로 이 인벤토리는 **전수가 아니라 대표 표본**이다. 검증 패스는 1차에서 주장 28건 중 12건만 confirmed 로 남겼다(경계 모듈 내 이펙트·부팅 1회 경로는 반박됨).
+계측 조건 (1차): 스캐너당 상위 15건 캡 — 대표 표본.
+
+**2차 전수 스윕 (같은 날, 캡 제거, 워크플로 `wf_1bdada3b`)**: 5개 패턴 패밀리를 전수 재스캔했다. 각 스위퍼는 rg 명령·총 매치 수·제외 사이트의 판정 근거(부팅 1회 / module-init / DI seam / 주석 전용)를 기록했다.
+
+| 패턴 | 전수 스캔 | 신규 발견 | confirmed |
+|---|---|---|---|
+| env 읽기 | 137 | 37 | 22 |
+| FS 직접 접근 | 447 | 21 | 16 |
+| Option.get / assert false / failwith | 34 | 13 | 7 |
+| 자기 렌더 재파싱 | 358 | 16 | 11 |
+| blanket catch | 163 | 22 | 7 |
+| **계** | **1,139** | **109** | **63** |
+
+검증 패스의 반박률은 두 라운드 모두 유의미했다: 1차 28건 중 16건 반박·강등, 2차 109건 중 46건 반박·강등(42%). 대표 반박: `exec_dispatch:150` 의 `Var` arm 은 bash lexer 가 `$` 를 fail-closed 하므로 프로덕션 도달 불가 — 스캐너의 그럴듯한 주장을 소비자·생산자 실독이 걸러냈다.
+
+2차에서 추가된 core-violation 7건 중 특기: `server_auth.ml:572` (mutation **origin allowlist** 를 요청마다 env 재독 — §1(b) 기지 :563 의 같은 결정 흐름 형제, B11), `keeper_owner.ml:329` (`run_in_systhread` 의 Cancelled 가 `Store_unavailable` 로 오분류 — B2 에서 즉시 소거), `keeper_provider_runtime_boundary.ml:117/:155` + `keeper_execution_receipt.ml:127` (typed→wire→re-typed 왕복 체인 — B12 의 실물 확정). workspace 의 mixed-layer FS 클러스터(~8곳: 가드는 bare `Sys.file_exists`, 본문은 backend-aware — Memory 폴백에서 fleet invariant 가 조용히 skip)는 B9 의 범위를 "backend-aware 일관화"로 재정의한다. 전체 판정 원문은 #28221 과 워크플로 저널.
 
 개별 버그 목록이 아니다. 4개 구조 패턴의 반복이다:
 

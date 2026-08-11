@@ -1,20 +1,23 @@
 type token_source =
   | Keyring
   | Environment of string
-  | Config_default
+  | Config_file of string
 
 type outcome =
   | Logged_in
   | Login_failed
+  | Timed_out
 
 type entry =
   { outcome : outcome
   ; host : string
   ; account : string option
   ; source_label : string
-  ; source : token_source option
-  ; active : bool option
+  ; source : token_source
+  ; active : bool
   ; scopes : string list option
+  ; git_protocol : [ `Https | `Ssh ]
+  ; error : string option
   }
 
 type verdict =
@@ -25,18 +28,10 @@ type verdict =
 
 type t =
   { entries : entry list
-  ; verdict : verdict
+  ; schema_error : string option
   }
 
-let logged_in_mark = "\xe2\x9c\x93 "
-let failed_mark = "X "
-let no_hosts_sentence = "You are not logged into any GitHub hosts"
-let logged_in_prefix = "Logged in to "
-let failed_prefix = "Failed to log in to "
-let account_keyword = "account"
-let using_token_keyword = "using"
-let active_account_label = "Active account:"
-let token_scopes_label = "Token scopes:"
+let ( let* ) = Result.bind
 
 let verdict_to_string = function
   | Authenticated -> "authenticated"
@@ -45,247 +40,253 @@ let verdict_to_string = function
   | Unknown -> "unknown"
 ;;
 
-(* A sound-partial read: [None] means this parser does not recognise the label,
-   not that the label is harmless. The verdict declines on [None] rather than
-   assuming a stored credential, because a label gh adds later could name a
-   variable, and treating that as stored would hide a shadow. *)
-let token_source_of_label label =
-  match label with
-  | "keyring" -> Some Keyring
-  | "default" -> Some Config_default
-  | "GH_TOKEN" | "GITHUB_TOKEN" | "GH_ENTERPRISE_TOKEN" | "GITHUB_ENTERPRISE_TOKEN" ->
-    Some (Environment label)
-  | _ -> None
+let command_argv ~hostname =
+  [| "gh"; "auth"; "status"; "--hostname"; hostname; "--json"; "hosts" |]
 ;;
 
-(* gh closes an entry line with the source in parentheses. Read the last pair
-   so an account name containing parentheses cannot capture the label. *)
-let split_trailing_parens text =
-  let length = String.length text in
-  if length = 0 || text.[length - 1] <> ')'
-  then None
-  else (
-    let rec find_open index =
-      if index < 0
-      then None
-      else if text.[index] = '('
-      then Some index
-      else find_open (index - 1)
-    in
-    match find_open (length - 2) with
-    | None -> None
-    | Some open_index ->
-      let head = String.trim (String.sub text 0 open_index) in
-      let label = String.sub text (open_index + 1) (length - open_index - 2) in
-      Some (head, label))
+let object_fields context = function
+  | `Assoc fields -> Ok fields
+  | json ->
+    Error
+      (Printf.sprintf
+         "%s must be an object, got %s"
+         context
+         (Yojson.Safe.to_string json))
 ;;
 
-let words text =
-  String.split_on_char ' ' text |> List.filter (fun word -> word <> "")
+let list_items context = function
+  | `List items -> Ok items
+  | json ->
+    Error
+      (Printf.sprintf
+         "%s must be an array, got %s"
+         context
+         (Yojson.Safe.to_string json))
 ;;
 
-(* "github.com account jeong-sik" -> host and account.
-   "github.com using token"       -> host, no account. *)
-let host_and_account head =
-  match words head with
-  | [] -> None
-  | host :: rest ->
-    let account =
-      match rest with
-      | keyword :: name :: _ when String.equal keyword account_keyword -> Some name
-      | keyword :: _ when String.equal keyword using_token_keyword -> None
-      | [] -> None
-      | _ -> None
-    in
-    Some (host, account)
+let exact_fields ~context ~required ~optional fields =
+  let expected = List.sort_uniq String.compare (required @ optional) in
+  let actual = List.map fst fields in
+  let unique = List.sort_uniq String.compare actual in
+  let missing = List.filter (fun name -> not (List.mem name unique)) required in
+  let unknown = List.filter (fun name -> not (List.mem name expected)) unique in
+  let duplicate_count = List.length actual - List.length unique in
+  match missing, unknown, duplicate_count with
+  | [], [], 0 -> Ok ()
+  | _ ->
+    Error
+      (Printf.sprintf
+         "%s fields mismatch (missing=[%s], unknown=[%s], duplicates=%d)"
+         context
+         (String.concat "," missing)
+         (String.concat "," unknown)
+         duplicate_count)
 ;;
 
-let parse_entry_line line =
-  let trimmed = String.trim line in
-  let outcome, body =
-    if String.starts_with ~prefix:logged_in_mark trimmed
-    then
-      ( Some Logged_in
-      , String.sub
-          trimmed
-          (String.length logged_in_mark)
-          (String.length trimmed - String.length logged_in_mark) )
-    else if String.starts_with ~prefix:failed_mark trimmed
-    then
-      ( Some Login_failed
-      , String.sub
-          trimmed
-          (String.length failed_mark)
-          (String.length trimmed - String.length failed_mark) )
-    else None, ""
-  in
-  match outcome with
+let field context name fields =
+  match List.assoc_opt name fields with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s is missing %s" context name)
+;;
+
+let string_field context name fields =
+  let* value = field context name fields in
+  match value with
+  | `String value -> Ok value
+  | json ->
+    Error
+      (Printf.sprintf
+         "%s.%s must be a string, got %s"
+         context
+         name
+         (Yojson.Safe.to_string json))
+;;
+
+let bool_field context name fields =
+  let* value = field context name fields in
+  match value with
+  | `Bool value -> Ok value
+  | json ->
+    Error
+      (Printf.sprintf
+         "%s.%s must be a boolean, got %s"
+         context
+         name
+         (Yojson.Safe.to_string json))
+;;
+
+let optional_string_field context name fields =
+  match List.assoc_opt name fields with
+  | None -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some json ->
+    Error
+      (Printf.sprintf
+         "%s.%s must be a string when present, got %s"
+         context
+         name
+         (Yojson.Safe.to_string json))
+;;
+
+let account_of_login login =
+  match String.trim login with
+  | "" -> None
+  | value -> Some value
+;;
+
+let scopes_of_header = function
   | None -> None
-  | Some outcome ->
-    let remainder =
-      if String.starts_with ~prefix:logged_in_prefix body
-      then
-        Some
-          (String.sub
-             body
-             (String.length logged_in_prefix)
-             (String.length body - String.length logged_in_prefix))
-      else if String.starts_with ~prefix:failed_prefix body
-      then
-        Some
-          (String.sub
-             body
-             (String.length failed_prefix)
-             (String.length body - String.length failed_prefix))
-      else None
+  | Some header ->
+    Some
+      (String.split_on_char ',' header
+       |> List.map String.trim
+       |> List.filter (fun scope -> scope <> ""))
+;;
+
+let source_of_label label =
+  if String.equal label "keyring"
+  then Ok Keyring
+  else if String.ends_with ~suffix:"_TOKEN" label
+  then Ok (Environment label)
+  else if
+    String.ends_with ~suffix:"/hosts.yml" label
+    || String.ends_with ~suffix:"\\hosts.yml" label
+  then Ok (Config_file label)
+  else Error (Printf.sprintf "unknown gh tokenSource %S" label)
+;;
+
+let outcome_of_state = function
+  | "success" -> Ok Logged_in
+  | "error" -> Ok Login_failed
+  | "timeout" -> Ok Timed_out
+  | state -> Error (Printf.sprintf "unknown gh auth state %S" state)
+;;
+
+let git_protocol_of_string = function
+  | "https" -> Ok `Https
+  | "ssh" -> Ok `Ssh
+  | protocol -> Error (Printf.sprintf "unknown gh gitProtocol %S" protocol)
+;;
+
+let parse_entry ~map_host ~index json =
+  let context = Printf.sprintf "hosts.%s[%d]" map_host index in
+  let* fields = object_fields context json in
+  let* () =
+    exact_fields
+      ~context
+      ~required:[ "active"; "gitProtocol"; "host"; "login"; "state"; "tokenSource" ]
+      ~optional:[ "error"; "scopes" ]
+      fields
+  in
+  let* state = string_field context "state" fields in
+  let* outcome = outcome_of_state state in
+  let* active = bool_field context "active" fields in
+  let* host = string_field context "host" fields in
+  let* () =
+    if String.equal (String.lowercase_ascii host) (String.lowercase_ascii map_host)
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "%s.host %S does not match map key %S"
+           context
+           host
+           map_host)
+  in
+  let* login = string_field context "login" fields in
+  let* source_label = string_field context "tokenSource" fields in
+  let* source = source_of_label source_label in
+  let* git_protocol_raw = string_field context "gitProtocol" fields in
+  let* git_protocol = git_protocol_of_string git_protocol_raw in
+  let* scopes = optional_string_field context "scopes" fields in
+  let* error = optional_string_field context "error" fields in
+  let* () =
+    match outcome, error with
+    | Logged_in, Some _ -> Error (context ^ " success unexpectedly carries error")
+    | (Login_failed | Timed_out), None ->
+      Error (context ^ " failed state is missing error")
+    | Logged_in, None | (Login_failed | Timed_out), Some _ -> Ok ()
+  in
+  Ok
+    { outcome
+    ; host
+    ; account = account_of_login login
+    ; source_label
+    ; source
+    ; active
+    ; scopes = scopes_of_header scopes
+    ; git_protocol
+    ; error
+    }
+;;
+
+let parse_host_entries (map_host, json) =
+  let* items = list_items ("hosts." ^ map_host) json in
+  let rec loop index acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+      let* entry = parse_entry ~map_host ~index item in
+      loop (index + 1) (entry :: acc) rest
+  in
+  loop 0 [] items
+;;
+
+let parse_json json =
+  let* root = object_fields "root" json in
+  let* () = exact_fields ~context:"root" ~required:[ "hosts" ] ~optional:[] root in
+  let* hosts_json = field "root" "hosts" root in
+  let* hosts = object_fields "hosts" hosts_json in
+  let host_names = List.map fst hosts in
+  if List.length host_names <> List.length (List.sort_uniq String.compare host_names)
+  then Error "hosts contains a duplicate hostname"
+  else
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc |> List.concat)
+      | host :: rest ->
+        let* entries = parse_host_entries host in
+        loop (entries :: acc) rest
     in
-    (match remainder with
-     | None -> None
-     | Some remainder ->
-       (match split_trailing_parens remainder with
-        | None -> None
-        | Some (head, label) ->
-          (match host_and_account head with
-           | None -> None
-           | Some (host, account) ->
-             Some
-               { outcome
-               ; host
-               ; account
-               ; source_label = label
-               ; source = token_source_of_label label
-               ; active = None
-               ; scopes = None
-               })))
-;;
-
-let parse_detail_line line =
-  let trimmed = String.trim line in
-  if not (String.starts_with ~prefix:"- " trimmed)
-  then None
-  else (
-    let body =
-      String.trim (String.sub trimmed 2 (String.length trimmed - 2))
-    in
-    if String.starts_with ~prefix:active_account_label body
-    then (
-      let value =
-        String.trim
-          (String.sub
-             body
-             (String.length active_account_label)
-             (String.length body - String.length active_account_label))
-      in
-      match value with
-      | "true" -> Some (`Active true)
-      | "false" -> Some (`Active false)
-      | _ -> None)
-    else if String.starts_with ~prefix:token_scopes_label body
-    then (
-      let value =
-        String.trim
-          (String.sub
-             body
-             (String.length token_scopes_label)
-             (String.length body - String.length token_scopes_label))
-      in
-      let scopes =
-        String.split_on_char ',' value
-        |> List.map (fun scope ->
-          String.trim scope
-          |> String.to_seq
-          |> Seq.filter (fun c -> c <> '\'')
-          |> String.of_seq
-          |> String.trim)
-        |> List.filter (fun scope -> scope <> "")
-      in
-      Some (`Scopes scopes))
-    else None)
-;;
-
-let apply_detail entry detail =
-  match detail with
-  | `Active value -> { entry with active = Some value }
-  | `Scopes scopes -> { entry with scopes = Some scopes }
-;;
-
-let collect_entries lines =
-  let flush current acc =
-    match current with
-    | None -> acc
-    | Some entry -> entry :: acc
-  in
-  let rec walk lines current acc =
-    match lines with
-    | [] -> List.rev (flush current acc)
-    | line :: rest ->
-      (match parse_entry_line line with
-       | Some entry -> walk rest (Some entry) (flush current acc)
-       | None ->
-         (match current, parse_detail_line line with
-          | Some entry, Some detail -> walk rest (Some (apply_detail entry detail)) acc
-          | _, _ -> walk rest current acc))
-  in
-  walk lines None []
-;;
-
-let is_environment_source = function
-  | Some (Environment _) -> true
-  | Some Keyring | Some Config_default -> false
-  | None -> false
-;;
-
-let is_unrecognised_source = function
-  | None -> true
-  | Some (Environment _ | Keyring | Config_default) -> false
-;;
-
-(* Shadowing is decided by the presence of an environment-sourced row beside a
-   non-environment one, not by gh's "Active account" line. gh reads the
-   variable before any stored credential, so a row for it appearing at all
-   means that is the token in use. Every measured shape agrees — the
-   environment row is marked active in all four — but reading [active] here
-   would rest the verdict on a field never observed as [false] for that row,
-   and a future [false] would silently report Authenticated for a host whose
-   pushes go out under the variable. [active] stays on the record because the
-   endpoint reports it; it just does not decide.
-
-   An unrecognised label short-circuits to [Unknown] before any of that: the
-   parser cannot tell whether it names a variable, and guessing "stored" would
-   report Authenticated for a shadowed host. *)
-let verdict_of_entries entries =
-  let has_environment =
-    List.exists (fun entry -> is_environment_source entry.source) entries
-  in
-  let has_non_environment =
-    List.exists (fun entry -> not (is_environment_source entry.source)) entries
-  in
-  let has_logged_in =
-    List.exists
-      (fun entry ->
-         match entry.outcome with
-         | Logged_in -> true
-         | Login_failed -> false)
-      entries
-  in
-  if List.exists (fun entry -> is_unrecognised_source entry.source) entries
-  then Unknown
-  else if has_environment && has_non_environment
-  then Shadowed
-  else if has_logged_in
-  then Authenticated
-  else Unauthenticated
+    loop [] hosts
 ;;
 
 let parse output =
-  let lines = String.split_on_char '\n' output in
-  let entries = collect_entries lines in
-  match entries with
-  | _ :: _ -> { entries; verdict = verdict_of_entries entries }
-  | [] ->
-    if List.exists
-         (fun line -> String_util.contains_substring line no_hosts_sentence)
-         lines
-    then { entries = []; verdict = Unauthenticated }
-    else { entries = []; verdict = Unknown }
+  match
+    try Ok (Yojson.Safe.from_string output) with
+    | Yojson.Json_error detail -> Error ("invalid gh auth JSON: " ^ detail)
+  with
+  | Error detail -> { entries = []; schema_error = Some detail }
+  | Ok json ->
+    (match parse_json json with
+     | Ok entries -> { entries; schema_error = None }
+     | Error detail -> { entries = []; schema_error = Some detail })
+;;
+
+let is_environment = function
+  | Environment _ -> true
+  | Keyring | Config_file _ -> false
+;;
+
+let verdict_for_host parsed ~hostname =
+  match parsed.schema_error with
+  | Some _ -> Unknown
+  | None ->
+    let hostname = String.lowercase_ascii hostname in
+    let entries =
+      List.filter
+        (fun entry -> String.equal (String.lowercase_ascii entry.host) hostname)
+        parsed.entries
+    in
+    (match List.filter (fun entry -> entry.active) entries with
+     | [] when entries = [] -> Unauthenticated
+     | [ active ] ->
+       if
+         is_environment active.source
+         && List.exists (fun entry -> not (is_environment entry.source)) entries
+       then Shadowed
+       else
+         (match active.outcome with
+          | Logged_in -> Authenticated
+          | Login_failed -> Unauthenticated
+          | Timed_out -> Unknown)
+     | [] | _ :: _ :: _ -> Unknown)
 ;;

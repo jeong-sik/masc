@@ -45,13 +45,15 @@ Add a product-specific **observation** module, structurally parallel to the
 connector modules that already know Discord or Slack, and keep it entirely
 outside exec/Gate:
 
-- New `lib/credential_observation/`: runs `gh auth status` and parses the
-  stable field labels (host, account, token source `keyring | env`, scopes),
-  using the same non-interactive env discipline as `Repo_git`
-  (`GIT_TERMINAL_PROMPT=0`, empty askpass). Unknown or unparseable output is
-  a typed `Unknown` verdict, never a permissive default.
-- Probes evaluate **per keeper profile**, not per host: the probe runs under
-  the keeper's projected environment (`local_env_for_keeper`; the Docker
+- New `lib/credential_observation/`: runs
+  `gh auth status --hostname <target> --json hosts` without `--show-token`
+  and strictly decodes the machine schema (host, login, active account,
+  state, token source, scopes, git protocol), using the same non-interactive
+  env discipline as `Repo_git` (`GIT_TERMINAL_PROMPT=0`, empty askpass).
+  Invalid JSON, unknown fields/enums, duplicate keys, host mismatches, or a
+  token-bearing response are typed `Unknown`, never a permissive default.
+- Probes evaluate **per keeper profile and target repository host**: the probe
+  runs under the keeper's projected environment (`local_env_for_keeper`; the Docker
   profile probes with the projected `--env-file`), so the verdict reflects
   what that keeper's shell would actually resolve — including the case where
   a host-keyring credential is shadowed by a projected `GH_TOKEN`, the
@@ -63,22 +65,26 @@ outside exec/Gate:
   A third shape needs no failure at all: a valid env token over a logged-in
   keyring renders both rows `✓`, yet the stored credential is not what
   authenticates. This is why the verdict keys on the env row's presence beside
-  a stored credential — gh reads the variable before the keyring — and not on
-  any per-row mark or `Active` flag.
+  a stored credential on that same host. The JSON `active` field is the
+  authority for which account the target host will use; credentials on a
+  different host, and inactive environment rows, cannot shadow it.
 - Read surface: `GET /api/v1/keepers/:name/credential-surface` returning
   `{schema, host, status: authenticated | unauthenticated | shadowed |
   unknown, account?, token_source?, scopes?, probed_at, next_action}` — never
   a token value, and the store stays write-only as today.
   `token_source?` is the label gh itself prints — `keyring`, or the shadowing
   variable's own name (`GH_TOKEN`, `GITHUB_TOKEN`, …) so `next_action` can
-  name exactly what to unset. Parsed as `Keyring | Environment of string`,
-  never collapsed to a bare `env`.
+  name exactly what to unset. Parsed as
+  `Keyring | Environment of string | Config_file of string`, never collapsed
+  to a bare `env`.
 - Dashboard: a credential card on the keeper detail panel rendering exactly
   those fields, with a manual re-probe action.
-- Probe budget: results are cached with a TTL (default 10 minutes) and a
-  manual refresh; probes serialize through a single in-process slot so a
-  fleet of N keepers cannot multiply `gh` API calls (the fleet shares one
-  personal rate limit — audit G4).
+- Probe budget: the process has a bounded timeout. Results are cached per
+  `(profile, target-host, projected-environment-revision)` with separate
+  success/error TTLs and manual refresh; bounded concurrency prevents a fleet
+  of N keepers from multiplying `gh` API calls without making one hung host a
+  global head-of-line blocker (the fleet shares one personal rate limit —
+  audit G4).
 
 ## 3. Non-goals
 
@@ -97,17 +103,18 @@ file boundary) becomes visible because the probe reports which source
 resolved.
 
 Negative: a probe consumes the operator's own `gh` API budget (bounded by the
-TTL and the single-slot serialization); parser follows `gh auth status` text,
-which is stable-labeled but not a formal API and needs a compatibility test
-against the pinned gh version.
+timeout, cache, and concurrency limit); the decoder follows the CLI's exported
+JSON schema and therefore needs a compatibility fixture against the pinned gh
+version.
 
 ## 5. Verification
 
-- Unit: parser fixtures for keyring/env/shadowed/GHES-host outputs, including
-  future-unknown labels mapping to `Unknown`.
-- The probe never reads `gh auth status`'s exit code as a verdict: a healthy
-  keyring shadowed by an invalid env token exits 1 exactly like a logged-out
-  host; only per-entry marks and labels decide.
+- Unit: an actual gh 2.87.3 JSON-shape fixture plus keyring/env/shadowed/GHES
+  and mixed-host isolation cases; unknown fields/enums and token-bearing JSON
+  map to `Unknown`.
+- The probe never reads `gh auth status`'s exit code as a verdict: JSON mode
+  exits zero for per-account authentication failures. The target host's typed
+  active/state/source fields decide.
 - Integration: probe under a projected fake `GH_TOKEN` reports `env` source;
   probe with an empty projection on a logged-in host reports `keyring`.
 - E2E completion bar (per the audit's production-use standard): the verdict

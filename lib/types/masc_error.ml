@@ -23,40 +23,41 @@ let rate_limit_config_to_yojson c =
     ("task_ops_per_minute", `Int c.task_ops_per_minute);
   ]
 
+(* The field helpers below are total (Json_util getters return options),
+   so the previous blanket [try] guarded nothing it could name and folded
+   asynchronous exceptions into a string error. *)
 let rate_limit_config_of_yojson json =
-  try
-    let int_field name default =
-      Json_util.get_int json name |> Option.value ~default
-    in
-    let float_field name default =
-      Json_util.get_float json name |> Option.value ~default
-    in
-    let string_list_field name default =
-      match Json_util.get_array json name with
-      | Some (`List values) ->
-          List.filter_map (function `String s -> Some s | _ -> None) values
-      | _ -> default
-    in
-    let per_minute = int_field "per_minute" default_rate_limit.per_minute in
-    let burst_allowed = int_field "burst_allowed" default_rate_limit.burst_allowed in
-    let priority_agents =
-      string_list_field "priority_agents" default_rate_limit.priority_agents
-    in
-    let worker_multiplier =
-      float_field "worker_multiplier" default_rate_limit.worker_multiplier
-    in
-    let admin_multiplier =
-      float_field "admin_multiplier" default_rate_limit.admin_multiplier
-    in
-    let broadcast_per_minute =
-      int_field "broadcast_per_minute" default_rate_limit.broadcast_per_minute
-    in
-    let task_ops_per_minute =
-      int_field "task_ops_per_minute" default_rate_limit.task_ops_per_minute
-    in
-    Ok { per_minute; burst_allowed; priority_agents; worker_multiplier;
-         admin_multiplier; broadcast_per_minute; task_ops_per_minute }
-  with e -> Error (Printexc.to_string e)
+  let int_field name default =
+    Json_util.get_int json name |> Option.value ~default
+  in
+  let float_field name default =
+    Json_util.get_float json name |> Option.value ~default
+  in
+  let string_list_field name default =
+    match Json_util.get_array json name with
+    | Some (`List values) ->
+        List.filter_map (function `String s -> Some s | _ -> None) values
+    | _ -> default
+  in
+  let per_minute = int_field "per_minute" default_rate_limit.per_minute in
+  let burst_allowed = int_field "burst_allowed" default_rate_limit.burst_allowed in
+  let priority_agents =
+    string_list_field "priority_agents" default_rate_limit.priority_agents
+  in
+  let worker_multiplier =
+    float_field "worker_multiplier" default_rate_limit.worker_multiplier
+  in
+  let admin_multiplier =
+    float_field "admin_multiplier" default_rate_limit.admin_multiplier
+  in
+  let broadcast_per_minute =
+    int_field "broadcast_per_minute" default_rate_limit.broadcast_per_minute
+  in
+  let task_ops_per_minute =
+    int_field "task_ops_per_minute" default_rate_limit.task_ops_per_minute
+  in
+  Ok { per_minute; burst_allowed; priority_agents; worker_multiplier;
+       admin_multiplier; broadcast_per_minute; task_ops_per_minute }
 
 let limit_for_category config = function
   | GeneralLimit -> config.per_minute

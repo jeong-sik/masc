@@ -195,27 +195,24 @@ let path_extension pathname =
     String.lowercase_ascii ext
 ;;
 
+(* [Uri.of_string], [Uri.path], [Uri.host] and [path_extension] are total —
+   Uri parses arbitrary strings without raising — so the previous [try]
+   wrappers around these helpers guarded nothing they could name. *)
 let is_image_url url =
-  try
-    let uri = Uri.of_string url in
-    let path = Uri.path uri in
-    List.mem (path_extension path) image_extensions
-  with
-  | _ -> false
+  let uri = Uri.of_string url in
+  let path = Uri.path uri in
+  List.mem (path_extension path) image_extensions
 ;;
 
 let hostname_title url =
-  try
-    let uri = Uri.of_string url in
-    let host = Option.value (Uri.host uri) ~default:url in
-    let host =
-      if String.length host > 4 && String.sub host 0 4 = "www."
-      then String.sub host 4 (String.length host - 4)
-      else host
-    in
-    if host = "" then url else host
-  with
-  | _ -> url
+  let uri = Uri.of_string url in
+  let host = Option.value (Uri.host uri) ~default:url in
+  let host =
+    if String.length host > 4 && String.sub host 0 4 = "www."
+    then String.sub host 4 (String.length host - 4)
+    else host
+  in
+  if host = "" then url else host
 ;;
 
 let standalone_url_re =
@@ -223,24 +220,21 @@ let standalone_url_re =
 ;;
 
 let is_http_url url =
-  try
-    let scheme = Uri.scheme (Uri.of_string url) in
-    match scheme with
-    | Some "http" | Some "https" -> true
-    | _ -> false
-  with
+  match Uri.scheme (Uri.of_string url) with
+  | Some "http" | Some "https" -> true
   | _ -> false
 ;;
 
+(* [Invalid_url] was removed from this vocabulary: its only producer was an
+   exception arm behind [Uri.of_string], which does not raise, so the reason
+   could never occur. *)
 type dropped_http_url_reason =
   | Missing_scheme
   | Unsupported_scheme of string
-  | Invalid_url
 
 let dropped_http_url_reason_to_string = function
   | Missing_scheme -> "missing_scheme"
   | Unsupported_scheme scheme -> "unsupported_scheme:" ^ scheme
-  | Invalid_url -> "invalid_url"
 ;;
 
 let redacted_http_url_opt ?on_drop url =
@@ -249,13 +243,10 @@ let redacted_http_url_opt ?on_drop url =
     Option.iter (fun f -> f reason) on_drop;
     None
   in
-  try
-    match Uri.scheme (Uri.of_string url) with
-    | Some "http" | Some "https" -> Some url
-    | Some scheme -> drop (Unsupported_scheme scheme)
-    | None -> drop Missing_scheme
-  with
-  | _ -> drop Invalid_url
+  match Uri.scheme (Uri.of_string url) with
+  | Some "http" | Some "https" -> Some url
+  | Some scheme -> drop (Unsupported_scheme scheme)
+  | None -> drop Missing_scheme
 ;;
 
 let has_prefix ~prefix value =

@@ -79,44 +79,28 @@ let test_command_targets_one_host_without_token () =
 ;;
 
 let test_command_rejects_empty_hostname () =
-  check_raises
-    "empty hostname"
-    (Invalid_argument "Gh_auth_status.command_argv: hostname is empty")
-    (fun () -> ignore (Gh_auth_status.command_argv ~hostname:"  "))
+  List.iter
+    (fun hostname ->
+       try
+         ignore (Gh_auth_status.command_argv ~hostname);
+         failf "empty hostname %S was accepted" hostname
+       with
+       | Invalid_argument _ -> ())
+    [ ""; "   "; "\t\n" ]
 ;;
 
-let test_bare_hosts_file_source_decodes () =
-  let json =
-    document
-      [ ( "github.com"
-        , `List
-            [ entry
-                ~active:true
-                ~git_protocol:"https"
-                ~host:"github.com"
-                ~login:"octo"
-                ~state:"success"
-                ~token_source:"hosts.yml"
-                ()
-            ] )
-      ]
-  in
-  let parsed = Gh_auth_status.parse json in
-  check (option string) "schema" None parsed.schema_error;
-  match parsed.entries with
-  | [ { source = Gh_auth_status.Config_file "hosts.yml"; _ } ] -> ()
-  | _ -> fail "bare hosts.yml source was not decoded as a config file"
+let replace_token_source token_source json =
+  match json with
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (name, value) ->
+            if String.equal name "tokenSource"
+            then name, `String token_source
+            else name, value)
+         fields)
+  | _ -> json
 ;;
-
-let test_schema_errors_redact_values () =
-  let parsed = Gh_auth_status.parse {|{"hosts":"ghp_secret"}|} in
-  check
-    (option string)
-    "token-free schema error"
-    (Some "hosts must be an object, got string")
-    parsed.schema_error
-;;
-
 let test_actual_cli_json_decodes () =
   let parsed = Gh_auth_status.parse actual_cli_json in
   check (option string) "schema" None parsed.schema_error;
@@ -136,6 +120,37 @@ let test_actual_cli_json_decodes () =
      | Gh_auth_status.Environment _ | Gh_auth_status.Config_file _ ->
        fail "keyring source was misclassified")
   | entries -> failf "expected one entry, got %d" (List.length entries)
+;;
+
+let test_relative_config_and_documented_environment_sources () =
+  let config_json =
+    document
+      [ ( "github.com"
+        , `List
+            [ replace_token_source "hosts.yml" (keyring_entry ()) ] ) ]
+  in
+  let parsed = Gh_auth_status.parse config_json in
+  check (option string) "bare hosts.yml schema" None parsed.schema_error;
+  (match parsed.entries with
+   | [ observed ] ->
+     (match observed.source with
+      | Gh_auth_status.Config_file "hosts.yml" -> ()
+      | Gh_auth_status.Config_file other ->
+        failf "unexpected config source %s" other
+      | Gh_auth_status.Keyring | Gh_auth_status.Environment _ ->
+        fail "bare hosts.yml was not classified as a config source")
+   | entries -> failf "expected one entry, got %d" (List.length entries));
+  List.iter
+    (fun token_source ->
+       let json =
+         document
+           [ ( "github.com"
+             , `List
+                 [ replace_token_source token_source (environment_entry ~state:"success" ()) ] ) ]
+       in
+       let parsed = Gh_auth_status.parse json in
+       check (option string) (token_source ^ " is documented") None parsed.schema_error)
+    [ "GH_TOKEN"; "GITHUB_TOKEN"; "GH_ENTERPRISE_TOKEN"; "GITHUB_ENTERPRISE_TOKEN" ]
 ;;
 
 let test_environment_shadows_stored_account_on_same_host () =
@@ -260,15 +275,26 @@ let test_schema_drift_is_unknown () =
              then name, `String "secure_enclave"
              else name, value)
           valid_fields )
-    ; ( "undocumented token-like source"
+    ; ( "undocumented environment token source"
       , List.map
           (fun (name, value) ->
              if String.equal name "tokenSource"
-             then name, `String "VAULT_TOKEN"
+             then name, `String "NOT_DOCUMENTED_TOKEN"
              else name, value)
           valid_fields )
     ; "token exposure", ("token", `String "must-not-be-ingested") :: valid_fields
     ]
+;;
+
+let test_schema_errors_redact_json_values () =
+  let parsed = Gh_auth_status.parse {|{"hosts":"ghp_secret_should_not_leak"}|} in
+  match parsed.schema_error with
+  | None -> fail "malformed hosts value was accepted"
+  | Some detail ->
+    check bool "schema error does not expose JSON value" false
+      (String_util.contains_substring detail "ghp_secret_should_not_leak");
+    check bool "schema error reports the JSON kind" true
+      (String_util.contains_substring detail "string")
 ;;
 
 let test_host_identity_mismatch_is_unknown () =
@@ -290,16 +316,15 @@ let () =
             "command targets one host without token"
             `Quick
             test_command_targets_one_host_without_token
-        ; test_case "actual CLI JSON decodes" `Quick test_actual_cli_json_decodes
         ; test_case
             "command rejects empty hostname"
             `Quick
             test_command_rejects_empty_hostname
+        ; test_case "actual CLI JSON decodes" `Quick test_actual_cli_json_decodes
         ; test_case
-            "bare hosts file source decodes"
+            "relative config and documented environment sources"
             `Quick
-            test_bare_hosts_file_source_decodes
-        ; test_case
+            test_relative_config_and_documented_environment_sources
             "same-host environment shadows stored account"
             `Quick
             test_environment_shadows_stored_account_on_same_host
@@ -315,13 +340,13 @@ let () =
             test_empty_hosts_is_target_unauthenticated
         ; test_case "schema drift is unknown" `Quick test_schema_drift_is_unknown
         ; test_case
-            "schema errors redact values"
-            `Quick
-            test_schema_errors_redact_values
-        ; test_case
             "host identity mismatch is unknown"
             `Quick
             test_host_identity_mismatch_is_unknown
+        ; test_case
+            "schema errors redact JSON values"
+            `Quick
+            test_schema_errors_redact_json_values
         ; test_case "invalid JSON is unknown" `Quick test_invalid_json_is_unknown
         ] )
     ]

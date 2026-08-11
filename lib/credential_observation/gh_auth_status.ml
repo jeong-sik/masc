@@ -40,21 +40,21 @@ let verdict_to_string = function
   | Unknown -> "unknown"
 ;;
 
-let command_argv ~hostname =
-  let hostname = String.trim hostname in
-  if String.equal hostname ""
-  then invalid_arg "Gh_auth_status.command_argv: hostname is empty"
-  else [| "gh"; "auth"; "status"; "--hostname"; hostname; "--json"; "hosts" |]
-;;
-
 let json_kind = function
   | `Null -> "null"
   | `Bool _ -> "boolean"
   | `Int _ | `Intlit _ | `Float _ -> "number"
   | `String _ -> "string"
   | `Assoc _ -> "object"
-  | `List _ | `Tuple _ -> "array"
-  | `Variant _ -> "variant"
+  | `List _ -> "array"
+;;
+
+let command_argv ~hostname =
+  let hostname = String.trim hostname in
+  if String.equal hostname ""
+  then invalid_arg "gh auth status requires a non-empty hostname"
+  else
+    [| "gh"; "auth"; "status"; "--hostname"; hostname; "--json"; "hosts" |]
 ;;
 
 let object_fields context = function
@@ -162,14 +162,19 @@ let source_of_label label =
   else if
     List.mem
       label
-      [ "GH_TOKEN"; "GITHUB_TOKEN"; "GH_ENTERPRISE_TOKEN"; "GITHUB_ENTERPRISE_TOKEN" ]
+      [ "GH_TOKEN"
+      ; "GITHUB_TOKEN"
+      ; "GH_ENTERPRISE_TOKEN"
+      ; "GITHUB_ENTERPRISE_TOKEN"
+      ]
   then Ok (Environment label)
   else if
     String.equal label "hosts.yml"
-    || String.ends_with ~suffix:"/hosts.yml" label
+    ||
+    String.ends_with ~suffix:"/hosts.yml" label
     || String.ends_with ~suffix:"\\hosts.yml" label
   then Ok (Config_file label)
-  else Error "unknown gh tokenSource"
+  else Error "unknown gh token source label"
 ;;
 
 let outcome_of_state = function
@@ -203,8 +208,7 @@ let parse_entry ~map_host ~index json =
     if String.equal (String.lowercase_ascii host) (String.lowercase_ascii map_host)
     then Ok ()
     else
-      Error
-        (Printf.sprintf "%s.host does not match map key" context)
+      Error (context ^ ".host does not match its map key")
   in
   let* login = string_field context "login" fields in
   let* source_label = string_field context "tokenSource" fields in

@@ -52,15 +52,6 @@ let user_message text : Agent_core.Types.message =
   }
 ;;
 
-let system_message text : Agent_core.Types.message =
-  { role = System
-  ; content = [ Text text ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-;;
-
 let last_tool_results messages =
   messages
   |> List.rev

@@ -263,11 +263,6 @@ let has_prefix ~prefix value =
   String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
 ;;
 
-let opt_string_field key = function
-  | None -> []
-  | Some value -> [ (key, `String value) ]
-;;
-
 let opt_bool_field key = function
   | None -> []
   | Some value -> [ (key, `Bool value) ]
@@ -334,23 +329,23 @@ let trace_step_to_yojson = function
     `Assoc
       ([ ("kind", `String "think"); ("text", `String wire_text) ]
        @ (if content_withheld then [ ("content_withheld", `Bool true) ] else [])
-       @ opt_string_field "ts" ts
+       @ Json_util.string_field_if_present "ts" ts
        @ opt_int_field "agent_core_block_index" agent_core_block_index)
   | Trace_reason { text; detail; ts } ->
     `Assoc
       ([ ("kind", `String "reason"); ("text", `String text) ]
-       @ opt_string_field "detail" detail
-       @ opt_string_field "ts" ts)
+       @ Json_util.string_field_if_present "detail" detail
+       @ Json_util.string_field_if_present "ts" ts)
   | Trace_tool
       { name; tool_call_id; status; dur; args; result; ts; agent_core_block_index } ->
     `Assoc
       ([ ("kind", `String "tool"); ("name", `String name) ]
-       @ opt_string_field "tool_call_id" tool_call_id
+       @ Json_util.string_field_if_present "tool_call_id" tool_call_id
        @ trace_status_to_yojson status
-       @ opt_string_field "dur" dur
+       @ Json_util.string_field_if_present "dur" dur
        @ opt_json_field "args" args
        @ opt_json_field "result" result
-       @ opt_string_field "ts" ts
+       @ Json_util.string_field_if_present "ts" ts
        @ opt_int_field "agent_core_block_index" agent_core_block_index)
 ;;
 
@@ -518,7 +513,7 @@ let block_to_yojson = function
       ]
   | Callout { severity; html } ->
     `Assoc ([ ("t", `String "callout"); ("html", `String html) ]
-            @ opt_string_field "severity" severity)
+            @ Json_util.string_field_if_present "severity" severity)
   | Table { head; rows } ->
     `Assoc
       [ ("t", `String "table")
@@ -545,9 +540,9 @@ let block_to_yojson = function
   | Mermaid { source; caption } ->
     `Assoc
       ([ ("t", `String "mermaid"); ("source", `String source) ]
-       @ opt_string_field "caption" caption)
+       @ Json_util.string_field_if_present "caption" caption)
   | Svg { svg; cap } ->
-    `Assoc ([ ("t", `String "svg"); ("svg", `String svg) ] @ opt_string_field "cap" cap)
+    `Assoc ([ ("t", `String "svg"); ("svg", `String svg) ] @ Json_util.string_field_if_present "cap" cap)
   | Voice { secs; wave; via; size; transcript; src } ->
     let fields =
       [ ("t", `String "voice") ]
@@ -555,25 +550,25 @@ let block_to_yojson = function
       @ (match wave with
          | None -> []
          | Some values -> [ ("wave", `List (List.map (fun v -> `Float v) values)) ])
-      @ opt_string_field "via" via
-      @ opt_string_field "size" size
-      @ opt_string_field "transcript" transcript
-      @ opt_string_field "src" src
+      @ Json_util.string_field_if_present "via" via
+      @ Json_util.string_field_if_present "size" size
+      @ Json_util.string_field_if_present "transcript" transcript
+      @ Json_util.string_field_if_present "src" src
     in
     `Assoc fields
   | Attach { name; dims; src; svg; ph; via; size; data; mime_type; size_bytes; kind } ->
     `Assoc
       ([ ("t", `String "attach"); ("name", `String name) ]
-       @ opt_string_field "dims" dims
-       @ opt_string_field "src" src
-       @ opt_string_field "svg" svg
-       @ opt_string_field "ph" ph
-       @ opt_string_field "via" via
-       @ opt_string_field "size" size
-       @ opt_string_field "data" data
-       @ opt_string_field "mimeType" mime_type
+       @ Json_util.string_field_if_present "dims" dims
+       @ Json_util.string_field_if_present "src" src
+       @ Json_util.string_field_if_present "svg" svg
+       @ Json_util.string_field_if_present "ph" ph
+       @ Json_util.string_field_if_present "via" via
+       @ Json_util.string_field_if_present "size" size
+       @ Json_util.string_field_if_present "data" data
+       @ Json_util.string_field_if_present "mimeType" mime_type
        @ opt_int_field "sizeBytes" size_bytes
-       @ opt_string_field "kind" kind)
+       @ Json_util.string_field_if_present "kind" kind)
   | Image { src; cap } ->
     let fields = [ ("t", `String "image"); ("src", `String src) ] in
     let fields =

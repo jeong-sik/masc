@@ -15,6 +15,17 @@
     Matching is case-insensitive on the trimmed key. *)
 val is_auth_header_key : string -> bool
 
+val effective_credential_reference :
+  provider_id:string ->
+  Runtime_schema.credential option ->
+  Runtime_schema.credential option
+(** Return the explicit credential reference, or the provider registry's
+    declared default environment reference when the runtime row omits one.
+    Environment aliases follow the same candidate selection as API-key
+    materialization, so the returned non-secret reference names the credential
+    that was actually selected. File and inline references are preserved.
+    An unregistered provider with no explicit credential remains [None]. *)
+
 val binding_to_provider_config
   :  Runtime_schema.config
   -> Runtime_schema.binding

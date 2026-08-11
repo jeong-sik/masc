@@ -244,7 +244,9 @@ module For_testing : sig
       (idx:int ->
       runtime_id:string ->
       'candidate ->
-      ('result, Agent_core.Error.t) result * Agent_core.Checkpoint.t option) ->
+      ('result, Agent_core.Error.t) result
+      * Agent_core.Checkpoint.t option
+      * Keeper_provider_attempt_effect.t) ->
     'candidate list ->
     ('result, Agent_core.Error.t) result
 

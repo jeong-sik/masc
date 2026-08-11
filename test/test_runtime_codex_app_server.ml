@@ -1925,6 +1925,115 @@ let test_keeper_resumes_persisted_codex_thread () =
        | Ok (Some binding) -> check int "stored turns" 2 binding.turn_count)
 ;;
 
+let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
+  let base_path = temp_workspace "masc-codex-context-wire-" in
+  let start_capture = Filename.temp_file "masc-codex-context-start-" ".jsonl" in
+  let resume_capture = Filename.temp_file "masc-codex-context-resume-" ".jsonl" in
+  let dynamic_context = "DYNAMIC_CONTEXT_RAW\nsecond line" in
+  let goal = "WIRE_GOAL_EXACT\nsecond line" in
+  let hooks : Agent_core.Hooks.hooks =
+    { Agent_core.Hooks.empty with
+      before_turn_params =
+        Some
+          (function
+            | BeforeTurnParams { current_params; _ } ->
+              AdjustParams
+                { current_params with
+                  extra_system_context = Some dynamic_context
+                }
+            | _ -> Continue)
+    }
+  in
+  let request capture_path method_ =
+    In_channel.with_open_bin capture_path (fun input ->
+      In_channel.input_lines input
+      |> List.map Yojson.Safe.from_string
+      |> List.find (fun json ->
+        Yojson.Safe.Util.member "method" json = `String method_))
+  in
+  let request_param_string name request =
+    request
+    |> Yojson.Safe.Util.member "params"
+    |> Yojson.Safe.Util.member name
+    |> Yojson.Safe.Util.to_string
+  in
+  let turn_prompt capture_path =
+    request capture_path "turn/start"
+    |> Yojson.Safe.Util.member "params"
+    |> Yojson.Safe.Util.member "input"
+    |> Yojson.Safe.Util.to_list
+    |> List.hd
+    |> Yojson.Safe.Util.member "text"
+    |> Yojson.Safe.Util.to_string
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_tree base_path;
+      Sys.remove start_capture;
+      Sys.remove resume_capture)
+    (fun () ->
+       with_fixture
+         ~capture_path:start_capture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~base_path
+                ~hooks
+                ~goal
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok result -> check int "initial context turn" 1 result.turns);
+       with_fixture
+         ~capture_path:resume_capture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; resumed_turn_result
+         ; resumed_item_completed
+         ; resumed_turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~base_path
+                ~hooks
+                ~goal
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok result -> check int "resumed context turn" 2 result.turns);
+       let start_instructions =
+         request start_capture "thread/start"
+         |> request_param_string "developerInstructions"
+       in
+       let resume_instructions =
+         request resume_capture "thread/resume"
+         |> request_param_string "developerInstructions"
+       in
+       check string
+         "start and resume receive identical developer instructions"
+         start_instructions
+         resume_instructions;
+       check string
+         "dynamic context is verbatim on the instruction channel"
+         dynamic_context
+         start_instructions;
+       check string "start prompt stays exact" goal (turn_prompt start_capture);
+       check string "resume prompt stays exact" goal (turn_prompt resume_capture))
+;;
+
 (* A changed tool surface must not RESUME the settled thread. It used to be
    pinned as "the turn fails", which also left the session with no way forward:
    Settled never becomes Recovery_required, so no operator action cleared it
@@ -2160,9 +2269,9 @@ let test_keeper_projects_typed_tools_and_hooks () =
     projection_saw_context :=
       List.exists
         (fun (message : Agent_core.Types.message) ->
-          message.role = User
+          message.role = System
           && String.equal
-               "[system context] fixture-context"
+               "fixture-context"
                (Agent_core.Types.text_of_content message.content)
           && Agent_core.Types.Extra_system_context_provenance.classify
                message.metadata
@@ -2181,8 +2290,7 @@ let test_keeper_projects_typed_tools_and_hooks () =
     [ init_result
     ; account_chatgpt
     ; thread_result
-    ; {|{"id":4,"result":{}}|}
-    ; {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
+    ; turn_result
     ; tool_call_request
     ; item_completed
     ; turn_completed
@@ -2616,6 +2724,10 @@ let () =
             "Keeper resumes persisted Codex thread"
             `Quick
             test_keeper_resumes_persisted_codex_thread
+        ; test_case
+            "Keeper dynamic context stays on Codex instruction wire"
+            `Quick
+            test_keeper_dynamic_context_stays_on_codex_instruction_wire
         ; test_case
             "Keeper starts fresh on a changed Codex tool surface"
             `Quick

@@ -367,7 +367,7 @@ val provider_id_of_runtime_id : string -> string option
 (** Owning provider id ([providers.<id>] in runtime.toml) of the runtime with
     this binding-key id, or [None] when the runtime id is unknown. *)
 
-val quota_scope_of_runtime_id : string -> string option
+val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
 (** Non-secret quota-scope identity of the runtime's provider
     ({!Runtime_quota_window.scope_of_credential}): rows sharing one
     credential account share one scope, so an exhausted window recorded on

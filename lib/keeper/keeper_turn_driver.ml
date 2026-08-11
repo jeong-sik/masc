@@ -237,9 +237,9 @@ let attempt_runtime_candidates
                the row's quota scope: siblings sharing the credential are
                demoted together (PR #28202 review P2). *)
             (match Runtime.quota_scope_of_runtime_id attempt_runtime_id with
-             | Some provider_id ->
+             | Some scope ->
                Runtime_quota_window.note_exhausted
-                 ~provider_id
+                 ~scope
                  (* NDT-OK: [retry_after] is relative to the provider response;
                     convert it to the wall-clock expiry at this ingress. *)
                  ~resets_at:(Unix.gettimeofday () +. retry_after_s)

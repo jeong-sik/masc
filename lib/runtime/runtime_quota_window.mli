@@ -20,21 +20,26 @@
     lazily on read; there is no background sweeper and no TTL knob.
     RFC-0370 §3.3. *)
 
-val note_exhausted : provider_id:string -> resets_at:float -> unit
-(** Remember that [provider_id]'s quota window is exhausted until
+type scope
+(** A non-secret quota ownership key.  The representation is deliberately
+    abstract so provider row ids, environment references, and file references
+    cannot be mixed accidentally at call sites. *)
+
+val note_exhausted : scope:scope -> resets_at:float -> unit
+(** Remember that [scope]'s quota window is exhausted until
     [resets_at] (Unix epoch seconds).  A later [resets_at] for the same
-    provider extends the window; an earlier one is ignored so a stale
+    scope extends the window; an earlier one is ignored so a stale
     retry hint cannot shorten a window a fresher response already
     established. *)
 
-val active_until : provider_id:string -> now:float -> float option
-(** [Some resets_at] when [provider_id] has a recorded window that has not
+val active_until : scope:scope -> now:float -> float option
+(** [Some resets_at] when [scope] has a recorded window that has not
     yet passed at [now]; [None] otherwise.  Expired entries are pruned on
     read. *)
 
 val demote_order :
   now:float ->
-  quota_scope_of:(string -> string option) ->
+  quota_scope_of:(string -> scope option) ->
   string list ->
   string list
 (** Stable-partition [candidates]: those whose quota scope (via
@@ -45,11 +50,12 @@ val demote_order :
     input unchanged when no candidate is demoted. *)
 
 val scope_of_credential :
-  provider_id:string -> Runtime_schema.credential option -> string
+  provider_id:string -> Runtime_schema.credential option -> scope
 (** Non-secret quota-scope identity for a provider row.  Provider hard quota
     is credential-account-owned, not provider-row-owned: two rows sharing one
     credential share one window (PR #28202 review).  [Env]/[File] carriers
-    are named by their non-secret reference ("env:KEY" / "file:PATH");
+    are keyed by their non-secret reference without encoding the carrier kind
+    into a string prefix;
     [Inline] carries the secret itself, so it cannot serve as a shared name
     and falls back to the row's [provider_id], as does an absent
     credential. *)

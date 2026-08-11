@@ -41,12 +41,12 @@ type turn_result =
   ; resumed : bool
   }
 
-type dynamic_tool_result =
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
   }
 
-type dynamic_tool =
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t

@@ -152,20 +152,15 @@ let model_input_projection_for_capacity
 
 let codex_dynamic_tool ~observe_effect_attempted (tool : Host.dynamic_tool) :
     Runtime_codex_app_server.dynamic_tool =
-  { name = tool.name
-  ; description = tool.description
-  ; input_schema = tool.input_schema
-  ; call =
+  { tool with
+    call =
       (fun ~call_id input ->
         (* Close the outer same-turn retry boundary before entering user/tool
            code. The handler may commit and then raise or be cancelled, so
            observing only its returned value would reopen a duplicate-effect
            window. *)
         observe_effect_attempted ();
-        let result = tool.call ~call_id input in
-        { Runtime_codex_app_server.success = result.success
-        ; content = result.content
-        })
+        tool.call ~call_id input)
   }
 ;;
 

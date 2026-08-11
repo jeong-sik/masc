@@ -1346,9 +1346,17 @@ let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option 
   match get_runtime_by_id id with
   | Some rt ->
     let credential =
-      Runtime_adapter.effective_credential_reference
-        ~provider_id:rt.provider.id
-        rt.provider.credentials
+      match rt.execution with
+      | Runtime_execution.Agent_core _ ->
+        Runtime_adapter.effective_credential_reference
+          ~provider_id:rt.provider.id
+          rt.provider.credentials
+      | Runtime_execution.Antigravity_cli _ -> rt.provider.credentials
+      | Runtime_execution.Codex_app_server _
+      | Runtime_execution.Claude_code _ ->
+        (* Official clients own subscription login. A registry API-key default
+           with the same provider label is a different account authority. *)
+        None
     in
     Some
       (Runtime_quota_window.scope_of_credential

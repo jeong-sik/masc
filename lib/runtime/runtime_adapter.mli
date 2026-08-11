@@ -21,8 +21,9 @@ val effective_credential_reference :
   Runtime_schema.credential option
 (** Return the explicit credential reference, or the provider registry's
     declared default environment reference when the runtime row omits one.
-    The fallback path is metadata only: it never reads the process environment
-    or credential files.  Explicit credentials are preserved unchanged.
+    Environment aliases follow the same candidate selection as API-key
+    materialization, so the returned non-secret reference names the credential
+    that was actually selected. File and inline references are preserved.
     An unregistered provider with no explicit credential remains [None]. *)
 
 val binding_to_provider_config

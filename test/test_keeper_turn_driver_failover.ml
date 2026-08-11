@@ -188,6 +188,23 @@ is-default = true
 [other.test_model]
 |}
 
+let runtime_toml_official_provider_named_like_registry =
+  {|
+[runtime]
+default = "openai.official_model"
+
+[providers.openai]
+protocol = "codex-app-server"
+command = "/definitely/missing/masc-codex-app-server"
+is-non-interactive = true
+
+[models.official_model]
+api-name = "gpt-fixture"
+max-context = 400000
+
+[openai.official_model]
+|}
+
 let runtime_toml_checkpoint_lane =
   {|
 [runtime]
@@ -1462,6 +1479,62 @@ let test_attempt_loop_reorders_shared_quota_sibling_same_turn () =
            [ "shared_a.test_model"; "other.test_model" ]
            !attempts))
 
+let test_deferred_quota_order_is_frozen_before_predispatch () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let shared_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
+         in
+         Runtime_quota_window.note_exhausted
+           ~scope:shared_scope
+           ~resets_at:500.0;
+         let hint =
+           Driver.For_testing.make_deferred_runtime_lane
+             ~assignment_id:"quota_lane"
+             ~failed_runtime_id:"previous.test_model"
+             ~next_runtime_id:"shared_a.test_model"
+             ~later_runtime_ids:
+               [ "shared_b.test_model"; "other.test_model" ]
+             ~failure:(retryable_network_error "previous cycle failed")
+         in
+         let ordered =
+           Driver.quota_ordered_deferred_runtime_lane ~now:100.0 hint
+         in
+         Alcotest.(check (list string))
+           "pre-dispatch and driver share the same reordered suffix"
+           [ "other.test_model"
+           ; "shared_a.test_model"
+           ; "shared_b.test_model"
+           ]
+           (Driver.deferred_runtime_ids ordered)))
+
+let test_official_client_does_not_inherit_registry_api_key_scope () =
+  with_runtime_config runtime_toml_official_provider_named_like_registry (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let official_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "openai.official_model")
+         in
+         let registry_api_key_scope =
+           Runtime_quota_window.scope_of_credential
+             ~provider_id:"openai"
+             (Some (Runtime_schema.Env "OPENAI_API_KEY"))
+         in
+         Runtime_quota_window.note_exhausted
+           ~scope:official_scope
+           ~resets_at:500.0;
+         Alcotest.(check (option (float 0.0)))
+           "subscription quota does not demote an API-key account"
+           None
+           (Runtime_quota_window.active_until
+              ~scope:registry_api_key_scope
+              ~now:100.0)))
+
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_core.Agent.After_assistant_collected
@@ -2046,6 +2119,14 @@ let () =
             "hard quota reorders shared sibling in same turn"
             `Quick
             test_attempt_loop_reorders_shared_quota_sibling_same_turn;
+          Alcotest.test_case
+            "deferred quota order is frozen before pre-dispatch"
+            `Quick
+            test_deferred_quota_order_is_frozen_before_predispatch;
+          Alcotest.test_case
+            "official client quota excludes registry API-key scope"
+            `Quick
+            test_official_client_does_not_inherit_registry_api_key_scope;
           Alcotest.test_case
             "typed checkpoint is same-run retry authority"
             `Quick

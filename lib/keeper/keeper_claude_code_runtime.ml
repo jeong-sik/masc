@@ -57,6 +57,65 @@ let claude_dynamic_tool (tool : Host.dynamic_tool) : Runtime_claude_code.dynamic
   }
 ;;
 
+let claude_stream_callback on_event =
+  match on_event with
+  | None -> None
+  | Some emit ->
+    let next_tool_index = ref 1 in
+    let tool_indexes = Hashtbl.create 8 in
+    let streamed_text = Buffer.create 256 in
+    let turn_identity = ref None in
+    Some
+      (function
+        | Runtime_claude_code.Turn_started { turn_id; model } ->
+          turn_identity := Some (turn_id, model);
+          emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
+        | Runtime_claude_code.Text_delta text ->
+          Buffer.add_string streamed_text text;
+          emit
+            (Agent_core.Types.ContentBlockDelta
+               { index = 0; delta = Agent_core.Types.TextDelta text })
+        | Runtime_claude_code.Dynamic_tool_started
+            { call_id; tool_name; arguments } ->
+          let index = !next_tool_index in
+          incr next_tool_index;
+          Hashtbl.replace tool_indexes call_id index;
+          emit
+            (Agent_core.Types.ContentBlockStart
+               { index
+               ; content_type = "tool_use"
+               ; tool_id = Some call_id
+               ; tool_name = Some tool_name
+               });
+          emit
+            (Agent_core.Types.ContentBlockDelta
+               { index
+               ; delta =
+                   Agent_core.Types.InputJsonSnapshot
+                     (Yojson.Safe.to_string arguments)
+               })
+        | Runtime_claude_code.Dynamic_tool_finished { call_id } ->
+          Option.iter
+            (fun index ->
+               Hashtbl.remove tool_indexes call_id;
+               emit (Agent_core.Types.ContentBlockStop { index }))
+            (Hashtbl.find_opt tool_indexes call_id)
+        | Runtime_claude_code.Turn_finished { text } ->
+          emit Agent_core.Types.MessageStop;
+          if not (String.equal (Buffer.contents streamed_text) text)
+          then
+            Option.iter
+              (fun (turn_id, model) ->
+                 emit
+                   (Agent_core.Types.MessageStart
+                      { id = turn_id ^ "-terminal"
+                      ; model
+                      ; usage = None
+                      });
+                 emit Agent_core.Types.MessageStop)
+              !turn_identity)
+;;
+
 let retry_after_of_rate_limit = function
   | None -> None
   | Some ({ resets_at = None; _ } : Runtime_claude_code.rate_limit) -> None
@@ -126,7 +185,7 @@ let recovery_failure_of_client_error = function
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~raw_trace
+    ~context ~event_bus ~raw_trace ~on_event
     ~(config : Runtime_execution.claude_code) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -397,6 +456,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       (Runtime_claude_code.dynamic_tool_bytes dynamic_tools);
     let started_at = Time_compat.now () in
     let turn_result =
+      let on_stream_event = claude_stream_callback on_event in
       try
         (match
            Runtime_claude_code.run_turn
@@ -433,6 +493,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                    ~turn_id
                    ~turn_count
                    ~updated_at:(Time_compat.now ())))
+             ?on_stream_event
              client_config
              ~prompt
          with
@@ -650,7 +711,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~raw_trace ~config =
+    ~context ~event_bus ~raw_trace ~on_event ~config =
   Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
     run_without_lifecycle
       ~runtime_id
@@ -667,5 +728,6 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
       ~context
       ~event_bus
       ~raw_trace
+      ~on_event
       ~config)
 ;;

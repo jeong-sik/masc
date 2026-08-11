@@ -863,6 +863,7 @@ let run_named
             ~context
             ~event_bus
             ~raw_trace
+            ~on_event
             ~config
         in
         let claude_result =

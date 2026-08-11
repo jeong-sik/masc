@@ -80,6 +80,32 @@ type dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+type stream_event =
+  | Turn_started of
+      { turn_id : string
+      ; model : string
+      }
+  | Text_delta of string
+  | Dynamic_tool_started of
+      { call_id : string
+      ; tool_name : string
+      ; arguments : Yojson.Safe.t
+      }
+  | Dynamic_tool_finished of { call_id : string }
+  | Turn_finished of { text : string }
+
+let emit_stream_event on_stream_event event =
+  match on_stream_event with
+  | None -> ()
+  | Some emit ->
+    (try emit event with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Runtime_agent.warn
+         "Claude Code stream callback raised (error=%s)"
+         (Printexc.to_string exn))
+;;
+
 let dynamic_tool_bytes tools =
   List.fold_left
     (fun acc tool ->
@@ -396,6 +422,7 @@ let handle_control_request
       ~mcp_session
       ~tools
       ~tool_call_count
+      ~on_stream_event
       fields
   =
   let stage = "control request" in
@@ -425,6 +452,9 @@ let handle_control_request
         match find_dynamic_tool tools name with
         | None -> None
         | Some tool ->
+          emit_stream_event
+            on_stream_event
+            (Dynamic_tool_started { call_id; tool_name = name; arguments });
           let result =
             try tool.call ~call_id arguments with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -435,6 +465,7 @@ let handle_control_request
                 (Printexc.to_string exn);
               { success = false; content = "MASC tool handler raised" }
           in
+          emit_stream_event on_stream_event (Dynamic_tool_finished { call_id });
           Some
             { Runtime_official_client_mcp.success = result.success
             ; content = result.content
@@ -537,7 +568,8 @@ let parse_control_response ~expected_request_id fields =
       protocol_error stage (Printf.sprintf "unknown response subtype %S" other)
 ;;
 
-let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id ~ignored =
+let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id
+    ~on_stream_event ~ignored =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -551,9 +583,11 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id ~ig
         ~mcp_session
         ~tools
         ~tool_call_count
+        ~on_stream_event
         fields
     in
-    await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id ~ignored
+    await_initialize
+      io ~mcp_session ~tools ~tool_call_count ~request_id ~on_stream_event ~ignored
   | ("system" | "rate_limit_event") when ignored < 32 ->
     await_initialize
       io
@@ -561,6 +595,7 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id ~ig
       ~tools
       ~tool_call_count
       ~request_id
+      ~on_stream_event
       ~ignored:(ignored + 1)
   | other ->
     protocol_error
@@ -737,7 +772,7 @@ let max_ignored_messages = 256
 
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
-    ~on_turn_started ~ignored =
+    ~on_turn_started ~on_stream_event ~stream_started ~ignored =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -749,26 +784,35 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
         ~mcp_session
         ~tools
         ~tool_call_count
+        ~on_stream_event
         fields
     in
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started ~ignored
+      ~on_stream_event ~stream_started
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "assistant" ->
-    let* _uuid, model, texts = parse_assistant ~expected_session_id fields in
+    let* uuid, model, texts = parse_assistant ~expected_session_id fields in
+    if not !stream_started
+    then (
+      stream_started := true;
+      emit_stream_event on_stream_event (Turn_started { turn_id = uuid; model }));
+    List.iter
+      (fun text -> emit_stream_event on_stream_event (Text_delta text))
+      texts;
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model:(Some model)
       ~assistant_texts:(assistant_texts @ texts)
-      ~on_turn_started ~ignored
+      ~on_turn_started ~on_stream_event ~stream_started ~ignored
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
-      ~on_turn_started ~ignored
+      ~on_turn_started ~on_stream_event ~stream_started ~ignored
   | "result" ->
     let* turn_id, result, usage =
       parse_result ~expected_session_id ~rate_limit fields
@@ -796,6 +840,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
       | Some text -> Ok text
       | None -> protocol_error "result message" "successful turn has no text"
     in
+    emit_stream_event on_stream_event (Turn_finished { text });
     Ok
       { session_id = expected_session_id
       ; turn_id
@@ -811,6 +856,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
+      ~on_stream_event ~stream_started
       ~ignored:(ignored + 1)
   | other ->
     protocol_error
@@ -945,7 +991,8 @@ let terminate_spawned_process ~clock proc stdin_w =
 ;;
 
 let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
-    ~prompt ~on_session_ready ~on_turn_starting ~on_turn_started =
+    ~prompt ~on_session_ready ~on_turn_starting ~on_turn_started
+    ~on_stream_event =
   let tool_call_count = ref 0 in
   let mcp_session = Runtime_official_client_mcp.create_session () in
   let initialize_id = Random_id.prefixed ~prefix:"masc-init-" ~bytes:12 in
@@ -957,6 +1004,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
       ~tools:dynamic_tools
       ~tool_call_count
       ~request_id:initialize_id
+      ~on_stream_event
       ~ignored:0
   in
   let* () =
@@ -996,12 +1044,14 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~assistant_model:None
     ~assistant_texts:[]
     ~on_turn_started
+    ~on_stream_event
+    ~stream_started:(ref false)
     ~ignored:0
 ;;
 
 let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
     ~session_mode ~session_id ~subscription ~prompt ~on_session_ready
-    ~on_turn_starting ~on_turn_started =
+    ~on_turn_starting ~on_turn_started ~on_stream_event =
   let* argv =
     command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id
   in
@@ -1051,7 +1101,8 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
             ~prompt
             ~on_session_ready
             ~on_turn_starting
-            ~on_turn_started)))
+            ~on_turn_started
+            ~on_stream_event)))
 ;;
 
 let validate_process_config config =
@@ -1121,7 +1172,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     ?admitted_subscription
     ~mgr ~clock ~cwd ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
-    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) config
+    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event config
     ~prompt =
   let result =
     let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt in
@@ -1154,6 +1205,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~on_session_ready
         ~on_turn_starting
         ~on_turn_started
+        ~on_stream_event
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Eio.Time.Timeout -> Error (Timeout config.timeout_s)

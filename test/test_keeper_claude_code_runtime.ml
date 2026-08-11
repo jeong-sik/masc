@@ -179,7 +179,7 @@ let content_of_wire_message raw =
 ;;
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
-    ?event_capture ?agent_core_checkpoint ?runtime_manifest_context
+    ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
@@ -215,6 +215,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ~initial_messages
                            ?context
                            ?event_bus
+                           ?on_event
                            ?agent_core_checkpoint
                            ?runtime_manifest_context
                            ?runtime_manifest_append
@@ -549,6 +550,74 @@ let test_keeper_projects_masc_tool () =
                (String_util.contains_substring raw "MASC_TOOL_RESULT")))
 ;;
 
+let test_keeper_streams_text_and_tool_events () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic fixture marker"
+      ~parameters:[ marker_param ]
+      (fun _ ->
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit (assistant ~turn_id:"turn-stream-1" "MASC_CLAUDE_STREAM")
+         ; Emit_and_read mcp_call
+         ; Emit (result ~turn_id:"turn-stream-1" "MASC_CLAUDE_STREAM")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~on_event:(fun event -> events := event :: !events)
+               ~base_path
+               ~cli_path
+               ~goal:"USE_TOOL"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok _ ->
+             match List.rev !events with
+             | [ Agent_core.Types.MessageStart
+                   { id = "assistant-turn-stream-1"
+                   ; model = "claude-fixture"
+                   ; usage = None
+                   }
+               ; ContentBlockDelta { index = 0; delta = TextDelta "MASC_CLAUDE_STREAM" }
+               ; ContentBlockStart
+                   { index = 1
+                   ; content_type = "tool_use"
+                   ; tool_id = Some "call-1"
+                   ; tool_name = Some "masc_probe"
+                   }
+               ; ContentBlockDelta
+                   { index = 1
+                   ; delta = InputJsonSnapshot arguments
+                   }
+               ; ContentBlockStop { index = 1 }
+               ; MessageStop
+               ] ->
+               check string
+                 "exact keeper tool arguments"
+                 {|{"marker":"from-claude"}|}
+                 arguments
+             | _ -> fail "Keeper did not project the exact Claude stream") )
+;;
+
 let test_tools_support_false_omits_mcp_bridge () =
   let base_path = temp_workspace () in
   let called = ref false in
@@ -778,6 +847,10 @@ let () =
             `Quick
             test_keeper_projects_typed_tool_history_and_lifecycle
         ; test_case "projects MASC tool" `Quick test_keeper_projects_masc_tool
+        ; test_case
+            "streams text and tool events"
+            `Quick
+            test_keeper_streams_text_and_tool_events
         ; test_case
             "tools-support false omits MCP bridge"
             `Quick

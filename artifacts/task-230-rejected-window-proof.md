@@ -16,3 +16,8 @@ Checks:
 - `ocamlformat --check lib/keeper/keeper_codex_runtime.ml test/test_runtime_model_input_tail_window.ml`: passed.
 - `git diff --check`: passed.
 - `bash scripts/dune-local.sh build test/test_runtime_model_input_tail_window.exe`: blocked by pre-existing PR-base errors in `lib/keeper/keeper_owner.ml:806-889` and `lib/keeper_runtime/keeper_event_queue_persistence.ml:588`; neither file is changed by this task.
+
+Bounded verifier snapshots (all kept below the artifact read limit):
+- `artifacts/task-230-keeper-codex-runtime-excerpt.md`
+- `artifacts/task-230-runtime-window-excerpt.md`
+- `artifacts/task-230-regression-excerpt.md`

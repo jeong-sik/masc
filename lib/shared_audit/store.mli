@@ -55,8 +55,11 @@ val create : base_dir:string -> t
     partition; reopening an existing owner refreshes that cursor under its
     append lock. The canonical path and its filesystem identity are retained
     for all later I/O, so aliases cannot silently retarget a live writer and
-    replacing the canonical directory fails closed. Thus [append] continues
-    the chain across sessions. *)
+    replacing the canonical directory fails closed. Each append opens and
+    validates that directory, then resolves its partition and file relative to
+    the validated directory descriptor; pathname replacement cannot redirect
+    the write after validation. Thus [append] continues the chain across
+    sessions. *)
 
 val append :
   t ->
@@ -66,7 +69,9 @@ val append :
 (** Append a new entry with [prev_hash] computed from the latest
     hash owned for this canonical base directory. Cursor read, durable
     append, and cursor update are serialized as one transaction across
-    every in-process store instance. Returns the appended entry. Raises
+    every in-process store instance. The write is bound to a freshly validated
+    base-directory descriptor and does not use the process-wide pathname writer
+    or mkdir caches. Returns the appended entry. Raises
     {!Base_directory_replaced} if the canonical directory identity changed. *)
 
 val recent : t -> n:int -> Envelope.t list

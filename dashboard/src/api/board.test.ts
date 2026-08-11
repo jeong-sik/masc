@@ -568,13 +568,6 @@ describe('fetchBoard', () => {
           has_voted: true,
           report_count: 2,
           moderation_status: 'flagged',
-          contributor_quality: {
-            source: 'agent_reputation',
-            completion_rate: 0.8,
-            response_rate: 0.6,
-            board_posts: 3,
-            board_comments: 5,
-          },
           reactions: [
             {
               emoji: '🔥',
@@ -611,13 +604,6 @@ describe('fetchBoard', () => {
       has_voted: true,
       report_count: 2,
       moderation_status: 'flagged',
-      contributor_quality: {
-        source: 'agent_reputation',
-        completion_rate: 0.8,
-        response_rate: 0.6,
-        board_posts: 3,
-        board_comments: 5,
-      },
       reactions: [
         {
           emoji: '🔥',

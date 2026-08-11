@@ -22,6 +22,8 @@ val supervise_keepalive :
     phases remain owned by the lifecycle sweep. [Executable] is a no-op;
     lifecycle/policy blocks, unreadable owner truth, and a shutdown fence retain
     durable work without booting.
+    A successful launch wakes the Owner's queued-operation drain before
+    publishing [Started]/[Running].
     When the injected launch gate returns [Error _] (registry FSM rejected
     [Fiber_started]), no [Started]/[Running] event is published — the gate
     already resolved the entry through the crash path. *)

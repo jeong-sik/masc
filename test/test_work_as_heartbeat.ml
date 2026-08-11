@@ -68,7 +68,7 @@ let test_keepalive_interval_has_one_resolved_ssot () =
 ;;
 
 let test_keepalive_sleep_chunk_default () =
-  check (float 0.01) "default sleep chunk 2.0s" 2.0
+  check (float 0.01) "default sleep chunk 0.5s" 0.5
     Cfg.KeeperKeepalive.sleep_chunk_sec
 
 (* ── KeeperGrpc config defaults ────────────────────────── *)

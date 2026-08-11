@@ -373,6 +373,11 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
         Yojson.Safe.Util.(keeper |> member "context_max" = `Null);
       Alcotest.(check bool) "unowned source is ignored" true
         Yojson.Safe.Util.(keeper |> member "context_source" = `Null);
+      Alcotest.(check (float 0.1)) "summary keeper cadence is projected" 300.0
+        Yojson.Safe.Util.(
+          keeper |> member "keeper_keepalive_interval_s" |> to_float);
+      Alcotest.(check (float 0.1)) "summary stale window is projected" 360.0
+        Yojson.Safe.Util.(keeper |> member "heartbeat_stale_after_s" |> to_float);
       Alcotest.(check string) "missing owner remains explicit" "not_observed"
         Yojson.Safe.Util.(
           keeper

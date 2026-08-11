@@ -384,16 +384,17 @@ let handle_tool_execute_typed
           let task_id =
             Option.map Keeper_id.Task_id.to_string meta.current_task_id
           in
-          let stream_dispatch =
-            Sys.getenv_opt "MASC_STREAM_EXECUTE_OUTPUT" <> Some "false"
-          in
-          if stream_dispatch
-          then (
-            try
-              Keeper_keepalive_signal.record_execute_stream_start
-                ~keeper_name:meta.name
-                ~task_id
-            with
+          (* Execute output always streams. The MASC_STREAM_EXECUTE_OUTPUT
+             kill switch was read here on every tool execution — an env
+             effect inside the dispatch path — while nothing in the
+             repository, shell config, or deployment scripts ever set it,
+             and its parse accepted every value except the exact string
+             "false" (RFC-0371 B7). *)
+          (try
+             Keeper_keepalive_signal.record_execute_stream_start
+               ~keeper_name:meta.name
+               ~task_id
+           with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Log.Dashboard.warn
@@ -406,23 +407,21 @@ let handle_tool_execute_typed
              held buffer on every 4KB read, so output whose newlines are far
              apart cost O(n^2) inside the Owner child. *)
           let on_output_chunk chunk =
-            if stream_dispatch
-            then (
-              let stream, data =
-                match chunk with
-                | `Stdout s -> `Stdout, s
-                | `Stderr s -> `Stderr, s
-              in
-              try
-                Keeper_keepalive_signal.record_execute_stream_chunk
-                  ~keeper_name:meta.name
-                  ~stream
-                  data
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Dashboard.warn
-                  "execute stream chunk callback failed keeper=%s: %s"
+            (let stream, data =
+               match chunk with
+               | `Stdout s -> `Stdout, s
+               | `Stderr s -> `Stderr, s
+             in
+             try
+               Keeper_keepalive_signal.record_execute_stream_chunk
+                 ~keeper_name:meta.name
+                 ~stream
+                 data
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Dashboard.warn
+                 "execute stream chunk callback failed keeper=%s: %s"
                   meta.name
                   (Printexc.to_string exn))
           in
@@ -487,22 +486,20 @@ let handle_tool_execute_typed
             let status_json =
               Keeper_alerting_path.process_status_to_json result.status
             in
-            if stream_dispatch
-            then (
-              (* No end-of-stream flush: chunks are forwarded as they are read,
-                 so nothing is held back waiting for a line terminator. *)
-              try
-                Keeper_keepalive_signal.record_execute_stream_end
-                  ~keeper_name:meta.name
-                  ~task_id
-                  ~status:status_json
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Dashboard.warn
-                  "execute stream end callback failed keeper=%s: %s"
-                  meta.name
-                  (Printexc.to_string exn));
+            (* No end-of-stream flush: chunks are forwarded as they are read,
+               so nothing is held back waiting for a line terminator. *)
+            (try
+               Keeper_keepalive_signal.record_execute_stream_end
+                 ~keeper_name:meta.name
+                 ~task_id
+                 ~status:status_json
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Dashboard.warn
+                 "execute stream end callback failed keeper=%s: %s"
+                 meta.name
+                 (Printexc.to_string exn));
             (try
                Keeper_keepalive_signal.record_execute_output
                  ~keeper_name:meta.name
@@ -510,7 +507,7 @@ let handle_tool_execute_typed
                  ~stdout
                  ~stderr
                  ~status:status_json
-                 ~streamed:stream_dispatch
+                 ~streamed:true
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->

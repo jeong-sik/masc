@@ -129,7 +129,6 @@ export function ScheduleSurface() {
     setView(next)
   }
 
-  const refresh = (): Promise<void> => loadScheduledAutomation()
   async function handlePrune() {
     if (
       !window.confirm(

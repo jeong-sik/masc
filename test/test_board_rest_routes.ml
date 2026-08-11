@@ -21,6 +21,23 @@ open Alcotest
 
 module Http = Masc.Http_server_eio
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when Sys.file_exists (Filename.concat root "dune-project") -> root
+  | _ -> Sys.getcwd ()
+
+let source_file rel =
+  let path = Filename.concat (source_root ()) rel in
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+      let len = in_channel_length ic in
+      really_input_string ic len)
+
+let contains ~needle haystack =
+  String.length needle = 0 || String_util.contains_substring haystack needle
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let with_reaction_auth_base f =
@@ -233,6 +250,117 @@ let test_dashboard_dev_token_can_vote_as_credential_owner () =
       | Ok actor -> check string "dashboard credential owner" "dashboard" actor
       | Error error -> fail (Masc_domain.masc_error_to_string error))
 
+let loopback_request_authority () =
+  match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+  | Ok authority -> authority
+  | Error `Malformed -> fail "failed to construct loopback request authority"
+
+let mutation_request ?(origin = "https://attacker.example") meth path =
+  Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list [ "origin", origin ])
+    meth
+    path
+
+let test_activity_mutation_routes_use_shared_auth () =
+  let source = source_file "lib/server/server_routes_http_routes_activity.ml" in
+  check bool "activity routes do not shadow shared tool auth" false
+    (contains
+       ~needle:"let with_tool_auth ~tool_name:_ handler = with_public_read handler"
+       source);
+  check bool "activity routes delegate tool auth to Server_auth" true
+    (contains ~needle:"let with_tool_auth = Server_auth.with_tool_auth" source);
+  List.iter
+    (fun (label, needle) -> check bool label true (contains ~needle source))
+    [
+      ( "keeper delegate remains tool-gated"
+      , "with_tool_auth ~tool_name:\"masc_keeper_delegate\"" );
+      ( "board sub-board create remains tool-gated"
+      , "with_tool_auth ~tool_name:\"masc_board_sub_board_create\"" );
+      ( "board sub-board delete remains tool-gated"
+      , "with_tool_auth ~tool_name:\"masc_board_sub_board_delete\"" );
+      ( "board sub-board update remains tool-gated"
+      , "with_tool_auth ~tool_name:\"masc_board_sub_board_update\"" );
+      ( "board vote remains tool-gated"
+      , "with_tool_auth ~tool_name:\"masc_board_vote\"" );
+      ( "board post remains tool-gated"
+      , "with_tool_auth ~tool_name:\"masc_board_post\"" );
+      ( "board comment remains tool-gated"
+      , "with_tool_auth ~tool_name:\"masc_board_comment\"" );
+      ( "board comment vote remains tool-gated"
+      , "with_tool_auth ~tool_name:\"masc_board_comment_vote\"" );
+      ( "prompt override remains tool-gated"
+      , "with_tool_auth ~tool_name:\"masc_prompt_override\"" );
+      ( "runtime parameter mutations remain tool-gated"
+      , "with_tool_auth ~tool_name:\"masc_set_param\"" );
+      ( "board reaction mutation keeps CanVote auth"
+      , "with_token_permission_auth\n         ~permission:Masc_domain.CanVote" );
+    ]
+
+let test_activity_mutations_reject_missing_token () =
+  with_reaction_auth_base (fun base_path ->
+    let authority = loopback_request_authority () in
+    let tool_routes =
+      [ "masc_keeper_delegate", "/api/v1/board/context-inference"
+      ; "masc_board_sub_board_create", "/api/v1/board/sub-boards"
+      ; "masc_board_sub_board_delete", "/api/v1/board/sub-boards/id"
+      ; "masc_board_sub_board_update", "/api/v1/board/sub-boards/id"
+      ; "masc_board_vote", "/api/v1/tools/masc_board_vote"
+      ; "masc_board_post", "/api/v1/tools/masc_board_post"
+      ; "masc_board_comment", "/api/v1/tools/masc_board_comment"
+      ; "masc_board_comment_vote", "/api/v1/tools/masc_board_comment_vote"
+      ; "masc_prompt_override", "/api/v1/prompts"
+      ; "masc_set_param", "/api/v1/runtime/params/set"
+      ; "masc_set_param", "/api/v1/runtime/params/clear"
+      ]
+    in
+    List.iter
+      (fun (tool_name, path) ->
+         match
+           Server_auth.authorize_tool_request
+             ~base_path
+             ~tool_name
+             ~request_authority:authority
+             (mutation_request `POST path)
+         with
+         | Error _ -> ()
+         | Ok () -> failf "%s accepted an unauthenticated mutation" path)
+      tool_routes;
+    match
+      Server_auth.authorize_token_bound_permission_request
+        ~base_path
+        ~permission:Masc_domain.CanVote
+        (mutation_request `POST "/api/v1/board/reactions")
+    with
+    | Error _ -> ()
+    | Ok actor ->
+      failf "board reaction mutation accepted unauthenticated actor %s" actor)
+
+let test_activity_board_vote_accepts_authorized_token () =
+  with_reaction_auth_base (fun base_path ->
+    match
+      Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token base_path
+    with
+    | Error error ->
+      fail (Server_routes_http_dashboard_dev_token.token_error_to_string error)
+    | Ok token ->
+      let request =
+        Httpun.Request.create
+          ~headers:
+            (Httpun.Headers.of_list
+               [ "authorization", String.concat "" [ "Bearer "; token.raw ] ])
+          `POST
+          "/api/v1/tools/masc_board_vote"
+      in
+      match
+        Server_auth.authorize_tool_request
+          ~base_path
+          ~tool_name:"masc_board_vote"
+          ~request_authority:(loopback_request_authority ())
+          request
+      with
+      | Ok () -> ()
+      | Error error -> fail (Masc_domain.masc_error_to_string error))
+
 let () =
   run
     "board_rest_routes"
@@ -273,5 +401,17 @@ let () =
             "dashboard dev-token can vote as credential owner"
             `Quick
             test_dashboard_dev_token_can_vote_as_credential_owner
+        ; test_case
+            "activity mutations use shared auth combinators"
+            `Quick
+            test_activity_mutation_routes_use_shared_auth
+        ; test_case
+            "activity mutations reject missing tokens"
+            `Quick
+            test_activity_mutations_reject_missing_token
+        ; test_case
+            "authorized dashboard token reaches board vote auth"
+            `Quick
+            test_activity_board_vote_accepts_authorized_token
         ] )
     ]

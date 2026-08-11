@@ -34,7 +34,7 @@ let include_moderation_projection ~base_path:_ _request = true
 let with_optional_board_reaction_actor ~base_path:_ _request _reqd f =
   f (Some (board_actor_author_for_write "dashboard"))
 
-let with_tool_auth ~tool_name:_ handler = with_public_read handler
+let with_tool_auth = Server_auth.with_tool_auth
 
 let activity_http_deps ~sw ~clock : Server_activity_http.deps =
   {
@@ -655,9 +655,10 @@ let add_routes ~sw ~clock router =
          reqd)
 
   |> Http.Router.post "/api/v1/board/reactions" (fun request reqd ->
-       with_public_read
-         (fun _state _req reqd ->
-            let actor = board_actor_author_for_write "dashboard" in
+       with_token_permission_auth
+         ~permission:Masc_domain.CanVote
+         (fun _state actor _req reqd ->
+            let actor = board_actor_author_for_write actor in
             Http.Request.read_body_async reqd (fun body ->
               let parsed =
                 match Yojson.Safe.from_string body with

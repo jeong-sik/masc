@@ -23,15 +23,12 @@ implementation_prs: [28227, 28231, 28233, 28235, 28238, 28240, 28236, 28234, 282
 
 | 판정 | 건수 |
 |---|---|
-| core-violation confirmed | 11 |
-| core-violation unverified¹ | 5 |
-| boundary-smell | 30 |
+| core-violation confirmed | 15 |
+| boundary-smell | 31 |
 | dead-guard | 12 |
 | info | 11 |
 | **소계** | **69** |
 | 확정 substring 왕복 (별도 수동 전수 감사, 7파일) | 13 |
-
-¹ string-roundtrip 검증 패스가 미완(연결 끊김)이라 unverified 로 표기. B12 착수 전 재검증이 선행 조건이다.
 
 계측 조건 (1차): 스캐너당 상위 15건 캡 — 대표 표본.
 
@@ -148,7 +145,7 @@ else `Bad_gateway
 | 배치 | 내용 | 선행 조건 |
 |---|---|---|
 | B11 | auth env 채널 제거 — putenv/getenv 왕복을 typed credential 주입으로 | credential RFC 게이트 + "재시작 없는 토글" 요구가 실재하는지 라이브 확인. 실재하면 env 가 아니라 명시적 admin 상태로 |
-| B12 | identity 이름 codec + 에러 귀속 터널 | unverified 5건 검증 패스 + agent_core Error 확장점 설계(§6) + wire 호환 마이그레이션 계획 |
+| B12 | identity 이름 codec + 에러 귀속 터널 | agent_core Error 확장점 설계(§6) + wire 호환 마이그레이션 계획 |
 
 ## 5. 검증 방법 (배치당 Done 기준)
 
@@ -161,7 +158,7 @@ else `Bad_gateway
 
 ## 6. 범위 밖 / 후속
 
-- ~~unverified 5건은 B12 착수 전 검증 패스에서 재판정~~ → **재판정 완료 (2026-08-12)**: keeper_internal_error:963 · workspace_task_receipts:23 · runtime_agent:259 · keeper_agent_error:281 confirmed, fusion_agent_core:63 은 boundary-smell 로 강등(표시 귀속만 바꾸고 제어 흐름 분기 없음).
+- 2026-08-12 검증 판정: keeper_internal_error:963 · workspace_task_receipts:23 · runtime_agent:259 · keeper_agent_error:281 은 core-violation, fusion_agent_core:63 은 제어 흐름을 바꾸지 않는 boundary-smell.
 
 ### 6.1 B12 설계 결정 (선행 조건 해소)
 
@@ -180,7 +177,7 @@ else `Bad_gateway
 처방도 동일: 이름 codec(4철자 수용 + `keeper_agent_name` 렌더)을 의존성 0 leaf (`lib/keeper_identity_codec` 또는 기존 `masc.string_util` 급의 신설 leaf)로 내리고, `Keeper_identity` 와 `workspace_task_receipts` 둘 다 위임한다. 렌더 산포 4곳(keeper_identity:94, tool_agent:94, server_auth 외)도 같은 leaf 로 수렴. leaf dune 에는 string_util 과 같은 anti-regrowth 주석을 박는다.
 
 - `runtime_agent:259` (description 필드의 `"runtime:%s/runtime"` 밀수) 는 carrier 와 무관 — config 레코드에 typed `runtime_id` 필드를 추가하고 description 은 사람용으로 되돌린다.
-- 잔여 unverified 없음: B12 는 위 두 설계로 착수 가능하다.
+- B12 는 위 두 설계로 착수 가능하다.
 - permissive default 값 자체의 변경(예: tool_catalog unknown→true)은 동작 변화이므로 범위 밖 — 별도 이슈로.
 - 테스트 코드의 같은 패턴(에러 메시지 문구에 결합된 단언 ~142곳, fixture cwd 추측)은 프로덕션 정리 후 별도 트랙.
 
@@ -190,21 +187,21 @@ else `Bad_gateway
 
 | 위치 | 심각도 | 검증 | 요지 |
 |---|---|---|---|
-| `lib/fusion/fusion_agent_core.ml:63` | core-violation | unverified | agent_core 의 error.ml 이 렌더한 "Provider '%s' ..." 메시지와 fusion_official_client.ml:23 이 렌더한 "runtime_id: detail" 을 재파싱해 귀속 |
-| `lib/keeper/keeper_agent_error.ml:281` | core-violation | unverified | typed Agent_core.Retry variant 를 wire 문자열로 렌더한 뒤 즉시 'typed' 생성자에 opaque string 으로 다시 싼다 |
+| `lib/fusion/fusion_agent_core.ml:63` | boundary-smell | confirmed | agent_core 의 error.ml 이 렌더한 "Provider '%s' ..." 메시지와 fusion_official_client.ml:23 이 렌더한 "runtime_id: detail" 을 재파싱해 표시 귀속 |
+| `lib/keeper/keeper_agent_error.ml:281` | core-violation | confirmed | typed Agent_core.Retry variant 를 wire 문자열로 렌더한 뒤 즉시 'typed' 생성자에 opaque string 으로 다시 싼다 |
 | `lib/keeper/keeper_board_attention_candidate.ml:1757` | core-violation | confirmed | 같은 status 를 두 층에서 분류 — Option 해소 후 재match, 1,600행 원거리 불변식에 assert false |
 | `lib/keeper/keeper_heartbeat_loop.ml:1205` | core-violation | confirmed | cycle_status 를 bool 로 파생해 정보 폐기 후 false 분기에서 재match — boolean blindness |
 | `lib/keeper/keeper_tool_execute_runtime.ml:388` | core-violation | confirmed | 툴 실행마다 env 읽어 스트리밍 여부 결정, `<> Some "false"` permissive 파싱 |
 | `lib/keeper/keeper_tool_registered_runtime.ml:115` | core-violation | confirmed | mint+guarded_dispatch 이중 실행 — pre-hook·observer·span 중복, 텔레메트리 오염 |
 | `lib/keeper/keeper_turn.ml:439` | core-violation | confirmed | 직접 메시지 턴 1건에 keeper 존재 검증 4회 (디스크 3 + 레지스트리 1) |
-| `lib/keeper_runtime/keeper_internal_error.ml:963` | core-violation | unverified | typed masc_internal_error 를 JSON 렌더해 Error.Internal 메시지 문자열에 박고 같은 프로세스가 재파싱 |
-| `lib/runtime/runtime_agent.ml:259` | core-violation | unverified | 사람용 description 필드에 "runtime:%s/runtime" 를 밀수해 되읽음 |
+| `lib/keeper_runtime/keeper_internal_error.ml:963` | core-violation | confirmed | typed masc_internal_error 를 JSON 렌더해 Error.Internal 메시지 문자열에 박고 같은 프로세스가 재파싱 |
+| `lib/runtime/runtime_agent.ml:259` | core-violation | confirmed | 사람용 description 필드에 "runtime:%s/runtime" 를 밀수해 되읽음 |
 | `lib/server/masc_grpc_service.ml:246` | core-violation | confirmed | directive 계산이 workspace store 의 typed 읽기를 우회해 raw JSON 프로브 — 생산자 0 필드로 이미 drift |
 | `lib/server/proactive_refresh.ml:36` | core-violation | confirmed | timeout 조건(label/phase)을 Failure 문자열로 렌더해 던지고 소비자가 substring 재파싱 |
 | `lib/server/server_auth.ml:563` | core-violation | confirmed | mutation 인가 게이트가 요청마다 env 재독 |
 | `lib/server/server_routes_http_routes_channel_gate.ml:298` | core-violation | confirmed | 존재 확인을 위해 status 전체 디스패치 실행, typed Ok None 이 문자열이 되어 substring 재분류 |
 | `lib/tool_input_validation.ml:835` | core-violation | confirmed | typed params → JSON 렌더 → 재파싱 → failwith. typed 직접 생성자 존재(types.mli:183) |
 | `lib/tool_workspace.ml:60` | core-violation | confirmed | 자기 프로세스가 putenv 한 토큰을 툴 호출마다 getenv — env 를 in-process mutable 채널로 사용 |
-| `lib/workspace/workspace_task_receipts.ml:23` | core-violation | unverified | keeper↔agent 이름 관계가 codec 없이 문자열 관습 — 렌더 4곳 산포, 매직 오프셋 역파싱 |
+| `lib/workspace/workspace_task_receipts.ml:23` | core-violation | confirmed | keeper↔agent 이름 관계가 codec 없이 문자열 관습 — 렌더 4곳 산포, 매직 오프셋 역파싱 |
 
 (boundary-smell 30 · dead-guard 12 · info 11 건의 전체 목록은 워크플로 저널과 구현 배치 PR 에서 인용한다. 표가 리뷰를 압도하지 않도록 core-violation 만 본문에 실었다.)

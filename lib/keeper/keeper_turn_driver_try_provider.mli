@@ -67,6 +67,25 @@ val observe_checkpoint_stage :
 
 val same_run_retry_allowed : bool Atomic.t -> bool
 
+val context_overflow_shrink_sequence :
+  ?shrink_capacity:
+    (capacity_bytes:int -> default_capacity_bytes:int -> int) ->
+  starting_capacity_bytes:int ->
+  same_run_retry_authorized:(unit -> bool) ->
+  record_success:(capacity_bytes:int -> unit) ->
+  on_shrink_retry:
+    (shrink_attempt:int ->
+     previous_capacity_bytes:int ->
+     capacity_bytes:int ->
+     unit) ->
+  attempt:(capacity_bytes:int -> ('ok, Agent_core.Error.t) result) ->
+  unit ->
+  ('ok, Agent_core.Error.t) result
+(** Provider-oracle retry policy shared by AGENT_CORE and official-client
+    runtimes. [default_capacity_bytes] is the policy's ordinary halved value;
+    a custom [shrink_capacity] can replace only exceptional starting values
+    without copying the shared divisor. *)
+
 val run_try_provider :
   try_provider_ctx ->
   ?enable_thinking_override:bool ->
@@ -114,16 +133,4 @@ module For_testing : sig
 
   val context_overflow_shrink_max_attempts : int
   val context_overflow_shrink_divisor : int
-
-  val context_overflow_shrink_sequence :
-    starting_capacity_bytes:int ->
-    same_run_retry_authorized:(unit -> bool) ->
-    record_success:(capacity_bytes:int -> unit) ->
-    on_shrink_retry:
-      (shrink_attempt:int ->
-       previous_capacity_bytes:int ->
-       capacity_bytes:int ->
-       unit) ->
-    attempt:(capacity_bytes:int -> ('ok, Agent_core.Error.t) result) ->
-    ('ok, Agent_core.Error.t) result
 end

@@ -2,7 +2,7 @@
 
     Two units are covered directly:
 
-    - {!Keeper_turn_driver_try_provider.For_testing.context_overflow_shrink_sequence}:
+    - {!Keeper_turn_driver_try_provider.context_overflow_shrink_sequence}:
       the pure same-runtime retry policy. Injects a fake [attempt] callback
       so the halving sequence, the attempt cap, the same-run-retry-authority
       gate, and the "only a typed overflow retries" rule are verified
@@ -49,7 +49,7 @@ let test_halves_capacity_on_repeated_overflow_until_success () =
   let recorded_success = ref None in
   let shrink_events = ref [] in
   let result =
-    Try_provider.For_testing.context_overflow_shrink_sequence
+    Try_provider.context_overflow_shrink_sequence
       ~starting_capacity_bytes:1024
       ~same_run_retry_authorized:always_authorized
       ~record_success:(fun ~capacity_bytes -> recorded_success := Some capacity_bytes)
@@ -57,6 +57,7 @@ let test_halves_capacity_on_repeated_overflow_until_success () =
         shrink_events :=
           (shrink_attempt, previous_capacity_bytes, capacity_bytes) :: !shrink_events)
       ~attempt
+      ()
   in
   check bool "eventually succeeds" true (result = Ok "done");
   check (list int) "capacity halves each retry: 1024, 512, 256, 128"
@@ -78,13 +79,14 @@ let test_stops_at_the_named_attempt_cap_then_falls_through () =
   in
   let shrink_count = ref 0 in
   let result =
-    Try_provider.For_testing.context_overflow_shrink_sequence
+    Try_provider.context_overflow_shrink_sequence
       ~starting_capacity_bytes:1024
       ~same_run_retry_authorized:always_authorized
       ~record_success:(fun ~capacity_bytes:_ -> fail "overflow never succeeds here")
       ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes:_ ->
         incr shrink_count)
       ~attempt
+      ()
   in
   check bool "the last (unshrinkable) overflow is returned unchanged" true
     (match result with
@@ -115,13 +117,14 @@ let test_non_overflow_error_never_shrinks () =
     Error (network_error ())
   in
   let result =
-    Try_provider.For_testing.context_overflow_shrink_sequence
+    Try_provider.context_overflow_shrink_sequence
       ~starting_capacity_bytes:1024
       ~same_run_retry_authorized:always_authorized
       ~record_success:(fun ~capacity_bytes:_ -> fail "network error never succeeds")
       ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes ->
         no_shrink_expected ~capacity_bytes)
       ~attempt
+      ()
   in
   check int "attempted exactly once" 1 !attempts;
   check bool "the network error propagates unchanged" true
@@ -142,19 +145,47 @@ let test_checkpoint_boundary_blocks_shrink_even_on_overflow () =
     Error (context_overflow ())
   in
   let result =
-    Try_provider.For_testing.context_overflow_shrink_sequence
+    Try_provider.context_overflow_shrink_sequence
       ~starting_capacity_bytes:1024
       ~same_run_retry_authorized:(fun () -> false)
       ~record_success:(fun ~capacity_bytes:_ -> fail "no success expected")
       ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes ->
         no_shrink_expected ~capacity_bytes)
       ~attempt
+      ()
   in
   check int "attempted exactly once" 1 !attempts;
   check bool "the overflow propagates unchanged" true
     (match result with
      | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) -> true
      | _ -> false)
+;;
+
+let test_custom_shrink_replaces_only_the_exceptional_start () =
+  let attempted_capacities = ref [] in
+  let attempt ~capacity_bytes =
+    attempted_capacities := capacity_bytes :: !attempted_capacities;
+    if capacity_bytes <= 200 then Ok "done" else Error (context_overflow ())
+  in
+  let sentinel = max_int in
+  let result =
+    Try_provider.context_overflow_shrink_sequence
+      ~starting_capacity_bytes:sentinel
+      ~same_run_retry_authorized:always_authorized
+      ~shrink_capacity:(fun ~capacity_bytes ~default_capacity_bytes ->
+        if capacity_bytes = sentinel then 400 else default_capacity_bytes)
+      ~record_success:(fun ~capacity_bytes:_ -> ())
+      ~on_shrink_retry:
+        (fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes:_ -> ())
+      ~attempt
+      ()
+  in
+  check bool "eventually succeeds" true (result = Ok "done");
+  check
+    (list int)
+    "custom start then shared default halving"
+    [ sentinel; 400; 200 ]
+    (List.rev !attempted_capacities)
 ;;
 
 (* {1 Keeper_context_overflow_shrink_state} *)
@@ -225,6 +256,10 @@ let () =
             "a checkpoint boundary blocks shrink even on overflow"
             `Quick
             test_checkpoint_boundary_blocks_shrink_even_on_overflow
+        ; test_case
+            "custom shrink replaces only the exceptional start"
+            `Quick
+            test_custom_shrink_replaces_only_the_exceptional_start
         ] )
     ; ( "shrink_state"
       , [ test_case

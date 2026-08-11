@@ -756,11 +756,14 @@ let context_overflow_shrink_divisor = 2
    shrink retry is a same-run retry too, so it must not fire once AGENT_CORE has
    mutated agent state at a durable checkpoint stage. *)
 let context_overflow_shrink_sequence
+      ?(shrink_capacity = fun ~capacity_bytes:_ ~default_capacity_bytes ->
+        default_capacity_bytes)
       ~starting_capacity_bytes
       ~same_run_retry_authorized
       ~record_success
       ~on_shrink_retry
       ~(attempt : capacity_bytes:int -> ('ok, Agent_core.Error.t) result)
+      ()
   : ('ok, Agent_core.Error.t) result
   =
   let rec go ~capacity_bytes ~shrink_attempt =
@@ -773,8 +776,11 @@ let context_overflow_shrink_sequence
          && same_run_retry_authorized ()
          && shrink_attempt < context_overflow_shrink_max_attempts
       then (
-        let shrunk_capacity_bytes =
+        let default_capacity_bytes =
           capacity_bytes / context_overflow_shrink_divisor
+        in
+        let shrunk_capacity_bytes =
+          shrink_capacity ~capacity_bytes ~default_capacity_bytes
         in
         on_shrink_retry
           ~shrink_attempt:(shrink_attempt + 1)
@@ -839,6 +845,7 @@ let run_try_provider_with_context_overflow_shrink
         checkpoint_after := attempt_checkpoint_after;
         success_sample := attempt_success_sample;
         attempt_result)
+      ()
   in
   result, !checkpoint_after, !success_sample
 ;;
@@ -850,5 +857,4 @@ module For_testing = struct
   let offload_model_input_cpu = offload_model_input_cpu
   let context_overflow_shrink_max_attempts = context_overflow_shrink_max_attempts
   let context_overflow_shrink_divisor = context_overflow_shrink_divisor
-  let context_overflow_shrink_sequence = context_overflow_shrink_sequence
 end

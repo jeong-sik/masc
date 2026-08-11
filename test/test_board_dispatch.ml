@@ -295,21 +295,12 @@ let meta_has_source (meta : Yojson.Safe.t option) : bool =
   | _ -> false
 
 (* stdlib-only substring containment; avoids a [re] dep for this test exe. *)
-let contains_substring ~(needle : string) (haystack : string) : bool =
-  let nlen = String.length needle and hlen = String.length haystack in
-  let rec scan i =
-    if i + nlen > hlen then false
-    else if String.equal (String.sub haystack i nlen) needle then true
-    else scan (i + 1)
-  in
-  nlen = 0 || scan 0
-
 let check_io_error ~where = function
   | Error (Board.Io_error msg) ->
       Alcotest.(check bool)
         ("error includes " ^ where)
         true
-        (contains_substring ~needle:where msg)
+        (String_util.string_contains_substring ~needle:where msg)
   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e)
   | Ok _ -> Alcotest.fail "expected Io_error"
 

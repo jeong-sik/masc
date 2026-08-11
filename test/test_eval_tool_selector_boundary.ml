@@ -26,25 +26,13 @@ let read_file path =
     (fun () -> really_input_string ic (in_channel_length ic))
 ;;
 
-let contains_substring ~needle text =
-  let nlen = String.length needle in
-  let tlen = String.length text in
-  let rec loop i =
-    if i + nlen > tlen
-    then false
-    else if String.sub text i nlen = needle
-    then true
-    else loop (i + 1)
-  in
-  loop 0
-;;
 
 let test_not_used_by_live_keeper_or_runtime () =
   let files = List.fold_left (fun acc root -> collect_sources root acc) [] guarded_roots in
   let offenders =
     files
     |> List.filter (fun path ->
-      contains_substring ~needle:"Eval_tool_selector" (read_file path))
+      String_util.string_contains_substring ~needle:"Eval_tool_selector" (read_file path))
     |> List.sort String.compare
   in
   match offenders with

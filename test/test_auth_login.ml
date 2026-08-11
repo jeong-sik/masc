@@ -19,20 +19,6 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let contains_substring ~needle s =
-  let nl = String.length needle in
-  let sl = String.length s in
-  if nl = 0 || nl > sl then
-    false
-  else
-    let limit = sl - nl in
-    let rec loop i =
-      if i > limit then false
-      else if String.sub s i nl = needle then true
-      else loop (i + 1)
-    in
-    loop 0
-
 (* With_expiry path: caller passes the default env var name, mint
    honors it verbatim. Agent_name is just a free string — the server
    no longer derives env names from it. *)
@@ -91,7 +77,7 @@ let test_login_with_expiry_uses_caller_env_var () =
              (Masc_domain.masc_error_to_string err));
       let shell = Auth_login.render_shell report in
       check bool "shell exports caller-named env var" true
-        (contains_substring ~needle:"export MASC_TOKEN="
+        (String_util.string_contains_substring ~needle:"export MASC_TOKEN="
            shell);
       let json = Auth_login.to_yojson report in
       check string "json status" "ok"
@@ -129,7 +115,7 @@ let test_login_long_lived_passes_env_var_through () =
              (Masc_domain.masc_error_to_string err));
       let shell = Auth_login.render_shell report in
       check bool "shell exports caller-named env var" true
-        (contains_substring ~needle:"export CUSTOM_MCP_TOKEN="
+        (String_util.string_contains_substring ~needle:"export CUSTOM_MCP_TOKEN="
            shell);
       let json = Auth_login.to_yojson report in
       check string "json client env passthrough" "CUSTOM_MCP_TOKEN"

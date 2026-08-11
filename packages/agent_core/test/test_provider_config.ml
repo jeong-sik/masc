@@ -1949,18 +1949,6 @@ let telemetry_with_kind (pk : Provider_config.provider_kind option)
 ;;
 
 (** Substring search helper local to this module. *)
-let contains_substring ~sub text =
-  let sub_len = String.length sub in
-  let text_len = String.length text in
-  let rec loop i =
-    if i + sub_len > text_len
-    then false
-    else if String.sub text i sub_len = sub
-    then true
-    else loop (i + 1)
-  in
-  sub_len = 0 || loop 0
-;;
 
 let test_wire_kind_lowercase () =
   let cases =
@@ -1981,7 +1969,7 @@ let test_wire_kind_lowercase () =
             (Provider_config.string_of_provider_kind kind)
             expected_substring)
          true
-         (contains_substring ~sub:expected_substring encoded))
+         (Agent_core_strings.contains_substring ~needle:expected_substring ~haystack:encoded))
     cases
 ;;
 
@@ -1994,7 +1982,7 @@ let test_wire_kind_none_roundtrip () =
        Alcotest.(check bool)
          (Printf.sprintf "None telemetry must not contain %S" s)
          false
-         (contains_substring ~sub:s encoded))
+         (Agent_core_strings.contains_substring ~needle:s ~haystack:encoded))
     [ "\"anthropic\""; "\"ollama\""; "\"openai_compat\"" ]
 ;;
 
@@ -2004,7 +1992,7 @@ let test_wire_unknown_latency_is_null () =
   Alcotest.(check bool)
     "unknown latency encoded as JSON null"
     true
-    (contains_substring ~sub:"\"request_latency_ms\":null" encoded);
+    (Agent_core_strings.contains_substring ~needle:"\"request_latency_ms\":null" ~haystack:encoded);
   let decoded =
     match Types.inference_telemetry_of_yojson (Yojson.Safe.from_string encoded) with
     | Ok t -> t
@@ -2022,7 +2010,7 @@ let test_wire_measured_zero_latency_is_distinct () =
   Alcotest.(check bool)
     "measured zero encoded as JSON zero"
     true
-    (contains_substring ~sub:"\"request_latency_ms\":0" encoded);
+    (Agent_core_strings.contains_substring ~needle:"\"request_latency_ms\":0" ~haystack:encoded);
   let decoded =
     match Types.inference_telemetry_of_yojson (Yojson.Safe.from_string encoded) with
     | Ok t -> t

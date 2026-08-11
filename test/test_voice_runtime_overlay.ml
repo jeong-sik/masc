@@ -69,20 +69,8 @@ let mkdir_if_missing path =
   if not (Sys.file_exists path) then Unix.mkdir path 0o755
 ;;
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      idx + needle_len <= haystack_len
-      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
-    in
-    loop 0
-;;
-
 let check_json_omits label needle json =
-  check bool label false (contains_substring ~needle (Yojson.Safe.to_string json))
+  check bool label false (String_util.string_contains_substring ~needle (Yojson.Safe.to_string json))
 ;;
 
 let test_resolve_voice_aliases () =

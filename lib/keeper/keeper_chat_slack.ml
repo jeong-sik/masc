@@ -412,6 +412,7 @@ let adapter_loop_with_transport
     ?post_stream
     ?edit_stream
     ?edit_blocks
+    (* NDT-OK: wall time only paces external Slack edits; tests inject [now]. *)
     ?(now = Unix.gettimeofday)
     ~(send_plain : content:string -> (unit, error) result)
     ~(send_blocks :
@@ -641,7 +642,6 @@ module For_testing = struct
   let content_blocks_of_text = content_blocks_of_text
   let final_message_blocks = final_message_blocks
   let build_message_body = build_message_body
-  let build_update_message_body = build_update_message_body
   let build_thread_status_body = build_thread_status_body
 
   let adapter_loop = adapter_loop_with_transport

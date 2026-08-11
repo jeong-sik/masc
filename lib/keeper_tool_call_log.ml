@@ -256,7 +256,8 @@ let append_to_store_result (entry : append_entry) =
 ;;
 
 let append_to_store entry =
-  ignore (append_to_store_result entry : (unit, exn) result)
+  match append_to_store_result entry with
+  | Ok () | Error _ -> ()
 ;;
 
 let take_queued_append () =

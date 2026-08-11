@@ -122,9 +122,9 @@ let secure_config_files_in config_path =
 let ensure_config_dir ~base_path ~keeper_name =
   if not (Keeper_config.validate_name keeper_name)
   then Error (Printf.sprintf "invalid keeper name: %s" keeper_name)
-  else
+  else begin
+    let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
     try
-      let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
       match require_directory keepers_root with
       | Error _ as error -> error
       | Ok () ->
@@ -151,11 +151,12 @@ let ensure_config_dir ~base_path ~keeper_name =
     | Unix.Unix_error (error, operation, target) ->
       Error
         (Printf.sprintf
-           "cannot prepare GitHub CLI directory %s: %s(%s): %s"
-           path
+           "cannot prepare GitHub CLI directory under %s: %s(%s): %s"
+           keepers_root
            operation
            target
            (Unix.error_message error))
+  end
 ;;
 
 let env_key entry =

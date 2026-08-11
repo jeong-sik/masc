@@ -20,6 +20,7 @@ module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_memory = Masc.Keeper_memory
 module Keeper_execution = Masc.Keeper_execution
 module Keeper_runtime = Masc.Keeper_runtime
+module Keeper_github_identity = Masc.Keeper_github_identity
 module Tool_operator = Masc.Tool_operator
 module Operator_control = Operator_control
 module Dashboard_execution = Dashboard_execution

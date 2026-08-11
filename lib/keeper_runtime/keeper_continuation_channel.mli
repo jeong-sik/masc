@@ -41,6 +41,7 @@ val discord :
   thread_id:string option ->
   ?reply_to_message_id:string ->
   user_id:string ->
+  unit ->
   (t, string) result
 
 (** [discord_thread_parent channel ~parent_channel_id] preserves a Discord

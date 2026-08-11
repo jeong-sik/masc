@@ -37,7 +37,7 @@ let dashboard ~thread_id =
 ;;
 
 let discord ~guild_id ~channel_id ~parent_channel_id ~thread_id
-      ?reply_to_message_id ~user_id =
+      ?reply_to_message_id ~user_id () =
   let* guild_id = validate_optional_nonblank "guild_id" guild_id in
   let* channel_id = validate_nonblank "channel_id" channel_id in
   let* parent_channel_id =

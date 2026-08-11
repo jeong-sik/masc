@@ -403,6 +403,7 @@ let discord_channel =
     ~parent_channel_id:None
     ~thread_id:None
     ~user_id:"user-3"
+    ()
   |> Result.get_ok
 ;;
 
@@ -691,6 +692,7 @@ let test_wake_isolates_keeper_run_identity () =
         ~parent_channel_id:None
         ~thread_id:None
         ~user_id:"user-7"
+        ()
       |> Result.get_ok
     in
     (match

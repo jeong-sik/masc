@@ -123,8 +123,6 @@ val overlay_application_to_yojson :
   Keeper_toml_loader.toml_doc -> Yojson.Safe.t
 (** Aggregate startup-overlay application state for save/read responses. *)
 
-val last_applied_at_unix : unit -> float option
-
 (** TOML schema (for documentation):
 
     {[

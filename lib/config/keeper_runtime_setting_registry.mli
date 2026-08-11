@@ -62,7 +62,6 @@ val active_toml : setting list
 val active_toml_mappings : (string * string) list
 
 val toml_key_opt : setting -> string option
-val find_by_env : string -> setting option
 val find_by_toml_key : string -> setting option
 
 val value_kind_label : value_kind -> string
@@ -78,6 +77,5 @@ val validate_registry : unit -> (unit, string list) result
 (** Rejects duplicate environment/TOML identities, malformed exposure, and
     active TOML settings without a concrete consumer. *)
 
-val setting_to_yojson : setting -> Yojson.Safe.t
 val schema_to_yojson : unit -> Yojson.Safe.t
 (** Machine-readable catalog used by operator surfaces and generated docs. *)

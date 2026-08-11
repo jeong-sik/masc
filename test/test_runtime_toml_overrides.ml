@@ -206,6 +206,16 @@ let test_unrelated_runtime_namespaces_are_not_claimed () =
     (Keeper_runtime_config.validation_report_is_valid report);
   check int "no Keeper issues" 0 (List.length report.issues)
 
+let test_runtime_provider_binding_under_keeper_namespace_is_not_claimed () =
+  let report =
+    Keeper_runtime_config.validate_doc
+      (parse_or_fail
+         "[turn.some-model]\nbase-url = \"https://example.invalid/v1\"\n")
+  in
+  check bool "runtime provider subtable remains valid" true
+    (Keeper_runtime_config.validation_report_is_valid report);
+  check int "provider binding has no Keeper issues" 0 (List.length report.issues)
+
 let test_load_and_apply_records_boot_override () =
   match Sys.getenv_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" with
   | Some _ -> ()
@@ -524,6 +534,31 @@ let test_removed_toml_overlay_is_pending_restart () =
        | _ -> false))
 ;;
 
+let test_settings_projection_uses_typed_effective_values () =
+  let open Yojson.Safe.Util in
+  let rows =
+    Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail "")
+    |> to_list
+  in
+  let find env_name =
+    List.find (fun row -> String.equal (row |> member "env" |> to_string) env_name) rows
+  in
+  let snapshot = find "MASC_KEEPER_SNAPSHOT_SEC" in
+  check string "snapshot projection uses clamped runtime value"
+    (string_of_int Env_config_keeper.KeeperRuntime.snapshot_sec)
+    (snapshot |> member "effective_value" |> to_string);
+  check bool "snapshot projection has no normalization error" true
+    (snapshot |> member "effective_error" = `Null);
+  let deadline = find "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" in
+  let expected_deadline =
+    match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override with
+    | Some value -> Printf.sprintf "%g" value
+    | None -> "(none)"
+  in
+  check string "deadline projection uses typed runtime value" expected_deadline
+    (deadline |> member "effective_value" |> to_string)
+;;
+
 let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
@@ -541,6 +576,8 @@ let () =
             test_future_schema_unknown_keeper_key_is_warning
         ; test_case "unrelated namespaces remain separately owned" `Quick
             test_unrelated_runtime_namespaces_are_not_claimed
+        ; test_case "provider binding under Keeper namespace remains separately owned" `Quick
+            test_runtime_provider_binding_under_keeper_namespace_is_not_claimed
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
         ; test_case "every failure kind has a label" `Quick
             test_every_failure_kind_has_a_label
@@ -548,6 +585,8 @@ let () =
             test_rendering_keeps_the_verb_prefix
         ; test_case "removed TOML overlay is pending restart" `Quick
             test_removed_toml_overlay_is_pending_restart
+        ; test_case "settings projection uses typed effective values" `Quick
+            test_settings_projection_uses_typed_effective_values
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init

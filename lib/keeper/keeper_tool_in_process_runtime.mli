@@ -247,6 +247,7 @@ val handle_masc_schedule_with_outcome
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> name:string
   -> args:Yojson.Safe.t
+  -> unit
   -> Keeper_tool_execution.t
 
 (** RFC-0252 — [handle_masc_fusion_with_outcome] is the in-process handler for the

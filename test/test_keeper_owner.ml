@@ -141,6 +141,7 @@ let test_operation_payload_preserves_connector_route () =
         ~parent_channel_id:(Some "channel-3")
         ~thread_id:(Some "thread-7")
         ~user_id:"user-9"
+        ()
     with
     | Ok continuation -> continuation
     | Error detail -> fail detail
@@ -1936,6 +1937,7 @@ let test_connector_submit_uses_owner_operation_idempotency () =
              ~parent_channel_id:None
              ~thread_id:None
              ~user_id:"user-1"
+             ()
          with
          | Ok continuation -> continuation
          | Error detail -> fail detail

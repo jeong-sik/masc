@@ -27,8 +27,6 @@ type entry =
   }
 
 val entries : entry list
-val artifact_label : artifact -> string
-val truth_role_label : truth_role -> string
 
 val validate : unit -> string list
 (** Empty means every artifact has one unique identity, at least one consumer,

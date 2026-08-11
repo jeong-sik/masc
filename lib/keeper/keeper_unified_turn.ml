@@ -130,6 +130,7 @@ type continuation_delivery_state =
 
 type continuation_delivery_completion =
   | Continuation_delivery_not_required
+  | Continuation_delivery_settled_by_terminal_surface_post
   | Continuation_delivery_committed of
       { intent_id : Keeper_continuation_delivery_intent.Intent_id.t
       ; delivery_state : continuation_delivery_state
@@ -1138,19 +1139,50 @@ let run_keeper_cycle
                        in
                        committed_delivery intent delivery_state
                      in
+                     let terminal_surface_post_succeeded =
+                       List.exists
+                         (fun
+                           (detail : Keeper_agent_result.tool_call_detail) ->
+                            match
+                              ( detail.execution_outcome
+                              , Keeper_tool_descriptor_resolution
+                                .descriptor_for_tool_name
+                                  detail.tool_name )
+                            with
+                            | ( Tool_result.Ok
+                              , Some
+                                  { Keeper_tool_descriptor.runtime_handler =
+                                      Keeper_tool_descriptor.Tool_surface_post
+                                  ; _
+                                  } ) ->
+                              true
+                            | ( (Tool_result.Error | Tool_result.Unknown)
+                              , Some _ )
+                            | _, None ->
+                              false)
+                         result.Keeper_agent_run.tool_calls
+                     in
                      let delivery_settlement =
                        match
                          ( continuation_delivery_origin
                          , result.Keeper_agent_run.continuation_delivery_intent
-                         , result.Keeper_agent_run.stop_reason )
+                         , result.Keeper_agent_run.turn_outcome
+                         , result.Keeper_agent_run.stop_reason
+                         , terminal_surface_post_succeeded )
                        with
-                       | Some _, None, Runtime_agent.Completed ->
+                       | ( Some _
+                         , None
+                         , Keeper_turn_outcome.External_effect_completed
+                         , Runtime_agent.Completed
+                         , true ) ->
+                         Continuation_delivery_settled_by_terminal_surface_post
+                       | Some _, None, _, Runtime_agent.Completed, _ ->
                          Continuation_delivery_quarantined
                            { detail =
                                "routable continuation completed without a visible delivery intent"
                            }
-                       | _, None, _ -> Continuation_delivery_not_required
-                       | _, Some intent, _ ->
+                       | _, None, _, _, _ -> Continuation_delivery_not_required
+                       | _, Some intent, _, _, _ ->
                          (match Keeper_continuation_delivery_store.persist ~config intent with
                           | Error
                               (Keeper_continuation_delivery_store.Persistence_failed

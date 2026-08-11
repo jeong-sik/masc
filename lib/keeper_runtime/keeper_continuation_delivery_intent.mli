@@ -99,9 +99,6 @@ val hitl_origin :
 val connector_attention_origin :
   event_id:string -> Keeper_continuation_channel.t -> (origin, error) result
 
-val schedule_origin :
-  occurrence_id:string -> Keeper_continuation_channel.t -> (origin, error) result
-
 val origin_of_payload :
   Keeper_event_queue.stimulus_payload -> (origin option, error) result
 (** Project the four continuation-bearing queue payload families.  A scheduled

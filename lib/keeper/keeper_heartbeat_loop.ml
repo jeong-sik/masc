@@ -305,6 +305,8 @@ type continuation_source_disposition =
   | Quarantine_continuation_source of { detail : string }
 
 let continuation_source_disposition ~source_requires = function
+  | Keeper_unified_turn.Continuation_delivery_settled_by_terminal_surface_post ->
+    Acknowledge_source
   | Keeper_unified_turn.Continuation_delivery_committed
       { delivery_state = Keeper_unified_turn.Delivery_recovery_pending; _ } ->
     Defer_continuation_source
@@ -986,6 +988,8 @@ let run_keepalive_unified_turn
               | Acknowledge_source ->
                 let connector_reply_delivered =
                   match completion.continuation_delivery with
+                  | Keeper_unified_turn.Continuation_delivery_settled_by_terminal_surface_post ->
+                    true
                   | Keeper_unified_turn.Continuation_delivery_committed
                       { delivery_state = Keeper_unified_turn.Delivery_delivered; _ } ->
                     true

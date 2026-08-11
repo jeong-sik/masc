@@ -33,8 +33,6 @@ type inventory =
   ; record_failures : record_failure list
   }
 
-open Keeper_continuation_delivery_intent
-
 let ( let* ) = Result.bind
 
 let publication_to_string = function
@@ -177,7 +175,9 @@ let state_transition_allowed
       (to_state : Keeper_continuation_delivery_intent.state)
   =
   match from_state, to_state with
-  | Pending, (Attempting _ | Failed _) -> true
+  | ( Keeper_continuation_delivery_intent.Pending
+    , (Attempting _ | Failed _) ) ->
+    true
   | Attempting _, (Delivered _ | Failed _ | Ambiguous _) -> true
   | Pending, (Pending | Delivered _ | Ambiguous _)
   | Attempting _, (Pending | Attempting _)
@@ -210,7 +210,7 @@ let persist ~config intent =
                   else Not_published)
              ; detail = Keeper_fs.durable_write_error_to_string error
              })
-       | Attempting _ | Delivered _ | Failed _ | Ambiguous _ ->
+       | Keeper_continuation_delivery_intent.(Attempting _ | Delivered _ | Failed _ | Ambiguous _) ->
          Error
            (Invalid_state_transition
               { from_state = "absent"

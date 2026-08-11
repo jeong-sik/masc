@@ -29,7 +29,6 @@ type terminal_effect =
 
 val criticality : terminal_effect -> criticality
 val effect_label : terminal_effect -> string
-val criticality_label : criticality -> string
 val failure_blocks_product_success : terminal_effect -> bool
 
 val run_best_effort

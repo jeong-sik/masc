@@ -831,10 +831,12 @@ let schedule_result_delivery_dashboard_json
                              (Keeper_continuation_delivery_store.error_to_string
                                 error) ) ])
                   "read_error"
-              | Some (Ok
-                  { intents = _
-                  ; record_failures = (_ :: _ as record_failures)
-                  }) ->
+              | Some
+                  (Ok
+                    Keeper_continuation_delivery_store.
+                      { intents = _
+                      ; record_failures = (_ :: _ as record_failures)
+                      }) ->
                 routed_projection
                   ~extra_fields:
                     (occurrence_fields
@@ -845,7 +847,10 @@ let schedule_result_delivery_dashboard_json
                          , result_delivery_record_failures_json record_failures )
                        ])
                   "read_error"
-              | Some (Ok { intents; record_failures = [] }) ->
+              | Some
+                  (Ok
+                    Keeper_continuation_delivery_store.
+                      { intents; record_failures = [] }) ->
                 let matching =
                   List.filter
                     (fun

@@ -468,6 +468,7 @@ module KeeperKeepalive = struct
   ;;
 
   let stream_idle_timeout_env_key = "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
+  let stream_idle_failsafe_floor_sec = 600.0
 
   (** Explicit idle-gap timeout for streaming AGENT_CORE provider responses.
       This bounds time between streamed lines, not total turn duration.

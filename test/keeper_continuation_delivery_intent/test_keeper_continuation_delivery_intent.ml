@@ -16,6 +16,7 @@ let discord channel_id =
     ~parent_channel_id:None
     ~thread_id:None
     ~user_id:"user-1"
+    ()
   |> Result.get_ok
 ;;
 

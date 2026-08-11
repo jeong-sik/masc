@@ -147,8 +147,8 @@ let test_roundtrip_and_settlement () =
       |> Result.get_ok
     in
     check int "cross-client failover starts at turn one" 1 changed_client_plan.turn_count;
-    check (option string) "cross-client failover never resumes old session"
-      None changed_client_plan.previous_settlement;
+    check bool "cross-client failover never resumes old session" true
+      (Option.is_none changed_client_plan.previous_settlement);
     check (option string) "cross-client failover has no stale tool-surface requirement"
       None changed_client_plan.required_tool_surface_sha256;
     let changed_runtime_plan =
@@ -159,8 +159,8 @@ let test_roundtrip_and_settlement () =
       |> Result.get_ok
     in
     check int "cross-runtime failover starts at turn one" 1 changed_runtime_plan.turn_count;
-    check (option string) "cross-runtime failover never resumes old session"
-      None changed_runtime_plan.previous_settlement;
+    check bool "cross-runtime failover never resumes old session" true
+      (Option.is_none changed_runtime_plan.previous_settlement);
     match load ~base_path ~keeper_name with
     | Error detail -> fail detail
     | Ok None -> fail "durable session disappeared"

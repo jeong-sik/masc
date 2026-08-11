@@ -5,6 +5,7 @@ let discord channel_id =
     ~parent_channel_id:None
     ~thread_id:None
     ~user_id:"user-1"
+    ()
   |> Result.get_ok
 ;;
 
@@ -55,6 +56,10 @@ let test_wake_origin_requires_exact_route_and_source () =
     (Masc.Keeper_heartbeat_loop.continuation_delivery_authorizes_source_ack
        ~source_requires:false
        Masc.Keeper_unified_turn.Continuation_delivery_not_required);
+  assert
+    (Masc.Keeper_heartbeat_loop.continuation_delivery_authorizes_source_ack
+       ~source_requires:true
+       Masc.Keeper_unified_turn.Continuation_delivery_settled_by_terminal_surface_post);
   assert
     (not
        (Masc.Keeper_heartbeat_loop.continuation_delivery_authorizes_source_ack

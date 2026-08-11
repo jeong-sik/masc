@@ -1447,6 +1447,7 @@ let handle_masc_schedule_with_outcome
       ?continuation_channel
       ~name
       ~args
+      ()
   =
   let ctx : Tool_schedule.context =
     { config

@@ -67,6 +67,7 @@ let test_discord_continuation_selects_exact_bound_channel () =
         ~parent_channel_id:None
         ~thread_id:None
         ~user_id:"user"
+        ()
     with
     | Ok channel -> channel
     | Error message -> fail message
@@ -85,6 +86,7 @@ let test_discord_thread_continuation_stays_in_thread () =
         ~parent_channel_id:(Some "parent-1")
         ~thread_id:(Some "thread-1")
         ~user_id:"user"
+        ()
     with
     | Ok channel -> channel
     | Error message -> fail message
@@ -107,6 +109,7 @@ let test_discord_thread_foreign_explicit_channel_is_error () =
         ~parent_channel_id:(Some "parent-1")
         ~thread_id:(Some "thread-1")
         ~user_id:"user"
+        ()
     with
     | Ok channel -> channel
     | Error message -> fail message

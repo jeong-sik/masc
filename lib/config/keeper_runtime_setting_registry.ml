@@ -620,10 +620,6 @@ let active_toml_mappings =
     active_toml
 ;;
 
-let find_by_env env_name =
-  List.find_opt (fun row -> String.equal row.env_name env_name) all
-;;
-
 let find_by_toml_key key =
   List.find_opt
     (fun row ->

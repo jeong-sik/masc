@@ -10,7 +10,7 @@ open Keeper_continuation_channel
 let dashboard_channel thread_id = dashboard ~thread_id |> Result.get_ok
 
 let discord_channel ~guild_id ~channel_id ~parent_channel_id ~thread_id
-      ?reply_to_message_id ~user_id =
+      ?reply_to_message_id ~user_id () =
   discord
     ~guild_id
     ~channel_id
@@ -18,6 +18,7 @@ let discord_channel ~guild_id ~channel_id ~parent_channel_id ~thread_id
     ~thread_id
     ?reply_to_message_id
     ~user_id
+    ()
   |> Result.get_ok
 ;;
 
@@ -39,7 +40,8 @@ let test_codec_roundtrip () =
        ~parent_channel_id:(Some "P1")
        ~thread_id:(Some "T1")
        ~reply_to_message_id:"M1"
-       ~user_id:"U9");
+       ~user_id:"U9"
+       ());
   roundtrip
     (slack_channel
        ~team_id:(Some "TEAM1")
@@ -76,7 +78,8 @@ let test_smart_constructors_reject_blank_coordinates () =
          ~channel_id:"C"
          ~parent_channel_id:None
          ~thread_id:None
-         ~user_id:""));
+         ~user_id:""
+         ()));
   assert (
     Result.is_error
       (slack

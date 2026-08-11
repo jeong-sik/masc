@@ -145,6 +145,10 @@ end
 module KeeperKeepalive : sig
   val interval_sec : int
   val sleep_chunk_sec : float
+  val stream_idle_failsafe_floor_sec : float
+  (** Resolved runtime fallback used only when the explicit idle timeout is
+      absent. Kept here so runtime execution and operator projection share one
+      value. *)
 
   val parse_stream_idle_timeout_sec : string -> (float, string) result
   (** Parse the operator-supplied seconds value. This schema parser performs

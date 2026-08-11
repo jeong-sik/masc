@@ -364,6 +364,7 @@ let () =
             ~parent_channel_id:None
             ~thread_id:(Some "th-1")
             ~user_id:"u-7"
+            ()
           |> Result.get_ok)
      }
    in

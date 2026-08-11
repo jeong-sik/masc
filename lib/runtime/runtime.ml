@@ -1336,6 +1336,12 @@ let turn_timeout_s_of_runtime_id (id : string) : float option =
   | None -> None
 ;;
 
+let provider_id_of_runtime_id (id : string) : string option =
+  match get_runtime_by_id id with
+  | Some rt -> Some rt.provider.id
+  | None -> None
+;;
+
 let max_prompt_bytes_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
   | Some rt -> rt.model.max_prompt_bytes

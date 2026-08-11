@@ -244,6 +244,23 @@ let test_next_shrink_capacity_ignores_materialized_preamble () =
     Alcotest.fail
       "a materialized preamble must not create a retry boundary before the newest atom"
 ;;
+
+let test_next_shrink_rejects_larger_framed_retry () =
+  let oldest = padded ~role:Types.User ~tag:"oldest|" 100 in
+  let newest = padded ~role:Types.Assistant ~tag:"newest|" 600 in
+  match
+    Window.next_shrink_capacity_bytes
+      ~measure_message_bytes
+      ~target_capacity_bytes:350
+      [ oldest; newest ]
+  with
+  | None -> ()
+  | Some capacity_bytes ->
+    Alcotest.failf
+      "synthetic framing expanded a 700-byte refusal into a %d-byte retry"
+      capacity_bytes
+;;
+
 let test_cut_is_quantized_when_a_quantized_cut_fits () =
   (* Cache stability (#26535): when some multiple of [k] fits, the drop count
      is that multiple, so the transmitted prefix only moves in whole
@@ -500,6 +517,10 @@ let () =
             "next shrink ignores materialized preamble"
             `Quick
             test_next_shrink_capacity_ignores_materialized_preamble
+        ; Alcotest.test_case
+            "next shrink rejects larger framed retry"
+            `Quick
+            test_next_shrink_rejects_larger_framed_retry
         ; Alcotest.test_case "cut is quantized when a quantized cut fits" `Quick
             test_cut_is_quantized_when_a_quantized_cut_fits
         ; Alcotest.test_case "cut point is stable while the budget holds" `Quick

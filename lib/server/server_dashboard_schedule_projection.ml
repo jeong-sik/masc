@@ -18,12 +18,12 @@
     never flattened to zero, which would read as "no schedules" rather than
     "the ledger could not be read". *)
 
-(* TEL-OK: every function here is a pure [record -> Yojson.Safe.t] renderer over
-   state the caller already read. The module takes no action to observe: it
-   dispatches nothing, mutates nothing, and its one read (the schedule ledger)
-   reports its own failure in the payload as [schedule_store_read_error] rather
-   than swallowing it. Telemetry for the actions these rows describe lives with
-   the actors that perform them — Schedule_runner for dispatch, and
+(* TEL-OK: this projection dispatches nothing and mutates no durable state.
+   Schedule, queue, signal, and reaction-ledger reads report failures in the
+   payload rather than swallowing them. Queue evidence uses the non-locking,
+   non-compacting observer, while reaction evidence is one request-local batch
+   per Keeper. Telemetry for the actions these rows describe lives with the
+   actors that perform them — Schedule_runner for dispatch, and
    Keeper_event_queue for wake delivery.
 
    The telemetry ratchet flags these as new handlers because this module is a
@@ -153,6 +153,91 @@ let schedule_dispatch_receipt_dashboard_json
          ]))
 ;;
 
+module String_set = Set.Make (String)
+
+type keeper_reaction_evidence_batch =
+  ( (string * Keeper_reaction_ledger.event_queue_reaction_evidence_outcome) list
+  , Keeper_reaction_ledger.event_queue_reaction_evidence_error )
+  result
+
+type schedule_evidence_snapshot =
+  { queue_by_keeper :
+      (string, Keeper_event_queue_persistence.snapshot_with_errors) Hashtbl.t
+  ; reaction_by_keeper : (string, keeper_reaction_evidence_batch) Hashtbl.t
+  }
+
+let schedule_keeper_receipt_identity (wake : Schedule_domain.wake_record option) =
+  match wake with
+  | None -> None
+  | Some wake ->
+    (match wake.Schedule_domain.detail with
+     | None -> None
+     | Some detail ->
+       (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+        | Error _ -> None
+        | Ok
+            (Server_schedule_consumers.Keeper_wake_enqueued
+              { keeper_name; stimulus_id; _ }) ->
+          Some (keeper_name, stimulus_id)))
+;;
+
+let schedule_evidence_snapshot ~config wakes =
+  let requested_stimulus_ids = Hashtbl.create (List.length wakes) in
+  List.iter
+    (fun wake ->
+       match schedule_keeper_receipt_identity wake with
+       | None -> ()
+       | Some (keeper_name, stimulus_id) ->
+         let existing =
+           match Hashtbl.find_opt requested_stimulus_ids keeper_name with
+           | Some existing -> existing
+           | None -> String_set.empty
+         in
+         let requested =
+           match stimulus_id with
+           | None -> existing
+           | Some stimulus_id -> String_set.add stimulus_id existing
+         in
+         Hashtbl.replace requested_stimulus_ids keeper_name requested)
+    wakes;
+  let queue_by_keeper = Hashtbl.create (Hashtbl.length requested_stimulus_ids) in
+  let reaction_by_keeper = Hashtbl.create (Hashtbl.length requested_stimulus_ids) in
+  Hashtbl.iter
+    (fun keeper_name stimulus_ids ->
+       Hashtbl.add
+         queue_by_keeper
+         keeper_name
+         (Keeper_event_queue_persistence.observe_snapshot_with_errors
+            ~base_path:config.Workspace_utils.base_path
+            ~keeper_name);
+       Hashtbl.add
+         reaction_by_keeper
+         keeper_name
+         (Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+            ~base_path:config.Workspace_utils.base_path
+            ~keeper_name
+            ~stimulus_ids:(String_set.elements stimulus_ids)))
+    requested_stimulus_ids;
+  { queue_by_keeper; reaction_by_keeper }
+;;
+
+type schedule_reaction_evidence_lookup =
+  | Reaction_evidence_observed of
+      Keeper_reaction_ledger.event_queue_reaction_evidence_outcome
+  | Reaction_evidence_failed of
+      Keeper_reaction_ledger.event_queue_reaction_evidence_error
+  | Reaction_evidence_not_captured
+
+let schedule_reaction_evidence_lookup snapshot ~keeper_name ~stimulus_id =
+  match Hashtbl.find_opt snapshot.reaction_by_keeper keeper_name with
+  | None -> Reaction_evidence_not_captured
+  | Some (Error error) -> Reaction_evidence_failed error
+  | Some (Ok evidence_by_id) ->
+    (match List.assoc_opt stimulus_id evidence_by_id with
+     | Some evidence -> Reaction_evidence_observed evidence
+     | None -> Reaction_evidence_not_captured)
+;;
+
 let schedule_queue_read_error_dashboard_json
   (error : Keeper_event_queue_persistence.snapshot_read_error)
   =
@@ -227,7 +312,7 @@ let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimu
 
 let schedule_keeper_queue_evidence_dashboard_json
   ~now
-  (config : Workspace.config)
+  ~evidence_snapshot
   (wake : Schedule_domain.wake_record option)
   =
   match wake with
@@ -259,9 +344,18 @@ let schedule_keeper_queue_evidence_dashboard_json
           let due_at = wake.Schedule_domain.due_at in
           let payload_digest = wake.Schedule_domain.payload_digest in
           let snapshot =
-            Keeper_event_queue_persistence.load_snapshot_with_errors
-              ~base_path:config.Workspace_utils.base_path
-              ~keeper_name
+            match Hashtbl.find_opt evidence_snapshot.queue_by_keeper keeper_name with
+            | Some snapshot -> snapshot
+            | None ->
+              { Keeper_event_queue_persistence.pending = Keeper_event_queue.empty
+              ; read_errors =
+                  [ { kind = Keeper_event_queue_persistence.Read_failed
+                    ; path = None
+                    ; message =
+                        "queue evidence was not captured in the request snapshot"
+                    }
+                  ]
+              }
           in
           let pending_match =
             schedule_queue_match
@@ -303,7 +397,7 @@ let schedule_keeper_queue_evidence_dashboard_json
 ;;
 
 let schedule_keeper_reaction_evidence_dashboard_json
-  (config : Workspace.config)
+  ~evidence_snapshot
   (wake : Schedule_domain.wake_record option)
   =
   match wake with
@@ -415,12 +509,13 @@ let schedule_keeper_reaction_evidence_dashboard_json
                   @ extra_fields)
              in
              (match
-                Keeper_reaction_ledger.event_queue_reaction_evidence_result
-                  ~base_path:config.Workspace_utils.base_path
+                schedule_reaction_evidence_lookup
+                  evidence_snapshot
                   ~keeper_name
                   ~stimulus_id
               with
-              | Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id ->
+              | Reaction_evidence_failed
+                  Keeper_reaction_ledger.Evidence_invalid_stimulus_id ->
                 let error =
                   Keeper_reaction_ledger.Evidence_invalid_stimulus_id
                 in
@@ -433,7 +528,8 @@ let schedule_keeper_reaction_evidence_dashboard_json
                              error) )
                    :: base_fields
                    @ [ "stimulus_id", `String stimulus_id ])
-              | Error (Keeper_reaction_ledger.Evidence_read_error _ as error) ->
+              | Reaction_evidence_failed
+                  (Keeper_reaction_ledger.Evidence_read_error _ as error) ->
                 `Assoc
                   (("projection_status", `String "read_error")
                    :: ( "reason"
@@ -443,7 +539,16 @@ let schedule_keeper_reaction_evidence_dashboard_json
                              error) )
                    :: base_fields
                    @ [ "stimulus_id", `String stimulus_id ])
-              | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+              | Reaction_evidence_not_captured ->
+                `Assoc
+                  (("projection_status", `String "read_error")
+                   :: ( "reason"
+                      , `String
+                          "reaction evidence was not captured in the request snapshot" )
+                   :: base_fields
+                   @ [ "stimulus_id", `String stimulus_id ])
+              | Reaction_evidence_observed
+                  (Keeper_reaction_ledger.Evidence_complete evidence) ->
                 let projection_status =
                   if
                     evidence.event_queue_ack_seen
@@ -460,7 +565,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
                   else "not_found"
                 in
                 projection_json projection_status evidence
-              | Ok
+              | Reaction_evidence_observed
                   (Keeper_reaction_ledger.Evidence_quarantined
                     { evidence; first_reason }) ->
                 projection_json
@@ -530,7 +635,7 @@ let schedule_signal_rows_and_errors config limit =
 
 let schedule_request_dashboard_json
   ~now
-  ~config
+  ~evidence_snapshot
   ?last_wake
   (request : Schedule_domain.schedule_request)
   =
@@ -596,9 +701,15 @@ let schedule_request_dashboard_json
         | None -> `Null
         | Some wake -> wake_record_dashboard_json wake )
     ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_wake
-    ; "keeper_queue_evidence", schedule_keeper_queue_evidence_dashboard_json ~now config last_wake
+    ; ( "keeper_queue_evidence"
+      , schedule_keeper_queue_evidence_dashboard_json
+          ~now
+          ~evidence_snapshot
+          last_wake )
     ; ( "keeper_reaction_evidence"
-      , schedule_keeper_reaction_evidence_dashboard_json config last_wake )
+      , schedule_keeper_reaction_evidence_dashboard_json
+          ~evidence_snapshot
+          last_wake )
     ]
 ;;
 
@@ -787,6 +898,22 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
         | _ -> String.compare left.schedule_id right.schedule_id)
     in
     let request_rows = take schedule_projection_request_limit sorted in
+    let request_rows_with_wakes =
+      List.map
+        (fun (request : Schedule_domain.schedule_request) ->
+           let last_wake =
+             Schedule_store.last_wake_for_schedule_instance state
+               ~schedule_instance_id:request.Schedule_domain.schedule_instance_id
+               ~schedule_id:request.Schedule_domain.schedule_id
+           in
+           request, last_wake)
+        request_rows
+    in
+    let evidence_snapshot =
+      schedule_evidence_snapshot
+        ~config
+        (List.map snd request_rows_with_wakes)
+    in
     `Assoc
       (base_fields
        @ [ "status", `String "ok"
@@ -809,14 +936,12 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
          ; ( "requests"
            , `List
                (List.map
-                  (fun (request : Schedule_domain.schedule_request) ->
-                     let last_wake =
-                       Schedule_store.last_wake_for_schedule_instance state
-                         ~schedule_instance_id:
-                           request.Schedule_domain.schedule_instance_id
-                         ~schedule_id:request.Schedule_domain.schedule_id
-                     in
-                     schedule_request_dashboard_json ~now ~config ?last_wake request)
-                  request_rows) )
+                  (fun (request, last_wake) ->
+                     schedule_request_dashboard_json
+                       ~now
+                       ~evidence_snapshot
+                       ?last_wake
+                       request)
+                  request_rows_with_wakes) )
          ])
 ;;

@@ -397,6 +397,12 @@ let reject_if_stopping state f =
   if (Keeper_owner_reducer.projection state).stopping then Error Owner_stopping else f ()
 ;;
 
+let turn_admission_open state =
+  match (Keeper_owner_reducer.projection state).meta with
+  | Some meta -> not meta.Keeper_meta_contract.paused
+  | None -> false
+;;
+
 let reject_if_shutdown shutdown_operation_id f =
   match shutdown_operation_id with
   | Some _ -> Error Owner_stopping
@@ -504,6 +510,7 @@ let start
       | Some _ when !(t.child_active) -> ()
       | Some _ when Option.is_some shutdown_operation_id -> ()
       | Some _ when (Keeper_owner_reducer.projection state).stopping -> ()
+      | Some _ when not (turn_admission_open state) -> ()
       | Some _ when Option.is_some !(t.store_error) -> ()
       | Some runner when not (runner.ready ~keeper_name:t.keeper_name) -> ()
       | Some runner ->
@@ -589,6 +596,7 @@ let start
                    Eio.Promise.resolve
                      resolve
                      (Ok (Keeper_owner_reducer.projection state).meta);
+                   start_child_if_needed state shutdown_operation_id;
                    loop state shutdown_operation_id)))
         | Command (Exact_operation operation_id, resolve) ->
           let response =
@@ -674,9 +682,17 @@ let start
           let response =
             reject_if_shutdown shutdown_operation_id (fun () ->
               reject_if_stopping state (fun () ->
-                run_operation_command t ~label:"claim next Keeper chat operation" (fun () ->
-                  Chat_operation_store.claim_next t.operation_store ~now:(t.now ()))
-                |> Result.map fst))
+                if not (turn_admission_open state)
+                then Ok None
+                else
+                  run_operation_command
+                    t
+                    ~label:"claim next Keeper chat operation"
+                    (fun () ->
+                       Chat_operation_store.claim_next
+                         t.operation_store
+                         ~now:(t.now ()))
+                  |> Result.map fst))
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id

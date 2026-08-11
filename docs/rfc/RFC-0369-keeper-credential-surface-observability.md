@@ -8,7 +8,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0312", "0343"]
-implementation_prs: []
+implementation_prs: ["28133"]
 ---
 
 # RFC-0369: Keeper credential-surface observability for repo-hosting CLIs

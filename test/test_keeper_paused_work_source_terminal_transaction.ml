@@ -557,6 +557,23 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
     in
     let residual_wal_bytes = Yojson.Safe.to_string residual_wal_row ^ "\n" in
     write_text transition_wal_path residual_wal_bytes;
+    let observed =
+      Persistence.observe_snapshot_with_errors
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+    in
+    Alcotest.(check int)
+      "lock-free operator observation reports no read errors"
+      0
+      (List.length observed.read_errors);
+    Alcotest.(check int)
+      "lock-free operator observation preserves the pending projection"
+      (Queue.length (State.pending projected))
+      (Queue.length observed.pending);
+    Alcotest.(check string)
+      "lock-free operator observation preserves residual WAL bytes"
+      residual_wal_bytes
+      (In_channel.with_open_bin transition_wal_path In_channel.input_all);
     let validated =
       Persistence.validate_existing_state_read_only_result
         ~base_path:config.Workspace.base_path

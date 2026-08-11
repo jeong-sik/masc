@@ -128,6 +128,12 @@ let next_shrink_capacity_bytes
     ~measure_message_bytes
     ~target_capacity_bytes
     messages =
+  let rejected_window_bytes =
+    List.fold_left
+      (fun total message -> total + measure_message_bytes message)
+      0
+      messages
+  in
   (* A provider-bound list may already contain the preamble materialized by a
      previous cut. It is generated framing, not a durable conversation atom;
      never let it become the oldest removable atom of the next retry. *)
@@ -177,9 +183,15 @@ let next_shrink_capacity_bytes
         Some newest_atom_bytes
       | None -> None
     in
-    Option.map
-      (fun retained -> undroppable_bytes + retained)
-      retained_atom_bytes)
+    Option.bind retained_atom_bytes (fun retained ->
+      let framed_capacity = undroppable_bytes + retained in
+      (* Removing an atom is not sufficient when the retained suffix starts
+         with Assistant/Tool: [project] then adds the synthetic User preamble.
+         Never retry a size-driven refusal with framing that is equal to or
+         larger than the exact window the provider already rejected. *)
+      if framed_capacity < rejected_window_bytes
+      then Some framed_capacity
+      else None))
 ;;
 
 (* Smallest multiple of [atoms_per_window] whose remaining suffix fits

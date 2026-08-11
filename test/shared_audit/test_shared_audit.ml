@@ -387,6 +387,11 @@ let test_store_rejects_replaced_canonical_directory () =
     in
     check (option string) "replacement starts its own chain" None
       replacement_entry.prev_hash;
+    let rotated_store = Store.create ~base_dir:rotated in
+    check int "replacement append did not reuse rotated cached writer" 1
+      (List.length (Store.recent rotated_store ~n:10));
+    check int "replacement append reached replacement directory" 1
+      (List.length (Store.recent replacement_store ~n:10));
     match Store.append old_store ~category:"old" ~payload:(`Int 2) with
     | exception
         Store.Base_directory_replaced

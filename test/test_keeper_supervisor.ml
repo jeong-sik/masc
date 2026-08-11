@@ -18,6 +18,7 @@ module KLH = Masc.Keeper_lifecycle_hooks
 module KA = Masc.Keeper_keepalive
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
 module KSS = Masc.Keeper_supervisor_supervise_keepalive
+module Chat_operation = Masc.Keeper_owner.Chat_operation
 module Supervisor_launch = Masc.Keeper_supervisor_launch
 module Lane = Masc.Keeper_lane
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
@@ -899,6 +900,152 @@ let test_supervise_keepalive_retains_sweep_owned_entries () =
     (List.rev_map
        (fun (name, phase) -> name, KSM.phase_to_string phase)
        !launched)
+
+let test_supervise_keepalive_wakes_ready_operation_drain () =
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      KR.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let clock = Eio.Stdenv.clock env in
+       let config = Masc.Workspace.default_config base_dir in
+       let _init_msg =
+         Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
+       in
+       let name = "supervised-operation-ready" in
+       let meta = make_meta name in
+       (match Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error detail -> fail ("failed to seed owner meta: " ^ detail));
+       let runner_ready = Atomic.make false in
+       let execution_count = ref 0 in
+       let executor_started, resolve_executor_started = Eio.Promise.create () in
+       let release_executor, resolve_release_executor = Eio.Promise.create () in
+       let operation_runner : Masc.Keeper_owner.operation_runner =
+         { ready =
+             (fun ~keeper_name ->
+                String.equal keeper_name name && Atomic.get runner_ready)
+         ; execute =
+             (fun ~sw:_ ~keeper_name ~claim ->
+                check string "executor keeper" name keeper_name;
+                incr execution_count;
+                match claim () with
+                | Error error ->
+                  fail (Masc.Keeper_owner.error_to_string error)
+                | Ok None -> fail "ready wake started an executor without a queued operation"
+                | Ok (Some operation) ->
+                  Eio.Promise.resolve resolve_executor_started operation.operation_id;
+                  Eio.Promise.await release_executor;
+                  Masc.Keeper_owner.Operation_succeeded
+                    { outcome_ref = "supervisor-ready-wake" })
+         }
+       in
+       (match
+          Masc.Keeper_owner_registry.install_from_store
+            ~sw
+            ~operation_runner:(Some operation_runner)
+            config
+        with
+        | Ok 1 -> ()
+        | Ok count -> failf "expected one owner, got %d" count
+        | Error error ->
+          fail (Masc.Keeper_owner_registry.install_error_to_string error));
+       let operation_id =
+         match Chat_operation.Operation_id.of_string "kmsg-supervisor-ready-wake" with
+         | Ok operation_id -> operation_id
+         | Error detail -> fail detail
+       in
+       let accepted =
+         match
+           Masc.Keeper_owner_registry.submit_operation
+             ~base_path:config.base_path
+             ~keeper_name:name
+             ~operation_id
+             ~source:(`Assoc [ "kind", `String "test" ])
+             ~input:(`Assoc [ "message", `String "wait for supervised readiness" ])
+         with
+         | Ok accepted -> accepted
+         | Error error ->
+           fail (Masc.Keeper_owner_registry.command_error_to_string error)
+       in
+       (match accepted.operation.state with
+        | Chat_operation.Queued -> ()
+        | state ->
+          fail
+            ("unready runner did not preserve Queued: "
+             ^ Chat_operation.state_to_string state));
+       Eio.Fiber.yield ();
+       check int "unready runner starts no operation child" 0 !execution_count;
+       let ctx = keeper_runtime_context env sw config in
+       let publish_lifecycle ~event:_ _name _detail () = () in
+       let launch_supervised_fiber
+             ~proactive_warmup_sec:_
+             _ctx
+             _meta
+             (_entry : Reg.registry_entry)
+         =
+         Atomic.set runner_ready true;
+         Ok ()
+       in
+       KSS.supervise_keepalive
+         ~publish_lifecycle
+         ~launch_supervised_fiber
+         ~proactive_warmup_sec:0
+         ctx
+         meta;
+       let executor_started_in_time =
+         wait_until
+           ~clock
+           ~deadline:(Eio.Time.now clock +. 1.0)
+           (fun () -> Option.is_some (Eio.Promise.peek executor_started))
+       in
+       check
+         bool
+         "supervisor wake starts the queued operation before timeout"
+         true
+         executor_started_in_time;
+       let claimed_operation_id = Eio.Promise.await executor_started in
+       check
+         string
+         "supervisor wake claims the queued operation"
+         (Chat_operation.Operation_id.to_string operation_id)
+         (Chat_operation.Operation_id.to_string claimed_operation_id);
+       check int "supervisor wake starts exactly one operation child" 1 !execution_count;
+       (match
+          Masc.Keeper_owner_registry.run_autonomous_if_idle
+            ~base_path:config.base_path
+            ~keeper_name:name
+            (fun () -> ())
+        with
+        | Ok (`Busy _) -> ()
+        | Ok (`Ran ()) -> fail "autonomous work overtook the ready operation drain"
+       | Error error ->
+          fail (Masc.Keeper_owner_registry.command_error_to_string error));
+       Eio.Promise.resolve resolve_release_executor ();
+       let completed =
+         wait_until
+           ~clock
+           ~deadline:(Eio.Time.now clock +. 1.0)
+           (fun () ->
+              match
+                Masc.Keeper_owner_registry.exact_operation
+                  ~base_path:config.base_path
+                  ~keeper_name:name
+                  operation_id
+              with
+              | Ok (Some operation) -> Chat_operation.is_terminal operation.state
+              | Ok None
+              | Error _ -> false)
+       in
+       check bool "supervisor-woken operation reaches terminal state" true completed;
+       Eio.Fiber.yield ();
+       check int "completed drain was not duplicated" 1 !execution_count)
 
 let registered_entries names =
   Reg.For_testing.clear ();
@@ -2044,6 +2191,8 @@ let () =
         test_reconcile_supervise_exception_continues;
       test_case "recoverable sweep-owned entries are not relaunched" `Quick
         test_supervise_keepalive_retains_sweep_owned_entries;
+      test_case "supervised readiness wakes queued owner operation" `Quick
+        test_supervise_keepalive_wakes_ready_operation_drain;
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;

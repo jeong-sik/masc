@@ -19,6 +19,20 @@ type t = {
   writer_owner : writer_owner;
 }
 
+external open_directory_nofollow : string -> Unix.file_descr
+  = "caml_masc_shared_audit_open_directory"
+
+external mkdirat_if_missing : Unix.file_descr -> string -> unit
+  = "caml_masc_shared_audit_mkdirat_if_missing"
+
+external openat_directory_nofollow :
+  Unix.file_descr -> string -> Unix.file_descr
+  = "caml_masc_shared_audit_openat_directory"
+
+external openat_append_file_nofollow :
+  Unix.file_descr -> string -> Unix.file_descr
+  = "caml_masc_shared_audit_openat_append_file"
+
 module Writer_owner_key = struct
   type t = writer_owner_key
 
@@ -203,6 +217,82 @@ let ensure_owner_directory_identity owner =
          ; actual_inode_id = Option.map (fun identity -> identity.inode_id) actual
          })
 
+let raise_base_directory_replaced owner actual =
+  let expected = owner.key.directory_identity in
+  raise
+    (Base_directory_replaced
+       { path = owner.key.canonical_base_dir
+       ; expected_device_id = expected.device_id
+       ; expected_inode_id = expected.inode_id
+       ; actual_device_id = Option.map (fun identity -> identity.device_id) actual
+       ; actual_inode_id = Option.map (fun identity -> identity.inode_id) actual
+       })
+
+let close_noerr descriptor =
+  try Unix.close descriptor with
+  | Unix.Unix_error _ -> ()
+
+let with_descriptor open_descriptor use_descriptor =
+  let descriptor = open_descriptor () in
+  Fun.protect
+    ~finally:(fun () -> close_noerr descriptor)
+    (fun () -> use_descriptor descriptor)
+
+let open_validated_base_directory owner =
+  let descriptor =
+    try open_directory_nofollow owner.key.canonical_base_dir with
+    | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR | Unix.ELOOP), _, _) ->
+      raise_base_directory_replaced owner
+        (current_directory_identity owner.key.canonical_base_dir)
+  in
+  let stats =
+    match Unix.fstat descriptor with
+    | stats -> stats
+    | exception exn ->
+      close_noerr descriptor;
+      raise exn
+  in
+  let actual = { device_id = stats.st_dev; inode_id = stats.st_ino } in
+  if actual = owner.key.directory_identity then descriptor
+  else begin
+    close_noerr descriptor;
+    raise_base_directory_replaced owner (Some actual)
+  end
+
+let rec write_all descriptor content offset =
+  if offset < String.length content then
+    match
+      Unix.write_substring descriptor content offset
+        (String.length content - offset)
+    with
+    | 0 ->
+      raise
+        (Unix.Unix_error
+           (Unix.EIO, "write", "shared audit append made no progress"))
+    | written -> write_all descriptor content (offset + written)
+    | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+      write_all descriptor content offset
+
+let append_entry_at_validated_directory owner entry =
+  let dated =
+    Jsonl_writer.dated_path
+      ~base_dir:owner.key.canonical_base_dir
+      ~ts:entry.Envelope.ts
+  in
+  let line = Yojson.Safe.to_string (Envelope.to_json entry) ^ "\n" in
+  with_descriptor
+    (fun () -> open_validated_base_directory owner)
+    (fun base_descriptor ->
+      mkdirat_if_missing base_descriptor dated.month_dir;
+      with_descriptor
+        (fun () ->
+          openat_directory_nofollow base_descriptor dated.month_dir)
+        (fun month_descriptor ->
+          with_descriptor
+            (fun () ->
+              openat_append_file_nofollow month_descriptor dated.day_file)
+            (fun day_descriptor -> write_all day_descriptor line 0)))
+
 let writer_owner_for_key key =
   (* Publish the canonical writer identity before reading its cursor. Every
      creator initializes under this owner's append lock below, so no append can
@@ -241,14 +331,8 @@ let base_dir t = t.base_dir
 let append t ~category ~payload =
   let owner = t.writer_owner in
   Cross_context_mutex.with_durable_lock owner.append_lock (fun () ->
-    ensure_owner_directory_identity owner;
     let entry = Envelope.make ~category ~payload ~prev_hash:owner.latest_hash in
-    ignore
-      (Jsonl_writer.append_dated_jsonl
-         ~base_dir:owner.key.canonical_base_dir
-         ~ts:entry.ts
-         (Envelope.to_json entry)
-        : Jsonl_writer.dated_path);
+    append_entry_at_validated_directory owner entry;
     owner.latest_hash <- Some (Envelope.hash_for_chain entry);
     entry)
 

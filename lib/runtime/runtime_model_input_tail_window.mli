@@ -86,12 +86,12 @@ val next_shrink_capacity_bytes
     removed while preserving the newest atom.
 
     The returned capacity is never below the bytes required by pinned
-    messages, the synthetic preamble, and the newest atom. It is also never
-    above the first strictly smaller atom suffix, so applying {!project} with
-    that capacity removes at least one older atom instead of repeating the
-    rejected request byte-for-byte. [target_capacity_bytes] is used when it
-    lies inside those structural bounds (for example, the ordinary halving
-    policy). *)
+    messages, the synthetic preamble, and the newest atom. It is also strictly
+    smaller than the exact rejected window after synthetic framing is charged;
+    otherwise this function returns [None]. Thus applying {!project} cannot
+    replace a size-driven refusal with an equal or larger request.
+    [target_capacity_bytes] is used when it lies inside those structural
+    bounds (for example, the ordinary halving policy). *)
 
 type budget_error =
   | Reservation_exceeds_capacity of

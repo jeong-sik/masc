@@ -387,6 +387,11 @@ type registry_entry = {
       (** Observable conditions that derive [phase]. *)
   fiber_stop : bool Atomic.t;
   fiber_wakeup : bool Atomic.t;
+  cadence_sleeping : bool Atomic.t;
+      (** Ephemeral sleep handshake for runtime cadence decreases. [true]
+          only while the heartbeat fiber is inside its inter-cycle sleep. A
+          cadence wake consumes it with CAS, so active pre-turn work cannot
+          queue an extra paid cycle. *)
   event_queue : Keeper_event_queue.t Atomic.t;
       (** Event Layer queue for incoming stimuli. Independent of
           [fiber_wakeup] (which remains a hint signal). The Policy

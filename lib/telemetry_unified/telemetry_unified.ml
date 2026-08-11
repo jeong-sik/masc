@@ -858,7 +858,9 @@ let goal_event_summary_stats ~masc_root =
     in
     (List.length entries, latest_ts_of_entries entries)
 
-let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
+let summary_json ?keeper_keepalive_interval_s ~base_path ~masc_root ()
+  : Yojson.Safe.t
+  =
   let now = Unix.gettimeofday () in
   let coverage_gaps = Telemetry_coverage_gap.read_recent ~masc_root ~n:50 in
   let keeper_dirs = discover_keeper_metric_dirs masc_root in
@@ -886,8 +888,16 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
       None keeper_dirs
   in
   let source_json_and_count source =
-    let freshness_slo_s = source_freshness_slo_s source in
-    let metadata_fields = source_metadata_fields ~base_path ~masc_root source in
+    let freshness_slo_s =
+      source_freshness_slo_s ?keeper_keepalive_interval_s source
+    in
+    let metadata_fields =
+      source_metadata_fields
+        ?keeper_keepalive_interval_s
+        ~base_path
+        ~masc_root
+        source
+    in
     let keeper_dir_fields dirs =
       [
         ( "keepers",

@@ -119,6 +119,55 @@ let () =
     | Ok () -> Alcotest.fail "should have rejected unknown key"
   in
 
+  let test_keyed_mutation_returns_atomic_change () =
+    let _p =
+      Runtime_params.register
+        ~key:"test.atomic_change_param"
+        ~default:(fun () -> 300)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun value -> `Int value)
+        ~deserialize:(function
+          | `Int value -> Ok value
+          | _ -> Error "expected int")
+        ()
+    in
+    let first =
+      match
+        Runtime_params.set_by_key_with_change
+          "test.atomic_change_param"
+          (`Int 30)
+      with
+      | Ok change -> change
+      | Error message -> Alcotest.fail message
+    in
+    Alcotest.(check string) "first prior value" "300"
+      (Yojson.Safe.to_string first.old_value);
+    Alcotest.(check string) "first committed value" "30"
+      (Yojson.Safe.to_string first.new_value);
+    let second =
+      match
+        Runtime_params.set_by_key_with_change
+          "test.atomic_change_param"
+          (`Int 60)
+      with
+      | Ok change -> change
+      | Error message -> Alcotest.fail message
+    in
+    Alcotest.(check string) "second observes first commit" "30"
+      (Yojson.Safe.to_string second.old_value);
+    Alcotest.(check string) "second committed value" "60"
+      (Yojson.Safe.to_string second.new_value);
+    let cleared =
+      match Runtime_params.clear_by_key_with_change "test.atomic_change_param" with
+      | Ok change -> change
+      | Error message -> Alcotest.fail message
+    in
+    Alcotest.(check string) "clear prior value" "60"
+      (Yojson.Safe.to_string cleared.old_value);
+    Alcotest.(check string) "clear committed default" "300"
+      (Yojson.Safe.to_string cleared.new_value)
+  in
+
   let test_clear () =
     let p =
       Runtime_params.register
@@ -508,6 +557,8 @@ let () =
           Alcotest.test_case "set_and_get" `Quick test_set_and_get;
           Alcotest.test_case "validation_rejects" `Quick test_validation_rejects;
           Alcotest.test_case "set_by_key" `Quick test_set_by_key;
+          Alcotest.test_case "keyed mutation returns atomic change" `Quick
+            test_keyed_mutation_returns_atomic_change;
           Alcotest.test_case "set_by_key_unknown" `Quick test_set_by_key_unknown;
           Alcotest.test_case "clear" `Quick test_clear;
           Alcotest.test_case "clear_by_key" `Quick test_clear_by_key;

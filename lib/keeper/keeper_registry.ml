@@ -467,6 +467,7 @@ type cadence_sleeper_wakeup_outcome =
   | Cadence_sleeper_missing
   | Cadence_sleeper_replaced
   | Cadence_sleeper_in_flight
+  | Cadence_sleeper_awake
   | Cadence_sleeper_inactive of Keeper_state_machine.phase
   | Cadence_sleeper_lifecycle_denied of
       Keeper_lifecycle_admission.autonomous_denial
@@ -503,15 +504,17 @@ let wakeup_cadence_sleeper_exact (expected : registry_entry) =
               denial;
             Cadence_sleeper_lifecycle_denied denial
           | Keeper_lifecycle_admission.Autonomous_admitted ->
-            (match current.current_turn_observation with
-             | Some _ -> Cadence_sleeper_in_flight
-             | None ->
-               (match current.phase with
-                | Keeper_state_machine.Running | Keeper_state_machine.Failing ->
-                  (* tla-lint: allow-mutation: cadence decrease interrupts a live sleeper *)
-                  Atomic.set current.fiber_wakeup true;
-                  Cadence_sleeper_signaled
-                | phase -> Cadence_sleeper_inactive phase)))))
+            (match current.phase with
+             | Keeper_state_machine.Running | Keeper_state_machine.Failing ->
+               (match current.current_turn_observation with
+                | Some _ -> Cadence_sleeper_in_flight
+                | None ->
+                  (* tla-lint: allow-mutation: cadence sleep handshake — CAS
+                     consumes only an active inter-cycle sleeper. *)
+                  if Atomic.compare_and_set current.cadence_sleeping true false
+                  then Cadence_sleeper_signaled
+                  else Cadence_sleeper_awake)
+             | phase -> Cadence_sleeper_inactive phase))))
 ;;
 
 let fiber_health_of ~base_path name =
@@ -1230,6 +1233,7 @@ let prepare_fiber_launch ~base_path name =
      (* tla-lint: allow-mutation: fiber signal — initialise per-fiber Atomic flags before keeper launch *)
      Atomic.set entry.fiber_stop false;
      Atomic.set entry.fiber_wakeup false;
+     Atomic.set entry.cadence_sleeping false;
      Atomic.set entry.waiting_for_inference false
    | None ->
      (* P3 cleanup: previously this was a silent no-op when the
@@ -1254,6 +1258,7 @@ let prepare_fiber_launch ~base_path name =
 let prepare_fiber_launch_for_lifecycle token (entry : registry_entry) =
   Atomic.set entry.fiber_stop false;
   Atomic.set entry.fiber_wakeup false;
+  Atomic.set entry.cadence_sleeping false;
   Atomic.set entry.waiting_for_inference false;
   dispatch_event_exact_for_lifecycle token entry Keeper_state_machine.Fiber_started
 ;;

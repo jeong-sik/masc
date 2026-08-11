@@ -480,6 +480,7 @@ type cadence_sleeper_wakeup_outcome =
   | Cadence_sleeper_missing
   | Cadence_sleeper_replaced
   | Cadence_sleeper_in_flight
+  | Cadence_sleeper_awake
   | Cadence_sleeper_inactive of Keeper_state_machine.phase
   | Cadence_sleeper_lifecycle_denied of
       Keeper_lifecycle_admission.autonomous_denial
@@ -489,10 +490,10 @@ type cadence_sleeper_wakeup_outcome =
 val wakeup_cadence_sleeper_exact :
   registry_entry -> cadence_sleeper_wakeup_outcome
 (** Break the inter-cycle sleep of the exact lifecycle-admitted lane after an
-    effective cadence decrease. [Running] and [Failing] sleepers are live and
-    signalable; an entry with [current_turn_observation = Some _] is explicitly
-    deferred so a runtime-parameter write cannot queue an extra turn behind an
-    in-flight one. *)
+    effective cadence decrease. [Running] and [Failing] lanes are signalable
+    only while their [cadence_sleeping] handshake is active. In-flight turns
+    and awake pre-turn/post-turn work are explicitly deferred, so a runtime
+    parameter write cannot queue an extra paid turn. *)
 
 (** Fiber-level health based on Promise resolution state.
     Returns Fiber_unknown if the keeper is not registered. *)

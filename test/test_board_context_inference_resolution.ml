@@ -173,13 +173,18 @@ let test_cadence_change_wakes_only_live_sleepers_when_shortened () =
           "in-flight"
           (make_meta "in-flight")
       in
+      let awake =
+        Keeper_registry.For_testing.register
+          ~base_path
+          "awake-pre-turn"
+          (make_meta "awake-pre-turn")
+      in
       Keeper_registry.mark_turn_started
         ~base_path
         ~wake:Keeper_registry.Proactive_tick
         "in-flight";
-      Atomic.set first.fiber_wakeup false;
-      Atomic.set second.fiber_wakeup false;
-      Atomic.set in_flight.fiber_wakeup false;
+      Atomic.set first.cadence_sleeping true;
+      Atomic.set second.cadence_sleeping true;
       let unrelated =
         Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
           ~base_path
@@ -189,10 +194,10 @@ let test_cadence_change_wakes_only_live_sleepers_when_shortened () =
       in
       check bool "unrelated param has no wake effect" true
         (Option.is_none unrelated);
-      check bool "unrelated param keeps first asleep" false
-        (Atomic.get first.fiber_wakeup);
-      check bool "unrelated param keeps second asleep" false
-        (Atomic.get second.fiber_wakeup);
+      check bool "unrelated param keeps first asleep" true
+        (Atomic.get first.cadence_sleeping);
+      check bool "unrelated param keeps second asleep" true
+        (Atomic.get second.cadence_sleeping);
       let summary =
         Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
           ~base_path
@@ -203,21 +208,26 @@ let test_cadence_change_wakes_only_live_sleepers_when_shortened () =
         |> Option.value ~default:`Null
       in
       let open Yojson.Safe.Util in
-      check bool "cadence change wakes first" true (Atomic.get first.fiber_wakeup);
-      check bool "cadence decrease wakes failing sleeper" true
-        (Atomic.get second.fiber_wakeup);
-      check bool "cadence decrease does not queue behind active turn" false
-        (Atomic.get in_flight.fiber_wakeup);
-      check int "summary requested all live lanes" 3
+      check bool "cadence change consumes first sleeper" false
+        (Atomic.get first.cadence_sleeping);
+      check bool "cadence decrease consumes failing sleeper" false
+        (Atomic.get second.cadence_sleeping);
+      check bool "cadence decrease does not mark an active turn sleeping" false
+        (Atomic.get in_flight.cadence_sleeping);
+      check bool "cadence decrease does not queue during pre-turn work" false
+        (Atomic.get awake.cadence_sleeping);
+      check int "summary requested all live lanes" 4
         (summary |> member "requested" |> to_int);
       check int "summary signaled both sleepers" 2
         (summary |> member "signaled" |> to_int);
       check int "summary exposes in-flight deferral" 1
         (summary |> member "deferred_in_flight" |> to_int);
+      check int "summary exposes awake pre-turn deferral" 1
+        (summary |> member "deferred_awake" |> to_int);
       check bool "summary does not claim full delivery" false
         (summary |> member "fully_signaled" |> to_bool);
-      Atomic.set first.fiber_wakeup false;
-      Atomic.set second.fiber_wakeup false;
+      Atomic.set first.cadence_sleeping true;
+      Atomic.set second.cadence_sleeping true;
       let lengthened =
         Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
           ~base_path
@@ -227,10 +237,10 @@ let test_cadence_change_wakes_only_live_sleepers_when_shortened () =
           ~new_interval_s:300
         |> Option.value ~default:`Null
       in
-      check bool "cadence increase wakes no running sleeper" false
-        (Atomic.get first.fiber_wakeup);
-      check bool "cadence increase wakes no failing sleeper" false
-        (Atomic.get second.fiber_wakeup);
+      check bool "cadence increase keeps running sleeper asleep" true
+        (Atomic.get first.cadence_sleeping);
+      check bool "cadence increase keeps failing sleeper asleep" true
+        (Atomic.get second.cadence_sleeping);
       check int "lengthening requests no wakes" 0
         (lengthened |> member "requested" |> to_int);
       check string "lengthening is explicit" "lengthened"

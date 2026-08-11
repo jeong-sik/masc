@@ -22,6 +22,7 @@ type keeper_cadence_wakeup_summary =
   ; deferred_missing : int
   ; deferred_replaced : int
   ; deferred_in_flight : int
+  ; deferred_awake : int
   ; deferred_inactive : int
   ; deferred_lifecycle : int
   ; deferred_lifecycle_reserved : int
@@ -33,6 +34,7 @@ let empty_keeper_cadence_wakeup_summary =
   ; deferred_missing = 0
   ; deferred_replaced = 0
   ; deferred_in_flight = 0
+  ; deferred_awake = 0
   ; deferred_inactive = 0
   ; deferred_lifecycle = 0
   ; deferred_lifecycle_reserved = 0
@@ -77,6 +79,8 @@ let wake_keepers_after_runtime_param_change
              { summary with
                deferred_in_flight = summary.deferred_in_flight + 1
              }
+           | Keeper_registry.Cadence_sleeper_awake ->
+             { summary with deferred_awake = summary.deferred_awake + 1 }
            | Keeper_registry.Cadence_sleeper_inactive _ ->
              { summary with deferred_inactive = summary.deferred_inactive + 1 }
            | Keeper_registry.Cadence_sleeper_lifecycle_denied _ ->
@@ -96,13 +100,15 @@ let wake_keepers_after_runtime_param_change
     then
       Log.Keeper.warn
         "keeper cadence shortened: signaled=%d requested=%d deferred_missing=%d \
-         deferred_replaced=%d deferred_in_flight=%d deferred_inactive=%d \
+         deferred_replaced=%d deferred_in_flight=%d deferred_awake=%d \
+         deferred_inactive=%d \
          deferred_lifecycle=%d deferred_lifecycle_reserved=%d"
         summary.signaled
         summary.requested
         summary.deferred_missing
         summary.deferred_replaced
         summary.deferred_in_flight
+        summary.deferred_awake
         summary.deferred_inactive
         summary.deferred_lifecycle
         summary.deferred_lifecycle_reserved;
@@ -117,6 +123,7 @@ let wake_keepers_after_runtime_param_change
          ; "deferred_missing", `Int summary.deferred_missing
          ; "deferred_replaced", `Int summary.deferred_replaced
          ; "deferred_in_flight", `Int summary.deferred_in_flight
+         ; "deferred_awake", `Int summary.deferred_awake
          ; "deferred_inactive", `Int summary.deferred_inactive
          ; "deferred_lifecycle", `Int summary.deferred_lifecycle
          ; ( "deferred_lifecycle_reserved"
@@ -128,20 +135,32 @@ let wake_keepers_after_runtime_param_change
 let runtime_param_effect_fields
       ~base_path
       ~param_key
-      ~previous_keepalive_interval_s
+      (change : Runtime_params.json_change)
   =
-  let new_keepalive_interval_s =
-    Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
-  in
-  match
-    wake_keepers_after_runtime_param_change
-      ~base_path
-      ~param_key
-      ~previous_interval_s:previous_keepalive_interval_s
-      ~new_interval_s:new_keepalive_interval_s
-  with
-  | None -> []
-  | Some summary -> [ "keeper_cadence_wakeup", summary ]
+  if
+    not
+      (String.equal
+         param_key
+         (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec))
+  then []
+  else
+    match change.old_value, change.new_value with
+    | `Int previous_interval_s, `Int new_interval_s ->
+      (match
+         wake_keepers_after_runtime_param_change
+           ~base_path
+           ~param_key
+           ~previous_interval_s
+           ~new_interval_s
+       with
+       | None -> []
+       | Some summary -> [ "keeper_cadence_wakeup", summary ])
+    | old_value, new_value ->
+      Log.Keeper.error
+        "keeper cadence mutation returned non-integer snapshots old=%s new=%s"
+        (Yojson.Safe.to_string old_value)
+        (Yojson.Safe.to_string new_value);
+      []
 ;;
 
 let respond_board_reaction_result request reqd = function
@@ -1350,32 +1369,25 @@ let add_routes ~sw ~clock router =
                  (`Assoc
                     [ ("ok", `Bool false); ("error", `String "value is required") ])
              | Some value ->
-               let previous_keepalive_interval_s =
-                 Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
-               in
-               let old_value =
-                 match Runtime_params.registry ()
-                   |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                 | Some (_, current, _, _, _) -> current
-                 | None -> `Null
-               in
-               (match Runtime_params.set_by_key param_key value ~actor with
+               (match
+                  Runtime_params.set_by_key_with_change param_key value ~actor
+                with
                 | Error msg ->
                   respond_json_value_with_cors ~status:`Bad_request request reqd
                     (`Assoc [ "ok", `Bool false; "error", `String msg ])
-                | Ok () ->
+                | Ok change ->
                   let effect_fields =
                     runtime_param_effect_fields
                       ~base_path
                       ~param_key
-                      ~previous_keepalive_interval_s
+                      change
                   in
                   Sse.broadcast
                     (`Assoc
                        ([ "type", `String "runtime_param_changed"
                         ; "param_key", `String param_key
-                        ; "old_value", old_value
-                        ; "new_value", value
+                        ; "old_value", change.old_value
+                        ; "new_value", change.new_value
                         ; "actor", `String actor
                         ]
                         @ effect_fields));
@@ -1387,7 +1399,7 @@ let add_routes ~sw ~clock router =
                               (Printf.sprintf
                                  "Set %s = %s"
                                  param_key
-                                 (Yojson.Safe.to_string value)) )
+                                 (Yojson.Safe.to_string change.new_value)) )
                         ]
                         @ effect_fields)))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -1418,38 +1430,23 @@ let add_routes ~sw ~clock router =
                  (`Assoc
                     [ ("ok", `Bool false); ("error", `String "param_key is required") ])
              else
-               let previous_keepalive_interval_s =
-                 Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
-               in
-               let old_value =
-                 match Runtime_params.registry ()
-                   |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                 | Some (_, current, _, _, _) -> current
-                 | None -> `Null
-               in
-               (match Runtime_params.clear_by_key param_key ~actor with
+               (match Runtime_params.clear_by_key_with_change param_key ~actor with
                 | Error msg ->
                   respond_json_value_with_cors ~status:`Bad_request request reqd
                     (`Assoc [ "ok", `Bool false; "error", `String msg ])
-                | Ok () ->
-                  let new_value =
-                    match Runtime_params.registry ()
-                      |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                    | Some (_, _, default, _, _) -> default
-                    | None -> `Null
-                  in
+                | Ok change ->
                   let effect_fields =
                     runtime_param_effect_fields
                       ~base_path
                       ~param_key
-                      ~previous_keepalive_interval_s
+                      change
                   in
                   Sse.broadcast
                     (`Assoc
                        ([ "type", `String "runtime_param_changed"
                         ; "param_key", `String param_key
-                        ; "old_value", old_value
-                        ; "new_value", new_value
+                        ; "old_value", change.old_value
+                        ; "new_value", change.new_value
                         ; "actor", `String actor
                         ]
                         @ effect_fields));

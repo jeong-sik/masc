@@ -186,8 +186,14 @@ let handle_telemetry request reqd =
           ("dashboard_surface", `String "/api/v1/dashboard/telemetry");
           ("source", `String "telemetry_unified");
           ( "retention",
-            Telemetry_unified.replay_retention_json ~base_path ~masc_root
-              ~sources );
+            Telemetry_unified.replay_retention_json
+              ~keeper_keepalive_interval_s:
+                (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
+                 |> float_of_int)
+              ~base_path
+              ~masc_root
+              ~sources
+              () );
           ("query", query_json);
           ("count", `Int (List.length result.entries));
           ("total_matching_entries", `Int result.total_matching_entries);

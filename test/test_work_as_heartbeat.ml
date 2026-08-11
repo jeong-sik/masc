@@ -60,6 +60,17 @@ let test_keeper_turn_record_freshness_tracks_cadence () =
        ~keepalive_interval_s:300.0)
 ;;
 
+let test_keeper_metric_freshness_tracks_runtime_cadence () =
+  check (float 0.1) "short cadence preserves telemetry floor" 300.0
+    (Telemetry_unified.source_freshness_slo_s
+       ~keeper_keepalive_interval_s:30.0
+       Telemetry_unified.Keeper_metric);
+  check (float 0.1) "keeper metric receives full-cycle slack" 420.0
+    (Telemetry_unified.source_freshness_slo_s
+       ~keeper_keepalive_interval_s:300.0
+       Telemetry_unified.Keeper_metric)
+;;
+
 let test_live_turn_keeps_turn_record_source_healthy () =
   let health, stale_reason =
     Masc.Keeper_status_runtime.keeper_turn_record_source_health
@@ -241,6 +252,8 @@ let () =
         test_keeper_heartbeat_stale_window_tracks_cadence;
       test_case "turn-record freshness tracks cadence" `Quick
         test_keeper_turn_record_freshness_tracks_cadence;
+      test_case "keeper metric freshness tracks runtime cadence" `Quick
+        test_keeper_metric_freshness_tracks_runtime_cadence;
       test_case "live turn keeps record source healthy" `Quick
         test_live_turn_keeps_turn_record_source_healthy;
       test_case "interval has one resolved SSOT" `Quick

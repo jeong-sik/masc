@@ -739,6 +739,33 @@ let test_summary_includes_freshness_metadata () =
     Alcotest.(check (float 0.1)) "freshness SLO" 900.0 freshness_slo_s
   | None -> Alcotest.fail "expected agent_event source summary"
 
+let test_keeper_metric_summary_freshness_tracks_runtime_cadence () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_keeper_metric_freshness" in
+  let json =
+    Telemetry_unified.summary_json
+      ~keeper_keepalive_interval_s:300.0
+      ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ()
+  in
+  let keeper_metric = source_summary "keeper_metric" json in
+  let freshness_slo_s =
+    match keeper_metric with
+    | `Assoc fields ->
+      (match List.assoc_opt "freshness_slo_s" fields with
+       | Some (`Float value) -> value
+       | Some (`Int value) -> float_of_int value
+       | _ -> Alcotest.fail "expected Keeper metric freshness_slo_s")
+    | _ -> Alcotest.fail "expected Keeper metric source summary"
+  in
+  Alcotest.(check (float 0.1))
+    "summary receives runtime cadence plus cycle slack"
+    420.0
+    freshness_slo_s
+;;
+
 let test_summary_tool_metric_surface_points_to_raw_metrics () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1268,6 +1295,7 @@ let test_replay_retention_lists_selected_sources () =
   let json =
     Telemetry_unified.replay_retention_json ~base_path:dir ~masc_root:root
       ~sources:[ Telemetry_unified.Agent_core_event; Telemetry_unified.Tool_metric ]
+      ()
   in
   match json with
   | `Assoc fields ->
@@ -1469,6 +1497,9 @@ let () =
           Alcotest.test_case "with data" `Quick test_summary_with_data;
           Alcotest.test_case "includes freshness metadata" `Quick
             test_summary_includes_freshness_metadata;
+          Alcotest.test_case "keeper metric freshness tracks runtime cadence"
+            `Quick
+            test_keeper_metric_summary_freshness_tracks_runtime_cadence;
           Alcotest.test_case "tool_metric surface points to raw metrics" `Quick
             test_summary_tool_metric_surface_points_to_raw_metrics;
           Alcotest.test_case "includes trajectory and execution receipt sources"

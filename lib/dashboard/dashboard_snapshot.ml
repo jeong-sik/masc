@@ -109,7 +109,15 @@ let refresh_loop
       safe "telemetry_summary" (fun () ->
         let base_path = config.base_path in
         let masc_root = Workspace.masc_root_dir config in
-        Telemetry_unified.summary_json ~base_path ~masc_root ())
+        let keeper_keepalive_interval_s =
+          Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
+          |> float_of_int
+        in
+        Telemetry_unified.summary_json
+          ~keeper_keepalive_interval_s
+          ~base_path
+          ~masc_root
+          ())
     in
     let namespace_truth =
       match state with

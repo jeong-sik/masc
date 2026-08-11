@@ -123,7 +123,7 @@ let test_keyring_is_authenticated () =
     string
     "source"
     "keyring"
-    (Gh_auth_status.token_source_to_string entry.Gh_auth_status.source);
+    (entry.Gh_auth_status.source_label);
   check (option bool) "active" (Some true) entry.Gh_auth_status.active;
   check
     (option (list string))
@@ -144,7 +144,7 @@ let test_github_token_shadows_a_valid_keyring () =
       string
       "environment variable is named"
       "GITHUB_TOKEN"
-      (Gh_auth_status.token_source_to_string env_entry.Gh_auth_status.source);
+      (env_entry.Gh_auth_status.source_label);
     check
       (option bool)
       "environment entry is the active one"
@@ -155,7 +155,7 @@ let test_github_token_shadows_a_valid_keyring () =
       string
       "keyring entry survives"
       "keyring"
-      (Gh_auth_status.token_source_to_string keyring_entry.Gh_auth_status.source);
+      (keyring_entry.Gh_auth_status.source_label);
     (match keyring_entry.Gh_auth_status.outcome with
      | Gh_auth_status.Logged_in -> ()
      | Gh_auth_status.Login_failed -> fail "keyring entry was reported as failed");
@@ -179,12 +179,12 @@ let test_gh_token_shadow_survives_both_entries_failing () =
       string
       "environment variable is named"
       "GH_TOKEN"
-      (Gh_auth_status.token_source_to_string env_entry.Gh_auth_status.source);
+      (env_entry.Gh_auth_status.source_label);
     check
       string
       "config entry source"
       "default"
-      (Gh_auth_status.token_source_to_string config_entry.Gh_auth_status.source);
+      (config_entry.Gh_auth_status.source_label);
     List.iter
       (fun entry ->
          match entry.Gh_auth_status.outcome with
@@ -211,7 +211,7 @@ let test_valid_environment_token_still_shadows () =
       string
       "environment variable is named"
       "GITHUB_TOKEN"
-      (Gh_auth_status.token_source_to_string env_entry.Gh_auth_status.source)
+      (env_entry.Gh_auth_status.source_label)
   | entries -> failf "expected two entries, parsed %d" (List.length entries)
 ;;
 
@@ -250,22 +250,20 @@ let test_enterprise_host_is_read_verbatim () =
   check (option (list string)) "scopes" (Some [ "repo" ]) entry.Gh_auth_status.scopes
 ;;
 
-(* A label gh adds later must not be read as one of the sources the verdict
-   depends on. It stays verbatim, and because it is not an environment source
-   it cannot manufacture a shadowed verdict. *)
-let test_unknown_label_stays_verbatim () =
+(* A label gh adds later could name a variable. Reading it as a stored
+   credential would report this host authenticated while its pushes go out
+   under that variable, so the verdict declines instead. The label is still
+   carried verbatim for whoever has to diagnose it. *)
+let test_unknown_label_declines_the_verdict () =
   let parsed = Gh_auth_status.parse future_label_output in
-  check string "verdict" "authenticated" (verdict parsed);
+  check string "verdict" "unknown" (verdict parsed);
   let entry = single_entry parsed in
+  check string "label preserved" "secure_enclave" entry.Gh_auth_status.source_label;
   check
-    string
-    "label preserved"
-    "secure_enclave"
-    (Gh_auth_status.token_source_to_string entry.Gh_auth_status.source);
-  match entry.Gh_auth_status.source with
-  | Gh_auth_status.Other_source _ -> ()
-  | Gh_auth_status.Keyring | Gh_auth_status.Config_default | Gh_auth_status.Environment _
-    -> fail "an unrecognised label was folded into a known source"
+    bool
+    "label is not interpreted"
+    true
+    (Option.is_none entry.Gh_auth_status.source)
 ;;
 
 (* Output the parser does not recognise is unknown, never a stand-in for a
@@ -309,7 +307,10 @@ let () =
             "enterprise host is read verbatim"
             `Quick
             test_enterprise_host_is_read_verbatim
-        ; test_case "unknown label stays verbatim" `Quick test_unknown_label_stays_verbatim
+        ; test_case
+            "unknown label declines the verdict"
+            `Quick
+            test_unknown_label_declines_the_verdict
         ; test_case
             "unrecognised output is unknown"
             `Quick

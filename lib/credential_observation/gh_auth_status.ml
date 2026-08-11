@@ -2,7 +2,6 @@ type token_source =
   | Keyring
   | Environment of string
   | Config_default
-  | Other_source of string
 
 type outcome =
   | Logged_in
@@ -12,7 +11,8 @@ type entry =
   { outcome : outcome
   ; host : string
   ; account : string option
-  ; source : token_source
+  ; source_label : string
+  ; source : token_source option
   ; active : bool option
   ; scopes : string list option
   }
@@ -45,23 +45,17 @@ let verdict_to_string = function
   | Unknown -> "unknown"
 ;;
 
-let token_source_to_string = function
-  | Keyring -> "keyring"
-  | Environment name -> name
-  | Config_default -> "default"
-  | Other_source label -> label
-;;
-
-(* The recognised set is explicit so a label gh adds later becomes
-   [Other_source] and stays visible, rather than collapsing into one of the
-   sources the verdict depends on. *)
+(* A sound-partial read: [None] means this parser does not recognise the label,
+   not that the label is harmless. The verdict declines on [None] rather than
+   assuming a stored credential, because a label gh adds later could name a
+   variable, and treating that as stored would hide a shadow. *)
 let token_source_of_label label =
   match label with
-  | "keyring" -> Keyring
-  | "default" -> Config_default
+  | "keyring" -> Some Keyring
+  | "default" -> Some Config_default
   | "GH_TOKEN" | "GITHUB_TOKEN" | "GH_ENTERPRISE_TOKEN" | "GITHUB_ENTERPRISE_TOKEN" ->
-    Environment label
-  | _ -> Other_source label
+    Some (Environment label)
+  | _ -> None
 ;;
 
 (* gh closes an entry line with the source in parentheses. Read the last pair
@@ -158,6 +152,7 @@ let parse_entry_line line =
                { outcome
                ; host
                ; account
+               ; source_label = label
                ; source = token_source_of_label label
                ; active = None
                ; scopes = None
@@ -235,8 +230,14 @@ let collect_entries lines =
 ;;
 
 let is_environment_source = function
-  | Environment _ -> true
-  | Keyring | Config_default | Other_source _ -> false
+  | Some (Environment _) -> true
+  | Some Keyring | Some Config_default -> false
+  | None -> false
+;;
+
+let is_unrecognised_source = function
+  | None -> true
+  | Some (Environment _ | Keyring | Config_default) -> false
 ;;
 
 (* Shadowing is decided by the presence of an environment-sourced row beside a
@@ -247,7 +248,11 @@ let is_environment_source = function
    would rest the verdict on a field never observed as [false] for that row,
    and a future [false] would silently report Authenticated for a host whose
    pushes go out under the variable. [active] stays on the record because the
-   endpoint reports it; it just does not decide. *)
+   endpoint reports it; it just does not decide.
+
+   An unrecognised label short-circuits to [Unknown] before any of that: the
+   parser cannot tell whether it names a variable, and guessing "stored" would
+   report Authenticated for a shadowed host. *)
 let verdict_of_entries entries =
   let has_environment =
     List.exists (fun entry -> is_environment_source entry.source) entries
@@ -263,7 +268,9 @@ let verdict_of_entries entries =
          | Login_failed -> false)
       entries
   in
-  if has_environment && has_non_environment
+  if List.exists (fun entry -> is_unrecognised_source entry.source) entries
+  then Unknown
+  else if has_environment && has_non_environment
   then Shadowed
   else if has_logged_in
   then Authenticated

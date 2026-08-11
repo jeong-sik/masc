@@ -8,7 +8,7 @@
     separate the cases this module exists to separate: a host whose keyring
     account is fine but whose active token comes from the environment exits 1,
     exactly like a host with no credential at all. The verdict comes from the
-    per-entry marks and source labels instead. *)
+    per-entry source labels instead. *)
 
 type token_source =
   | Keyring  (** gh printed [(keyring)]. *)
@@ -17,10 +17,6 @@ type token_source =
           [(GITHUB_TOKEN)]. The name is kept because it is what an operator has
           to unset. *)
   | Config_default  (** gh printed [(default)] — the on-disk config entry. *)
-  | Other_source of string
-      (** A label this parser does not recognise, kept verbatim. New gh labels
-          surface as drift rather than collapsing into one of the known
-          sources. *)
 
 type outcome =
   | Logged_in  (** gh marked the entry [✓]. *)
@@ -32,7 +28,14 @@ type entry =
   ; account : string option
       (** [None] for an environment token, which gh reports as
           "using token" with no account. *)
-  ; source : token_source
+  ; source_label : string
+      (** The label gh printed, verbatim, recognised or not. *)
+  ; source : token_source option
+      (** The interpretation of [source_label], or [None] when this parser does
+          not recognise it. A label gh adds later must not be assumed to be a
+          stored credential: if it names a variable, treating it as stored
+          would hide a shadow. So an unrecognised label is not interpreted at
+          all, and the verdict declines rather than guessing. *)
   ; active : bool option  (** [None] when gh printed no "Active account" line. *)
   ; scopes : string list option
       (** [None] when gh printed no scopes line, which is not the same as a
@@ -50,13 +53,15 @@ type verdict =
 
           Decided by the presence of the environment row, not by gh's "Active
           account" line and not by whether either credential is still valid.
-          All four measured shapes agree — an invalid variable over a valid
+          All three measured shapes agree — an invalid variable over a valid
           keyring, an invalid variable over an invalid config entry, and a
           perfectly valid variable over a valid keyring are all shadowed. *)
   | Unknown
       (** The output matched neither the "not logged into any host" sentence
-          nor any entry line. Never a stand-in for an authenticated or
-          unauthenticated verdict. *)
+          nor any entry line, or an entry carries a source label this parser
+          does not recognise. Never a stand-in for an authenticated or
+          unauthenticated verdict: an unreadable credential surface is
+          reported as unreadable. *)
 
 type t =
   { entries : entry list
@@ -68,4 +73,3 @@ val parse : string -> t
     Unknown }] rather than a default. *)
 
 val verdict_to_string : verdict -> string
-val token_source_to_string : token_source -> string

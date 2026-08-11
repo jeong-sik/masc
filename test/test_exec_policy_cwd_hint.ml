@@ -41,7 +41,11 @@ let test_lists_existing_sibling_dirs () =
     let hint = Exec_policy.existing_sibling_dirs_hint ~workdir:root "repos/masc-mcp" in
     Alcotest.(check (option string))
       "stale repos/masc-mcp surfaces the real repos/ entries (sorted, no rename table)"
-      (Some "(existing directories under repos/: masc, agent_core)")
+      (* Sorted by String.compare, so agent_core precedes masc. The literal is
+         written out rather than derived from the mkdir_p calls above: deriving
+         it would call the same sort the subject uses and pass whatever order
+         the subject produced. *)
+      (Some "(existing directories under repos/: agent_core, masc)")
       hint)
 ;;
 

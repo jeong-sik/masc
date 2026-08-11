@@ -2423,7 +2423,11 @@ let handle_file_write_with_outcome
                 |> Result.map_error (fun error ->
                   Content_write_capability { error; created_parents })))
       in
-      (match run () with
+      (match
+         Keeper_external_resource_lease.with_lease
+           (Keeper_external_resource_lease.File_path target)
+           run
+       with
        | Ok attempt -> file_write_attempt_to_execution attempt
        | Error msg ->
          Keeper_tool_execution.failure
@@ -2546,7 +2550,11 @@ let handle_file_write_with_outcome
                             file
                             content))))
       in
-      (match run () with
+      (match
+         Keeper_external_resource_lease.with_lease
+           (Keeper_external_resource_lease.File_path target)
+           run
+       with
        | Ok attempt -> file_write_attempt_to_execution attempt
        | Error msg ->
          Keeper_tool_execution.failure
@@ -2816,7 +2824,11 @@ let handle_file_write_with_outcome
                                  Content_write_capability
                                    { error; created_parents = [] }))))
               in
-              (match run () with
+              (match
+                 Keeper_external_resource_lease.with_lease
+                   (Keeper_external_resource_lease.File_path target)
+                   run
+               with
                | Ok attempt -> file_write_attempt_to_execution attempt
                | Error msg ->
                  Keeper_tool_execution.failure

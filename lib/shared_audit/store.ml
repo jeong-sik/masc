@@ -1,5 +1,15 @@
-type writer_owner = {
+type directory_identity = {
+  device_id : int;
+  inode_id : int;
+}
+
+type writer_owner_key = {
   canonical_base_dir : string;
+  directory_identity : directory_identity;
+}
+
+type writer_owner = {
+  key : writer_owner_key;
   append_lock : Cross_context_mutex.t;
   mutable latest_hash : string option;
 }
@@ -10,10 +20,17 @@ type t = {
 }
 
 module Writer_owner_key = struct
-  type t = string
+  type t = writer_owner_key
 
-  let equal = String.equal
-  let hash = Hashtbl.hash
+  let equal left right =
+    String.equal left.canonical_base_dir right.canonical_base_dir
+    && left.directory_identity = right.directory_identity
+
+  let hash key =
+    Hashtbl.hash
+      ( key.canonical_base_dir
+      , key.directory_identity.device_id
+      , key.directory_identity.inode_id )
 end
 
 module Writer_owner_table = Ephemeron.K1.Make (Writer_owner_key)
@@ -29,6 +46,14 @@ exception Corrupt_jsonl of {
   path : string;
   line_number : int;
   detail : string;
+}
+
+exception Base_directory_replaced of {
+  path : string;
+  expected_device_id : int;
+  expected_inode_id : int;
+  actual_device_id : int option;
+  actual_inode_id : int option;
 }
 
 type verify_report = {
@@ -59,6 +84,26 @@ let read_jsonl_file path =
          done
        with End_of_file -> ());
       List.rev !entries)
+
+let read_latest_jsonl_entry path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+      let latest = ref None in
+      let line_number = ref 0 in
+      (try
+         while true do
+           let line = input_line ic in
+           incr line_number;
+           if String.length line > 0 then
+             match parse_jsonl_line line with
+             | Ok env -> latest := Some env
+             | Error detail ->
+               raise (Corrupt_jsonl { path; line_number = !line_number; detail })
+         done
+       with End_of_file -> ());
+      !latest)
 
 let verify_chain entries =
   let rec check idx prev = function
@@ -101,34 +146,93 @@ let read_all_entries_from_base_dir base_dir =
     List.rev !entries
 
 let load_latest_hash ~base_dir =
-  match List.rev (read_all_entries_from_base_dir base_dir) with
-  | [] -> None
-  | last :: _ -> Some (Envelope.hash_for_chain last)
+  if not (Sys.file_exists base_dir) then None
+  else if not (Sys.is_directory base_dir) then None
+  else
+    let months =
+      Sys.readdir base_dir
+      |> Array.to_list
+      |> List.filter (fun name -> String.length name = 7 && name.[4] = '-')
+      |> List.sort (fun left right -> String.compare right left)
+    in
+    let rec find_in_months = function
+      | [] -> None
+      | month :: remaining_months ->
+        let month_dir = Filename.concat base_dir month in
+        if not (Sys.is_directory month_dir) then find_in_months remaining_months
+        else
+          let days =
+            Sys.readdir month_dir
+            |> Array.to_list
+            |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+            |> List.sort (fun left right -> String.compare right left)
+          in
+          let rec find_in_days = function
+            | [] -> find_in_months remaining_months
+            | day :: remaining_days ->
+              let path = Filename.concat month_dir day in
+              (match read_latest_jsonl_entry path with
+               | Some entry -> Some (Envelope.hash_for_chain entry)
+               | None -> find_in_days remaining_days)
+          in
+          find_in_days days
+    in
+    find_in_months months
 
-let writer_owner_for_base_dir ~canonical_base_dir =
+let directory_identity path =
+  let stats = Unix.stat path in
+  if stats.st_kind <> Unix.S_DIR then
+    raise (Unix.Unix_error (Unix.ENOTDIR, "stat", path));
+  { device_id = stats.st_dev; inode_id = stats.st_ino }
+
+let current_directory_identity path =
+  try Some (directory_identity path) with
+  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> None
+
+let ensure_owner_directory_identity owner =
+  let expected = owner.key.directory_identity in
+  match current_directory_identity owner.key.canonical_base_dir with
+  | Some actual when actual = expected -> ()
+  | actual ->
+    raise
+      (Base_directory_replaced
+         { path = owner.key.canonical_base_dir
+         ; expected_device_id = expected.device_id
+         ; expected_inode_id = expected.inode_id
+         ; actual_device_id = Option.map (fun identity -> identity.device_id) actual
+         ; actual_inode_id = Option.map (fun identity -> identity.inode_id) actual
+         })
+
+let writer_owner_for_key key =
   (* Publish the canonical writer identity before reading its cursor. Every
      creator initializes under this owner's append lock below, so no append can
      overlap the first disk read and unrelated directories do not hold the
      process-wide registry mutex while doing I/O. *)
   Stdlib.Mutex.protect writer_owners_mutex (fun () ->
-    match Writer_owner_table.find_opt writer_owners canonical_base_dir with
+    match Writer_owner_table.find_opt writer_owners key with
     | Some owner -> owner
     | None ->
       let owner =
-        { canonical_base_dir
+        { key
         ; append_lock = Cross_context_mutex.create ()
         ; latest_hash = None
         }
       in
       Writer_owner_table.clean writer_owners;
-      Writer_owner_table.add writer_owners canonical_base_dir owner;
+      Writer_owner_table.add writer_owners key owner;
       owner)
 
 let create ~base_dir =
   if not (Sys.file_exists base_dir) then Fs_compat.mkdir_p base_dir;
   let canonical_base_dir = Fs_compat.realpath base_dir in
-  let writer_owner = writer_owner_for_base_dir ~canonical_base_dir in
+  let key =
+    { canonical_base_dir
+    ; directory_identity = directory_identity canonical_base_dir
+    }
+  in
+  let writer_owner = writer_owner_for_key key in
   Cross_context_mutex.with_durable_lock writer_owner.append_lock (fun () ->
+    ensure_owner_directory_identity writer_owner;
     writer_owner.latest_hash <- load_latest_hash ~base_dir:canonical_base_dir);
   { base_dir = canonical_base_dir; writer_owner }
 
@@ -137,10 +241,11 @@ let base_dir t = t.base_dir
 let append t ~category ~payload =
   let owner = t.writer_owner in
   Cross_context_mutex.with_durable_lock owner.append_lock (fun () ->
+    ensure_owner_directory_identity owner;
     let entry = Envelope.make ~category ~payload ~prev_hash:owner.latest_hash in
     ignore
       (Jsonl_writer.append_dated_jsonl
-         ~base_dir:owner.canonical_base_dir
+         ~base_dir:owner.key.canonical_base_dir
          ~ts:entry.ts
          (Envelope.to_json entry)
         : Jsonl_writer.dated_path);
@@ -150,7 +255,8 @@ let append t ~category ~payload =
 let read_all_entries t =
   let owner = t.writer_owner in
   Cross_context_mutex.with_durable_lock owner.append_lock (fun () ->
-    read_all_entries_from_base_dir owner.canonical_base_dir)
+    ensure_owner_directory_identity owner;
+    read_all_entries_from_base_dir owner.key.canonical_base_dir)
 
 let recent t ~n =
   let all = read_all_entries t in

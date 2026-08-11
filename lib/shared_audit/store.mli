@@ -35,14 +35,28 @@ exception Corrupt_jsonl of {
     invalid audit envelope. Audit-chain corruption is fail-closed rather than
     skipped, and identifies the exact file and line. *)
 
+exception Base_directory_replaced of {
+  path : string;
+  expected_device_id : int;
+  expected_inode_id : int;
+  actual_device_id : int option;
+  actual_inode_id : int option;
+}
+(** Raised when the canonical audit directory no longer names the filesystem
+    directory captured by [create]. A missing, non-directory, renamed, or
+    replaced base directory is rejected before further audit I/O so an
+    in-memory cursor cannot be applied to a different log. *)
+
 val create : base_dir:string -> t
 (** Create or open a store rooted at [base_dir]. The directory is
     created (with parents) if it does not exist. Stores for equivalent
     realpath-resolved directories share one in-process writer owner.
-    A new owner loads the latest entry's hash from disk; reopening an
-    existing owner refreshes that cursor under its append lock. The canonical
-    path is retained for all later I/O, so aliases cannot silently retarget a
-    live writer. Thus [append] continues the chain across sessions. *)
+    A new owner loads the latest entry's hash from the newest non-empty
+    partition; reopening an existing owner refreshes that cursor under its
+    append lock. The canonical path and its filesystem identity are retained
+    for all later I/O, so aliases cannot silently retarget a live writer and
+    replacing the canonical directory fails closed. Thus [append] continues
+    the chain across sessions. *)
 
 val append :
   t ->
@@ -52,11 +66,13 @@ val append :
 (** Append a new entry with [prev_hash] computed from the latest
     hash owned for this canonical base directory. Cursor read, durable
     append, and cursor update are serialized as one transaction across
-    every in-process store instance. Returns the appended entry. *)
+    every in-process store instance. Returns the appended entry. Raises
+    {!Base_directory_replaced} if the canonical directory identity changed. *)
 
 val recent : t -> n:int -> Envelope.t list
 (** Read the most recent [n] entries (chronologically increasing).
-    Raises {!Corrupt_jsonl} when persisted audit evidence is malformed. *)
+    Raises {!Corrupt_jsonl} when persisted audit evidence is malformed, and
+    {!Base_directory_replaced} if the canonical directory identity changed. *)
 
 val since : t -> ts:float -> Envelope.t list
 (** Read all entries whose [ts] is >= the given timestamp.

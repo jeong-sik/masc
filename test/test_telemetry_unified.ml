@@ -739,6 +739,70 @@ let test_summary_includes_freshness_metadata () =
     Alcotest.(check (float 0.1)) "freshness SLO" 900.0 freshness_slo_s
   | None -> Alcotest.fail "expected agent_event source summary"
 
+let test_keeper_metric_summary_freshness_tracks_runtime_cadence () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_keeper_metric_freshness" in
+  let json =
+    Telemetry_unified.summary_json
+      ~keeper_keepalive_interval_s:300.0
+      ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ()
+  in
+  let keeper_metric = source_summary "keeper_metric" json in
+  let freshness_slo_s =
+    match keeper_metric with
+    | `Assoc fields ->
+      (match List.assoc_opt "freshness_slo_s" fields with
+       | Some (`Float value) -> value
+       | Some (`Int value) -> float_of_int value
+       | _ -> Alcotest.fail "expected Keeper metric freshness_slo_s")
+    | _ -> Alcotest.fail "expected Keeper metric source summary"
+  in
+  Alcotest.(check (float 0.1))
+    "summary receives runtime cadence plus cycle slack"
+    420.0
+    freshness_slo_s
+;;
+
+let test_keeper_metric_summary_stays_healthy_while_producer_active () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_keeper_metric_active" in
+  let config = Workspace.default_config dir in
+  let keeper_name = "long-running" in
+  let old_ts = Unix.gettimeofday () -. 900.0 in
+  Dated_jsonl.append
+    (Keeper_types_support.keeper_metrics_store config keeper_name)
+    (`Assoc
+      (Keeper_metrics_record.fields Keeper_metrics_record.Heartbeat
+       @ [ "ts", `String (Masc_domain.iso8601_of_unix_seconds old_ts)
+         ; "ts_unix", `Float old_ts
+         ; "name", `String keeper_name
+         ]));
+  let summary producer_active =
+    Telemetry_unified.summary_json
+      ~keeper_keepalive_interval_s:300.0
+      ~keeper_metric_producer_active:producer_active
+      ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ()
+    |> source_summary "keeper_metric"
+  in
+  let open Yojson.Safe.Util in
+  let active = summary true in
+  Alcotest.(check string) "active producer suppresses age-only staleness" "ok"
+    (active |> member "health" |> to_string);
+  Alcotest.(check bool) "active producer evidence is explicit" true
+    (active |> member "producer_active" |> to_bool);
+  let inactive = summary false in
+  Alcotest.(check string) "inactive old producer remains stale" "stale"
+    (inactive |> member "health" |> to_string);
+  Alcotest.(check bool) "inactive producer evidence is explicit" false
+    (inactive |> member "producer_active" |> to_bool)
+;;
+
 let test_summary_tool_metric_surface_points_to_raw_metrics () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1268,6 +1332,7 @@ let test_replay_retention_lists_selected_sources () =
   let json =
     Telemetry_unified.replay_retention_json ~base_path:dir ~masc_root:root
       ~sources:[ Telemetry_unified.Agent_core_event; Telemetry_unified.Tool_metric ]
+      ()
   in
   match json with
   | `Assoc fields ->
@@ -1469,6 +1534,12 @@ let () =
           Alcotest.test_case "with data" `Quick test_summary_with_data;
           Alcotest.test_case "includes freshness metadata" `Quick
             test_summary_includes_freshness_metadata;
+          Alcotest.test_case "keeper metric freshness tracks runtime cadence"
+            `Quick
+            test_keeper_metric_summary_freshness_tracks_runtime_cadence;
+          Alcotest.test_case "active Keeper metric producer stays healthy"
+            `Quick
+            test_keeper_metric_summary_stays_healthy_while_producer_active;
           Alcotest.test_case "tool_metric surface points to raw metrics" `Quick
             test_summary_tool_metric_surface_points_to_raw_metrics;
           Alcotest.test_case "includes trajectory and execution receipt sources"

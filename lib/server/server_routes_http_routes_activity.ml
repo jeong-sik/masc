@@ -16,6 +16,173 @@ let activity_result_json ~ok ~message =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
 
+type keeper_cadence_wakeup_summary =
+  { requested : int
+  ; signaled : int
+  ; deferred_missing : int
+  ; deferred_replaced : int
+  ; deferred_in_flight : int
+  ; deferred_awake : int
+  ; deferred_inactive : int
+  ; deferred_lifecycle : int
+  ; deferred_lifecycle_reserved : int
+  }
+
+let empty_keeper_cadence_wakeup_summary =
+  { requested = 0
+  ; signaled = 0
+  ; deferred_missing = 0
+  ; deferred_replaced = 0
+  ; deferred_in_flight = 0
+  ; deferred_awake = 0
+  ; deferred_inactive = 0
+  ; deferred_lifecycle = 0
+  ; deferred_lifecycle_reserved = 0
+  }
+;;
+
+let keeper_cadence_effect_mu = Eio.Mutex.create ()
+
+let is_keeper_cadence_param param_key =
+  String.equal
+    param_key
+    (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec)
+;;
+
+let wake_keepers_after_runtime_param_change
+      ~base_path
+      ~param_key
+      ~previous_interval_s
+      ~new_interval_s
+  =
+  if
+    not (is_keeper_cadence_param param_key)
+  then None
+  else
+    let change, wake_required =
+      if new_interval_s < previous_interval_s
+      then "shortened", true
+      else if new_interval_s > previous_interval_s
+      then "lengthened", false
+      else "unchanged", false
+    in
+    let entries =
+      if wake_required then Keeper_registry.all ~base_path () else []
+    in
+    let summary =
+      List.fold_left
+        (fun summary (entry : Keeper_registry.registry_entry) ->
+           let summary = { summary with requested = summary.requested + 1 } in
+           match Keeper_registry.wakeup_cadence_sleeper_exact entry with
+           | Keeper_registry.Cadence_sleeper_signaled ->
+             { summary with signaled = summary.signaled + 1 }
+           | Keeper_registry.Cadence_sleeper_missing ->
+             { summary with deferred_missing = summary.deferred_missing + 1 }
+           | Keeper_registry.Cadence_sleeper_replaced ->
+             { summary with deferred_replaced = summary.deferred_replaced + 1 }
+           | Keeper_registry.Cadence_sleeper_in_flight ->
+             { summary with
+               deferred_in_flight = summary.deferred_in_flight + 1
+             }
+           | Keeper_registry.Cadence_sleeper_awake ->
+             { summary with deferred_awake = summary.deferred_awake + 1 }
+           | Keeper_registry.Cadence_sleeper_inactive _ ->
+             { summary with deferred_inactive = summary.deferred_inactive + 1 }
+           | Keeper_registry.Cadence_sleeper_lifecycle_denied _ ->
+             { summary with
+               deferred_lifecycle = summary.deferred_lifecycle + 1
+             }
+           | Keeper_registry.Cadence_sleeper_lifecycle_reserved _ ->
+             { summary with
+               deferred_lifecycle_reserved =
+                 summary.deferred_lifecycle_reserved + 1
+             })
+        empty_keeper_cadence_wakeup_summary
+        entries
+    in
+    let deferred = summary.requested - summary.signaled in
+    if deferred > 0
+    then
+      Log.Keeper.warn
+        "keeper cadence shortened: signaled=%d requested=%d deferred_missing=%d \
+         deferred_replaced=%d deferred_in_flight=%d deferred_awake=%d \
+         deferred_inactive=%d \
+         deferred_lifecycle=%d deferred_lifecycle_reserved=%d"
+        summary.signaled
+        summary.requested
+        summary.deferred_missing
+        summary.deferred_replaced
+        summary.deferred_in_flight
+        summary.deferred_awake
+        summary.deferred_inactive
+        summary.deferred_lifecycle
+        summary.deferred_lifecycle_reserved;
+    Some
+      (`Assoc
+         [ "change", `String change
+         ; "previous_interval_s", `Int previous_interval_s
+         ; "new_interval_s", `Int new_interval_s
+         ; "wake_required", `Bool wake_required
+         ; "requested", `Int summary.requested
+         ; "signaled", `Int summary.signaled
+         ; "deferred_missing", `Int summary.deferred_missing
+         ; "deferred_replaced", `Int summary.deferred_replaced
+         ; "deferred_in_flight", `Int summary.deferred_in_flight
+         ; "deferred_awake", `Int summary.deferred_awake
+         ; "deferred_inactive", `Int summary.deferred_inactive
+         ; "deferred_lifecycle", `Int summary.deferred_lifecycle
+         ; ( "deferred_lifecycle_reserved"
+           , `Int summary.deferred_lifecycle_reserved )
+         ; "fully_signaled", `Bool (deferred = 0)
+         ])
+;;
+
+let runtime_param_effect_fields
+      ~base_path
+      ~param_key
+      (change : Runtime_params.json_change)
+  =
+  if
+    not (is_keeper_cadence_param param_key)
+  then []
+  else
+    match change.old_value, change.new_value with
+    | `Int previous_interval_s, `Int new_interval_s ->
+      (match
+         wake_keepers_after_runtime_param_change
+           ~base_path
+           ~param_key
+           ~previous_interval_s
+           ~new_interval_s
+       with
+       | None -> []
+       | Some summary -> [ "keeper_cadence_wakeup", summary ])
+    | old_value, new_value ->
+      Log.Keeper.error
+        "keeper cadence mutation returned non-integer snapshots old=%s new=%s"
+        (Yojson.Safe.to_string old_value)
+        (Yojson.Safe.to_string new_value);
+      []
+;;
+
+let mutate_runtime_param_with_effects ~base_path ~param_key mutate =
+  let mutate_and_apply_effects () =
+    match mutate () with
+    | Error _ as error -> error
+    | Ok change ->
+      Ok
+        ( change
+        , runtime_param_effect_fields ~base_path ~param_key change )
+  in
+  if is_keeper_cadence_param param_key
+  then
+    Eio.Mutex.use_rw
+      ~protect:true
+      keeper_cadence_effect_mu
+      mutate_and_apply_effects
+  else mutate_and_apply_effects ()
+;;
+
 let respond_board_reaction_result request reqd = function
   | Ok json -> respond_json_value_with_cors request reqd json
   | Error error ->
@@ -1221,35 +1388,40 @@ let add_routes ~sw ~clock router =
                  (`Assoc
                     [ ("ok", `Bool false); ("error", `String "value is required") ])
              | Some value ->
-               let old_value =
-                 match Runtime_params.registry ()
-                   |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                 | Some (_, current, _, _, _) -> current
-                 | None -> `Null
-               in
-               (match Runtime_params.set_by_key param_key value ~actor with
+               (match
+                  mutate_runtime_param_with_effects
+                    ~base_path
+                    ~param_key
+                    (fun () ->
+                      Runtime_params.set_by_key_with_change
+                        param_key
+                        value
+                        ~actor)
+                with
                 | Error msg ->
                   respond_json_value_with_cors ~status:`Bad_request request reqd
                     (`Assoc [ "ok", `Bool false; "error", `String msg ])
-                | Ok () ->
+                | Ok (change, effect_fields) ->
                   Sse.broadcast
                     (`Assoc
-                       [ "type", `String "runtime_param_changed"
-                       ; "param_key", `String param_key
-                       ; "old_value", old_value
-                       ; "new_value", value
-                       ; "actor", `String actor
-                       ]);
+                       ([ "type", `String "runtime_param_changed"
+                        ; "param_key", `String param_key
+                        ; "old_value", change.old_value
+                        ; "new_value", change.new_value
+                        ; "actor", `String actor
+                        ]
+                        @ effect_fields));
                   respond_json_value_with_cors request reqd
                     (`Assoc
-                       [ "ok", `Bool true
-                       ; ( "message"
-                         , `String
-                             (Printf.sprintf
-                                "Set %s = %s"
-                                param_key
-                                (Yojson.Safe.to_string value)) )
-                       ]))
+                       ([ "ok", `Bool true
+                        ; ( "message"
+                          , `String
+                              (Printf.sprintf
+                                 "Set %s = %s"
+                                 param_key
+                                 (Yojson.Safe.to_string change.new_value)) )
+                        ]
+                        @ effect_fields)))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (`Assoc
@@ -1278,37 +1450,33 @@ let add_routes ~sw ~clock router =
                  (`Assoc
                     [ ("ok", `Bool false); ("error", `String "param_key is required") ])
              else
-               let old_value =
-                 match Runtime_params.registry ()
-                   |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                 | Some (_, current, _, _, _) -> current
-                 | None -> `Null
-               in
-               (match Runtime_params.clear_by_key param_key ~actor with
+               (match
+                  mutate_runtime_param_with_effects
+                    ~base_path
+                    ~param_key
+                    (fun () ->
+                      Runtime_params.clear_by_key_with_change param_key ~actor)
+                with
                 | Error msg ->
                   respond_json_value_with_cors ~status:`Bad_request request reqd
                     (`Assoc [ "ok", `Bool false; "error", `String msg ])
-                | Ok () ->
-                  let new_value =
-                    match Runtime_params.registry ()
-                      |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                    | Some (_, _, default, _, _) -> default
-                    | None -> `Null
-                  in
+                | Ok (change, effect_fields) ->
                   Sse.broadcast
                     (`Assoc
-                       [ "type", `String "runtime_param_changed"
-                       ; "param_key", `String param_key
-                       ; "old_value", old_value
-                       ; "new_value", new_value
-                       ; "actor", `String actor
-                       ]);
+                       ([ "type", `String "runtime_param_changed"
+                        ; "param_key", `String param_key
+                        ; "old_value", change.old_value
+                        ; "new_value", change.new_value
+                        ; "actor", `String actor
+                        ]
+                        @ effect_fields));
                   respond_json_value_with_cors request reqd
                     (`Assoc
-                       [ "ok", `Bool true
-                       ; ( "message"
-                         , `String (Printf.sprintf "Cleared %s to default" param_key) )
-                       ]))
+                       ([ "ok", `Bool true
+                        ; ( "message"
+                          , `String (Printf.sprintf "Cleared %s to default" param_key) )
+                        ]
+                        @ effect_fields)))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (`Assoc

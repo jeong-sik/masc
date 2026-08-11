@@ -45,8 +45,14 @@ let fixed_store_dir ~masc_root ~base_path = function
       None
     (* handled separately *)
 
-let source_freshness_slo_s = function
-  | Keeper_metric -> 300.0
+let source_freshness_slo_s ?keeper_keepalive_interval_s = function
+  | Keeper_metric ->
+    let keepalive_interval_s =
+      Option.value
+        keeper_keepalive_interval_s
+        ~default:(float_of_int Env_config.KeeperKeepalive.interval_sec)
+    in
+    Float.max 300.0 (keepalive_interval_s +. 120.0)
   | Tool_call_io -> 300.0
   | Trajectory_tool_call -> 300.0
   | Execution_receipt -> 300.0
@@ -90,16 +96,30 @@ let source_durable_store ~masc_root ~base_path = function
       | Some dir -> dir
       | None -> "")
 
-let source_metadata_fields ~base_path ~masc_root source =
+let source_metadata_fields
+      ?keeper_keepalive_interval_s
+      ~base_path
+      ~masc_root
+      source
+  =
   [
-    ("freshness_slo_s", `Float (source_freshness_slo_s source));
+    ( "freshness_slo_s"
+    , `Float
+        (source_freshness_slo_s ?keeper_keepalive_interval_s source) );
     ("producer", `String (source_producer source));
     ( "durable_store",
       `String (source_durable_store ~masc_root ~base_path source) );
     ("dashboard_surface", `String (source_dashboard_surface source));
   ]
 
-let replay_retention_json ~base_path ~masc_root ~sources : Yojson.Safe.t =
+let replay_retention_json
+      ?keeper_keepalive_interval_s
+      ~base_path
+      ~masc_root
+      ~sources
+      ()
+  : Yojson.Safe.t
+  =
   `Assoc
     [
       ("scope", `String "dashboard_telemetry_replay");
@@ -116,7 +136,11 @@ let replay_retention_json ~base_path ~masc_root ~sources : Yojson.Safe.t =
              (fun source ->
                `Assoc
                  (("source", `String (source_to_string source))
-                 :: source_metadata_fields ~base_path ~masc_root source))
+                 :: source_metadata_fields
+                      ?keeper_keepalive_interval_s
+                      ~base_path
+                      ~masc_root
+                      source))
              sources) );
       ( "cache_policy",
         `String

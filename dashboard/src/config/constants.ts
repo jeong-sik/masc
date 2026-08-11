@@ -48,7 +48,19 @@ export const RECONNECT_JITTER_MS = 1_000
 
 // --- Refresh & debounce (milliseconds) ---
 export const SHELL_TTL_MS = 5_000
-export const HEARTBEAT_STALE_MS = 120_000
+// Ordinary agents retain the backend's two-minute liveness window. Keeper
+// freshness is cadence-aware and comes from the server's resolved runtime
+// parameter projection; the fallback is deliberately conservative for an old
+// server that does not expose that field yet.
+export const AGENT_HEARTBEAT_STALE_MS = 120_000
+export const KEEPER_HEARTBEAT_STALE_FALLBACK_MS = 120_000
+export function keeperHeartbeatStaleMs(staleAfterSeconds: unknown): number {
+  return typeof staleAfterSeconds === 'number'
+    && Number.isFinite(staleAfterSeconds)
+    && staleAfterSeconds > 0
+    ? staleAfterSeconds * 1000
+    : KEEPER_HEARTBEAT_STALE_FALLBACK_MS
+}
 export const UI_REFRESH_TTL_MS = 1_000
 export const MISSION_BRIEFING_POLL_DELAY_MS = 1_500
 export const SSE_DEFAULT_DEBOUNCE_MS = 500

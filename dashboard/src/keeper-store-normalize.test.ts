@@ -101,6 +101,22 @@ describe('normalizeKeepers phase field', () => {
   })
 })
 
+describe('normalizeKeepers heartbeat cadence', () => {
+  it('preserves the server-resolved Keeper freshness contract', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'cadence-test',
+        status: 'active',
+        keeper_keepalive_interval_s: 30,
+        heartbeat_stale_after_s: 120,
+      },
+    ])
+
+    expect(keeper?.keeper_keepalive_interval_s).toBe(30)
+    expect(keeper?.heartbeat_stale_after_s).toBe(120)
+  })
+})
+
 describe('normalizeKeepers context measurement', () => {
   it('decodes context numbers declared by the turn_record projection', () => {
     const [keeper] = normalizeKeepers([

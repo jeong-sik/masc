@@ -120,8 +120,12 @@ let string_starts_with ~prefix s =
   let slen = String.length s in
   slen >= plen && String.sub s 0 plen = prefix
 
+(* Matrix fragments are operator-facing text, so matching keeps the
+   case-insensitive behavior of the pre-convergence local helper. *)
 let contains_any haystack needles =
-  List.exists (fun needle -> String_util.contains_substring haystack needle) needles
+  List.exists
+    (fun needle -> String_util.contains_substring_ci haystack needle)
+    needles
 
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -923,6 +927,27 @@ let fatal_fragments =
     "unknown tool";
     "tools/call timeout";
   ]
+
+(* Regression fixtures for the matrix's fatal/guard classifier.  The mixed
+   casing is intentional: provider and keeper responses do not promise a
+   normalized wire spelling. *)
+let mixed_case_matching_regressions =
+  [
+    ("fatal", "Internal Error: provider failed", [ "internal error" ]);
+    ("guard", "Already Joined", [ "already joined" ]);
+  ]
+
+let regression_case_insensitive_matching () =
+  List.iter
+    (fun (label, response, fragments) ->
+      if not (contains_any response fragments) then
+        failwith (Printf.sprintf "%s fragment did not match mixed case" label))
+    mixed_case_matching_regressions
+
+module For_testing = struct
+  let contains_any = contains_any
+  let regression_case_insensitive_matching = regression_case_insensitive_matching
+end
 
 let evaluate_expectation ~name expectation response =
   let text = response_text response in

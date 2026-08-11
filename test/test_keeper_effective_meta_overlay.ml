@@ -240,6 +240,34 @@ let resolved_keeper_name config name =
   | Ok resolved -> resolved
   | Error err -> Alcotest.failf "resolve_keeper_name_config failed: %s" err
 
+(* RFC-0371 B4: typed existence for the channel-gate routes. Pins that the
+   new keeper_exists_config answers through the same candidate spellings as
+   the status resolver, and that unknown and invalid names are a typed
+   [Ok false] — the answer the removed "keeper not found" substring
+   classifier used to reverse-engineer out of a rendered error. *)
+let test_keeper_exists_config_answers_typed () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "existsprobe" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+    ~instructions:"exists probe instructions";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let exists raw =
+    match Status_detail.keeper_exists_config ~config raw with
+    | Ok value -> value
+    | Error err -> Alcotest.failf "keeper_exists_config failed: %s" err
+  in
+  Alcotest.(check bool) "canonical name exists" true (exists name);
+  Alcotest.(check bool)
+    "agent alias spelling exists"
+    true
+    (exists "keeper-existsprobe-agent");
+  Alcotest.(check bool) "unknown name is Ok false" false (exists "no-such-keeper");
+  Alcotest.(check bool)
+    "invalid name is Ok false, not an error"
+    false
+    (exists "not/a valid;name")
+
 let test_status_resolves_keeper_alias_names () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "aliasprobe" in
@@ -1205,6 +1233,8 @@ let () =
         [
           Alcotest.test_case "TOML sandbox overlay reaches effective meta"
             `Quick test_toml_overlay_reaches_effective_meta;
+          Alcotest.test_case "keeper_exists_config answers existence typed"
+            `Quick test_keeper_exists_config_answers_typed;
           Alcotest.test_case
             "profile identity snapshot reaches meta JSON"
             `Quick test_keeper_instructions_reach_meta_json;

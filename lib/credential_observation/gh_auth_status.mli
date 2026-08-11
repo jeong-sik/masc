@@ -41,7 +41,8 @@ type t =
   }
 
 val command_argv : hostname:string -> string array
-(** Exact token-free command for one target host. *)
+(** Exact token-free command for one target host. Raises [Invalid_argument]
+    when the hostname is empty after trimming. *)
 
 val parse : string -> t
 (** Decode the closed JSON schema. Invalid JSON, duplicate/unknown fields,

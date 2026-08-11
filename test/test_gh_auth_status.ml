@@ -101,7 +101,6 @@ let replace_token_source token_source json =
          fields)
   | _ -> json
 ;;
-
 let test_actual_cli_json_decodes () =
   let parsed = Gh_auth_status.parse actual_cli_json in
   check (option string) "schema" None parsed.schema_error;
@@ -326,7 +325,6 @@ let () =
             "relative config and documented environment sources"
             `Quick
             test_relative_config_and_documented_environment_sources
-        ; test_case
             "same-host environment shadows stored account"
             `Quick
             test_environment_shadows_stored_account_on_same_host

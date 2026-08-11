@@ -139,6 +139,7 @@ let make_hooks
         success:bool -> duration_ms:float -> provider:string ->
         typed_outcome:Keeper_tool_outcome.t option -> unit =
         fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
+    ?on_tool_result_ready
     ?(trajectory_acc : Trajectory.accumulator option)
     ()
   : Agent_core.Hooks.hooks =
@@ -515,7 +516,12 @@ let make_hooks
              ?allowed_paths:tctx.allowed_paths
              ?network_mode:tctx.network_mode
              ?runtime_profile:tctx.runtime_profile
-             ~result_bytes ?truncated_to ()
+             ~result_bytes ?truncated_to
+             ?on_committed:
+               (Option.map
+                  (fun notify () -> notify ~tool_call_id:tool_use_id)
+                  on_tool_result_ready)
+             ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -530,7 +536,8 @@ let make_hooks
                ();
              Log.Keeper.warn ~keeper_name:(!meta_ref).name
                "tool=%s log_call write failed: %s"
-               tool_name (Printexc.to_string exn));
+               tool_name (Printexc.to_string exn);
+             if Option.is_some on_tool_result_ready then raise exn);
         (match trajectory_acc with
          | None -> ()
          | Some acc ->

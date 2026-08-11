@@ -123,6 +123,7 @@ let prepare_agent_setup
       ?runtime_manifest_context
       ?runtime_manifest_append
       ?continuation_channel
+      ?on_tool_result_ready
       ?hitl_resolution
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_core.Error.t) result
@@ -395,6 +396,7 @@ let prepare_agent_setup
     ; receipt_stop_reason_ref
     ; receipt_runtime_observation_ref
     ; receipt_response_text_present_ref
+    ; on_tool_result_ready
     ; tools
     }
   in

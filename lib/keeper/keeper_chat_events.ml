@@ -85,6 +85,7 @@ type keeper_chat_event =
   | Tool_call_args of { tool_call_id : string; delta : string }
   | Tool_call_args_snapshot of { tool_call_id : string; snapshot : string }
   | Tool_call_end of { tool_call_id : string }
+  | Tool_result_ready of { tool_call_id : string }
   | Link_block of
       { url : string
       ; title : string

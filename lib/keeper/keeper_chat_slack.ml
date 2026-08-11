@@ -578,7 +578,8 @@ let adapter_loop_with_transport
     | Tool_call_start _ ->
         update_activity "필요한 작업을 진행하고 있어요…";
         continue ()
-    | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _ ->
+    | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _
+    | Tool_result_ready _ ->
         continue ()
     | Link_block { url; title; description; image = _ } ->
         let block = link_block_json ~url ~title ~description in

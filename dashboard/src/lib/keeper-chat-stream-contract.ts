@@ -14,6 +14,7 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_CONTINUATION_CHECKPOINT',
   'KEEPER_EXTERNAL_EFFECT_COMPLETED',
   'KEEPER_REPLY_DETAILS',
+  'KEEPER_TOOL_RESULT_READY',
 ] as const
 
 export type KeeperChatCustomEventName = typeof KEEPER_CHAT_CUSTOM_EVENT_NAMES[number]
@@ -80,6 +81,11 @@ type KeeperChatCustomEvent =
     }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_MESSAGE_STOP'; value: null }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_PING'; value: null }
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_TOOL_RESULT_READY'
+      value: { tool_call_id: string }
+    }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_CONTENT_BLOCK_START'

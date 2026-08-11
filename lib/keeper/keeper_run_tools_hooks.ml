@@ -51,6 +51,7 @@ type ctx =
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
+  ; on_tool_result_ready : (tool_call_id:string -> unit) option
   ; tools : Agent_core.Tool.t list
   }
 
@@ -196,6 +197,7 @@ let assemble_hooks
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~keeper_turn_id
         ~on_after_turn_ordinal:(fun turn -> final_agent_core_turn_ordinal_ref := Some turn)
+        ?on_tool_result_ready:ctx.on_tool_result_ready
         ?trajectory_acc
         ~on_tool_executed:
           (fun

@@ -249,6 +249,23 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
+  it('accepts exact durable tool-result readiness identity', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ag_ui_event: {
+        type: 'CUSTOM',
+        threadId: 'keeper-consumer:sangsu',
+        runId: 'run-1',
+        name: 'KEEPER_TOOL_RESULT_READY',
+        value: { tool_call_id: 'tool-use-7' },
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(true)
+  })
+
   it('accepts an operator-visible projection error for an operation', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'keeper_chat_operation_event',

@@ -582,11 +582,10 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (toolCallId) {
-        markAssistantToolTraceEnded(keeperName, assistantEntryId, toolCallId)
         updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
           ...entry,
-          delivery: 'delivered',
-          streamState: null,
+          delivery: 'streaming',
+          streamState: 'streaming',
           streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_END' }),
         }))
       }
@@ -594,6 +593,22 @@ export function applyKeeperStreamEvent(
     }
     case 'CUSTOM': {
       const customEventName: string = event.name
+      if (event.name === 'KEEPER_TOOL_RESULT_READY') {
+        const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
+        if (!toolCallId) return 'KEEPER_TOOL_RESULT_READY missing tool_call_id'
+        markAssistantToolTraceEnded(keeperName, assistantEntryId, toolCallId)
+        updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
+          ...entry,
+          delivery: 'delivered',
+          streamState: null,
+          streamContract: keeperClientObservedSseStreamContract(
+            'sse_event',
+            'backend_stream_event',
+            { eventName: 'KEEPER_TOOL_RESULT_READY' },
+          ),
+        }))
+        return null
+      }
       if (event.name === 'KEEPER_CHAT_OPERATION_ACCEPTED') {
         const operationId = event.value.operation_id.trim()
         if (!operationId) return 'Keeper operation acceptance is missing operation_id.'

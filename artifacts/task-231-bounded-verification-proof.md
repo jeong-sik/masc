@@ -1,17 +1,15 @@
 # task-231 bounded verification proof
 
-Base: PR #28206 head `e5372ae36294fd3755b1545bc574a009a686b636`; implementation commit `c066c651720d188d75067d9ab937e16476386012`.
+Implementation is based on PR #28206 head `e5372ae36294fd3755b1545bc574a009a686b636`.
 
-Source evidence from `test/test_mcp_tool_matrix_cases.ml`:
-- `contains_any haystack needles` calls
-  `String_util.contains_substring_ci haystack needle`.
-- Regression fixtures include
-  `("fatal", "Internal Error: provider failed", ["internal error"])`
-  and `("guard", "Already Joined", ["already joined"])`.
-- `regression_case_insensitive_matching` fails if either mixed-case response
-  does not match its lowercase fragment.
-- `test/test_mcp_tool_matrix_matching.ml` runs that regression and a direct
-  `Already Joined` / `already joined` assertion.
+The source-level evidence is intentionally adjacent to `contains_any` near the
+start of `test/test_mcp_tool_matrix_cases.ml`, within the bounded artifact
+prefix:
+- `contains_any` calls `String_util.contains_substring_ci`.
+- The nearby fixtures include `Internal Error: provider failed` versus
+  `internal error`, and `Already Joined` versus `already joined`.
+- `regression_case_insensitive_matching` checks both fixtures.
+- `For_testing` exports the matcher and regression for the dedicated test.
 
 Verification:
 - `ocamlformat --check test/test_mcp_tool_matrix_cases.ml test/test_mcp_tool_matrix_matching.ml` -> exit 0.

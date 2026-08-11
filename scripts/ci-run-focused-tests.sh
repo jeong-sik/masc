@@ -17,35 +17,14 @@ mkdir -p "${ME_ROOT}"
 
 run_group() {
   local label="$1"
-  shift
-  local target_args=""
-  local status=0
-  printf -v target_args ' %q' "$@"
-  echo "::group::focused tests: ${label}"
-  scripts/ci-run-tests.sh "opam exec -- dune build --root .${target_args}" || status=$?
-  echo "::endgroup::"
-  return "${status}"
-}
-
-run_group_with_timeout() {
-  local label="$1"
   local timeout_sec="$2"
   shift 2
   local target_args=""
   local status=0
   printf -v target_args ' %q' "$@"
   echo "::group::focused tests: ${label}"
-  timeout \
-    --foreground \
-    --signal=TERM \
-    --kill-after=15s \
-    "${timeout_sec}s" \
-    scripts/ci-run-tests.sh \
-      "opam exec -- dune build --root .${target_args}" \
-    || status=$?
-  if [[ "${status}" -eq 124 || "${status}" -eq 137 ]]; then
-    echo "::error::focused test target timed out label=${label} timeout_sec=${timeout_sec}"
-  fi
+  CI_TEST_TIMEOUT_SEC="${timeout_sec}" \
+    scripts/ci-run-tests.sh "opam exec -- dune build --root .${target_args}" || status=$?
   echo "::endgroup::"
   return "${status}"
 }
@@ -97,7 +76,6 @@ normal_targets=(
   @test/runtest-test_keeper_tool_schema_bytes
   @test/runtest-test_keeper_prompt_metrics
   @test/runtest-test_keeper_surface_presence_prompt
-  @test/runtest-test_keeper_board_attention_worker
   @test/runtest-test_keeper_board_attention_partition
   @test/runtest-test_keeper_board_attention_candidate
   @test/runtest-test_keeper_lifecycle_global_gate
@@ -154,6 +132,10 @@ normal_targets=(
   @test/runtest-test_keeper_secret_redaction
 )
 
+board_attention_targets=(
+  @test/runtest-test_keeper_board_attention_worker
+)
+
 agent_core_targets=(
   @packages/agent_core/test/runtest
   @test/runtest-test_keeper_hooks_agent_core_introspection
@@ -178,7 +160,7 @@ overall_status=0
 
 (
   export ALCOTEST_QUICK_TESTS=1
-  run_group paused-work "${paused_targets[@]}"
+  run_group paused-work 600 "${paused_targets[@]}"
 ) || overall_status=1
 
 echo "::group::focused tests: host-fd-health-paths"
@@ -187,23 +169,11 @@ if ! bash test/test_monitor_system_health_paths.sh; then
 fi
 echo "::endgroup::"
 
-# Keep the ordinary suites independently attributable and bounded. A single
-# wedged executable previously hid inside one batched Dune invocation for more
-# than 30 minutes while the observer could report only that the group was
-# alive. The 150s boundary is above the slowest healthy target in recent CI
-# history and names the exact target that failed to terminate.
-for target in "${normal_targets[@]}"; do
-  label="normal:${target#@test/runtest-}"
-  if run_group_with_timeout "${label}" 150 "${target}"; then
-    :
-  else
-    overall_status=1
-    break
-  fi
-done
+run_group board-attention-worker 180 "${board_attention_targets[@]}" || overall_status=1
+run_group normal 1200 "${normal_targets[@]}" || overall_status=1
 
 if [[ "${RUN_AGENT_CORE:-false}" == "true" ]]; then
-  run_group agent-core "${agent_core_targets[@]}" || overall_status=1
+  run_group agent-core 900 "${agent_core_targets[@]}" || overall_status=1
 else
   echo "::notice::focused tests: agent-core skipped by changed-surface scope"
 fi
@@ -212,12 +182,12 @@ fi
   export ALCOTEST_QUICK_TESTS=1
   export MASC_LOCAL_RUNTIMES_JSON='[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'
   export MASC_E2E_TESTS=true
-  run_group operator-control "${operator_targets[@]}"
+  run_group operator-control 600 "${operator_targets[@]}"
 ) || overall_status=1
 
 (
   export MASC_E2E_TESTS=true
-  run_group sse "${sse_targets[@]}"
+  run_group sse 900 "${sse_targets[@]}"
 ) || overall_status=1
 
 exit "${overall_status}"

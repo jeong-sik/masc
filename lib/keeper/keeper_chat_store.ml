@@ -1410,17 +1410,18 @@ let parse_line ~file_path (line : string) : chat_message option =
           let atts = List.filter_map (fun att_json ->
             match att_json with
             | `Assoc _ ->
-                (try
-                  let id = Json_util.get_string_with_default att_json ~key:"id" ~default:"" in
-                  let att_type = Json_util.get_string_with_default att_json ~key:"type" ~default:"" in
-                  let name = Json_util.get_string_with_default att_json ~key:"name" ~default:"" in
-                  let size = (match Json_util.assoc_member_opt "size" att_json with
-                    | Some (`Int i) -> i | _ -> 0) in
-                  let mime_type = Json_util.get_string_with_default att_json ~key:"mime_type" ~default:"" in
-                  let data = Json_util.get_string_with_default att_json ~key:"data" ~default:"" in
-                  if id = "" || data = "" then None
-                  else Some { id; att_type; name; size; mime_type; data }
-                with _ -> None)  (* cancel-guard-ok: guards pure Json_util reads: no Eio cancellation point *)
+                (* No guard: Json_util getters absorb type errors into their
+                   defaults, so this body is total — the catch that wrapped it
+                   could only hide asynchronous exceptions. *)
+                let id = Json_util.get_string_with_default att_json ~key:"id" ~default:"" in
+                let att_type = Json_util.get_string_with_default att_json ~key:"type" ~default:"" in
+                let name = Json_util.get_string_with_default att_json ~key:"name" ~default:"" in
+                let size = (match Json_util.assoc_member_opt "size" att_json with
+                  | Some (`Int i) -> i | _ -> 0) in
+                let mime_type = Json_util.get_string_with_default att_json ~key:"mime_type" ~default:"" in
+                let data = Json_util.get_string_with_default att_json ~key:"data" ~default:"" in
+                if id = "" || data = "" then None
+                else Some { id; att_type; name; size; mime_type; data }
             | _ -> None
           ) att_list in
           if atts = [] then None else Some atts

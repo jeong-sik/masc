@@ -732,7 +732,7 @@ let test_stream_idle_timeout_is_typed () =
     [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
     (fun path ->
        match run_fixture ~timeout_s:0.05 path with
-       | Error (Runtime_codex_app_server.Timeout seconds) ->
+       | Error (Runtime_codex_app_server.Timeout { seconds; _ }) ->
          check (float 0.001) "exact idle timeout" 0.05 seconds
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "silent app-server stream ignored its idle timeout")
@@ -746,7 +746,7 @@ let test_state_callback_timeout_is_typed () =
         ~on_thread_ready_delay_s:0.2
         path
     with
-    | Error (Runtime_codex_app_server.Timeout seconds) ->
+    | Error (Runtime_codex_app_server.Timeout { seconds; _ }) ->
       check (float 0.001) "exact callback timeout" 0.05 seconds
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
     | Ok _ -> fail "blocking app-server callback ignored its timeout")
@@ -1290,14 +1290,25 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
            ~model:"gpt-fixture"
            ()
        with
-       | Error
-           (Agent_core.Error.Provider
-              (Llm_provider.Error.ProviderReportedError
-                 { provider = "codex_app_server"
-                 ; error_type = Some "context_window_exceeded_after_tool_effect"
-                 ; _
-                 })) ->
-         ()
+       | Error (Agent_core.Error.Internal message) ->
+         (* The provider-attempt effect fence intercepts the failure before
+            the raw provider error reaches the caller: an observed tool
+            effect forbids same-turn retry, and the fenced envelope carries
+            the provider diagnostic. *)
+         check
+           bool
+           "fenced by the provider-attempt effect discipline"
+           true
+           (Astring.String.is_infix
+              ~affix:"provider_attempt_effect_fenced"
+              message);
+         check
+           bool
+           "fenced envelope keeps the provider diagnostic"
+           true
+           (Astring.String.is_infix
+              ~affix:"context_window_exceeded_after_tool_effect"
+              message)
        | Error error -> fail (Agent_core.Error.to_string error)
        | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;

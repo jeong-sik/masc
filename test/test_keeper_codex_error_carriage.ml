@@ -57,10 +57,20 @@ let test_every_variant_lands_in_its_class () =
   check "unsupported_server_request"
     (Codex.Unsupported_server_request "applyPatch")
     "provider:unknown_variant";
+  (* Effectful failed turns are fenced out of same-turn retry by
+     [Keeper_provider_attempt_effect] at the driver level; the mapping itself
+     stays descriptive. *)
   check "turn_failed"
     (Codex.Turn_failed "stream disconnected before completion")
     "provider:reported:turn_failed";
-  check "timeout" (Codex.Timeout 300.0) "api:timeout";
+  check "idle timeout before turn/start rotates"
+    (Codex.Timeout { seconds = 300.0; turn_accepted = false })
+    "api:timeout";
+  (* Idle after turn/start acceptance is ambiguous: the upstream turn may
+     still commit (PR #28192 review P1). *)
+  check "idle timeout after turn/start stays internal"
+    (Codex.Timeout { seconds = 300.0; turn_accepted = true })
+    "internal";
   check "turn_interrupted (deliberate stop stays internal)"
     Codex.Turn_interrupted
     "internal"

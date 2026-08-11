@@ -240,17 +240,6 @@ let login_env ~base_path ~keeper_name =
   | Ok env -> Ok (strip_github_token_env env)
 ;;
 
-let read_all channel =
-  let buffer = Buffer.create 256 in
-  (try
-     while true do
-       Buffer.add_channel buffer channel 4096
-     done
-   with
-   | End_of_file -> ());
-  Buffer.contents buffer
-;;
-
 let process_exit_text = function
   | Unix.WEXITED code -> Printf.sprintf "exit %d" code
   | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
@@ -259,22 +248,11 @@ let process_exit_text = function
 
 let run_capture ~env = function
   | [] -> Unix.WEXITED 127, "", "GitHub CLI argv must not be empty"
-  | command :: _ as argv ->
-    (try
-       let stdout_channel, stdin_channel, stderr_channel =
-         Unix.open_process_args_full command (Array.of_list argv) env
-       in
-       let stdout = read_all stdout_channel in
-       let stderr = read_all stderr_channel in
-       let status =
-         Unix.close_process_full (stdout_channel, stdin_channel, stderr_channel)
-       in
-       status, stdout, stderr
-     with
-     | Unix.Unix_error (error, operation, target) ->
-       ( Unix.WEXITED 127
-       , ""
-       , Printf.sprintf "%s(%s): %s" operation target (Unix.error_message error) ))
+  | argv ->
+    Process_eio.run_argv_with_status_split
+      ~timeout_sec:30.0
+      ~env
+      argv
 ;;
 
 let auth_result_of_command ~redact ~env ~hostname =

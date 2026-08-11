@@ -227,6 +227,22 @@ let test_tool_projection_is_nonblocking_without_identity () =
     docker_args
 ;;
 
+let test_observe_does_not_provision_missing_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "observe-missing-identity" in
+  let config_dir = Github.config_dir ~base_path ~keeper_name in
+  Alcotest.(check bool) "identity starts absent" false (Sys.file_exists config_dir);
+  (match Github.observe ~base_path ~keeper_name ~hostname:"github.com" with
+   | Error message -> Alcotest.fail message
+   | Ok observation ->
+     Alcotest.(check bool) "stored identity is unconfigured" false
+       observation.stored.authenticated;
+     Alcotest.(check bool) "effective identity is unconfigured" false
+       observation.effective.authenticated);
+  Alcotest.(check bool) "observation remains read-only" false
+    (Sys.file_exists config_dir)
+;;
+
 let test_tool_projection_uses_safe_existing_identity () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "configured-identity" in
@@ -317,6 +333,10 @@ let () =
             "tool projection is nonblocking without identity"
             `Quick
             test_tool_projection_is_nonblocking_without_identity
+        ; Alcotest.test_case
+            "observation does not provision missing identity"
+            `Quick
+            test_observe_does_not_provision_missing_identity
         ; Alcotest.test_case
             "tool projection uses safe existing identity"
             `Quick

@@ -1187,7 +1187,20 @@ let keeper_github_hostname_arg =
 
 let keeper_github_action_cmd name doc run =
   let invoke base_path keeper_name hostname =
-    run ~base_path ~keeper_name ~hostname
+    let config = Workspace_utils.default_config base_path in
+    if not (Keeper_config.validate_name keeper_name)
+    then (
+      prerr_endline (Printf.sprintf "invalid keeper name: %s" keeper_name);
+      1)
+    else
+      match Keeper_meta_store.read_meta config keeper_name with
+      | Error message ->
+        prerr_endline message;
+        1
+      | Ok None ->
+        prerr_endline (Printf.sprintf "keeper %S not found" keeper_name);
+        1
+      | Ok (Some _) -> run ~base_path ~keeper_name ~hostname
   in
   Cmd.v
     (Cmd.info name ~doc)

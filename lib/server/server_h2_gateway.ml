@@ -1073,6 +1073,199 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       | `POST, "/api/v1/workspace/current" ->
           h2_respond_removed_surface h2_reqd ~surface:"namespace" ~extra_headers:cors
 
+      | `GET, keeper_path
+        when String.starts_with ~prefix:"/api/v1/keepers/" keeper_path
+             && String.ends_with
+                  ~suffix:
+                    Server_dashboard_http_keeper_api_types.keeper_suffix_github_identity
+                  keeper_path ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanAdmin
+            (fun state _actor ->
+               let suffix =
+                 Server_dashboard_http_keeper_api_types.keeper_suffix_github_identity
+               in
+               let keeper_name =
+                 Server_dashboard_http_keeper_api_types.extract_keeper_name_for_suffix
+                   keeper_path
+                   suffix
+               in
+               let config = Mcp_server.workspace_config state in
+               if String.equal keeper_name ""
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc [ "error", `String "missing or invalid keeper name" ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else if not (Keeper_config.validate_name keeper_name)
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc
+                      [ "error"
+                      , `String (Printf.sprintf "invalid keeper name: %s" keeper_name)
+                      ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else
+                 match Keeper_meta_store.read_meta config keeper_name with
+                 | Error message ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String message ])
+                     ~status:`Internal_server_error
+                     ~extra_headers:cors
+                 | Ok None ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc
+                        [ "error"
+                        , `String (Printf.sprintf "keeper %S not found" keeper_name)
+                        ])
+                     ~status:`Not_found
+                     ~extra_headers:cors
+                 | Ok (Some _) ->
+                   let hostname =
+                     Option.value
+                       ~default:"github.com"
+                       (Server_utils.query_param httpun_request "hostname")
+                   in
+                   (match
+                      Keeper_github_identity.observe
+                        ~base_path:config.base_path
+                        ~keeper_name
+                        ~hostname
+                    with
+                    | Ok observation ->
+                      h2_respond_json_value
+                        h2_reqd
+                        (Keeper_github_identity.observation_to_yojson observation)
+                        ~extra_headers:cors
+                    | Error message ->
+                      h2_respond_json_value
+                        h2_reqd
+                        (`Assoc [ "error", `String message ])
+                        ~status:`Bad_request
+                        ~extra_headers:cors))
+
+      | `POST, keeper_path
+        when String.starts_with ~prefix:"/api/v1/keepers/" keeper_path
+             && String.ends_with
+                  ~suffix:
+                    Server_dashboard_http_keeper_api_types.keeper_suffix_github_login
+                  keeper_path ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanAdmin
+            (fun state _actor ->
+               let suffix =
+                 Server_dashboard_http_keeper_api_types.keeper_suffix_github_login
+               in
+               let keeper_name =
+                 Server_dashboard_http_keeper_api_types.extract_keeper_name_for_suffix
+                   keeper_path
+                   suffix
+               in
+               let config = Mcp_server.workspace_config state in
+               if String.equal keeper_name ""
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc [ "error", `String "missing or invalid keeper name" ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else if not (Keeper_config.validate_name keeper_name)
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc
+                      [ "error"
+                      , `String (Printf.sprintf "invalid keeper name: %s" keeper_name)
+                      ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else
+                 match Keeper_meta_store.read_meta config keeper_name with
+                 | Error message ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String message ])
+                     ~status:`Internal_server_error
+                     ~extra_headers:cors
+                 | Ok None ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc
+                        [ "error"
+                        , `String (Printf.sprintf "keeper %S not found" keeper_name)
+                        ])
+                     ~status:`Not_found
+                     ~extra_headers:cors
+                 | Ok (Some _) ->
+                   let hostname =
+                     Option.value
+                       ~default:"github.com"
+                       (Server_utils.query_param httpun_request "hostname")
+                   in
+                   (match
+                      Keeper_github_identity.login_env
+                        ~base_path:config.base_path
+                        ~keeper_name
+                    with
+                    | Error message ->
+                      h2_respond_json_value
+                        h2_reqd
+                        (`Assoc [ "error", `String message ])
+                        ~status:`Bad_request
+                        ~extra_headers:cors
+                    | Ok env ->
+                      let headers =
+                        H2.Headers.of_list
+                          ([ "content-type", "text/event-stream"
+                           ; "cache-control", "no-cache"
+                           ; "x-accel-buffering", "no"
+                           ]
+                           @ cors)
+                      in
+                      let response = H2.Response.create ~headers `OK in
+                      let writer =
+                        H2.Reqd.respond_with_streaming
+                          ~flush_headers_immediately:true
+                          h2_reqd
+                          response
+                      in
+                      let send_event event json =
+                        H2.Body.Writer.write_string
+                          writer
+                          (Printf.sprintf
+                             "event: %s\ndata: %s\n\n"
+                             event
+                             (Yojson.Safe.to_string json));
+                        H2.Body.Writer.flush writer (fun _ -> ())
+                      in
+                      Fun.protect
+                        ~finally:(fun () -> H2.Body.Writer.close writer)
+                        (fun () ->
+                           match
+                             Keeper_github_identity.stream_login
+                               ~base_path:config.base_path
+                               ~keeper_name
+                               ~hostname
+                               ~env
+                               ~is_closed:(fun () ->
+                                 H2.Body.Writer.is_closed writer)
+                               ~send_event
+                           with
+                           | Ok () -> ()
+                           | Error message
+                             when not (H2.Body.Writer.is_closed writer) ->
+                             send_event
+                               "error"
+                               (`Assoc [ "message", `String message ])
+                           | Error _ -> ())))
+
       | `GET, "/api/v1/board/reactions/catalog" ->
           with_h2_public_read h2_reqd (fun _state ->
             h2_respond_json_value

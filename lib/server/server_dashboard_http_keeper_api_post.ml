@@ -35,17 +35,13 @@ let github_login_stream_send writer event json =
     (Printf.sprintf "event: %s\ndata: %s\n\n" event (Yojson.Safe.to_string json))
 ;;
 
-let github_login_process_status = function
-  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
-  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
-  | Unix.WSTOPPED signal -> Printf.sprintf "stopped by signal %d" signal
-;;
-
 let handle_keeper_github_login_post state req reqd =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_suffix req_path keeper_suffix_github_login in
   let config = Mcp_server.workspace_config state in
   if name = "" then respond_error reqd "keeper name is required"
+  else if not (Keeper_config.validate_name name) then
+    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
   else
     match Keeper_meta_store.read_meta config name with
     | Error message -> respond_error ~status:`Internal_server_error reqd message
@@ -64,90 +60,27 @@ let handle_keeper_github_login_post state req reqd =
        with
        | Error message -> respond_error reqd message
        | Ok env ->
-         let redaction =
-           Keeper_secret_redaction.snapshot
-             ~base_path:config.base_path
-             ~keeper_name:name
-         in
-         let stdout_redaction = Keeper_secret_redaction.create_stream_state redaction in
-         let stderr_redaction = Keeper_secret_redaction.create_stream_state redaction in
          let response = Httpun.Response.create ~headers:github_login_stream_headers `OK in
          let writer = Httpun.Reqd.respond_with_streaming reqd response in
          Fun.protect
            ~finally:(fun () -> Httpun.Body.Writer.close writer)
            (fun () ->
-              let send_redacted_output stream state chunk =
-                let text = Keeper_secret_redaction.redact_stream_chunk state chunk in
-                if not (String.equal text "")
-                then
-                  github_login_stream_send
-                    writer
-                    "output"
-                    (`Assoc [ "stream", `String stream; "text", `String text ])
-              in
-              let finish_redacted_output stream state =
-                let text = Keeper_secret_redaction.redact_stream_finish state in
-                if not (String.equal text "")
-                then
-                  github_login_stream_send
-                    writer
-                    "output"
-                    (`Assoc [ "stream", `String stream; "text", `String text ])
-              in
-              let status, _, stderr =
-                Process_eio.run_argv_with_status_split_streaming
+              match
+                Keeper_github_identity.stream_login
+                  ~base_path:config.base_path
+                  ~keeper_name:name
+                  ~hostname
                   ~env
-                  ~on_stdout_chunk:(send_redacted_output "stdout" stdout_redaction)
-                  ~on_stderr_chunk:(send_redacted_output "stderr" stderr_redaction)
-                  (Keeper_github_identity.login_argv ~hostname)
-              in
-              finish_redacted_output "stdout" stdout_redaction;
-              finish_redacted_output "stderr" stderr_redaction;
-              let stderr = Keeper_secret_redaction.redact_text redaction stderr in
-              match status with
-              | Unix.WEXITED 0 ->
-                (match
-                   Keeper_github_identity.secure_config_files
-                     ~base_path:config.base_path
-                     ~keeper_name:name
-                 with
-                 | Error message ->
-                   github_login_stream_send
-                     writer
-                     "error"
-                     (`Assoc [ "message", `String message ])
-                 | Ok () ->
-                   (match
-                      Keeper_github_identity.observe
-                        ~base_path:config.base_path
-                        ~keeper_name:name
-                        ~hostname
-                    with
-                    | Ok observation ->
-                      github_login_stream_send
-                        writer
-                        "complete"
-                        (`Assoc
-                           [ ( "observation"
-                             , Keeper_github_identity.observation_to_yojson
-                                 observation )
-                           ])
-                    | Error message ->
-                      github_login_stream_send
-                        writer
-                        "error"
-                        (`Assoc [ "message", `String message ])))
-              | failed ->
-                let detail = String.trim (redact stderr) in
-                let message =
-                  if String.equal detail ""
-                  then "gh auth login failed: " ^ github_login_process_status failed
-                  else detail
-                in
+                  ~is_closed:(fun () -> Httpun.Body.Writer.is_closed writer)
+                  ~send_event:(github_login_stream_send writer)
+              with
+              | Ok () -> ()
+              | Error message when not (Httpun.Body.Writer.is_closed writer) ->
                 github_login_stream_send
                   writer
                   "error"
-                  (`Assoc [ "message", `String message ])))
+                  (`Assoc [ "message", `String message ])
+              | Error _ -> ()))
 ;;
 
 (* The rubric and the output sections are the operator's, not this handler's:

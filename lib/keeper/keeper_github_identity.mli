@@ -68,6 +68,19 @@ val auth_result_to_yojson : auth_result -> Yojson.Safe.t
 val observation_to_yojson : observation -> Yojson.Safe.t
 val secure_config_files :
   base_path:string -> keeper_name:string -> (unit, string) result
+
+val stream_login :
+  base_path:string ->
+  keeper_name:string ->
+  hostname:string ->
+  env:string array ->
+  is_closed:(unit -> bool) ->
+  send_event:(string -> Yojson.Safe.t -> unit) ->
+  (unit, string) result
+(** Run interactive [gh auth login] with redacted streaming events. Closing
+    the response cancels and reaps the child; a bounded timeout is also
+    enforced. The caller must validate Keeper existence before invoking it. *)
+
 val run_cli_login : base_path:string -> keeper_name:string -> hostname:string -> int
 val run_cli_status : base_path:string -> keeper_name:string -> hostname:string -> int
 val run_cli_logout : base_path:string -> keeper_name:string -> hostname:string -> int

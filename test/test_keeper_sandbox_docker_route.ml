@@ -1671,6 +1671,15 @@ let test_docker_shell_projects_keeper_secret_dir () =
   ensure_dir (Filename.dirname ssh_path);
   write_file token_path "projected-token\n";
   write_file ssh_path "PRIVATE KEY";
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir
+        ~base_path:config.Workspace.base_path
+        ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   let line = run_docker_shell_command ~config ~meta ~playground ~log_path in
   Alcotest.(check bool) "projected raw token not in docker argv" false
@@ -1760,6 +1769,9 @@ let test_turn_runtime_projects_keeper_secret_dir () =
     (contains_substring log "--env-file ");
   Alcotest.(check bool) "turn container mounts file read-only" true
     (contains_substring log (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+  Alcotest.(check bool) "turn container mounts Keeper GitHub identity read-only" true
+    (contains_substring log (github_config_dir ^ ":")
+     && contains_substring log "/github-cli:ro");
   (match env_file_path_from_docker_line log with
    | None -> Alcotest.fail "missing --env-file path in docker log"
    | Some env_file ->

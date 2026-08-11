@@ -371,6 +371,22 @@ let start_container ?timeout_sec (t : t) =
         with
         | Error err -> Error ("docker_container_start_failed: secret_projection: " ^ err)
         | Ok secret_projection ->
+         (match
+            Keeper_github_identity.docker_args_for_tool
+              ~base_path:t.config.base_path
+              ~keeper_name:t.meta.name
+              ~container_masc_dir:
+                (Keeper_sandbox_runtime_setup.container_masc_dir
+                   ~container_root:t.container_root)
+          with
+          | Error err ->
+            Eio_guard.protect
+              ~finally:secret_projection.cleanup
+              (fun () ->
+                 Error
+                   ("docker_container_start_failed: github_identity_invalid: "
+                    ^ err))
+          | Ok (github_identity_args, _identity_state) ->
          let argv =
            Keeper_sandbox_runtime.docker_command_argv ()
            @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
@@ -411,6 +427,7 @@ let start_container ?timeout_sec (t : t) =
                ~base_path:t.config.base_path
                ~container_root:t.container_root
            @ secret_projection.docker_args
+           @ github_identity_args
            @ identity_mounts
            @ network_args
            @ [ image; "tail"; "-f"; "/dev/null" ]
@@ -471,7 +488,7 @@ let start_container ?timeout_sec (t : t) =
               (Printf.sprintf
                  "docker_container_start_failed: %s%s"
                  (Keeper_sandbox_runtime.docker_failure_output_for_log out)
-                 mount_context)))))
+                 mount_context))))))
 ;;
 
 let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =

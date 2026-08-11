@@ -297,7 +297,7 @@ let login_argv ~hostname =
 
 let logout_argv ~hostname = [ "gh"; "auth"; "logout"; "--hostname"; hostname ]
 
-let projected_env ~base_path ~keeper_name =
+let projected_base_env ~base_path ~keeper_name =
   match
     Keeper_secret_projection.local_env_for_keeper
       ~host_env:(Unix.environment ())
@@ -309,7 +309,13 @@ let projected_env ~base_path ~keeper_name =
   | Ok None ->
     Error
       "keeper secret projection returned no environment; refusing host-environment fallback"
-  | Ok (Some env) -> runtime_env ~base_path ~keeper_name env
+  | Ok (Some env) -> Ok env
+;;
+
+let projected_env ~base_path ~keeper_name =
+  match projected_base_env ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok env -> runtime_env ~base_path ~keeper_name env
 ;;
 
 let login_env ~base_path ~keeper_name =
@@ -353,24 +359,58 @@ let observe ~base_path ~keeper_name ~hostname =
   let hostname = String.trim hostname in
   if String.equal hostname "" then Error "GitHub hostname must not be empty"
   else
-    match projected_env ~base_path ~keeper_name with
+    match projected_base_env ~base_path ~keeper_name with
     | Error _ as error -> error
-    | Ok effective_env ->
+    | Ok base_env ->
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let redact = Keeper_secret_redaction.redact_text redaction in
-      Ok
-        { keeper = keeper_name
-        ; hostname
-        ; config_dir = config_dir ~base_path ~keeper_name
-        ; projected_token_env_names = projected_token_env_names effective_env
-        ; stored =
-            auth_result_of_command
-              ~redact
-              ~env:(strip_github_token_env effective_env)
-              ~hostname
-        ; effective = auth_result_of_command ~redact ~env:effective_env ~hostname
-        ; checked_at_unix = Time_compat.now ()
-        }
+      let token_env_names = projected_token_env_names base_env in
+      (match existing_config_dir ~base_path ~keeper_name with
+       | Error _ as error -> error
+       | Ok existing ->
+         let unconfigured =
+           { authenticated = false
+           ; login = None
+           ; error = Some "Keeper GitHub CLI identity is not configured"
+           }
+         in
+         let probe_with_ephemeral_config env =
+           let probe_dir = Filename.temp_dir "masc-gh-observe-" "" in
+           Unix.chmod probe_dir 0o700;
+           Fun.protect
+             ~finally:(fun () -> Fs_compat.remove_tree probe_dir)
+             (fun () ->
+                auth_result_of_command
+                  ~redact
+                  ~env:(overlay_config_env ~config_dir:probe_dir env)
+                  ~hostname)
+         in
+         let stored, effective =
+           match existing with
+           | Some path ->
+             let effective_env = overlay_config_env ~config_dir:path base_env in
+             ( auth_result_of_command
+                 ~redact
+                 ~env:(strip_github_token_env effective_env)
+                 ~hostname
+             , auth_result_of_command ~redact ~env:effective_env ~hostname )
+           | None ->
+             let effective =
+               match token_env_names with
+               | [] -> unconfigured
+               | _ :: _ -> probe_with_ephemeral_config base_env
+             in
+             unconfigured, effective
+         in
+         Ok
+           { keeper = keeper_name
+           ; hostname
+           ; config_dir = config_dir ~base_path ~keeper_name
+           ; projected_token_env_names = token_env_names
+           ; stored
+           ; effective
+           ; checked_at_unix = Time_compat.now ()
+           })
 ;;
 
 let auth_result_to_yojson result =
@@ -412,6 +452,93 @@ let secure_config_files ~base_path ~keeper_name =
          operation
          target
          (Unix.error_message error))
+;;
+
+let stream_login ~base_path ~keeper_name ~hostname ~env ~is_closed ~send_event =
+  let send event json =
+    if is_closed ()
+    then raise (Eio.Cancel.Cancelled (Failure "GitHub login response closed"))
+    else
+      try send_event event json with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> raise (Eio.Cancel.Cancelled exn)
+  in
+  match Eio_context.get_clock_opt () with
+  | None -> Error "GitHub login streaming requires the server Eio clock"
+  | Some clock ->
+    let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+    let stdout_redaction = Keeper_secret_redaction.create_stream_state redaction in
+    let stderr_redaction = Keeper_secret_redaction.create_stream_state redaction in
+    let send_redacted_output stream state chunk =
+      let text = Keeper_secret_redaction.redact_stream_chunk state chunk in
+      if not (String.equal text "")
+      then send "output" (`Assoc [ "stream", `String stream; "text", `String text ])
+    in
+    let finish_redacted_output stream state =
+      let text = Keeper_secret_redaction.redact_stream_finish state in
+      if not (String.equal text "")
+      then send "output" (`Assoc [ "stream", `String stream; "text", `String text ])
+    in
+    let run_process () =
+      let finished = Atomic.make false in
+      let process_result = ref None in
+      Eio.Cancel.sub (fun cancellation ->
+        Eio.Fiber.both
+          (fun () ->
+             Fun.protect
+               ~finally:(fun () -> Atomic.set finished true)
+               (fun () ->
+                  process_result :=
+                    Some
+                      (Process_eio.run_argv_with_status_split_streaming
+                         ~timeout_sec:600.0
+                         ~env
+                         ~on_stdout_chunk:
+                           (send_redacted_output "stdout" stdout_redaction)
+                         ~on_stderr_chunk:
+                           (send_redacted_output "stderr" stderr_redaction)
+                         (login_argv ~hostname))))
+          (fun () ->
+             while (not (Atomic.get finished)) && not (is_closed ()) do
+               Eio.Time.sleep clock 0.1
+             done;
+             if is_closed ()
+             then
+               Eio.Cancel.cancel
+                 cancellation
+                 (Failure "GitHub login response closed")));
+      match !process_result with
+      | Some result -> result
+      | None -> failwith "GitHub login process completed without a result"
+    in
+    (try
+       let status, _, stderr = run_process () in
+       finish_redacted_output "stdout" stdout_redaction;
+       finish_redacted_output "stderr" stderr_redaction;
+       let stderr = Keeper_secret_redaction.redact_text redaction stderr in
+       (match status with
+        | Unix.WEXITED 0 ->
+          (match secure_config_files ~base_path ~keeper_name with
+           | Error message -> send "error" (`Assoc [ "message", `String message ])
+           | Ok () ->
+             (match observe ~base_path ~keeper_name ~hostname with
+              | Ok observation ->
+                send
+                  "complete"
+                  (`Assoc [ "observation", observation_to_yojson observation ])
+              | Error message ->
+                send "error" (`Assoc [ "message", `String message ])))
+        | failed ->
+          let detail = String.trim stderr in
+          let detail =
+            if String.equal detail "" then process_exit_text failed else detail
+          in
+          send "error" (`Assoc [ "message", `String detail ]));
+       Ok ()
+     with
+     | Eio.Cancel.Cancelled _ when is_closed () -> Ok ()
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Printexc.to_string exn))
 ;;
 
 let print_observation ~base_path ~keeper_name ~hostname =

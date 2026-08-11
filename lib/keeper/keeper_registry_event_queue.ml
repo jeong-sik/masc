@@ -97,7 +97,8 @@ let project_source_ack_result ~base_path ~keeper_name result =
       Keeper_reaction_ledger.project_event_queue_transition_outbox_result
         ~base_path
         ~keeper_name
-        ~expected_transition_id:receipt.transition_id
+        ~expected_transition_id:
+          receipt.Keeper_event_queue_state.transition_id
     with
     | Ok () -> Ok (success receipt)
     | Error detail ->

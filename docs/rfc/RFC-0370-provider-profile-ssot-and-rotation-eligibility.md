@@ -43,11 +43,13 @@ FAILED 284건의 상위 클래스와, 그 클래스의 rotation 자격 (측정:
 **P1 — Internal-carried provider 실패는 rotation 자격이 없다 (54건/일).**
 `Keeper_runtime_attempt.core_error_to_runtime_outcome`은 `Internal _`에
 `None`을 돌려주고, `lane_should_retry`는 상태 코드를 보기 전에 단락된다.
-그런데 official-client 런타임 3종 (Codex app-server, Claude Code,
-Antigravity)은 구독 클라이언트에 다른 생성자가 없어서 provider·transport
-실패를 전부 `Internal <string>`으로 보고한다. per-runtime transport 실패가
-MASC 내부 버그와 같은 판정을 받는다. `Internal`을 terminal로 두는 것
-자체는 옳다 — 틀린 것은 provider 실패가 `Internal`에 실려 들어오는 것이다.
+이 결함의 범위는 **Codex app-server 경계 하나다** (PR #28192 리뷰 P2
+정정): Claude Code(#28136)와 Antigravity 변환기는 이미 provider·transport
+실패를 typed `Provider`/`Api` 생성자로 운반하며, 진짜 내부·state-callback
+실패만 `Internal`로 남긴다. Codex 변환기만 catch-all로 전 실패를
+`Internal <string>`에 눌러 담아, per-runtime transport 실패가 MASC 내부
+버그와 같은 판정을 받았다. `Internal`을 terminal로 두는 것 자체는 옳다 —
+틀린 것은 provider 실패가 `Internal`에 실려 들어오는 것이다.
 
 **P2 — 노브가 부분 선언 상태다.** `runtime_toml.ml`이 받는 14개 키 기준,
 repo 템플릿(`config/runtime.toml`)은 8개 키가 선언 0건이고, 라이브

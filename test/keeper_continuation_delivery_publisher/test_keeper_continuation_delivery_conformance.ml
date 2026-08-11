@@ -124,7 +124,12 @@ let source_key (source : Intent.source_identity) =
 let intent_for family channel =
   let origin =
     Intent.origin_of_payload (payload family channel)
-    |> Option.to_result ~none:(family_label family ^ " lost its routable origin")
+    |> Result.map_error Intent.error_to_string
+    |> fun result ->
+    Result.bind
+      result
+      (Option.to_result
+         ~none:(family_label family ^ " lost its routable origin"))
     |> Result.fold ~ok:Fun.id ~error:fail
   in
   Intent.create

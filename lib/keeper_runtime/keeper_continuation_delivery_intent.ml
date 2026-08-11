@@ -199,17 +199,20 @@ let schedule_origin ~occurrence_id channel =
 
 let origin_of_payload = function
   | Keeper_event_queue.Fusion_completed completion ->
-    fusion_origin ~run_id:completion.run_id completion.channel |> Result.to_option
+    fusion_origin ~run_id:completion.run_id completion.channel
+    |> Result.map Option.some
   | Keeper_event_queue.Hitl_resolved resolution ->
     hitl_origin ~approval_id:resolution.approval_id resolution.channel
-    |> Result.to_option
+    |> Result.map Option.some
   | Keeper_event_queue.Connector_attention attention ->
     connector_attention_origin ~event_id:attention.event_id attention.channel
-    |> Result.to_option
+    |> Result.map Option.some
   | Keeper_event_queue.Schedule_due wake ->
-    Option.bind wake.result_delivery (fun channel ->
-      schedule_origin ~occurrence_id:wake.occurrence_id channel
-      |> Result.to_option)
+    (match wake.result_delivery with
+     | None -> Ok None
+     | Some channel ->
+       schedule_origin ~occurrence_id:wake.occurrence_id channel
+       |> Result.map Option.some)
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Bootstrap
@@ -218,7 +221,7 @@ let origin_of_payload = function
   | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _ ->
-    None
+    Ok None
 ;;
 
 let source_to_yojson = function

@@ -303,10 +303,12 @@ let continuation_delivery_origin_of_wake ~admitted_channel wake =
     (match wake with
      | Keeper_registry.Woken [ payload ] ->
        (match Keeper_continuation_delivery_intent.origin_of_payload payload with
-        | None ->
+        | Error error ->
+          Error (Keeper_continuation_delivery_intent.error_to_string error)
+        | Ok None ->
           Error
             "continuation delivery channel has no singleton typed source"
-        | Some origin ->
+        | Ok (Some origin) ->
           if Keeper_continuation_channel.same_route origin.channel channel
           then Ok (Some origin)
           else Error "continuation delivery source and admitted route differ")

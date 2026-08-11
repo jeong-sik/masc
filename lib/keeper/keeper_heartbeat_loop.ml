@@ -262,16 +262,9 @@ let source_requires_continuation_delivery stimuli =
 let continuation_delivery_origin_for_stimuli stimuli =
   match stimuli with
   | [ stimulus ] ->
-    let origin =
-      Keeper_continuation_delivery_intent.origin_of_payload
-        stimulus.Keeper_event_queue.payload
-    in
-    if source_requires_continuation_delivery [ stimulus ]
-       && Option.is_none origin
-    then
-      Error
-        "continuation source has no valid routable delivery origin; inference suppressed"
-    else Ok origin
+    Keeper_continuation_delivery_intent.origin_of_payload
+      stimulus.Keeper_event_queue.payload
+    |> Result.map_error Keeper_continuation_delivery_intent.error_to_string
   | [] -> Ok None
   | stimuli ->
     if source_requires_continuation_delivery stimuli

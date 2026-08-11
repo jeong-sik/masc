@@ -553,6 +553,7 @@ let run_try_provider
           ; hooks = ctx.hooks
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
+          ; runtime_id = Some ctx.runtime_id
           ; transport = ctx.transport_resolved
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
           ; session_id = ctx.session_id

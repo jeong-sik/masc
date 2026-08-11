@@ -111,6 +111,7 @@ type config =
   event_bus : Agent_core.Event_bus.t option;
   session_id : string option;
   description : string option;
+  runtime_id : string option;
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
   pre_dispatch_serialization_observer :
@@ -256,18 +257,13 @@ let transport_for_provider
           ?body_timeout_s
           ()))
 
+(* Typed field first (RFC-0371 B12): the id used to be recovered by parsing
+   the "runtime:<id>/runtime" spelling the producer had printed into the
+   human-facing [description]. The description is display-only now. *)
 let runtime_id_of_config (config : config) =
-  let runtime_prefix = "runtime:" in
-  let runtime_suffix = "/runtime" in
-  match config.description with
-  | Some description
-    when String.starts_with ~prefix:runtime_prefix description
-         && String.ends_with ~suffix:runtime_suffix description ->
-      let prefix_len = String.length runtime_prefix in
-      let suffix_len = String.length runtime_suffix in
-      let len = String.length description - prefix_len - suffix_len in
-      if len > 0 then String.sub description prefix_len len else config.name
-  | _ -> config.name
+  match config.runtime_id with
+  | Some runtime_id -> runtime_id
+  | None -> config.name
 
 let runtime_observation_for_terminal_config ~total_duration_ms ?error
     (config : config) =

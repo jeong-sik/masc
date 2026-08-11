@@ -63,6 +63,13 @@ type config =
   ; event_bus : Agent_core.Event_bus.t option
   ; session_id : string option
   ; description : string option
+    (** Human-facing label only. Logic must not parse it: the executing
+        runtime's identity travels in {!field-runtime_id}
+        (RFC-0371 B12 — this field used to smuggle
+        ["runtime:<id>/runtime"] for a downstream re-parse). *)
+  ; runtime_id : string option
+    (** The executing runtime's id, typed. [None] for callers that are
+        not dispatching on behalf of a configured runtime. *)
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
     (** Caller-owned projection applied only to provider-bound messages.
@@ -132,6 +139,7 @@ let default_config
   ; event_bus = None
   ; session_id = None
   ; description = None
+  ; runtime_id = None
   ; initial_messages = []
   ; model_input_projection = None
   ; pre_dispatch_serialization_observer = None

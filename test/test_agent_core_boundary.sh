@@ -47,6 +47,23 @@ if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
   exit 1
 fi
 
+cp "${fixture}/lib/dune.safe" "${fixture}/lib/dune"
+printf '(library (name bad) (libraries masc_keeper_runtime))\n' > "${fixture}/lib/deps.inc"
+printf '\n(include deps.inc)\n' >> "${fixture}/lib/dune"
+if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
+  echo "boundary self-test: included internal MASC dependency was accepted" >&2
+  exit 1
+fi
+
+cp "${fixture}/lib/dune.safe" "${fixture}/lib/dune"
+rm "${fixture}/lib/deps.inc"
+printf 'open Server_runtime\n' > "${fixture}/lib/open_bypass.ml"
+if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
+  echo "boundary self-test: opened coordinator module was accepted" >&2
+  exit 1
+fi
+rm "${fixture}/lib/open_bypass.ml"
+
 rm -rf "${fixture}/lib"
 if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
   echo "boundary self-test: missing core tree was accepted" >&2

@@ -23,9 +23,9 @@ dune_violations="$({
   # In Dune syntax, [;] starts a comment through end-of-line unless it appears
   # inside a quoted string. Preserve quoted semicolons while scanning the code
   # prefix so comments cannot hide or imitate a library dependency.
-  find "${core_root}" -name dune -type f -print0 \
+  find "${core_root}" -type f \( -name dune -o -name '*.inc' \) -print0 \
     | while IFS= read -r -d '' dune_file; do
-        if matches="$(awk '
+        if code="$(awk '
           BEGIN {
             in_string = 0
             escaped = 0
@@ -46,10 +46,23 @@ dune_violations="$({
             }
             print code
           }
-        ' "${dune_file}" \
-          | perl -0777 -pe \
-              's{\(\s*public_name\s+masc\.agent_core(?:\.[a-z_]+)?\s*\)}{}g' \
-          | rg -n 'masc\.')"; then
+        ' "${dune_file}")"; then
+          :
+        else
+          exit $?
+        fi
+        if code="$(perl -0777 -pe '
+          s{\(\s*public_name\s+masc\.agent_core(?:\.[a-z_]+)?\s*\)}{
+            my $allowed = $&;
+            $allowed =~ s/[^\n]/ /g;
+            $allowed
+          }gex
+        ' <<< "${code}")"; then
+          :
+        else
+          exit $?
+        fi
+        if matches="$(rg -n 'masc[._]' <<< "${code}")"; then
           printf '%s\n' "${matches}" | sed "s#^#${dune_file}:#"
         else
           status=$?
@@ -67,7 +80,7 @@ dune_violations="$({
 
 module_violations="$({
   rg -n \
-    '\b(Masc_[A-Za-z0-9_]*|Keeper_[A-Za-z0-9_]*|Board_[A-Za-z0-9_]*|Gate_[A-Za-z0-9_]*|Server_[A-Za-z0-9_]*|Operator_[A-Za-z0-9_]*|Runtime_agent|Runtime_toml|Workspace_[A-Za-z0-9_]*)\.' \
+    '\b(Masc_[A-Za-z0-9_]*|Keeper_[A-Za-z0-9_]*|Board_[A-Za-z0-9_]*|Gate_[A-Za-z0-9_]*|Server_[A-Za-z0-9_]*|Operator_[A-Za-z0-9_]*|Runtime_agent|Runtime_toml|Workspace_[A-Za-z0-9_]*)\b' \
     "${core_root}/lib" \
     --glob '*.ml' --glob '*.mli' \
     || true

@@ -2105,6 +2105,13 @@ let handle_keeper_get_subroutes state req request reqd =
         |> max 1 |> min trajectory_max_limit
       in
       let config = (Mcp_server.workspace_config state) in
+      let turn_record_freshness_slo_s =
+        Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
+        |> float_of_int
+        |> fun keepalive_interval_s ->
+        Keeper_status_runtime.keeper_turn_record_freshness_slo_s
+          ~keepalive_interval_s
+      in
       let store = Keeper_types_support.keeper_turn_record_store config name in
       let raw_rows = Dated_jsonl.read_recent store limit in
       (* Strict decode: malformed rows are counted and reported, never
@@ -2163,7 +2170,7 @@ let handle_keeper_get_subroutes state req request reqd =
         | None when skipped_rows > 0 ->
             ("incompatible", "incompatible_rows")
         | None -> ("empty", "no_entries")
-        | Some age when age > freshness_slo_s ->
+        | Some age when age > turn_record_freshness_slo_s ->
             ("stale", "freshness_slo_exceeded")
         | Some _ -> ("ok", "")
       in
@@ -2179,7 +2186,7 @@ let handle_keeper_get_subroutes state req request reqd =
                (Workspace.masc_root_dir config)
                (Printf.sprintf "keepers/%s/turn-records" name)) );
         ("dashboard_surface", `String "/api/v1/keepers/:name/turn-records");
-        ("freshness_slo_s", `Float freshness_slo_s);
+        ("freshness_slo_s", `Float turn_record_freshness_slo_s);
         ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
         ( "latest_ts_iso",
           match latest_ts with

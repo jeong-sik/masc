@@ -46,6 +46,8 @@ type erased = {
 
 type 'a param = 'a param_entry
 
+let key (param : _ param) = param.key
+
 (* ── global state ────────────────────────────────────────────── *)
 
 (** Registry keyed by parameter name.

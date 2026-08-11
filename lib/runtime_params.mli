@@ -24,6 +24,11 @@ type param_meta = {
 (** Opaque typed parameter handle.  Obtained from {!register}. *)
 type 'a param
 
+(** Canonical registered key for a typed parameter handle.  Callers that need
+    to route a string-keyed API side effect can compare against this value
+    without duplicating the key literal. *)
+val key : 'a param -> string
+
 (** {1 Initialization} *)
 
 (** Set the workspace base path used for automatic persistence and audit.

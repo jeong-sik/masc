@@ -441,6 +441,7 @@ type wakeup_intent =
   | Broadcast_signal
   | Compaction_signal
   | Attention_result
+  | Runtime_parameter_change
 
 type wakeup_outcome =
   | Signaled

@@ -16,6 +16,10 @@ let keeper_heartbeat_stale_after_s ~keepalive_interval_s =
   Float.max agent_staleness_threshold_s (keepalive_interval_s +. 60.0)
 ;;
 
+let keeper_turn_record_freshness_slo_s ~keepalive_interval_s =
+  Float.max 300.0 (keepalive_interval_s +. 120.0)
+;;
+
 let unknown_model_label =
   Boundary_redaction.to_string Boundary_redaction.unknown_model_label
 

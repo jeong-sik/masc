@@ -49,6 +49,15 @@ let test_keeper_heartbeat_stale_window_tracks_cadence () =
        ~keepalive_interval_s:300.0)
 ;;
 
+let test_keeper_turn_record_freshness_tracks_cadence () =
+  check (float 0.1) "short cadence preserves the historical 300s floor" 300.0
+    (Masc.Keeper_status_runtime.keeper_turn_record_freshness_slo_s
+       ~keepalive_interval_s:30.0);
+  check (float 0.1) "300s cadence receives full-cycle slack" 420.0
+    (Masc.Keeper_status_runtime.keeper_turn_record_freshness_slo_s
+       ~keepalive_interval_s:300.0)
+;;
+
 let test_keepalive_interval_has_one_resolved_ssot () =
   Runtime_settings.ensure_init ();
   check
@@ -206,6 +215,8 @@ let () =
       test_case "interval positive" `Quick test_keepalive_interval_positive;
       test_case "stale window tracks cadence" `Quick
         test_keeper_heartbeat_stale_window_tracks_cadence;
+      test_case "turn-record freshness tracks cadence" `Quick
+        test_keeper_turn_record_freshness_tracks_cadence;
       test_case "interval has one resolved SSOT" `Quick
         test_keepalive_interval_has_one_resolved_ssot;
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;

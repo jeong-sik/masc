@@ -366,6 +366,7 @@ type wakeup_intent =
   | Broadcast_signal
   | Compaction_signal
   | Attention_result
+  | Runtime_parameter_change
 
 let wakeup_intent_to_wire = function
   | Reactive_signal -> "reactive_signal"
@@ -376,6 +377,7 @@ let wakeup_intent_to_wire = function
   | Broadcast_signal -> "broadcast_signal"
   | Compaction_signal -> "compaction_signal"
   | Attention_result -> "attention_result"
+  | Runtime_parameter_change -> "runtime_parameter_change"
 ;;
 
 type wakeup_outcome =

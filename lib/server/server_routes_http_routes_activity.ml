@@ -16,6 +16,87 @@ let activity_result_json ~ok ~message =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
 
+type keeper_cadence_wakeup_summary =
+  { requested : int
+  ; signaled : int
+  ; deferred_unregistered : int
+  ; deferred_not_running : int
+  ; deferred_lifecycle : int
+  }
+
+let empty_keeper_cadence_wakeup_summary =
+  { requested = 0
+  ; signaled = 0
+  ; deferred_unregistered = 0
+  ; deferred_not_running = 0
+  ; deferred_lifecycle = 0
+  }
+;;
+
+let wake_keepers_after_runtime_param_change ~base_path ~param_key =
+  if
+    not
+      (String.equal
+         param_key
+         (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec))
+  then None
+  else
+    let entries = Keeper_registry.all ~base_path () in
+    let summary =
+      List.fold_left
+        (fun summary (entry : Keeper_registry.registry_entry) ->
+           let summary = { summary with requested = summary.requested + 1 } in
+           match
+             Keeper_registry.wakeup_running
+               ~intent:Keeper_registry.Runtime_parameter_change
+               ~base_path:entry.base_path
+               entry.name
+           with
+           | Keeper_registry.Signaled ->
+             { summary with signaled = summary.signaled + 1 }
+           | Keeper_registry.Deferred_unregistered ->
+             { summary with
+               deferred_unregistered = summary.deferred_unregistered + 1
+             }
+           | Keeper_registry.Deferred_not_running _ ->
+             { summary with
+               deferred_not_running = summary.deferred_not_running + 1
+             }
+           | Keeper_registry.Deferred_lifecycle _ ->
+             { summary with
+               deferred_lifecycle = summary.deferred_lifecycle + 1
+             })
+        empty_keeper_cadence_wakeup_summary
+        entries
+    in
+    let deferred = summary.requested - summary.signaled in
+    if deferred > 0
+    then
+      Log.Keeper.warn
+        "keeper cadence changed: signaled=%d requested=%d deferred_unregistered=%d \
+         deferred_not_running=%d deferred_lifecycle=%d"
+        summary.signaled
+        summary.requested
+        summary.deferred_unregistered
+        summary.deferred_not_running
+        summary.deferred_lifecycle;
+    Some
+      (`Assoc
+         [ "requested", `Int summary.requested
+         ; "signaled", `Int summary.signaled
+         ; "deferred_unregistered", `Int summary.deferred_unregistered
+         ; "deferred_not_running", `Int summary.deferred_not_running
+         ; "deferred_lifecycle", `Int summary.deferred_lifecycle
+         ; "fully_signaled", `Bool (deferred = 0)
+         ])
+;;
+
+let runtime_param_effect_fields ~base_path ~param_key =
+  match wake_keepers_after_runtime_param_change ~base_path ~param_key with
+  | None -> []
+  | Some summary -> [ "keeper_cadence_wakeup", summary ]
+;;
+
 let respond_board_reaction_result request reqd = function
   | Ok json -> respond_json_value_with_cors request reqd json
   | Error error ->
@@ -1233,24 +1314,29 @@ let add_routes ~sw ~clock router =
                   respond_json_value_with_cors ~status:`Bad_request request reqd
                     (`Assoc [ "ok", `Bool false; "error", `String msg ])
                 | Ok () ->
+                  let effect_fields =
+                    runtime_param_effect_fields ~base_path ~param_key
+                  in
                   Sse.broadcast
                     (`Assoc
-                       [ "type", `String "runtime_param_changed"
-                       ; "param_key", `String param_key
-                       ; "old_value", old_value
-                       ; "new_value", value
-                       ; "actor", `String actor
-                       ]);
+                       ([ "type", `String "runtime_param_changed"
+                        ; "param_key", `String param_key
+                        ; "old_value", old_value
+                        ; "new_value", value
+                        ; "actor", `String actor
+                        ]
+                        @ effect_fields));
                   respond_json_value_with_cors request reqd
                     (`Assoc
-                       [ "ok", `Bool true
-                       ; ( "message"
-                         , `String
-                             (Printf.sprintf
-                                "Set %s = %s"
-                                param_key
-                                (Yojson.Safe.to_string value)) )
-                       ]))
+                       ([ "ok", `Bool true
+                        ; ( "message"
+                          , `String
+                              (Printf.sprintf
+                                 "Set %s = %s"
+                                 param_key
+                                 (Yojson.Safe.to_string value)) )
+                        ]
+                        @ effect_fields)))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (`Assoc
@@ -1296,20 +1382,25 @@ let add_routes ~sw ~clock router =
                     | Some (_, _, default, _, _) -> default
                     | None -> `Null
                   in
+                  let effect_fields =
+                    runtime_param_effect_fields ~base_path ~param_key
+                  in
                   Sse.broadcast
                     (`Assoc
-                       [ "type", `String "runtime_param_changed"
-                       ; "param_key", `String param_key
-                       ; "old_value", old_value
-                       ; "new_value", new_value
-                       ; "actor", `String actor
-                       ]);
+                       ([ "type", `String "runtime_param_changed"
+                        ; "param_key", `String param_key
+                        ; "old_value", old_value
+                        ; "new_value", new_value
+                        ; "actor", `String actor
+                        ]
+                        @ effect_fields));
                   respond_json_value_with_cors request reqd
                     (`Assoc
-                       [ "ok", `Bool true
-                       ; ( "message"
-                         , `String (Printf.sprintf "Cleared %s to default" param_key) )
-                       ]))
+                       ([ "ok", `Bool true
+                        ; ( "message"
+                          , `String (Printf.sprintf "Cleared %s to default" param_key) )
+                        ]
+                        @ effect_fields)))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (`Assoc

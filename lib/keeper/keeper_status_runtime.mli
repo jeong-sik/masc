@@ -9,6 +9,11 @@ val keeper_heartbeat_stale_after_s : keepalive_interval_s:float -> float
 (** Operator-facing Keeper freshness window. The ordinary-agent 120-second
     floor is preserved for short cadences; longer Keeper cadences receive one
     minute of scheduling/transport slack. *)
+val keeper_turn_record_freshness_slo_s : keepalive_interval_s:float -> float
+(** Turn-record freshness window.  A record is emitted after a Keeper cycle,
+    so the SLO covers the configured sleep cadence plus two minutes of cycle
+    execution/scheduling slack while preserving the historical 300-second
+    floor for short cadences. *)
 (** Parse the "status" field of an agent-status snapshot blob (produced by
     {!parse_agent_status}) into the closed [Masc_domain.agent_status] ADT.
     An absent agent-registry record is represented by an empty object; the

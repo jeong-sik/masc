@@ -49,14 +49,6 @@ type llama_process = {
     operator dashboards render every field (pid + cmdline diff
     against the runtime config). *)
 
-type bench_sample = {
-  success : bool;
-  latency_ms : int;
-  error : string option;
-}
-(** Single benchmark sample.  Currently unconsumed — the
-    local-runtime bench/status loops that read it were removed. *)
-
 (** Aliases over {!Json_util.*_opt_to_json} re-exported for the
     sibling include runtime. *)
 

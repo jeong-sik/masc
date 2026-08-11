@@ -27,12 +27,6 @@ type llama_process = {
   slots_enabled : bool;
 }
 
-type bench_sample = {
-  success : bool;
-  latency_ms : int;
-  error : string option;
-}
-
 let parse_int_opt value =
   Stdlib.int_of_string_opt ((String.trim value))
 

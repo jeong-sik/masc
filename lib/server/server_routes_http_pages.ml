@@ -539,12 +539,26 @@ let get_server_state_result () =
 let server_state_error_json message =
   Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])
 
+(* DET-OK: the non-determinism is the point. A CSP nonce must differ per
+   response, so a deterministic value would defeat the header. It is confined
+   to one output boundary — the response's CSP header and the matching script
+   tag — and nothing branches on it, parses it, or stores it.
+
+   The ratchet flags these two lines as new debt because they moved here; they
+   are unchanged from the copy that lived in handle_get_graphql, and the H2
+   gateway now calls this instead of keeping a second copy.
+
+   Scope limit, deliberately not claimed above: Random is a PRNG, not a
+   CSPRNG, so this nonce is unguessable only to the extent the seed is. That
+   property predates this function and is not what DET-OK asserts. *)
+let fresh_graphql_csp_nonce () =
+  (* DET-OK: per-response CSP nonce, rationale above. *)
+  let rng = Random.State.make_self_init () in
+  let bytes = Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256)) in
+  Base64.encode_string (Bytes.to_string bytes)
+
 let handle_get_graphql _request reqd =
-  let nonce =
-    let rng = Random.State.make_self_init () in
-    let bytes = Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256)) in
-    Base64.encode_string (Bytes.to_string bytes)
-  in
+  let nonce = fresh_graphql_csp_nonce () in
   let headers = [
     ("content-security-policy", graphql_csp_header nonce);
   ] in

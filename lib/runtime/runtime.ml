@@ -1342,7 +1342,7 @@ let provider_id_of_runtime_id (id : string) : string option =
   | None -> None
 ;;
 
-let quota_scope_of_runtime_id (id : string) : string option =
+let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option =
   match get_runtime_by_id id with
   | Some rt ->
     Some

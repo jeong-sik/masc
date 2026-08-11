@@ -157,16 +157,48 @@ let meta_counter_feature
     ~next_action
     eligible_snapshots
 
-let runtime_liveness_feature snapshots =
+let timestamp_within_window ?window_hours ~now ts =
+  (* Reject zero/negative timestamps (marker/unset) and future timestamps
+     (clock skew or corrupted logs). Without the [ts <= now] guard, any
+     future timestamp would satisfy the recency check because [now -. ts]
+     would be negative and trivially [<= hours *. 3600.0]. *)
+  ts > 0.0
+  && ts <= now
+  &&
+  match window_hours with
+  | None -> true
+  | Some hours when hours <= 0.0 ->
+    (* Non-positive window is treated as "no recency check": flipping it
+       to a hard reject would silently disqualify all past evidence. The
+       top-level [json] helper clamps callers' inputs to a sane domain;
+       this keeps internal logic robust if a caller bypasses the boundary. *)
+    true
+  | Some hours -> now -. ts <= hours *. Masc_time_constants.hour
+
+let runtime_liveness_feature ~now snapshots =
   meta_counter_feature snapshots
     ~id:"runtime_liveness"
     ~label:"Persisted keeper runtime turns"
     ~eligible:(fun _snapshot -> true)
-    ~predicate:(fun meta -> meta.runtime.usage.total_turns > 0)
-    ~summary_label:"keepers have persisted runtime turns"
+    ~predicate:(fun meta ->
+       (* A lifetime counter latches: once [total_turns] passes zero it stays
+          positive for the rest of the keeper's life, so a counter-only
+          predicate reports a stopped keeper as live forever. This feature is
+          named liveness, so it also requires the last persisted turn to be
+          recent, using the same window as [persistent_24h_turn_exchange]. *)
+       meta.runtime.usage.total_turns > 0
+       && timestamp_within_window
+            ~window_hours:Decision.recent_turn_max_age_hours
+            ~now
+            meta.runtime.usage.last_turn_ts)
+    ~summary_label:
+      (Printf.sprintf
+         "keepers have persisted runtime turns with a latest turn <= %.1fh old"
+         Decision.recent_turn_max_age_hours)
     ~evidence_refs:[keeper_meta_evidence; route_evidence "/api/v1/dashboard/execution"]
     ~next_action:
-      "Resume or repair keepers without persisted turns before claiming fleet-wide autonomy."
+      "Resume or repair keepers without recent persisted turns before claiming \
+       fleet-wide autonomy."
 
 let persistent_turn_exchange_feature ~config ~now snapshots =
   let stats =
@@ -265,24 +297,6 @@ let board_reactive_feature snapshots =
     ~evidence_refs:[keeper_meta_evidence; route_evidence "/api/v1/dashboard/board"]
     ~next_action:
       "Post board events and confirm every active keeper records board-reactive turns."
-
-let timestamp_within_window ?window_hours ~now ts =
-  (* Reject zero/negative timestamps (marker/unset) and future timestamps
-     (clock skew or corrupted logs). Without the [ts <= now] guard, any
-     future timestamp would satisfy the recency check because [now -. ts]
-     would be negative and trivially [<= hours *. 3600.0]. *)
-  ts > 0.0
-  && ts <= now
-  &&
-  match window_hours with
-  | None -> true
-  | Some hours when hours <= 0.0 ->
-    (* Non-positive window is treated as "no recency check": flipping it
-       to a hard reject would silently disqualify all past evidence. The
-       top-level [json] helper clamps callers' inputs to a sane domain;
-       this keeps internal logic robust if a caller bypasses the boundary. *)
-    true
-  | Some hours -> now -. ts <= hours *. Masc_time_constants.hour
 
 let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
   let decision_stats =
@@ -439,7 +453,7 @@ let json ~config ?window_hours ?now () =
   let snapshots = load_keeper_snapshots config in
   let features =
     [
-      runtime_liveness_feature snapshots;
+      runtime_liveness_feature ~now snapshots;
       persistent_turn_exchange_feature ~config ~now snapshots;
       autonomous_tool_feature snapshots;
       board_reactive_feature snapshots;

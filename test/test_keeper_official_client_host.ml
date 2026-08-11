@@ -333,15 +333,31 @@ let test_extra_system_context_keeps_typed_provenance () =
   | None -> fail "official-client projection did not observe the provider input"
   | Some messages ->
     check int "one typed context carrier appended" 2 (List.length messages);
+    let carrier = List.nth messages 1 in
+    check bool "context stays on the system channel" true (carrier.role = System);
+    check string
+      "context text stays byte-identical"
+      "dynamic context"
+      (Agent_core.Types.text_of_content carrier.content);
     check
       bool
-      "input composition can remove the typed carrier"
+      "context retains typed provenance"
       true
-      (Option.is_some
-         (Keeper_agent_prompt_metrics.provider_content_messages
-            ~prompt_context_present:true
-            ~projection_input:messages
-            ~projected_messages:messages))
+      (Agent_core.Types.Extra_system_context_provenance.classify carrier.metadata
+       = Agent_core.Types.Extra_system_context_provenance.Present);
+    (match
+       Keeper_agent_prompt_metrics.provider_content_messages
+         ~prompt_context_present:true
+         ~projection_input:messages
+         ~projected_messages:messages
+     with
+     | None -> fail "input composition could not identify the typed carrier"
+     | Some retained ->
+       check int "typed carrier is removed exactly once" 1 (List.length retained);
+       check string
+         "original history remains"
+         "history"
+         (Agent_core.Types.text_of_content (List.hd retained).content))
 ;;
 
 let text_of (m : Agent_core.Types.message) =

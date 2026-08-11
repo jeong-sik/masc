@@ -278,6 +278,19 @@ let test_result_error_is_not_success () =
        | Ok _ -> fail "ERROR result was admitted as success")
 ;;
 
+let test_success_with_blank_response_is_not_success () =
+  with_fixture
+    [ init (); result ~response:" \n\t" () ]
+    (fun path ->
+       match run_fixture path with
+       | Error
+           (Runtime_antigravity.Turn_failed
+              "successful result response has no deliverable content") ->
+         ()
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "blank SUCCESS result was admitted as a completed turn")
+;;
+
 let test_duplicate_keys_fail_closed () =
   let duplicate =
     {|{"event":"init","event":"init","conversation_id":"conversation-1","init":{"model":"gemini-fixture","cwd":"/tmp","permission_mode":"always-proceed"}}|}
@@ -476,6 +489,10 @@ let () =
             test_conversation_callback_failure_is_typed
         ; test_case "tool measurements" `Quick test_tool_steps_and_errors_are_measured
         ; test_case "error result" `Quick test_result_error_is_not_success
+        ; test_case
+            "blank success"
+            `Quick
+            test_success_with_blank_response_is_not_success
         ; test_case "duplicate keys" `Quick test_duplicate_keys_fail_closed
         ; test_case
             "observed permission modes are admitted"

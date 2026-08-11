@@ -115,6 +115,42 @@ printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","
   path
 ;;
 
+let blank_then_success_fixture_script ~base_path =
+  let path = Filename.concat base_path "agy-blank-then-success.sh" in
+  let invocation_path = Filename.concat base_path "antigravity-invocation" in
+  let script =
+    Printf.sprintf
+      {|#!/bin/sh
+set -eu
+test "$HOME" = %s
+case " $* " in *" --new-project "*) ;; *) exit 96 ;; esac
+case " $* " in *" --conversation "*) exit 97 ;; esac
+cat >/dev/null
+if [ -e %s ]; then
+  conversation=conversation-recovered
+  response=MASC_ANTIGRAVITY_RECOVERED
+else
+  : > %s
+  conversation=conversation-blank
+  response='   '
+fi
+printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture","cwd":%s,"tools":[],"permission_mode":"always-proceed"}}\n' "$conversation"
+printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"%%s","error":null,"num_turns":1,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":0,"total_tokens":16}}}\n' "$conversation" "$response"
+|}
+      (shell_quote
+         (Filename.concat
+            (Filename.concat
+               (Filename.concat base_path ".masc")
+               "official-clients")
+            "antigravity/antigravity-fixture"))
+      (shell_quote invocation_path)
+      (shell_quote invocation_path)
+      (Yojson.Safe.to_string (`String base_path))
+  in
+  write_file ~mode:0o700 path script;
+  path
+;;
+
 let runtime_toml ~cli_path ~oauth_source =
   Printf.sprintf
     {|[providers.antigravity]
@@ -431,14 +467,104 @@ let test_keeper_projects_mcp_tool_and_settles () =
       check bool "turn capability cleared" false (Sys.file_exists mcp_path))
 ;;
 
+let test_blank_success_requires_fresh_conversation () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+      Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+      let oauth_source = Filename.concat base_path "operator-oauth-token" in
+      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      let cli_path = blank_then_success_fixture_script ~base_path in
+      let runtime_path = Filename.concat base_path "runtime.toml" in
+      write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+      let runtime_snapshot = Runtime.For_testing.snapshot () in
+      Fun.protect
+        ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+        (fun () ->
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Eio_context.set_env env;
+              Eio_context.with_test_env
+                ~net:(Eio.Stdenv.net env)
+                ~clock:(Eio.Stdenv.clock env)
+                ~mono_clock:(Eio.Stdenv.mono_clock env)
+                ~sw
+                (fun () ->
+                  Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                  let run () =
+                    Keeper_turn_driver.run_named
+                      ~runtime_id:"antigravity.gemini"
+                      ~keeper_name:"antigravity-fixture"
+                      ~base_path
+                      ~goal:"Return a non-empty completion"
+                      ~context:(Agent_core.Context.create ())
+                      ~sw
+                      ~net:(Eio.Stdenv.net env)
+                      ()
+                  in
+                  (match run () with
+                   | Error
+                       (Agent_core.Error.Provider
+                          (Llm_provider.Error.ProviderReportedError
+                             { provider = "antigravity_cli"
+                             ; error_type = Some "turn_failed"
+                             ; detail =
+                                 "successful result response has no deliverable content"
+                             })) ->
+                     ()
+                   | Error error -> fail (Agent_core.Error.to_string error)
+                   | Ok _ -> fail "blank Antigravity result settled as success");
+                  let failed_session =
+                    Keeper_official_client_session_store.load
+                      ~base_path
+                      ~keeper_name:"antigravity-fixture"
+                    |> Result.get_ok
+                    |> Option.get
+                  in
+                  (match failed_session.phase with
+                   | Recovery_required { failure = Provider_rejected; _ } -> ()
+                   | _ -> fail "blank Antigravity result did not require a fresh session");
+                  match run () with
+                  | Error error -> fail (Agent_core.Error.to_string error)
+                  | Ok selected ->
+                    let result = selected.Keeper_turn_driver.run_result in
+                    check string
+                      "recovered response"
+                      "MASC_ANTIGRAVITY_RECOVERED"
+                      (keeper_response_text result);
+                    check string
+                      "fresh conversation"
+                      "conversation-recovered"
+                      result.session_id))));
+      let session =
+        Keeper_official_client_session_store.load
+          ~base_path
+          ~keeper_name:"antigravity-fixture"
+        |> Result.get_ok
+        |> Option.get
+      in
+      match session.phase with
+      | Settled
+          { session_id = "conversation-recovered"
+          ; turn_id = "conversation-recovered:ordinal:1"
+          } ->
+        ()
+      | _ -> fail "fresh Antigravity conversation did not settle")
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
     [ ( "lifecycle"
-      , [ test_case
+        , [ test_case
             "projects MCP tool and settles"
             `Quick
             test_keeper_projects_mcp_tool_and_settles
+          ; test_case
+              "blank result starts fresh next turn"
+              `Quick
+              test_blank_success_requires_fresh_conversation
         ] )
     ]
 ;;

@@ -185,7 +185,8 @@ let recovery_failure_of_client_error = function
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~raw_trace ~on_event ?on_pre_dispatch_failure
+    ~context ~event_bus ~raw_trace ~on_event
+    ~on_pre_dispatch_failure
     ~(config : Runtime_execution.claude_code) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -339,7 +340,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
            fallback lane available for only these typed transport outcomes;
            every other probe error and every [run_turn] failure remains
            observation-unavailable and fails closed. *)
-        Option.iter (fun callback -> callback ()) on_pre_dispatch_failure;
+        on_pre_dispatch_failure ();
         Error (claude_error_to_core_error error)
       | Error error -> Error (claude_error_to_core_error error)
     in
@@ -468,7 +469,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       try
         (match
            Runtime_claude_code.run_turn
-             ?on_spawn_failure:on_pre_dispatch_failure
+             ~on_spawn_failure:on_pre_dispatch_failure
              ~mgr:process_mgr
              ~clock
              ~cwd:process_cwd
@@ -720,7 +721,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~raw_trace ~on_event ?on_pre_dispatch_failure ~config =
+    ~context ~event_bus ~raw_trace ~on_event
+    ~on_pre_dispatch_failure ~config =
   Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
     run_without_lifecycle
       ~runtime_id
@@ -738,6 +740,6 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
       ~event_bus
       ~raw_trace
       ~on_event
-      ?on_pre_dispatch_failure
+      ~on_pre_dispatch_failure
       ~config)
 ;;

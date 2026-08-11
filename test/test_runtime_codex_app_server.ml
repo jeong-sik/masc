@@ -54,7 +54,8 @@ let rec drop count values =
     | _ :: rest -> drop (count - 1) rest
 ;;
 
-let fixture_script ?capture_path ?terminal_line_delay_s lines =
+let fixture_script ?capture_path ?terminal_line_delay_s
+    ?(terminal_line_delay_start_index = 0) lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
@@ -81,12 +82,14 @@ let fixture_script ?capture_path ?terminal_line_delay_s lines =
   read_request ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
   read_request ();
-  List.iter
-    (fun line ->
-       Option.iter
-         (fun seconds ->
-            output_string output (Printf.sprintf "sleep %.3f\n" seconds))
-         terminal_line_delay_s;
+  List.iteri
+    (fun index line ->
+       if index >= terminal_line_delay_start_index
+       then
+         Option.iter
+           (fun seconds ->
+              output_string output (Printf.sprintf "sleep %.3f\n" seconds))
+           terminal_line_delay_s;
        output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     (drop 3 lines);
   output_string output "while IFS= read -r ignored; do :; done\n";
@@ -95,8 +98,15 @@ let fixture_script ?capture_path ?terminal_line_delay_s lines =
   path
 ;;
 
-let with_fixture ?capture_path ?terminal_line_delay_s lines f =
-  let path = fixture_script ?capture_path ?terminal_line_delay_s lines in
+let with_fixture ?capture_path ?terminal_line_delay_s
+    ?terminal_line_delay_start_index lines f =
+  let path =
+    fixture_script
+      ?capture_path
+      ?terminal_line_delay_s
+      ?terminal_line_delay_start_index
+      lines
+  in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
@@ -736,6 +746,25 @@ let test_stream_idle_timeout_is_typed () =
          check (float 0.001) "exact idle timeout" 0.05 seconds
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "silent app-server stream ignored its idle timeout")
+;;
+
+let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
+  with_fixture
+    ~terminal_line_delay_s:0.2
+    ~terminal_line_delay_start_index:1
+    [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
+    (fun path ->
+       match run_fixture ~timeout_s:0.05 path with
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { seconds; turn_accepted = true }) ->
+         check (float 0.001) "exact idle timeout" 0.05 seconds
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { turn_accepted = false; _ }) ->
+         fail "turn/start acceptance was lost before the idle timeout"
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "accepted turn ignored its idle timeout")
 ;;
 
 let test_state_callback_timeout_is_typed () =
@@ -2963,6 +2992,10 @@ let () =
             "stream idle timeout is typed"
             `Quick
             test_stream_idle_timeout_is_typed
+        ; test_case
+            "stream idle timeout preserves turn acceptance"
+            `Quick
+            test_stream_idle_timeout_after_turn_acceptance_is_typed
         ; test_case
             "state callback timeout is typed"
             `Quick

@@ -128,8 +128,9 @@ val ack_pending_source_terminal_result :
   acked_at:float ->
   source_terminal:accepted_source_terminal ->
   (source_ack_result, string) result
-(** Commit one exact terminal source ACK and publish the post-commit pending
-    projection when the owner is registered. *)
+(** Commit one exact terminal source ACK, publish the post-commit pending
+    projection when the owner is registered, and project its durable reaction
+    evidence before another source can settle. *)
 
 val terminalize_pending_turn_attempt_result :
   base_path:string ->
@@ -139,8 +140,9 @@ val terminalize_pending_turn_attempt_result :
   selection:Keeper_event_queue_state.pending_selection ->
   detail:string ->
   (source_ack_result, string) result
-(** Commit a source-bearing terminal receipt for one failed admitted turn and
-    publish the post-commit pending projection. *)
+(** Commit a source-bearing terminal receipt for one failed admitted turn,
+    publish the post-commit pending projection, and project its durable reaction
+    evidence before another source can settle. *)
 
 val terminalize_pending_turn_completed_result :
   base_path:string ->
@@ -149,8 +151,9 @@ val terminalize_pending_turn_completed_result :
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   (source_ack_result, string) result
-(** Commit a source-bearing completion receipt for one successful admitted turn
-    and publish the post-commit pending projection. *)
+(** Commit a source-bearing completion receipt for one successful admitted
+    turn, publish the post-commit pending projection, and project its durable
+    reaction evidence before another source can settle. *)
 
 (** Enqueue a stimulus on the keeper's event queue. An owner not registered yet
     may receive durable work so a later lane can replay it. A finalized

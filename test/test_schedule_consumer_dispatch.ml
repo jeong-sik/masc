@@ -679,8 +679,8 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
        ~base_path
        ~keeper_name
    with
-   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-   | Ok _ -> fail "first terminal receipt projection did not converge"
+   | Ok Keeper_event_queue_recovery.No_pending_transition -> ()
+   | Ok _ -> fail "owner terminalization left a transition for recovery"
    | Error error ->
      fail (Keeper_event_queue_recovery.projection_error_to_string error));
   (match Schedule_store.prune_completed config with

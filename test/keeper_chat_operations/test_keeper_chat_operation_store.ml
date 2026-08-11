@@ -359,14 +359,17 @@ let test_close_is_idempotent_and_refuses_later_operations () =
 
 let test_statement_finalize_survives_gc_pressure () =
   with_store "finalize-gc-pressure" @@ fun _path store ->
+  let iterations = 2_000 in
   let churn = ref [] in
-  for i = 1 to 2_000 do
+  let inventoried = ref 0 in
+  for i = 1 to iterations do
     ignore (store_ok (Store.inventory store));
+    incr inventoried;
     churn := String.make 256 'x' :: (if i mod 16 = 0 then [] else !churn);
     if i mod 64 = 0 then Gc.minor ()
   done;
   ignore (Sys.opaque_identity !churn);
-  check bool "all inventory statements finalized under GC pressure" true
+  check int "all inventory statements finalized under GC pressure" iterations !inventoried
 ;;
 
 let () =

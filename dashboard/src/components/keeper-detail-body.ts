@@ -31,6 +31,7 @@ import {
   KeeperDetailSection,
 } from './keeper-detail-shell'
 import { KeeperCheckpointPanel } from './keeper-detail-history'
+import { KeeperGithubIdentityPanel } from './keeper-github-identity-panel'
 import {
   KeeperDiagnosticSummary,
   KeeperRuntimeActions,
@@ -191,6 +192,7 @@ export function KeeperDetailBody({
           <${KeeperRuntimeModelEditor} keeperName=${keeper.name} onOpenRuntimeConfig=${onOpenRuntimeConfig} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
           <${KeeperSecretProjectionPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
+          <${KeeperGithubIdentityPanel} keeperName=${keeper.name} />
           <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
           <${CollapsibleSection} title="Live Truth (composite/runtime 합성)" open=${false}>
             <${KeeperLiveTruthPanel}

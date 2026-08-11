@@ -174,6 +174,10 @@ val handle_keeper_secrets_post :
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /secrets] (redacted env-secret projection edits). *)
 
+val handle_keeper_github_login_post :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Stream an isolated GitHub CLI login for the selected keeper. *)
+
 val handle_keeper_lifecycle_post :
   ?body_str:string ->
   sw:Eio.Switch.t ->

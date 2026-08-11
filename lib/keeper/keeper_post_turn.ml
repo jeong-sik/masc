@@ -157,83 +157,6 @@ let compaction_recovery_error_to_string = function
       source.sha256
       (Keeper_compaction_outcome.no_compaction_reason_to_string reason)
 
-(* ── Tier A6: resilience post-turn wire-in (Cycle 23) ──────────────
-   Feature-flag-gated layer that runs before tool emission and
-   multimodal hydration. The strict ordering is explicit at the call
-   site below — do not reorder.
-
-   When [MASC_RESILIENCE] is off (default), this is a pure pass-
-   through. When on, untyped compaction or handoff error text is
-   fail-closed to operator handoff, and a [`Assoc] meta tree is upserted into
-   [working_context["resilience_meta"]].
-
-   Failures inside the wire-in do not propagate — they are logged
-   and the unmodified lifecycle result is returned, preserving the
-   keeper's primary turn outcome. *)
-
-let apply_resilience_wirein
-    ?audit_store
-    ?strategy_executor
-    ~(now : float)
-    (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
-  if not (Resilience.Keeper_bridge.masc_resilience_enabled ()) then lifecycle
-  else
-    match lifecycle.checkpoint with
-    | None ->
-        (* No checkpoint to enrich; resilience_meta has no host. *)
-        lifecycle
-    | Some cp -> (
-        try
-          let maybe_error = lifecycle.handoff_failure_reason in
-          let witness = Resilience.Keeper_bridge.running_witness in
-          let outcome =
-            Resilience.Keeper_bridge.apply_post_turn_resilience
-              witness ?audit_store ?strategy_executor ~now
-              ~working_context:cp.Agent_core.Checkpoint.working_context
-              ~maybe_error ()
-          in
-          let new_cp =
-            { cp with
-              Agent_core.Checkpoint.working_context = outcome.working_context
-            }
-          in
-          { lifecycle with checkpoint = Some new_cp }
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Keeper.warn
-            "keeper:%s resilience wire-in failed: %s"
-            lifecycle.updated_meta.name (Printexc.to_string exn);
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string PostTurnWireinFailures)
-            ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "resilience")]
-            ();
-          lifecycle)
-
-(* ── Tier K1: multimodal post-turn wire-in (Cycle 27) ─────────────
-   Wire-in that runs after the A5/A6 pair. Reads
-   raw multimodal artifacts the keeper agent dropped into
-   [working_context["multimodal_artifacts"]], hydrates them via
-   [Multimodal_keeper_bridge.hydrate_one], and accumulates them into
-   the process-wide [Multimodal.Workspace_holder].
-
-   It consumes the artifact bag and replaces it with a [workspace_meta]
-   summary so the next turn does not re-process the same entries.
-
-   Failures inside the wire-in do not propagate — they are logged
-   and the unmodified lifecycle result is returned, preserving the
-   keeper's primary turn outcome. *)
-
-(* ── Tier K4b: tool-emission drain (Cycle 27) ──────────────────────
-   Drains producer-owned typed JSON captured at the Keeper tool execution
-   boundary into [working_context["multimodal_artifacts"]] so the
-   K1 wirein below picks them up.
-
-   Strict ordering: this MUST run BEFORE [apply_multimodal_wirein].
-   K4b emit + K1 hydrate is a producer/consumer pair on the same
-   working_context bag.
-
-   Typed tool emission is a normal Keeper capability, not a rollout gate. *)
 let apply_tool_emission_wirein
     (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
   match lifecycle.checkpoint with
@@ -342,25 +265,9 @@ let apply_multimodal_wirein
             ();
           lifecycle))
 
-let apply_post_turn_lifecycle_with_resilience_handles
-    ~(resilience_audit_store : Shared_audit.Store.t option)
-    ~(resilience_strategy_executor : Resilience.Recovery.strategy_executor option)
+let apply_post_turn_lifecycle
     ~(meta : keeper_meta)
     ~(checkpoint : Agent_core.Checkpoint.t option) : post_turn_lifecycle =
-  (* Reviewer #13214: an executor without an audit store would let
-     retry/fallback/handoff/abort callbacks mutate live state
-     without the pre-flight RecoveryAttempted envelope that
-     keeper_bridge relies on for durable auditability.  Reject the
-     combination at the seam so the invariant fails fast at the
-     call site, not later when an envelope is missing. *)
-  (match resilience_audit_store, resilience_strategy_executor with
-   | None, Some _ ->
-     invalid_arg
-       "Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles: \
-        resilience_strategy_executor requires resilience_audit_store; \
-        executor without audit store would skip the RecoveryAttempted \
-        envelope and break durable auditability"
-   | _ -> ());
   let now_ts = Time_compat.now () in
   let no_checkpoint_decision = Keeper_compact_policy.Skipped_no_checkpoint in
   let body = match checkpoint with
@@ -433,17 +340,11 @@ let apply_post_turn_lifecycle_with_resilience_handles
         message_count = message_count ctx;
       }
   in
-  (* Strict ordering: resilience classification → tool emission drain (K4b)
-     → multimodal hydration (K1). K4b precedes multimodal because it is the
-     producer that K1 consumes. The multimodal pass runs last because it
-     persists a [workspace_meta] summary that depends on whether prior passes
-     have already mutated [working_context]. *)
-  let body =
-    apply_resilience_wirein
-      ?audit_store:resilience_audit_store
-      ?strategy_executor:resilience_strategy_executor
-      ~now:now_ts body
-  in
+  (* Strict ordering: tool emission drain (K4b) → multimodal hydration (K1).
+     K4b precedes multimodal because it is the producer that K1 consumes. The
+     multimodal pass runs last because it persists a [workspace_meta] summary
+     that depends on whether the prior pass has already mutated
+     [working_context]. *)
   let body = apply_tool_emission_wirein body in
   apply_multimodal_wirein ~now:now_ts body
 

@@ -2,9 +2,9 @@
 
     {!Time} owns monotonic-clock access and ISO 8601 parsing.
 
-    Renamed from [Resilience] (cycle 100 / fix #11709) so the module
-    name does not shadow the [masc.resilience] sub-library that
-    PR #11695 started using via [Resilience.Keeper_bridge].
+    Renamed from [Resilience] (cycle 100 / fix #11709) to stop shadowing
+    the then-existing [masc.resilience] sub-library. That library has since
+    been removed; the name stays because callers use it.
 
     @since Single source of truth — failure handling consolidation *)
 

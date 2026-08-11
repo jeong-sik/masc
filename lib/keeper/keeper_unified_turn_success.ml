@@ -18,14 +18,8 @@ let apply_lifecycle
       ~meta
       (result : Keeper_agent_run.run_result)
   =
-  let resilience_handles = KCB.post_turn_resilience_handles ~config ~meta in
   let lifecycle : KEC.post_turn_lifecycle =
-    KEC.apply_post_turn_lifecycle_with_resilience_handles
-      ~resilience_audit_store:resilience_handles.resilience_audit_store
-      ~resilience_strategy_executor:resilience_handles.resilience_strategy_executor
-      ~meta
-      ~checkpoint:result.checkpoint
-    |> resilience_handles.sync_lifecycle_meta
+    KEC.apply_post_turn_lifecycle ~meta ~checkpoint:result.checkpoint
   in
   KEC.dispatch_post_turn_lifecycle_events
     ~config

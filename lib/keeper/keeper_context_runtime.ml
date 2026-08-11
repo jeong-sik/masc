@@ -162,8 +162,7 @@ let context_budget_json_of_resolution
     ]
 ;;
 
-let apply_post_turn_lifecycle_with_resilience_handles =
-  Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles
+let apply_post_turn_lifecycle = Keeper_post_turn.apply_post_turn_lifecycle
 
 let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
   Otel_metric_store.inc_counter

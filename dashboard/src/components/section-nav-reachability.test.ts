@@ -5,7 +5,7 @@
 // two other tabs that carry more than one visible section:
 //
 //   workspace/verification, lab/performance,
-//   lab/keeper-memory-health, lab/audit-integrity
+//   lab/keeper-memory-health
 //
 // Every pure-function test over the section table passed the whole time. The
 // registry always knew those sections existed — what was missing was a
@@ -71,7 +71,6 @@ describe('sections that #27547 left unreachable', () => {
     ['workspace', 'verification', 'work', Work],
     ['lab', 'performance', 'tools', Lab],
     ['lab', 'keeper-memory-health', 'tools', Lab],
-    ['lab', 'audit-integrity', 'tools', Lab],
   ]
 
   for (const [tab, section, landing, Surface] of ORPHANS) {

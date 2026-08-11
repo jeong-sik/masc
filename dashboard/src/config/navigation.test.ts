@@ -155,7 +155,6 @@ describe('lab navigation', () => {
       'harness',
       'performance',
       'keeper-memory-health',
-      'audit-integrity',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
@@ -163,7 +162,6 @@ describe('lab navigation', () => {
       'Safety Harness',
       'Performance',
       '키퍼 메모리 상태',
-      '감사 무결성',
     ])
     expect(labSections.find(item => item.id === 'performance')?.description).toBe(
       'FPS meter, VirtualList, content-visibility, native dialog, and observer probes.',

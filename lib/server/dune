@@ -176,7 +176,6 @@
   masc.autonomous
   masc.shared_audit
   masc.shared_types
-  masc.resilience
   masc.multimodal
   masc.repo_manager
   masc.parse_outcome

@@ -78,7 +78,6 @@ type SurfaceSectionId =
   | 'harness'
   | 'performance'
   | 'keeper-memory-health'
-  | 'audit-integrity'
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
 
@@ -467,12 +466,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '키퍼 메모리 상태',
       description: 'Per-keeper fact-store size, GC statistics, and cadence counter.',
       params: { section: 'keeper-memory-health' },
-    },
-    {
-      id: 'audit-integrity',
-      label: '감사 무결성',
-      description: 'Per-keeper resilience audit hash-chain verification result.',
-      params: { section: 'audit-integrity' },
     },
   ],
   code: [

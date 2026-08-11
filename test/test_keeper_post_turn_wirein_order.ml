@@ -291,9 +291,7 @@ let test_regular_post_turn_does_not_auto_compact () =
   let meta = make_meta () in
   let checkpoint = make_checkpoint () in
   let result =
-    Post_turn.apply_post_turn_lifecycle_with_resilience_handles
-      ~resilience_audit_store:None
-      ~resilience_strategy_executor:None
+    Post_turn.apply_post_turn_lifecycle
       ~meta
       ~checkpoint:(Some checkpoint)
   in

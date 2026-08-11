@@ -63,36 +63,15 @@ val compaction_recovery_error_to_string : compaction_recovery_error -> string
 (** End-of-turn pipeline. Preserves the checkpoint and persists the result to
     the keeper meta and dashboard surface. Explicit compaction is a separate
     request path; Keeper autonomy remains owned by its heartbeat/turn lane. *)
-val apply_post_turn_lifecycle_with_resilience_handles :
-  resilience_audit_store:Shared_audit.Store.t option ->
-  resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->
+val apply_post_turn_lifecycle :
   meta:Keeper_meta_contract.keeper_meta ->
   checkpoint:Agent_core.Checkpoint.t option ->
   post_turn_lifecycle
-(** Apply the keeper post-turn lifecycle with explicit resilience handles.
+(** Apply the keeper post-turn lifecycle.
 
-    Valid combinations of the two resilience arguments are:
-    - both [None]: no audit envelope, no recovery side effect.
-    - both [Some]: the feature-flagged resilience wire-in writes a
-      durable [RecoveryAttempted] envelope through the audit store
-      before invoking the executor, preserving auditability.
-
-    Passing [resilience_strategy_executor:(Some _)] together with
-    [resilience_audit_store:None] is rejected ({!Invalid_argument})
-    because retry/fallback/handoff/abort callbacks would mutate
-    live state without the pre-flight envelope that
-    [keeper_bridge] relies on.
-
-    @raise Invalid_argument when an executor is supplied without an
-      audit store.
-
-    Concurrency: [Shared_audit.Store.t] is a mutable single-writer
-    chain ([latest_hash] + append with no internal locking).  The
-    same store instance must not be threaded through concurrent
-    keeper turns — sharing one across fibers can produce envelopes
-    with duplicate [prev_hash] values and break audit-chain
-    verification.  Callers own serialization; the typical pattern
-    is one store per keeper, owned by the keeper bridge. *)
+    Ordering is strict: tool emission drain (K4b) then multimodal
+    hydration (K1). K4b is the producer K1 consumes, and the multimodal
+    pass persists a [workspace_meta] summary that depends on it. *)
 
 type prepared_compaction
 (** Fully-planned compaction: durable source loaded, policy and LLM plan

@@ -122,7 +122,6 @@
   (re_export masc.prompt_registry)
   (re_export masc.pulse)
   (re_export masc.repo_manager)
-  (re_export masc.resilience)
   (re_export masc.dashboard)
   (re_export masc.operator)
   (re_export masc.server)

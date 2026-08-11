@@ -19,6 +19,8 @@ type config =
   ; model : string option
   ; developer_instructions : string option
   ; timeout_s : float
+    (** Maximum silence between app-server protocol messages. Each received
+        message resets the deadline; a progressing turn has no wall limit. *)
   }
 
 val default_timeout_s : float

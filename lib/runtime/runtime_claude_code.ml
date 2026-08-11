@@ -172,7 +172,7 @@ let error_to_string = function
   | Process_exited detail ->
     "Claude Code exited before terminal result: " ^ detail
   | Timeout seconds ->
-    Printf.sprintf "Claude Code turn timed out after %.3fs" seconds
+    Printf.sprintf "Claude Code stream was idle for %.3fs" seconds
 ;;
 
 let error_kind = function
@@ -493,7 +493,7 @@ let handle_control_request
          in a control_request that carries a [request_id] and blocks until that
          id is answered. Returning without sending anything therefore parks the
          client forever: it waits for the control_response, MASC waits for the
-         next message, and the turn ends only when the turn timeout fires.
+         next message, and the stream-idle timeout eventually fires.
 
          Measured against the real client (2.1.226): with the notification
          unanswered the turn stops after `notifications/initialized` and never
@@ -1081,28 +1081,32 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
       Eio.Flow.copy_string "\n" stdin_w
     in
     let receive () =
-      try parse_wire_line (Eio.Buf_read.line reader) with
+      try
+        Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+          Eio.Buf_read.line reader)
+        |> parse_wire_line
+      with
       | End_of_file ->
         let detail = String.trim !stderr_tail in
         Error (Process_exited (if detail = "" then "stdout closed" else detail))
+      | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
     Fun.protect
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->
-        Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
-          run_protocol
-            { send; receive }
-            ~dynamic_tools
-            ~subscription
-            ~session_mode
-            ~session_id
-            ~prompt
-            ~on_session_ready
-            ~on_turn_starting
-            ~on_turn_started
-            ~on_stream_event)))
+        run_protocol
+          { send; receive }
+          ~dynamic_tools
+          ~subscription
+          ~session_mode
+          ~session_id
+          ~prompt
+          ~on_session_ready
+          ~on_turn_starting
+          ~on_turn_started
+          ~on_stream_event))
 ;;
 
 let validate_process_config config =

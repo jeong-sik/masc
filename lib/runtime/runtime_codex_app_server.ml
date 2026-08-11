@@ -160,7 +160,7 @@ let error_to_string = function
   | Turn_interrupted -> "Codex app-server turn was interrupted"
   | Process_exited detail -> "Codex app-server exited before completion: " ^ detail
   | Timeout seconds ->
-    Printf.sprintf "Codex app-server turn timed out after %.3fs" seconds
+    Printf.sprintf "Codex app-server stream was idle for %.3fs" seconds
 ;;
 
 let error_kind = function
@@ -716,9 +716,9 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
        upstream, so the turn is alive. Counting these and failing the turn at a
        cap preempted the declared liveness boundary below and, under one
        upstream degradation window, drove three keepers into
-       Recovery_required twice in two hours. The enclosing turn timeout
-       remains the only liveness boundary; willRetry:false still carries the
-       provider's terminal error. *)
+       Recovery_required twice in two hours. The per-message stream idle
+       timeout remains the only liveness boundary; willRetry:false still
+       carries the provider's terminal error. *)
     let stage = "error notification" in
     let* fields = assoc_at stage params in
     let* will_retry = required_bool stage "willRetry" fields in
@@ -751,8 +751,8 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~tool_effect_attempted:(!tool_call_count > 0)
       params
   (* App-server progress and account notifications are observational. Protocol
-     evolution must not turn them into a computation failure; the enclosing
-     turn timeout remains the liveness boundary. *)
+     evolution must not turn them into a computation failure; each valid wire
+     message resets the stream-idle liveness boundary. *)
   | Notification _ ->
     await_turn_terminal
       io
@@ -1040,10 +1040,15 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
       Eio.Flow.copy_string "\n" stdin_w
     in
     let receive () =
-      try parse_wire_line (Eio.Buf_read.line reader) with
+      try
+        Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+          Eio.Buf_read.line reader)
+        |> parse_wire_line
+      with
       | End_of_file ->
         let detail = String.trim !stderr_tail in
         Error (Process_exited (if detail = "" then "stdout closed" else detail))
+      | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
@@ -1053,9 +1058,7 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
        preserves cleanup across fiber cancellation. *)
     Fun.protect
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
-      (fun () ->
-        Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
-          run { send; receive })))
+      (fun () -> run { send; receive }))
 ;;
 
 let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools

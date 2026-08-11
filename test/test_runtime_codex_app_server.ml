@@ -54,7 +54,7 @@ let rec drop count values =
     | _ :: rest -> drop (count - 1) rest
 ;;
 
-let fixture_script ?capture_path lines =
+let fixture_script ?capture_path ?terminal_line_delay_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
@@ -82,7 +82,12 @@ let fixture_script ?capture_path lines =
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
   read_request ();
   List.iter
-    (fun line -> output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
+    (fun line ->
+       Option.iter
+         (fun seconds ->
+            output_string output (Printf.sprintf "sleep %.3f\n" seconds))
+         terminal_line_delay_s;
+       output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     (drop 3 lines);
   output_string output "while IFS= read -r ignored; do :; done\n";
   close_out output;
@@ -90,8 +95,8 @@ let fixture_script ?capture_path lines =
   path
 ;;
 
-let with_fixture ?capture_path lines f =
-  let path = fixture_script ?capture_path lines in
+let with_fixture ?capture_path ?terminal_line_delay_s lines f =
+  let path = fixture_script ?capture_path ?terminal_line_delay_s lines in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
@@ -129,12 +134,12 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 ;;
 
 let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp")
-    ?on_stream_event path =
+    ?(timeout_s = 2.0) ?on_stream_event path =
   Eio_main.run (fun env ->
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
-      ; timeout_s = 2.0
+      ; timeout_s
       }
     in
     Runtime_codex_app_server.run_turn
@@ -668,7 +673,8 @@ let test_retry_notifications_are_observational () =
   (* Live incident 2026-08-10 (masc#27953): one upstream degradation window
      drove three keepers into Recovery_required twice in two hours because the
      turn died at the fourth willRetry:true. The app-server retrying upstream
-     is progress, not failure; the turn deadline is the liveness boundary. *)
+     is progress, not failure; the stream-idle deadline is the liveness
+     boundary. *)
   let retry = {|{"method":"error","params":{"willRetry":true}}|} in
   with_fixture
     ([ init_result; account_chatgpt; thread_result; turn_result ]
@@ -689,6 +695,38 @@ let test_retry_notifications_are_observational () =
        | Error (Runtime_codex_app_server.Turn_failed "provider gave up") -> ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "terminal error notification did not fail the turn")
+;;
+
+let test_progress_resets_stream_idle_timeout () =
+  let retry = {|{"method":"error","params":{"willRetry":true}}|} in
+  with_fixture
+    ~terminal_line_delay_s:0.4
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; retry
+    ; retry
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       match run_fixture ~timeout_s:0.75 path with
+       | Ok turn ->
+         check string "progressing turn completes" "MASC_SUBSCRIPTION_OK" turn.text
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error))
+;;
+
+let test_stream_idle_timeout_is_typed () =
+  with_fixture
+    ~terminal_line_delay_s:0.2
+    [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
+    (fun path ->
+       match run_fixture ~timeout_s:0.05 path with
+       | Error (Runtime_codex_app_server.Timeout seconds) ->
+         check (float 0.001) "exact idle timeout" 0.05 seconds
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "silent app-server stream ignored its idle timeout")
 ;;
 
 let test_terminal_error_notification_uses_official_context_error_enum () =
@@ -2679,6 +2717,14 @@ let () =
             "retry notifications are observational"
             `Quick
             test_retry_notifications_are_observational
+        ; test_case
+            "progress resets stream idle timeout"
+            `Quick
+            test_progress_resets_stream_idle_timeout
+        ; test_case
+            "stream idle timeout is typed"
+            `Quick
+            test_stream_idle_timeout_is_typed
         ; test_case
             "terminal error notification uses official context error enum"
             `Quick

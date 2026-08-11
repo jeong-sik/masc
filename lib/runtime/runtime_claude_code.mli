@@ -16,6 +16,8 @@ type config =
   ; model : string option
   ; system_prompt : string option
   ; timeout_s : float
+    (** Maximum silence between CLI stream messages. Each received message
+        resets the deadline; a progressing turn has no wall limit. *)
   }
 
 val default_timeout_s : float

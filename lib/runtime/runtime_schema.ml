@@ -222,13 +222,11 @@ type model_spec =
         {!Runtime_inference.resolve_reasoning_effort}, symmetric to the
         [temperature] path. *)
   ; turn_timeout_s : float option
-    (** [turn-timeout-s] — per-model wall-clock bound on one official-client
-        turn, in seconds. Reasoning effort is declared per model, and effort is
-        the dominant term in how long a turn runs; a timeout that can only be
-        set per provider therefore cannot bound a [max]-effort binding and a
-        [low]-effort one differently, and for claude-code / codex-app-server it
-        could not be set at all. [None] keeps the provider value where one
-        exists (antigravity [timeout-s]) and the adapter default otherwise.
+    (** [turn-timeout-s] — per-model liveness window for one official-client
+        turn, in seconds. Codex and Claude reset it on every protocol message,
+        so progressing turns have no wall-clock limit. Antigravity also passes
+        the value to its CLI-owned print boundary. [None] keeps the provider
+        value where one exists and the adapter default otherwise.
         Resolved via {!Runtime.turn_timeout_s_of_runtime_id} →
         {!Runtime_inference.resolve_turn_timeout_s}. *)
   ; max_prompt_bytes : int option

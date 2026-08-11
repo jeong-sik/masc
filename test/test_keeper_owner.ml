@@ -1010,7 +1010,7 @@ let test_paused_owner_preserves_queue_until_resume () =
     match claim () with
     | Error error -> fail (Owner.error_to_string error)
     | Ok None -> fail "resumed owner did not claim its queued operation"
-    | Ok (Some operation) ->
+    | Ok (Some (operation : Chat_operation.t)) ->
       Owner.Operation_succeeded
         { outcome_ref =
             "turn:" ^ Chat_operation.Operation_id.to_string operation.operation_id

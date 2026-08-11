@@ -181,6 +181,22 @@ let test_json_string_list_empty () =
   check string "builds empty list" "[]"
     (Yojson.Safe.to_string result)
 
+let test_string_assoc_of_json () =
+  check
+    (result (list (pair string string)) string)
+    "preserves string fields"
+    (Ok [ "first", "1"; "second", "2" ])
+    (Json_util.string_assoc_of_json
+       (`Assoc [ "first", `String "1"; "second", `String "2" ]))
+
+let test_string_assoc_of_json_rejects_non_string () =
+  check
+    (result (list (pair string string)) string)
+    "does not silently drop an invalid field"
+    (Error "string object field \"count\" must be a string, got int")
+    (Json_util.string_assoc_of_json
+       (`Assoc [ "name", `String "ok"; "count", `Int 1 ]))
+
 (* ================================================================
    dedupe_keep_order
    ================================================================ *)
@@ -275,6 +291,13 @@ let () =
       test_case "construction" `Quick test_json_string_list_construction;
       test_case "empty" `Quick test_json_string_list_empty;
     ];
+    "string_assoc", [
+      test_case "decode strings" `Quick test_string_assoc_of_json;
+      test_case
+        "reject non-string"
+        `Quick
+        test_string_assoc_of_json_rejects_non_string;
+    ];
     "dedupe_keep_order", [
     ];
     "dedupe_keep_order", [
@@ -322,5 +345,69 @@ let () =
         check yojson "Some false" (`Bool false) (Json_util.bool_opt_to_json (Some false)));
       test_case "none" `Quick (fun () ->
         check yojson "None" `Null (Json_util.bool_opt_to_json None));
+    ];
+    "string_assoc_of_json", [
+      test_case "reads string members in order" `Quick (fun () ->
+        check
+          (result (list (pair string string)) string)
+          "pairs"
+          (Ok [ "a", "1"; "b", "2" ])
+          (Json_util.string_assoc_of_json
+             (`Assoc [ "a", `String "1"; "b", `String "2" ])));
+      test_case "empty object" `Quick (fun () ->
+        check
+          (result (list (pair string string)) string)
+          "empty"
+          (Ok [])
+          (Json_util.string_assoc_of_json (`Assoc [])));
+      (* The two keeper copies this replaced used List.filter_map, so a
+         non-string member vanished from the decoded result and the caller
+         saw a short list it could not distinguish from a short payload.
+         The member is named in the error instead. *)
+      test_case "non-string member is an error, not a silent drop" `Quick (fun () ->
+        check
+          (result (list (pair string string)) string)
+          "names the offending key and its kind"
+          (Error "string object field \"port\" must be a string, got int")
+          (Json_util.string_assoc_of_json
+             (`Assoc [ "a", `String "1"; "port", `Int 8080 ])));
+      test_case "non-object is an error" `Quick (fun () ->
+        check
+          (result (list (pair string string)) string)
+          "rejects a list"
+          (Error "expected string object, got array")
+          (Json_util.string_assoc_of_json (`List [])));
+    ];
+    "string_field_if_present", [
+      test_case "some emits the key" `Quick (fun () ->
+        check
+          yojson
+          "present"
+          (`Assoc [ "k", `String "v" ])
+          (`Assoc (Json_util.string_field_if_present "k" (Some "v"))));
+      (* Unlike string_opt_field, None omits the key rather than
+         emitting it as null. *)
+      test_case "none omits the key" `Quick (fun () ->
+        check
+          yojson
+          "absent"
+          (`Assoc [])
+          (`Assoc (Json_util.string_field_if_present "k" None)));
+    ];
+    "assoc_object_opt", [
+      test_case "object member" `Quick (fun () ->
+        check
+          (option yojson)
+          "found"
+          (Some (`Assoc [ "x", `Int 1 ]))
+          (Json_util.assoc_object_opt
+             "o"
+             (`Assoc [ "o", `Assoc [ "x", `Int 1 ] ])));
+      test_case "missing, null and non-object are all None" `Quick (fun () ->
+        check bool "None" true
+          (Json_util.assoc_object_opt "o" (`Assoc []) = None
+           && Json_util.assoc_object_opt "o" (`Assoc [ "o", `Null ]) = None
+           && Json_util.assoc_object_opt "o" (`Assoc [ "o", `Int 1 ]) = None
+           && Json_util.assoc_object_opt "o" (`List []) = None));
     ];
   ]

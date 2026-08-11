@@ -50,7 +50,7 @@ let clear_stale_agent_task
   let agent_file =
     Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
   in
-  if Sys.file_exists agent_file then
+  if path_exists config agent_file then
     with_file_lock config agent_file (fun () ->
       let json = read_json config agent_file in
       match agent_of_yojson json with

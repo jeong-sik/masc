@@ -55,15 +55,17 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
     else begin
       let dir = agents_dir config in
       let prefix = safe_filename agent_type ^ "-" in
+      (* Backend-aware: the bare [Sys.readdir] scan saw only the local
+         mirror, so a Memory-backend workspace never found the existing
+         record and minted a fresh nickname per session (RFC-0371 B9).
+         [list_dir] is total — missing dir reads as []. *)
       let existing =
-        if Sys.file_exists dir && Sys.is_directory dir then
-          Array.to_list (Sys.readdir dir)
-          |> List.find_opt (fun f ->
-               Filename.check_suffix f ".json"
-               && String.length f > String.length prefix
-               && String.starts_with f ~prefix)
-          |> Option.map (fun f -> Filename.chop_suffix f ".json")
-        else None
+        list_dir config dir
+        |> List.find_opt (fun f ->
+             Filename.check_suffix f ".json"
+             && String.length f > String.length prefix
+             && String.starts_with f ~prefix)
+        |> Option.map (fun f -> Filename.chop_suffix f ".json")
       in
       match existing with
       | Some nick -> nick  (* Reuse existing nickname for this agent_type *)

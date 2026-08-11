@@ -205,13 +205,6 @@ val work_kind_of_turn_mode : turn_mode -> string
 
 val work_kind_of_json : Yojson.Safe.t -> string option
 
-val accountability_evidence_refs :
-  trace_id:string ->
-  turn_number:int ->
-  result:Keeper_agent_run.run_result ->
-  validated_evidence:Agent_core.Raw_trace.run_validation option ->
-  string list
-
 val decision_channel_of_observation :
   Keeper_world_observation.world_observation ->
   Keeper_world_observation.keeper_cycle_channel

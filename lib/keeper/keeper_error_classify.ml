@@ -150,11 +150,7 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
     - [Provider (ProviderUnavailable {detail})] with [detail] starting
       ["empty completion (stop_reason="] — a recognized non-overflow
       stop_reason (e.g. [end_turn]) on an empty assistant turn, routed to
-      provider-unavailability handling upstream;
-    - [Provider (ParseError {detail})] whose detail embeds the marker
-      ["empty completion (no thinking, text, or tool calls"]
-      (defensive: see the branch comment in [is_empty_completion_error] —
-      no production producer of this shape exists at the pinned Agent Core).
+      provider-unavailability handling upstream.
 
     Deliberately excluded:
 
@@ -173,16 +169,13 @@ let is_empty_completion_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable { detail; _ }) ->
       String.starts_with ~prefix:"empty completion (stop_reason=" detail
-  | Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail }) ->
-      (* Defensive: no production producer at pinned Agent Core 5851df2e.  The
-         marker is rendered only by backend_openai_parse.ml
-         [parse_error_to_string], whose callers are all test-only; production
-         empty completions route via [Http_client.empty_completion_error] into
-         [ProviderUnavailable]/[InvalidRequest], and production [ParseError]
-         details come from sse/glm/image_generation/speech_generation parse
-         failures.  Kept as a bounded guard (exemption budget caps the blast
-         radius) in case a future Agent Core promotes this shape to [ParseError]. *)
-      String_util.contains_substring detail "empty completion (no thinking"
+  (* [ParseError] is not an empty-completion shape: no producer renders the
+     old "empty completion (no thinking" marker into a production
+     [ParseError] at the pinned Agent Core (the renderer's callers are
+     test-only), so the substring guard that used to sit here matched
+     nothing. If a future Agent Core promotes empty completions to
+     [ParseError], that pin update is the place to classify them — as a
+     typed shape, not a message substring (RFC-0371 §3.7). *)
   | Agent_core.Error.Provider _ -> false
   | Agent_core.Error.Api _ -> false
   | Agent_core.Error.Agent _ -> false

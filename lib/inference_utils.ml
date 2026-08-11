@@ -10,14 +10,10 @@
 (* Helpers                                                           *)
 (* ================================================================ *)
 
+(* Delegation to the canonical clamped reader (RFC-0371 B7); this was one of
+   four raw copies of the same helper. *)
 let int_of_env_default name ~default ~min_v ~max_v =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw ->
-      let v =
-        Option.value ~default:default (int_of_string_opt (String.trim raw))
-      in
-      max min_v (min max_v v)
+  Env_config_core.get_int_clamped ~default ~min_v ~max_v name
 
 (* ================================================================ *)
 (* Usage helpers                                                     *)

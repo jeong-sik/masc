@@ -19,6 +19,7 @@ module Keeper_sandbox_exec_failure = Masc.Keeper_sandbox_exec_failure
 module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
 module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
 module Keeper_turn_sandbox_runtime = Masc.Keeper_turn_sandbox_runtime
+module Keeper_github_identity = Masc.Keeper_github_identity
 module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
 module Keeper_identity = Masc.Keeper_identity
 module Keeper_types = Keeper_types
@@ -102,6 +103,18 @@ let docker_log_has_container_execution log =
 let env_file_path_from_docker_line line =
   let rec loop = function
     | "--env-file" :: path :: _ -> Some path
+    | _ :: rest -> loop rest
+    | [] -> None
+  in
+  loop (String.split_on_char ' ' line)
+
+let mount_source_for_destination line destination =
+  let suffix = ":" ^ destination ^ ":ro" in
+  let rec loop = function
+    | "-v" :: mount :: rest ->
+      if String.ends_with ~suffix mount
+      then Some (String.sub mount 0 (String.length mount - String.length suffix))
+      else loop rest
     | _ :: rest -> loop rest
     | [] -> None
   in
@@ -236,6 +249,7 @@ let setup ~sandbox f =
   in
   ensure_dir config_dir;
   let config = Workspace.default_config base in
+  ensure_dir (Workspace.keepers_runtime_dir config);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:"minjae" ~sandbox () in
@@ -268,6 +282,7 @@ let setup_with_sandbox ~sandbox f =
   in
   ensure_dir config_dir;
   let config = Workspace.default_config base in
+  ensure_dir (Workspace.keepers_runtime_dir config);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:"minjae" ~sandbox () in
@@ -524,29 +539,29 @@ if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
 fi\n\
-if [ \"$1\" != \"run\" ]; then\n\
-  printf 'unexpected docker invocation\\n' >&2\n\
-  exit 2\n\
+if [ \"$1\" = \"inspect\" ]; then\n\
+  case \"$3\" in\n\
+    *State.Running*) printf 'true\\n' ;;\n\
+    *) printf 'fake-container-id\\n' ;;\n\
+  esac\n\
+  exit 0\n\
 fi\n\
-shift\n\
-while [ \"$#\" -gt 0 ]; do\n\
-  if [ \"$1\" = \"alpine:test\" ]; then\n\
-    shift\n\
-    break\n\
-  fi\n\
-  shift\n\
-done\n\
-if [ \"$1\" = \"bash\" ] && [ \"$2\" = \"-l\" ] && [ \"$3\" = \"-s\" ]; then\n\
-  script=$(cat)\n\
-  case \"$script\" in\n\
+if [ \"$1\" = \"exec\" ]; then\n\
+  case \"$*\" in\n\
     *rg*) exit 1 ;;\n\
   esac\n\
+  printf 'stdout:%s\\n' \"$*\"\n\
+  exit 0\n\
 fi\n\
-if [ \"$1\" = \"rg\" ]; then\n\
-  exit 1\n\
+if [ \"$1\" = \"rm\" ]; then\n\
+  exit 0\n\
 fi\n\
-printf 'stdout:%s\\n' \"$*\"\n\
-exit 0\n"
+if [ \"$1\" = \"run\" ]; then\n\
+  printf 'fake-container-id\\n'\n\
+  exit 0\n\
+fi\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
 
 let test_rg_no_match_remains_successful_in_docker_route () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -1671,8 +1686,36 @@ let test_docker_shell_projects_keeper_secret_dir () =
   ensure_dir (Filename.dirname ssh_path);
   write_file token_path "projected-token\n";
   write_file ssh_path "PRIVATE KEY";
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir
+        ~config
+        ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   let line = run_docker_shell_command ~config ~meta ~playground ~log_path in
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let container_masc_dir =
+    Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+    |> Filename.dirname
+  in
+  let github_container_dir =
+    Keeper_github_identity.container_config_dir
+      ~container_masc_dir
+      ~keeper_name:meta.name
+  in
+  let github_snapshot =
+    match mount_source_for_destination line github_container_dir with
+    | None -> Alcotest.fail "missing read-only Keeper GitHub snapshot mount"
+    | Some path -> path
+  in
+  Alcotest.(check bool) "operator-owned GitHub config is not mounted" true
+    (not (String.equal github_snapshot github_config_dir));
+  Alcotest.(check bool) "one-shot GitHub snapshot is cleaned" false
+    (Sys.file_exists github_snapshot);
   Alcotest.(check bool) "projected raw token not in docker argv" false
     (contains_substring line "projected-token");
   Alcotest.(check bool) "projected env uses env-file" true
@@ -1740,9 +1783,19 @@ let test_turn_runtime_projects_keeper_secret_dir () =
   ensure_dir (Filename.dirname ssh_path);
   write_file token_path "projected-token\n";
   write_file ssh_path "PRIVATE KEY";
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir
+        ~config
+        ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
-  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let github_snapshot_path = ref None in
+  with_turn_sandbox_factory ~config ~meta (fun factory ->
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute
       ~turn_sandbox_factory:(Some factory)
@@ -1760,11 +1813,78 @@ let test_turn_runtime_projects_keeper_secret_dir () =
     (contains_substring log "--env-file ");
   Alcotest.(check bool) "turn container mounts file read-only" true
     (contains_substring log (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let container_masc_dir =
+    Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+    |> Filename.dirname
+  in
+  let github_container_dir =
+    Keeper_github_identity.container_config_dir
+      ~container_masc_dir
+      ~keeper_name:meta.name
+  in
+  let github_snapshot =
+    match mount_source_for_destination log github_container_dir with
+    | None -> Alcotest.fail "missing turn-scoped Keeper GitHub snapshot mount"
+    | Some path -> path
+  in
+  github_snapshot_path := Some github_snapshot;
+  Alcotest.(check bool) "turn container does not mount operator identity" true
+    (not (String.equal github_snapshot github_config_dir));
+  Alcotest.(check bool) "turn GitHub snapshot lives with its container" true
+    (Sys.file_exists github_snapshot);
   (match env_file_path_from_docker_line log with
    | None -> Alcotest.fail "missing --env-file path in docker log"
    | Some env_file ->
      Alcotest.(check bool) "env-file cleaned after container start" false
-       (Sys.file_exists env_file))
+       (Sys.file_exists env_file)));
+  match !github_snapshot_path with
+  | None -> Alcotest.fail "turn-scoped GitHub snapshot was not recorded"
+  | Some github_snapshot ->
+    Alcotest.(check bool) "turn GitHub snapshot is cleaned with its container" false
+      (Sys.file_exists github_snapshot)
+
+let test_turn_runtime_redacts_the_mounted_github_snapshot () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let snapshot_token = "snapshot-token-before-central-rotation" in
+  let rotated_token = "central-token-after-container-start" in
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir
+        ~config
+        ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
+  let hosts_path = Filename.concat github_config_dir "hosts.yml" in
+  write_file
+    hosts_path
+    ("github.com:\n  user: keeper-user\n  oauth_token: " ^ snapshot_token ^ "\n");
+  Unix.chmod hosts_path 0o600;
+  with_env "MASC_STREAM_EXECUTE_OUTPUT" "false" @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let execute value =
+    Keeper_tool_execute_runtime.handle_tool_execute
+      ~turn_sandbox_factory:(Some factory)
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ value ])
+      ()
+  in
+  ignore (execute "hello");
+  write_file
+    hosts_path
+    ("github.com:\n  user: keeper-user\n  oauth_token: " ^ rotated_token ^ "\n");
+  Unix.chmod hosts_path 0o600;
+  let raw = execute snapshot_token in
+  Alcotest.(check bool) "mounted snapshot token never reaches response" false
+    (contains_substring raw snapshot_token);
+  if not (contains_substring raw "[REDACTED]")
+  then Alcotest.failf "exact snapshot token was not redacted: %s" raw
 
 let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->
@@ -2170,6 +2290,9 @@ let () =
           Alcotest.test_case
             "turn runtime projects keeper secret directory"
             `Quick test_turn_runtime_projects_keeper_secret_dir;
+          Alcotest.test_case
+            "turn runtime redacts its mounted GitHub snapshot"
+            `Quick test_turn_runtime_redacts_the_mounted_github_snapshot;
           Alcotest.test_case
             "docker run does not retry generic timeout"
             `Quick

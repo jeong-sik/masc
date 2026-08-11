@@ -48,17 +48,6 @@ let initial_turn_prompt ~history ~goal =
     |> Yojson.Safe.to_string
 ;;
 
-let claude_dynamic_tool (tool : Host.dynamic_tool) : Runtime_claude_code.dynamic_tool =
-  { name = tool.name
-  ; description = tool.description
-  ; input_schema = tool.input_schema
-  ; call =
-      (fun ~call_id input ->
-        let result = tool.call ~call_id input in
-        { Runtime_claude_code.success = result.success; content = result.content })
-  }
-;;
-
 let claude_stream_callback on_event =
   match on_event with
   | None -> None
@@ -310,7 +299,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~terminal_error
         ~raw_trace_run:None
     in
-    let dynamic_tools = List.map claude_dynamic_tool host_dynamic_tools in
+    let dynamic_tools = host_dynamic_tools in
     let* () =
       match
         Runtime_claude_code.validate_turn
@@ -360,7 +349,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~terminal_error
         ~raw_trace_run
     in
-    let dynamic_tools = List.map claude_dynamic_tool host_dynamic_tools in
+    let dynamic_tools = host_dynamic_tools in
     let* claimed_session =
       match
         Session_store.claim

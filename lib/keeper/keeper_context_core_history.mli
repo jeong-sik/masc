@@ -2,10 +2,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-val normalize_system_context_prefix : string -> string
-
-val has_world_state_signature : string -> bool
-
 type history_line_action =
   | Keep_main
   | Move_internal

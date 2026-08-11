@@ -201,22 +201,68 @@ kill_active_cmd_tree() {
   while IFS= read -r pid; do
     [[ -n "${pid}" ]] && tree_pids+=("${pid}")
   done < <(active_cmd_tree_pids)
+  signal_pid_snapshot "${signal}" "${tree_pids[@]}"
+  signal_active_cmd_group "${signal}"
+}
+
+signal_pid_snapshot() {
+  local signal="$1"
+  shift
+  local tree_pids=("$@")
   local idx=0
   for (( idx=${#tree_pids[@]}-1; idx>=0; idx-- )); do
     kill "-${signal}" "${tree_pids[idx]}" >/dev/null 2>&1 || true
   done
 }
 
+pid_snapshot_has_survivor() {
+  local pid=""
+  for pid in "$@"; do
+    if kill -0 "${pid}" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+signal_active_cmd_group() {
+  local signal="$1"
+  if [[ "${ACTIVE_CMD_PGID:-}" =~ ^[0-9]+$ ]]; then
+    kill "-${signal}" -- "-${ACTIVE_CMD_PGID}" >/dev/null 2>&1 || true
+  fi
+}
+
+active_cmd_group_has_survivor() {
+  [[ "${ACTIVE_CMD_PGID:-}" =~ ^[0-9]+$ ]] \
+    && kill -0 -- "-${ACTIVE_CMD_PGID}" >/dev/null 2>&1
+}
+
+active_snapshot_or_group_has_survivor() {
+  pid_snapshot_has_survivor "$@" || active_cmd_group_has_survivor
+}
+
 terminate_active_cmd_tree() {
+  local tree_pids=()
+  local pid=""
+  while IFS= read -r pid; do
+    [[ -n "${pid}" ]] && tree_pids+=("${pid}")
+  done < <(active_cmd_tree_pids)
   local deadline=$(( $(date +%s) + TEST_TIMEOUT_GRACE_SEC ))
-  kill_active_cmd_tree TERM
-  while kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1 \
+  signal_pid_snapshot TERM "${tree_pids[@]}"
+  signal_active_cmd_group TERM
+  while active_snapshot_or_group_has_survivor "${tree_pids[@]}" \
         && [[ "$(date +%s)" -lt "${deadline}" ]]; do
     sleep 1
   done
-  if kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; then
-    kill_active_cmd_tree KILL
-  fi
+  # Descendants can be reparented when the root shell handles TERM and exits.
+  # Recheck the saved tree, not only the root PID, before escalating.
+  signal_pid_snapshot KILL "${tree_pids[@]}"
+  signal_active_cmd_group KILL
+  local kill_deadline=$(( $(date +%s) + 2 ))
+  while active_snapshot_or_group_has_survivor "${tree_pids[@]}" \
+        && [[ "$(date +%s)" -lt "${kill_deadline}" ]]; do
+    sleep 0.1
+  done
 }
 
 hb_pid=""
@@ -242,9 +288,13 @@ run_observed() {
 
   tail -n 0 -f "${TEST_LOG_FILE}" &
   ACTIVE_LOG_TAIL_PID=$!
+  # A dedicated process group lets timeout cleanup reach descendants even if
+  # the root shell exits and reparents them, or process-tree inspection fails.
+  set -m
   bash -l -s <<< "${cmd}" >> "${TEST_LOG_FILE}" 2>&1 &
   ACTIVE_CMD_PID=$!
-  ACTIVE_CMD_PGID="$(ps -o pgid= -p "${ACTIVE_CMD_PID}" 2>/dev/null | tr -d '[:space:]')"
+  ACTIVE_CMD_PGID="${ACTIVE_CMD_PID}"
+  set +m
 
   while kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; do
     local now_epoch

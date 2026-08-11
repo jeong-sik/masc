@@ -461,9 +461,9 @@ let discord_bound_channel ~meta ~args =
 ;;
 
 let discord_token () =
-  match Sys.getenv_opt "DISCORD_BOT_TOKEN" with
-  | Some token when String.trim token <> "" -> Ok token
-  | Some _ | None -> Error "DISCORD_BOT_TOKEN is unset or empty"
+  match Env_config_discord.bot_token_opt () with
+  | Some token -> Ok token
+  | None -> Error "DISCORD_BOT_TOKEN is unset or empty"
 ;;
 
 let discord_snowflake ~field value =

@@ -77,6 +77,17 @@ module Make (E : Error) = struct
     | Some _ -> protocol_error stage (Printf.sprintf "field %S must be a boolean" name)
     | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
   ;;
+
+  let invoke_state_callback ~stage callback =
+    try
+      match callback () with
+      | Ok () -> Ok ()
+      | Error detail -> protocol_error stage detail
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
+    | exn -> protocol_error stage (Printexc.to_string exn)
+  ;;
 end
 
 let bounded_tail ~limit current addition =

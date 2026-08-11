@@ -704,20 +704,15 @@ let runtime_diagnostics_json () =
               ; "signal", `String signal
               ; "message", `String message
               ])
-      | None
-        when String_util.contains_substring
-               message "repairing state and rewriting canonical JSON" ->
-        Some
-          (`Assoc
-              [ "ts", `String entry.ts
-              ; "kind", `String "state_repair"
-              ; "message", `String message
-              ])
+      (* Two needles were removed from this classifier because nothing in the
+         repository produces them: "repairing state and rewriting canonical
+         JSON" (whole state_repair arm) and "parse error:
+         Types_core.agent.last_seen". A guard with no producer classifies
+         nothing and only pins the phrasing of future log lines
+         (RFC-0371 §3.7). *)
       | None
         when String_util.contains_substring message "invalid agent JSON"
-             || String_util.contains_substring message "repaired agent JSON"
-             || String_util.contains_substring
-                  message "parse error: Types_core.agent.last_seen" ->
+             || String_util.contains_substring message "repaired agent JSON" ->
         Some
           (`Assoc
               [ "ts", `String entry.ts
@@ -736,7 +731,7 @@ let runtime_diagnostics_json () =
       0
       diagnostics
   in
-  `List diagnostics, count "external_signal", count "state_repair", count "agent_state"
+  `List diagnostics, count "external_signal", count "agent_state"
 ;;
 
 type dashboard_runtime_provider_probe =
@@ -2131,7 +2126,7 @@ let runtime_resolution_json (config : Workspace.config) =
     | None -> false
     | Some server_repo_path -> server_workspace_mismatch ~server_repo_path config
   in
-  let diagnostics, signal_count, repair_count, agent_issue_count =
+  let diagnostics, signal_count, agent_issue_count =
     runtime_diagnostics_json ()
   in
   let add_source_mismatch_warning acc =
@@ -2277,11 +2272,6 @@ let runtime_resolution_json (config : Workspace.config) =
       :: acc
     else acc
   in
-  let add_repair_warning acc =
-    if repair_count > 0
-    then Printf.sprintf "Recent workspace-state repair events detected (%d)." repair_count :: acc
-    else acc
-  in
   let add_agent_issue_warning acc =
     if agent_issue_count > 0
     then
@@ -2299,7 +2289,6 @@ let runtime_resolution_json (config : Workspace.config) =
     |> add_server_workspace_mismatch_warning
     |> add_prompt_dir_mismatch_warning
     |> add_signal_warning
-    |> add_repair_warning
     |> add_agent_issue_warning
     |> List.rev
   in

@@ -4,6 +4,15 @@
     injection. Protocol adapters only translate the resulting tool records to
     their official client's wire format. *)
 
+val config_error : field:string -> string -> Agent_core.Error.t
+(** Build the [InvalidConfig] error the official-client adapters report when a
+    runtime is misconfigured. Shared so the three adapters name the offending
+    field the same way. *)
+
+val internal_error : string -> Agent_core.Error.t
+(** Build the [Internal] error for a failure that is neither configuration nor
+    provider behaviour. *)
+
 type prepared_turn =
   { messages : Agent_core.Types.message list
   ; system_prompt : string

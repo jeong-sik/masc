@@ -221,6 +221,25 @@ let attempt_runtime_candidates
            ~status:"failed"
            ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
            Keeper_runtime_manifest.Runtime_failed;
+         (* A hard-quota rejection with a provider-stated reset time is an
+            account-scoped fact; remember it so later lane ordering stops
+            re-dispatching into the exhausted window (RFC-0370 §3.3). The
+            provider identity comes from the attempted candidate's catalog
+            row, not the error payload, so both sides of the window share
+            one namespace. Quota errors without [retry_after] record
+            nothing — a cooldown the provider never stated would be a
+            synthesized default. *)
+         (match error with
+          | Agent_core.Error.Provider
+              (Llm_provider.Error.HardQuota { retry_after = Some retry_after_s; _ })
+            ->
+            (match Runtime.provider_id_of_runtime_id attempt_runtime_id with
+             | Some provider_id ->
+               Runtime_quota_window.note_exhausted
+                 ~provider_id
+                 ~resets_at:(Unix.gettimeofday () +. retry_after_s)
+             | None -> ())
+          | _ -> ());
          let retry_admitted =
            allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
          in
@@ -507,8 +526,16 @@ let run_named
        | `Lane lane ->
          let lane_id = Runtime_lane.id lane in
          ( Some lane_id
-         , Runtime_lane_preference.prefer_order ~lane_id
-             (Runtime_lane.ordered_candidates lane) ))
+         , (* Quota-window demotion runs after sticky preference: a provider
+              that stated "exhausted until T" outranks a remembered last-good
+              candidate on that same provider. Ordering only — a demoted
+              candidate is still attempted when the lane has nothing else.
+              RFC-0370 §3.3. *)
+           Runtime_lane_preference.prefer_order ~lane_id
+             (Runtime_lane.ordered_candidates lane)
+           |> Runtime_quota_window.demote_order
+                ~now:(Unix.gettimeofday ())
+                ~provider_id_of:Runtime.provider_id_of_runtime_id ))
   in
   if lane_candidate_ids = []
   then

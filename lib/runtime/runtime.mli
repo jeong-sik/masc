@@ -363,6 +363,12 @@ val turn_timeout_s_of_runtime_id : string -> float option
     "keep whatever bound the caller already has". Consumed by
     {!Runtime_inference.resolve_turn_timeout_s}. *)
 
+val provider_id_of_runtime_id : string -> string option
+(** Owning provider id ([providers.<id>] in runtime.toml) of the runtime with
+    this binding-key id, or [None] when the runtime id is unknown. Consumed by
+    {!Runtime_quota_window.demote_order} so lane ordering can act on
+    account-scoped provider quota windows. *)
+
 val max_prompt_bytes_of_runtime_id : string -> int option
 (** Declared [max-prompt-bytes] for the model bound to this runtime id, or
     [None] when the model declares none. *)

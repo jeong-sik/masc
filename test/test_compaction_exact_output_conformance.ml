@@ -68,6 +68,7 @@ let execute_prepared_lane
       ~net
       ?clock
       ?(before_dispatch_authority = fun _ -> Ok ())
+      ?observation_registry
       prepared_lane
   =
   C.execute_prepared_lane
@@ -75,6 +76,7 @@ let execute_prepared_lane
     ~net
     ?clock
     ~before_dispatch_authority
+    ?observation_registry
     prepared_lane
 ;;
 
@@ -724,6 +726,68 @@ let test_final_agent_core_flow_failure_is_generic_source_terminal () =
   Alcotest.(check int) "terminal flow failure never advances" 0 (F.post_count successor)
 ;;
 
+let test_observation_completion_failure_does_not_mask_source_terminal () =
+  with_temp_dir "compaction-observation-failure-"
+  @@ fun temp_dir ->
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let failed = F.start_server ~sw ~net ~clock F.Abort_after_request in
+  let slot_id = "observation-write-failure" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"compaction observation completion failure"
+      [ { id = slot_id; base_url = failed.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-observation-failure" ~registry () in
+  let observation_path = Filename.concat temp_dir "exact-lane-runs.jsonl" in
+  let observation_registry = Exact_lane_run_registry.create ~path:observation_path () in
+  let break_completion_path _observation =
+    (* Registration has already fsynced by the time source authority runs.
+       Replace the file with a directory so only the completion append fails. *)
+    Sys.remove observation_path;
+    Unix.mkdir observation_path 0o700;
+    Ok ()
+  in
+  let terminal =
+    match
+      execute_prepared_lane
+        ~keeper_name:"keeper-observation-failure"
+        ~net
+        ~clock
+        ~before_dispatch_authority:break_completion_path
+        ~observation_registry
+        prepared
+    with
+    | Error (C.Exact_execution_terminal terminal) -> terminal
+    | Error _ -> Alcotest.fail "observation failure changed the typed source terminal"
+    | Ok _ -> Alcotest.fail "failed provider unexpectedly produced a compaction plan"
+  in
+  Alcotest.(check bool)
+    "primary terminal survives the secondary write failure"
+    true
+    (terminal.cause = Keeper_compaction_outcome.Exact_execution_failed);
+  Alcotest.(check string) "source identity survives" slot_id terminal.slot_id;
+  Alcotest.(check int) "provider is dispatched exactly once" 1 (F.post_count failed);
+  match Exact_lane_run_registry.list_runs observation_registry with
+  | [ { status = Exact_lane_run_registry.Completion_persistence_failed
+          { failure; _ }; _ } as run ] ->
+    Alcotest.(check string)
+      "failed observation append is explicitly uncertain"
+      "completion_durability_unknown"
+      (Exact_lane_run_registry.status_label run.status);
+    Alcotest.(check bool)
+      "failure detail survives"
+      true
+      (String.trim failure.detail <> "")
+  | [ _ ] ->
+    Alcotest.fail "failed observation append was not exposed as a persistence failure"
+  | runs ->
+    Alcotest.failf
+      "expected one observation row after completion failure, got %d"
+      (List.length runs)
+;;
+
 let test_cancellation_preserves_lifecycle_authorized_identity () =
   run_eio
   @@ fun ~sw ~net ~clock ->
@@ -959,6 +1023,10 @@ let () =
             "final AGENT_CORE failure is generic terminal"
             `Quick
             test_final_agent_core_flow_failure_is_generic_source_terminal
+        ; Alcotest.test_case
+            "observation completion failure preserves source terminal"
+            `Quick
+            test_observation_completion_failure_does_not_mask_source_terminal
         ; Alcotest.test_case
             "semantic exhaustion terminalizes final bound"
             `Quick

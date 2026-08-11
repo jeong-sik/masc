@@ -73,6 +73,7 @@ val execute_prepared_lane
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:_ Eio.Time.clock
   -> ?before_dispatch_authority:before_dispatch_authority
+  -> ?observation_registry:Exact_lane_run_registry.t
   -> prepared_lane
   -> (completed_plan, summarization_failure) result
 

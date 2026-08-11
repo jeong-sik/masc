@@ -302,14 +302,6 @@ let test_status_string_empty () =
    Notification queue overflow logging
    ============================================================ *)
 
-let contains_substring s sub =
-  let len = String.length sub in
-  let rec scan i =
-    if i + len > String.length s then false
-    else if String.sub s i len = sub then true
-    else scan (i + 1)
-  in
-  scan 0
 ;;
 
 let test_message_queue_overflow_is_logged () =
@@ -352,8 +344,8 @@ let test_message_queue_overflow_is_logged () =
   let found =
     List.exists
       (fun (entry : Log.Ring.entry) ->
-         contains_substring entry.Log.Ring.message "Dropped oldest notification"
-         && contains_substring entry.Log.Ring.message "drop-test")
+         String_util.contains_substring entry.Log.Ring.message "Dropped oldest notification"
+         && String_util.contains_substring entry.Log.Ring.message "drop-test")
       entries
   in
   check bool "overflow produced a structured warning" true found

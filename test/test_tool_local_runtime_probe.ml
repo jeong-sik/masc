@@ -3,19 +3,6 @@ open Alcotest
 let check_float_close label expected actual =
   check bool label true (Float.abs (expected -. actual) < 0.001)
 
-let contains_substring text needle =
-  let len_text = String.length text in
-  let len_needle = String.length needle in
-  if len_needle = 0 then true
-  else if len_needle > len_text then false
-  else
-    let rec loop idx =
-      if idx > len_text - len_needle then false
-      else if String.equal (String.sub text idx len_needle) needle then true
-      else loop (idx + 1)
-    in
-    loop 0
-
 let test_ollama_ps_parser_extracts_loaded_models () =
   let json =
     Yojson.Safe.from_string
@@ -243,8 +230,8 @@ let test_curl_get_argv_keeps_curl_as_executable_with_headers () =
   check bool "curl emits structured metadata" true
     (List.exists
        (fun arg ->
-         contains_substring arg "%{url_effective}"
-         && contains_substring arg "%{content_type}")
+         String_util.contains_substring arg "%{url_effective}"
+         && String_util.contains_substring arg "%{content_type}")
        argv);
   check bool "curl is not repeated after headers" false (List.mem "curl" (List.tl argv))
 

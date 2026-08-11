@@ -48,24 +48,6 @@ let with_env name value f =
      | None -> Unix.putenv name "");
     raise exn
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  if needle_len = 0 then
-    true
-  else if needle_len > text_len then
-    false
-  else
-    let rec loop i =
-      if i + needle_len > text_len then
-        false
-      else if String.sub text i needle_len = needle then
-        true
-      else
-        loop (i + 1)
-    in
-    loop 0
-
 let read_file path =
   let ic = open_in_bin path in
   Fun.protect
@@ -219,7 +201,7 @@ let test_load_auth_config_rejects_malformed_file () =
       | exception (Auth.Auth_config_error { file = actual_file; reason } as error) ->
         check string "error identifies config file" file actual_file;
         check bool "error identifies invalid field" true
-          (contains_substring reason "require_token");
+          (String_util.contains_substring reason "require_token");
         check string "public exception hides path and parser detail"
           "Auth.Auth_config_error"
           (Printexc.to_string error))
@@ -469,9 +451,9 @@ let test_verify_token_reports_token_owner_on_agent_mismatch () =
       let rendered = Masc_domain.masc_error_to_string (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)) in
       check bool "mismatch message names token owner" true
         (String.contains rendered '('
-         && contains_substring rendered "bearer token belongs to codex");
+         && String_util.contains_substring rendered "bearer token belongs to codex");
       check bool "mismatch message explains fix" true
-        (contains_substring rendered
+        (String_util.contains_substring rendered
            "masc login --agent gemini --role worker --shell")
   | Ok _, Ok _ ->
       fail "verify_token should fail when token owner and requested agent differ"
@@ -736,7 +718,7 @@ let test_verify_token_rejects_dashboard_dev_legacy_alias () =
   | Error e ->
       let rendered = Masc_domain.masc_error_to_string e in
       check bool "legacy dashboard-dev bearer rejected for dashboard" true
-        (contains_substring rendered "bearer token belongs to dashboard-dev")
+        (String_util.contains_substring rendered "bearer token belongs to dashboard-dev")
 
 let test_save_raw_token_credential_uses_provided_token () =
   let dir = setup_test_workspace () in

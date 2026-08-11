@@ -29,16 +29,6 @@ let create_admin_token ?(agent_name = "stable-admin") base_path =
   | Ok (token, _cred) -> token
   | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  if n_len = 0 then true else loop 0
-
 let extract_json_from_text text =
   try
     let idx = String.index text '{' in

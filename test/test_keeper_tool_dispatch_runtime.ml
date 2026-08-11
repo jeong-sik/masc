@@ -175,15 +175,6 @@ let with_exec_fixture
                    run
                else run ())))
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    idx + needle_len <= text_len
-    && (String.sub text idx needle_len = needle || loop (idx + 1))
-  in
-  needle_len = 0 || loop 0
-
 let parse_json raw =
   try Yojson.Safe.from_string raw with
   | Yojson.Json_error err -> fail ("invalid json: " ^ err)
@@ -285,9 +276,9 @@ let test_public_read_rejects_unsupported_range_fields () =
         |> Option.value ~default:""
       in
       check bool "error mentions unsupported field" true
-        (contains_substring error "unsupported field");
+        (String_util.contains_substring error "unsupported field");
       check bool "error mentions start_line" true
-        (contains_substring error "start_line");
+        (String_util.contains_substring error "start_line");
       check string "validation source" "agent_core_tool_middleware"
         Yojson.Safe.Util.(member "validation" json |> to_string);
       check string "failure class" "policy_rejection"
@@ -355,12 +346,12 @@ let test_surface_read_rejects_duplicate_dispatch_fields () =
              ; "channel_id", `String "456" ])
       in
       check bool "duplicate fields produce validation output" true
-        (contains_substring duplicate_mode.raw_output "error_code");
+        (String_util.contains_substring duplicate_mode.raw_output "error_code");
       check string "duplicate mode is named"
         "keeper_surface_read arguments contains duplicate field \"mode\""
         Yojson.Safe.Util.(member "message" (parse_json duplicate_mode.raw_output) |> to_string);
       check bool "duplicate channel produces validation output" true
-        (contains_substring duplicate_channel.raw_output "error_code");
+        (String_util.contains_substring duplicate_channel.raw_output "error_code");
       check string "duplicate channel is not silently selected"
         "keeper_surface_read arguments contains duplicate field \"channel_id\""
         Yojson.Safe.Util.(member "message" (parse_json duplicate_channel.raw_output) |> to_string))
@@ -722,7 +713,7 @@ let check_publication_recovery_failure
        check bool
          (label ^ " " ^ sentinel_label ^ " is absent from tool output")
          false
-         (contains_substring public_output sentinel))
+         (String_util.contains_substring public_output sentinel))
     sentinels;
   check bool (label ^ " created no file") false (Sys.file_exists target)
 ;;
@@ -1114,21 +1105,21 @@ let test_publication_initialization_crash_is_redacted () =
        check bool
          "exception payload is absent from message"
          false
-         (contains_substring result.raw_output exception_text);
+         (String_util.contains_substring result.raw_output exception_text);
        check bool
          "exception payload is absent from data"
          false
-         (contains_substring rendered_data exception_text);
+         (String_util.contains_substring rendered_data exception_text);
        if backtrace_text <> ""
        then (
          check bool
            "backtrace is absent from message"
            false
-           (contains_substring result.raw_output backtrace_text);
+           (String_util.contains_substring result.raw_output backtrace_text);
          check bool
            "backtrace is absent from data"
            false
-           (contains_substring rendered_data backtrace_text));
+           (String_util.contains_substring rendered_data backtrace_text));
        check bool "crashed initialization created no file" false
          (Sys.file_exists path))
 ;;
@@ -1972,9 +1963,9 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
       check string "Grep translates to rg op" "rg"
         (json_string_field ~default:"" "op" grep_json);
       check bool "Grep returns real match" true
-        (contains_substring grep_result.raw_output visible_file_path);
+        (String_util.contains_substring grep_result.raw_output visible_file_path);
       check bool "Grep match includes content" true
-        (contains_substring grep_result.raw_output "gamma");
+        (String_util.contains_substring grep_result.raw_output "gamma");
       let execute_result =
         run
           "Execute"
@@ -2142,7 +2133,7 @@ let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
             (List.exists
                (fun (key, value) ->
                  String.equal key "User-Agent"
-                 && contains_substring value "MASC-FetchWeb")
+                 && String_util.contains_substring value "MASC-FetchWeb")
                headers);
           Ok (Some 200, html))
         (fun () ->
@@ -2181,11 +2172,11 @@ let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
           check string "description" "Alias description & detail"
             Yojson.Safe.Util.(member "description" json |> to_string);
           check bool "heading rendered as markdown" true
-            (contains_substring
+            (String_util.contains_substring
                Yojson.Safe.Util.(member "text" json |> to_string)
                "# Alias Fetch");
           check bool "body text cleaned" true
-            (contains_substring
+            (String_util.contains_substring
                Yojson.Safe.Util.(member "text" json |> to_string)
                "Body content & proof.")))
 
@@ -2473,7 +2464,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
                  check bool
                    "stored WebSearch effect executed"
                    true
-                   (contains_substring output "Replayed result")
+                   (String_util.contains_substring output "Replayed result")
                | Some
                    { outcome = Masc.Keeper_gate_replay.Applied _; _ } ->
                  fail
@@ -2514,7 +2505,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
             check bool
               "replayed WebSearch output survives behind the durable reference"
               true
-              (contains_substring output "Replayed result")
+              (String_util.contains_substring output "Replayed result")
           | Ok None -> fail "durable replay output artifact is missing"
           | Error error ->
             fail (Tool_blob_store.fetch_error_to_string error));
@@ -2539,7 +2530,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
          check bool
            "durable replay output stays outside the provider-only projection"
            false
-           (contains_substring projected_message "Replayed result");
+           (String_util.contains_substring projected_message "Replayed result");
          (match
             projected_evidence
             |> Yojson.Safe.Util.member "untrusted_tool_output_ref"
@@ -2557,7 +2548,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
          check bool
            "model is forbidden to request the consumed operation again"
            true
-           (contains_substring
+           (String_util.contains_substring
               model_message.text
               "Do not request the approved operation again")
        | Ok _ -> fail "durable WebSearch replay result was missing"
@@ -2849,7 +2840,7 @@ let test_blob_failure_repairs_journal_without_second_effect () =
          check bool
            "journal-only repair persisted the exact prior outcome"
            true
-           (contains_substring output "Exactly once")
+           (String_util.contains_substring output "Exactly once")
        | outcome ->
          failf
            "in-memory journal-only repair failed: %s"
@@ -3215,11 +3206,11 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
        check bool
          "unsupported exact input remains in the model-issued path"
          true
-         (contains_substring model_message "UNSUPPORTED-END");
+         (String_util.contains_substring model_message "UNSUPPORTED-END");
        check bool
          "unsupported approval does not invent operator repair"
          false
-         (contains_substring model_message "Operator repair is required"))
+         (String_util.contains_substring model_message "Operator repair is required"))
 ;;
 
 let workflow_rejection_message =
@@ -3579,7 +3570,7 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
          | Tool_result.Completed () -> fail "expected typed failure"
          | Tool_result.Deferred () -> fail "expected typed failure, got deferred");
         check bool "error message preserved" true
-          (contains_substring execution.raw_output "Self-approval"))
+          (String_util.contains_substring execution.raw_output "Self-approval"))
 
 (* ── Agent Core descriptor execution mode ───────────────────────────
 
@@ -3721,7 +3712,7 @@ let test_surface_post_bundle_names_reader_and_repeat_cost () =
             check bool
               (Printf.sprintf "projected description contains %S" phrase)
               true
-              (contains_substring description phrase))
+              (String_util.contains_substring description phrase))
          [ "read by a person"
          ; "unchanged status reposted every cycle"
          ; "the turn ends without a post"
@@ -4026,7 +4017,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
          ~id:subscriber_id
          ~callback:(fun (ev : Masc.Sse.external_event) ->
             let event = ev.Masc.Sse.ext_frame in
-           if contains_substring event "\"type\":\"keeper_chat_appended\""
+           if String_util.contains_substring event "\"type\":\"keeper_chat_appended\""
            then incr chat_broadcast_count)
          ();
        Fun.protect
@@ -4056,7 +4047,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                check bool
                  "raw append failure retains the exact full chat target"
                  true
-                 (contains_substring error_detail chat_path)
+                 (String_util.contains_substring error_detail chat_path)
              | Ok _ -> fail "durable dashboard append failure became Completed");
             check int
               "failed append emits no keeper chat broadcast"
@@ -4077,7 +4068,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                check bool
                  "terminal failure retains the exact full chat target"
                  true
-                 (contains_substring failure.diagnostic chat_path)
+                 (String_util.contains_substring failure.diagnostic chat_path)
              | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
                fail "failed surface delivery left the terminal effect open"
              | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
@@ -4189,7 +4180,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                check bool
                  "Runtime_agent error retains the exact full chat target"
                  true
-                 (contains_substring diagnostic chat_path)
+                 (String_util.contains_substring diagnostic chat_path)
              | Some other ->
                failf
                  "Runtime_agent returned %s instead of terminal_effect_failed"
@@ -4209,7 +4200,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                check bool
                  "runtime terminal state retains the exact full chat target"
                  true
-                 (contains_substring failure.diagnostic chat_path)
+                 (String_util.contains_substring failure.diagnostic chat_path)
              | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
                fail "runtime terminal failure was not recorded"
              | Masc.Keeper_tools_agent_core.Deferred_tool_result ->

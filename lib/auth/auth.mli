@@ -35,6 +35,12 @@ val auth_config_file : string -> string
 val credential_file : string -> string -> string
 val internal_keeper_token_hash_file : string -> string
 val internal_keeper_token_env_key : string
+
+val internal_keeper_token : unit -> string option
+(** The internal keeper token this process ensured at boot, as a typed
+    in-process value. [None] before {!ensure_internal_keeper_token} has
+    run. In-process consumers use this; the env var remains only as the
+    cross-process surface. *)
 val extract_agent_type_prefix : string -> string option
 val save_internal_keeper_token_hash : string -> raw_token:string -> unit
 

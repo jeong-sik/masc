@@ -331,14 +331,17 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           client_config
       with
       | Ok subscription -> Ok subscription
-      | Error error ->
+      | Error
+          ((Runtime_claude_code.Spawn_failed _ | Runtime_claude_code.Timeout _) as error) ->
         (* The subscription probe is a separate, pre-dispatch CLI process. No
            Claude turn (and therefore no dynamic tool) can have started when
-           it fails. Let the turn driver keep the same-turn fallback lane
-           available for this case; failures returned by [run_turn] below
-           remain observation-unavailable and fail closed. *)
+           it cannot start or times out. Let the turn driver keep the same-turn
+           fallback lane available for only these typed transport outcomes;
+           every other probe error and every [run_turn] failure remains
+           observation-unavailable and fails closed. *)
         Option.iter (fun callback -> callback ()) on_pre_dispatch_failure;
         Error (claude_error_to_core_error error)
+      | Error error -> Error (claude_error_to_core_error error)
     in
     let raw_trace_run =
       Host.start_raw_trace

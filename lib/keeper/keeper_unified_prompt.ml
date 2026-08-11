@@ -1212,9 +1212,9 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
         Some (Buffer.contents ubuf))
       else None
   in
-  (* The header keeps its exact "## Current World State" prefix:
-     [Keeper_context_core_history.has_world_state_signature] matches that
-     literal to keep world-state frames out of persisted chat history.
+  (* The frame is injected as ephemeral context. The turn call site passes an
+     explicit [world_state_prompt] source to history persistence, so JSONL
+     routing does not depend on any markdown wording below.
 
      The provenance line is what the sections underneath do not carry. A block
      headed "### Your Recent Board Posts" reads as something the keeper did,

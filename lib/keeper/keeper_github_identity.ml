@@ -19,6 +19,7 @@ type observation =
   ; projected_token_env_names : string list
   ; stored : auth_result
   ; effective : auth_result
+  ; effective_probe_scope : [ `Host_process_credential_only ]
   ; checked_at_unix : float
   }
 
@@ -104,11 +105,12 @@ let inspect_config_files_in ~on_regular config_path =
     | filename :: rest ->
       let path = Filename.concat config_path filename in
       (match lstat_opt path with
-       | Error _ as error -> error
-       | Ok None -> inspect rest
-       | Ok (Some stats) when stats.Unix.st_kind = Unix.S_REG ->
-         on_regular path;
-         inspect rest
+     | Error _ as error -> error
+     | Ok None -> inspect rest
+     | Ok (Some stats) when stats.Unix.st_kind = Unix.S_REG ->
+         (match on_regular path stats with
+          | Error _ as error -> error
+          | Ok () -> inspect rest)
        | Ok (Some stats) ->
          Error
            (Printf.sprintf
@@ -120,11 +122,66 @@ let inspect_config_files_in ~on_regular config_path =
 ;;
 
 let secure_config_files_in config_path =
-  inspect_config_files_in ~on_regular:(fun path -> Unix.chmod path 0o600) config_path
+  inspect_config_files_in
+    ~on_regular:(fun path _stats ->
+      Unix.chmod path 0o600;
+      Ok ())
+    config_path
 ;;
 
 let validate_config_files_in config_path =
-  inspect_config_files_in ~on_regular:(fun _path -> ()) config_path
+  let expected_uid = Unix.getuid () in
+  let validate_regular path stats =
+    let mode = stats.Unix.st_perm land 0o777 in
+    if stats.Unix.st_uid <> expected_uid
+    then
+      Error
+        (Printf.sprintf
+           "GitHub CLI credential owner is unsafe: expected uid=%d actual uid=%d path=%s"
+           expected_uid
+           stats.Unix.st_uid
+           path)
+    else if mode <> 0o600
+    then
+      Error
+        (Printf.sprintf
+           "GitHub CLI credential mode is unsafe: expected 0600 actual %04o path=%s"
+           mode
+           path)
+    else Ok ()
+  in
+  inspect_config_files_in ~on_regular:validate_regular config_path
+;;
+
+let validate_existing_config_dir path =
+  let expected_uid = Unix.getuid () in
+  match lstat_opt path with
+  | Error _ as error -> error
+  | Ok None -> Error (Printf.sprintf "GitHub CLI config directory disappeared: %s" path)
+  | Ok (Some stats) when stats.Unix.st_kind <> Unix.S_DIR ->
+    Error
+      (Printf.sprintf
+         "GitHub CLI path must be a directory, not a %s: %s"
+         (file_kind_to_string stats.Unix.st_kind)
+         path)
+  | Ok (Some stats) ->
+    let mode = stats.Unix.st_perm land 0o777 in
+    if stats.Unix.st_uid <> expected_uid
+    then
+      Error
+        (Printf.sprintf
+           "GitHub CLI config directory owner is unsafe: expected uid=%d actual uid=%d path=%s"
+           expected_uid
+           stats.Unix.st_uid
+           path)
+    else if mode <> 0o700
+    then
+      Error
+        (Printf.sprintf
+           "GitHub CLI config directory mode is unsafe: expected 0700 actual %04o path=%s"
+           mode
+           path)
+    else validate_config_files_in path
 ;;
 
 let ensure_config_dir ~base_path ~keeper_name =
@@ -235,7 +292,7 @@ let existing_config_dir ~base_path ~keeper_name =
           | Error _ as error -> error
           | Ok false -> Ok None
           | Ok true ->
-            (match validate_config_files_in keeper_config_dir with
+            (match validate_existing_config_dir keeper_config_dir with
              | Error _ as error -> error
              | Ok () -> Ok (Some keeper_config_dir))))
   end
@@ -269,7 +326,13 @@ let docker_args_for_tool ~base_path ~keeper_name ~container_masc_dir =
   | Error _ as error -> error
   | Ok None ->
     let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
-    Ok ([ "--env"; "GH_CONFIG_DIR=" ^ container_dir ], Unconfigured)
+    Ok
+      ( [ "--env"
+        ; "GH_CONFIG_DIR=" ^ container_dir
+        ; "--tmpfs"
+        ; container_dir ^ ":ro,mode=0555"
+        ]
+      , Unconfigured )
   | Ok (Some host_dir) ->
     let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
     Ok
@@ -409,6 +472,7 @@ let observe ~base_path ~keeper_name ~hostname =
            ; projected_token_env_names = token_env_names
            ; stored
            ; effective
+           ; effective_probe_scope = `Host_process_credential_only
            ; checked_at_unix = Time_compat.now ()
            })
 ;;
@@ -431,6 +495,7 @@ let observation_to_yojson observation =
       , `List (List.map (fun value -> `String value) observation.projected_token_env_names) )
     ; "stored", auth_result_to_yojson observation.stored
     ; "effective", auth_result_to_yojson observation.effective
+    ; "effective_probe_scope", `String "host_process_credential_only"
     ; "checked_at_unix", `Float observation.checked_at_unix
     ]
 ;;

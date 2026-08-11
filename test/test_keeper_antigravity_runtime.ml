@@ -699,7 +699,7 @@ let test_spawn_failure_is_pre_dispatch () =
                     "spawn is proven pre-dispatch"
                     "no_effect_observed"
                     (Keeper_provider_attempt_effect.to_string
-                       attempt.effect_disposition)))))
+                       attempt.effect_disposition))))))
 ;;
 
 let () =

@@ -12,4 +12,4 @@
   time_compat
   keeper_github_identity
   test_keeper_github_identity)
- (libraries alcotest yojson unix))
+ (libraries alcotest masc.fs_compat yojson unix))

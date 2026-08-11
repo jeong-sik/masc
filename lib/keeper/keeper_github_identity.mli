@@ -16,6 +16,7 @@ type observation =
   ; projected_token_env_names : string list
   ; stored : auth_result
   ; effective : auth_result
+  ; effective_probe_scope : [ `Host_process_credential_only ]
   ; checked_at_unix : float
   }
 
@@ -49,8 +50,8 @@ val docker_args :
   (string list, string) result
 
 (** Docker counterpart of [runtime_env_for_tool]. A safe existing identity is
-    mounted read-only; an absent one projects only its deterministic container
-    path. Malformed state remains a typed error. *)
+    mounted read-only; an absent identity shadows its deterministic container
+    path with an empty read-only tmpfs. Malformed state remains a typed error. *)
 val docker_args_for_tool :
   base_path:string ->
   keeper_name:string ->
@@ -63,6 +64,9 @@ val login_env : base_path:string -> keeper_name:string -> (string array, string)
 
 val observe :
   base_path:string -> keeper_name:string -> hostname:string -> (observation, string) result
+(** [effective] verifies projected credentials with the host process only.
+    [effective_probe_scope] prevents callers from presenting it as proof that a
+    Docker image contains a usable CLI/network stack. *)
 
 val auth_result_to_yojson : auth_result -> Yojson.Safe.t
 val observation_to_yojson : observation -> Yojson.Safe.t

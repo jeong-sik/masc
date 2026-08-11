@@ -16,6 +16,7 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Workspace = Masc.Workspace
 module Workspace_utils = Workspace_utils
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_config = Masc.Keeper_config
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_memory = Masc.Keeper_memory
 module Keeper_execution = Masc.Keeper_execution

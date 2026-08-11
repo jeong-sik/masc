@@ -142,7 +142,11 @@ let test_fake_gh_login_and_effective_identity () =
          Alcotest.(check (option string)) "effective identity uses projected token"
            (Some "token-user") observation.effective.login;
          Alcotest.(check (list string)) "effective token source is observable by name"
-           [ "GH_TOKEN" ] observation.projected_token_env_names)
+           [ "GH_TOKEN" ] observation.projected_token_env_names;
+         Alcotest.(check string) "effective probe is explicitly host-scoped"
+           "host_process_credential_only"
+           (match observation.effective_probe_scope with
+            | `Host_process_credential_only -> "host_process_credential_only"))
 ;;
 
 let test_config_dir_does_not_chmod_ancestor () =
@@ -220,9 +224,11 @@ let test_tool_projection_is_nonblocking_without_identity () =
   (match docker_state with
    | Github.Unconfigured -> ()
    | Configured _ -> Alcotest.fail "missing Docker identity reported configured");
-  Alcotest.(check (list string)) "docker remains runnable without a mount"
+  Alcotest.(check (list string)) "docker config path is shadowed read-only"
     [ "--env"
     ; "GH_CONFIG_DIR=/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli"
+    ; "--tmpfs"
+    ; "/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli:ro,mode=0555"
     ]
     docker_args
 ;;
@@ -308,6 +314,32 @@ let test_tool_projection_rejects_malformed_identity () =
   | Ok _ -> Alcotest.fail "malformed Docker identity was collapsed into absence"
 ;;
 
+let test_tool_projection_rejects_permissive_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "permissive-identity" in
+  let config_dir =
+    match Github.ensure_config_dir ~base_path ~keeper_name with
+    | Error message -> Alcotest.fail message
+    | Ok path -> path
+  in
+  Unix.chmod config_dir 0o755;
+  (match Github.runtime_env_for_tool ~base_path ~keeper_name [||] with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "world-readable config directory was accepted");
+  Unix.chmod config_dir 0o700;
+  let hosts = Filename.concat config_dir "hosts.yml" in
+  write_file hosts "github.com:\n  oauth_token: fixture\n";
+  Unix.chmod hosts 0o644;
+  match
+    Github.docker_args_for_tool
+      ~base_path
+      ~keeper_name
+      ~container_masc_dir:"/tmp/masc-runtime/.masc"
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "world-readable credential file was accepted"
+;;
+
 let () =
   Alcotest.run
     "keeper GitHub identity"
@@ -345,6 +377,10 @@ let () =
             "tool projection rejects malformed identity"
             `Quick
             test_tool_projection_rejects_malformed_identity
+        ; Alcotest.test_case
+            "tool projection rejects permissive identity"
+            `Quick
+            test_tool_projection_rejects_permissive_identity
         ] )
     ]
 ;;

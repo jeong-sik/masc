@@ -460,14 +460,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     let started_at = Time_compat.now () in
     let turn_result =
       let on_stream_event = claude_stream_callback on_event in
-      (match tools with
-       | [] -> ()
-       | _ :: _ ->
-         Atomic.set
-           effect_disposition
-           Keeper_provider_attempt_effect.Observation_unavailable);
       try
-        (match
+        let client_result =
            Runtime_claude_code.run_turn
              ~mgr:process_mgr
              ~clock
@@ -505,7 +499,17 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              ?on_stream_event
              client_config
              ~prompt
-         with
+        in
+        Atomic.set
+          effect_disposition
+          (match client_result with
+           | Error (Runtime_claude_code.Spawn_failed _) ->
+             Keeper_provider_attempt_effect.No_effect_observed
+           | Ok _ | Error _ ->
+             (match tools with
+              | [] -> Keeper_provider_attempt_effect.No_effect_observed
+              | _ :: _ -> Keeper_provider_attempt_effect.Observation_unavailable));
+        (match client_result with
          | Error error ->
            if not !state_persistence_failed
            then recovery_failure := recovery_failure_of_client_error error;

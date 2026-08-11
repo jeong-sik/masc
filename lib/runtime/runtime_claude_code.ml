@@ -1061,15 +1061,19 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = ref "" in
     let proc =
-      Eio.Process.spawn
-        ~sw
-        mgr
-        ~cwd
-        ~env:(subscription_only_environment ())
-        ~stdin:stdin_r
-        ~stdout:stdout_w
-        ~stderr:stderr_w
-        argv
+      try
+        Eio.Process.spawn
+          ~sw
+          mgr
+          ~cwd
+          ~env:(subscription_only_environment ())
+          ~stdin:stdin_r
+          ~stdout:stdout_w
+          ~stderr:stderr_w
+          argv
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
     in
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
@@ -1214,7 +1218,11 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
-    | exn -> Error (Spawn_failed (Printexc.to_string exn))
+    | Runtime_error error -> Error error
+    | exn ->
+      Error
+        (Protocol_error
+           { stage = "runtime boundary"; detail = Printexc.to_string exn })
   in
   (match result with
    | Ok turn ->

@@ -292,6 +292,58 @@ let prepare ?max_prompt_bytes messages =
     ~max_prompt_bytes
 ;;
 
+let test_extra_system_context_keeps_typed_provenance () =
+  let initial_messages = [ msg Agent_core.Types.User "history" ] in
+  let projected_messages = ref None in
+  let hooks =
+    { Agent_core.Hooks.empty with
+      before_turn_params =
+        Some
+          (fun event ->
+             match event with
+             | Agent_core.Hooks.BeforeTurnParams { current_params; _ } ->
+               Agent_core.Hooks.AdjustParams
+                 { current_params with
+                   extra_system_context = Some "dynamic context"
+                 }
+             | _ -> Agent_core.Hooks.Continue)
+    }
+  in
+  let result =
+    Host.prepare_turn
+      ~runtime_label:"Fixture"
+      ~keeper_name:"provenance-fixture"
+      ~turn_count:1
+      ~system_prompt:"SYS"
+      ~tools:[]
+      ~initial_messages
+      ~model_input_projection:
+        (Some
+           (fun messages ->
+              projected_messages := Some messages;
+              Ok messages))
+      ~hooks:(Some hooks)
+      ~configured_reasoning_effort:None
+      ~max_prompt_bytes:None
+  in
+  (match result with
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> ());
+  match !projected_messages with
+  | None -> fail "official-client projection did not observe the provider input"
+  | Some messages ->
+    check int "one typed context carrier appended" 2 (List.length messages);
+    check
+      bool
+      "input composition can remove the typed carrier"
+      true
+      (Option.is_some
+         (Keeper_agent_prompt_metrics.provider_content_messages
+            ~prompt_context_present:true
+            ~projection_input:messages
+            ~projected_messages:messages))
+;;
+
 let text_of (m : Agent_core.Types.message) =
   m.content
   |> List.filter_map (function Agent_core.Types.Text t -> Some t | _ -> None)
@@ -400,6 +452,10 @@ let () =
         ] )
     ; ( "start-turn seed budget"
       , [ test_case
+            "extra context keeps typed provenance"
+            `Quick
+            test_extra_system_context_keeps_typed_provenance
+        ; test_case
             "bounds the seed and keeps the newest messages"
             `Quick
             test_seed_is_bounded_and_keeps_the_newest

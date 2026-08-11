@@ -224,7 +224,16 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
   let messages =
     match turn_params.extra_system_context with
     | None -> messages
-    | Some text -> messages @ [ system_message text ]
+    | Some text ->
+      messages
+      @ [ { Agent_core.Types.role = Agent_core.Types.User
+          ; content = [ Agent_core.Types.Text ("[system context] " ^ text) ]
+          ; name = None
+          ; tool_call_id = None
+          ; metadata =
+              Agent_core.Types.Extra_system_context_provenance.metadata
+          }
+        ]
   in
   let* messages =
     match model_input_projection with

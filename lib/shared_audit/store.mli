@@ -40,9 +40,9 @@ val create : base_dir:string -> t
     created (with parents) if it does not exist. Stores for equivalent
     realpath-resolved directories share one in-process writer owner.
     A new owner loads the latest entry's hash from disk; reopening an
-    existing owner refreshes that cursor under its append lock, preserving
-    fail-closed validation of on-disk evidence. Thus [append] continues the
-    chain across sessions. *)
+    existing owner refreshes that cursor under its append lock. The canonical
+    path is retained for all later I/O, so aliases cannot silently retarget a
+    live writer. Thus [append] continues the chain across sessions. *)
 
 val append :
   t ->

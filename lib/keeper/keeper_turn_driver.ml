@@ -228,6 +228,18 @@ let attempt_runtime_candidates
            Keeper_provider_attempt_effect.allows_same_turn_retry
              effect_disposition
          in
+         let terminal_error =
+           match effect_disposition with
+           | Keeper_provider_attempt_effect.No_effect_observed -> error
+           | Keeper_provider_attempt_effect.Effect_attempted
+           | Keeper_provider_attempt_effect.Observation_unavailable ->
+             core_error_of_masc_internal_error
+               (Provider_attempt_effect_fenced
+                  { runtime_id = attempt_runtime_id
+                  ; effect_disposition
+                  ; diagnostic = Agent_core.Error.to_string error
+                  })
+         in
          let allow_accept_no_progress_retry =
            if
              Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next
@@ -256,7 +268,9 @@ let attempt_runtime_candidates
              then Some error
              else None
          in
-         if retry_admitted && effect_retry_admitted && error_is_retryable
+         if not effect_retry_admitted
+         then Error terminal_error
+         else if retry_admitted && error_is_retryable
          then loop ~observed_overflow (idx + 1) rest
          else if is_last
          then (
@@ -278,7 +292,7 @@ let attempt_runtime_candidates
                 ; failure = error
                 }
             | false, _, _ | true, false, _ | true, true, [] -> ());
-           Error error))
+           Error terminal_error))
   in
   loop ~observed_overflow:None 0 candidates
 
@@ -812,17 +826,20 @@ let run_named
         let run_antigravity_with_history () =
           run_antigravity ~initial_messages ()
         in
-        let antigravity_result, effect_disposition =
+        let antigravity_attempt =
           match provider_config_transform, agent_core_checkpoint with
           | Some _, _ ->
-            ( Error
-                (Agent_core.Error.Config
-                   (Agent_core.Error.InvalidConfig
-                      { field = "provider_config_transform"
-                      ; detail =
-                          "provider config transforms cannot target an antigravity-cli runtime"
-                      }))
-            , Keeper_provider_attempt_effect.No_effect_observed )
+            { Keeper_antigravity_runtime.result =
+                Error
+                  (Agent_core.Error.Config
+                     (Agent_core.Error.InvalidConfig
+                        { field = "provider_config_transform"
+                        ; detail =
+                            "provider config transforms cannot target an antigravity-cli runtime"
+                        }))
+            ; effect_disposition =
+                Keeper_provider_attempt_effect.No_effect_observed
+            }
           | None, Some _ ->
             Log.Keeper.info
               "%s: official-client runtime %s resolves start-or-resume from \
@@ -840,15 +857,12 @@ let run_named
                     , `String "official_client_session_store_owns_resume" )
                   ])
               Keeper_runtime_manifest.Runtime_routed;
-            ( run_antigravity_with_history ()
-            , Keeper_provider_attempt_effect.Observation_unavailable )
-          | None, None ->
-            ( run_antigravity_with_history ()
-            , Keeper_provider_attempt_effect.Observation_unavailable )
+            run_antigravity_with_history ()
+          | None, None -> run_antigravity_with_history ()
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let antigravity_result =
-          Result.bind antigravity_result (fun run_result ->
+          Result.bind antigravity_attempt.result (fun run_result ->
             Keeper_turn_driver_try_provider.apply_accept
               ~runtime_id:attempt_runtime_id
               ~accept
@@ -863,10 +877,7 @@ let run_named
          | Error _ -> ());
         ( selected_runtime_result runtime antigravity_result
         , None
-        (* Antigravity executes dynamic tools but does not yet return a
-           complete attempt-local effect observation. Never infer safety from
-           an absent AGENT_CORE checkpoint after dispatch. *)
-        , effect_disposition )
+        , antigravity_attempt.effect_disposition )
       | Runtime_execution.Claude_code config ->
         let run_claude ~initial_messages () =
           let tools = if runtime.model.tools_support then tools else [] in
@@ -888,17 +899,20 @@ let run_named
             ~on_event
             ~config
         in
-        let claude_result, effect_disposition =
+        let claude_attempt =
           match provider_config_transform, agent_core_checkpoint with
           | Some _, _ ->
-            ( Error
-                (Agent_core.Error.Config
-                   (Agent_core.Error.InvalidConfig
-                      { field = "provider_config_transform"
-                      ; detail =
-                          "provider config transforms cannot target a claude-code runtime"
-                      }))
-            , Keeper_provider_attempt_effect.No_effect_observed )
+            { Keeper_claude_code_runtime.result =
+                Error
+                  (Agent_core.Error.Config
+                     (Agent_core.Error.InvalidConfig
+                        { field = "provider_config_transform"
+                        ; detail =
+                            "provider config transforms cannot target a claude-code runtime"
+                        }))
+            ; effect_disposition =
+                Keeper_provider_attempt_effect.No_effect_observed
+            }
           | None, Some _ ->
             (* The durable official-client session store owns start-or-resume
                (Keeper_claude_code_runtime reads [previous_settlement]), so a
@@ -921,15 +935,12 @@ let run_named
                     , `String "official_client_session_store_owns_resume" )
                   ])
               Keeper_runtime_manifest.Runtime_routed;
-            ( run_claude ~initial_messages ()
-            , Keeper_provider_attempt_effect.Observation_unavailable )
-          | None, None ->
-            ( run_claude ~initial_messages ()
-            , Keeper_provider_attempt_effect.Observation_unavailable )
+            run_claude ~initial_messages ()
+          | None, None -> run_claude ~initial_messages ()
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let claude_result =
-          Result.bind claude_result (fun run_result ->
+          Result.bind claude_attempt.result (fun run_result ->
             Keeper_turn_driver_try_provider.apply_accept
               ~runtime_id:attempt_runtime_id
               ~accept
@@ -944,9 +955,7 @@ let run_named
          | Error _ -> ());
         ( selected_runtime_result runtime claude_result
         , None
-        (* Claude Code has the same post-dispatch observation gap. Until its
-           adapter carries the dynamic-tool fact, lane fallback is fail-closed. *)
-        , effect_disposition )
+        , claude_attempt.effect_disposition )
       | Runtime_execution.Agent_core runtime_provider_config ->
        (match
           match provider_config_transform with

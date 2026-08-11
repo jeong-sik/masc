@@ -1,22 +1,18 @@
 (** Typed observation of tool effects within one provider candidate attempt.
 
-    This value is carried separately from the provider error. Provider error
-    text and subtypes are diagnostic evidence; they must never be parsed to
-    recover whether trying another candidate could repeat an external effect. *)
+    This public projection is manifestly equal to the leaf SSOT used by the
+    durable failure codec. Provider error text and subtypes never grant retry
+    authority. *)
 
-type t =
+type t = Keeper_provider_attempt_effect_core.t =
   | No_effect_observed
-      (** The attempt boundary did not observe a dynamic tool invocation. This
-          does not override another retry fence such as an AGENT_CORE checkpoint. *)
+      (** No dynamic tool invocation was observed. *)
   | Effect_attempted
-      (** A dynamic tool handler was entered. The effect may have committed, so
-          another provider candidate must not receive the same turn. *)
+      (** A dynamic tool handler was entered; another candidate could duplicate
+          the effect. *)
   | Observation_unavailable
-      (** This runtime path has no complete tool-effect observer. Same-turn
-          retry is fail-closed until the adapter supplies one. *)
+      (** The adapter cannot prove whether an effect was attempted. *)
 
-(** [allows_same_turn_retry disposition] is the effect-side half of the
-    same-turn retry gate. Callers must compose it with every other retry
-    authority, notably the typed AGENT_CORE checkpoint fence. Unknown
-    observation is denied rather than treated as evidence of no effect. *)
 val allows_same_turn_retry : t -> bool
+val to_string : t -> string
+val of_string : string -> t option

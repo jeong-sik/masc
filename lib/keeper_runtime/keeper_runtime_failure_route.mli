@@ -68,6 +68,7 @@ type terminal_class =
   | Terminal_effect_policy_rejection
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection
+  | Provider_attempt_effect_fenced
   | Internal_opaque
       (** unhandled internal exceptions, serialization/io/orchestration/agent
           family errors; the failure stays visible while the keeper remains

@@ -1177,7 +1177,28 @@ let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
       [ "primary.test_model"; "fallback.test_model" ]
   in
   (match result with
-   | Error _ -> ()
+   | Error error ->
+     (match Driver.classify_masc_internal_error error with
+      | Some
+          (Driver.Provider_attempt_effect_fenced
+             { runtime_id = "primary.test_model"
+             ; effect_disposition = observed
+             ; diagnostic
+             }) ->
+        Alcotest.(check bool)
+          (label ^ " keeps the exact effect disposition")
+          true
+          (observed = effect_disposition);
+        Alcotest.(check bool)
+          (label ^ " keeps a diagnostic")
+          true
+          (String.length diagnostic > 0)
+      | Some other ->
+        Alcotest.failf
+          "%s returned wrong typed failure %s"
+          label
+          (Driver.kind_of_masc_internal_error other)
+      | None -> Alcotest.failf "%s dropped the typed effect fence" label)
    | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label);
   Alcotest.(check (list string))
     (label ^ " attempts only the effect owner")
@@ -1197,6 +1218,46 @@ let test_attempt_loop_fails_closed_without_effect_observation () =
   check_effect_disposition_blocks_same_turn_retry
     "effect observation unavailable"
     Masc.Keeper_provider_attempt_effect.Observation_unavailable
+
+let test_effect_fence_outranks_an_earlier_overflow () =
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
+        match candidate with
+        | "small.test_model" ->
+          attempt_without_effect
+            (Error
+               (Agent_core.Error.Api
+                  (Agent_core.Retry.ContextOverflow
+                     { message = "small context"; limit = Some 1024 })))
+            None
+        | "effect-owner.test_model" ->
+          ( Error (retryable_network_error "failed after an effect")
+          , None
+          , Masc.Keeper_provider_attempt_effect.Effect_attempted )
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "small.test_model"; "effect-owner.test_model" ]
+  in
+  match result with
+  | Error error ->
+    (match Driver.classify_masc_internal_error error with
+     | Some
+         (Driver.Provider_attempt_effect_fenced
+            { runtime_id = "effect-owner.test_model"
+            ; effect_disposition =
+                Masc.Keeper_provider_attempt_effect.Effect_attempted
+            ; _
+            }) ->
+       ()
+     | Some other ->
+       Alcotest.failf
+         "later effect fence was replaced by %s"
+         (Driver.kind_of_masc_internal_error other)
+     | None -> Alcotest.fail "later effect fence was replaced by the first overflow")
+  | Ok _ -> Alcotest.fail "effect-fenced lane unexpectedly succeeded"
 
 let test_attempt_loop_blocks_no_progress_when_gate_denies () =
   let attempts = ref [] in
@@ -1872,6 +1933,10 @@ let () =
             "missing effect observation fails closed"
             `Quick
             test_attempt_loop_fails_closed_without_effect_observation;
+          Alcotest.test_case
+            "effect fence outranks an earlier overflow"
+            `Quick
+            test_effect_fence_outranks_an_earlier_overflow;
           Alcotest.test_case
             "attempt loop blocks no-progress when gate denies"
             `Quick

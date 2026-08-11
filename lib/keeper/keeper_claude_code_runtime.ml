@@ -9,6 +9,11 @@ let internal_error detail = Agent_core.Error.Internal detail
 module Host = Keeper_official_client_host
 module Session_store = Keeper_official_client_session_store
 
+type attempt_outcome =
+  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; effect_disposition : Keeper_provider_attempt_effect.t
+  }
+
 let runtime_label = "Claude Code"
 
 let project_messages messages =
@@ -185,7 +190,7 @@ let recovery_failure_of_client_error = function
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~raw_trace ~on_event
+    ~context ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~(config : Runtime_execution.claude_code) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -457,6 +462,12 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     let started_at = Time_compat.now () in
     let turn_result =
       let on_stream_event = claude_stream_callback on_event in
+      (match tools with
+       | [] -> ()
+       | _ :: _ ->
+         Atomic.set
+           effect_disposition
+           Keeper_provider_attempt_effect.Observation_unavailable);
       try
         (match
            Runtime_claude_code.run_turn
@@ -712,22 +723,29 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context ~event_bus ~raw_trace ~on_event ~config =
-  Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-    run_without_lifecycle
-      ~runtime_id
-      ~keeper_name
-      ~base_path
-      ~goal
-      ~goal_blocks
-      ~system_prompt
-      ~tools
-      ~initial_messages
-      ~model_input_projection
-      ~hooks
-      ~context_injector
-      ~context
-      ~event_bus
-      ~raw_trace
-      ~on_event
-      ~config)
+  let effect_disposition =
+    Atomic.make Keeper_provider_attempt_effect.No_effect_observed
+  in
+  let result =
+    Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+      run_without_lifecycle
+        ~runtime_id
+        ~keeper_name
+        ~base_path
+        ~goal
+        ~goal_blocks
+        ~system_prompt
+        ~tools
+        ~initial_messages
+        ~model_input_projection
+        ~hooks
+        ~context_injector
+        ~context
+        ~event_bus
+        ~raw_trace
+        ~on_event
+        ~effect_disposition
+        ~config)
+  in
+  { result; effect_disposition = Atomic.get effect_disposition }
 ;;

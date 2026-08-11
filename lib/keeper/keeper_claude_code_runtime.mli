@@ -1,5 +1,14 @@
 (** Keeper projection for the official Claude Code subscription runtime. *)
 
+type attempt_outcome =
+  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; effect_disposition : Keeper_provider_attempt_effect.t
+  }
+(** One Claude Code candidate result plus the explicit tool-effect observation
+    available at its runtime boundary. Preflight failures remain
+    [No_effect_observed]; once the model turn is dispatched, the adapter fails
+    closed with [Observation_unavailable]. *)
+
 val run :
   runtime_id:string ->
   keeper_name:string ->
@@ -17,4 +26,4 @@ val run :
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
   config:Runtime_execution.claude_code ->
-  (Runtime_agent.run_result, Agent_core.Error.t) result
+  attempt_outcome

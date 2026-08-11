@@ -272,7 +272,9 @@ let record_compaction_outcome_metric ~keeper_name outcome =
    removed (#26546), a typed context overflow has no automatic repair step.
    Without a deferred runtime successor, retry has no evidence of a smaller
    request. [Some detail] terminalizes the selection so the keeper moves on.
-   Everything else preserves the selection:
+   An effect-fenced provider failure is also terminal for this exact source:
+   replay could duplicate an effect, so its typed failed receipt outranks any
+   stale deferred successor. Everything else preserves the selection:
    - a pending [deferred_runtime_lane] freezes a successor runtime for this
      exact selection; the next cycle re-runs it on that lane, and a lane list
      is finite, so the walk terminates without a timed retry cycle;
@@ -289,18 +291,25 @@ let failed_selection_terminal_detail
   match failure.Keeper_unified_turn.source_disposition with
   | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None
   | Keeper_unified_turn.Follow_failure_route ->
-    (match failure.Keeper_unified_turn.deferred_runtime_lane with
-     | Some _ -> None
-     | None ->
-       (match failure.Keeper_unified_turn.route with
-        | Keeper_runtime_failure_route.Exhausted_visible_alive
-            { terminal = Keeper_runtime_failure_route.Context_overflow
-            ; detail
-            ; _
-            } -> Some detail
-        | Keeper_runtime_failure_route.Exhausted_visible_alive _
-        | Keeper_runtime_failure_route.Retry_after_observed _
-        | Keeper_runtime_failure_route.Rotate_now _ -> None))
+    (match failure.Keeper_unified_turn.route with
+     | Keeper_runtime_failure_route.Exhausted_visible_alive
+         { terminal = Keeper_runtime_failure_route.Provider_attempt_effect_fenced
+         ; detail
+         ; _
+         } -> Some detail
+     | route ->
+       (match failure.Keeper_unified_turn.deferred_runtime_lane with
+        | Some _ -> None
+        | None ->
+          (match route with
+           | Keeper_runtime_failure_route.Exhausted_visible_alive
+               { terminal = Keeper_runtime_failure_route.Context_overflow
+               ; detail
+               ; _
+               } -> Some detail
+           | Keeper_runtime_failure_route.Exhausted_visible_alive _
+           | Keeper_runtime_failure_route.Retry_after_observed _
+           | Keeper_runtime_failure_route.Rotate_now _ -> None)))
 ;;
 
 module For_testing = struct

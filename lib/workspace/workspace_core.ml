@@ -115,14 +115,11 @@ end
 
 let clear_agent_current_task_cache config ~task_id =
   let agents_path = agents_dir config in
-  if path_exists config agents_path
-  then (
-    (* Backend-aware listing: the guard above already went through
-       [path_exists config], but the listing used bare [Sys.readdir], so a
-       Memory-backend workspace scanned an empty local mirror and skipped
-       the cache invalidation silently (RFC-0371 B9). [list_dir] is total —
-       missing dir and backend errors read as []. *)
-    let agent_files = list_dir config agents_path in
+  (* Backend-aware listing: a Memory-backend workspace may have agent
+     child keys without an exact parent directory key, so the parent
+     [path_exists] guard would skip cache invalidation. [list_dir] is total —
+     missing dir and backend errors read as []. *)
+  let agent_files = list_dir config agents_path in
     List.iter
       (fun name ->
          if Filename.check_suffix name ".json"
@@ -158,7 +155,7 @@ let clear_agent_current_task_cache config ~task_id =
                | Ok _ -> ()
                | Error msg ->
                  Log.Misc.warn "cache desync agent read failed for %s: %s" name msg)))
-      agent_files)
+      agent_files
 ;;
 
 (* #13460: cache desync invalidation counter. Workspace_broadcast emits this when

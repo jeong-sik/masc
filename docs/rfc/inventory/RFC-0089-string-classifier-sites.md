@@ -1,8 +1,8 @@
 # RFC-0089 inventory — `String.starts_with ~prefix:"..."` sites in `lib/`
 
-수집 시점: 2026-05-17 (re-scan after Accepted promotion, PR #15775).
+수집 시점: 2026-08-12 (re-scan after deletion in PR #28209).
 원본 명령: `rg -n 'String\.starts_with ~prefix:"' lib/`.
-합계: **211 site, 85 파일** after the credential bundle purge.
+합계: **207 site, 84 파일** after the credential bundle purge.
 
 이전 baseline (2026-05-15): 215 site, 56 파일. 7 implementation PRs (#15520, #15523,
 #15524, #15684, #15699, #15703, #15704) 머지 후 site count는 net +2, 파일 분포는
@@ -13,7 +13,7 @@ single-site로 흩어진* 양상 — 본 RFC가 목표한 typed-variant 도입 �
 sample 만 둔다. 도메인별 migration PR이 자기 파일을 닫을 때 본 인벤토리도 같은
 PR에서 줄여나간다.
 
-## 파일별 분포 (15+ → 1 site, 2026-05-17 main HEAD)
+## 파일별 분포 (15+ → 1 site, 2026-08-12 PR #28209 HEAD)
 
 | count | file | classification |
 |---|---|---|
@@ -24,7 +24,6 @@ PR에서 줄여나간다.
 | 9 | `lib/keeper/agent_tool_execute_command_parse.ml` | scope-out (CLI argv tokenizer) |
 | 7 | `lib/server/server_auth.ml` | scope-out (HTTP path routing) |
 | 5 | `lib/graphql_endpoint.ml` | scope-out (URL scheme + GraphQL protocol) |
-| 4 | `lib/tool_local_runtime_bench.ml` | scope-out (benchmark output parser) |
 | 4 | `lib/repo_manager/keeper_repo_mapping.ml` | scope-out (repo URL prefix) |
 | 4 | `lib/keeper_skill_routing/keeper_skill_routing.ml` | **scope-in (G5 pending)** |
 | 4 | `lib/ide/ide_region_tracker.ml` | scope-out (file path classifier) |
@@ -51,9 +50,9 @@ PR에서 줄여나간다.
 | TOML key matching | runtime_config, runtime_declarative_adapter | 8 | user-authored config; key string is the protocol |
 | HTTP/2 + MCP protocol marker | server_h2_gateway, mcp_server_eio_protocol, server_dashboard_http_runtime_info | 9 | wire protocol literals |
 | Worker dev tools shell parser | retired_worker_shell_facade, agent_tool_execute_runtime | 19 | shell command string parser; deleted by **RFC-0091 PR-2** |
-| Benchmark / file path classifier | tool_local_runtime_bench, ide/ide_region_tracker | 8 | output parser + path filter |
+| File path classifier | ide/ide_region_tracker | 4 | path filter |
 
-**Subtotal scope-out: ~133 sites across the top 23 files.**
+**Subtotal scope-out: ~129 sites across the top 22 files.**
 
 ## §3.1 scope-in residual — 2026-05-17
 

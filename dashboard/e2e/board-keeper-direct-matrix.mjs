@@ -34,6 +34,7 @@ const transportTimeoutMs = 120_000
 const karmaLedgerApiLimit = 5_000
 const pollIntervalMs = 500
 const matrix = []
+const mcpSessionClosers = []
 let postId
 let commentId
 let author
@@ -139,6 +140,14 @@ async function createMcpClient(token, agent) {
     'Mcp-Session-Id': sessionId,
     'Mcp-Protocol-Version': protocolVersion,
   }
+  mcpSessionClosers.push(async () => {
+    const closeResponse = await fetchWithTimeout(`MCP session close ${agent}`, mcpUrl, {
+      method: 'DELETE',
+      headers: sessionHeaders,
+    })
+    const closeText = await closeResponse.text()
+    check(closeResponse.ok, `MCP session close ${agent}: HTTP ${closeResponse.status} ${closeText}`)
+  })
   const initializedResponse = await fetchWithTimeout(
     `MCP initialized notification ${agent}`,
     mcpUrl,
@@ -237,7 +246,7 @@ try {
     author: 'anonymous',
   })
   const listResult = await eventually(
-    remainingMs => readJson('/api/v1/board?limit=150&blind_votes=true', {
+    remainingMs => readJson('/api/v1/board?limit=150&sort=recent&blind_votes=true', {
       timeoutMs: remainingMs,
     }),
     result => result.ok && result.json?.posts?.some(post => post.title === title),
@@ -352,7 +361,7 @@ try {
   let cleanupError
   if (!postId) {
     try {
-      const candidates = await readJson('/api/v1/board?limit=150&blind_votes=true')
+      const candidates = await readJson('/api/v1/board?limit=150&sort=recent&blind_votes=true')
       const orphan = candidates.json?.posts?.find(candidate => candidate.title === title)
       if (orphan) {
         postId = orphan.id
@@ -386,6 +395,16 @@ try {
     } catch (error) {
       cleanupError = error
     }
+  }
+  const sessionCloseResults = await Promise.allSettled(mcpSessionClosers.map(close => close()))
+  const sessionCloseErrors = sessionCloseResults
+    .filter(result => result.status === 'rejected')
+    .map(result => result.reason)
+  if (sessionCloseErrors.length > 0) {
+    const sessionCloseError = new AggregateError(sessionCloseErrors, 'MCP session cleanup failed')
+    cleanupError = cleanupError
+      ? new AggregateError([cleanupError, sessionCloseError], 'Board and MCP cleanup both failed')
+      : sessionCloseError
   }
   if (testError && cleanupError) {
     throw new AggregateError([testError, cleanupError], 'Keeper matrix and cleanup both failed')

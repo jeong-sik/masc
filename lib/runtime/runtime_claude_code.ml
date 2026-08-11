@@ -139,6 +139,8 @@ type error =
   | Process_exited of string
   | Timeout of float
 
+exception Runtime_error of error
+
 let error_to_string = function
   | Invalid_config detail -> "invalid Claude Code config: " ^ detail
   | Spawn_failed detail -> "failed to start Claude Code: " ^ detail

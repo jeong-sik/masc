@@ -837,8 +837,8 @@ let start_keeper_loops_owned
     match
       Keeper_owner_registry.install_from_store
         ~sw
-        ~operation_executor:
-          (Some (Server_routes_http_keeper_stream.operation_executor ~state ~clock))
+        ~operation_runner:
+          (Some (Server_routes_http_keeper_stream.operation_runner ~state ~clock))
         config
     with
     | Ok count -> count

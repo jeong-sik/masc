@@ -318,24 +318,11 @@ let field_bool_opt name json =
   | Some (`Bool b) -> Some b
   | _ -> None
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0 then true
-  else if needle_len > haystack_len then false
-  else
-    let rec loop i =
-      if i + needle_len > haystack_len then false
-      else if String.sub haystack i needle_len = needle then true
-      else loop (i + 1)
-    in
-    loop 0
-
 let content_mentions_user ~user_id content =
   let user_id = String.trim user_id in
   user_id <> ""
-  && (contains_substring ~needle:("<@" ^ user_id ^ ">") content
-      || contains_substring ~needle:("<@!" ^ user_id ^ ">") content)
+  && (String_util.contains_substring content ("<@" ^ user_id ^ ">")
+      || String_util.contains_substring content ("<@!" ^ user_id ^ ">"))
 
 (* Discord sends user mentions as [<@snowflake>] (or [<@!snowflake>] for
    nickname-ping).  The structured [mentions] array carries the matching

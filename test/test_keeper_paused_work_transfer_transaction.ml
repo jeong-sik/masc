@@ -132,7 +132,7 @@ let with_transfer_lane f =
            ~paused:false
        in
        let _, sw = current_test_context () in
-       (match Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
+       (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok count -> Alcotest.(check int) "installed owner count" 2 count
         | Error error ->
           Alcotest.fail (Keeper_owner_registry.install_error_to_string error));

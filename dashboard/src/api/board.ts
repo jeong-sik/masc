@@ -5,7 +5,7 @@ import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardPostOrigin, BoardComment, BoardReactionSummary,
   BoardReactionState, BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
-  BoardVoteDirection, BoardModerationStatus, BoardContributorQuality,
+  BoardVoteDirection, BoardModerationStatus,
     BoardAttachmentDecode, BoardAttachmentKind,
     BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
     KeeperApprovalQueueItem, KeeperExactAttemptState,
@@ -567,36 +567,6 @@ function normalizeBoardModerationStatus(raw: unknown): BoardModerationStatus {
   }
 }
 
-function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality | null {
-  if (!isRecord(raw)) return null
-  const completionRate = asNumber(raw.completion_rate)
-  const responseRate = asNumber(raw.response_rate)
-  const boardPosts = asNumber(raw.board_posts)
-  const boardComments = asNumber(raw.board_comments)
-  const source = asString(raw.source, '').trim() || undefined
-  const rawEvidenceState = asString(raw.evidence_state, '').trim()
-  const evidenceState = rawEvidenceState === 'measured' || rawEvidenceState === 'default'
-    ? rawEvidenceState
-    : undefined
-
-  if (
-    completionRate === undefined
-    && responseRate === undefined
-    && boardPosts === undefined
-    && boardComments === undefined
-    && source === undefined
-    && evidenceState === undefined
-  ) return null
-  return {
-    source,
-    completion_rate: completionRate,
-    response_rate: responseRate,
-    board_posts: boardPosts,
-    board_comments: boardComments,
-    evidence_state: evidenceState,
-  }
-}
-
 // RFC-0233 §7: parse the typed origin object (post_to_yojson_with_karma emits
 // turn_ref / source / fusion_run_id). Parse, don't repair: a non-object or an
 // all-absent origin -> null (no empty record); each sub-field degrades
@@ -697,7 +667,6 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     hearth_count: asNumber(raw.hearth_count, 0),
     report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
     moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
-    contributor_quality: normalizeBoardContributorQuality(raw.contributor_quality),
     ...(reactions !== undefined ? { reactions } : {}),
     ...(supportedReactionEmojis !== undefined
       ? { supported_reaction_emojis: supportedReactionEmojis }

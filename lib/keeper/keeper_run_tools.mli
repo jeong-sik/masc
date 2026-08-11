@@ -94,6 +94,7 @@ val prepare_agent_setup
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)
   -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?on_tool_result_ready:(tool_call_id:string -> unit)
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> unit
   -> (agent_setup, Agent_core.Error.t) result

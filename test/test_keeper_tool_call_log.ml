@@ -1247,6 +1247,50 @@ let test_async_append_defers_until_flush env =
           (Safe_ops.json_string_opt "keeper" entry)
       | _ -> Alcotest.fail "expected exactly one entry"))
 
+let test_commit_callback_bypasses_async_queue env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber
+        ~sw
+        ~clock:(Eio.Stdenv.clock env);
+      let committed = ref false in
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"chat-k"
+        ~tool_name:"masc_status"
+        ~input:(`Assoc [])
+        ~output_text:"ready"
+        ~success:true
+        ~duration_ms:1.0
+        ~on_committed:(fun () -> committed := true)
+        ();
+      Alcotest.(check bool) "callback observed committed row" true !committed;
+      Alcotest.(check int)
+        "committed row did not enter async queue"
+        0
+        (Keeper_tool_call_log.queued_count_for_testing ());
+      Alcotest.(check int)
+        "committed row is immediately readable"
+        1
+        (List.length (Keeper_tool_call_log.read_recent ~n:1 ()))))
+
+let test_commit_callback_fails_closed_without_store () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let raised =
+    try
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"chat-k"
+        ~tool_name:"masc_status"
+        ~input:(`Assoc [])
+        ~output_text:"unavailable"
+        ~success:true
+        ~duration_ms:1.0
+        ~on_committed:(fun () -> Alcotest.fail "callback must not run")
+        ();
+      false
+    with _ -> true
+  in
+  Alcotest.(check bool) "required commit fails closed" true raised
+
 let () =
   Alcotest.run "keeper_tool_call_log"
     [ ( "read_recent",
@@ -1321,5 +1365,9 @@ let () =
     ; ( "async_append",
         [ eio_env_test "append queues until flush when async fiber is active"
             test_async_append_defers_until_flush
+        ; eio_env_test "commit callback runs after synchronous readable append"
+            test_commit_callback_bypasses_async_queue
+        ; eio_test "commit callback fails closed without store"
+            test_commit_callback_fails_closed_without_store
         ] )
     ]

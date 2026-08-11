@@ -22,7 +22,8 @@ import {
   Overview,
 } from './overview'
 import type {
-  DashboardScheduledAutomation,
+  DashboardScheduledAutomationAvailableData,
+  DashboardScheduledAutomationProjection,
   DashboardScheduledAutomationRequest,
   DashboardScheduleRunnerStatus,
   FusionRunRecord,
@@ -33,11 +34,11 @@ import { keepers, boardPosts, boardTotal, lastBoardRefreshAt, shellRuntimeResolu
 import type { Goal } from '../../types/core'
 
 const overviewMocks = vi.hoisted(() => ({
-  scheduledAutomation: { value: null as null | DashboardScheduledAutomation },
+  scheduledAutomationProjection: { value: null as null | DashboardScheduledAutomationProjection },
 }))
 
 vi.mock('../schedule/schedule-state', () => ({
-  scheduledAutomation: overviewMocks.scheduledAutomation,
+  scheduledAutomationProjection: overviewMocks.scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh: () => () => {},
 }))
 
@@ -90,8 +91,13 @@ function makeBoardPost(partial: Partial<BoardPost>): BoardPost {
   }
 }
 
-function makeScheduledAutomation(partial: Partial<DashboardScheduledAutomation> = {}): DashboardScheduledAutomation {
-  return {
+function makeScheduledAutomation(
+  partial: Partial<DashboardScheduledAutomationAvailableData> = {},
+): DashboardScheduledAutomationProjection {
+  const data: DashboardScheduledAutomationAvailableData = {
+    status: 'ok',
+    schedule_store_known: true,
+    schedule_store_read_error: null,
     request_count: 3,
     request_limit: 10,
     truncated: false,
@@ -128,6 +134,16 @@ function makeScheduledAutomation(partial: Partial<DashboardScheduledAutomation> 
       },
     ],
     ...partial,
+  }
+  return {
+    state: 'available',
+    data,
+    page: {
+      visibleCount: data.requests.length,
+      totalCount: data.request_count,
+      limit: data.request_limit,
+      truncated: data.truncated,
+    },
   }
 }
 
@@ -914,9 +930,12 @@ describe('computeOverviewDigest', () => {
         },
       }),
     )
-    expect(digest.scheduledAutomation.hasProjection).toBe(true)
-    expect(digest.scheduledAutomation.requestCount).toBe(5)
-    expect(digest.scheduledAutomation.requestLimit).toBe(10)
+    expect(digest.scheduledAutomation.state).toBe('available')
+    if (digest.scheduledAutomation.state !== 'available') {
+      throw new Error('expected available schedule projection')
+    }
+    expect(digest.scheduledAutomation.totalCount).toBe(5)
+    expect(digest.scheduledAutomation.limit).toBe(10)
     expect(digest.scheduledAutomation.fsmState).toBe('due')
     expect(digest.scheduledAutomation.dueCount).toBe(1)
     expect(digest.scheduledAutomation.runningCount).toBe(0)
@@ -942,7 +961,24 @@ describe('computeOverviewDigest', () => {
         ],
       }),
     )
+    expect(digest.scheduledAutomation.state).toBe('available')
+    if (digest.scheduledAutomation.state !== 'available') {
+      throw new Error('expected available schedule projection')
+    }
     expect(digest.scheduledAutomation.scheduledCount).toBe(0)
+  })
+
+  it('keeps an unreadable schedule ledger unavailable instead of summarizing zero', () => {
+    const digest = computeOverviewDigest(0, [], [], {
+      state: 'unavailable',
+      reason: 'schedule store read failed: corrupt ledger',
+    })
+
+    expect(digest.scheduledAutomation).toEqual({
+      state: 'unavailable',
+      reason: 'schedule store read failed: corrupt ledger',
+      tone: 'bad',
+    })
   })
 
   it('summarizes schedule runner status from /health as a digest field', () => {
@@ -1133,8 +1169,8 @@ describe('Overview prototype surface', () => {
   })
 
   it('renders live scheduled-automation summary from the schedule projection', () => {
-    const previousScheduledAutomation = overviewMocks.scheduledAutomation.value
-    overviewMocks.scheduledAutomation.value = makeScheduledAutomation({
+    const previousScheduledAutomation = overviewMocks.scheduledAutomationProjection.value
+    overviewMocks.scheduledAutomationProjection.value = makeScheduledAutomation({
       fsm: {
         state: 'active',
         active_count: 2,
@@ -1159,14 +1195,35 @@ describe('Overview prototype surface', () => {
       expect(bodyText).toContain('Due 2')
       expect(bodyText).toContain('Running 1')
       expect(bodyText).toContain('projection warning 1')
+      expect(bodyText).toContain('표시 3 / 전체 3 · 최대 10')
       expect(bodyText).not.toContain('예약 자동화 projection 미연결')
     } finally {
-      overviewMocks.scheduledAutomation.value = previousScheduledAutomation
+      overviewMocks.scheduledAutomationProjection.value = previousScheduledAutomation
+    }
+  })
+
+  it('renders an unreadable schedule ledger as an error with no zero count', () => {
+    const previousProjection = overviewMocks.scheduledAutomationProjection.value
+    overviewMocks.scheduledAutomationProjection.value = {
+      state: 'unavailable',
+      reason: 'schedule store read failed: corrupt ledger',
+    }
+
+    try {
+      const { container } = render(h(Overview, null))
+      const card = container.querySelector('[data-testid="domain-schedule"]')
+
+      expect(card?.querySelector('.ov-dcount')?.textContent).toBe('—')
+      expect(card?.querySelector('[data-testid="overview-schedule-unavailable"]')).not.toBeNull()
+      expect(card?.textContent).toContain('schedule store read failed: corrupt ledger')
+      expect(card?.textContent).not.toContain('Due 0')
+    } finally {
+      overviewMocks.scheduledAutomationProjection.value = previousProjection
     }
   })
 
   it('renders schedule_runner liveness row in the 예약 · 자동화 card when full health returns runner status', async () => {
-    const previousScheduledAutomation = overviewMocks.scheduledAutomation.value
+    const previousScheduledAutomation = overviewMocks.scheduledAutomationProjection.value
     const previousFetch = global.fetch
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = `${input}`
@@ -1212,7 +1269,7 @@ describe('Overview prototype surface', () => {
       return Promise.reject(new Error(`unexpected url: ${url}`))
     })
     try {
-      overviewMocks.scheduledAutomation.value = makeScheduledAutomation({
+      overviewMocks.scheduledAutomationProjection.value = makeScheduledAutomation({
         request_count: 1,
         request_limit: 1,
         counts: { scheduled: 1 },
@@ -1231,7 +1288,7 @@ describe('Overview prototype surface', () => {
         expect(card?.textContent).toContain('runner: ok')
       })
     } finally {
-      overviewMocks.scheduledAutomation.value = previousScheduledAutomation
+      overviewMocks.scheduledAutomationProjection.value = previousScheduledAutomation
       if (previousFetch) {
         vi.stubGlobal('fetch', previousFetch)
       } else {

@@ -15,6 +15,10 @@ let thread_result =
 
 let turn_result = {|{"id":4,"result":{"turn":{"id":"turn-1"}}}|}
 
+let agent_message_delta =
+  {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"message-1","delta":"MASC_"}}|}
+;;
+
 let item_completed =
   {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":1,"item":{"type":"agentMessage","id":"message-1","text":"MASC_SUBSCRIPTION_OK","phase":"final_answer"}}}|}
 ;;
@@ -50,7 +54,7 @@ let rec drop count values =
     | _ :: rest -> drop (count - 1) rest
 ;;
 
-let fixture_script ?capture_path lines =
+let fixture_script ?capture_path ?terminal_line_delay_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
@@ -78,7 +82,12 @@ let fixture_script ?capture_path lines =
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
   read_request ();
   List.iter
-    (fun line -> output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
+    (fun line ->
+       Option.iter
+         (fun seconds ->
+            output_string output (Printf.sprintf "sleep %.3f\n" seconds))
+         terminal_line_delay_s;
+       output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     (drop 3 lines);
   output_string output "while IFS= read -r ignored; do :; done\n";
   close_out output;
@@ -86,8 +95,8 @@ let fixture_script ?capture_path lines =
   path
 ;;
 
-let with_fixture ?capture_path lines f =
-  let path = fixture_script ?capture_path lines in
+let with_fixture ?capture_path ?terminal_line_delay_s lines f =
+  let path = fixture_script ?capture_path ?terminal_line_delay_s lines in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
@@ -124,12 +133,13 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp") path =
+let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp")
+    ?(timeout_s = 2.0) ?on_stream_event path =
   Eio_main.run (fun env ->
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
-      ; timeout_s = 2.0
+      ; timeout_s
       }
     in
     Runtime_codex_app_server.run_turn
@@ -139,6 +149,7 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp
       ~dynamic_tools
       ?thread_mode
       ~history
+      ?on_stream_event
       config
       ~prompt:"Return the fixture marker")
 ;;
@@ -166,6 +177,7 @@ let tool_call_request =
 let test_dynamic_tool_callback () =
   let call_id = ref None in
   let arguments = ref `Null in
+  let stream_events = ref [] in
   let tool : Runtime_codex_app_server.dynamic_tool =
     { name = "masc_probe"
     ; description = "Return a deterministic fixture marker"
@@ -187,12 +199,18 @@ let test_dynamic_tool_callback () =
     ; account_chatgpt
     ; thread_result
     ; turn_result
+    ; agent_message_delta
     ; tool_call_request
     ; item_completed
     ; turn_completed
     ]
     (fun path ->
-       match run_fixture ~dynamic_tools:[ tool ] path with
+       match
+         run_fixture
+           ~dynamic_tools:[ tool ]
+           ~on_stream_event:(fun event -> stream_events := event :: !stream_events)
+           path
+       with
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok result ->
          check int "measured tool calls" 1 result.dynamic_tool_calls;
@@ -200,7 +218,21 @@ let test_dynamic_tool_callback () =
          check string
            "arguments"
            {|{"marker":"from-codex"}|}
-           (Yojson.Safe.to_string !arguments))
+           (Yojson.Safe.to_string !arguments);
+         let open Runtime_codex_app_server in
+         (match List.rev !stream_events with
+          | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
+            ; Text_delta "MASC_"
+            ; Dynamic_tool_started
+                { call_id = "call-1"; tool_name = "masc_probe"; arguments }
+            ; Dynamic_tool_finished { call_id = "call-1" }
+            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
+            ] ->
+            check string
+              "stream arguments"
+              {|{"marker":"from-codex"}|}
+              (Yojson.Safe.to_string arguments)
+          | _ -> fail "Codex live stream events were not projected in wire order"))
 ;;
 
 let test_context_error_records_prior_tool_effect () =
@@ -641,7 +673,8 @@ let test_retry_notifications_are_observational () =
   (* Live incident 2026-08-10 (masc#27953): one upstream degradation window
      drove three keepers into Recovery_required twice in two hours because the
      turn died at the fourth willRetry:true. The app-server retrying upstream
-     is progress, not failure; the turn deadline is the liveness boundary. *)
+     is progress, not failure; the stream-idle deadline is the liveness
+     boundary. *)
   let retry = {|{"method":"error","params":{"willRetry":true}}|} in
   with_fixture
     ([ init_result; account_chatgpt; thread_result; turn_result ]
@@ -662,6 +695,38 @@ let test_retry_notifications_are_observational () =
        | Error (Runtime_codex_app_server.Turn_failed "provider gave up") -> ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "terminal error notification did not fail the turn")
+;;
+
+let test_progress_resets_stream_idle_timeout () =
+  let retry = {|{"method":"error","params":{"willRetry":true}}|} in
+  with_fixture
+    ~terminal_line_delay_s:0.4
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; retry
+    ; retry
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       match run_fixture ~timeout_s:0.75 path with
+       | Ok turn ->
+         check string "progressing turn completes" "MASC_SUBSCRIPTION_OK" turn.text
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error))
+;;
+
+let test_stream_idle_timeout_is_typed () =
+  with_fixture
+    ~terminal_line_delay_s:0.2
+    [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
+    (fun path ->
+       match run_fixture ~timeout_s:0.05 path with
+       | Error (Runtime_codex_app_server.Timeout seconds) ->
+         check (float 0.001) "exact idle timeout" 0.05 seconds
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "silent app-server stream ignored its idle timeout")
 ;;
 
 let test_terminal_error_notification_uses_official_context_error_enum () =
@@ -1095,6 +1160,7 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
     ?(initial_messages = []) ?base_path ?raw_trace_path
+    ?on_event
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model () =
   let owns_base_path = Option.is_none base_path in
@@ -1150,6 +1216,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ?context_injector
                       ?context
                       ?raw_trace
+                      ?on_event
                       ~sw
                       ~net:(Eio.Stdenv.net env)
                       ()
@@ -1299,6 +1366,67 @@ let test_keeper_dispatches_codex_turn_runtime () =
        | Ok result ->
          check string "Keeper response" "MASC_SUBSCRIPTION_OK" (keeper_response_text result);
          check bool "measured observation" true (Option.is_some result.runtime_observation))
+;;
+
+let test_keeper_projects_codex_live_stream () =
+  let stream_events = ref [] in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic fixture marker"
+      ~parameters:
+        [ { Agent_core.Types.name = "marker"
+          ; description = "Fixture marker"
+          ; param_type = String
+          ; required = true
+          }
+        ]
+      (fun _ ->
+         Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+  in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; agent_message_delta
+    ; tool_call_request
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun cli_path ->
+       match
+         run_keeper_turn
+           ~tools:[ tool ]
+           ~on_event:(fun event -> stream_events := event :: !stream_events)
+           ~cli_path
+           ~model:"gpt-fixture"
+           ()
+       with
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ ->
+         let open Agent_core.Types in
+         (match List.rev !stream_events with
+          | [ MessageStart { id = "turn-1"; model = "gpt-fixture"; usage = None }
+            ; ContentBlockDelta { index = 0; delta = TextDelta "MASC_" }
+            ; ContentBlockStart
+                { index = 1
+                ; content_type = "tool_use"
+                ; tool_id = Some "call-1"
+                ; tool_name = Some "masc_probe"
+                }
+            ; ContentBlockDelta
+                { index = 1; delta = InputJsonSnapshot arguments }
+            ; ContentBlockStop { index = 1 }
+            ; ContentBlockDelta
+                { index = 0; delta = TextDelta "SUBSCRIPTION_OK" }
+            ; MessageStop
+            ] ->
+            check string
+              "Keeper stream arguments"
+              {|{"marker":"from-codex"}|}
+              arguments
+          | _ -> fail "Keeper did not preserve the Codex live event sequence"))
 ;;
 
 let test_keeper_preserves_typed_history_on_codex_wire () =
@@ -1925,6 +2053,115 @@ let test_keeper_resumes_persisted_codex_thread () =
        | Ok (Some binding) -> check int "stored turns" 2 binding.turn_count)
 ;;
 
+let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
+  let base_path = temp_workspace "masc-codex-context-wire-" in
+  let start_capture = Filename.temp_file "masc-codex-context-start-" ".jsonl" in
+  let resume_capture = Filename.temp_file "masc-codex-context-resume-" ".jsonl" in
+  let dynamic_context = "DYNAMIC_CONTEXT_RAW\nsecond line" in
+  let goal = "WIRE_GOAL_EXACT\nsecond line" in
+  let hooks : Agent_core.Hooks.hooks =
+    { Agent_core.Hooks.empty with
+      before_turn_params =
+        Some
+          (function
+            | BeforeTurnParams { current_params; _ } ->
+              AdjustParams
+                { current_params with
+                  extra_system_context = Some dynamic_context
+                }
+            | _ -> Continue)
+    }
+  in
+  let request capture_path method_ =
+    In_channel.with_open_bin capture_path (fun input ->
+      In_channel.input_lines input
+      |> List.map Yojson.Safe.from_string
+      |> List.find (fun json ->
+        Yojson.Safe.Util.member "method" json = `String method_))
+  in
+  let request_param_string name request =
+    request
+    |> Yojson.Safe.Util.member "params"
+    |> Yojson.Safe.Util.member name
+    |> Yojson.Safe.Util.to_string
+  in
+  let turn_prompt capture_path =
+    request capture_path "turn/start"
+    |> Yojson.Safe.Util.member "params"
+    |> Yojson.Safe.Util.member "input"
+    |> Yojson.Safe.Util.to_list
+    |> List.hd
+    |> Yojson.Safe.Util.member "text"
+    |> Yojson.Safe.Util.to_string
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_tree base_path;
+      Sys.remove start_capture;
+      Sys.remove resume_capture)
+    (fun () ->
+       with_fixture
+         ~capture_path:start_capture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~base_path
+                ~hooks
+                ~goal
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok result -> check int "initial context turn" 1 result.turns);
+       with_fixture
+         ~capture_path:resume_capture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; resumed_turn_result
+         ; resumed_item_completed
+         ; resumed_turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~base_path
+                ~hooks
+                ~goal
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok result -> check int "resumed context turn" 2 result.turns);
+       let start_instructions =
+         request start_capture "thread/start"
+         |> request_param_string "developerInstructions"
+       in
+       let resume_instructions =
+         request resume_capture "thread/resume"
+         |> request_param_string "developerInstructions"
+       in
+       check string
+         "start and resume receive identical developer instructions"
+         start_instructions
+         resume_instructions;
+       check string
+         "dynamic context is verbatim on the instruction channel"
+         dynamic_context
+         start_instructions;
+       check string "start prompt stays exact" goal (turn_prompt start_capture);
+       check string "resume prompt stays exact" goal (turn_prompt resume_capture))
+;;
+
 (* A changed tool surface must not RESUME the settled thread. It used to be
    pinned as "the turn fails", which also left the session with no way forward:
    Settled never becomes Recovery_required, so no operator action cleared it
@@ -2160,9 +2397,9 @@ let test_keeper_projects_typed_tools_and_hooks () =
     projection_saw_context :=
       List.exists
         (fun (message : Agent_core.Types.message) ->
-          message.role = User
+          message.role = System
           && String.equal
-               "[system context] fixture-context"
+               "fixture-context"
                (Agent_core.Types.text_of_content message.content)
           && Agent_core.Types.Extra_system_context_provenance.classify
                message.metadata
@@ -2181,8 +2418,7 @@ let test_keeper_projects_typed_tools_and_hooks () =
     [ init_result
     ; account_chatgpt
     ; thread_result
-    ; {|{"id":4,"result":{}}|}
-    ; {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
+    ; turn_result
     ; tool_call_request
     ; item_completed
     ; turn_completed
@@ -2353,6 +2589,7 @@ let test_live_keeper_dynamic_tool_subscription () =
   then Alcotest.skip ()
   else
     let tool_calls = ref 0 in
+    let stream_events = ref [] in
     let tool =
       Agent_core.Tool.create
         ~name:"masc_probe"
@@ -2370,6 +2607,7 @@ let test_live_keeper_dynamic_tool_subscription () =
          match
            run_keeper_turn
              ~tools:[ tool ]
+             ~on_event:(fun event -> stream_events := event :: !stream_events)
              ~base_path
              ~raw_trace_path
              ~goal:
@@ -2381,6 +2619,50 @@ let test_live_keeper_dynamic_tool_subscription () =
          | Error error -> fail (Agent_core.Error.to_string error)
          | Ok result ->
            check int "live typed tool calls" 1 !tool_calls;
+           let stream_events = List.rev !stream_events in
+           check bool
+             "live Keeper emitted text delta"
+             true
+             (List.exists
+                (function
+                  | Agent_core.Types.ContentBlockDelta
+                      { delta = Agent_core.Types.TextDelta text; _ } ->
+                    String.trim text <> ""
+                  | _ -> false)
+                stream_events);
+           let tool_index =
+             List.find_map
+               (function
+                 | Agent_core.Types.ContentBlockStart
+                     { index; tool_id = Some _; tool_name = Some "masc_probe"; _ } ->
+                   Some index
+                 | _ -> None)
+               stream_events
+           in
+           let tool_index =
+             match tool_index with
+             | Some index -> index
+             | None -> fail "live Keeper omitted masc_probe tool start"
+           in
+           check bool
+             "live Keeper emitted tool args snapshot"
+             true
+             (List.exists
+                (function
+                  | Agent_core.Types.ContentBlockDelta
+                      { index; delta = Agent_core.Types.InputJsonSnapshot _ } ->
+                    index = tool_index
+                  | _ -> false)
+                stream_events);
+           check bool
+             "live Keeper emitted matching tool stop"
+             true
+             (List.exists
+                (function
+                  | Agent_core.Types.ContentBlockStop { index } ->
+                    index = tool_index
+                  | _ -> false)
+                stream_events);
            check string
              "live tool Keeper response"
              "MASC_TOOL_OK"
@@ -2543,6 +2825,14 @@ let () =
             `Quick
             test_retry_notifications_are_observational
         ; test_case
+            "progress resets stream idle timeout"
+            `Quick
+            test_progress_resets_stream_idle_timeout
+        ; test_case
+            "stream idle timeout is typed"
+            `Quick
+            test_stream_idle_timeout_is_typed
+        ; test_case
             "terminal error notification uses official context error enum"
             `Quick
             test_terminal_error_notification_uses_official_context_error_enum
@@ -2597,6 +2887,10 @@ let () =
             `Quick
             test_keeper_shrinks_history_after_typed_context_error
         ; test_case
+            "Keeper projects Codex live stream"
+            `Quick
+            test_keeper_projects_codex_live_stream
+        ; test_case
             "Keeper preserves typed history on Codex wire"
             `Quick
             test_keeper_preserves_typed_history_on_codex_wire
@@ -2616,6 +2910,10 @@ let () =
             "Keeper resumes persisted Codex thread"
             `Quick
             test_keeper_resumes_persisted_codex_thread
+        ; test_case
+            "Keeper dynamic context stays on Codex instruction wire"
+            `Quick
+            test_keeper_dynamic_context_stays_on_codex_instruction_wire
         ; test_case
             "Keeper starts fresh on a changed Codex tool surface"
             `Quick

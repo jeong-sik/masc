@@ -122,18 +122,15 @@ let dashboard_board_json
       let has_more = fetched_len > window_end in
       let total_json : Yojson.Safe.t = if has_more then `Null else `Int fetched_len in
       let paged = posts |> drop offset |> take limit in
-      let contributor_quality_for = board_contributor_quality_lookup ?config () in
       let posts_json =
         List.map
           (fun (post : Board.post) ->
              let author = Board.Agent_id.to_string post.author in
              let post_id = Board.Post_id.to_string post.id in
              let current_vote = board_current_vote_for_post ~voter ~post_id in
-             let contributor_quality = contributor_quality_for author in
              board_post_dashboard_json
                ~blind_votes
                ?current_vote
-               ?contributor_quality
                ~author_karma:(get_karma author)
                post)
           paged

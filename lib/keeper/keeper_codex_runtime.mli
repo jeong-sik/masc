@@ -15,5 +15,6 @@ val run :
   context:Agent_core.Context.t option ->
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
+  on_event:(Agent_core.Types.sse_event -> unit) option ->
   config:Runtime_execution.codex_app_server ->
   (Runtime_agent.run_result, Agent_core.Error.t) result

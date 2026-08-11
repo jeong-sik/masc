@@ -842,6 +842,7 @@ let handle_keeper_msg_stream_admitted
       ~admission_token
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
       ?continuation_channel
       ctx
       message
@@ -860,6 +861,7 @@ let handle_keeper_msg_stream_admitted
       ~admission_token
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
       ?event_bus
       ?continuation_channel
       ctx

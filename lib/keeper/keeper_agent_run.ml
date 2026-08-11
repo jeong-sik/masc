@@ -383,6 +383,7 @@ let run_turn
       ?(history_assistant_source = "direct_assistant")
       ?temperature
       ?on_event
+      ?on_tool_result_ready
       ?(trajectory_acc : Trajectory.accumulator option)
       ?(degraded_retry_applied = false)
       ?degraded_retry_runtime
@@ -602,6 +603,7 @@ let run_turn
       ~meta
       ~publication_recovery
       ?continuation_channel
+      ?on_tool_result_ready
       ?hitl_resolution
       ~turn_ctx_cell
       ~ctx_work

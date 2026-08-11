@@ -1,6 +1,10 @@
 (** Shared IDE annotation and code-region wire types. *)
 
+(** Equality re-declaration of {!Agent_observation.annotation_kind} — the
+    observation bus owns the axis; this module re-exports it (and its codec)
+    the same way it already shares {!annotation_reference}. *)
 type annotation_kind =
+  Agent_observation.annotation_kind =
   | Comment
   | Decision
   | Question

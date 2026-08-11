@@ -19,6 +19,8 @@ type config =
   ; model : string option
   ; developer_instructions : string option
   ; timeout_s : float
+    (** Maximum silence between app-server protocol messages. Each received
+        message resets the deadline; a progressing turn has no wall limit. *)
   }
 
 val default_timeout_s : float
@@ -50,6 +52,20 @@ type dynamic_tool =
   ; input_schema : Yojson.Safe.t
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
+
+type stream_event =
+  | Turn_started of
+      { turn_id : string
+      ; model : string
+      }
+  | Text_delta of string
+  | Dynamic_tool_started of
+      { call_id : string
+      ; tool_name : string
+      ; arguments : Yojson.Safe.t
+      }
+  | Dynamic_tool_finished of { call_id : string }
+  | Turn_finished of { text : string }
 
 type history_role =
   | User
@@ -126,6 +142,7 @@ val run_turn :
   ?on_thread_ready:(thread_id:string -> (unit, string) result) ->
   ?on_turn_starting:(thread_id:string -> (unit, string) result) ->
   ?on_turn_started:(thread_id:string -> turn_id:string -> (unit, string) result) ->
+  ?on_stream_event:(stream_event -> unit) ->
   config ->
   prompt:string ->
   (turn_result, error) result

@@ -127,6 +127,11 @@ val prepare_turn :
 (** [configured_reasoning_effort] seeds the turn params the
     [before_turn_params] hook receives, so a hook can still override it.
 
+    The hook's [extra_system_context] is appended as a raw [System] message
+    carrying {!Agent_core.Types.Extra_system_context_provenance}. Official
+    adapters must keep that message on their provider instruction surface; it
+    is not an Agent Core synthetic User carrier.
+
     [max_prompt_bytes] bounds the history a start turn seeds its conversation
     with, keeping the newest messages. [None] applies no ceiling, which is the
     behaviour before this parameter existed. [seed_dropped_atoms] on the result

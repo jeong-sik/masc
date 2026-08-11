@@ -171,11 +171,13 @@ let test_failed_durable_completion_is_explicitly_visible () =
      check bool "serialized persistence state" true
        (List.mem_assoc "persistence_state" fields);
      check (option string) "serialized intended failure code" (Some "model_error")
-       (List.assoc_opt "intended_code" fields
-        |> Option.bind (function `String value -> Some value | _ -> None));
+       (Option.bind
+          (List.assoc_opt "intended_code" fields)
+          (function `String value -> Some value | _ -> None));
      check (option string) "serialized intended failure detail" (Some "typed failure detail")
-       (List.assoc_opt "intended_detail" fields
-        |> Option.bind (function `String value -> Some value | _ -> None))
+       (Option.bind
+          (List.assoc_opt "intended_detail" fields)
+          (function `String value -> Some value | _ -> None))
    | _ -> fail "run serializer must emit an object");
   Unix.rmdir path
 ;;

@@ -12,6 +12,7 @@ type scope =
   | Provider_row of string
   | Credential_env of string
   | Credential_file of string
+  | Credential_inline of string
 
 let windows : (scope, float) Hashtbl.t = Hashtbl.create 4
 let mu = Stdlib.Mutex.create ()
@@ -49,9 +50,13 @@ let scope_of_credential ~provider_id (credential : Runtime_schema.credential opt
   match credential with
   | Some (Runtime_schema.Env key) -> Credential_env key
   | Some (Runtime_schema.File path) -> Credential_file path
-  (* The inline carrier is the secret itself, so it cannot name a shared
-     account without leaking; the row id is the narrowest honest scope. *)
-  | Some (Runtime_schema.Inline _) | None -> Provider_row provider_id
+  | Some (Runtime_schema.Inline value) ->
+    let digest =
+      Digestif.SHA256.digest_string ("runtime-quota-inline\000" ^ value)
+      |> Digestif.SHA256.to_hex
+    in
+    Credential_inline digest
+  | None -> Provider_row provider_id
 
 let reset_for_testing () =
   Stdlib.Mutex.protect mu (fun () -> Hashtbl.reset windows)

@@ -138,6 +138,33 @@ let test_shared_credential_scope_demotes_siblings () =
        ~quota_scope_of:scope_of
        [ "ollama_cloud.qwen"; "claude_code.sonnet"; "ollama_cloud_native.qwen" ])
 
+(* Inline credentials use a secret-derived account scope, so the same
+   secret shared by distinct provider rows demotes both rows without exposing
+   the secret in the scope key. *)
+let test_shared_inline_credential_scope_demotes_siblings () =
+  reset ();
+  let shared = Some (Runtime_schema.Inline "shared-inline-secret") in
+  let separate = Some (Runtime_schema.Inline "separate-inline-secret") in
+  let scope_of = function
+    | "row_a.model" ->
+      Some (Q.scope_of_credential ~provider_id:"row_a" shared)
+    | "row_b.model" ->
+      Some (Q.scope_of_credential ~provider_id:"row_b" shared)
+    | "row_c.model" ->
+      Some (Q.scope_of_credential ~provider_id:"row_c" separate)
+    | _ -> None
+  in
+  Q.note_exhausted
+    ~scope:(Q.scope_of_credential ~provider_id:"row_a" shared)
+    ~resets_at:500.0;
+  Alcotest.(check (list string))
+    "same inline credential demotes both provider rows"
+    [ "row_c.model"; "row_a.model"; "row_b.model" ]
+    (Q.demote_order
+       ~now:100.0
+       ~quota_scope_of:scope_of
+       [ "row_a.model"; "row_c.model"; "row_b.model" ])
+
 let test_scope_kinds_do_not_collide () =
   reset ();
   let env_scope =
@@ -236,6 +263,10 @@ let () =
             "shared credential demotes siblings"
             `Quick
             test_shared_credential_scope_demotes_siblings
+        ; Alcotest.test_case
+            "shared inline credential demotes siblings"
+            `Quick
+            test_shared_inline_credential_scope_demotes_siblings
         ] )
     ; ( "scope"
       , [ Alcotest.test_case

@@ -55,10 +55,9 @@ val scope_of_credential :
     is credential-account-owned, not provider-row-owned: two rows sharing one
     credential share one window (PR #28202 review).  [Env]/[File] carriers
     are keyed by their non-secret reference without encoding the carrier kind
-    into a string prefix;
-    [Inline] carries the secret itself, so it cannot serve as a shared name
-    and falls back to the row's [provider_id], as does an absent
-    credential. *)
+    into a string prefix.  [Inline] carriers use a stable SHA-256 digest of
+    the secret as their account key; the secret itself never enters the
+    scope.  An absent credential falls back to the row's [provider_id]. *)
 
 val reset_for_testing : unit -> unit
 (** Drop every remembered window.  Test-only. *)

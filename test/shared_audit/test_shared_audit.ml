@@ -32,6 +32,7 @@ let cleanup_dir dir =
   try rm_rf dir with _ -> ()
 
 let audit_path ~base_dir ~ts =
+  let base_dir = Unix.realpath base_dir in
   let tm = Unix.gmtime ts in
   let yyyy_mm =
     Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
@@ -297,6 +298,52 @@ let test_store_instances_share_append_cursor () =
     | Error (idx, reason) ->
       fail (Printf.sprintf "shared-store chain broken at %d: %s" idx reason))
 
+let test_store_resume_skips_empty_newer_partition () =
+  let dir = unique_temp_dir "audit_empty_newer_partition" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let month_dir = Filename.concat dir "2020-01" in
+    Unix.mkdir month_dir 0o755;
+    let first =
+      { (Env.make ~category:"X" ~payload:(`Int 1) ~prev_hash:None) with
+        ts = 1_577_836_800.0 }
+    in
+    let first_path = Filename.concat month_dir "01.jsonl" in
+    let oc = open_out first_path in
+    output_string oc (Yojson.Safe.to_string (Env.to_json first));
+    output_char oc '\n';
+    close_out oc;
+    let empty_path = Filename.concat month_dir "02.jsonl" in
+    close_out (open_out empty_path);
+    let store = Store.create ~base_dir:dir in
+    let next = Store.append store ~category:"X" ~payload:(`Int 2) in
+    check (option string)
+      "empty newer day does not reset cursor"
+      (Some (Env.hash_for_chain first))
+      next.prev_hash)
+
+let test_store_alias_keeps_canonical_io_target () =
+  let root = unique_temp_dir "audit_canonical_io" in
+  let actual = Filename.concat root "actual" in
+  let redirected = Filename.concat root "redirected" in
+  let alias = Filename.concat root "alias" in
+  Unix.mkdir actual 0o755;
+  Unix.mkdir redirected 0o755;
+  Unix.symlink actual alias;
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove alias with Sys_error _ -> ());
+      cleanup_dir root)
+    (fun () ->
+      let store = Store.create ~base_dir:alias in
+      Sys.remove alias;
+      Unix.symlink redirected alias;
+      ignore (Store.append store ~category:"X" ~payload:(`Int 1));
+      let canonical_store = Store.create ~base_dir:actual in
+      check int "entry stayed in canonical directory" 1
+        (List.length (Store.recent canonical_store ~n:10));
+      check int "retargeted alias received no files" 0
+        (Array.length (Sys.readdir redirected)))
+
 let test_store_rejects_malformed_jsonl_lines () =
   let dir = unique_temp_dir "audit_malformed" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
@@ -336,7 +383,7 @@ let test_store_base_dir_inspector () =
   let dir = unique_temp_dir "audit_inspector" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let store = Store.create ~base_dir:dir in
-    check string "base_dir reported" dir (Store.base_dir store))
+    check string "canonical base_dir reported" (Unix.realpath dir) (Store.base_dir store))
 
 (* ──────────────────────────────────────────────────────────── *)
 (* Suite                                                         *)
@@ -367,6 +414,10 @@ let () =
       test_case "verify reports on-disk tampering" `Quick test_store_verify_reports_on_disk_tampering;
       test_case "resume continues chain" `Quick test_store_resume_continues_chain;
       test_case "instances share append cursor" `Quick test_store_instances_share_append_cursor;
+      test_case "resume skips empty newer partition" `Quick
+        test_store_resume_skips_empty_newer_partition;
+      test_case "alias keeps canonical I/O target" `Quick
+        test_store_alias_keeps_canonical_io_target;
       test_case "rejects malformed JSONL lines" `Quick test_store_rejects_malformed_jsonl_lines;
       test_case "rejects invalid envelope JSONL lines" `Quick test_store_rejects_invalid_envelope_jsonl_lines;
       test_case "resume rejects malformed JSONL lines" `Quick test_store_resume_rejects_malformed_jsonl_lines;

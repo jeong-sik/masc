@@ -153,6 +153,47 @@ let test_target_resolution_implicit_unregistered_author () =
          "error message"
          "target_keeper is required because board post author \"operator\" is not a registered keeper")
 
+let test_cadence_change_wakes_registered_keepers () =
+  let base_path = "/tmp/test_runtime_param_keeper_wakeup" in
+  Keeper_registry.For_testing.clear ();
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    (fun () ->
+      let first =
+        Keeper_registry.For_testing.register ~base_path "first" (make_meta "first")
+      in
+      let second =
+        Keeper_registry.For_testing.register ~base_path "second" (make_meta "second")
+      in
+      Atomic.set first.fiber_wakeup false;
+      Atomic.set second.fiber_wakeup false;
+      let unrelated =
+        Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
+          ~base_path ~param_key:"keeper.max_turns"
+      in
+      check bool "unrelated param has no wake effect" true
+        (Option.is_none unrelated);
+      check bool "unrelated param keeps first asleep" false
+        (Atomic.get first.fiber_wakeup);
+      check bool "unrelated param keeps second asleep" false
+        (Atomic.get second.fiber_wakeup);
+      let summary =
+        Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
+          ~base_path
+          ~param_key:
+            (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec)
+        |> Option.value ~default:`Null
+      in
+      let open Yojson.Safe.Util in
+      check bool "cadence change wakes first" true (Atomic.get first.fiber_wakeup);
+      check bool "cadence change wakes second" true (Atomic.get second.fiber_wakeup);
+      check int "summary requested both keepers" 2
+        (summary |> member "requested" |> to_int);
+      check int "summary signaled both keepers" 2
+        (summary |> member "signaled" |> to_int);
+      check bool "summary reports full delivery" true
+        (summary |> member "fully_signaled" |> to_bool))
+
 let () =
   run "Server board context inference resolution"
     [ ( "parse_request",
@@ -162,5 +203,9 @@ let () =
         ; test_case "explicit unregistered target" `Quick test_target_resolution_explicit_unregistered
         ; test_case "implicit registered author" `Quick test_target_resolution_implicit_registered_author
         ; test_case "implicit unregistered author" `Quick test_target_resolution_implicit_unregistered_author
+        ] )
+    ; ( "runtime_params",
+        [ test_case "cadence changes wake registered keepers" `Quick
+            test_cadence_change_wakes_registered_keepers
         ] )
     ]

@@ -30,3 +30,9 @@ val resolve_board_context_inference_target :
   Board.post ->
   string option ->
   (string * board_context_inference_target_source, [ `Bad_request of string | `Internal_server_error of string ]) result
+
+val wake_keepers_after_runtime_param_change :
+  base_path:string -> param_key:string -> Yojson.Safe.t option
+(** For the Keeper cadence parameter, signals every admitted live Keeper and
+    returns an operator-visible outcome summary. Other runtime parameters
+    return [None] without waking Keeper lanes. *)

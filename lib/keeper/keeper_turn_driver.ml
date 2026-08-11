@@ -91,11 +91,23 @@ type deferred_runtime_lane =
 let deferred_runtime_ids hint =
   hint.next_runtime_id :: hint.later_runtime_ids
 
+(* Quota demotion must never promote a candidate the runtime table cannot
+   resolve (for example one removed by a runtime.toml reload while a deferred
+   suffix was frozen): a missing id at the head fails the attempt with a
+   non-rotating error before resolvable alternatives are tried. Order is
+   therefore resolvable-active, then resolvable-exhausted, then unresolvable —
+   declared relative order preserved within each class (PR #28219 review). *)
 let quota_ordered_runtime_ids ~now runtime_ids =
+  let resolvable, unresolvable =
+    List.partition
+      (fun id -> Option.is_some (Runtime.get_runtime_by_id id))
+      runtime_ids
+  in
   Runtime_quota_window.demote_order
     ~now
     ~quota_scope_of:Runtime.quota_scope_of_runtime_id
-    runtime_ids
+    resolvable
+  @ unresolvable
 ;;
 
 let quota_ordered_deferred_runtime_lane ~now hint =
@@ -205,6 +217,25 @@ let attempt_runtime_candidates
       fun candidate ->
         Runtime.quota_scope_of_runtime_id (runtime_id_of candidate)
   in
+  (* Mid-walk demotion shares the pre-walk rule: never move an
+     exhausted-but-resolvable candidate behind one the runtime table cannot
+     resolve, or the walk fails on the missing head with a non-rotating error
+     before real alternatives are tried (PR #28219 review). Candidates whose
+     id resolves keep quota ordering among themselves; unresolvable ones sink
+     to the tail in declared order. *)
+  let demote_rest rest =
+    let resolvable, unresolvable =
+      List.partition
+        (fun candidate ->
+          Option.is_some (Runtime.get_runtime_by_id (runtime_id_of candidate)))
+        rest
+    in
+    Runtime_quota_window.demote_order
+      ~now:(Unix.gettimeofday ())
+      ~quota_scope_of
+      resolvable
+    @ unresolvable
+  in
   let rec loop ~observed_overflow idx = function
     | [] ->
       (match observed_overflow with
@@ -278,12 +309,7 @@ let attempt_runtime_candidates
             that the shared account is exhausted.  This remains ordering,
             not admission: if every remaining candidate is demoted they are
             all still attempted in their prior relative order. *)
-         let rest =
-           Runtime_quota_window.demote_order
-             ~now:(Unix.gettimeofday ())
-             ~quota_scope_of
-             rest
-         in
+         let rest = demote_rest rest in
          let retry_admitted =
            allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
          in

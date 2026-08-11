@@ -585,7 +585,8 @@ let observe_state_read_only_typed_with ~between_samples ~base_path ~keeper_name 
             Result.bind
               (read_state_read_only_unlocked ~require_existing:false owner
                |> Result.map_error (fun message -> Observation_read_failed message))
-              (stable_read_only_observation ~keeper_name))
+              (fun second ->
+                 stable_read_only_observation ~keeper_name first second))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->

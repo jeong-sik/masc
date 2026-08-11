@@ -113,10 +113,8 @@ val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_applied : compaction_decision -> bool
 val compaction_decision_prepared : compaction_decision -> bool
 
-val apply_post_turn_lifecycle_with_resilience_handles
-  :  resilience_audit_store:Shared_audit.Store.t option
-  -> resilience_strategy_executor:Resilience.Recovery.strategy_executor option
-  -> meta:keeper_meta
+val apply_post_turn_lifecycle
+  :  meta:keeper_meta
   -> checkpoint:Agent_core.Checkpoint.t option
   -> post_turn_lifecycle
 

@@ -323,7 +323,6 @@
   masc.shared_audit
   masc.shared_types
   ;; Resilience sub-library (Tier B6-B7) used by Keeper post-turn wire-in (Tier A6)
-  masc.resilience
   ;; Multimodal artifact GADT sub-library (Tier B8) — Code/Image/Audio/Doc + Payload + Provenance
   masc.multimodal
   ;; Repository manager sub-library (multi-repository feature)

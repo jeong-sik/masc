@@ -240,34 +240,6 @@ val current_keeper_meta :
 (** Read the latest meta from the registry, falling back to the given
     [fallback_meta] when the registry entry is missing. *)
 
-type post_turn_resilience_handles = {
-  resilience_audit_store : Shared_audit.Store.t option;
-  resilience_strategy_executor : Resilience.Recovery.strategy_executor option;
-  sync_lifecycle_meta :
-    Keeper_context_runtime.post_turn_lifecycle ->
-    Keeper_context_runtime.post_turn_lifecycle;
-}
-(** Runtime handles for the feature-flagged post-turn resilience wire-in.
-
-    When [MASC_RESILIENCE] is off or the audit store cannot be opened, both
-    handles are [None] and [sync_lifecycle_meta] is identity. Failure strategies
-    record explicit evidence without rewriting Keeper lifecycle; therefore
-    [sync_lifecycle_meta] remains identity when execution is enabled as well. *)
-
-val resilience_audit_dir :
-  config:Workspace.config ->
-  keeper_name:string ->
-  string
-(** Per-keeper audit root for resilience recovery envelopes. *)
-
-val post_turn_resilience_handles :
-  config:Workspace.config ->
-  meta:keeper_meta ->
-  post_turn_resilience_handles
-(** Create per-turn resilience audit/executor handles. The audit store is
-    per keeper to respect [Shared_audit.Store]'s single-writer chain
-    contract. *)
-
 val resolved_max_context_for_turn
   :  meta:keeper_meta
   -> Keeper_context_runtime.max_context_resolution

@@ -370,8 +370,6 @@ export type {
   KeeperMemoryHealthAlertTarget,
   KeeperMemoryHealthKeeperEntry,
   KeeperMemoryHealthResponse,
-  AuditIntegrityKeeperEntry,
-  AuditIntegrityResponse,
   VerificationRequest,
   VerificationRequestsResponse,
   TlaSpecCategory,
@@ -386,7 +384,6 @@ export type {
 } from './dashboard-misc'
 export {
   fetchKeeperMemoryHealth,
-  fetchAuditIntegrity,
   fetchVerificationRequests,
   fetchTlaSpecs,
   fetchTlcResults,

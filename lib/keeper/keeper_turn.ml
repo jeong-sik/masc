@@ -776,19 +776,10 @@ let run_keeper_invocation_turn_admitted_inner
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
-              let resilience_handles =
-                Keeper_turn_runtime_budget.post_turn_resilience_handles
-                  ~config:ctx.config ~meta
-              in
               let lifecycle =
-                Keeper_context_runtime.apply_post_turn_lifecycle_with_resilience_handles
-                  ~resilience_audit_store:
-                    resilience_handles.resilience_audit_store
-                  ~resilience_strategy_executor:
-                    resilience_handles.resilience_strategy_executor
-	                  ~meta
+                Keeper_context_runtime.apply_post_turn_lifecycle
+                  ~meta
                   ~checkpoint:result.checkpoint
-                |> resilience_handles.sync_lifecycle_meta
               in
               Keeper_context_runtime.dispatch_post_turn_lifecycle_events
                 ~config:ctx.config

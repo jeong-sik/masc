@@ -129,7 +129,6 @@
   test_dashboard_nav_event
   test_server_dashboard_http_keeper_memory_health
   test_keeper_exact_flow_detail
-  test_server_dashboard_http_audit_integrity
   test_dashboard_execute_output
   test_tool_assignment_telemetry
   test_dashboard_link_preview
@@ -428,7 +427,6 @@
   test_dashboard_nav_event
   test_server_dashboard_http_keeper_memory_health
   test_keeper_exact_flow_detail
-  test_server_dashboard_http_audit_integrity
   test_dashboard_execute_output
   test_tool_assignment_telemetry
   test_dashboard_link_preview
@@ -1527,11 +1525,6 @@
  (name tool_call_quality_benchmark_cli)
  (modules tool_call_quality_benchmark_cli)
  (libraries masc_test_deps))
-
-(executable
- (name test_multimodal_resilience_audit_composition)
- (modules test_multimodal_resilience_audit_composition)
- (libraries masc_test_deps multimodal resilience shared_audit shared_types))
 
 (executable
  (name test_mention_monkey)

@@ -24,6 +24,7 @@ val keeper_suffix_directive : string
 val keeper_suffix_paused_work : string
 val keeper_suffix_catchup_judge : string
 val keeper_suffix_operator_note : string
+val keeper_suffix_credential_surface : string
 
 (** {1 Dashboard cache keys} *)
 
@@ -94,9 +95,9 @@ val is_keeper_paused_work_get_path : string -> bool
 
 val keeper_get_permission : string -> Masc_domain.permission option
 (** Mandatory token-bound permission for sensitive keeper GET sub-routes.
-    Raw retained traces, Memory OS change journals, checkpoint state, and
-    paused-work operator state all require [CanAdmin]. [None] leaves the route
-    on its existing public-read policy. *)
+    Raw retained traces, Memory OS change journals, checkpoint state,
+    credential-surface observations, and paused-work operator state all require
+    [CanAdmin]. [None] leaves the route on its existing public-read policy. *)
 
 (** {1 Trajectory preview helpers} *)
 

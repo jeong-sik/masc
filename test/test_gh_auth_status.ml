@@ -347,6 +347,41 @@ let test_invalid_json_is_unknown () =
     [ "empty", ""; "human prose", "github.com\n  Logged in"; "truncated", {|{"hosts":|} ]
 ;;
 
+let test_production_observer_runs_parser_boundary () =
+  let observed_argv = ref None in
+  let parsed =
+    Server_keeper_credential_observation.For_testing.observe_with_runner
+      ~run:(fun argv ->
+        observed_argv := Some argv;
+        Ok actual_cli_json)
+      ~hostname:" GITHUB.COM "
+  in
+  check string
+    "production observer verdict"
+    "authenticated"
+    (verdict parsed "github.com");
+  (match !observed_argv with
+   | None -> fail "production observer did not invoke its runner"
+   | Some argv ->
+     check
+       (array string)
+       "production observer argv"
+       [| "gh"; "auth"; "status"; "--hostname"; "github.com"; "--json"; "hosts" |]
+       argv);
+  let surface =
+    Server_keeper_credential_observation.surface_json
+      ~hostname:"github.com"
+      ~probed_at:123.0
+      parsed
+  in
+  match surface with
+  | `Assoc fields ->
+    (match List.assoc_opt "status" fields with
+     | Some (`String status) -> check string "surface status" "authenticated" status
+     | _ -> fail "surface did not publish a status")
+  | _ -> fail "surface was not an object"
+;;
+
 let () =
   run
     "gh_auth_status"
@@ -359,6 +394,10 @@ let () =
             "command rejects empty hostname"
             `Quick
             test_command_rejects_empty_hostname
+        ; test_case
+            "production observer invokes parser and surface"
+            `Quick
+            test_production_observer_runs_parser_boundary
         ; test_case "actual CLI JSON decodes" `Quick test_actual_cli_json_decodes
         ; test_case
             "relative config and documented environment sources"

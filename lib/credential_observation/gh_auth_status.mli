@@ -44,6 +44,16 @@ val command_argv : hostname:string -> string array
     whitespace is removed and ASCII hostname case is canonicalized. Raises
     [Invalid_argument] when the resulting hostname is empty. *)
 
+val observe :
+  run:(string array -> (string, string) result) ->
+  hostname:string ->
+  t
+(** Run the token-free command through the supplied process boundary and parse
+    its stdout. A runner error becomes [Unknown]; a completed process's exit
+    status is deliberately outside this parser boundary because gh may use a
+    non-zero status for per-account authentication failures while still
+    returning the decisive JSON rows. *)
+
 val parse : string -> t
 (** Decode the closed JSON schema. Invalid JSON, duplicate/unknown fields,
     unknown enums or inconsistent host identities return no entries and a

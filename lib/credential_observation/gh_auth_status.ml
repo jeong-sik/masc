@@ -302,6 +302,19 @@ let parse output =
      | Error detail -> { entries = []; schema_error = Some detail })
 ;;
 
+let observe ~run ~hostname =
+  let argv =
+    try Ok (command_argv ~hostname) with
+    | Invalid_argument detail -> Error detail
+  in
+  match argv with
+  | Error detail -> { entries = []; schema_error = Some detail }
+  | Ok argv ->
+    (match run argv with
+     | Ok output -> parse output
+     | Error detail -> { entries = []; schema_error = Some detail })
+;;
+
 let is_environment = function
   | Environment _ -> true
   | Keyring | Config_file _ -> false

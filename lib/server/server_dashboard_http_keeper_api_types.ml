@@ -19,6 +19,7 @@ let keeper_suffix_raw_trace = "/raw-trace"
 let keeper_suffix_memory_journal = "/memory-journal"
 let keeper_suffix_catchup_judge = "/catchup-judge"
 let keeper_suffix_operator_note = "/operator-note"
+let keeper_suffix_credential_surface = "/credential-surface"
 
 let cache_key_string_segment value =
   Printf.sprintf "s%d:%s" (String.length value) value
@@ -168,6 +169,7 @@ let keeper_get_permission req_path =
   if
     is_keeper_checkpoints_get_path req_path
     || is_keeper_paused_work_get_path req_path
+    || keeper_path_ends_with req_path keeper_suffix_credential_surface
   then Some Masc_domain.CanAdmin
   else if
     keeper_path_ends_with req_path keeper_suffix_raw_traces

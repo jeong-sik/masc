@@ -1568,6 +1568,36 @@ let handle_keeper_get_subroutes state req request reqd =
                  ; ("note", `String note)
                  ])
              notes))
+  else if ends_with keeper_suffix_credential_surface then
+    let name = extract_name keeper_suffix_credential_surface in
+    if name = "" then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json "missing keeper name")
+    else if not (Keeper_config.validate_name name) then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json (Printf.sprintf "invalid keeper name: %s" name))
+    else
+      let hostname =
+        Server_utils.query_param req "hostname"
+        |> Option.value ~default:"github.com"
+      in
+      if String.trim hostname = "" then
+        Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+          (error_json "hostname must not be empty")
+      else
+        let config = Mcp_server.workspace_config state in
+        let observed =
+          Server_keeper_credential_observation.observe
+            ~base_path:config.base_path
+            ~keeper_name:name
+            ~hostname
+            ()
+        in
+        Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+          (Server_keeper_credential_observation.surface_json
+             ~hostname
+             ~probed_at:(Time_compat.now ())
+             observed)
   else if ends_with keeper_suffix_checkpoints then
     let name = extract_name keeper_suffix_checkpoints in
     if String.length name = 0 then

@@ -20,10 +20,35 @@ for forbidden in dune-project agent_core.opam .github release-please-config.json
 done
 
 dune_violations="$({
-  # In Dune syntax, [;] starts a comment through end-of-line. Inspect only the
-  # code prefix so documentation cannot be mistaken for a library dependency.
+  # In Dune syntax, [;] starts a comment through end-of-line unless it appears
+  # inside a quoted string. Preserve quoted semicolons while scanning the code
+  # prefix so comments cannot hide or imitate a library dependency.
   find "${core_root}" -name dune -type f -print0 \
-    | xargs -0 rg -n '^[^;]*masc\.' \
+    | while IFS= read -r -d '' dune_file; do
+        awk '
+          BEGIN {
+            in_string = 0
+            escaped = 0
+          }
+          {
+            code = ""
+            for (i = 1; i <= length($0); i++) {
+              ch = substr($0, i, 1)
+              if (!in_string && ch == ";") break
+              code = code ch
+              if (in_string && escaped) {
+                escaped = 0
+              } else if (in_string && ch == "\\") {
+                escaped = 1
+              } else if (ch == "\"") {
+                in_string = !in_string
+              }
+            }
+            print FILENAME ":" FNR ":" code
+          }
+        ' "${dune_file}"
+      done \
+    | rg 'masc\.' \
     | rg -v '\(public_name masc\.agent_core(\.[a-z_]+)?\)' \
     || true
 })"

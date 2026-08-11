@@ -30,9 +30,10 @@ function identityPath(keeperName: string, hostname: string): string {
 export async function fetchKeeperGithubIdentity(
   keeperName: string,
   hostname = 'github.com',
+  signal?: AbortSignal,
 ): Promise<KeeperGithubIdentityObservation> {
   await ensureDevToken()
-  return get<KeeperGithubIdentityObservation>(identityPath(keeperName, hostname))
+  return get<KeeperGithubIdentityObservation>(identityPath(keeperName, hostname), { signal })
 }
 
 function decodeSseFrame(rawFrame: string): { event: string; data: string } | null {

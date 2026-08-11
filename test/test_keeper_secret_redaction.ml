@@ -151,6 +151,25 @@ let test_execute_output_redaction_uses_keeper_snapshot () =
   contains "stdout marker present" stdout "[REDACTED]";
   contains "stderr marker present" stderr "[REDACTED]"
 
+let test_stream_redaction_hides_secret_across_chunks () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "stream" in
+  let root = secret_root_default ~base ~keeper_name in
+  let secret = "chunk.boundary.secret" in
+  write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") secret;
+  let state =
+    R.snapshot ~base_path:base ~keeper_name |> R.create_stream_state
+  in
+  let first = R.redact_stream_chunk state "prefix chunk.boundary." in
+  let second = R.redact_stream_chunk state "secret suffix\nnext" in
+  let trailing = R.redact_stream_finish state in
+  Alcotest.(check string) "unterminated line is withheld" "" first;
+  not_contains "joined secret is hidden" second secret;
+  contains "joined line has marker" second "[REDACTED]";
+  Alcotest.(check string) "final unterminated line is emitted" "next" trailing
+
 let () =
   Alcotest.run
     "keeper secret redaction"
@@ -165,5 +184,7 @@ let () =
             test_json_redaction_preserves_shape;
           Alcotest.test_case "redacts Execute stdout stderr and combined output" `Quick
             test_execute_output_redaction_uses_keeper_snapshot;
+          Alcotest.test_case "redacts a secret split across chunks" `Quick
+            test_stream_redaction_hides_secret_across_chunks;
         ] )
     ]

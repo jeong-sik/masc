@@ -328,7 +328,7 @@ let run_capture ~env = function
   | [] -> Unix.WEXITED 127, "", "GitHub CLI argv must not be empty"
   | argv ->
     Process_eio.run_argv_with_status_split
-      ~timeout_sec:30.0
+      ~timeout_sec:15.0
       ~env
       argv
 ;;
@@ -427,16 +427,30 @@ let print_observation ~base_path ~keeper_name ~hostname =
 let run_inherited ~env = function
   | [] -> Unix.WEXITED 127
   | command :: _ as argv ->
-    let process =
-      Unix.create_process_env
-        command
-        (Array.of_list argv)
-        env
-        Unix.stdin
-        Unix.stdout
-        Unix.stderr
-    in
-    snd (Unix.waitpid [] process)
+    (try
+       let process =
+         Unix.create_process_env
+           command
+           (Array.of_list argv)
+           env
+           Unix.stdin
+           Unix.stdout
+           Unix.stderr
+       in
+       let rec wait () =
+         try snd (Unix.waitpid [] process) with
+         | Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+       in
+       wait ()
+     with
+     | Unix.Unix_error (error, operation, target) ->
+       prerr_endline
+         (Printf.sprintf
+            "cannot run GitHub CLI: %s(%s): %s"
+            operation
+            target
+            (Unix.error_message error));
+       Unix.WEXITED 127)
 ;;
 
 let run_cli_login ~base_path ~keeper_name ~hostname =

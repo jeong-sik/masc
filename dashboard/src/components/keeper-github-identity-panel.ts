@@ -29,19 +29,36 @@ export function KeeperGithubIdentityPanel({
   const [loginRunning, setLoginRunning] = useState(false)
   const [output, setOutput] = useState('')
   const abortRef = useRef<AbortController | null>(null)
+  const refreshAbortRef = useRef<AbortController | null>(null)
 
   const refresh = async () => {
+    refreshAbortRef.current?.abort()
+    const controller = new AbortController()
+    refreshAbortRef.current = controller
     setLoadError(null)
+    setObservation(null)
     try {
-      setObservation(await fetchKeeperGithubIdentity(keeperName))
+      const next = await fetchKeeperGithubIdentity(
+        keeperName,
+        'github.com',
+        controller.signal,
+      )
+      if (refreshAbortRef.current === controller) setObservation(next)
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : String(error))
+      if (!controller.signal.aborted && refreshAbortRef.current === controller) {
+        setLoadError(error instanceof Error ? error.message : String(error))
+      }
+    } finally {
+      if (refreshAbortRef.current === controller) refreshAbortRef.current = null
     }
   }
 
   useEffect(() => {
     void refresh()
-    return () => abortRef.current?.abort()
+    return () => {
+      refreshAbortRef.current?.abort()
+      abortRef.current?.abort()
+    }
   }, [keeperName])
 
   const urls = useMemo(() => extractUrls(output), [output])
@@ -106,10 +123,12 @@ export function KeeperGithubIdentityPanel({
           <div class="rounded-lg border border-slate-200 bg-[var(--white-80)] p-3">
             <span class="text-3xs font-semibold uppercase tracking-wider text-slate-400">Keeper 저장소</span>
             <p class="mt-1 text-sm font-semibold text-slate-900">${authLabel(observation.stored.authenticated, observation.stored.login)}</p>
+            ${observation.stored.error && html`<p class="mt-1 text-3xs text-red-700">확인 실패: ${observation.stored.error}</p>`}
           </div>
           <div class="rounded-lg border border-slate-200 bg-[var(--white-80)] p-3">
             <span class="text-3xs font-semibold uppercase tracking-wider text-slate-400">실제 실행 환경</span>
             <p class="mt-1 text-sm font-semibold text-slate-900">${authLabel(observation.effective.authenticated, observation.effective.login)}</p>
+            ${observation.effective.error && html`<p class="mt-1 text-3xs text-red-700">확인 실패: ${observation.effective.error}</p>`}
             ${observation.projected_token_env_names.length > 0 && html`
               <p class="mt-1 text-3xs text-amber-700">토큰 우선 적용: ${observation.projected_token_env_names.join(', ')}</p>
             `}

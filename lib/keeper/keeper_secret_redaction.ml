@@ -1,5 +1,10 @@
 type t = { patterns : Re.re list }
 
+type stream_state =
+  { redaction : t
+  ; pending_line : Buffer.t
+  }
+
 let empty = { patterns = [] }
 
 let min_secret_len = 8
@@ -122,6 +127,29 @@ let redact_text t text =
       t.patterns
   in
   Observability_redact.redact_text text
+
+let create_stream_state redaction =
+  { redaction; pending_line = Buffer.create 256 }
+;;
+
+let redact_stream_chunk state chunk =
+  let emitted = Buffer.create (String.length chunk) in
+  String.iter
+    (fun char ->
+       Buffer.add_char state.pending_line char;
+       if Char.equal char '\n'
+       then (
+         Buffer.add_string emitted (redact_text state.redaction (Buffer.contents state.pending_line));
+         Buffer.clear state.pending_line))
+    chunk;
+  Buffer.contents emitted
+;;
+
+let redact_stream_finish state =
+  let trailing = redact_text state.redaction (Buffer.contents state.pending_line) in
+  Buffer.clear state.pending_line;
+  trailing
+;;
 
 let rec redact_json_exact t = function
   | `String s -> `String (redact_text t s)

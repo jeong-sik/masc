@@ -69,28 +69,41 @@ let handle_keeper_github_login_post state req reqd =
              ~base_path:config.base_path
              ~keeper_name:name
          in
-         let redact = Keeper_secret_redaction.redact_text redaction in
+         let stdout_redaction = Keeper_secret_redaction.create_stream_state redaction in
+         let stderr_redaction = Keeper_secret_redaction.create_stream_state redaction in
          let response = Httpun.Response.create ~headers:github_login_stream_headers `OK in
          let writer = Httpun.Reqd.respond_with_streaming reqd response in
          Fun.protect
            ~finally:(fun () -> Httpun.Body.Writer.close writer)
            (fun () ->
-              let send_output stream chunk =
-                github_login_stream_send
-                  writer
-                  "output"
-                  (`Assoc
-                     [ "stream", `String stream
-                     ; "text", `String (redact chunk)
-                     ])
+              let send_redacted_output stream state chunk =
+                let text = Keeper_secret_redaction.redact_stream_chunk state chunk in
+                if not (String.equal text "")
+                then
+                  github_login_stream_send
+                    writer
+                    "output"
+                    (`Assoc [ "stream", `String stream; "text", `String text ])
+              in
+              let finish_redacted_output stream state =
+                let text = Keeper_secret_redaction.redact_stream_finish state in
+                if not (String.equal text "")
+                then
+                  github_login_stream_send
+                    writer
+                    "output"
+                    (`Assoc [ "stream", `String stream; "text", `String text ])
               in
               let status, _, stderr =
                 Process_eio.run_argv_with_status_split_streaming
                   ~env
-                  ~on_stdout_chunk:(send_output "stdout")
-                  ~on_stderr_chunk:(send_output "stderr")
+                  ~on_stdout_chunk:(send_redacted_output "stdout" stdout_redaction)
+                  ~on_stderr_chunk:(send_redacted_output "stderr" stderr_redaction)
                   (Keeper_github_identity.login_argv ~hostname)
               in
+              finish_redacted_output "stdout" stdout_redaction;
+              finish_redacted_output "stderr" stderr_redaction;
+              let stderr = Keeper_secret_redaction.redact_text redaction stderr in
               match status with
               | Unix.WEXITED 0 ->
                 (match

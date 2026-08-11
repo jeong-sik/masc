@@ -1185,10 +1185,6 @@ let keeper_github_hostname_arg =
   let doc = "GitHub hostname." in
   Arg.(value & opt string "github.com" & info [ "hostname" ] ~docv:"HOST" ~doc)
 
-let keeper_github_base_path_arg =
-  let doc = "MASC workspace base path." in
-  Arg.(value & opt string (Sys.getcwd ()) & info [ "base-path" ] ~docv:"PATH" ~doc)
-
 let keeper_github_action_cmd name doc run =
   let invoke base_path keeper_name hostname =
     run ~base_path ~keeper_name ~hostname
@@ -1197,7 +1193,7 @@ let keeper_github_action_cmd name doc run =
     (Cmd.info name ~doc)
     Term.(
       const invoke
-      $ keeper_github_base_path_arg
+      $ base_path
       $ keeper_github_keeper_arg
       $ keeper_github_hostname_arg)
 

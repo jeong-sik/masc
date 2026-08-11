@@ -525,8 +525,12 @@ let run_docker_shell_command_with_status_internal
                                     ~container_root)
                            with
                            | Error err ->
-                             sandbox_error
-                               ("docker_shell_failed: github_identity_invalid: " ^ err)
+                             Eio_guard.protect
+                               ~finally:(fun () -> secret_projection.cleanup ())
+                               (fun () ->
+                                  sandbox_error
+                                    ("docker_shell_failed: github_identity_invalid: "
+                                     ^ err))
                            | Ok (github_identity_args, _identity_state) ->
                              let argv =
                             docker_run_argv

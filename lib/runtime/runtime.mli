@@ -13,6 +13,12 @@ type t =
   ; model : model_spec
   ; binding : binding
   ; execution : Runtime_execution.t
+  ; quota_scope : Runtime_quota_window.scope
+    (** Quota ownership key frozen at materialization, from the same
+        credential-alias selection that resolved the dispatched API key. A
+        later environment change must not re-select the alias at
+        window-recording time, or the window is charged to an account the
+        dispatch never used (PR #28219 review). *)
   }
 
 val id_of_binding : binding -> string

@@ -790,6 +790,9 @@ let run_named
         , None
         , codex_attempt.effect_disposition )
       | Runtime_execution.Antigravity_cli config ->
+        let antigravity_effect_disposition =
+          ref Keeper_provider_attempt_effect.Observation_unavailable
+        in
         let run_antigravity ~initial_messages () =
           Keeper_antigravity_runtime.run
             ~runtime_id:attempt_runtime_id
@@ -807,6 +810,9 @@ let run_named
             ~event_bus
             ~raw_trace
             ~on_event
+            ~on_pre_dispatch_failure:(fun () ->
+              antigravity_effect_disposition :=
+                Keeper_provider_attempt_effect.No_effect_observed)
             ~config
         in
         let run_antigravity_with_history () =
@@ -840,11 +846,11 @@ let run_named
                     , `String "official_client_session_store_owns_resume" )
                   ])
               Keeper_runtime_manifest.Runtime_routed;
-            ( run_antigravity_with_history ()
-            , Keeper_provider_attempt_effect.Observation_unavailable )
+            let result = run_antigravity_with_history () in
+            result, !antigravity_effect_disposition
           | None, None ->
-            ( run_antigravity_with_history ()
-            , Keeper_provider_attempt_effect.Observation_unavailable )
+            let result = run_antigravity_with_history () in
+            result, !antigravity_effect_disposition
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let antigravity_result =
@@ -868,6 +874,9 @@ let run_named
            an absent AGENT_CORE checkpoint after dispatch. *)
         , effect_disposition )
       | Runtime_execution.Claude_code config ->
+        let claude_effect_disposition =
+          ref Keeper_provider_attempt_effect.Observation_unavailable
+        in
         let run_claude ~initial_messages () =
           let tools = if runtime.model.tools_support then tools else [] in
           Keeper_claude_code_runtime.run
@@ -886,6 +895,9 @@ let run_named
             ~event_bus
             ~raw_trace
             ~on_event
+            ~on_pre_dispatch_failure:(fun () ->
+              claude_effect_disposition :=
+                Keeper_provider_attempt_effect.No_effect_observed)
             ~config
         in
         let claude_result, effect_disposition =
@@ -921,11 +933,11 @@ let run_named
                     , `String "official_client_session_store_owns_resume" )
                   ])
               Keeper_runtime_manifest.Runtime_routed;
-            ( run_claude ~initial_messages ()
-            , Keeper_provider_attempt_effect.Observation_unavailable )
+            let result = run_claude ~initial_messages () in
+            result, !claude_effect_disposition
           | None, None ->
-            ( run_claude ~initial_messages ()
-            , Keeper_provider_attempt_effect.Observation_unavailable )
+            let result = run_claude ~initial_messages () in
+            result, !claude_effect_disposition
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let claude_result =

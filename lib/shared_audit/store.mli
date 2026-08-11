@@ -8,13 +8,17 @@
 
     The store maintains in-memory state for the latest entry's hash
     so [append] can chain automatically without re-reading the
-    full log on each call. On creation, the latest hash is loaded
-    from the most recent JSONL file (if any) so sessions that resume
-    an existing audit log continue the chain correctly.
+    full log on each call. All stores whose [base_dir] resolves to the
+    same canonical directory share one in-process writer owner: its
+    cursor and cross-context durable lock make append one serialized
+    read-write-update transaction across instances, Eio fibers,
+    system threads, and Domains. The owner is initialized from the
+    most recent JSONL file (if any) so sessions that resume an existing
+    audit log continue the chain correctly.
 
     {b Single-process design}: this implementation does not orchestrate
-    across processes. For multi-process audit (e.g., concurrent keepers
-    writing to the same log), a follow-up PR will add file-locking
+    across processes. For multi-process audit (e.g., concurrent processes
+    writing to the same log), a follow-up PR must add file-locking
     or a single-writer dispatcher.
 
     @stability Evolving
@@ -33,9 +37,12 @@ exception Corrupt_jsonl of {
 
 val create : base_dir:string -> t
 (** Create or open a store rooted at [base_dir]. The directory is
-    created (with parents) if it does not exist. The latest entry's
-    hash is loaded from the most recent JSONL file in [base_dir],
-    so [append] continues the chain across sessions. *)
+    created (with parents) if it does not exist. Stores for equivalent
+    realpath-resolved directories share one in-process writer owner.
+    A new owner loads the latest entry's hash from disk; reopening an
+    existing owner refreshes that cursor under its append lock, preserving
+    fail-closed validation of on-disk evidence. Thus [append] continues the
+    chain across sessions. *)
 
 val append :
   t ->
@@ -43,7 +50,9 @@ val append :
   payload:Yojson.Safe.t ->
   Envelope.t
 (** Append a new entry with [prev_hash] computed from the latest
-    on-disk entry. Returns the appended entry. *)
+    hash owned for this canonical base directory. Cursor read, durable
+    append, and cursor update are serialized as one transaction across
+    every in-process store instance. Returns the appended entry. *)
 
 val recent : t -> n:int -> Envelope.t list
 (** Read the most recent [n] entries (chronologically increasing).

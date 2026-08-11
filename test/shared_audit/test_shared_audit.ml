@@ -274,6 +274,29 @@ let test_store_resume_continues_chain () =
       "resumed chain: e2.prev_hash = hash of e1"
       (Some (Env.hash_for_chain e1)) e2.prev_hash)
 
+let test_store_instances_share_append_cursor () =
+  let dir = unique_temp_dir "audit_shared_cursor" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    (* Create both handles before either append. Independent cached cursors
+       would therefore both start at [None] and deterministically fork. *)
+    let store_a = Store.create ~base_dir:dir in
+    let store_b = Store.create ~base_dir:dir in
+    let e1 = Store.append store_a ~category:"A" ~payload:(`Int 1) in
+    let e2 = Store.append store_b ~category:"B" ~payload:(`Int 2) in
+    let e3 = Store.append store_a ~category:"A" ~payload:(`Int 3) in
+    check (option string)
+      "B observes A's cursor"
+      (Some (Env.hash_for_chain e1))
+      e2.prev_hash;
+    check (option string)
+      "A observes B's cursor"
+      (Some (Env.hash_for_chain e2))
+      e3.prev_hash;
+    match Store.verify_chain [ e1; e2; e3 ] with
+    | Ok () -> ()
+    | Error (idx, reason) ->
+      fail (Printf.sprintf "shared-store chain broken at %d: %s" idx reason))
+
 let test_store_rejects_malformed_jsonl_lines () =
   let dir = unique_temp_dir "audit_malformed" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
@@ -343,6 +366,7 @@ let () =
       test_case "verify reports intact chain" `Quick test_store_verify_reports_intact_chain;
       test_case "verify reports on-disk tampering" `Quick test_store_verify_reports_on_disk_tampering;
       test_case "resume continues chain" `Quick test_store_resume_continues_chain;
+      test_case "instances share append cursor" `Quick test_store_instances_share_append_cursor;
       test_case "rejects malformed JSONL lines" `Quick test_store_rejects_malformed_jsonl_lines;
       test_case "rejects invalid envelope JSONL lines" `Quick test_store_rejects_invalid_envelope_jsonl_lines;
       test_case "resume rejects malformed JSONL lines" `Quick test_store_resume_rejects_malformed_jsonl_lines;

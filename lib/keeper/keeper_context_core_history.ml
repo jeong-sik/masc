@@ -33,11 +33,12 @@ type history_line_action =
   | Drop_line
 
 let classify_history_entry ~(source : string) : history_line_action =
-  if Keeper_types_support.is_prompt_history_source source
-  then Drop_line
-  else if Keeper_types_support.is_internal_history_source source
-  then Move_internal
-  else Keep_main
+  match Keeper_types_support.history_source_of_string source with
+  | None -> Drop_line
+  | Some Keeper_types_support.World_state_prompt -> Drop_line
+  | Some Keeper_types_support.Internal_assistant -> Move_internal
+  | Some (Keeper_types_support.Direct_user | Keeper_types_support.Direct_assistant) ->
+    Keep_main
 
 let history_path_for_source ~(session_dir : string) ~(source : string option) :
     string =

@@ -88,12 +88,17 @@ let keeper_history_summary_json
           let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
           if ts0 > 0.0 then ts0 else Safe_ops.json_float ~default:0.0 "timestamp" j
         in
-        if role = "" || content = ""
-           || Keeper_types_support.is_internal_history_source source
-           || Keeper_context_core.has_world_state_signature content
+        let source_kind = Keeper_types_support.history_source_of_string source in
+        if role = "" || content = "" || Option.is_none source_kind
         then
           (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
         else
+          match source_kind with
+          | None
+          | Some Keeper_types_support.World_state_prompt
+          | Some Keeper_types_support.Internal_assistant ->
+            (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
+          | Some (Keeper_types_support.Direct_user | Keeper_types_support.Direct_assistant) ->
           let is_fragment =
             role_lc = "assistant"
             && Keeper_execution.looks_fragmentary_history_text content

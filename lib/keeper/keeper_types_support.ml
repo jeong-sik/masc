@@ -147,13 +147,31 @@ let keeper_internal_history_path config trace_id =
 let normalize_history_source (source : string) =
   source |> String.trim |> String.lowercase_ascii
 
+type history_source =
+  | Direct_user
+  | Direct_assistant
+  | World_state_prompt
+  | Internal_assistant
+
+let history_source_of_string (source : string) : history_source option =
+  match normalize_history_source source with
+  | "direct_user" -> Some Direct_user
+  | "direct_assistant" -> Some Direct_assistant
+  | "world_state_prompt" -> Some World_state_prompt
+  | "internal_assistant" -> Some Internal_assistant
+  | _ -> None
+;;
+
 let is_prompt_history_source (source : string) =
-  String.equal (normalize_history_source source) "world_state_prompt"
+  match history_source_of_string source with
+  | Some World_state_prompt -> true
+  | Some Direct_user | Some Direct_assistant | Some Internal_assistant | None ->
+    false
 
 let is_internal_history_source (source : string) =
-  match normalize_history_source source with
-  | "world_state_prompt" | "internal_assistant" -> true
-  | _ -> false
+  match history_source_of_string source with
+  | Some World_state_prompt | Some Internal_assistant -> true
+  | Some Direct_user | Some Direct_assistant | None -> false
 
 let keeper_decision_log_path config name =
   Filename.concat

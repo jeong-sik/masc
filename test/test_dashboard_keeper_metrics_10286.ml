@@ -227,8 +227,8 @@ let test_history_summary_decodes_content_blocks () =
   let rows =
     String.concat
       "\n"
-      [ {|{"role":"assistant","content_blocks":[{"type":"text","text":"hello from albini"}],"ts_unix":1.0}|}
-      ; {|{"role":"user","content_blocks":[{"type":"text","text":"ping @taskmaster please"}],"ts_unix":2.0}|}
+      [ {|{"role":"assistant","source":"direct_assistant","content_blocks":[{"type":"text","text":"hello from albini"}],"ts_unix":1.0}|}
+      ; {|{"role":"user","source":"direct_user","content_blocks":[{"type":"text","text":"ping @taskmaster please"}],"ts_unix":2.0}|}
       ]
     ^ "\n"
   in
@@ -256,6 +256,58 @@ let test_history_summary_decodes_content_blocks () =
             content
       | _ -> fail "expected non-empty conversation list")
 
+let history_row ?source ~role ~ts_unix content =
+  let source_field =
+    match source with
+    | Some source -> [ ("source", `String source) ]
+    | None -> []
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+      (source_field
+      @ [
+          ("role", `String role);
+          ( "content_blocks",
+            `List
+              [ `Assoc
+                  [ ("type", `String "text"); ("text", `String content) ] ] );
+          ("ts_unix", `Float ts_unix);
+        ]))
+
+(* The source field is the routing authority. Missing/unknown values fail
+   closed, while a known direct-user message is retained even when its text
+   happens to contain the internal world-state headings. *)
+let test_history_summary_fails_closed_on_unknown_sources () =
+  let world_state_like_text =
+    "## Current World State\n### Namespace State\nuser quoted headings"
+  in
+  let rows =
+    [ history_row ~source:"direct_user" ~role:"user" ~ts_unix:1.0 world_state_like_text
+    ; history_row ~role:"user" ~ts_unix:2.0 "missing source"
+    ; history_row ~source:"direct_usr" ~role:"user" ~ts_unix:3.0 "typo source"
+    ; history_row ~source:"internal_assistant" ~role:"assistant" ~ts_unix:4.0
+        "internal assistant text"
+    ]
+    |> String.concat "\n"
+    |> fun rows -> rows ^ "\n"
+  in
+  with_temp_history rows (fun path ->
+      let conversation, _k2k_recent, _k2k_mentions, raw_count, _frag, _filtered =
+        Metrics.keeper_history_summary_json
+          ~all_keeper_names:[ "albini" ]
+          ~keeper_name:"albini"
+          ~history_path:path
+          ~filter_fragments:false
+      in
+      check int "only known direct source is counted" 1 raw_count;
+      match conversation with
+      | `List [ item ] ->
+          check string "direct text with headings is retained" world_state_like_text
+            (item |> Yojson.Safe.Util.member "content" |> Yojson.Safe.Util.to_string)
+      | other ->
+          failf "expected only direct-user history row, got %s"
+            (Yojson.Safe.to_string other))
+
 let () =
   run "dashboard_keeper_metrics_10286"
     [
@@ -277,5 +329,7 @@ let () =
         [
           test_case "decodes content_blocks rows" `Quick
             test_history_summary_decodes_content_blocks;
+          test_case "fails closed on unknown sources" `Quick
+            test_history_summary_fails_closed_on_unknown_sources;
         ] );
     ]

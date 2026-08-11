@@ -66,6 +66,16 @@ val keeper_internal_history_path : Workspace.config -> string -> string
 (** Trim + lowercase a history-source label. *)
 val normalize_history_source : string -> string
 
+type history_source =
+  | Direct_user
+  | Direct_assistant
+  | World_state_prompt
+  | Internal_assistant
+
+(** Parse the closed history-source schema. [None] means the row has a
+    missing or unknown source and must not enter the main conversation. *)
+val history_source_of_string : string -> history_source option
+
 (** Whether [source] denotes the world-state prompt history channel. *)
 val is_prompt_history_source : string -> bool
 

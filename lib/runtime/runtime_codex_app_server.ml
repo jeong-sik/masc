@@ -853,7 +853,14 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
           @ optional_field
               "effort"
               (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)));
-  let* turn = await_response io ~id:turn_request_id ~method_:"turn/start" in
+  let* turn =
+    try await_response io ~id:turn_request_id ~method_:"turn/start" with
+    | Eio.Time.Timeout ->
+      (* The request has been written. A missing response cannot prove that
+         the app-server rejected it, so rotating here could duplicate a turn
+         that is already executing upstream. *)
+      Error (Timeout { seconds = config.timeout_s; turn_accepted = true })
+  in
   let* turn_id = parse_turn_start turn in
   let* () =
     invoke_state_callback ~stage:"turn started callback" (fun () ->
@@ -1167,8 +1174,12 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
                  })
           | exn -> Error (Spawn_failed (Printexc.to_string exn)))
        with
-       | Error (Timeout { seconds; turn_accepted = _ }) ->
-         Error (Timeout { seconds; turn_accepted = !turn_accepted })
+       | Error (Timeout { seconds; turn_accepted = dispatch_ambiguous }) ->
+         Error
+           (Timeout
+              { seconds
+              ; turn_accepted = dispatch_ambiguous || !turn_accepted
+              })
        | other -> other)
   in
   (match result with

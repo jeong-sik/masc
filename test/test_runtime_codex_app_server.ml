@@ -742,8 +742,14 @@ let test_stream_idle_timeout_is_typed () =
     [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
     (fun path ->
        match run_fixture ~timeout_s:0.05 path with
-       | Error (Runtime_codex_app_server.Timeout { seconds; _ }) ->
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { seconds; turn_accepted = true }) ->
          check (float 0.001) "exact idle timeout" 0.05 seconds
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { turn_accepted = false; _ }) ->
+         fail "a sent turn/start request was classified as pre-dispatch"
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "silent app-server stream ignored its idle timeout")
 ;;

@@ -56,10 +56,18 @@ outside exec/Gate:
   what that keeper's shell would actually resolve — including the case where
   a host-keyring credential is shadowed by a projected `GH_TOKEN`, the
   documented `gh` footgun where `gh auth refresh` silently no-ops.
+  Measured on gh 2.87.3, shadowing takes two shapes: `GITHUB_TOKEN` leaves the
+  keyring row `✓` with `Active account: false`, while `GH_TOKEN` marks the
+  config entry `X`. Both are `Shadowed` — routing the second to
+  `unauthenticated` would send the operator to a no-op `gh auth login`.
 - Read surface: `GET /api/v1/keepers/:name/credential-surface` returning
   `{schema, host, status: authenticated | unauthenticated | shadowed |
   unknown, account?, token_source?, scopes?, probed_at, next_action}` — never
   a token value, and the store stays write-only as today.
+  `token_source?` is the label gh itself prints — `keyring`, or the shadowing
+  variable's own name (`GH_TOKEN`, `GITHUB_TOKEN`, …) so `next_action` can
+  name exactly what to unset. Parsed as `Keyring | Environment of string`,
+  never collapsed to a bare `env`.
 - Dashboard: a credential card on the keeper detail panel rendering exactly
   those fields, with a manual re-probe action.
 - Probe budget: results are cached with a TTL (default 10 minutes) and a
@@ -92,6 +100,9 @@ against the pinned gh version.
 
 - Unit: parser fixtures for keyring/env/shadowed/GHES-host outputs, including
   future-unknown labels mapping to `Unknown`.
+- The probe never reads `gh auth status`'s exit code as a verdict: a healthy
+  keyring shadowed by an invalid env token exits 1 exactly like a logged-out
+  host; only per-entry marks and labels decide.
 - Integration: probe under a projected fake `GH_TOKEN` reports `env` source;
   probe with an empty projection on a logged-in host reports `keyring`.
 - E2E completion bar (per the audit's production-use standard): the verdict

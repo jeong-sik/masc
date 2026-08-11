@@ -495,6 +495,7 @@ let exact_execution_terminal_of_evidence
     ; call_id = evidence.call_id
     ; plan_fingerprint = evidence.plan_fingerprint
     ; request_body_sha256 = evidence.receipt_request_body_sha256
+    ; detail = None
     }
 ;;
 

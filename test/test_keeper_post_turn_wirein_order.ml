@@ -34,6 +34,7 @@ let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction")
     ; call_id
     ; plan_fingerprint = "compaction-plan"
     ; request_body_sha256 = String.make 64 'c'
+    ; detail = None
     }
 ;;
 

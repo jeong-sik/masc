@@ -871,6 +871,46 @@ let test_admission_rejection_then_cancellation_propagates () =
 ;;
 
 
+(* The four identifiers on a compaction terminal say which call failed; none of
+   them says why. Measured on a live compaction that spent 470 s on
+   glm-coding.glm-5-turbo — a slot completing 97% of its work elsewhere — and
+   left only slot_id, call_id, and two fingerprints. The sibling consumer of the
+   same agent-core branch (hitl_summary_worker) was already rendering the
+   provider's account; compaction discarded it in the pattern match. *)
+let test_terminal_carries_the_provider_account () =
+  let base : Keeper_compaction_outcome.exact_execution_terminal =
+    { cause = Keeper_compaction_outcome.Exact_execution_failed
+    ; slot_id = "glm-coding.glm-5-turbo"
+    ; call_id = "call-fixture"
+    ; plan_fingerprint = "plan-fixture"
+    ; request_body_sha256 = String.make 64 'a'
+    ; detail = None
+    }
+  in
+  let render t = Keeper_compaction_outcome.exact_execution_terminal_to_string t in
+  let contains needle text =
+    let n = String.length needle in
+    let rec scan i =
+      i + n <= String.length text && (String.sub text i n = needle || scan (i + 1))
+    in
+    scan 0
+  in
+  (* Control: without an account the rendering is exactly what it was before
+     this field existed. A change here would be a silent format break for every
+     terminal that has no provider account to carry. *)
+  let without = render base in
+  Alcotest.(check bool) "keeps the identifiers" true (contains "slot_id=glm-coding.glm-5-turbo" without);
+  Alcotest.(check bool) "adds nothing when there is no account" false (contains "detail=" without);
+  (* An empty account is the same as none: a bare "detail=" would read as an
+     account that says nothing, which is worse than not claiming one. *)
+  Alcotest.(check bool) "blank account is not rendered" false
+    (contains "detail=" (render { base with detail = Some "   " }));
+  let with_account = render { base with detail = Some "slot=x completion failed (http_status=429)" } in
+  Alcotest.(check bool) "carries the account" true (contains "detail=slot=x completion failed" with_account);
+  Alcotest.(check bool) "still carries the identifiers" true
+    (contains "call_id=call-fixture" with_account)
+;;
+
 let () =
   Alcotest.run
     "compaction exact-flow conformance"
@@ -931,6 +971,10 @@ let () =
             "admission rejection then cancellation propagates"
             `Quick
             test_admission_rejection_then_cancellation_propagates
+        ; Alcotest.test_case
+            "terminal carries the provider account"
+            `Quick
+            test_terminal_carries_the_provider_account
         ] )
       (* The "affinity and non-sharing" group held only cases whose functions
          #25993 removed; its registrations were left behind and the group is now

@@ -60,6 +60,11 @@ outside exec/Gate:
   keyring row `✓` with `Active account: false`, while `GH_TOKEN` marks the
   config entry `X`. Both are `Shadowed` — routing the second to
   `unauthenticated` would send the operator to a no-op `gh auth login`.
+  A third shape needs no failure at all: a valid env token over a logged-in
+  keyring renders both rows `✓`, yet the stored credential is not what
+  authenticates. This is why the verdict keys on the env row's presence beside
+  a stored credential — gh reads the variable before the keyring — and not on
+  any per-row mark or `Active` flag.
 - Read surface: `GET /api/v1/keepers/:name/credential-surface` returning
   `{schema, host, status: authenticated | unauthenticated | shadowed |
   unknown, account?, token_source?, scopes?, probed_at, next_action}` — never

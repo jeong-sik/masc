@@ -86,7 +86,11 @@ let schedule_tool_name action =
 let schedule_ctx ?continuation_channel config : Tool_schedule.context =
   { config
   ; agent_name = "scheduler-agent"
-  ; continuation_channel
+  ; stamp_keeper_wake_result_delivery =
+      (fun ~payload ->
+         Schedule_payload_projection.set_keeper_wake_result_delivery
+           ~payload
+           ~channel:continuation_channel)
   ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
   }
 ;;

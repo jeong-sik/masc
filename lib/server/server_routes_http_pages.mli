@@ -64,6 +64,11 @@ val graphql_playground_html : nonce:string -> string
     CSP nonce inlined into the boot script. *)
 
 val graphql_csp_header : string -> string
+
+val fresh_graphql_csp_nonce : unit -> string
+(** Per-response CSP nonce for the GraphQL playground. Both transports call
+    this so the playground is served with one nonce implementation rather than
+    a copy per route table. *)
 (** Builds the [Content-Security-Policy] header value
     pinned to the GraphQL Playground asset set, threading
     the per-request nonce. *)

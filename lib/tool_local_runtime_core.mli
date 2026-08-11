@@ -3,9 +3,8 @@
     and OpenAI-compatible model fetching for local llama-server
     runtime probing.
 
-    Three siblings ({!Tool_local_runtime},
-    {!Tool_local_runtime_http},
-    {!Tool_local_runtime_status}) all do
+    Its siblings ({!Tool_local_runtime},
+    {!Tool_local_runtime_http}) do
     [include Tool_local_runtime_core], so this module's surface
     propagates as a re-export through every consumer.  The
     cmdline-flag-parsing helpers ([parse_pid_and_command],
@@ -55,9 +54,8 @@ type bench_sample = {
   latency_ms : int;
   error : string option;
 }
-(** Single benchmark sample.  Used by {!Tool_local_runtime_status}
-    bench loops; exposed here so all four siblings see the same
-    type via include. *)
+(** Single benchmark sample.  Currently unconsumed — the
+    local-runtime bench/status loops that read it were removed. *)
 
 (** Aliases over {!Json_util.*_opt_to_json} re-exported for the
     sibling include runtime. *)

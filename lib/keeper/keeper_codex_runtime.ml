@@ -137,7 +137,7 @@ let model_input_projection_for_capacity
       Runtime_model_input_tail_window.next_shrink_capacity_bytes
         ~measure_message_bytes:measure_model_input_message_bytes
         ~target_capacity_bytes
-        projected);
+        messages);
   Ok projected
 ;;
 

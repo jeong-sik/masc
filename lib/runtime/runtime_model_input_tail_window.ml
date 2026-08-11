@@ -67,6 +67,12 @@ let is_extra_context (msg : Agent_core.Types.message) =
   | Agent_core.Types.Extra_system_context_provenance.Duplicate -> true
 ;;
 
+let is_preamble (msg : Agent_core.Types.message) =
+  match List.assoc_opt preamble_marker_key msg.metadata with
+  | Some (`Bool true) -> true
+  | None | Some _ -> false
+;;
+
 type label =
   | Pinned
   | Atom of int
@@ -122,6 +128,7 @@ let next_shrink_capacity_bytes
     ~measure_message_bytes
     ~target_capacity_bytes
     messages =
+  let messages = List.filter (fun message -> not (is_preamble message)) messages in
   let labelled, atom_count = annotate messages in
   if atom_count <= 1
   then None

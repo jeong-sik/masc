@@ -225,6 +225,31 @@ let test_next_shrink_capacity_clamps_to_lopsided_newest_atom () =
     fits_budget ~capacity_bytes ~reserved_bytes:0 projected
 ;;
 
+let test_next_shrink_ignores_synthetic_preamble () =
+  let history =
+    List.concat (List.init (4 * k) (fun i -> [ assistant i; tool i ]))
+  in
+  let projected =
+    ok_exn ~what:"preamble shrink input" (project ~capacity_bytes:60_000 history)
+  in
+  let without_preamble = List.filter (fun message -> not (is_preamble message)) projected in
+  Alcotest.(check bool)
+    "projection contains a synthetic preamble"
+    true
+    (List.length without_preamble < List.length projected);
+  let target_capacity_bytes = total_bytes without_preamble / 2 in
+  let shrink messages =
+    Window.next_shrink_capacity_bytes
+      ~measure_message_bytes
+      ~target_capacity_bytes
+      messages
+  in
+  Alcotest.(check (option int))
+    "synthetic preamble does not create a conversation atom"
+    (shrink without_preamble)
+    (shrink projected)
+;;
+
 let test_cut_is_quantized_when_a_quantized_cut_fits () =
   (* Cache stability (#26535): when some multiple of [k] fits, the drop count
      is that multiple, so the transmitted prefix only moves in whole
@@ -477,6 +502,10 @@ let () =
             "next shrink clamps to lopsided newest atom"
             `Quick
             test_next_shrink_capacity_clamps_to_lopsided_newest_atom
+        ; Alcotest.test_case
+            "next shrink ignores synthetic preamble"
+            `Quick
+            test_next_shrink_ignores_synthetic_preamble
         ; Alcotest.test_case "cut is quantized when a quantized cut fits" `Quick
             test_cut_is_quantized_when_a_quantized_cut_fits
         ; Alcotest.test_case "cut point is stable while the budget holds" `Quick

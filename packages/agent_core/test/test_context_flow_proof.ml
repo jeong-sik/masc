@@ -90,17 +90,6 @@ let require_run_success label = function
 ;;
 
 (** Substring search — checks if [sub] appears anywhere in [s]. *)
-let contains_substring s sub =
-  let len_s = String.length s
-  and len_sub = String.length sub in
-  if len_sub > len_s
-  then false
-  else (
-    let found = ref false in
-    for i = 0 to len_s - len_sub do
-      if (not !found) && String.sub s i len_sub = sub then found := true
-    done;
-    !found)
 ;;
 
 (* ── Test 1: Full chain — injector → Context.t → hook → LLM ── *)
@@ -172,7 +161,9 @@ let test_full_chain_across_turns () =
        Alcotest.(check bool)
          "API body contains context string"
          true
-         (contains_substring !captured_turn1_body "proof_marker=context_reached_llm"))
+         (Agent_core_strings.contains_substring
+            ~haystack:!captured_turn1_body
+            ~needle:"proof_marker=context_reached_llm"))
 ;;
 
 (* ── Test 2: No injector → no context pollution ────────── *)
@@ -295,7 +286,7 @@ let test_accumulation_across_tool_calls () =
     Alcotest.(check bool)
       "API body has accumulation"
       true
-      (contains_substring !captured2 "count=2"))
+      (Agent_core_strings.contains_substring ~haystack:!captured2 ~needle:"count=2"))
 ;;
 
 (* ── Test 4: Context.t identity — same object across pipeline ── *)

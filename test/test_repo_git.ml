@@ -79,18 +79,6 @@ let init_local_repo path =
   in
   ()
 
-let contains_substring s sub =
-  let sub_len = String.length sub in
-  sub_len = 0
-  ||
-  let s_len = String.length s in
-  let rec aux i =
-    if i + sub_len > s_len then false
-    else if String.sub s i sub_len = sub then true
-    else aux (i + 1)
-  in
-  aux 0
-
 let sample_repo ~url local_path =
   {
     id = "test-repo";
@@ -172,7 +160,7 @@ let test_get_recent_commits () =
               Alcotest.(check bool) "at least 1 commit" true
                 (List.length commits >= 1);
               Alcotest.(check bool) "contains initial" true
-                (List.exists (fun s -> contains_substring s "initial") commits)))
+                (List.exists (fun s -> String_util.contains_substring s "initial") commits)))
 
 let test_status_summary_counts_porcelain_rows () =
   with_temp_dir (fun tmp ->
@@ -230,10 +218,10 @@ let test_status_summary_uses_read_only_git_conventions () =
               let joined = String.concat "\n" (List.rev !captured) in
               Alcotest.(check bool)
                 "uses --no-optional-locks" true
-                (contains_substring joined "--no-optional-locks");
+                (String_util.contains_substring joined "--no-optional-locks");
 	              Alcotest.(check bool)
 	                "sets GIT_OPTIONAL_LOCKS env key" true
-	                (contains_substring joined "\"GIT_OPTIONAL_LOCKS\"")))
+	                (String_util.contains_substring joined "\"GIT_OPTIONAL_LOCKS\"")))
 
 let test_origin_head_branch_preserves_slash_branch () =
   with_temp_dir (fun tmp ->

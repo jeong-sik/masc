@@ -52,16 +52,6 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  if n_len = 0 then true else loop 0
-
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -464,7 +454,7 @@ let test_protocol_version () =
   match Mcp.validate_protocol_version "unknown" with
   | Error msg ->
       Alcotest.(check bool) "unsupported version rejected" true
-        (contains_substring msg "Unsupported protocolVersion")
+        (String_util.contains_substring msg "Unsupported protocolVersion")
   | Ok _ -> Alcotest.fail "expected unsupported protocol version to be rejected"
 
 (* ===== Unit Tests for Response Builders ===== *)
@@ -564,7 +554,7 @@ let test_handle_request_initialize_rejects_unsupported_protocol_version () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check bool) "unsupported protocol message" true
-    (contains_substring (error_message_exn response) "Unsupported protocolVersion");
+    (String_util.contains_substring (error_message_exn response) "Unsupported protocolVersion");
 
   cleanup_dir base_path
 
@@ -744,11 +734,11 @@ let test_handle_request_initialize_operator_profile () =
               | _ -> ""
             in
             Alcotest.(check bool) "mentions operator profile" true
-              (contains_substring instructions "six operator tools");
+              (String_util.contains_substring instructions "six operator tools");
             Alcotest.(check bool) "does not mention surface audit" false
-              (contains_substring instructions "surface audit");
+              (String_util.contains_substring instructions "surface audit");
             Alcotest.(check bool) "mentions confirm workflow" true
-              (contains_substring instructions "confirm_required=true")
+              (String_util.contains_substring instructions "confirm_required=true")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
@@ -879,9 +869,9 @@ let test_handle_request_initialize_managed_profile () =
               | _ -> ""
             in
             Alcotest.(check bool) "mentions managed profile" true
-              (contains_substring instructions "managed-agent profile");
+              (String_util.contains_substring instructions "managed-agent profile");
             Alcotest.(check bool) "mentions canonical task control" true
-              (contains_substring instructions "masc_transition")
+              (String_util.contains_substring instructions "masc_transition")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
@@ -1004,7 +994,7 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
   in
   let response_text = Yojson.Safe.to_string response in
   Alcotest.(check bool) "removed alias rejected" true
-    (contains_substring response_text
+    (String_util.contains_substring response_text
        "Tool 'masc_claim_task' is not available on this MCP endpoint");
   Alcotest.(check (float 0.0001)) "rejected tools/call records duration count"
     1.0
@@ -1057,7 +1047,7 @@ let test_handle_request_tools_call_missing_params_records_duration () =
   in
   let response_text = Yojson.Safe.to_string response in
   Alcotest.(check bool) "missing params rejected" true
-    (contains_substring response_text "Missing params");
+    (String_util.contains_substring response_text "Missing params");
   Alcotest.(check (float 0.0001)) "missing params records duration count"
     1.0
     (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
@@ -1115,7 +1105,7 @@ let test_handle_request_tools_call_managed_translation_error_records_duration ()
   in
   let response_text = Yojson.Safe.to_string response in
   Alcotest.(check bool) "translation error is returned" true
-    (contains_substring response_text "managed agent tool translation failed");
+    (String_util.contains_substring response_text "managed agent tool translation failed");
   Alcotest.(check (float 0.0001)) "translation error records duration count"
     1.0
     (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
@@ -1323,8 +1313,8 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   in
   let response_text = Yojson.Safe.to_string response in
   Alcotest.(check bool) "missing action rejected" true
-    (contains_substring response_text "action"
-     && contains_substring response_text "MISSING");
+    (String_util.contains_substring response_text "action"
+     && String_util.contains_substring response_text "MISSING");
   cleanup_dir base_path
 
 let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
@@ -1353,7 +1343,7 @@ let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
             Alcotest.(check bool) "method not available" true
               (match List.assoc_opt "message" error_fields with
                | Some (`String msg) ->
-                   contains_substring msg "not available on this MCP endpoint"
+                   String_util.contains_substring msg "not available on this MCP endpoint"
                | _ -> false)
         | _ -> Alcotest.fail "error missing")
    | _ -> Alcotest.fail "response not an object");
@@ -1681,9 +1671,9 @@ let check_auth_preflight_result ~tool_name result =
     false
     (Tool_result.is_success result);
   Alcotest.(check bool) (tool_name ^ " reports auth/credential blocker") true
-    (contains_substring msg "Token required"
-     || contains_substring msg "Unauthorized"
-     || contains_substring msg "No credential");
+    (String_util.contains_substring msg "Token required"
+     || String_util.contains_substring msg "Unauthorized"
+     || String_util.contains_substring msg "No credential");
   Alcotest.(check (option string))
     (tool_name ^ " policy rejection class")
     (Some "policy_rejection")
@@ -1808,7 +1798,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mut
   Alcotest.(check bool) "claim_next rejected by public MCP path" false
     (Tool_result.is_success result);
   Alcotest.(check bool) "claim_next points to in-process task handler" true
-    (contains_substring
+    (String_util.contains_substring
        (Tool_result.message result)
        "keeper in-process task handler");
   check_task_still_todo (Mcp_server.workspace_config state) "task-001";
@@ -1912,7 +1902,7 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
   in
   Alcotest.(check bool) "add_task succeeds" true (Tool_result.is_success result);
   Alcotest.(check bool) "response mentions added task" true
-    (contains_substring ((Tool_result.message result)) "Added task-001");
+    (String_util.contains_substring ((Tool_result.message result)) "Added task-001");
   let task =
     match Masc.Workspace.get_tasks_raw (Mcp_server.workspace_config state) with
     | [ task ] -> task
@@ -2247,7 +2237,7 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
     | _ -> Alcotest.fail "missing content"
   in
   Alcotest.(check bool) "mentions unknown keeper internal tool" true
-    (contains_substring msg "Unknown tool: keeper_time_now");
+    (String_util.contains_substring msg "Unknown tool: keeper_time_now");
   cleanup_dir base_path
 
 let tool_names_from_list_response response =
@@ -2344,9 +2334,9 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execu
         | _ -> Alcotest.fail "missing content"
       in
       Alcotest.(check bool) "mentions unknown tool_execute" true
-        (contains_substring msg "Unknown tool: tool_execute");
+        (String_util.contains_substring msg "Unknown tool: tool_execute");
       Alcotest.(check bool) "mentions registry inconsistency" true
-        (contains_substring msg "registry inconsistency"))
+        (String_util.contains_substring msg "registry inconsistency"))
 
 let test_handle_request_batch_rejected () =
   Eio_main.run @@ fun env ->
@@ -2371,7 +2361,7 @@ let test_handle_request_batch_rejected () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "batch rejected" (-32600) (error_code_exn response);
   Alcotest.(check bool) "mentions batch unsupported" true
-    (contains_substring (error_message_exn response) "batch requests are not supported");
+    (String_util.contains_substring (error_message_exn response) "batch requests are not supported");
   cleanup_dir base_path
 
 let test_handle_request_jsonrpc_response_returns_null () =
@@ -2468,7 +2458,7 @@ let test_handle_request_tools_list_rejects_tier_field () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check bool) "unsupported tier error" true
-    (contains_substring (error_message_exn response) "unsupported field(s): tier");
+    (String_util.contains_substring (error_message_exn response) "unsupported field(s): tier");
   cleanup_dir base_path
 
 let test_handle_request_resources_list_rejects_unknown_field () =
@@ -2491,7 +2481,7 @@ let test_handle_request_resources_list_rejects_unknown_field () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check bool) "unknown field rejected" true
-    (contains_substring (error_message_exn response) "unsupported field");
+    (String_util.contains_substring (error_message_exn response) "unsupported field");
   cleanup_dir base_path
 
 let test_handle_request_resources_templates_rejects_invalid_cursor () =
@@ -2516,10 +2506,10 @@ let test_handle_request_resources_templates_rejects_invalid_cursor () =
   let msg = error_message_exn response in
   Alcotest.(check bool)
     "invalid cursor error preserves contract label" true
-    (contains_substring msg "Invalid params: cursor");
+    (String_util.contains_substring msg "Invalid params: cursor");
   Alcotest.(check bool)
     "invalid cursor error names received string" true
-    (contains_substring msg "not-base64");
+    (String_util.contains_substring msg "not-base64");
   cleanup_dir base_path
 
 let test_handle_request_prompts_list_rejects_invalid_cursor () =
@@ -2544,10 +2534,10 @@ let test_handle_request_prompts_list_rejects_invalid_cursor () =
   let msg = error_message_exn response in
   Alcotest.(check bool)
     "invalid cursor error preserves contract label" true
-    (contains_substring msg "Invalid params: cursor");
+    (String_util.contains_substring msg "Invalid params: cursor");
   Alcotest.(check bool)
     "invalid cursor error names received string" true
-    (contains_substring msg "bad-cursor");
+    (String_util.contains_substring msg "bad-cursor");
   cleanup_dir base_path
 
 let test_handle_request_prompts_list_non_empty () =
@@ -2659,7 +2649,7 @@ let test_handle_request_prompts_get_tool_help () =
     | _ -> Alcotest.fail "response not an object"
   in
   Alcotest.(check bool) "description contains help intent" true
-    (contains_substring description "tool");
+    (String_util.contains_substring description "tool");
   Alcotest.(check bool) "prompt has one or more messages" true
     (messages <> []);
   cleanup_dir base_path
@@ -2801,7 +2791,7 @@ let test_handle_request_tool_help_resource_read () =
     | _ -> Alcotest.fail "response not an object"
   in
   Alcotest.(check bool) "resource contains heading" true
-    (contains_substring text "# masc_status");
+    (String_util.contains_substring text "# masc_status");
   cleanup_dir base_path
 
 let test_handle_request_resources_read_matrix () =
@@ -2861,7 +2851,7 @@ Alpha body
       Alcotest.(check string) (uri ^ " mime type") expected_mime
         (resource_mime_type_exn response);
       Alcotest.(check bool) (uri ^ " text contains expected") true
-        (contains_substring (resource_text_exn response) expected_text))
+        (String_util.contains_substring (resource_text_exn response) expected_text))
     cases;
   cleanup_dir base_path
 
@@ -2909,7 +2899,7 @@ let test_handle_request_dashboard_ping_requires_session () =
   in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check bool) "ping requires ws session" true
-    (contains_substring
+    (String_util.contains_substring
        (Yojson.Safe.to_string response)
        "dashboard/ping requires a WebSocket session");
   cleanup_dir base_path
@@ -2940,7 +2930,7 @@ let test_handle_request_dashboard_ping_reports_unknown_ws_session () =
       request
   in
   Alcotest.(check bool) "unknown ws session reported" true
-    (contains_substring
+    (String_util.contains_substring
        (Yojson.Safe.to_string response)
        "WebSocket session not found");
   cleanup_dir base_path

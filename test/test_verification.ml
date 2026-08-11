@@ -67,16 +67,6 @@ let ensure_keeper_meta config name =
   | Error detail -> Alcotest.failf "write keeper meta failed: %s" detail
 ;;
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop offset =
-    if offset + needle_len > text_len then false
-    else if String.sub text offset needle_len = needle then true
-    else loop (offset + 1)
-  in
-  needle_len = 0 || loop 0
-
 let test_verdict_event_preserves_typed_authority () =
   let event =
     VP.For_testing.verdict_event_json
@@ -289,55 +279,55 @@ let test_system_llm_review_notes_are_metadata_only () =
   Alcotest.(check bool)
     "artifact content is not duplicated into task notes"
     false
-    (contains_substring notes "secret artifact content must not be duplicated");
+    (String_util.contains_substring notes "secret artifact content must not be duplicated");
   Alcotest.(check bool)
     "narrative content is not duplicated into task notes"
     false
-    (contains_substring notes "secret narrative must not be duplicated");
+    (String_util.contains_substring notes "secret narrative must not be duplicated");
   Alcotest.(check bool)
     "verification output is not duplicated into task notes"
     false
-    (contains_substring notes "must not be duplicated");
+    (String_util.contains_substring notes "must not be duplicated");
   Alcotest.(check bool)
     "verification criteria are not duplicated into task notes"
     false
-    (contains_substring notes "secret criterion should stay in the audit store");
+    (String_util.contains_substring notes "secret criterion should stay in the audit store");
   Alcotest.(check bool)
     "artifact reference remains observable"
     true
-    (contains_substring notes "artifact:proof.txt");
+    (String_util.contains_substring notes "artifact:proof.txt");
   Alcotest.(check bool)
     "truncation remains observable"
     true
-    (contains_substring notes "truncated");
+    (String_util.contains_substring notes "truncated");
   Alcotest.(check bool)
     "verification creation time remains observable"
     true
-    (contains_substring notes "1234.5");
+    (String_util.contains_substring notes "1234.5");
   Alcotest.(check bool)
     "rejection reason remains observable"
     true
-    (contains_substring notes "insufficient proof");
+    (String_util.contains_substring notes "insufficient proof");
   Alcotest.(check bool)
     "verification identity remains observable"
     true
-    (contains_substring notes "vrf-metadata-only");
+    (String_util.contains_substring notes "vrf-metadata-only");
   Alcotest.(check bool)
     "read error detail is not duplicated into task notes"
     false
-    (contains_substring notes "/private/producer/secret.txt");
+    (String_util.contains_substring notes "/private/producer/secret.txt");
   Alcotest.(check bool)
     "stable read error code remains observable"
     true
-    (contains_substring notes "read_error");
+    (String_util.contains_substring notes "read_error");
   Alcotest.(check bool)
     "invalid raw reference is not duplicated into task notes"
     false
-    (contains_substring notes "/private/producer/invalid-reference.txt");
+    (String_util.contains_substring notes "/private/producer/invalid-reference.txt");
   Alcotest.(check bool)
     "stable invalid-reference code remains observable"
     true
-    (contains_substring notes "invalid_reference");
+    (String_util.contains_substring notes "invalid_reference");
   let unavailable_metadata =
     VS.submitted_evidence_access_metadata_to_yojson
       (VS.Evidence_unavailable
@@ -350,11 +340,11 @@ let test_system_llm_review_notes_are_metadata_only () =
   Alcotest.(check bool)
     "unavailable detail is not duplicated into metadata"
     false
-    (contains_substring unavailable_metadata "/private/producer/request.json")
+    (String_util.contains_substring unavailable_metadata "/private/producer/request.json")
   ; Alcotest.(check bool)
       "unavailable reason code remains observable"
       true
-      (contains_substring unavailable_metadata "request_load_error")
+      (String_util.contains_substring unavailable_metadata "request_load_error")
   ; let unavailable_audit =
       VS.submitted_evidence_access_to_yojson
         (VS.Evidence_unavailable
@@ -367,7 +357,7 @@ let test_system_llm_review_notes_are_metadata_only () =
     Alcotest.(check bool)
       "full audit keeps the unavailable detail"
       true
-      (contains_substring unavailable_audit "/private/producer/request.json")
+      (String_util.contains_substring unavailable_audit "/private/producer/request.json")
 
 let test_unreadable_evidence_uses_structured_current_contract () =
   let request : VS.request_header =
@@ -449,7 +439,7 @@ let test_invalid_reference_snapshot_rejects_hidden_payload () =
       Alcotest.(check bool)
         "hidden invalid-reference payload is rejected"
         true
-        (contains_substring detail "payload-free")
+        (String_util.contains_substring detail "payload-free")
     | _ -> Alcotest.fail "hidden invalid-reference payload was accepted")
 
 let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
@@ -999,19 +989,19 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
              Alcotest.(check bool)
                "prompt uses persisted completion criterion"
                true
-               (contains_substring prompt "persisted completion criterion");
+               (String_util.contains_substring prompt "persisted completion criterion");
              Alcotest.(check bool)
                "prompt does not use mutated live completion criterion"
                false
-               (contains_substring prompt "mutated live completion criterion");
+               (String_util.contains_substring prompt "mutated live completion criterion");
              Alcotest.(check bool)
                "prompt uses persisted required artifact"
                true
-               (contains_substring prompt "persisted required artifact");
+               (String_util.contains_substring prompt "persisted required artifact");
              Alcotest.(check bool)
                "prompt does not use mutated live required artifact"
                false
-               (contains_substring prompt "mutated live required artifact"));
+               (String_util.contains_substring prompt "mutated live required artifact"));
           match W.get_tasks_raw config with
           | [ { task_status = Masc_domain.Done _; _ } ] -> ()
           | [ task ] ->
@@ -1736,8 +1726,8 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
     Alcotest.(check bool)
       "invalid references are absent from the persisted snapshot"
       false
-      (contains_substring persisted_snapshot "artifacts/bare.txt"
-       || contains_substring persisted_snapshot absolute_path);
+      (String_util.contains_substring persisted_snapshot "artifacts/bare.txt"
+       || String_util.contains_substring persisted_snapshot absolute_path);
     ignore
       (match
          V.create_request
@@ -2071,12 +2061,12 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
     Alcotest.(check bool)
       "row identifies the completion-authority wait"
       true
-      (contains_substring projection
+      (String_util.contains_substring projection
          "awaiting_completion_authority task_id=task-001");
     Alcotest.(check bool)
       "keeper row does not choose a verdict action"
       false
-      (contains_substring projection "ACTION:");
+      (String_util.contains_substring projection "ACTION:");
     (match
        W.claim_task_r config ~agent_name:"keeper-executor-agent" ~task_id:"task-001" ()
      with
@@ -2095,19 +2085,19 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
     Alcotest.(check bool)
       "task projection contains no evidence bytes"
       false
-      (contains_substring projection "full-cycle-evidence");
+      (String_util.contains_substring projection "full-cycle-evidence");
     Alcotest.(check bool)
       "task projection keeps request metadata"
       true
-      (contains_substring projection request_id);
+      (String_util.contains_substring projection request_id);
     Alcotest.(check bool)
       "task projection has no assigned verifier"
       false
-      (contains_substring projection "assigned_verifier=");
+      (String_util.contains_substring projection "assigned_verifier=");
     Alcotest.(check bool)
       "task projection has no verdict action"
       false
-      (contains_substring projection "ACTION:"))
+      (String_util.contains_substring projection "ACTION:"))
 
 (* --- ID generation property test (#7544) --- *)
 

@@ -316,10 +316,11 @@ describe('MCP 2026-07-28 dashboard client', () => {
   // The transport says whether a request reached a tool. These cases pin that
   // the decision reads the thrown value, not its prose.
   it('reports a fetch that never reached the host', async () => {
-    fetchWithTimeout.mockRejectedValueOnce(new TypeError('Load failed'))
+    const transportError = new TypeError('Load failed')
+    fetchWithTimeout.mockRejectedValueOnce(transportError)
 
     const { callMcpTool } = await import('./mcp')
-    await expect(callMcpTool('masc_keeper_msg', { message: 'ping' })).rejects.toThrow()
+    await expect(callMcpTool('masc_keeper_msg', { message: 'ping' })).rejects.toBe(transportError)
 
     expect(reportToolHostFailure).toHaveBeenCalledWith(expect.objectContaining({
       tool_name: 'masc_keeper_msg',
@@ -327,6 +328,19 @@ describe('MCP 2026-07-28 dashboard client', () => {
       cause_code: 'tool_host_transport_unavailable',
     }))
     expect(reportToolHostFailure.mock.calls[0]![0].timeout_ms).toBeUndefined()
+  })
+
+  it('does not report an HTTP-success malformed response as transport unavailable', async () => {
+    fetchWithTimeout.mockResolvedValueOnce(new Response(
+      'data: null\n',
+      { status: 200 },
+    ))
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_keeper_msg', { message: 'ping' }))
+      .rejects.toThrow(TypeError)
+
+    expect(reportToolHostFailure).not.toHaveBeenCalled()
   })
 
   it('does not report a non-timeout ApiRequestError', async () => {

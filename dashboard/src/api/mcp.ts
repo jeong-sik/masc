@@ -28,6 +28,16 @@ const MCP_PROTOCOL_VERSION = '2026-07-28'
 const MCP_BLOCKED_MESSAGE = 'MCP 연결이 차단되었습니다.'
 const MCP_AUTH_CHANGED_MESSAGE = 'MCP authentication changed during request'
 
+class McpFetchTransportError extends Error {
+  readonly originalError: unknown
+
+  constructor(originalError: unknown) {
+    super(errorToString(originalError))
+    this.name = 'McpFetchTransportError'
+    this.originalError = originalError
+  }
+}
+
 interface McpRequestBinding {
   readonly authRevision: number
 }
@@ -65,10 +75,13 @@ type ToolHostFailureObservation =
   | { causeCode: 'tool_host_transport_unavailable'; timeoutMs?: never }
 
 function toolHostFailureObservation(err: unknown): ToolHostFailureObservation | null {
-  if (err instanceof ApiRequestError && err.timeout) {
+  if (!(err instanceof McpFetchTransportError)) return null
+
+  const originalError = err.originalError
+  if (originalError instanceof ApiRequestError && originalError.timeout) {
     return { causeCode: 'tool_host_timeout', timeoutMs: DEFAULT_MCP_TIMEOUT_MS }
   }
-  if (err instanceof TypeError) {
+  if (originalError instanceof TypeError) {
     return { causeCode: 'tool_host_transport_unavailable' }
   }
   return null
@@ -185,11 +198,17 @@ async function mcpPost(
 ): Promise<string> {
   assertBinding(binding)
   const request = currentRequest(body)
-  const res = await fetchWithTimeout('/mcp', {
+  const requestInit: RequestInit = {
     method: 'POST',
     headers: mcpHeadersForActor(binding, request.method, request.name, actorName),
     body: JSON.stringify(request.body),
-  }, timeoutMs)
+  }
+  let res: Response
+  try {
+    res = await fetchWithTimeout('/mcp', requestInit, timeoutMs)
+  } catch (err) {
+    throw new McpFetchTransportError(err)
+  }
   assertBinding(binding)
   if (!res.ok) {
     if (res.status === 403) {
@@ -301,10 +320,13 @@ async function callMcpToolInternal(
     const parsed = parseMcpHttpResponse(text)
     return extractMcpText(parsed)
   } catch (err) {
-    const authErrorCode = err instanceof McpToolCallError
-      ? err.authErrorCode
-      : err instanceof ApiRequestError && err.status === 401
-        ? err.authErrorCode
+    const originalError = err instanceof McpFetchTransportError
+      ? err.originalError
+      : err
+    const authErrorCode = originalError instanceof McpToolCallError
+      ? originalError.authErrorCode
+      : originalError instanceof ApiRequestError && originalError.status === 401
+        ? originalError.authErrorCode
         : null
     if (
       allowAuthRecovery
@@ -314,7 +336,7 @@ async function callMcpToolInternal(
       observedTokenRevision = currentStoredTokenRevision()
       return callMcpToolInternal(toolName, args, false)
     }
-    const message = errorToString(err)
+    const message = errorToString(originalError)
     const failure = toolHostFailureObservation(err)
     if (failure) {
       await bestEffortReportToolHostFailure({
@@ -326,7 +348,7 @@ async function callMcpToolInternal(
         timeoutMs: failure.timeoutMs,
       })
     }
-    throw err
+    throw originalError
   }
 }
 

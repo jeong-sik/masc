@@ -17,3 +17,11 @@ val run :
   raw_trace:Agent_core.Raw_trace.t option ->
   config:Runtime_execution.codex_app_server ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
+
+module For_testing : sig
+  (** Typed carriage of Codex app-server client errors into agent-core
+      errors; rotation class per constructor is pinned by
+      [test_keeper_codex_error_carriage]. RFC-0370 §3.1. *)
+  val codex_error_to_core_error :
+    Runtime_codex_app_server.error -> Agent_core.Error.t
+end

@@ -131,10 +131,13 @@ let api_invalid_request_unknown_model =
        ; reason = Agent_core.Retry.Unknown_invalid_request
        })
 
-(* The official-client runtimes (Codex app-server, Claude Code, Antigravity)
-   report provider-side and transport-side failures through
-   [Internal], because that is the only constructor the subscription clients
-   have. These three strings are verbatim classes from the live logs. *)
+(* Until RFC-0370 §3.1, the Codex app-server boundary folded provider- and
+   transport-side failures into [Internal] strings (the catch-all in
+   [codex_error_to_core_error]); these three verbatim live-log classes
+   document what that wire looked like, and that [Internal] itself remains
+   non-rotating for genuine MASC defects. The typed rows below them are what
+   the same failures carry after the boundary fix (mirroring the claude_code
+   and antigravity conversions, which were already typed). *)
 let internal_app_server_timeout =
   Agent_core.Error.Internal
     "Codex app-server turn timed out after 300.000s"
@@ -146,6 +149,24 @@ let internal_stream_disconnected =
 let internal_remote_command_failed =
   Agent_core.Error.Internal
     "Codex app-server turn failed: Error running remote command"
+
+(* Post-RFC-0370 typed forms of the same boundary failures. *)
+let api_turn_budget_timeout =
+  Agent_core.Error.Api
+    (Agent_core.Retry.Timeout
+       { message = "Codex app-server turn timed out after 300.000s"
+       ; phase = None
+       })
+
+let provider_parse_error =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.ParseError
+       { detail = "turn: unsupported stream message type" })
+
+let provider_unknown_variant =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.UnknownVariant
+       { type_name = "codex_app_server.server_request"; value = "applyPatch" })
 
 let serialization_parse_error =
   Agent_core.Error.Serialization
@@ -167,6 +188,9 @@ let census_rows =
   ; "api:context_overflow", api_context_overflow, 9
   ; "internal:remote_command_failed", internal_remote_command_failed, 4
   ; "api:invalid_request", api_invalid_request_unknown_model, 2
+  ; "api:turn_budget_timeout", api_turn_budget_timeout, 0
+  ; "provider:parse_error", provider_parse_error, 0
+  ; "provider:unknown_variant", provider_unknown_variant, 0
   ; "provider:rate_limit", provider_rate_limit, 0
   ; "provider:unavailable", provider_unavailable, 0
   ; "provider:server_error_transient", provider_server_error_transient, 0
@@ -233,6 +257,9 @@ let expected_rotation =
   ; "api:context_overflow", true
   ; "internal:remote_command_failed", false
   ; "api:invalid_request", false
+  ; "api:turn_budget_timeout", true
+  ; "provider:parse_error", false
+  ; "provider:unknown_variant", false
   ; "provider:rate_limit", true
   ; "provider:unavailable", true
   ; "provider:server_error_transient", true

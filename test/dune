@@ -111,6 +111,7 @@
   test_keeper_turn_driver_accept
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
+  test_keeper_codex_error_carriage
   test_domain_pool
   test_sse
   test_graphql_api
@@ -410,6 +411,7 @@
   test_keeper_turn_driver_accept
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
+  test_keeper_codex_error_carriage
   test_domain_pool
   test_sse
   test_graphql_api

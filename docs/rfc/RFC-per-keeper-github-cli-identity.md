@@ -68,10 +68,10 @@ prose. Closing the modal aborts the request.
 
 ## Failure behavior
 
-An absent or invalid credential is observable, not a Keeper lifecycle admission
-gate. General Local and Docker tool execution continues without creating or
-repairing identity state. When no safe Keeper config directory exists, the
-runtime projects `GH_CONFIG_DIR=/dev/null`; this prevents fallback to the host
-account while allowing unrelated commands to run. GitHub commands fail
+An absent credential is observable, not a Keeper lifecycle admission gate.
+General Local and Docker tool execution continues without creating or repairing
+identity state, while `GH_CONFIG_DIR` still names the deterministic Keeper path
+so the host account is never reused. Malformed or unsafe identity state is a
+typed execution error and is not collapsed into absence. GitHub commands fail
 according to `gh`. A failed Dashboard login ends its stream and leaves the
 Keeper runnable. Projected tokens are visible by name only, never by value.

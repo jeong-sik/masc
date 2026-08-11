@@ -188,22 +188,43 @@ let test_config_dir_rejects_credential_symlink () =
 
 let test_tool_projection_is_nonblocking_without_identity () =
   with_temp_base @@ fun base_path ->
-  let env =
-    Github.runtime_env_for_tool
-      ~base_path
-      ~keeper_name:"missing-identity"
-      [| "KEEP=value"; "GH_CONFIG_DIR=/host/account" |]
+  let keeper_name = "missing-identity" in
+  let env, state =
+    match
+      Github.runtime_env_for_tool
+        ~base_path
+        ~keeper_name
+        [| "KEEP=value"; "GH_CONFIG_DIR=/host/account" |]
+    with
+    | Error message -> Alcotest.fail message
+    | Ok projection -> projection
   in
-  Alcotest.(check (option string)) "host account is not reused" (Some "/dev/null")
+  (match state with
+   | Github.Unconfigured -> ()
+   | Configured _ -> Alcotest.fail "missing identity reported configured");
+  Alcotest.(check (option string)) "host account is not reused"
+    (Some (Github.config_dir ~base_path ~keeper_name))
     (env_value "GH_CONFIG_DIR" env);
   Alcotest.(check (option string)) "unrelated env survives" (Some "value")
     (env_value "KEEP" env);
+  let docker_args, docker_state =
+    match
+      Github.docker_args_for_tool
+        ~base_path
+        ~keeper_name
+        ~container_masc_dir:"/tmp/masc-runtime/.masc"
+    with
+    | Error message -> Alcotest.fail message
+    | Ok projection -> projection
+  in
+  (match docker_state with
+   | Github.Unconfigured -> ()
+   | Configured _ -> Alcotest.fail "missing Docker identity reported configured");
   Alcotest.(check (list string)) "docker remains runnable without a mount"
-    [ "--env"; "GH_CONFIG_DIR=/dev/null" ]
-    (Github.docker_args_for_tool
-       ~base_path
-       ~keeper_name:"missing-identity"
-       ~container_masc_dir:"/tmp/masc-runtime/.masc")
+    [ "--env"
+    ; "GH_CONFIG_DIR=/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli"
+    ]
+    docker_args
 ;;
 
 let test_tool_projection_uses_safe_existing_identity () =
@@ -214,18 +235,61 @@ let test_tool_projection_uses_safe_existing_identity () =
     | Error message -> Alcotest.fail message
     | Ok path -> path
   in
-  let env = Github.runtime_env_for_tool ~base_path ~keeper_name [| "KEEP=value" |] in
+  let env, state =
+    match Github.runtime_env_for_tool ~base_path ~keeper_name [| "KEEP=value" |] with
+    | Error message -> Alcotest.fail message
+    | Ok projection -> projection
+  in
+  (match state with
+   | Github.Configured path -> Alcotest.(check string) "configured path" host_dir path
+   | Unconfigured -> Alcotest.fail "existing identity reported unconfigured");
   Alcotest.(check (option string)) "keeper account is projected" (Some host_dir)
     (env_value "GH_CONFIG_DIR" env);
   let container_masc_dir = "/tmp/masc-runtime/.masc" in
   let container_dir = Github.container_config_dir ~container_masc_dir ~keeper_name in
+  let docker_args, docker_state =
+    match Github.docker_args_for_tool ~base_path ~keeper_name ~container_masc_dir with
+    | Error message -> Alcotest.fail message
+    | Ok projection -> projection
+  in
+  (match docker_state with
+   | Github.Configured path -> Alcotest.(check string) "mounted path" host_dir path
+   | Unconfigured -> Alcotest.fail "existing Docker identity reported unconfigured");
   Alcotest.(check (list string)) "safe identity is mounted read-only"
     [ "--env"
     ; "GH_CONFIG_DIR=" ^ container_dir
     ; "-v"
     ; host_dir ^ ":" ^ container_dir ^ ":ro"
     ]
-    (Github.docker_args_for_tool ~base_path ~keeper_name ~container_masc_dir)
+    docker_args
+;;
+
+let test_tool_projection_rejects_malformed_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "malformed-identity" in
+  let keeper_root =
+    Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
+  in
+  mkdir_p keeper_root;
+  let target = Filename.concat base_path "redirected-tool-config" in
+  mkdir_p target;
+  Unix.symlink target (Github.config_dir ~base_path ~keeper_name);
+  (match
+     Github.runtime_env_for_tool
+       ~base_path
+       ~keeper_name
+       [| "GH_CONFIG_DIR=/host/account" |]
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "malformed local identity was collapsed into absence");
+  match
+    Github.docker_args_for_tool
+      ~base_path
+      ~keeper_name
+      ~container_masc_dir:"/tmp/masc-runtime/.masc"
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "malformed Docker identity was collapsed into absence"
 ;;
 
 let () =
@@ -257,6 +321,10 @@ let () =
             "tool projection uses safe existing identity"
             `Quick
             test_tool_projection_uses_safe_existing_identity
+        ; Alcotest.test_case
+            "tool projection rejects malformed identity"
+            `Quick
+            test_tool_projection_rejects_malformed_identity
         ] )
     ]
 ;;

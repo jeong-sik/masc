@@ -516,15 +516,19 @@ let run_docker_shell_command_with_status_internal
                         | Error err ->
                           sandbox_error ("docker_shell_failed: secret_projection: " ^ err)
                         | Ok secret_projection ->
-                          let github_identity_args =
-                            Keeper_github_identity.docker_args_for_tool
-                              ~base_path:config.base_path
-                              ~keeper_name:meta.name
-                              ~container_masc_dir:
-                                (Keeper_sandbox_runtime_setup.container_masc_dir
-                                   ~container_root)
-                          in
-                          let argv =
+                          (match
+                             Keeper_github_identity.docker_args_for_tool
+                               ~base_path:config.base_path
+                               ~keeper_name:meta.name
+                               ~container_masc_dir:
+                                 (Keeper_sandbox_runtime_setup.container_masc_dir
+                                    ~container_root)
+                           with
+                           | Error err ->
+                             sandbox_error
+                               ("docker_shell_failed: github_identity_invalid: " ^ err)
+                           | Ok (github_identity_args, _identity_state) ->
+                             let argv =
                             docker_run_argv
                               ~config
                               ~meta
@@ -543,8 +547,8 @@ let run_docker_shell_command_with_status_internal
                                  @ github_identity_args)
                               ~image
                               ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
-                          in
-                          (try
+                             in
+                             (try
                              let run_once () =
                                Keeper_turn_sandbox_runtime.run_argv_with_stdin_and_status_split
                                  ~timeout_sec
@@ -600,7 +604,7 @@ let run_docker_shell_command_with_status_internal
                                   "docker_shell_failed: unix_error: %s: %s(%s)"
                                   (Unix.error_message code)
                                   fn
-                                  arg)))))))
+                                  arg))))))))
 ;;
 
 let run_docker_shell_command_with_status =

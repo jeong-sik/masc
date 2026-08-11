@@ -29,11 +29,18 @@ val projected_token_env_names : string array -> string list
 val runtime_env :
   base_path:string -> keeper_name:string -> string array -> (string array, string) result
 
-(** Projects Keeper GitHub identity into a general tool environment without
-    making identity availability an execution gate. Missing or unsafe state is
-    isolated from the host account through an unusable GitHub CLI config path. *)
+type tool_identity_state =
+  | Unconfigured
+  | Configured of string
+
+(** Projects the deterministic Keeper path without provisioning it. Missing
+    state is [Unconfigured]; malformed or unsafe state is a typed error rather
+    than being collapsed into absence. *)
 val runtime_env_for_tool :
-  base_path:string -> keeper_name:string -> string array -> string array
+  base_path:string ->
+  keeper_name:string ->
+  string array ->
+  (string array * tool_identity_state, string) result
 
 val docker_args :
   base_path:string ->
@@ -42,9 +49,13 @@ val docker_args :
   (string list, string) result
 
 (** Docker counterpart of [runtime_env_for_tool]. A safe existing identity is
-    mounted read-only; otherwise only an unusable config path is projected. *)
+    mounted read-only; an absent one projects only its deterministic container
+    path. Malformed state remains a typed error. *)
 val docker_args_for_tool :
-  base_path:string -> keeper_name:string -> container_masc_dir:string -> string list
+  base_path:string ->
+  keeper_name:string ->
+  container_masc_dir:string ->
+  (string list * tool_identity_state, string) result
 
 val login_argv : hostname:string -> string list
 val logout_argv : hostname:string -> string list

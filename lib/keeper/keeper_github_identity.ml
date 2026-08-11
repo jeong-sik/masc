@@ -199,37 +199,56 @@ let runtime_env ~base_path ~keeper_name env =
   | Ok keeper_config_dir -> Ok (overlay_config_env ~config_dir:keeper_config_dir env)
 ;;
 
+type tool_identity_state =
+  | Unconfigured
+  | Configured of string
+
+let inspect_optional_directory path =
+  match lstat_opt path with
+  | Error _ as error -> error
+  | Ok None -> Ok false
+  | Ok (Some stats) when stats.Unix.st_kind = Unix.S_DIR -> Ok true
+  | Ok (Some stats) ->
+    Error
+      (Printf.sprintf
+         "GitHub CLI path must be a directory, not a %s: %s"
+         (file_kind_to_string stats.Unix.st_kind)
+         path)
+;;
+
 let existing_config_dir ~base_path ~keeper_name =
   if not (Keeper_config.validate_name keeper_name)
-  then None
+  then Error (Printf.sprintf "invalid keeper name: %s" keeper_name)
   else begin
     let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
     let keeper_root = Filename.concat keepers_root keeper_name in
     let keeper_config_dir = Filename.concat keeper_root "github-cli" in
-    match require_directory keepers_root with
-    | Error _ -> None
-    | Ok () ->
-      (match require_directory keeper_root with
-       | Error _ -> None
-       | Ok () ->
-         (match require_directory keeper_config_dir with
-          | Error _ -> None
-          | Ok () ->
+    match inspect_optional_directory keepers_root with
+    | Error _ as error -> error
+    | Ok false -> Ok None
+    | Ok true ->
+      (match inspect_optional_directory keeper_root with
+       | Error _ as error -> error
+       | Ok false -> Ok None
+       | Ok true ->
+         (match inspect_optional_directory keeper_config_dir with
+          | Error _ as error -> error
+          | Ok false -> Ok None
+          | Ok true ->
             (match validate_config_files_in keeper_config_dir with
-             | Error _ -> None
-             | Ok () -> Some keeper_config_dir)))
+             | Error _ as error -> error
+             | Ok () -> Ok (Some keeper_config_dir))))
   end
 ;;
 
-let unavailable_config_dir = "/dev/null"
-
 let runtime_env_for_tool ~base_path ~keeper_name env =
-  let config_dir =
-    match existing_config_dir ~base_path ~keeper_name with
-    | Some path -> path
-    | None -> unavailable_config_dir
-  in
-  overlay_config_env ~config_dir env
+  match existing_config_dir ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok None ->
+    Ok
+      ( overlay_config_env ~config_dir:(config_dir ~base_path ~keeper_name) env
+      , Unconfigured )
+  | Ok (Some path) -> Ok (overlay_config_env ~config_dir:path env, Configured path)
 ;;
 
 let docker_args ~base_path ~keeper_name ~container_masc_dir =
@@ -247,14 +266,19 @@ let docker_args ~base_path ~keeper_name ~container_masc_dir =
 
 let docker_args_for_tool ~base_path ~keeper_name ~container_masc_dir =
   match existing_config_dir ~base_path ~keeper_name with
-  | None -> [ "--env"; "GH_CONFIG_DIR=" ^ unavailable_config_dir ]
-  | Some host_dir ->
+  | Error _ as error -> error
+  | Ok None ->
     let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
-    [ "--env"
-    ; "GH_CONFIG_DIR=" ^ container_dir
-    ; "-v"
-    ; host_dir ^ ":" ^ container_dir ^ ":ro"
-    ]
+    Ok ([ "--env"; "GH_CONFIG_DIR=" ^ container_dir ], Unconfigured)
+  | Ok (Some host_dir) ->
+    let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
+    Ok
+      ( [ "--env"
+        ; "GH_CONFIG_DIR=" ^ container_dir
+        ; "-v"
+        ; host_dir ^ ":" ^ container_dir ^ ":ro"
+        ]
+      , Configured host_dir )
 ;;
 
 let login_argv ~hostname =

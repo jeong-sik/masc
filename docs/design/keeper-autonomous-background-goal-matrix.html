@@ -352,7 +352,7 @@
         <div class="goal-rail"><span class="goal-id">G2</span><span class="goal-phase">Phase 1 · 지금</span></div>
         <div class="goal-body">
           <h3>HTTP projection 배선 + 대시보드 타입</h3>
-          <p>pull 기반 <span class="fl">/api/v1/dashboard/tools</span> 응답에 형제 필드로 노출(SSE 불필요 — scheduled_automation과 동일 경로).</p>
+          <p>pull 기반 <span class="fl">/api/v1/dashboard/tools</span> 응답에 형제 필드로 노출(SSE 불필요).</p>
           <dl class="kv">
             <dt>산출물</dt><dd><code>attach_live_tools_projections</code>에 한 줄 · <code>DashboardKeeperBackground</code> 타입 + <span class="mono">DashboardToolsResponse.keeper_background?</span></dd>
             <dt>연결점</dt><dd>server_dashboard_http_runtime_info.ml:3423 · dashboard-tools-prompts.ts:332</dd>

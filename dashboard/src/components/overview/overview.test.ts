@@ -24,7 +24,6 @@ import {
 import type {
   DashboardScheduledAutomation,
   DashboardScheduledAutomationRequest,
-  DashboardToolsResponse,
   DashboardScheduleRunnerStatus,
   FusionRunRecord,
   TelemetryEntry,
@@ -34,11 +33,12 @@ import { keepers, boardPosts, boardTotal, lastBoardRefreshAt, shellRuntimeResolu
 import type { Goal } from '../../types/core'
 
 const overviewMocks = vi.hoisted(() => ({
-  toolsData: { value: null as null | DashboardToolsResponse },
+  scheduledAutomation: { value: null as null | DashboardScheduledAutomation },
 }))
 
-vi.mock('../tools/tool-state', () => ({
-  toolsData: overviewMocks.toolsData,
+vi.mock('../schedule/schedule-state', () => ({
+  scheduledAutomation: overviewMocks.scheduledAutomation,
+  subscribeScheduledAutomationRefresh: () => () => {},
 }))
 
 // bar-seg ratio helper (mirrors FunnelCard inline logic)
@@ -86,24 +86,6 @@ function makeBoardPost(partial: Partial<BoardPost>): BoardPost {
     comment_count: 0,
     created_at: localIsoAt(1),
     updated_at: localIsoAt(1),
-    ...partial,
-  }
-}
-
-function makeToolsResponse(partial: Partial<DashboardToolsResponse> = {}): DashboardToolsResponse {
-  return {
-    tool_inventory: {
-      count: 0,
-      tools: [],
-    },
-    tool_usage: {
-      total_calls: 0,
-      distinct_tools_called: 0,
-      top_20: [],
-      never_called_count: 0,
-      dispatch_v2_enabled: false,
-      registered_count: 0,
-    },
     ...partial,
   }
 }
@@ -1092,6 +1074,34 @@ describe('Overview prototype surface', () => {
     shellRuntimeResolution.value = null
   })
 
+  it('does not fetch the tool inventory when the home surface loads', async () => {
+    const previousFetch = global.fetch
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    try {
+      render(h(Overview, null))
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+
+      // Root reached schedule state through /api/v1/dashboard/tools before the
+      // projection got its own route, so entering the home surface pulled the
+      // whole tool registry.
+      const requested = fetchMock.mock.calls.map(call => String(call[0]))
+      expect(requested.some(url => url.includes('/api/v1/dashboard/tools'))).toBe(false)
+    } finally {
+      if (previousFetch) {
+        vi.stubGlobal('fetch', previousFetch)
+      } else {
+        vi.unstubAllGlobals()
+      }
+    }
+  })
+
   it('marks deep-link KPI cells as buttons', () => {
     const { container } = render(h(Overview, null))
     const runCell = container.querySelector('[data-testid="kpi-run"]')
@@ -1122,23 +1132,21 @@ describe('Overview prototype surface', () => {
     ])
   })
 
-  it('renders live scheduled-automation summary from tools projection', () => {
-    const previousToolsData = overviewMocks.toolsData.value
-    overviewMocks.toolsData.value = makeToolsResponse({
-      scheduled_automation: makeScheduledAutomation({
-        fsm: {
-          state: 'active',
-          active_count: 2,
-          terminal_count: 1,
-          next_due_at: '2026-07-18T12:00:00Z',
-        },
-        counts: {
-          due: 2,
-          running: 1,
-          scheduled: 0,
-        },
-        warnings: ['warn'],
-      }),
+  it('renders live scheduled-automation summary from the schedule projection', () => {
+    const previousScheduledAutomation = overviewMocks.scheduledAutomation.value
+    overviewMocks.scheduledAutomation.value = makeScheduledAutomation({
+      fsm: {
+        state: 'active',
+        active_count: 2,
+        terminal_count: 1,
+        next_due_at: '2026-07-18T12:00:00Z',
+      },
+      counts: {
+        due: 2,
+        running: 1,
+        scheduled: 0,
+      },
+      warnings: ['warn'],
     })
 
     try {
@@ -1153,12 +1161,12 @@ describe('Overview prototype surface', () => {
       expect(bodyText).toContain('projection warning 1')
       expect(bodyText).not.toContain('예약 자동화 projection 미연결')
     } finally {
-      overviewMocks.toolsData.value = previousToolsData
+      overviewMocks.scheduledAutomation.value = previousScheduledAutomation
     }
   })
 
   it('renders schedule_runner liveness row in the 예약 · 자동화 card when full health returns runner status', async () => {
-    const previousToolsData = overviewMocks.toolsData.value
+    const previousScheduledAutomation = overviewMocks.scheduledAutomation.value
     const previousFetch = global.fetch
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = `${input}`
@@ -1204,18 +1212,16 @@ describe('Overview prototype surface', () => {
       return Promise.reject(new Error(`unexpected url: ${url}`))
     })
     try {
-      overviewMocks.toolsData.value = makeToolsResponse({
-        scheduled_automation: makeScheduledAutomation({
-          request_count: 1,
-          request_limit: 1,
-          counts: { scheduled: 1 },
-          fsm: {
-            state: 'active',
-            active_count: 1,
-            terminal_count: 0,
-            next_due_at: null,
-          },
-        }),
+      overviewMocks.scheduledAutomation.value = makeScheduledAutomation({
+        request_count: 1,
+        request_limit: 1,
+        counts: { scheduled: 1 },
+        fsm: {
+          state: 'active',
+          active_count: 1,
+          terminal_count: 0,
+          next_due_at: null,
+        },
       })
       vi.stubGlobal('fetch', fetchMock)
 
@@ -1225,7 +1231,7 @@ describe('Overview prototype surface', () => {
         expect(card?.textContent).toContain('runner: ok')
       })
     } finally {
-      overviewMocks.toolsData.value = previousToolsData
+      overviewMocks.scheduledAutomation.value = previousScheduledAutomation
       if (previousFetch) {
         vi.stubGlobal('fetch', previousFetch)
       } else {

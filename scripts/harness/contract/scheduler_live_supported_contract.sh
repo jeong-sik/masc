@@ -17,7 +17,7 @@ KEEPER_NAME="contract-scheduler-keeper"
 NOW_UNIX="$(date +%s)"
 INTERVAL_SEC="${SCHEDULER_LIVE_INTERVAL_SEC:-3600}"
 DUE_AT_UNIX="$((NOW_UNIX + INTERVAL_SEC))"
-DASHBOARD_JSON="$(mcp_mktemp_file "masc-scheduler-live-supported-dashboard" ".json")"
+DASHBOARD_JSON="$(mcp_mktemp_file "masc-scheduler-live-supported-projection" ".json")"
 AUTH_HEADER_FILE=""
 CREATED_SCHEDULE_ID=""
 
@@ -83,19 +83,22 @@ if [[ -n "$auth_token" ]]; then
   AUTH_HEADER_FILE="$(_mcp_auth_header_file "$auth_token")"
 fi
 
-curl_dashboard_tools() {
+# The projection has its own route; it used to be a nested field of
+# /api/v1/dashboard/tools, so this harness pulled the whole tool inventory to
+# assert on schedule rows.
+curl_scheduled_automation() {
   local -a headers=()
   if [[ -n "$AUTH_HEADER_FILE" ]]; then
     headers+=( -H "@$AUTH_HEADER_FILE" )
   fi
   curl -fsS --max-time "${CURL_TIMEOUT_SEC:-25}" "${headers[@]}" \
-    "${BASE_URL}/api/v1/dashboard/tools" >"$DASHBOARD_JSON"
+    "${BASE_URL}/api/v1/dashboard/scheduled-automation" >"$DASHBOARD_JSON"
 }
 
 assert_dashboard_matched_supported_non_terminal() {
   local schedule_id="$1"
   jq -e --arg schedule_id "$schedule_id" '
-    .scheduled_automation as $automation
+    . as $automation
     | ($automation.live_supported_non_terminal_evidence // {}) as $evidence
     | ($automation.requests // []) as $requests
     | ($requests[] | select(.schedule_id == $schedule_id)) as $row
@@ -170,12 +173,12 @@ if [[ "$created_schedule_id" != "$SCHEDULE_ID" ]]; then
 fi
 echo "  PASS: ${SCHEDULE_ID}"
 
-echo "[3/3] dashboard tools reports matched_supported_non_terminal"
-curl_dashboard_tools
+echo "[3/3] dashboard scheduled-automation reports matched_supported_non_terminal"
+curl_scheduled_automation
 if ! assert_dashboard_matched_supported_non_terminal "$SCHEDULE_ID"; then
   mcp_fail_with_context \
     "dashboard scheduled automation did not prove matched_supported_non_terminal" \
-    "$(jq -c '.scheduled_automation.live_supported_non_terminal_evidence as $evidence | {evidence:$evidence,requests:(.scheduled_automation.requests // [])}' "$DASHBOARD_JSON" 2>/dev/null || cat "$DASHBOARD_JSON")"
+    "$(jq -c '.live_supported_non_terminal_evidence as $evidence | {evidence:$evidence,requests:(.requests // [])}' "$DASHBOARD_JSON" 2>/dev/null || cat "$DASHBOARD_JSON")"
 fi
 echo "  PASS: ${SCHEDULE_ID}"
 

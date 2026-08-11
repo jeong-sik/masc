@@ -543,7 +543,7 @@ let test_keeper_wake_consumer_records_wake_receipt () =
   check int "keeper wake does not create board posts" 0
     (List.length (Board_dispatch.list_posts ~limit:10 ()));
   let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
@@ -609,7 +609,7 @@ let test_keeper_wake_consumer_records_wake_receipt () =
     check int "queue evidence read errors" 0
       (queue_evidence |> member "read_errors" |> to_list |> List.length)
   ; let terminal_dashboard =
-      Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+      Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
     in
     let terminal_row =
       dashboard_schedule_row_exn terminal_dashboard ~schedule_id:request.schedule_id
@@ -1538,7 +1538,7 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   in
   Keeper_registry_event_queue.enqueue ~base_path keeper_name stale_stimulus;
   let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   let row =
@@ -1570,7 +1570,7 @@ let test_dashboard_live_supported_non_terminal_evidence_matches_supported_reques
   @@ fun config ->
   let request = create_keeper_wake_schedule config in
   let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   let evidence = dashboard |> member "live_supported_non_terminal_evidence" in
@@ -1597,7 +1597,7 @@ let test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported
   @@ fun config ->
   ignore (create_unsupported_schedule config : Schedule_domain.schedule_request);
   let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   let evidence = dashboard |> member "live_supported_non_terminal_evidence" in
@@ -1731,7 +1731,7 @@ let test_dashboard_keeps_unattributed_damage_out_of_exact_evidence () =
     ~base_path:config.Workspace_utils.base_path
     ~keeper_name:"schedule-keeper";
   let evidence =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
     |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
     |> Yojson.Safe.Util.member "keeper_reaction_evidence"
   in
@@ -1772,7 +1772,7 @@ let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
               ] )
         ]);
   let evidence () =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
     |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
     |> Yojson.Safe.Util.member "keeper_reaction_evidence"
   in

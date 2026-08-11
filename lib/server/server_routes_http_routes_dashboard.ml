@@ -1493,6 +1493,20 @@ let add_routes ~sw ~clock router =
            in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
+  (* Schedule projection, served by its owner. Previously reachable only as a
+     nested field of /api/v1/dashboard/tools, which made a surface that needs
+     schedule state fetch the whole tool inventory. No cache: the owner reads a
+     single ledger file, and a TTL here would be staler than what the tools
+     snapshot used to provide. *)
+  |> Http.Router.get "/api/v1/dashboard/scheduled-automation" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json =
+           Domain_pool_ref.submit_io_or_inline (fun () ->
+             Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+               (Mcp_server.workspace_config state))
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/briefing/sections" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =

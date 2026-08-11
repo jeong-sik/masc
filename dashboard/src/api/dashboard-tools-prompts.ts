@@ -56,8 +56,10 @@ export interface ToolMetricsResponse extends TelemetryFreshnessMetadata {
 
 export interface DashboardScheduledAutomationFsm {
   state: string
-  active_count: number
-  terminal_count: number
+  /** null when the server reported no count — it sends null for every count
+   *  when the schedule ledger read failed. Never render null as 0. */
+  active_count: number | null
+  terminal_count: number | null
   next_due_at?: string | null
 }
 
@@ -268,18 +270,24 @@ export interface DashboardScheduledAutomationLiveSupportedNonTerminalEvidence {
   matched_schedule_id_limit?: number
 }
 
+/** Served by GET /api/v1/dashboard/scheduled-automation. Counts are nullable
+ *  because the server reports a schedule-ledger read failure as null counts
+ *  plus [schedule_store_read_error], and that distinction has to survive the
+ *  decoder. */
 export interface DashboardScheduledAutomation {
   schema?: string
   source?: string
   generated_at?: string
-  request_count: number
-  request_limit: number
+  schedule_store_read_error?: string | null
+  status?: string
+  request_count: number | null
+  request_limit: number | null
   truncated: boolean
   signal_source?: string
   signal_count?: number
   signal_limit?: number
   signals?: DashboardScheduledAutomationSignal[]
-  counts: Record<string, number>
+  counts: Record<string, number> | null
   payload_support?: DashboardScheduledAutomationPayloadSupport
   warnings?: string[]
   live_supported_non_terminal_evidence?: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence
@@ -488,7 +496,6 @@ export interface DashboardToolsResponse {
   runtime_resolution?: DashboardRuntimeResolution
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
-  scheduled_automation?: DashboardScheduledAutomation
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
   keeper_background?: DashboardKeeperBackground
 }
@@ -770,64 +777,6 @@ export function normalizeFullHealthResponse(
 export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promise<DashboardToolsResponse> {
   await ensureDevToken()
   const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools', { signal: opts?.signal })
-  const normalizeScheduledAutomation = (
-    rawAutomation: DashboardScheduledAutomation,
-  ): DashboardScheduledAutomation => {
-    const requests =
-      rawAutomation.requests && Array.isArray(rawAutomation.requests) ? rawAutomation.requests : []
-    const counts =
-      rawAutomation.counts
-      && typeof rawAutomation.counts === 'object'
-      && !Array.isArray(rawAutomation.counts)
-        ? rawAutomation.counts
-        : {}
-    const signals =
-      rawAutomation.signals && Array.isArray(rawAutomation.signals) ? rawAutomation.signals : []
-    const warnings =
-      rawAutomation.warnings && Array.isArray(rawAutomation.warnings)
-        ? rawAutomation.warnings.filter(warning => typeof warning === 'string')
-        : []
-    const fsm =
-      rawAutomation.fsm && typeof rawAutomation.fsm === 'object'
-        ? {
-            state:
-              typeof rawAutomation.fsm.state === 'string' && rawAutomation.fsm.state.trim() !== ''
-                ? rawAutomation.fsm.state
-                : 'unknown',
-            active_count:
-              typeof rawAutomation.fsm.active_count === 'number'
-                ? rawAutomation.fsm.active_count
-                : 0,
-            terminal_count:
-              typeof rawAutomation.fsm.terminal_count === 'number'
-                ? rawAutomation.fsm.terminal_count
-                : 0,
-            next_due_at: rawAutomation.fsm.next_due_at,
-          }
-        : {
-            state: 'unknown',
-            active_count: 0,
-            terminal_count: 0,
-            next_due_at: null,
-          }
-    return {
-      ...rawAutomation,
-      request_count:
-        typeof rawAutomation.request_count === 'number'
-          ? rawAutomation.request_count
-          : requests.length,
-      request_limit:
-        typeof rawAutomation.request_limit === 'number'
-          ? rawAutomation.request_limit
-          : requests.length,
-      truncated: typeof rawAutomation.truncated === 'boolean' ? rawAutomation.truncated : false,
-      counts,
-      signals,
-      requests,
-      warnings,
-      fsm,
-    }
-  }
   const normalizedTools = raw.tool_inventory?.tools?.map(t => ({
     ...t,
     category: t.category ?? 'uncategorized',
@@ -841,9 +790,6 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
   const normalizedWaitingInventory = raw.keeper_waiting_inventory
     ? normalizeKeeperWaitingInventory(raw.keeper_waiting_inventory)
     : undefined
-  const normalizedScheduledAutomation = raw.scheduled_automation
-    ? normalizeScheduledAutomation(raw.scheduled_automation)
-    : undefined
   return {
     ...raw,
     tool_inventory: {
@@ -852,9 +798,6 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
     },
     ...(normalizedWaitingInventory
       ? { keeper_waiting_inventory: normalizedWaitingInventory }
-      : {}),
-    ...(normalizedScheduledAutomation
-      ? { scheduled_automation: normalizedScheduledAutomation }
       : {}),
   }
 }

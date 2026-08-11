@@ -520,7 +520,7 @@ let test_due_signal_and_dashboard_projection () =
      check string "persisted signal request" signal.schedule_id persisted.schedule_id
    | Error detail -> failf "persisted wake signal did not decode: %s" detail);
   let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   check string "dashboard status" "ok" (dashboard |> member "status" |> to_string);
@@ -641,6 +641,52 @@ let test_keeper_wake_creation_respects_shutdown_fence () =
          (List.length (Schedule_store.read_state config).schedules))
 ;;
 
+(* A schedule-ledger read failure must reach the operator as "we could not
+   read it", never as zero schedules. The projection reports it as a typed
+   fact: status unknown, every count null, and the reason carried alongside. *)
+let test_projection_reports_read_failure_as_unknown () =
+  with_config
+  @@ fun config ->
+  Workspace_core.write_text
+    config
+    (Filename.concat (Workspace_utils.masc_dir config) "schedules.json")
+    "{not-json";
+  let dashboard =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  check string "status is unknown" "unknown"
+    (dashboard |> member "status" |> to_string);
+  check bool "store is not claimed as known" false
+    (dashboard |> member "schedule_store_known" |> to_bool);
+  check bool "read error is reported" true
+    (String_util.contains_substring
+       (dashboard |> member "schedule_store_read_error" |> to_string)
+       "schedule store read failed");
+  check bool "counts stay null rather than zero" true
+    (dashboard |> member "counts" = `Null);
+  check bool "request_count stays null rather than zero" true
+    (dashboard |> member "request_count" = `Null);
+  check bool "fsm active_count stays null rather than zero" true
+    (dashboard |> member "fsm" |> member "active_count" = `Null)
+;;
+
+(* The projection used to ride along inside the tool inventory, so any surface
+   that needed schedule state pulled the whole tool registry. It now has its
+   own route and must not reappear as a nested field. *)
+let test_tools_response_no_longer_carries_the_projection () =
+  with_config
+  @@ fun config ->
+  let tools = Server_dashboard_http_runtime_info.dashboard_tools_http_json config in
+  let fields =
+    match tools with
+    | `Assoc fields -> List.map fst fields
+    | _ -> failf "tools projection is not an object"
+  in
+  check bool "scheduled_automation is not nested in tools" false
+    (List.mem "scheduled_automation" fields)
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
@@ -664,6 +710,10 @@ let () =
             test_due_signal_and_dashboard_projection
         ; test_case "schedule store error is explicit" `Quick
             test_schedule_store_error_is_explicit
+        ; test_case "projection reports read failure as unknown" `Quick
+            test_projection_reports_read_failure_as_unknown
+        ; test_case "tools response no longer carries the projection" `Quick
+            test_tools_response_no_longer_carries_the_projection
         ; test_case "Keeper wake target validation is fenced" `Quick
             test_keeper_wake_target_validation_is_inside_creation_fence
         ; test_case "Keeper wake creation respects shutdown fence" `Quick

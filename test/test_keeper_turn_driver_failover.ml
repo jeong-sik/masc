@@ -138,6 +138,84 @@ max-concurrent = 1
 max-request-body-bytes = 65536
 |}
 
+let runtime_toml_quota_lane_with_shared_credential shared_credential =
+  Printf.sprintf
+    {|
+[runtime]
+default = "shared_a.test_model"
+
+[runtime.lanes.quota_lane]
+strategy = "ordered"
+candidates = [ "shared_a.test_model", "shared_b.test_model", "other.test_model" ]
+
+[providers.shared_a]
+display-name = "Shared account A"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.shared_a.credentials]
+type = "env"
+key = %S
+
+[providers.shared_b]
+display-name = "Shared account B"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[providers.shared_b.credentials]
+type = "env"
+key = %S
+
+[providers.other]
+display-name = "Other account"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:3"
+
+[providers.other.credentials]
+type = "env"
+key = "OTHER_QUOTA_TEST_KEY"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[shared_a.test_model]
+is-default = true
+max-request-body-bytes = 65536
+
+[shared_b.test_model]
+max-request-body-bytes = 65536
+
+[other.test_model]
+max-request-body-bytes = 65536
+|}
+    shared_credential
+    shared_credential
+;;
+
+let runtime_toml_quota_lane =
+  runtime_toml_quota_lane_with_shared_credential "SHARED_QUOTA_TEST_KEY"
+;;
+
+let runtime_toml_official_provider_named_like_registry =
+  {|
+[runtime]
+default = "openai.official_model"
+
+[providers.openai]
+protocol = "codex-app-server"
+command = "/definitely/missing/masc-codex-app-server"
+is-non-interactive = true
+
+[models.official_model]
+api-name = "gpt-fixture"
+max-context = 400000
+
+[openai.official_model]
+|}
+
 let runtime_toml_checkpoint_lane =
   {|
 [runtime]
@@ -359,6 +437,18 @@ let with_runtime_config toml f =
        match Runtime.init_default ~config_path:path with
        | Ok () -> f ()
        | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e)
+
+let reload_runtime_config toml =
+  let path = Filename.temp_file "runtime_failover_reload_" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       write_file path toml;
+       match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error e -> Alcotest.failf "Runtime.init_default reload failed: %s" e)
 
 let test_lane_loads_ordered_candidates () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -1365,6 +1455,225 @@ let test_attempt_loop_does_not_gate_network_retry () =
     4
     (List.length !events)
 
+let test_attempt_loop_reorders_shared_quota_sibling_same_turn () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let attempts = ref [] in
+         let result =
+           Driver.For_testing.attempt_runtime_candidates
+             ~runtime_id:"quota_lane"
+             ~runtime_id_of:Fun.id
+             ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+             ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+               attempts := !attempts @ [ runtime_id ];
+               match runtime_id with
+               | "shared_a.test_model" ->
+                 attempt_without_effect
+                   (Error
+                      (Agent_core.Error.Provider
+                         (Llm_provider.Error.HardQuota
+                            { provider = "shared_a"
+                            ; retry_after = Some 300.0
+                            ; detail = "account quota exhausted"
+                            })))
+                   None
+               | "other.test_model" -> attempt_without_effect (Ok runtime_id) None
+               | "shared_b.test_model" ->
+                 Alcotest.fail
+                   "same-credential sibling must move behind the unrelated account"
+               | other -> Alcotest.failf "unexpected candidate %s" other)
+             [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
+         in
+         (match result with
+          | Ok runtime_id ->
+            Alcotest.(check string)
+              "unrelated account serves the turn"
+              "other.test_model"
+              runtime_id
+          | Error error ->
+            Alcotest.failf
+              "expected unrelated fallback success: %s"
+              (Agent_core.Error.to_string error));
+         Alcotest.(check (list string))
+           "new quota window reorders the remaining walk immediately"
+           [ "shared_a.test_model"; "other.test_model" ]
+           !attempts))
+
+let test_attempt_quota_scope_survives_runtime_reload () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let attempted_runtime =
+           Option.get (Runtime.get_runtime_by_id "shared_a.test_model")
+         in
+         let attempted_scope = Runtime.quota_scope_of_runtime attempted_runtime in
+         let result =
+           Driver.For_testing.attempt_runtime_candidates
+             ~runtime_id:"quota_lane"
+             ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
+             ~quota_scope_of:(fun runtime ->
+               Some (Runtime.quota_scope_of_runtime runtime))
+             ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+             ~run_attempt:(fun ~idx:_ ~runtime_id:_ _candidate ->
+               reload_runtime_config
+                 (runtime_toml_quota_lane_with_shared_credential
+                    "REBOUND_QUOTA_TEST_KEY");
+               attempt_without_effect
+                 (Error
+                    (Agent_core.Error.Provider
+                       (Llm_provider.Error.HardQuota
+                          { provider = "shared_a"
+                          ; retry_after = Some 300.0
+                          ; detail = "old account quota exhausted"
+                          })))
+                 None)
+             [ attempted_runtime ]
+         in
+         (match result with
+          | Error (Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)) -> ()
+          | Error error ->
+            Alcotest.failf
+              "expected hard-quota result, got %s"
+              (Agent_core.Error.to_string error)
+          | Ok _ -> Alcotest.fail "hard-quota attempt unexpectedly succeeded");
+         let rebound_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
+         in
+         let now = Unix.gettimeofday () in
+         Alcotest.(check bool)
+           "response remains attributed to attempted credential"
+           true
+           (Option.is_some
+              (Runtime_quota_window.active_until ~scope:attempted_scope ~now));
+         Alcotest.(check (option (float 0.0)))
+           "replacement credential is not charged for old response"
+           None
+           (Runtime_quota_window.active_until ~scope:rebound_scope ~now)))
+
+let test_deferred_quota_order_is_frozen_before_predispatch () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let shared_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
+         in
+         Runtime_quota_window.note_exhausted
+           ~scope:shared_scope
+           ~resets_at:500.0;
+         let hint =
+           Driver.For_testing.make_deferred_runtime_lane
+             ~assignment_id:"quota_lane"
+             ~failed_runtime_id:"previous.test_model"
+             ~next_runtime_id:"shared_a.test_model"
+             ~later_runtime_ids:
+               [ "shared_b.test_model"; "other.test_model" ]
+             ~failure:(retryable_network_error "previous cycle failed")
+         in
+         let ordered =
+           Driver.quota_ordered_deferred_runtime_lane ~now:100.0 hint
+         in
+         Alcotest.(check (list string))
+           "pre-dispatch and driver share the same reordered suffix"
+           [ "other.test_model"
+           ; "shared_a.test_model"
+           ; "shared_b.test_model"
+           ]
+           (Driver.deferred_runtime_ids ordered)))
+
+let test_deferred_dispatch_preserves_predispatch_quota_order () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let hint =
+           Driver.For_testing.make_deferred_runtime_lane
+             ~assignment_id:"quota_lane"
+             ~failed_runtime_id:"previous.test_model"
+             ~next_runtime_id:"shared_a.test_model"
+             ~later_runtime_ids:
+               [ "shared_b.test_model"; "other.test_model" ]
+             ~failure:(retryable_network_error "previous cycle failed")
+         in
+         let frozen =
+           Driver.quota_ordered_deferred_runtime_lane
+             ~now:(Unix.gettimeofday ())
+             hint
+         in
+         let shared_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
+         in
+         Runtime_quota_window.note_exhausted
+           ~scope:shared_scope
+           ~resets_at:(Unix.gettimeofday () +. 300.0);
+         Eio_main.run
+         @@ fun env ->
+         Eio.Switch.run
+         @@ fun sw ->
+         Masc_test_deps.init_eio_clock ~sw env;
+         let transformed_urls = ref [] in
+         let result =
+           Driver.run_named
+             ~runtime_id:"quota_lane"
+             ~keeper_name:"deferred-frozen-quota-order"
+             ~base_path:(Filename.get_temp_dir_name ())
+             ~goal:"preserve the pre-dispatch runtime binding"
+             ~deferred_runtime_lane:frozen
+             ~provider_config_transform:(fun provider_config ->
+               transformed_urls := provider_config.base_url :: !transformed_urls;
+               Error
+                 (Agent_core.Error.Config
+                    (Agent_core.Error.InvalidConfig
+                       { field = "provider-config-transform"
+                       ; detail = "stop after observing the selected runtime"
+                       })))
+             ~sw
+             ~net:env#net
+             ()
+         in
+         (match result with
+          | Error error when !transformed_urls = [] ->
+            Alcotest.failf
+              "dispatch did not reach the selected runtime: %s"
+              (Agent_core.Error.to_string error)
+          | Error _ -> ()
+          | Ok _ -> Alcotest.fail "test provider transform unexpectedly succeeded");
+         Alcotest.(check (list string))
+           "dispatch keeps the runtime frozen before pre-dispatch"
+           [ "http://127.0.0.1:1" ]
+           (List.rev !transformed_urls)))
+
+let test_official_client_does_not_inherit_registry_api_key_scope () =
+  with_runtime_config runtime_toml_official_provider_named_like_registry (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let official_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "openai.official_model")
+         in
+         let registry_api_key_scope =
+           Runtime_quota_window.scope_of_credential
+             ~provider_id:"openai"
+             (Some (Runtime_schema.Env "OPENAI_API_KEY"))
+         in
+         Runtime_quota_window.note_exhausted
+           ~scope:official_scope
+           ~resets_at:500.0;
+         Alcotest.(check (option (float 0.0)))
+           "subscription quota does not demote an API-key account"
+           None
+           (Runtime_quota_window.active_until
+              ~scope:registry_api_key_scope
+              ~now:100.0)))
+
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_core.Agent.After_assistant_collected
@@ -1945,6 +2254,26 @@ let () =
             "attempt loop does not gate network retry"
             `Quick
             test_attempt_loop_does_not_gate_network_retry;
+          Alcotest.test_case
+            "hard quota reorders shared sibling in same turn"
+            `Quick
+            test_attempt_loop_reorders_shared_quota_sibling_same_turn;
+          Alcotest.test_case
+            "hard quota keeps attempted scope across runtime reload"
+            `Quick
+            test_attempt_quota_scope_survives_runtime_reload;
+          Alcotest.test_case
+            "deferred quota order is frozen before pre-dispatch"
+            `Quick
+            test_deferred_quota_order_is_frozen_before_predispatch;
+          Alcotest.test_case
+            "deferred dispatch preserves pre-dispatch quota order"
+            `Quick
+            test_deferred_dispatch_preserves_predispatch_quota_order;
+          Alcotest.test_case
+            "official client quota excludes registry API-key scope"
+            `Quick
+            test_official_client_does_not_inherit_registry_api_key_scope;
           Alcotest.test_case
             "typed checkpoint is same-run retry authority"
             `Quick

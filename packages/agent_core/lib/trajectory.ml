@@ -10,7 +10,7 @@
 (* ── Tool call ──────────────────────────────────────────────── *)
 
 type tool_call =
-  { tool_use_id : string
+  { tool_use_id : string option
   ; tool_name : string
   ; tool_input : Yojson.Safe.t
   ; tool_result : string option
@@ -20,9 +20,14 @@ type tool_call =
   }
 
 let show_tool_call tc =
+  let tool_use_id =
+    match tc.tool_use_id with
+    | Some id -> id
+    | None -> "<missing>"
+  in
   Printf.sprintf
     "tool_call(%s:%s started=%.3f error=%b)"
-    tc.tool_use_id
+    tool_use_id
     tc.tool_name
     tc.started_at
     tc.is_error
@@ -110,8 +115,7 @@ let pp_trajectory fmt t = Format.fprintf fmt "%s" (show_trajectory t)
 
 (** Accumulator for pairing tool-start with tool-finish records. *)
 type tool_acc =
-  { id : string
-  ; name : string
+  { name : string
   ; input : Yojson.Safe.t
   ; started_at : float
   }
@@ -141,6 +145,11 @@ let initial_state =
   ; p_pending_tools = StringMap.empty
   ; p_steps = []
   }
+;;
+
+let tool_use_id_of_raw = function
+  | Some id when String.trim id <> "" -> Some id
+  | Some _ | None -> None
 ;;
 
 let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
@@ -187,56 +196,31 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
             | Some "tool_use" -> st
             | _ -> st)
          | Tool_execution_started ->
-           (* A record without a tool_use_id cannot be paired with its finish
-              event. The old "" sentinel keyed every such record onto one map
-              slot, so id-less starts overwrote each other and finish events
-              paired with whichever start happened to be last (RFC-0371 B10).
-              Unpairable records are skipped instead of mispaired. *)
-           (match r.tool_use_id with
-            | None -> st
+           let tool_name = Option.value ~default:"unknown" r.tool_name in
+           let tool_input = Option.value ~default:`Null r.tool_input in
+           (match tool_use_id_of_raw r.tool_use_id with
             | Some tool_use_id ->
-              let tool_name = Option.value ~default:"unknown" r.tool_name in
-              let tool_input = Option.value ~default:`Null r.tool_input in
-              let acc =
-                { id = tool_use_id
-                ; name = tool_name
-                ; input = tool_input
-                ; started_at = r.ts
-                }
-              in
+              let acc = { name = tool_name; input = tool_input; started_at = r.ts } in
               { st with
                 p_pending_tools = StringMap.add tool_use_id acc st.p_pending_tools
-              })
-         | Tool_execution_finished ->
-           (match r.tool_use_id with
-            | None -> st
-            | Some tool_use_id ->
-           let is_error = Option.value ~default:false r.tool_error in
-           let tool_result = r.tool_result in
-           (match StringMap.find_opt tool_use_id st.p_pending_tools with
-            | Some acc ->
-              let tc =
-                { tool_use_id
-                ; tool_name = acc.name
-                ; tool_input = acc.input
-                ; tool_result
-                ; is_error
-                ; started_at = acc.started_at
-                ; finished_at = Some r.ts
-                }
-              in
-              let act_step = Act { tool_call = tc; ts = acc.started_at } in
-              let obs_steps =
-                match tool_result with
-                | Some result when result <> "" ->
-                  [ Observe { content = result; ts = r.ts } ]
-                | _ -> []
-              in
-              { st with
-                p_steps = obs_steps @ (act_step :: st.p_steps)
-              ; p_pending_tools = StringMap.remove tool_use_id st.p_pending_tools
               }
             | None ->
+              let tool_call =
+                { tool_use_id = None
+                ; tool_name
+                ; tool_input
+                ; tool_result = None
+                ; is_error = false
+                ; started_at = r.ts
+                ; finished_at = None
+                }
+              in
+              { st with p_steps = Act { tool_call; ts = r.ts } :: st.p_steps })
+         | Tool_execution_finished ->
+           let tool_use_id = tool_use_id_of_raw r.tool_use_id in
+           let is_error = Option.value ~default:false r.tool_error in
+           let tool_result = r.tool_result in
+           let record_unmatched_finish () =
               let tool_name = Option.value ~default:"unknown" r.tool_name in
               let tc =
                 { tool_use_id
@@ -248,7 +232,35 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
                 ; finished_at = Some r.ts
                 }
               in
-              { st with p_steps = Act { tool_call = tc; ts = r.ts } :: st.p_steps }))
+              { st with p_steps = Act { tool_call = tc; ts = r.ts } :: st.p_steps }
+           in
+           (match tool_use_id with
+            | None -> record_unmatched_finish ()
+            | Some tool_use_id ->
+              (match StringMap.find_opt tool_use_id st.p_pending_tools with
+               | Some acc ->
+                 let tc =
+                   { tool_use_id = Some tool_use_id
+                   ; tool_name = acc.name
+                   ; tool_input = acc.input
+                   ; tool_result
+                   ; is_error
+                   ; started_at = acc.started_at
+                   ; finished_at = Some r.ts
+                   }
+                 in
+                 let act_step = Act { tool_call = tc; ts = acc.started_at } in
+                 let obs_steps =
+                   match tool_result with
+                   | Some result when result <> "" ->
+                     [ Observe { content = result; ts = r.ts } ]
+                   | _ -> []
+                 in
+                 { st with
+                   p_steps = obs_steps @ (act_step :: st.p_steps)
+                 ; p_pending_tools = StringMap.remove tool_use_id st.p_pending_tools
+                 }
+               | None -> record_unmatched_finish ()))
          | Run_finished ->
            let p_success, p_error_msg =
              match r.error with
@@ -278,9 +290,9 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
   in
   let pending_steps =
     StringMap.fold
-      (fun _id acc steps ->
+      (fun tool_use_id acc steps ->
          let tc =
-           { tool_use_id = acc.id
+           { tool_use_id = Some tool_use_id
            ; tool_name = acc.name
            ; tool_input = acc.input
            ; tool_result = None
@@ -312,7 +324,10 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
 
 let tool_call_to_json tc =
   `Assoc
-    [ "tool_use_id", `String tc.tool_use_id
+    [ ( "tool_use_id"
+      , match tc.tool_use_id with
+        | Some id -> `String id
+        | None -> `Null )
     ; "tool_name", `String tc.tool_name
     ; "tool_input", tc.tool_input
     ; ( "tool_result"
@@ -332,7 +347,7 @@ let tool_call_of_json json =
   let open Yojson.Safe.Util in
   try
     Ok
-      { tool_use_id = json |> member "tool_use_id" |> to_string
+      { tool_use_id = json |> member "tool_use_id" |> to_string_option
       ; tool_name = json |> member "tool_name" |> to_string
       ; tool_input = json |> member "tool_input"
       ; tool_result = json |> member "tool_result" |> to_string_option

@@ -326,6 +326,10 @@ let owner_error_of_operation_error = function
 
 let run_operation_store ~label f =
   try Eio_unix.run_in_systhread ~label f with
+  (* [run_in_systhread] awaits — a cancellation point. Folding Cancelled
+     into [Store_unavailable] misreported keeper cancellation as a store
+     outage and let the owner continue past its own cancellation. *)
+  | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Error
       (Chat_operation_store.Store_unavailable

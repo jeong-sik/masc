@@ -7,7 +7,7 @@
 
     Motivation: the three call sites in [Workspace] that invoke
     [warn_telemetry_drop] (after catching [Stdlib.Effect.Unhandled] when
-    the lifecycle/task/accountability hook runs outside an Eio scheduler)
+    the lifecycle/task hook runs outside an Eio scheduler)
     previously passed free strings for [event_family] / [event_kind].
     [Read_drop_reason.t] closed-sums the [reason] label of
     [metric_persistence_read_drops]; this module mirrors that pattern for
@@ -50,7 +50,7 @@ type t =
 
 (** Wire label for the [event_family] Otel_metric_store label. Stable: matches
     the byte-for-byte strings emitted before the typed swap-over
-    (["agent_lifecycle"], ["task_transition"], ["accountability"]) so
+    (["agent_lifecycle"], ["task_transition"]) so
     Otel_metric_store label cardinality does not change at the migration
     boundary. *)
 val family_to_wire : t -> string

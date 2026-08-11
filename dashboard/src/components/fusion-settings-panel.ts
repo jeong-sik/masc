@@ -301,7 +301,11 @@ export function FusionSettingsPanel() {
       setDraft(draftFromSettings(cfg.source_text, parsed.settings))
       try {
         await refreshRuntimeConfigConsumers()
-        setSavedMessage(cfg.reloaded ? '저장됨 (reload 완료)' : '저장됨')
+        setSavedMessage(
+          cfg.application?.keeper_overlay.requires_restart
+            ? '저장됨 (Keeper 설정은 재시작 대기)'
+            : '저장됨',
+        )
       } catch (err) {
         setError(`저장됨, 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
         setState('error')

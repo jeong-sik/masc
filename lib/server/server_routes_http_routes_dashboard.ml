@@ -231,13 +231,59 @@ let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
     ]
 ;;
 
-let runtime_config_raw_json ~path ~source_text ~reloaded =
+let keeper_setting_payload source_text =
+  match Keeper_toml_loader.parse_toml source_text with
+  | Error detail ->
+    ( `Assoc
+        [ "valid", `Bool false
+        ; "parse_error", `String detail
+        ; "issues", `List []
+        ]
+    , `List []
+    , `Assoc
+        [ "status", `String "invalid"
+        ; "configured_count", `Int 0
+        ; "requires_restart", `Bool false
+        ; "pending_keys", `List []
+        ; "applied_keys", `List []
+        ; "preempted_keys", `List []
+        ; "applied_at", `Null
+        ] )
+  | Ok doc ->
+    ( Keeper_runtime_config.validation_report_to_yojson
+        (Keeper_runtime_config.validate_doc doc)
+    , Keeper_runtime_config.settings_projection_to_yojson doc
+    , Keeper_runtime_config.overlay_application_to_yojson doc )
+;;
+
+let runtime_config_application_json ~operation ~routing_applied_at overlay =
+  `Assoc
+    [ "operation", `String operation
+    ; ( "routing"
+      , `Assoc
+          [ "status", `String (if Option.is_some routing_applied_at then "applied" else "active")
+          ; "requires_restart", `Bool false
+          ; ( "applied_at"
+            , match routing_applied_at with
+              | Some value -> `String value
+              | None -> `Null )
+          ] )
+    ; "keeper_overlay", overlay
+    ]
+;;
+
+let runtime_config_raw_json ~path ~source_text ~operation ~routing_applied_at =
+  let validation, keeper_settings, overlay = keeper_setting_payload source_text in
   `Assoc
     [ ("ok", `Bool true)
     ; ("path", `String path)
     ; ("file_name", `String "runtime.toml")
     ; ("source_text", `String source_text)
-    ; ("reloaded", `Bool reloaded)
+    ; ( "application"
+      , runtime_config_application_json ~operation ~routing_applied_at overlay )
+    ; "validation", validation
+    ; "keeper_setting_schema", Keeper_runtime_config.setting_schema_to_yojson ()
+    ; "keeper_settings", keeper_settings
     ; ( "provider_protocols"
       , `List (List.map runtime_editor_protocol_json Runtime_toml.editor_protocols) )
     ]
@@ -385,6 +431,7 @@ let runtime_config_write_operation_details = function
     (match runtime_id with
      | None -> []
      | Some id -> [ ("runtime_id", `String id) ])
+
   | Runtime_config_routing_list (lane, runtime_ids) ->
     [ ("operation", `String "routing")
     ; ("lane", `String (runtime_route_lane_to_string lane))
@@ -404,6 +451,35 @@ let runtime_config_write_operation_details = function
     (match runtime_id with
      | None -> []
      | Some id -> [ ("runtime_id", `String id) ])
+
+let runtime_config_write_operation_label = function
+  | Runtime_config_raw_save -> "raw_save"
+  | Runtime_config_routing _ | Runtime_config_routing_list _ -> "routing"
+  | Runtime_config_assignment _ -> "assignment"
+;;
+
+let keeper_validation_error_message report =
+  match
+    List.find_opt
+      (fun issue -> issue.Keeper_runtime_config.severity = Keeper_runtime_config.Error)
+      report.Keeper_runtime_config.issues
+  with
+  | Some issue -> Printf.sprintf "%s: %s" issue.key issue.detail
+  | None -> "Keeper runtime setting validation failed"
+;;
+
+let respond_keeper_validation_error ~request reqd report =
+  Http.Response.json_value
+    ~status:`Bad_request
+    ~request
+    (`Assoc
+      [ "ok", `Bool false
+      ; "error", `String (keeper_validation_error_message report)
+      ; "validation", Keeper_runtime_config.validation_report_to_yojson report
+      ; "keeper_setting_schema", Keeper_runtime_config.setting_schema_to_yojson ()
+      ])
+    reqd
+;;
 
 let audit_runtime_config_write state agent_name ?path ~operation ~text ~outcome () =
   try
@@ -435,7 +511,11 @@ let respond_runtime_config_reload state agent_name ~operation request reqd =
     audit_runtime_config_write state agent_name ~path ~operation ~text:saved_text
       ~outcome:Audit_log.Success ();
     Http.Response.json_value ~compress:true ~request
-      (runtime_config_raw_json ~path ~source_text:saved_text ~reloaded:true)
+      (runtime_config_raw_json
+         ~path
+         ~source_text:saved_text
+         ~operation:(runtime_config_write_operation_label operation)
+         ~routing_applied_at:(Some (Masc_domain.now_iso ())))
       reqd
   | Error msg ->
     respond_dashboard_error
@@ -901,7 +981,11 @@ let add_routes ~sw ~clock router =
            match Runtime.load_config_text () with
            | Ok (path, source_text) ->
              Http.Response.json_value ~compress:true ~request:req
-               (runtime_config_raw_json ~path ~source_text ~reloaded:false)
+               (runtime_config_raw_json
+                  ~path
+                  ~source_text
+                  ~operation:"read"
+                  ~routing_applied_at:None)
                reqd
            | Error msg ->
              respond_dashboard_error
@@ -928,6 +1012,33 @@ let add_routes ~sw ~clock router =
              respond_dashboard_error ~status:`Internal_server_error
                ~request:req reqd msg)
          request reqd)
+  |> Http.Router.post "/api/v1/runtime/config/raw/preview" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match parse_runtime_config_raw_body body_str with
+             | Error msg ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+             | Ok source_text ->
+               (match Keeper_runtime_config.validate_source_text source_text with
+                | Error msg ->
+                  respond_dashboard_error
+                    ~status:`Bad_request
+                    ~request:req
+                    reqd
+                    ("runtime config parse failed: " ^ msg)
+                | Ok report ->
+                  Http.Response.json_value
+                    ~compress:true
+                    ~request:req
+                    (`Assoc
+                      [ "ok", `Bool true
+                      ; "can_save", `Bool (Keeper_runtime_config.validation_report_is_valid report)
+                      ; "validation", Keeper_runtime_config.validation_report_to_yojson report
+                      ; "keeper_setting_schema", Keeper_runtime_config.setting_schema_to_yojson ()
+                      ])
+                    reqd)))
+         request reqd)
   |> Http.Router.post "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->
@@ -940,15 +1051,33 @@ let add_routes ~sw ~clock router =
                   audit trail (actor + path + size) on top of the CanAdmin gate.
                   The config body is deliberately excluded: runtime.toml can carry
                   provider secrets (RFC-0132 redaction). *)
-               (match Runtime.save_config_text source_text with
+               (match Keeper_runtime_config.validate_source_text source_text with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:Runtime_config_raw_save ~text:source_text
                     ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () ->
-                  respond_runtime_config_reload state agent_name
-                    ~operation:Runtime_config_raw_save req reqd)
+                  respond_dashboard_error
+                    ~status:`Bad_request
+                    ~request:req
+                    reqd
+                    ("runtime config parse failed: " ^ msg)
+                | Ok report
+                  when not (Keeper_runtime_config.validation_report_is_valid report) ->
+                  let detail = keeper_validation_error_message report in
+                  audit_runtime_config_write state agent_name
+                    ~operation:Runtime_config_raw_save ~text:source_text
+                    ~outcome:(Audit_log.Failure detail) ();
+                  respond_keeper_validation_error ~request:req reqd report
+                | Ok _ ->
+                  (match Runtime.save_config_text source_text with
+                   | Error msg ->
+                     audit_runtime_config_write state agent_name
+                       ~operation:Runtime_config_raw_save ~text:source_text
+                       ~outcome:(Audit_log.Failure msg) ();
+                     respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                   | Ok () ->
+                     respond_runtime_config_reload state agent_name
+                       ~operation:Runtime_config_raw_save req reqd))
            )
          ) request reqd)
   |> Http.Router.post "/api/v1/runtime/config/routing" (fun request reqd ->

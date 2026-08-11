@@ -471,11 +471,24 @@ describe('ScheduledAutomationPanel', () => {
           keeper_name: 'schedule-keeper',
           schedule_id: 'sched-keeper-wake',
           urgency: 'immediate',
+          result_delivery_policy: 'reply_to_origin',
           occurrence_status: 'awaiting_ack',
           activation_status: 'deferred',
           activation_reason: 'owner_unknown',
           activation_detail: 'owner metadata unavailable',
           post_id: 'schedule-due:sched-keeper-wake',
+        },
+        result_delivery: {
+          schema: 'masc.dashboard.schedule_result_delivery.v1',
+          policy: 'reply_to_origin',
+          required: true,
+          status: 'delivered',
+          occurrence_id: 'schedule-due:sched-keeper-wake',
+          keeper_name: 'schedule-keeper',
+          intent_id: 'kdelivery-test',
+          response_sha256: 'response-digest',
+          destination: { kind: 'dashboard', thread_id: 'thread-1' },
+          connector_message_id: 'message-1',
         },
         keeper_queue_evidence: {
           projection_status: 'matched_pending',
@@ -530,6 +543,11 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.querySelector('[data-dispatch-receipt-row="activation_reason"]')?.textContent).toContain('owner_unknown')
     expect(container.querySelector('[data-dispatch-receipt-row="activation_detail"]')?.textContent).toContain('owner metadata unavailable')
     expect(container.querySelector('[data-dispatch-receipt-row="post_id"]')?.textContent).toContain('schedule-due:sched-keeper-wake')
+    expect(container.querySelector('[data-dispatch-receipt-row="result_delivery_policy"]')?.textContent).toContain('reply_to_origin')
+    const resultDelivery = container.querySelector('[data-schedule-result-delivery="delivered"]')
+    expect(resultDelivery).not.toBeNull()
+    expect(container.querySelector('[data-result-delivery-row="occurrence_id"]')?.textContent).toContain('schedule-due:sched-keeper-wake')
+    expect(container.querySelector('[data-result-delivery-row="intent_id"]')?.textContent).toContain('kdelivery-test')
     const queueEvidence = container.querySelector('[data-schedule-keeper-queue-evidence="matched_pending"]')
     expect(queueEvidence).not.toBeNull()
     expect(queueEvidence?.getAttribute('data-schedule-keeper-queue-evidence-source')).toBe('durable_event_queue_snapshot')
@@ -554,10 +572,12 @@ describe('ScheduledAutomationPanel', () => {
     expect(cardWakeSummary?.getAttribute('data-schedule-wake-evidence-receipt')).toBe('recognized')
     expect(cardWakeSummary?.getAttribute('data-schedule-wake-evidence-queue')).toBe('matched_pending')
     expect(cardWakeSummary?.getAttribute('data-schedule-wake-evidence-reaction')).toBe('matched_stimulus')
+    expect(cardWakeSummary?.getAttribute('data-schedule-wake-evidence-result')).toBe('delivered')
     expect(cardWakeSummary?.textContent).toContain('wake evidence')
     expect(cardWakeSummary?.textContent).toContain('receipt recognized')
     expect(cardWakeSummary?.textContent).toContain('queue matched pending')
     expect(cardWakeSummary?.textContent).toContain('reaction matched stimulus')
+    expect(cardWakeSummary?.textContent).toContain('result delivered')
     expect(cardWakeSummary?.textContent).toContain('post schedule-due:sched-keeper-wake')
 
     const openDetail = container.querySelector('[data-schedule-detail="sched-keeper-wake"]') as HTMLButtonElement
@@ -569,6 +589,9 @@ describe('ScheduledAutomationPanel', () => {
     expect(v2Receipt?.textContent).toContain('keeper_event_queue')
     expect(v2Receipt?.textContent).toContain('schedule_due')
     expect(v2Receipt?.textContent).toContain('schedule-due:sched-keeper-wake')
+    const v2ResultDelivery = container.querySelector('[data-schedule-result-delivery="delivered"]')
+    expect(v2ResultDelivery).not.toBeNull()
+    expect(v2ResultDelivery?.textContent).toContain('kdelivery-test')
     const v2QueueEvidence = container.querySelector('[data-schedule-keeper-queue-evidence="matched_pending"]')
     expect(v2QueueEvidence).not.toBeNull()
     expect(v2QueueEvidence?.textContent).toContain('durable_event_queue_snapshot')

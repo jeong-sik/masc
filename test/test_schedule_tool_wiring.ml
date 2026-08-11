@@ -83,16 +83,22 @@ let schedule_tool_name action =
   schema.name
 ;;
 
-let schedule_ctx config : Tool_schedule.context =
+let schedule_ctx ?continuation_channel config : Tool_schedule.context =
   { config
   ; agent_name = "scheduler-agent"
+  ; continuation_channel
   ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
   }
 ;;
 
-let dispatch_exn config action args =
+let dispatch_exn ?continuation_channel config action args =
   let name = schedule_tool_name action in
-  match Tool_schedule.dispatch (schedule_ctx config) ~name ~args with
+  match
+    Tool_schedule.dispatch
+      (schedule_ctx ?continuation_channel config)
+      ~name
+      ~args
+  with
   | Some result -> result
   | None -> fail ("schedule dispatch returned None: " ^ name)
 ;;
@@ -203,6 +209,13 @@ let test_create_list_get_cancel () =
     (Tool_result.data create |> member "status" |> to_string);
   check string "created payload support" "supported"
     (Tool_result.data create |> member "payload_support" |> to_string);
+  check string "no continuation stamps an explicit no-delivery policy" "none"
+    (Tool_result.data create
+     |> member "payload"
+     |> member "body"
+     |> member "result_delivery"
+     |> member "policy"
+     |> to_string);
   let list_result =
     dispatch_exn config Tool_schemas_schedule.List_requests
       (`Assoc [ "limit", `Int 10 ])
@@ -231,6 +244,91 @@ let test_create_list_get_cancel () =
      |> member "schedule"
      |> member "status"
      |> to_string)
+;;
+
+let test_creation_boundary_owns_result_delivery_destination () =
+  with_config
+  @@ fun config ->
+  let channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"dashboard-thread-42" with
+    | Ok channel -> channel
+    | Error detail -> fail detail
+  in
+  let forged_channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"forged-thread" with
+    | Ok channel -> channel
+    | Error detail -> fail detail
+  in
+  let payload =
+    `Assoc
+      [ "kind", `String Schedule_supported_kinds.keeper_wake
+      ; "schema_version", `Int 1
+      ; ( "body"
+        , `Assoc
+            [ "keeper_name", `String "schedule-keeper"
+            ; "message", `String "return the result to the invoking thread"
+            ; ( "result_delivery"
+              , `Assoc
+                  [ "policy", `String "reply_to_origin"
+                  ; "channel", Keeper_continuation_channel.to_yojson forged_channel
+                  ] )
+            ; "result_delivery", `Assoc [ "policy", `String "none" ]
+            ] )
+      ]
+  in
+  let result =
+    dispatch_exn
+      ~continuation_channel:channel
+      config
+      Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-owned-result-destination"
+        ; "due_at_unix", `Float 200.0
+        ; "payload", payload
+        ])
+  in
+  check bool "routed schedule creation succeeds" true
+    (Tool_result.is_success result);
+  let open Yojson.Safe.Util in
+  let stored_delivery =
+    Tool_result.data result
+    |> member "payload"
+    |> member "body"
+    |> member "result_delivery"
+  in
+  check string "creation boundary selects reply-to-origin" "reply_to_origin"
+    (stored_delivery |> member "policy" |> to_string);
+  check bool "exact invoking route is persisted" true
+    (Yojson.Safe.equal
+       (stored_delivery |> member "channel")
+       (Keeper_continuation_channel.to_yojson channel));
+  let stored_body_fields =
+    Tool_result.data result
+    |> member "payload"
+    |> member "body"
+    |> to_assoc
+  in
+  check int "forged duplicate delivery fields are replaced once" 1
+    (List.fold_left
+       (fun count (name, _) ->
+          if String.equal name "result_delivery" then count + 1 else count)
+       0
+       stored_body_fields);
+  let request =
+    match
+      Schedule_store.get_schedule
+        config
+        ~schedule_id:"sched-owned-result-destination"
+    with
+    | Some request -> request
+    | None -> fail "routed schedule was not persisted"
+  in
+  (match Schedule_payload_projection.result_delivery request with
+   | Ok (Some persisted) ->
+     check bool "typed projection preserves exact route" true
+       (Keeper_continuation_channel.same_route channel persisted)
+   | Ok None -> fail "routed schedule lost its result destination"
+   | Error detail -> fail detail)
 ;;
 
 let test_get_recurring_schedule_after_accept_advance () =
@@ -574,6 +672,7 @@ let test_keeper_wake_target_validation_is_inside_creation_fence () =
   let ctx : Tool_schedule.context =
     { config
     ; agent_name = "scheduler-agent"
+    ; continuation_channel = None
     ; admit_keeper_wake_creation
     }
   in
@@ -692,6 +791,8 @@ let () =
     [ ( "wiring"
       , [ test_case "flat tool surface" `Quick test_flat_tool_surface
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
+        ; test_case "creation boundary owns result delivery destination" `Quick
+            test_creation_boundary_owns_result_delivery_destination
         ; test_case "get recurring schedule after accept advance" `Quick
             test_get_recurring_schedule_after_accept_advance
         ; test_case "create accepts explicit ISO-8601 offset" `Quick

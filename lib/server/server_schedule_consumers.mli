@@ -10,6 +10,10 @@ type keeper_wake_occurrence_status =
   | Keeper_wake_already_failed
   | Keeper_wake_already_cancelled
 
+type keeper_wake_result_delivery_policy =
+  | Keeper_wake_result_delivery_none
+  | Keeper_wake_result_delivery_reply_to_origin
+
 type keeper_wake_activation_deferred_reason =
   | Keeper_wake_activation_lifecycle_denied of string
   | Keeper_wake_activation_autoboot_disabled
@@ -35,6 +39,7 @@ type dispatch_receipt =
       ; stimulus : string
       ; stimulus_id : string option
       ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
+      ; result_delivery_policy : keeper_wake_result_delivery_policy
       ; occurrence_status : keeper_wake_occurrence_status
       ; activation_outcome : keeper_wake_activation_outcome
       }

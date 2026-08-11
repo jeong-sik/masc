@@ -1031,11 +1031,68 @@ export interface RuntimeTomlConfig {
   path: string | null
   file_name: string
   source_text: string
-  reloaded: boolean
   provider_protocols: RuntimeTomlEditorProtocol[]
+  application?: RuntimeConfigApplication
+  validation?: RuntimeConfigValidation
+  keeper_setting_schema?: unknown
+  keeper_settings?: RuntimeKeeperSetting[]
   message?: string | null
   reason?: string | null
   issues?: unknown
+}
+
+export interface RuntimeConfigApplicationLane {
+  status: string
+  requires_restart: boolean
+  applied_at: string | number | null
+}
+
+export interface RuntimeConfigKeeperOverlayApplication extends RuntimeConfigApplicationLane {
+  configured_count: number
+  pending_keys: string[]
+  applied_keys: string[]
+  preempted_keys: string[]
+}
+
+export interface RuntimeConfigApplication {
+  operation: string
+  routing: RuntimeConfigApplicationLane
+  keeper_overlay: RuntimeConfigKeeperOverlayApplication
+}
+
+export interface RuntimeConfigValidationIssue {
+  key: string
+  kind: string
+  severity: 'error' | 'warning'
+  detail: string
+}
+
+export interface RuntimeConfigValidation {
+  valid: boolean
+  schema_version: number
+  current_schema_version: number
+  forward_schema: boolean
+  issues: RuntimeConfigValidationIssue[]
+}
+
+export interface RuntimeKeeperSetting {
+  key: string | null
+  env: string
+  configured_value: string | null
+  source: string
+  effective_value: string
+  applied_at: number | null
+  reload_class: string
+  requires_restart: boolean
+  application_status: string
+  consumers: string[]
+}
+
+export interface RuntimeConfigPreview {
+  ok: boolean
+  can_save: boolean
+  validation: RuntimeConfigValidation
+  keeper_setting_schema?: unknown
 }
 
 export type RuntimeTomlEditorTransport = 'endpoint' | 'command'
@@ -1633,12 +1690,87 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
     path: asNullableString(record.path),
     file_name: asString(record.file_name) ?? 'runtime.toml',
     source_text: asString(record.source_text, ''),
-    reloaded: asBoolean(record.reloaded) ?? false,
     provider_protocols: parseRuntimeTomlEditorProtocols(record.provider_protocols),
+    application: normalizeRuntimeConfigApplication(record.application),
+    validation: normalizeRuntimeConfigValidation(record.validation),
+    keeper_setting_schema: record.keeper_setting_schema,
+    keeper_settings: normalizeRuntimeKeeperSettings(record.keeper_settings),
     message: asNullableString(record.message),
     reason: asNullableString(record.reason),
     issues: record.issues,
   }
+}
+
+function appliedAt(raw: unknown): string | number | null {
+  return asString(raw) ?? asNumber(raw) ?? null
+}
+
+function normalizeApplicationLane(raw: unknown): RuntimeConfigApplicationLane {
+  const record = isRecord(raw) ? raw : {}
+  return {
+    status: asString(record.status) ?? 'unknown',
+    requires_restart: asBoolean(record.requires_restart) ?? false,
+    applied_at: appliedAt(record.applied_at),
+  }
+}
+
+function normalizeRuntimeConfigApplication(raw: unknown): RuntimeConfigApplication | undefined {
+  if (!isRecord(raw)) return undefined
+  const keeperOverlay = isRecord(raw.keeper_overlay) ? raw.keeper_overlay : {}
+  return {
+    operation: asString(raw.operation) ?? 'unknown',
+    routing: normalizeApplicationLane(raw.routing),
+    keeper_overlay: {
+      ...normalizeApplicationLane(keeperOverlay),
+      configured_count: asNumber(keeperOverlay.configured_count) ?? 0,
+      pending_keys: asStringArray(keeperOverlay.pending_keys) ?? [],
+      applied_keys: asStringArray(keeperOverlay.applied_keys) ?? [],
+      preempted_keys: asStringArray(keeperOverlay.preempted_keys) ?? [],
+    },
+  }
+}
+
+function normalizeRuntimeConfigValidation(raw: unknown): RuntimeConfigValidation | undefined {
+  if (!isRecord(raw)) return undefined
+  const issues = Array.isArray(raw.issues)
+    ? raw.issues.flatMap((issue): RuntimeConfigValidationIssue[] => {
+      if (!isRecord(issue)) return []
+      const severity = asString(issue.severity)
+      if (severity !== 'error' && severity !== 'warning') return []
+      return [{
+        key: asString(issue.key) ?? '',
+        kind: asString(issue.kind) ?? 'unknown',
+        severity,
+        detail: asString(issue.detail) ?? '',
+      }]
+    })
+    : []
+  return {
+    valid: asBoolean(raw.valid) ?? false,
+    schema_version: asNumber(raw.schema_version) ?? 0,
+    current_schema_version: asNumber(raw.current_schema_version) ?? 0,
+    forward_schema: asBoolean(raw.forward_schema) ?? false,
+    issues,
+  }
+}
+
+function normalizeRuntimeKeeperSettings(raw: unknown): RuntimeKeeperSetting[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  return raw.flatMap((value): RuntimeKeeperSetting[] => {
+    if (!isRecord(value)) return []
+    return [{
+      key: asNullableString(value.key),
+      env: asString(value.env) ?? '',
+      configured_value: asNullableString(value.configured_value),
+      source: asString(value.source) ?? 'unknown',
+      effective_value: asString(value.effective_value) ?? '',
+      applied_at: asNumber(value.applied_at) ?? null,
+      reload_class: asString(value.reload_class) ?? 'unknown',
+      requires_restart: asBoolean(value.requires_restart) ?? false,
+      application_status: asString(value.application_status) ?? 'unknown',
+      consumers: asStringArray(value.consumers) ?? [],
+    }]
+  })
 }
 
 export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
@@ -1714,6 +1846,22 @@ export async function saveRuntimeTomlConfig(sourceText: string): Promise<Runtime
   return post<unknown>('/api/v1/runtime/config/raw', {
     source_text: sourceText,
   }).then(normalizeRuntimeTomlConfig)
+}
+
+export async function previewRuntimeTomlConfig(sourceText: string): Promise<RuntimeConfigPreview> {
+  await ensureDevToken()
+  const raw = await post<unknown>('/api/v1/runtime/config/raw/preview', {
+    source_text: sourceText,
+  })
+  if (!isRecord(raw)) throw new Error('유효하지 않은 runtime config preview payload')
+  const validation = normalizeRuntimeConfigValidation(raw.validation)
+  if (!validation) throw new Error('유효하지 않은 runtime config validation payload')
+  return {
+    ok: asBoolean(raw.ok) ?? false,
+    can_save: asBoolean(raw.can_save) ?? false,
+    validation,
+    keeper_setting_schema: raw.keeper_setting_schema,
+  }
 }
 
 export type RuntimeRoutingLane =

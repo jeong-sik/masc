@@ -61,6 +61,7 @@ import {
   type TelemetryEntry,
   type TelemetrySourceSummary,
   type DashboardFullHealthResponse,
+  type DashboardKeeperEventQueueHealth,
   type DashboardScheduleRunnerStatus,
 } from '../../api/dashboard'
 import {
@@ -208,6 +209,18 @@ export interface OverviewDigest {
   scheduledAutomation: OverviewScheduledAutomationDigest
   /** schedule_runner liveness summary from /health?full=1. */
   scheduleRunner: OverviewScheduleRunnerDigest
+  /** Durable queue storage and runnable work are intentionally separate. */
+  keeperQueue: OverviewKeeperQueueDigest
+}
+
+export interface OverviewKeeperQueueDigest {
+  hasProjection: boolean
+  storageStatus: string
+  workStatus: string
+  workState: string
+  runnableBacklogCount: number
+  runnableOldestAgeSeconds: number | null
+  backlogClean: boolean
 }
 
 export interface OverviewScheduleRunnerDigest {
@@ -426,6 +439,31 @@ function summarizeScheduleRunnerStatus(
   }
 }
 
+function summarizeKeeperQueueHealth(
+  queue: DashboardKeeperEventQueueHealth | null | undefined,
+): OverviewKeeperQueueDigest {
+  if (!queue) {
+    return {
+      hasProjection: false,
+      storageStatus: 'unknown',
+      workStatus: 'unknown',
+      workState: 'unknown',
+      runnableBacklogCount: 0,
+      runnableOldestAgeSeconds: null,
+      backlogClean: false,
+    }
+  }
+  return {
+    hasProjection: true,
+    storageStatus: queue.storage_integrity?.status ?? 'unknown',
+    workStatus: queue.work_liveness?.status ?? 'unknown',
+    workState: queue.work_liveness?.state ?? 'unknown',
+    runnableBacklogCount: queue.work_liveness?.runnable_backlog_count ?? 0,
+    runnableOldestAgeSeconds: queue.work_liveness?.runnable_oldest_age_seconds ?? null,
+    backlogClean: queue.backlog_clean,
+  }
+}
+
 export function summarizeScheduledAutomation(
   automation: DashboardScheduledAutomation | null | undefined,
 ): OverviewScheduledAutomationDigest {
@@ -525,6 +563,7 @@ export function computeOverviewDigest(
   fusionList: readonly FusionRunRecord[],
   scheduledAutomation?: DashboardScheduledAutomation | null,
   scheduleRunnerStatus?: DashboardScheduleRunnerStatus | null,
+  keeperQueueHealth?: DashboardKeeperEventQueueHealth | null,
 ): OverviewDigest {
   // Highest priority first; ties keep input order (stable sort).
   const topGoals = [...goalList].sort((a, b) => b.priority - a.priority).slice(0, 3)
@@ -536,6 +575,7 @@ export function computeOverviewDigest(
   const fusionLatest = [...fusionList].sort((a, b) => b.startedAt - a.startedAt)[0] ?? null
   const scheduledAutomationDigest = summarizeScheduledAutomation(scheduledAutomation)
   const scheduleRunnerDigest = summarizeScheduleRunnerStatus(scheduleRunnerStatus)
+  const keeperQueueDigest = summarizeKeeperQueueHealth(keeperQueueHealth)
 
   return {
     openGateRequests,
@@ -547,6 +587,7 @@ export function computeOverviewDigest(
     fusionLatest,
     scheduledAutomation: scheduledAutomationDigest,
     scheduleRunner: scheduleRunnerDigest,
+    keeperQueue: keeperQueueDigest,
   }
 }
 
@@ -1258,6 +1299,7 @@ function OverviewDomainSection({
 }) {
   const scheduleSummary = digest.scheduledAutomation
   const scheduleRunnerSummary = digest.scheduleRunner
+  const keeperQueueSummary = digest.keeperQueue
 
   const scheduleRunnerRows: string[] = []
   if (scheduleRunnerSummary.hasProjection) {
@@ -1467,6 +1509,23 @@ function OverviewDomainSection({
           <div class="ov-fleet-stat"><span class=${`v ${stats.hot > 0 ? 'bad' : ''}`}>${stats.hot}</span><span class="k">압박</span></div>
           <div class="ov-fleet-stat"><span class="v">${stats.total}</span><span class="k">전체</span></div>
         </div>
+        ${keeperQueueSummary.hasProjection
+          ? html`
+              <div class="ov-stat-row" data-testid="fleet-queue-storage">
+                <span class="k">queue storage</span>
+                <span class="v mono">${keeperQueueSummary.storageStatus}</span>
+              </div>
+              <div class="ov-stat-row" data-testid="fleet-queue-work">
+                <span class="k">work liveness</span>
+                <span class=${`v mono ${keeperQueueSummary.backlogClean ? 'ok' : 'warn'}`}>
+                  ${keeperQueueSummary.workState} · ${keeperQueueSummary.runnableBacklogCount}
+                  ${keeperQueueSummary.runnableOldestAgeSeconds == null
+                    ? ''
+                    : ` · oldest ${Math.round(keeperQueueSummary.runnableOldestAgeSeconds)}s`}
+                </span>
+              </div>
+            `
+          : html`<div class="ov-stat-row"><span class="k">queue health</span><span class="v mono">unknown</span></div>`}
         <div class="ov-stat-row"><span class="k">전체 keeper</span><span class="v mono">${stats.total}</span></div>
       <//>
     </div>
@@ -1507,6 +1566,10 @@ export function Overview() {
     overviewFullHealthResource.state.value.status === 'loaded'
       ? overviewFullHealthResource.state.value.data.schedule_runner ?? null
       : null
+  const keeperQueueHealth =
+    overviewFullHealthResource.state.value.status === 'loaded'
+      ? overviewFullHealthResource.state.value.data.keeper_event_queue ?? null
+      : null
   // Keeper execution counts come from the runtime-health fleet projection the
   // shell already holds — the same `keeper_fleet_safety_health_json` payload
   // `/health?full=1` embeds, so reading it here adds no request.
@@ -1514,8 +1577,15 @@ export function Overview() {
   const fleet = useMemo(() => resolveKeeperFleetExecutionCounts(fleetSafety), [fleetSafety])
   const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
   const digest = useMemo(
-    () => computeOverviewDigest(openGateRequests, goalList, fusionList, scheduledAutomationData, scheduleRunnerStatus),
-    [openGateRequests, goalList, fusionList, scheduledAutomationData, scheduleRunnerStatus],
+    () => computeOverviewDigest(
+      openGateRequests,
+      goalList,
+      fusionList,
+      scheduledAutomationData,
+      scheduleRunnerStatus,
+      keeperQueueHealth,
+    ),
+    [openGateRequests, goalList, fusionList, scheduledAutomationData, scheduleRunnerStatus, keeperQueueHealth],
   )
   const telemetry = overviewTelemetryResource.state.value
 

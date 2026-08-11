@@ -54,6 +54,15 @@ val creation_keeper_wake_target
   :  payload:Yojson.Safe.t
   -> (string option, string) result
 
+val set_keeper_wake_result_delivery :
+  payload:Yojson.Safe.t ->
+  channel:Keeper_continuation_channel.t option ->
+  (Yojson.Safe.t, string) result
+(** Stamp the creation-boundary result policy into a Keeper wake payload.
+    A routable current continuation becomes [reply_to_origin]; absence or an
+    unroutable continuation becomes explicit [none]. Caller-supplied delivery
+    coordinates are replaced, never trusted. *)
+
 val dispatch_view_detailed
   :  Schedule_domain.schedule_request
   -> (known_kind * payload_view, dispatch_rejection) result
@@ -68,6 +77,11 @@ val dispatch_tool_for_request_result
 
 val dispatch_tool_for_request : Schedule_domain.schedule_request -> string option
 val target_summary : Schedule_domain.schedule_request -> string option * string option
+val result_delivery :
+  Schedule_domain.schedule_request ->
+  (Keeper_continuation_channel.t option, string) result
 
 val body_required_string : payload_view -> string -> (string, string) result
 val body_optional_string : payload_view -> string -> (string option, string) result
+val body_result_delivery :
+  payload_view -> (Keeper_continuation_channel.t option, string) result

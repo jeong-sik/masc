@@ -20,11 +20,13 @@
 
 (* TEL-OK: every function here is a pure [record -> Yojson.Safe.t] renderer over
    state the caller already read. The module takes no action to observe: it
-   dispatches nothing, mutates nothing, and its one read (the schedule ledger)
-   reports its own failure in the payload as [schedule_store_read_error] rather
-   than swallowing it. Telemetry for the actions these rows describe lives with
-   the actors that perform them — Schedule_runner for dispatch, and
-   Keeper_event_queue for wake delivery.
+   dispatches nothing and mutates nothing. In addition to the schedule ledger,
+   a routed result row reads the exact Keeper continuation-delivery obligation
+   inventory so dispatch acceptance and user-visible result delivery are never
+   collapsed into one status. Read failures remain typed projection facts.
+   Telemetry for the actions these rows describe lives with the actors that
+   perform them — Schedule_runner for dispatch, Keeper_event_queue for wake
+   intake, and Keeper_continuation_delivery_publisher for result delivery.
 
    The telemetry ratchet flags these as new handlers because this module is a
    new file; the code moved here verbatim from
@@ -253,6 +255,7 @@ let schedule_keeper_queue_evidence_dashboard_json
               ; stimulus
               ; stimulus_id = _
               ; reaction_ledger_status = _
+              ; result_delivery_policy = _
               ; occurrence_status = _
               ; activation_outcome = _
               }) ->
@@ -329,6 +332,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
               ; stimulus
               ; stimulus_id
               ; reaction_ledger_status = _
+              ; result_delivery_policy = _
               ; occurrence_status = _
               ; activation_outcome = _
               }) ->
@@ -528,6 +532,249 @@ let schedule_signal_rows_and_errors config limit =
     ([], [])
 ;;
 
+let result_delivery_record_failures_json failures =
+  `List
+    (List.map
+       (fun (failure : Keeper_continuation_delivery_store.record_failure) ->
+          `Assoc
+            [ "path", `String failure.path
+            ; "detail", `String failure.detail
+            ])
+       failures)
+;;
+
+let result_delivery_state_fields
+  (intent : Keeper_continuation_delivery_intent.t)
+  =
+  let intent_fields =
+    [ ( "intent_id"
+      , `String
+          (Keeper_continuation_delivery_intent.Intent_id.to_string
+             intent.intent_id) )
+    ; "response_sha256", `String intent.response.sha256
+    ]
+  in
+  match intent.state with
+  | Keeper_continuation_delivery_intent.Pending ->
+    ("pending", intent_fields)
+  | Keeper_continuation_delivery_intent.Attempting
+      { started_at; idempotency_key } ->
+    ( "attempting"
+    , intent_fields
+      @ [ "attempt_started_at", `Float started_at
+        ; "attempt_started_at_iso", unix_iso_json started_at
+        ; "idempotency_key", `String idempotency_key
+        ] )
+  | Keeper_continuation_delivery_intent.Delivered
+      { completed_at; connector_message_id } ->
+    ( "delivered"
+    , intent_fields
+      @ [ "completed_at", `Float completed_at
+        ; "completed_at_iso", unix_iso_json completed_at
+        ; ( "connector_message_id"
+          , match connector_message_id with
+            | None -> `Null
+            | Some value -> `String value )
+        ] )
+  | Keeper_continuation_delivery_intent.Failed
+      { completed_at; kind; detail } ->
+    ( "failed"
+    , intent_fields
+      @ [ "completed_at", `Float completed_at
+        ; "completed_at_iso", unix_iso_json completed_at
+        ; ( "failure_kind"
+          , `String
+              (Keeper_continuation_delivery_intent.failure_kind_to_string
+                 kind) )
+        ; "detail", `String detail
+        ] )
+  | Keeper_continuation_delivery_intent.Ambiguous
+      { detected_at; detail } ->
+    ( "ambiguous"
+    , intent_fields
+      @ [ "detected_at", `Float detected_at
+        ; "detected_at_iso", unix_iso_json detected_at
+        ; "detail", `String detail
+        ] )
+;;
+
+let schedule_result_delivery_dashboard_json
+  (config : Workspace.config)
+  (request : Schedule_domain.schedule_request)
+  (last_wake : Schedule_domain.wake_record option)
+  =
+  let projection ?(extra_fields = []) ~policy ~required status =
+    `Assoc
+      ([ "schema", `String "masc.dashboard.schedule_result_delivery.v1"
+       ; "policy", `String policy
+       ; "required", `Bool required
+       ; "status", `String status
+       ]
+       @ extra_fields)
+  in
+  match Schedule_payload_projection.result_delivery request with
+  | Error detail ->
+    projection
+      ~policy:"invalid"
+      ~required:true
+      ~extra_fields:[ "detail", `String detail ]
+      "invalid_policy"
+  | Ok None ->
+    (match
+       Option.bind last_wake (fun wake ->
+         Option.bind wake.Schedule_domain.detail (fun detail ->
+           Server_schedule_consumers.dispatch_receipt_of_detail detail
+           |> Result.to_option))
+     with
+     | Some
+         (Server_schedule_consumers.Keeper_wake_enqueued
+           { result_delivery_policy =
+               Server_schedule_consumers.Keeper_wake_result_delivery_reply_to_origin
+           ; _
+           }) ->
+       projection
+         ~policy:"none"
+         ~required:false
+         ~extra_fields:
+           [ "detail", `String "dispatch receipt contradicts no-delivery policy" ]
+         "destination_conflict"
+     | None
+     | Some
+         (Server_schedule_consumers.Keeper_wake_enqueued
+           { result_delivery_policy =
+               Server_schedule_consumers.Keeper_wake_result_delivery_none
+           ; _
+           }) ->
+       projection ~policy:"none" ~required:false "not_required")
+  | Ok (Some channel) ->
+    let destination = Keeper_continuation_channel.to_yojson channel in
+    let routed_projection ?(extra_fields = []) status =
+      projection
+        ~policy:"reply_to_origin"
+        ~required:true
+        ~extra_fields:(("destination", destination) :: extra_fields)
+        status
+    in
+    (match last_wake with
+     | None -> routed_projection "awaiting_occurrence"
+     | Some wake ->
+       (match wake.Schedule_domain.detail with
+        | None -> routed_projection "awaiting_dispatch_receipt"
+        | Some detail ->
+          (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+           | Error reason ->
+             routed_projection
+               ~extra_fields:[ "detail", `String reason ]
+               "unrecognized_dispatch_receipt"
+           | Ok
+               (Server_schedule_consumers.Keeper_wake_enqueued
+                 { keeper_name
+                 ; post_id = occurrence_id
+                 ; schedule_instance_id = _
+                 ; schedule_id = _
+                 ; urgency = _
+                 ; queue = _
+                 ; stimulus = _
+                 ; stimulus_id = _
+                 ; reaction_ledger_status = _
+                 ; result_delivery_policy
+                 ; occurrence_status = _
+                 ; activation_outcome = _
+                 }) ->
+             let occurrence_fields =
+               [ "occurrence_id", `String occurrence_id
+               ; "keeper_name", `String keeper_name
+               ]
+             in
+             (match result_delivery_policy with
+              | Server_schedule_consumers.Keeper_wake_result_delivery_none ->
+                routed_projection
+                  ~extra_fields:
+                    (occurrence_fields
+                     @ [ ( "detail"
+                         , `String
+                             "dispatch receipt omitted required reply-to-origin policy" ) ])
+                  "destination_conflict"
+              | Server_schedule_consumers.Keeper_wake_result_delivery_reply_to_origin ->
+                (match
+                Keeper_continuation_delivery_store.inventory
+                  ~config
+                  ~keeper_name
+              with
+              | Error error ->
+                routed_projection
+                  ~extra_fields:
+                    (occurrence_fields
+                     @ [ ( "detail"
+                         , `String
+                             (Keeper_continuation_delivery_store.error_to_string
+                                error) ) ])
+                  "read_error"
+              | Ok
+                  { intents = _
+                  ; record_failures = (_ :: _ as record_failures)
+                  } ->
+                routed_projection
+                  ~extra_fields:
+                    (occurrence_fields
+                     @ [ ( "detail"
+                         , `String
+                             "continuation delivery inventory contains malformed records" )
+                       ; ( "record_failures"
+                         , result_delivery_record_failures_json record_failures )
+                       ])
+                  "read_error"
+              | Ok { intents; record_failures = [] } ->
+                let matching =
+                  List.filter
+                    (fun
+                      (intent : Keeper_continuation_delivery_intent.t) ->
+                       match intent.origin.source with
+                       | Keeper_continuation_delivery_intent.Schedule_occurrence
+                           { occurrence_id = candidate } ->
+                         String.equal occurrence_id candidate
+                       | Keeper_continuation_delivery_intent.Fusion_completion _
+                       | Keeper_continuation_delivery_intent.Hitl_resolution _
+                       | Keeper_continuation_delivery_intent.Connector_attention _ ->
+                         false)
+                    intents
+                in
+                (match matching with
+                 | [] ->
+                   routed_projection
+                     ~extra_fields:occurrence_fields
+                     "execution_pending"
+                 | [ intent ]
+                   when not
+                          (Keeper_continuation_channel.same_route
+                             channel
+                             intent.origin.channel) ->
+                   routed_projection
+                     ~extra_fields:
+                       (occurrence_fields
+                        @ [ ( "intent_id"
+                            , `String
+                                (Keeper_continuation_delivery_intent.Intent_id
+                                 .to_string
+                                   intent.intent_id) )
+                          ; "detail", `String "persisted intent destination differs from schedule policy"
+                          ])
+                     "destination_conflict"
+                 | [ intent ] ->
+                   let status, state_fields =
+                     result_delivery_state_fields intent
+                   in
+                   routed_projection
+                     ~extra_fields:(occurrence_fields @ state_fields)
+                     status
+                 | _ :: _ :: _ ->
+                   routed_projection
+                     ~extra_fields:
+                       (occurrence_fields
+                        @ [ "detail", `String "multiple intents claim one schedule occurrence" ])
+                     "identity_conflict"))))))
+;;
+
 let schedule_request_dashboard_json
   ~now
   ~config
@@ -551,6 +798,7 @@ let schedule_request_dashboard_json
     [ "schedule_instance_id", `String request.schedule_instance_id
     ; "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
+    ; "dispatch_status", `String (Schedule_domain.schedule_status_to_string request.status)
     ; "source", `String (Schedule_domain.schedule_source_to_string request.source)
     ; "requested_by", Schedule_domain.actor_to_yojson request.requested_by
     ; "scheduled_by", Schedule_domain.actor_to_yojson request.scheduled_by
@@ -596,6 +844,8 @@ let schedule_request_dashboard_json
         | None -> `Null
         | Some wake -> wake_record_dashboard_json wake )
     ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_wake
+    ; ( "result_delivery"
+      , schedule_result_delivery_dashboard_json config request last_wake )
     ; "keeper_queue_evidence", schedule_keeper_queue_evidence_dashboard_json ~now config last_wake
     ; ( "keeper_reaction_evidence"
       , schedule_keeper_reaction_evidence_dashboard_json config last_wake )

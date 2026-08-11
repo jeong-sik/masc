@@ -46,6 +46,7 @@ import {
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
   patchKeeperConfig,
+  previewRuntimeTomlConfig,
   saveRuntimeTomlConfig,
   fetchDashboardCacheStats,
   fetchTelemetry,
@@ -1234,6 +1235,28 @@ describe('fetchDashboardFullHealth', () => {
         last_success_age_sec: 12.5,
         last_error_age_sec: null,
       },
+      keeper_event_queue: {
+        schema: 'masc.keeper_event_queue.fleet_summary.v4',
+        status: 'degraded',
+        operator_action_required: true,
+        status_reasons: ['runnable_backlog', 'runnable_backlog_stale'],
+        backlog_clean: false,
+        storage_integrity: {
+          status: 'ok',
+          counts_complete: true,
+          read_error_count: 0,
+          transition_outbox_count: 0,
+          operator_action_required: false,
+        },
+        work_liveness: {
+          status: 'degraded',
+          state: 'stalled',
+          runnable_backlog_count: 18,
+          runnable_oldest_age_seconds: 3360,
+          stale_after_seconds: 300,
+          operator_action_required: true,
+        },
+      },
     }
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1260,6 +1283,16 @@ describe('fetchDashboardFullHealth', () => {
       stale_after_sec: 60,
       last_tick_age_sec: 12.5,
       last_error_age_sec: null,
+    })
+    expect(result.keeper_event_queue).toMatchObject({
+      status: 'degraded',
+      backlog_clean: false,
+      storage_integrity: { status: 'ok', counts_complete: true },
+      work_liveness: {
+        status: 'degraded',
+        state: 'stalled',
+        runnable_backlog_count: 18,
+      },
     })
   })
 
@@ -3125,7 +3158,19 @@ describe('runtime.toml raw config API', () => {
         path: '/tmp/.masc/config/runtime.toml',
         file_name: 'runtime.toml',
         source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
-        reloaded: false,
+        application: {
+          operation: 'read',
+          routing: { status: 'active', requires_restart: false, applied_at: null },
+          keeper_overlay: {
+            status: 'not_configured',
+            requires_restart: false,
+            applied_at: null,
+            configured_count: 0,
+            pending_keys: [],
+            applied_keys: [],
+            preempted_keys: [],
+          },
+        },
         provider_protocols: providerProtocols,
       }), {
         status: 200,
@@ -3144,7 +3189,8 @@ describe('runtime.toml raw config API', () => {
     expect(result.path).toBe('/tmp/.masc/config/runtime.toml')
     expect(result.file_name).toBe('runtime.toml')
     expect(result.source_text).toContain('[runtime]')
-    expect(result.reloaded).toBe(false)
+    expect(result.application?.routing.status).toBe('active')
+    expect(result.application?.keeper_overlay.requires_restart).toBe(false)
     expect(result.provider_protocols).toEqual(providerProtocols)
   })
 
@@ -3185,7 +3231,19 @@ describe('runtime.toml raw config API', () => {
         path: '/tmp/.masc/config/runtime.toml',
         file_name: 'runtime.toml',
         source_text: sourceText,
-        reloaded: true,
+        application: {
+          operation: 'raw_save',
+          routing: { status: 'applied', requires_restart: false, applied_at: '2026-08-11T00:00:00Z' },
+          keeper_overlay: {
+            status: 'pending_restart',
+            requires_restart: true,
+            applied_at: null,
+            configured_count: 1,
+            pending_keys: ['turn.temperature'],
+            applied_keys: [],
+            preempted_keys: [],
+          },
+        },
         provider_protocols: providerProtocols,
       }), {
         status: 200,
@@ -3205,8 +3263,42 @@ describe('runtime.toml raw config API', () => {
     expect(url).toBe('/api/v1/runtime/config/raw')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ source_text: sourceText })
-    expect(result.reloaded).toBe(true)
+    expect(result.application?.routing.status).toBe('applied')
+    expect(result.application?.keeper_overlay.status).toBe('pending_restart')
     expect(result.source_text).toBe(sourceText)
+  })
+
+  it('previews Keeper setting validation before raw save', async () => {
+    const sourceText = '[keeper_settings]\nschema_version = 1\n[turn]\ntemperatur = 0.4\n'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        can_save: false,
+        validation: {
+          valid: false,
+          schema_version: 1,
+          current_schema_version: 1,
+          forward_schema: false,
+          issues: [{
+            key: 'turn.temperatur',
+            kind: 'unknown_key',
+            severity: 'error',
+            detail: 'unknown Keeper runtime setting',
+          }],
+        },
+        keeper_setting_schema: { authority: 'Keeper_runtime_setting_registry' },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const preview = await previewRuntimeTomlConfig(sourceText)
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/runtime/config/raw/preview')
+    expect(preview.can_save).toBe(false)
+    expect(preview.validation.issues[0]?.kind).toBe('unknown_key')
   })
 
   it('posts runtime routing patches without client-side TOML text', async () => {

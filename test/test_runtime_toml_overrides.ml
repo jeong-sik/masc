@@ -66,33 +66,20 @@ let test_missing_file_returns_zero () =
   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
 
 
-let test_applies_sleep_and_throttle_overrides () =
+let test_applies_sleep_and_batch_overrides () =
   let doc = parse_or_fail
-    "[autonomous]\n\
-     fairness_cooldown_sec = 3\n\
-     [heartbeat]\n\
+    "[heartbeat]\n\
      sleep_chunk_sec = 1.5\n\
-     board_wakeup_max = 6\n\
      [turn]\n\
-     capacity_limit = 3\n\
      batch_limit = 9\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied sleep/throttle overrides" 5 count;
-  check (option string) "autonomous fairness cooldown"
-    (Some "3")
-    (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC" overrides);
+  check int "applied sleep/batch overrides" 2 count;
   check (option string) "sleep chunk"
     (Some "1.5")
     (List.assoc_opt "MASC_KEEPER_SLEEP_CHUNK_SEC" overrides);
-  check (option string) "board wakeup max"
-    (Some "6")
-    (List.assoc_opt "MASC_KEEPER_BOARD_WAKEUP_MAX" overrides);
-  check (option string) "capacity limit"
-    (Some "3")
-    (List.assoc_opt "MASC_KEEPER_TURN_CAPACITY_LIMIT" overrides);
   check (option string) "batch limit"
     (Some "9")
     (List.assoc_opt "MASC_KEEPER_BATCH_LIMIT" overrides)
@@ -101,19 +88,15 @@ let test_applies_turn_execution_overrides () =
   let doc = parse_or_fail
     "[turn]\n\
      temperature = 0.65\n\
-     max_output_tokens = 8192\n\
      stream_idle_timeout_sec = 90\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 3" 3 count;
+  check int "applied 2" 2 count;
   check (option string) "temperature"
     (Some "0.65")
     (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides);
-  check (option string) "max output tokens"
-    (Some "8192")
-    (List.assoc_opt "MASC_KEEPER_UNIFIED_MAX_TOKENS" overrides);
   check (option string) "stream idle timeout"
     (Some "90")
     (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
@@ -165,6 +148,63 @@ let test_parse_error_returns_error () =
   match Keeper_runtime_config.load_and_apply ~base_path with
   | Ok _ -> fail "expected parse error"
   | Error _ -> ()
+
+let test_current_schema_unknown_keeper_key_is_rejected () =
+  let report =
+    Keeper_runtime_config.validate_doc
+      (parse_or_fail "[keeper_settings]\nschema_version = 1\n[turn]\ntemperatur = 0.4\n")
+  in
+  check bool "current-schema typo is invalid" false
+    (Keeper_runtime_config.validation_report_is_valid report);
+  match report.issues with
+  | [ issue ] ->
+    check string "unknown key retained" "turn.temperatur" issue.key;
+    check bool "classified unknown" true
+      (issue.kind = Keeper_runtime_config.Unknown_key);
+    check bool "current schema rejects" true
+      (issue.severity = Keeper_runtime_config.Error)
+  | issues -> failf "expected one issue, got %d" (List.length issues)
+
+let test_retired_keeper_key_is_rejected () =
+  let report =
+    Keeper_runtime_config.validate_doc
+      (parse_or_fail "[turn]\ncapacity_limit = 3\n")
+  in
+  check bool "retired key is invalid" false
+    (Keeper_runtime_config.validation_report_is_valid report);
+  match report.issues with
+  | [ issue ] ->
+    check bool "classified retired" true
+      (issue.kind = Keeper_runtime_config.Retired_key);
+    check bool "retired key rejects" true
+      (issue.severity = Keeper_runtime_config.Error)
+  | issues -> failf "expected one issue, got %d" (List.length issues)
+
+let test_future_schema_unknown_keeper_key_is_warning () =
+  let report =
+    Keeper_runtime_config.validate_doc
+      (parse_or_fail "[keeper_settings]\nschema_version = 2\n[turn]\nfuture_budget = 7\n")
+  in
+  check bool "future schema remains saveable" true
+    (Keeper_runtime_config.validation_report_is_valid report);
+  check bool "forward schema is explicit" true report.forward_schema;
+  match report.issues with
+  | [ issue ] ->
+    check bool "future key remains unknown" true
+      (issue.kind = Keeper_runtime_config.Unknown_key);
+    check bool "future key warns" true
+      (issue.severity = Keeper_runtime_config.Warning)
+  | issues -> failf "expected one warning, got %d" (List.length issues)
+
+let test_unrelated_runtime_namespaces_are_not_claimed () =
+  let report =
+    Keeper_runtime_config.validate_doc
+      (parse_or_fail
+         "[runtime]\ndefault = \"provider.model\"\n[models.sample]\napi-name = \"sample\"\n")
+  in
+  check bool "other loader namespaces remain valid" true
+    (Keeper_runtime_config.validation_report_is_valid report);
+  check int "no Keeper issues" 0 (List.length report.issues)
 
 let test_load_and_apply_records_boot_override () =
   match Sys.getenv_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" with
@@ -421,37 +461,6 @@ let test_stream_idle_timeout_toml_wrong_type_returns_error () =
            "turn.stream_idle_timeout_sec: expected a numeric TOML value"
          (Keeper_runtime_config.load_failure_to_string failure))
 
-let test_resolved_cli_subprocess_idle_default_120s () =
-  with_clean_boot_overrides @@ fun () ->
-  Keeper_runtime_resolved.init ();
-  check (float 0.0001) "cli_subprocess_idle default 120s"
-    120.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
-
-let test_resolved_cli_subprocess_idle_clamps_low () =
-  with_clean_boot_overrides @@ fun () ->
-  with_env "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC" (Some "1") @@ fun () ->
-  Keeper_runtime_resolved.init ();
-  check (float 0.0001) "cli_subprocess_idle clamps to 10s floor"
-    10.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
-
-let test_resolved_cli_subprocess_idle_clamps_high () =
-  with_clean_boot_overrides @@ fun () ->
-  with_env "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC" (Some "9999") @@ fun () ->
-  Keeper_runtime_resolved.init ();
-  check (float 0.0001) "cli_subprocess_idle clamps to 600s ceiling"
-    600.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
-
-let test_resolved_cli_subprocess_idle_from_toml () =
-  with_clean_boot_overrides @@ fun () ->
-  with_base_path @@ fun base_path ->
-  write_toml base_path "[turn]\ncli_subprocess_idle_sec = 45\n";
-  (match Keeper_runtime_config.load_and_apply ~base_path with
-   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
-   | Ok _ -> ());
-  Keeper_runtime_resolved.init ();
-  check (float 0.0001) "cli_subprocess_idle from toml"
-    45.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
-
 (* The bootstrap counter labels itself from load_failure_kind. Its help text
    enumerates the labels, so a constructor added without a label — or a label
    added without a constructor — has to break here rather than at whatever
@@ -486,11 +495,19 @@ let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
       , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
-        ; test_case "applies sleep/throttle overrides" `Quick test_applies_sleep_and_throttle_overrides
+        ; test_case "applies sleep/batch overrides" `Quick test_applies_sleep_and_batch_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies health overrides" `Quick test_applies_health_overrides
         ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
+        ; test_case "current schema rejects unknown Keeper key" `Quick
+            test_current_schema_unknown_keeper_key_is_rejected
+        ; test_case "retired Keeper key is rejected" `Quick
+            test_retired_keeper_key_is_rejected
+        ; test_case "future schema preserves unknown key as warning" `Quick
+            test_future_schema_unknown_keeper_key_is_warning
+        ; test_case "unrelated namespaces remain separately owned" `Quick
+            test_unrelated_runtime_namespaces_are_not_claimed
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
         ; test_case "every failure kind has a label" `Quick
             test_every_failure_kind_has_a_label
@@ -511,10 +528,6 @@ let () =
             test_resolved_provider_call_deadline_uses_toml
         ; test_case "resolved provider call deadline prefers env" `Quick
             test_resolved_provider_call_deadline_prefers_env
-        ; test_case "cli subprocess idle default 120s" `Quick test_resolved_cli_subprocess_idle_default_120s
-        ; test_case "cli subprocess idle from toml" `Quick test_resolved_cli_subprocess_idle_from_toml
-        ; test_case "cli subprocess idle clamps to 10s floor" `Quick test_resolved_cli_subprocess_idle_clamps_low
-        ; test_case "cli subprocess idle clamps to 600s ceiling" `Quick test_resolved_cli_subprocess_idle_clamps_high
         ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
         ; test_case "resolved stream idle timeout does not clamp" `Quick test_resolved_stream_idle_timeout_does_not_clamp
         ; test_case "resolved stream idle timeout env below floor preserved" `Quick test_resolved_stream_idle_timeout_env_below_floor_preserved

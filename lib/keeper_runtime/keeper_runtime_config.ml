@@ -1,67 +1,10 @@
 (** Keeper_runtime_config — load startup runtime env seeding from
     [<resolved config root>/runtime.toml].  See [.mli] for design. *)
 
-(* TOML key → env var name. Startup-scoped runtime knobs map here so
-   that TOML is the SSOT and env vars become CI/test overrides.
-   Unknown TOML keys are silently ignored (forward compat). *)
-let key_to_env =
-  [
-    (* [bootstrap] *)
-    "bootstrap.enabled",                "MASC_KEEPER_BOOTSTRAP_ENABLED";
-    (* [autonomous] *)
-    (* RFC-0297 P0-1: global lifecycle kill-switches. Without these mappings
-       the [reactive]/[proactive]/[autonomous] enabled keys were silently
-       dropped (see load_and_apply — only known key_to_env keys are visited). *)
-    "autonomous.enabled",               "MASC_KEEPER_AUTONOMOUS_ENABLED";
-    "autonomous.fairness_cooldown_sec", "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC";
-    (* [reactive] *)
-    "reactive.enabled",                 "MASC_KEEPER_REACTIVE_ENABLED";
-    (* [heartbeat] *)
-    "heartbeat.interval_sec",           "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC";
-    "heartbeat.max_silence_sec",        "MASC_KEEPER_MAX_SILENCE_SEC";
-    "heartbeat.snapshot_sec",           "MASC_KEEPER_SNAPSHOT_SEC";
-    "heartbeat.work_as_heartbeat",      "MASC_KEEPER_WORK_AS_HEARTBEAT";
-    "heartbeat.sleep_chunk_sec",        "MASC_KEEPER_SLEEP_CHUNK_SEC";
-    "heartbeat.board_wakeup_max",       "MASC_KEEPER_BOARD_WAKEUP_MAX";
-    (* [health] *)
-    "health.durable_queue_stale_sec",   "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC";
-    (* [wire_capture] *)
-    "wire_capture.enabled",             "MASC_KEEPER_WIRE_CAPTURE";
-    (* [proactive] *)
-    "proactive.enabled",                "MASC_KEEPER_PROACTIVE_ENABLED";
-    (* [turn] *)
-    "turn.stream_idle_timeout_sec",     "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC";
-    (* #27416: the provider-call deadline lived only in restart-command env,
-       and 2 of 3 restarts on 2026-08-07 silently dropped it (a wedge recurred
-       in the unprotected window). TOML makes the knob survive whoever
-       restarts the server; env remains the CI/operator override.
-       Effective range at the reader is [30, 3600] seconds — a positive value
-       below 30 passes boot validation and is then silently raised to 30 by
-       the reader's clamp (#27355 contract, unchanged here). *)
-    "turn.provider_call_deadline_sec",  "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC";
-    "turn.cli_subprocess_idle_sec",     "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC";
-    "turn.capacity_limit",              "MASC_KEEPER_TURN_CAPACITY_LIMIT";
-    "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
-    "turn.temperature",                 "MASC_KEEPER_UNIFIED_TEMP";
-    "turn.max_output_tokens",           "MASC_KEEPER_UNIFIED_MAX_TOKENS";
-    "turn.enable_thinking",             "MASC_KEEPER_ENABLE_THINKING";
-    (* [supervisor] *)
-    "supervisor.sweep_sec",             "MASC_KEEPER_SUPERVISOR_SWEEP_SEC";
-    (* [lifecycle] *)
-    "lifecycle.dead_ttl_sec",           "MASC_KEEPER_DEAD_TTL_SEC";
-    (* [metrics] *)
-    "metrics.max_bytes",                "MASC_KEEPER_METRICS_MAX_BYTES";
-    "metrics.max_rotated",              "MASC_KEEPER_METRICS_MAX_ROTATED";
-    (* [web_search] *)
-    "web_search.searxng_url",           "MASC_SEARXNG_URL";
-    "web_search.provider",              "MASC_WEB_SEARCH_PROVIDER";
-    "web_search.provider_order",        "MASC_WEB_SEARCH_PROVIDER_ORDER";
-    "web_search.fallbacks",             "MASC_WEB_SEARCH_FALLBACKS";
-    "web_search.timeout_sec",           "MASC_WEB_SEARCH_TIMEOUT_SEC";
-    "web_search.cache_ttl_sec",         "MASC_WEB_SEARCH_CACHE_TTL_SEC";
-    (* [debug] *)
-    "debug.enabled",                    "MASC_KEEPER_DEBUG";
-  ]
+(* Generated projection of the typed setting authority. A TOML setting cannot
+   reach the boot-overlay path unless the registry also declares its type,
+   range, default, restart boundary, and concrete runtime consumer. *)
+let key_to_env = Keeper_runtime_setting_registry.active_toml_mappings
 
 let env_is_set env_lookup env_name =
   Option.is_some (env_lookup env_name)
@@ -160,21 +103,99 @@ let toml_shadow : (string, string) Hashtbl.t = Hashtbl.create 16
 
 let toml_value_opt env_name = Hashtbl.find_opt toml_shadow env_name
 
-let validate_positive_seconds_key doc key =
-  match List.assoc_opt key doc with
-  | None -> Ok ()
-  | Some (Keeper_toml_loader.Toml_int seconds) ->
-    Env_config_keeper.KeeperKeepalive.parse_stream_idle_timeout_sec
-      (string_of_int seconds)
-    |> Result.map (fun (_ : float) -> ())
-    |> Result.map_error (fun detail -> Printf.sprintf "%s: %s" key detail)
-  | Some (Keeper_toml_loader.Toml_float seconds) ->
-    Env_config_keeper.KeeperKeepalive.parse_stream_idle_timeout_sec
-      (Printf.sprintf "%.17g" seconds)
-    |> Result.map (fun (_ : float) -> ())
-    |> Result.map_error (fun detail -> Printf.sprintf "%s: %s" key detail)
-  | Some
-      (Keeper_toml_loader.Toml_string _
+let current_schema_version = 1
+let schema_version_key = "keeper_settings.schema_version"
+
+type validation_severity =
+  | Error
+  | Warning
+
+type validation_issue_kind =
+  | Invalid_schema_version
+  | Unknown_key
+  | Retired_key
+  | Type_mismatch
+  | Out_of_range
+
+type validation_issue =
+  { key : string
+  ; kind : validation_issue_kind
+  ; severity : validation_severity
+  ; detail : string
+  }
+
+type validation_report =
+  { schema_version : int
+  ; forward_schema : bool
+  ; issues : validation_issue list
+  }
+
+let last_applied_at = Atomic.make None
+let last_applied_at_unix () = Atomic.get last_applied_at
+
+let validation_issue ~key ~kind ~severity detail =
+  { key; kind; severity; detail }
+;;
+
+let validation_report_is_valid report =
+  not (List.exists (fun issue -> issue.severity = Error) report.issues)
+;;
+
+let first_segment key =
+  match String.index_opt key '.' with
+  | Some index -> String.sub key 0 index
+  | None -> key
+;;
+
+let owned_namespaces =
+  let add_unique value values =
+    if List.exists (String.equal value) values then values else value :: values
+  in
+  List.fold_left
+    (fun namespaces row ->
+       match Keeper_runtime_setting_registry.toml_key_opt row with
+       | Some key -> add_unique (first_segment key) namespaces
+       | None -> namespaces)
+    [ "keeper_settings" ]
+    Keeper_runtime_setting_registry.all
+;;
+
+let is_owned_key key =
+  List.exists (String.equal (first_segment key)) owned_namespaces
+;;
+
+let numeric_value = function
+  | Keeper_toml_loader.Toml_int value -> Some (float_of_int value)
+  | Keeper_toml_loader.Toml_float value -> Some value
+  | ( Keeper_toml_loader.Toml_string _
+    | Keeper_toml_loader.Toml_bool _
+    | Keeper_toml_loader.Toml_string_array _
+    | Keeper_toml_loader.Toml_array _
+    | Keeper_toml_loader.Toml_table _
+    | Keeper_toml_loader.Toml_inline_table _
+    | Keeper_toml_loader.Toml_table_array _
+    | Keeper_toml_loader.Toml_offset_datetime _
+    | Keeper_toml_loader.Toml_local_datetime _
+    | Keeper_toml_loader.Toml_local_date _
+    | Keeper_toml_loader.Toml_local_time _ ) ->
+    None
+;;
+
+let type_matches kind value =
+  match kind, value with
+  | Keeper_runtime_setting_registry.Boolean, Keeper_toml_loader.Toml_bool _ -> true
+  | Keeper_runtime_setting_registry.Integer, Keeper_toml_loader.Toml_int _ -> true
+  | ( Keeper_runtime_setting_registry.Float
+    , (Keeper_toml_loader.Toml_int _ | Keeper_toml_loader.Toml_float _) ) ->
+    true
+  | Keeper_runtime_setting_registry.String, Keeper_toml_loader.Toml_string _ -> true
+  | ( ( Keeper_runtime_setting_registry.Boolean
+      | Keeper_runtime_setting_registry.Integer
+      | Keeper_runtime_setting_registry.Float
+      | Keeper_runtime_setting_registry.String )
+    , ( Keeper_toml_loader.Toml_string _
+      | Keeper_toml_loader.Toml_int _
+      | Keeper_toml_loader.Toml_float _
       | Keeper_toml_loader.Toml_bool _
       | Keeper_toml_loader.Toml_string_array _
       | Keeper_toml_loader.Toml_array _
@@ -184,24 +205,300 @@ let validate_positive_seconds_key doc key =
       | Keeper_toml_loader.Toml_offset_datetime _
       | Keeper_toml_loader.Toml_local_datetime _
       | Keeper_toml_loader.Toml_local_date _
-      | Keeper_toml_loader.Toml_local_time _) ->
-    Error (Printf.sprintf "%s: expected a numeric TOML value" key)
+      | Keeper_toml_loader.Toml_local_time _ ) ) ->
+    false
+;;
 
-(* Boot-validated seconds keys. Both are opt-in liveness ceilings whose
-   readers expect a finite, positive duration; a malformed TOML value must be
-   an operator configuration error at boot, never a silent disable (the
-   deadline reader maps unparseable input to [None] = off). *)
-let validated_positive_seconds_keys =
-  [ "turn.stream_idle_timeout_sec"; "turn.provider_call_deadline_sec" ]
+let range_matches range value =
+  match range with
+  | Keeper_runtime_setting_registry.Unbounded -> true
+  | Keeper_runtime_setting_registry.Integer_range { min_inclusive; max_inclusive } ->
+    (match value with
+     | Keeper_toml_loader.Toml_int value ->
+       Option.fold ~none:true ~some:(fun minimum -> value >= minimum) min_inclusive
+       && Option.fold ~none:true ~some:(fun maximum -> value <= maximum) max_inclusive
+     | ( Keeper_toml_loader.Toml_string _
+       | Keeper_toml_loader.Toml_float _
+       | Keeper_toml_loader.Toml_bool _
+       | Keeper_toml_loader.Toml_string_array _
+       | Keeper_toml_loader.Toml_array _
+       | Keeper_toml_loader.Toml_table _
+       | Keeper_toml_loader.Toml_inline_table _
+       | Keeper_toml_loader.Toml_table_array _
+       | Keeper_toml_loader.Toml_offset_datetime _
+       | Keeper_toml_loader.Toml_local_datetime _
+       | Keeper_toml_loader.Toml_local_date _
+       | Keeper_toml_loader.Toml_local_time _ ) ->
+       false)
+  | Keeper_runtime_setting_registry.Float_range
+      { min_inclusive; min_exclusive; max_inclusive } ->
+    (match numeric_value value with
+     | Some value ->
+       Float.is_finite value
+       && Option.fold ~none:true ~some:(fun minimum -> value >= minimum) min_inclusive
+       && Option.fold ~none:true ~some:(fun minimum -> value > minimum) min_exclusive
+       && Option.fold ~none:true ~some:(fun maximum -> value <= maximum) max_inclusive
+     | None -> false)
+;;
 
-let validate_positive_seconds_keys doc =
-  List.fold_left
-    (fun acc key ->
-       match acc with
-       | Error _ -> acc
-       | Ok () -> validate_positive_seconds_key doc key)
-    (Ok ())
-    validated_positive_seconds_keys
+let validate_setting_value key row value =
+  if not (type_matches row.Keeper_runtime_setting_registry.value_kind value)
+  then
+    Some
+      (validation_issue
+         ~key
+         ~kind:Type_mismatch
+         ~severity:Error
+         (match row.value_kind with
+          | Keeper_runtime_setting_registry.Float -> "expected a numeric TOML value"
+          | kind ->
+            Printf.sprintf
+              "expected a %s TOML value"
+              (Keeper_runtime_setting_registry.value_kind_label kind)))
+  else if range_matches row.value_range value
+  then None
+  else
+    Some
+      (validation_issue
+         ~key
+         ~kind:Out_of_range
+         ~severity:Error
+         (match row.value_range with
+          | Keeper_runtime_setting_registry.Float_range
+              { min_inclusive = None
+              ; min_exclusive = Some minimum
+              ; max_inclusive = None
+              }
+            when Float.equal minimum 0.0 ->
+            "expected a finite, positive number of seconds"
+          | range ->
+            Printf.sprintf
+              "value is outside the declared range %s"
+              (Keeper_runtime_setting_registry.value_range_label range)))
+;;
+
+let schema_version_of_doc doc =
+  match List.assoc_opt schema_version_key doc with
+  | None -> current_schema_version, []
+  | Some (Keeper_toml_loader.Toml_int version) when version > 0 -> version, []
+  | Some _ ->
+    ( current_schema_version
+    , [ validation_issue
+          ~key:schema_version_key
+          ~kind:Invalid_schema_version
+          ~severity:Error
+          "schema_version must be a positive integer"
+      ] )
+;;
+
+let validate_doc doc =
+  let schema_version, schema_issues = schema_version_of_doc doc in
+  let forward_schema = schema_version > current_schema_version in
+  let issues =
+    List.fold_left
+      (fun issues (key, value) ->
+         if String.equal key schema_version_key || not (is_owned_key key)
+         then issues
+         else
+           match Keeper_runtime_setting_registry.find_by_toml_key key with
+           | Some
+               ({ lifecycle = Keeper_runtime_setting_registry.Active; _ } as row) ->
+             (match validate_setting_value key row value with
+              | Some issue -> issue :: issues
+              | None -> issues)
+           | Some
+               { lifecycle = Keeper_runtime_setting_registry.Retired { reason; replacement }
+               ; _
+               } ->
+             let replacement =
+               match replacement with
+               | Some value -> Printf.sprintf "; use %s" value
+               | None -> ""
+             in
+             validation_issue
+               ~key
+               ~kind:Retired_key
+               ~severity:Error
+               (reason ^ replacement)
+             :: issues
+           | None ->
+             validation_issue
+               ~key
+               ~kind:Unknown_key
+               ~severity:(if forward_schema then Warning else Error)
+               (if forward_schema
+                then
+                  Printf.sprintf
+                    "unknown to Keeper settings schema v%d; preserved as a future-version warning"
+                    current_schema_version
+                else "unknown Keeper runtime setting")
+             :: issues)
+      schema_issues
+      doc
+  in
+  { schema_version; forward_schema; issues = List.rev issues }
+;;
+
+let validate_source_text source_text =
+  match Keeper_toml_loader.parse_toml source_text with
+  | Error message -> Error message
+  | Ok doc -> Ok (validate_doc doc)
+;;
+
+let validation_severity_label = function
+  | Error -> "error"
+  | Warning -> "warning"
+;;
+
+let validation_issue_kind_label = function
+  | Invalid_schema_version -> "invalid_schema_version"
+  | Unknown_key -> "unknown_key"
+  | Retired_key -> "retired_key"
+  | Type_mismatch -> "type_mismatch"
+  | Out_of_range -> "out_of_range"
+;;
+
+let validation_report_to_yojson report =
+  `Assoc
+    [ "valid", `Bool (validation_report_is_valid report)
+    ; "schema_version", `Int report.schema_version
+    ; "current_schema_version", `Int current_schema_version
+    ; "forward_schema", `Bool report.forward_schema
+    ; ( "issues"
+      , `List
+          (List.map
+             (fun issue ->
+                `Assoc
+                  [ "key", `String issue.key
+                  ; "kind", `String (validation_issue_kind_label issue.kind)
+                  ; "severity", `String (validation_severity_label issue.severity)
+                  ; "detail", `String issue.detail
+                  ])
+             report.issues) )
+    ]
+;;
+
+let setting_schema_to_yojson = Keeper_runtime_setting_registry.schema_to_yojson
+
+let configured_value doc (row : Keeper_runtime_setting_registry.setting) =
+  match Keeper_runtime_setting_registry.toml_key_opt row with
+  | Some key -> Option.bind (List.assoc_opt key doc) value_to_string
+  | None -> None
+;;
+
+let effective_source env_name =
+  match Config_boot_overrides.source env_name with
+  | "boot_override" -> "toml"
+  | "env" -> "env"
+  | "default" -> "default"
+  | _ -> "unknown"
+;;
+
+let application_status doc (row : Keeper_runtime_setting_registry.setting) =
+  match configured_value doc row, effective_source row.env_name with
+  | Some _, "env" -> "preempted_by_env"
+  | Some configured, "toml" ->
+    (match toml_value_opt row.env_name with
+     | Some applied when String.equal applied configured -> "applied"
+     | Some _ | None -> "pending_restart")
+  | Some _, ("default" | "unknown") ->
+    if Keeper_runtime_setting_registry.requires_restart row
+    then "pending_restart"
+    else "pending_effect_boundary"
+  | None, _ ->
+    (match row.exposure with
+     | Keeper_runtime_setting_registry.Env_only -> "environment_only"
+     | Keeper_runtime_setting_registry.Toml_and_env _ -> "not_configured")
+  | Some _, _ -> "pending_restart"
+;;
+
+let settings_projection_to_yojson doc =
+  let applied_at = last_applied_at_unix () in
+  let applied_at_json status =
+    match status, applied_at with
+    | "applied", Some value -> `Float value
+    | _, _ -> `Null
+  in
+  let project (row : Keeper_runtime_setting_registry.setting) =
+    let configured_value = configured_value doc row in
+    let source = effective_source row.env_name in
+    let effective_value =
+      Option.value
+        ~default:row.default_display
+        (Env_config_core.raw_value_opt row.env_name)
+    in
+    let application_status = application_status doc row in
+    `Assoc
+      [ ( "key"
+        , match Keeper_runtime_setting_registry.toml_key_opt row with
+          | Some value -> `String value
+          | None -> `Null )
+      ; "env", `String row.env_name
+      ; ( "configured_value"
+        , match configured_value with
+          | Some value -> `String value
+          | None -> `Null )
+      ; "source", `String source
+      ; "effective_value", `String effective_value
+      ; "applied_at", applied_at_json application_status
+      ; "reload_class", `String (Keeper_runtime_setting_registry.reload_class_label row.reload_class)
+      ; "requires_restart", `Bool (Keeper_runtime_setting_registry.requires_restart row)
+      ; "application_status", `String application_status
+      ; "consumers", `List (List.map (fun value -> `String value) row.consumers)
+      ]
+  in
+  `List (List.map project Keeper_runtime_setting_registry.active)
+;;
+
+let overlay_application_to_yojson doc =
+  let configured =
+    Keeper_runtime_setting_registry.active_toml
+    |> List.filter (fun row -> Option.is_some (configured_value doc row))
+  in
+  let classified =
+    List.map
+      (fun row ->
+         Option.value ~default:row.env_name (Keeper_runtime_setting_registry.toml_key_opt row),
+         application_status doc row)
+      configured
+  in
+  let keys_with_status expected =
+    classified
+    |> List.filter_map (fun (key, status) ->
+      if String.equal status expected then Some (`String key) else None)
+  in
+  let pending_keys =
+    classified
+    |> List.filter_map (fun (key, status) ->
+      if String.equal status "pending_restart"
+         || String.equal status "pending_effect_boundary"
+      then Some (`String key)
+      else None)
+  in
+  let status =
+    if classified = []
+    then "not_configured"
+    else if pending_keys <> []
+    then "pending_restart"
+    else if List.for_all (fun (_, value) -> String.equal value "applied") classified
+    then "applied"
+    else if List.for_all (fun (_, value) -> String.equal value "preempted_by_env") classified
+    then "preempted_by_env"
+    else "mixed"
+  in
+  `Assoc
+    [ "status", `String status
+    ; "configured_count", `Int (List.length configured)
+    ; "requires_restart", `Bool (pending_keys <> [])
+    ; "pending_keys", `List pending_keys
+    ; "applied_keys", `List (keys_with_status "applied")
+    ; "preempted_keys", `List (keys_with_status "preempted_by_env")
+    ; ( "applied_at"
+      , match status, last_applied_at_unix () with
+        | "applied", Some value -> `Float value
+        | _, _ -> `Null )
+    ]
+;;
 
 (* Bootstrap labels its failure counter from this. It used to recover the label
    by re-reading the rendered message for a "read " or "parse " prefix, which
@@ -250,10 +547,15 @@ let load_and_apply ~base_path =
       | Error msg ->
         Error { kind = Parse; message = Printf.sprintf "%s: %s" path msg }
       | Ok doc ->
-        (match validate_positive_seconds_keys doc with
-         | Error msg ->
-           Error { kind = Validate; message = Printf.sprintf "%s: %s" path msg }
-         | Ok () ->
+        let report = validate_doc doc in
+        (match List.find_opt (fun issue -> issue.severity = Error) report.issues with
+         | Some issue ->
+           Error
+             { kind = Validate
+             ; message = Printf.sprintf "%s: %s: %s" path issue.key issue.detail
+             }
+         | None ->
+           Hashtbl.clear toml_shadow;
            let count =
              List.fold_left
                (fun acc (toml_key, env_name) ->
@@ -269,4 +571,5 @@ let load_and_apply ~base_path =
                0
                key_to_env
            in
+           Atomic.set last_applied_at (Some (Time_compat.now ()));
            Ok count)

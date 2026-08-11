@@ -6,6 +6,7 @@ import {
   type DashboardScheduledAutomationDispatchReceipt,
   type DashboardScheduledAutomationKeeperReactionEvidence,
   type DashboardScheduledAutomationKeeperQueueEvidence,
+  type DashboardScheduledAutomationResultDelivery,
   type DashboardScheduledAutomationWakeReceipt,
   type DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,
   type DashboardScheduledAutomationRequest,
@@ -389,6 +390,7 @@ function dispatchReceiptRows(
     { label: 'activation_reason', value: receipt.activation_reason },
     { label: 'activation_detail', value: receipt.activation_detail },
     { label: 'post_id', value: receipt.post_id },
+    { label: 'result_delivery_policy', value: receipt.result_delivery_policy },
   ]
   return rows.filter((row): row is { label: string; value: string } => {
     return typeof row.value === 'string' && row.value.trim() !== ''
@@ -510,6 +512,101 @@ function QueueEvidenceBlock({
   `
 }
 
+function resultDeliveryTone(
+  delivery: DashboardScheduledAutomationResultDelivery | null | undefined,
+): StatusChipTone {
+  switch (delivery?.status) {
+    case 'delivered':
+    case 'not_required':
+      return 'ok'
+    case 'awaiting_occurrence':
+    case 'awaiting_dispatch_receipt':
+    case 'execution_pending':
+    case 'pending':
+    case 'attempting':
+      return 'warn'
+    case 'failed':
+    case 'ambiguous':
+    case 'invalid_policy':
+    case 'unrecognized_dispatch_receipt':
+    case 'read_error':
+    case 'destination_conflict':
+    case 'identity_conflict':
+      return 'bad'
+    default:
+      return 'neutral'
+  }
+}
+
+function resultDeliveryRows(
+  delivery: DashboardScheduledAutomationResultDelivery | null | undefined,
+): Array<{ label: string; value: string }> {
+  if (!delivery) return []
+  const recordFailures = (delivery.record_failures ?? [])
+    .map(failure => `${failure.path}: ${failure.detail}`)
+    .join(' | ')
+  const rows: Array<{
+    label: string
+    value: string | number | boolean | null | undefined
+  }> = [
+    { label: 'policy', value: delivery.policy },
+    { label: 'required', value: delivery.required },
+    { label: 'occurrence_id', value: delivery.occurrence_id },
+    { label: 'keeper', value: delivery.keeper_name },
+    { label: 'intent_id', value: delivery.intent_id },
+    { label: 'response_sha256', value: delivery.response_sha256 },
+    { label: 'destination', value: delivery.destination ? JSON.stringify(delivery.destination) : null },
+    { label: 'attempt_started_at', value: delivery.attempt_started_at_iso },
+    { label: 'idempotency_key', value: delivery.idempotency_key },
+    { label: 'completed_at', value: delivery.completed_at_iso },
+    { label: 'detected_at', value: delivery.detected_at_iso },
+    { label: 'connector_message_id', value: delivery.connector_message_id },
+    { label: 'failure_kind', value: delivery.failure_kind },
+    { label: 'detail', value: delivery.detail },
+    { label: 'record_failures', value: recordFailures },
+  ]
+  return rows
+    .map(row => ({ label: row.label, value: row.value == null ? '' : String(row.value) }))
+    .filter(row => row.value.trim() !== '')
+}
+
+function ResultDeliveryBlock({
+  delivery,
+  compact = false,
+}: {
+  delivery: DashboardScheduledAutomationResultDelivery | null | undefined
+  compact?: boolean
+}) {
+  if (!delivery) return null
+  const rows = resultDeliveryRows(delivery)
+  return html`
+    <div
+      class=${compact
+        ? 'sch-kvs'
+        : 'grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2'}
+      data-schedule-result-delivery=${delivery.status}
+      data-schedule-result-delivery-policy=${delivery.policy}
+    >
+      <div class=${compact ? 'sch-kv' : 'flex flex-wrap items-center gap-2'}>
+        ${compact
+          ? html`<span class="k">result_delivery</span>`
+          : html`<span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">result delivery</span>`}
+        <span class=${compact ? 'v mono' : ''}>
+          <${StatusChip} tone=${resultDeliveryTone(delivery)} uppercase=${false}>
+            ${enumLabel(delivery.status)}
+          <//>
+        </span>
+      </div>
+      ${rows.map(row => html`
+        <div class=${compact ? 'sch-kv' : 'grid grid-cols-[7.5rem_minmax(0,1fr)] gap-2'} data-result-delivery-row=${row.label}>
+          <span class=${compact ? 'k' : 'truncate text-[var(--color-fg-disabled)]'} title=${row.label}>${row.label}</span>
+          <span class=${compact ? 'v mono' : 'truncate font-mono text-[var(--color-fg-secondary)]'} title=${row.value}>${row.value}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
 function reactionEvidenceTone(
   evidence: DashboardScheduledAutomationKeeperReactionEvidence | null | undefined,
 ): StatusChipTone {
@@ -612,7 +709,8 @@ function hasWakeEvidenceSummary(request: DashboardScheduledAutomationRequest): b
   return isKeeperWakePayload(request) ||
     request.dispatch_receipt != null ||
     request.keeper_queue_evidence != null ||
-    request.keeper_reaction_evidence != null
+    request.keeper_reaction_evidence != null ||
+    request.result_delivery != null
 }
 
 function wakeEvidenceJoinKey(request: DashboardScheduledAutomationRequest): string | null {
@@ -638,6 +736,7 @@ function WakeEvidenceSummary({ request }: { request: DashboardScheduledAutomatio
   const receiptStatus = wakeEvidenceStatus(request.dispatch_receipt)
   const queueStatus = wakeEvidenceStatus(request.keeper_queue_evidence)
   const reactionStatus = wakeEvidenceStatus(request.keeper_reaction_evidence)
+  const resultStatus = request.result_delivery?.status ?? 'missing'
   const joinKey = wakeEvidenceJoinKey(request)
   const items: ReadonlyArray<{
     key: string
@@ -663,6 +762,12 @@ function WakeEvidenceSummary({ request }: { request: DashboardScheduledAutomatio
       status: reactionStatus,
       tone: wakeEvidenceTone(request.keeper_reaction_evidence, reactionEvidenceTone(request.keeper_reaction_evidence)),
     },
+    {
+      key: 'result',
+      label: 'result',
+      status: resultStatus,
+      tone: resultDeliveryTone(request.result_delivery),
+    },
   ]
   return html`
     <div
@@ -671,6 +776,7 @@ function WakeEvidenceSummary({ request }: { request: DashboardScheduledAutomatio
       data-schedule-wake-evidence-receipt=${receiptStatus}
       data-schedule-wake-evidence-queue=${queueStatus}
       data-schedule-wake-evidence-reaction=${reactionStatus}
+      data-schedule-wake-evidence-result=${resultStatus}
     >
       <span class="sch-wake-title">wake evidence</span>
       ${items.map(item => html`
@@ -910,6 +1016,12 @@ function ScheduleDetailPanel({
         <div>
           <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">페이로드</div>
           <div class="mt-1"><${PayloadCell} request=${request} /></div>
+        </div>
+        <div>
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">결과 전달</div>
+          <div class="mt-1">
+            <${ResultDeliveryBlock} delivery=${request.result_delivery ?? null} />
+          </div>
         </div>
         <div>
           <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">최근 실행</div>
@@ -1767,6 +1879,13 @@ export function SchDetail({
               </div>
             </div>
             <pre class="turn-pre" data-stub="payload body not in projection">${payloadEnvelope}</pre>
+          </div>
+
+          <div class="turn-sec">
+            <h4>결과 전달</h4>
+            ${request.result_delivery
+              ? html`<${ResultDeliveryBlock} delivery=${request.result_delivery} compact=${true} />`
+              : html`<div class="sch-kvs"><div class="sch-kv"><span class="k">status</span><span class="v mono" data-stub="no result_delivery">projection field 없음</span></div></div>`}
           </div>
 
           <div class="turn-sec">

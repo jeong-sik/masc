@@ -17,6 +17,7 @@
   env_config_snapshot
   env_config_snapshot_core
   feature_flag_registry
+  keeper_runtime_setting_registry
   keeper_sandbox_config
   masc_grpc_transport
   masc_network_defaults

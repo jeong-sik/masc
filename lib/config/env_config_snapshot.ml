@@ -281,9 +281,9 @@ let keeper_grpc_entries =
 
 let keeper_keepalive_entries =
   [
-    entry ~default:"30" "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
+    entry ~default:"300" "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
       "Heartbeat cycle interval (positive integer, no implicit upper bound)";
-    entry ~default:"120.0" "MASC_KEEPER_MAX_SILENCE_SEC"
+    entry ~default:"300.0" "MASC_KEEPER_MAX_SILENCE_SEC"
       "Max seconds since last heartbeat before presence sync required";
     entry ~default:"0.5" "MASC_KEEPER_SLEEP_CHUNK_SEC"
       "Interruptible sleep chunk size (seconds, clamped 0.1-10)";

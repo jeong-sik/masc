@@ -19,9 +19,9 @@ let test_wah_enabled_default () =
     true Cfg.WorkAsHeartbeat.enabled
 
 let test_wah_max_silence_default () =
-  (* MASC_KEEPER_MAX_SILENCE_SEC not set in test env → default 120.0 *)
+  (* MASC_KEEPER_MAX_SILENCE_SEC not set in test env → default 300.0 *)
   let v = Cfg.WorkAsHeartbeat.max_silence_sec in
-  check (float 0.1) "default max silence 120s" 120.0 v
+  check (float 0.1) "default max silence 300s" 300.0 v
 
 let test_wah_max_silence_floor_logic () =
   (* The floor clamp uses keepalive interval dynamically.
@@ -34,7 +34,7 @@ let test_wah_max_silence_floor_logic () =
 (* ── KeeperKeepalive config defaults ───────────────────── *)
 
 let test_keepalive_interval_default () =
-  check int "default interval 30s" 30 Cfg.KeeperKeepalive.interval_sec
+  check int "default interval 300s" 300 Cfg.KeeperKeepalive.interval_sec
 
 let test_keepalive_interval_positive () =
   let v = Cfg.KeeperKeepalive.interval_sec in

@@ -96,6 +96,7 @@ val validate_turn :
 val run_turn :
   ?conversation_mode:conversation_mode ->
   ?home_dir:string ->
+  ?on_spawn_failure:(unit -> unit) ->
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->

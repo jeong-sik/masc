@@ -1049,9 +1049,9 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~ignored:0
 ;;
 
-let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
-    ~session_mode ~session_id ~subscription ~prompt ~on_session_ready
-    ~on_turn_starting ~on_turn_started ~on_stream_event =
+let run_spawned ?on_spawn_failure ~mgr ~clock ~cwd config ~dynamic_tools
+    ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt
+    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_stream_event =
   let* argv =
     command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id
   in
@@ -1061,15 +1061,21 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = ref "" in
     let proc =
-      Eio.Process.spawn
-        ~sw
-        mgr
-        ~cwd
-        ~env:(subscription_only_environment ())
-        ~stdin:stdin_r
-        ~stdout:stdout_w
-        ~stderr:stderr_w
-        argv
+      try
+        Eio.Process.spawn
+          ~sw
+          mgr
+          ~cwd
+          ~env:(subscription_only_environment ())
+          ~stdin:stdin_r
+          ~stdout:stdout_w
+          ~stderr:stderr_w
+          argv
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Option.iter (fun callback -> callback ()) on_spawn_failure;
+        raise exn
     in
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
@@ -1174,8 +1180,8 @@ let probe_subscription ~mgr ~clock ~cwd config =
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
-    ?admitted_subscription
-    ~mgr ~clock ~cwd ?(on_session_ready = fun ~session_id:_ -> Ok ())
+    ?admitted_subscription ?on_spawn_failure ~mgr ~clock ~cwd
+    ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
     ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event config
     ~prompt =
@@ -1197,6 +1203,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
       subscription.subscription_type;
     try
       run_spawned
+        ?on_spawn_failure
         ~mgr
         ~clock
         ~cwd

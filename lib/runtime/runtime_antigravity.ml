@@ -656,23 +656,29 @@ let status_to_string = function
   | `Signaled signal -> Printf.sprintf "signal %d" signal
 ;;
 
-let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
-    ~on_conversation_ready ~on_stream_event =
+let run_spawned ?home_dir ?on_spawn_failure ~mgr ~clock ~cwd config
+    ~conversation_mode ~prompt ~on_conversation_ready ~on_stream_event =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = ref "" in
     let proc =
-      Eio.Process.spawn
-        ~sw
-        mgr
-        ~cwd
-        ~env:(official_client_environment ?home_dir ())
-        ~stdin:stdin_r
-        ~stdout:stdout_w
-        ~stderr:stderr_w
-        (argv config ~conversation_mode)
+      try
+        Eio.Process.spawn
+          ~sw
+          mgr
+          ~cwd
+          ~env:(official_client_environment ?home_dir ())
+          ~stdin:stdin_r
+          ~stdout:stdout_w
+          ~stderr:stderr_w
+          (argv config ~conversation_mode)
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Option.iter (fun callback -> callback ()) on_spawn_failure;
+        raise exn
     in
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
@@ -741,9 +747,9 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
     status, !state, String.trim !stderr_tail)
 ;;
 
-let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
-    ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) ?on_stream_event
-    config ~prompt =
+let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawn_failure ~mgr ~clock
+    ~cwd ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ())
+    ?on_stream_event config ~prompt =
   let* () =
     match home_dir with
     | None -> Ok ()
@@ -758,6 +764,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
       Ok
         (run_spawned
            ?home_dir
+           ?on_spawn_failure
            ~mgr
            ~clock
            ~cwd

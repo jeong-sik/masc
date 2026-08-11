@@ -468,6 +468,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       try
         (match
            Runtime_claude_code.run_turn
+             ?on_spawn_failure:on_pre_dispatch_failure
              ~mgr:process_mgr
              ~clock
              ~cwd:process_cwd

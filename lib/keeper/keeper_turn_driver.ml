@@ -791,7 +791,10 @@ let run_named
         , codex_attempt.effect_disposition )
       | Runtime_execution.Antigravity_cli config ->
         let antigravity_effect_disposition =
-          ref Keeper_provider_attempt_effect.Observation_unavailable
+          ref
+            (match tools with
+             | [] -> Keeper_provider_attempt_effect.No_effect_observed
+             | _ :: _ -> Keeper_provider_attempt_effect.Observation_unavailable)
         in
         let run_antigravity ~initial_messages () =
           Keeper_antigravity_runtime.run
@@ -874,11 +877,16 @@ let run_named
            an absent AGENT_CORE checkpoint after dispatch. *)
         , effect_disposition )
       | Runtime_execution.Claude_code config ->
+        let effective_claude_tools =
+          if runtime.model.tools_support then tools else []
+        in
         let claude_effect_disposition =
-          ref Keeper_provider_attempt_effect.Observation_unavailable
+          ref
+            (match effective_claude_tools with
+             | [] -> Keeper_provider_attempt_effect.No_effect_observed
+             | _ :: _ -> Keeper_provider_attempt_effect.Observation_unavailable)
         in
         let run_claude ~initial_messages () =
-          let tools = if runtime.model.tools_support then tools else [] in
           Keeper_claude_code_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -886,7 +894,7 @@ let run_named
             ~goal
             ~goal_blocks
             ~system_prompt
-            ~tools
+            ~tools:effective_claude_tools
             ~initial_messages
             ~model_input_projection
             ~hooks

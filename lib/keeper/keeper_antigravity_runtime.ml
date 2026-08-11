@@ -468,6 +468,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           Runtime_antigravity.run_turn
             ~conversation_mode
             ~home_dir:(Runtime_antigravity_home.home_dir home)
+            ?on_spawn_failure:on_pre_dispatch_failure
             ~mgr:process_mgr
             ~clock
             ~cwd:process_cwd
@@ -492,16 +493,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             client_config
             ~prompt
           |> Result.map_error (fun error ->
-            (match error with
-             | Runtime_antigravity.Spawn_failed _ ->
-               Option.iter (fun callback -> callback ()) on_pre_dispatch_failure
-             | Runtime_antigravity.Invalid_config _
-             | Runtime_antigravity.Turn_failed _
-             | Runtime_antigravity.Timeout _
-             | Runtime_antigravity.Process_exited _
-             | Runtime_antigravity.Protocol_error _
-             | Runtime_antigravity.State_callback_failed _ ->
-               ());
             recovery_failure := recovery_failure_of_runtime_error error;
             runtime_error_to_core_error error))
       in

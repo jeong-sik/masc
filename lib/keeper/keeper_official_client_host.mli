@@ -9,7 +9,6 @@ type prepared_turn =
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
-  ; seed_dropped_atoms : int
   }
 
 type dynamic_tool_result =
@@ -122,7 +121,6 @@ val prepare_turn :
   model_input_projection:Agent_core.Agent.model_input_projection option ->
   hooks:Agent_core.Hooks.hooks option ->
   configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
-  max_prompt_bytes:int option ->
   (prepared_turn, Agent_core.Error.t) result
 (** [configured_reasoning_effort] seeds the turn params the
     [before_turn_params] hook receives, so a hook can still override it.
@@ -132,10 +130,13 @@ val prepare_turn :
     adapters must keep that message on their provider instruction surface; it
     is not an Agent Core synthetic User carrier.
 
-    [max_prompt_bytes] bounds the history a start turn seeds its conversation
-    with, keeping the newest messages. [None] applies no ceiling, which is the
-    behaviour before this parameter existed. [seed_dropped_atoms] on the result
-    reports what was left out so the caller can say so on its own log line. *)
+    The seed carries the projected history as-is. Nothing is cut here: the
+    provider owns its context window and reports exceeding it as a typed
+    terminal, which the shrink sequence in
+    {!Keeper_turn_driver_try_provider.context_overflow_shrink_sequence}
+    consumes to retry with less. A second ceiling applied before that one
+    measured wire bytes instead of tokens and dropped the oldest atoms with no
+    copy kept. *)
 
 val dynamic_tools :
   runtime_label:string ->

@@ -1839,19 +1839,20 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
            (String_util.contains_substring detail "local.lane"))
 ;;
 
-(* The Agent_core rule above bounds the serialized request body. An
-   official-client turn never builds that body — it seeds a spawned client's
-   conversation on turn 1 and sends only the goal afterwards — so its ceiling
-   sits on the seed instead. Leaving that side unbounded was the absence of a
-   rule, not a lighter version of one: an undeclared seed overflows the model
-   window on turn 1, the session never reaches turn 2, and recovery to a fresh
-   session makes the next turn a start turn again.
+(* The Agent_core rule above bounds the serialized request body, and stops
+   there. An official-client turn never builds that body: it hands its
+   conversation to a spawned vendor client that owns its own context window and
+   refuses an oversized one in a typed terminal, which the shrink sequence
+   retries with less. Requiring a declared max-prompt-bytes there made the
+   provider's own window a boot-time obligation on the operator, so a
+   deployment could not choose to let the provider decide — and the ceiling it
+   demanded was in wire bytes, which is not the unit the window is in.
 
-   Measured while rotating keepers across the declared runtimes: 13 of 13
-   official-client runtimes without the declaration failed this way, and all 13
-   completed once it was declared. *)
-let test_runtime_config_validation_rejects_unbounded_official_client_seed () =
-  let content bound =
+   This pins the removal in both directions: the official-client side must
+   load undeclared, and the Agent_core side must still reject. Without the
+   second half, deleting the whole check would also pass. *)
+let test_runtime_config_validation_admits_undeclared_official_client_seed () =
+  let content ~bound ~agent_core_cap =
     Printf.sprintf
       "[providers.local]\n\
        protocol = \"openai-compatible-http\"\n\
@@ -1870,8 +1871,7 @@ let test_runtime_config_validation_rejects_unbounded_official_client_seed () =
        api-name = \"seeded\"\n\
        max-context = 1024\n%s\
        \n\
-       [local.sample]\n\
-       max-request-body-bytes = 65536\n\
+       [local.sample]\n%s\
        \n\
        [subscription.seeded]\n\
        \n\
@@ -1881,7 +1881,9 @@ let test_runtime_config_validation_rejects_unbounded_official_client_seed () =
        [runtime.assignments]\n\
        \"probe\" = \"subscription.seeded\"\n"
       bound
+      agent_core_cap
   in
+  let declared_agent_core_cap = "max-request-body-bytes = 65536\n" in
   let attempt text =
     let snapshot = Runtime.For_testing.snapshot () in
     let path = Filename.temp_file "official_seed_" ".toml" in
@@ -1895,30 +1897,43 @@ let test_runtime_config_validation_rejects_unbounded_official_client_seed () =
         | Sys_error _ -> ())
       (fun () -> Runtime.save_config_text ~runtime_config_path:path text)
   in
-  (match attempt (content "") with
-   | Ok () ->
-     fail "an official-client Keeper runtime with no max-prompt-bytes must be rejected"
+  (match
+     attempt (content ~bound:"" ~agent_core_cap:declared_agent_core_cap)
+   with
+   | Ok () -> ()
    | Error detail ->
-     check bool "the diagnostic names the key an operator must add" true
-     (String_util.contains_substring detail "max-prompt-bytes");
-     check bool "the diagnostic names the runtime" true
-       (String_util.contains_substring detail "subscription.seeded");
-     check bool
-       "the remediation points at the model table that owns the key"
-       true
-       (String_util.contains_substring
-          detail
-          "[models.seeded].max-prompt-bytes");
-     (* The Agent_core key would send the operator to the wrong line. *)
-     check bool "the diagnostic does not name the Agent_core key" false
-       (String_util.contains_substring detail "max-request-body-bytes"));
-  (* Control and remediation round-trip: the same table/key emitted above is
-     applied to the config and must make it load. Without this, a diagnostic
-     that pointed at a syntactically plausible but unconsumed table could pass
-     the substring assertions while startup remained stuck. *)
-  match attempt (content "max-prompt-bytes = 131072\n") with
-  | Ok () -> ()
-  | Error detail -> failf "a declared seed bound must load: %s" detail
+     failf
+       "an official-client Keeper runtime with no max-prompt-bytes must load: %s"
+       detail);
+  (* Declaring it stays legal — the key still exists for operators who want the
+     seed bounded; it is simply no longer an admission condition. *)
+  (match
+     attempt
+       (content
+          ~bound:"max-prompt-bytes = 131072\n"
+          ~agent_core_cap:declared_agent_core_cap)
+   with
+   | Ok () -> ()
+   | Error detail -> failf "a declared seed bound must still load: %s" detail);
+  (* Control. The Agent_core half of this validator must still reject, or the
+     two assertions above would also pass with the whole check deleted. The
+     remediation assertion is kept from #28175: a diagnostic naming a
+     syntactically plausible but unconsumed table would satisfy a bare key
+     substring while startup stayed stuck. *)
+  match attempt (content ~bound:"" ~agent_core_cap:"") with
+  | Ok () ->
+    fail "an Agent_core Keeper runtime with no max-request-body-bytes must be rejected"
+  | Error detail ->
+    check bool "the diagnostic names the Agent_core key" true
+      (String_util.contains_substring detail "max-request-body-bytes");
+    check bool
+      "the remediation points at the binding table that owns the key"
+      true
+      (String_util.contains_substring
+         detail
+         "[local.sample].max-request-body-bytes");
+    check bool "the diagnostic does not demand the seed key" false
+      (String_util.contains_substring detail "max-prompt-bytes")
 ;;
 
 let test_runtime_config_validation_rejects_uncapped_special_runtime () =
@@ -3890,9 +3905,9 @@ let () =
             `Quick
             test_runtime_config_validation_rejects_uncapped_special_runtime;
           test_case
-            "runtime config rejects an unbounded official-client seed"
+            "runtime config admits an undeclared official-client seed"
             `Quick
-            test_runtime_config_validation_rejects_unbounded_official_client_seed;
+            test_runtime_config_validation_admits_undeclared_official_client_seed;
           test_case
             "runtime config allows uncapped dormant lane candidate"
             `Quick

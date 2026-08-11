@@ -119,20 +119,29 @@ let with_fixture ?auth_json ?before_initialize_response steps f =
 ;;
 
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
-    ?on_stream_event path =
+    ?on_session_ready_delay_s ?on_stream_event path =
   Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
     let config =
       { (Runtime_claude_code.default_config ~cwd:"/tmp") with
         cli_path = path
       ; timeout_s
       }
     in
+    let on_session_ready =
+      Option.map
+        (fun delay_s ~session_id:_ ->
+           Eio.Time.sleep clock delay_s;
+           Ok ())
+        on_session_ready_delay_s
+    in
     Runtime_claude_code.run_turn
       ~mgr:(Eio.Stdenv.process_mgr env)
-      ~clock:(Eio.Stdenv.clock env)
+      ~clock
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
       ~dynamic_tools
       ?session_mode
+      ?on_session_ready
       ?on_stream_event
       config
       ~prompt:"Return the fixture marker")
@@ -195,6 +204,20 @@ let test_stream_idle_timeout_is_typed () =
       check (float 0.001) "exact idle timeout" 0.05 seconds
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "silent Claude stream ignored its idle timeout")
+;;
+
+let test_state_callback_timeout_is_typed () =
+  with_fixture [] (fun path ->
+    match
+      run_fixture
+        ~timeout_s:0.05
+        ~on_session_ready_delay_s:0.2
+        path
+    with
+    | Error (Runtime_claude_code.Timeout seconds) ->
+      check (float 0.001) "exact callback timeout" 0.05 seconds
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "blocking Claude callback ignored its timeout")
 ;;
 
 (* [dynamic_tool_bytes] measures what the tool declarations add to a request.
@@ -953,6 +976,10 @@ let () =
             "stream idle timeout is typed"
             `Quick
             test_stream_idle_timeout_is_typed
+        ; test_case
+            "state callback timeout is typed"
+            `Quick
+            test_state_callback_timeout_is_typed
         ; test_case
             "non-subscription rejected"
             `Quick

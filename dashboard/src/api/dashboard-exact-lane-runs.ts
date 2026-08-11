@@ -7,7 +7,16 @@ export type ExactLane =
   | 'board_attention_exact'
   | 'compaction_exact'
 
-export type ExactLaneRunStatus = 'running' | 'succeeded' | 'cancelled' | 'failed'
+export type ExactLaneRunStatus =
+  | 'running'
+  | 'succeeded'
+  | 'cancelled'
+  | 'failed'
+  | 'completion_persistence_failed'
+  | 'completion_durability_unknown'
+
+export type ExactLaneIntendedStatus = 'succeeded' | 'cancelled' | 'failed'
+export type ExactLanePersistenceState = 'not_persisted' | 'durability_unknown'
 
 export type ExactLaneRunInput = { kind: 'exact'; payload: unknown }
 
@@ -23,6 +32,11 @@ export interface ExactLaneRunRecord {
   output?: unknown
   code?: string
   detail?: string
+  intendedStatus?: ExactLaneIntendedStatus
+  intendedCode?: string
+  intendedDetail?: string
+  persistenceError?: string
+  persistenceState?: ExactLanePersistenceState
 }
 
 export interface DashboardExactLaneRunsResponse {
@@ -37,7 +51,15 @@ const LANES: readonly string[] = [
   'board_attention_exact',
   'compaction_exact',
 ]
-const STATUSES: readonly string[] = ['running', 'succeeded', 'cancelled', 'failed']
+const STATUSES: readonly string[] = [
+  'running',
+  'succeeded',
+  'cancelled',
+  'failed',
+  'completion_persistence_failed',
+  'completion_durability_unknown',
+]
+const INTENDED_STATUSES: readonly string[] = ['succeeded', 'cancelled', 'failed']
 
 function fail(message: string): never {
   throw new Error(`Invalid exact lane runs response: ${message}`)
@@ -87,12 +109,42 @@ function parseRun(raw: unknown, index: number): ExactLaneRunRecord {
   const lane = string(raw.lane, `${context}.lane`)
   if (!LANES.includes(lane)) fail(`${context}.lane has unknown value ${JSON.stringify(lane)}`)
   const base = ['run_id', 'lane', 'subject_id', 'actor', 'started_at', 'input', 'status']
+  const persistenceFailure = status === 'completion_persistence_failed'
+    || status === 'completion_durability_unknown'
+  const intendedStatus = persistenceFailure
+    ? string(raw.intended_status, `${context}.intended_status`)
+    : undefined
+  if (intendedStatus !== undefined && !INTENDED_STATUSES.includes(intendedStatus)) {
+    fail(`${context}.intended_status has unknown value ${JSON.stringify(intendedStatus)}`)
+  }
+  const intendedFailure = intendedStatus === 'failed'
   const required = status === 'running'
     ? base
-    : status === 'failed'
-      ? [...base, 'elapsed_s', 'output', 'code', 'detail']
-      : [...base, 'elapsed_s', 'output']
+    : persistenceFailure
+      ? [
+          ...base,
+          'intended_status',
+          'elapsed_s',
+          'output',
+          'persistence_error',
+          'persistence_state',
+          ...(intendedFailure ? ['intended_code', 'intended_detail'] : []),
+        ]
+      : status === 'failed'
+        ? [...base, 'elapsed_s', 'output', 'code', 'detail']
+        : [...base, 'elapsed_s', 'output']
   exactFields(raw, required, [], context)
+  const persistenceState = persistenceFailure
+    ? string(raw.persistence_state, `${context}.persistence_state`)
+    : undefined
+  const expectedPersistenceState = status === 'completion_persistence_failed'
+    ? 'not_persisted'
+    : status === 'completion_durability_unknown'
+      ? 'durability_unknown'
+      : undefined
+  if (persistenceState !== expectedPersistenceState) {
+    fail(`${context}.persistence_state must be ${JSON.stringify(expectedPersistenceState)}`)
+  }
   return {
     runId: string(raw.run_id, `${context}.run_id`),
     lane: lane as ExactLane,
@@ -105,6 +157,13 @@ function parseRun(raw: unknown, index: number): ExactLaneRunRecord {
     output: status === 'running' ? undefined : raw.output,
     code: status === 'failed' ? string(raw.code, `${context}.code`) : undefined,
     detail: status === 'failed' ? string(raw.detail, `${context}.detail`) : undefined,
+    intendedStatus: intendedStatus as ExactLaneIntendedStatus | undefined,
+    intendedCode: intendedFailure ? string(raw.intended_code, `${context}.intended_code`) : undefined,
+    intendedDetail: intendedFailure ? string(raw.intended_detail, `${context}.intended_detail`) : undefined,
+    persistenceError: persistenceFailure
+      ? string(raw.persistence_error, `${context}.persistence_error`)
+      : undefined,
+    persistenceState: persistenceState as ExactLanePersistenceState | undefined,
   }
 }
 

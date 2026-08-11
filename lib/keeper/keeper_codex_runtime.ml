@@ -8,6 +8,11 @@ let internal_error detail = Agent_core.Error.Internal detail
 
 module Host = Keeper_official_client_host
 
+type attempt_outcome =
+  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; effect_disposition : Keeper_provider_attempt_effect.t
+  }
+
 let runtime_label = "Codex"
 
 let finish_raw_error ~keeper_name raw_trace_run error =
@@ -90,8 +95,7 @@ let measure_model_input_message_bytes (message : Agent_core.Types.message) =
    provider-bound copy without rewriting the durable conversation. *)
 let model_input_projection_for_capacity
     ~capacity_bytes
-    ~observed_full_bytes
-    ~observed_history_atoms
+    ~observed_next_shrink_capacity_bytes
     source_projection
     messages =
   let windowed =
@@ -112,32 +116,55 @@ let model_input_projection_for_capacity
             (Runtime_model_input_tail_window.budget_error_to_string error))
   in
   let* windowed = windowed in
+  (* Compute the next structural retry boundary from the current bounded
+     history before source projections append synthetic evidence (for example
+     Gate replay). Using the current window also means the oracle reaches
+     [None] at the newest-atom floor instead of authorizing an identical
+     provider retry from the original unwindowed history. *)
+  let () =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      let full_bytes =
+        List.fold_left
+          (fun total message ->
+             total + measure_model_input_message_bytes message)
+          0
+          windowed
+      in
+      let target_capacity_bytes =
+        if capacity_bytes = unbounded_model_input_capacity_bytes
+        then
+          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+            ~capacity_bytes:full_bytes
+        else
+          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+            ~capacity_bytes
+      in
+      observed_next_shrink_capacity_bytes :=
+        Runtime_model_input_tail_window.next_shrink_capacity_bytes
+          ~measure_message_bytes:measure_model_input_message_bytes
+          ~target_capacity_bytes
+          windowed)
+  in
   let* projected =
     match source_projection with
     | None -> Ok windowed
     | Some project -> project windowed
   in
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    let _, history_atoms = Runtime_model_input_tail_window.annotate projected in
-    let full_bytes =
-      List.fold_left
-        (fun total message ->
-           total + measure_model_input_message_bytes message)
-        0
-        projected
-    in
-    observed_full_bytes := Some full_bytes;
-    observed_history_atoms := Some history_atoms);
   Ok projected
 ;;
 
-let codex_dynamic_tool (tool : Host.dynamic_tool) :
+let codex_dynamic_tool ~observe_effect_attempted (tool : Host.dynamic_tool) :
     Runtime_codex_app_server.dynamic_tool =
   { name = tool.name
   ; description = tool.description
   ; input_schema = tool.input_schema
   ; call =
       (fun ~call_id input ->
+        (* Close the outer same-turn retry boundary before entering user/tool
+           code. The handler may commit and then raise or be cancelled, so
+           observing only its returned value would reopen a duplicate-effect
+           window. *)
+        observe_effect_attempted ();
         let result = tool.call ~call_id input in
         { Runtime_codex_app_server.success = result.success
         ; content = result.content
@@ -294,6 +321,7 @@ let recovery_failure_of_client_error = function
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~event_bus ~raw_trace ~on_event
+    ~observe_effect_attempted
     ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -375,8 +403,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       Host.prepare_turn
         ~configured_reasoning_effort:
           (Runtime_inference.resolve_reasoning_effort ~runtime_id)
-        ~max_prompt_bytes:
-          (Runtime_inference.resolve_max_prompt_bytes ~runtime_id)
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -426,7 +452,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~terminal_error
         ~raw_trace_run:None
     in
-    let dynamic_tools = List.map codex_dynamic_tool host_dynamic_tools in
+    let dynamic_tools =
+      List.map (codex_dynamic_tool ~observe_effect_attempted) host_dynamic_tools
+    in
     (* The only size this tree reports for a turn is
        [keeper_unified_turn.ml]'s [system_and_user_bytes], which sums
        [system_prompt + world_state + user_message] and nothing else. The
@@ -493,7 +521,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~terminal_error
         ~raw_trace_run
     in
-    let dynamic_tools = List.map codex_dynamic_tool host_dynamic_tools in
+    let dynamic_tools =
+      List.map (codex_dynamic_tool ~observe_effect_attempted) host_dynamic_tools
+    in
     let* claimed_session =
       match
         Keeper_official_client_session_store.claim
@@ -785,30 +815,31 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~event_bus ~raw_trace ~on_event ~config =
-  let observed_full_bytes = ref None in
-  let observed_history_atoms = ref None in
+  let effect_disposition =
+    Atomic.make Keeper_provider_attempt_effect.No_effect_observed
+  in
+  let observe_effect_attempted () =
+    Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
+  in
+  let observed_next_shrink_capacity_bytes = ref None in
   let starting_capacity_bytes =
     Keeper_context_overflow_shrink_state.starting_capacity_bytes
       ~keeper_name
       ~runtime_id
       ~max_capacity_bytes:unbounded_model_input_capacity_bytes
   in
-  Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-    Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
+  let result =
+    Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+      Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
       ~starting_capacity_bytes
-      (* The newest atom is indivisible. With fewer than two atoms there is
-         no older provider-bound history for the tail window to remove. *)
       ~same_run_retry_authorized:(fun () ->
-        match !observed_history_atoms with
-        | Some history_atoms -> history_atoms > 1
-        | None -> false)
-      ~shrink_capacity:(fun ~capacity_bytes ~default_capacity_bytes ->
-        if capacity_bytes <> unbounded_model_input_capacity_bytes
-        then max 1 default_capacity_bytes
-        else
-          match !observed_full_bytes with
-          | Some full_bytes -> max 1 (full_bytes / 2)
-          | None -> max 1 default_capacity_bytes)
+        Keeper_provider_attempt_effect.allows_same_turn_retry
+          (Atomic.get effect_disposition)
+        && Option.is_some !observed_next_shrink_capacity_bytes)
+      ~shrink_capacity:(fun ~capacity_bytes:_ ~default_capacity_bytes ->
+        Option.value
+          !observed_next_shrink_capacity_bytes
+          ~default:(max 1 default_capacity_bytes))
       ~record_success:(fun ~capacity_bytes ->
         if capacity_bytes <> unbounded_model_input_capacity_bytes
         then
@@ -838,8 +869,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             (Some
                (model_input_projection_for_capacity
                   ~capacity_bytes
-                  ~observed_full_bytes
-                  ~observed_history_atoms
+                  ~observed_next_shrink_capacity_bytes
                   model_input_projection))
           ~hooks
           ~context_injector
@@ -847,8 +877,11 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           ~event_bus
           ~raw_trace
           ~on_event
+          ~observe_effect_attempted
           ~config)
       ())
+  in
+  { result; effect_disposition = Atomic.get effect_disposition }
 ;;
 
 module For_testing = struct

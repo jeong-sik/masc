@@ -497,12 +497,21 @@ let run_best_effort
                     , `Int prompt_input.max_recall_fact_bytes )
                   ]));
         let complete outcome output =
-          Exact_lane_run_registry.mark_completed
-            registry
-            ~run_id
-            ~outcome
-            ~elapsed_s:(Eio.Time.now clock -. started_at_monotonic)
-            ~output
+          match
+            Exact_lane_run_registry.mark_completed
+              registry
+              ~run_id
+              ~outcome
+              ~elapsed_s:(Eio.Time.now clock -. started_at_monotonic)
+              ~output
+          with
+          | Ok () -> ()
+          | Error error ->
+            Log.Keeper.error
+              ~keeper_name:keeper_id
+              "librarian exact-run observation completion failed run_id=%s: %s"
+              run_id
+              (Exact_lane_run_registry.completion_error_to_string error)
         in
         (try
            let result =

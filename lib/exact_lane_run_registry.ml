@@ -12,12 +12,27 @@ type outcome =
       ; detail : string
       }
 
+type persistence_state =
+  | Not_persisted
+  | Durability_unknown
+
+type persistence_failure =
+  { detail : string
+  ; state : persistence_state
+  }
+
 type run_status =
   | Running
   | Completed of
       { outcome : outcome
       ; elapsed_s : float
       ; output : Yojson.Safe.t
+      }
+  | Completion_persistence_failed of
+      { intended_outcome : outcome
+      ; elapsed_s : float
+      ; output : Yojson.Safe.t
+      ; failure : persistence_failure
       }
 
 type run_input = Exact_input of Yojson.Safe.t
@@ -172,7 +187,28 @@ end
 
 module Store = Run_registry_core.Make (Payload)
 
-type t = Store.t
+type failed_completion =
+  { intended_outcome : outcome
+  ; elapsed_s : float
+  ; output : Yojson.Safe.t
+  ; failure : persistence_failure
+  }
+
+type t =
+  { store : Store.t
+  ; failed_completions : (string * failed_completion) list Atomic.t
+  ; projection : run list Atomic.t
+  ; observation_mutex : Stdlib.Mutex.t
+  }
+
+type completion_error =
+  | Unknown_run
+  | Persistence_failed of persistence_failure
+
+let completion_error_to_string = function
+  | Unknown_run -> "completion referenced an unknown exact-lane run"
+  | Persistence_failed failure -> failure.detail
+;;
 
 let storage_filename = "exact-lane-runs-v3.jsonl"
 
@@ -187,29 +223,26 @@ let notify_changed () =
       (Printexc.to_string exn)
 ;;
 
-let create = Store.create
-let replay = Store.replay
-let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
-  Store.register
-    t
-    ~id:run_id
-    ~started_at
-    ~registration:{ Payload.lane; subject_id; actor; input };
-  notify_changed ()
+let remove_failed_completion t run_id =
+  Atomic.set
+    t.failed_completions
+    (List.remove_assoc run_id (Atomic.get t.failed_completions))
 ;;
 
-let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
-  let completion = { Payload.outcome; elapsed_s; output } in
-  match Store.complete t ~id:run_id ~completion with
-  | `Completed -> notify_changed ()
-  | `Unknown -> ()
-;;
-
-let run_of_entry (entry : Store.entry) =
+let run_of_entry failed_completions (entry : Store.entry) =
   let status =
-    match entry.status with
-    | Store.Running -> Running
-    | Store.Completed completion ->
+    match List.assoc_opt entry.id failed_completions, entry.status with
+    | Some failed, Store.Running ->
+      Completion_persistence_failed
+        { intended_outcome = failed.intended_outcome
+        ; elapsed_s = failed.elapsed_s
+        ; output = failed.output
+        ; failure = failed.failure
+        }
+    | None, Store.Running -> Running
+    | _, Store.Completed completion ->
+      (* A committed completion always wins. This also keeps a stale
+         diagnostic overlay from masking durable evidence. *)
       Completed
         { outcome = completion.outcome
         ; elapsed_s = completion.elapsed_s
@@ -226,12 +259,88 @@ let run_of_entry (entry : Store.entry) =
   }
 ;;
 
-let list_runs t = List.map run_of_entry (Store.list_entries t)
-let get t ~run_id = Option.map run_of_entry (Store.get t ~id:run_id)
+let publish_projection t =
+  let failed_completions = Atomic.get t.failed_completions in
+  Store.list_entries t.store
+  |> List.map (run_of_entry failed_completions)
+  |> Atomic.set t.projection
+;;
+
+let make store =
+  let t =
+    { store
+    ; failed_completions = Atomic.make []
+    ; projection = Atomic.make []
+    ; observation_mutex = Stdlib.Mutex.create ()
+    }
+  in
+  publish_projection t;
+  t
+;;
+
+let create ?path () = make (Store.create ?path ())
+let replay path = make (Store.replay path)
+
+let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
+  Stdlib.Mutex.protect t.observation_mutex (fun () ->
+    Store.register
+      t.store
+      ~id:run_id
+      ~started_at
+      ~registration:{ Payload.lane; subject_id; actor; input };
+    remove_failed_completion t run_id;
+    publish_projection t);
+  notify_changed ()
+;;
+
+let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
+  let completion = { Payload.outcome; elapsed_s; output } in
+  let result =
+    Stdlib.Mutex.protect t.observation_mutex (fun () ->
+      match Store.complete t.store ~id:run_id ~completion with
+      | `Completed ->
+        remove_failed_completion t run_id;
+        publish_projection t;
+        Ok ()
+      | `Unknown -> Error Unknown_run
+      | `Persistence_failed failure ->
+        let state =
+          match failure.state with
+          | Run_registry_core.Not_persisted -> Not_persisted
+          | Run_registry_core.Durability_unknown -> Durability_unknown
+        in
+        let failure = { detail = failure.detail; state } in
+        let failed = { intended_outcome = outcome; elapsed_s; output; failure } in
+        Atomic.set
+          t.failed_completions
+          ((run_id, failed) :: List.remove_assoc run_id (Atomic.get t.failed_completions));
+        publish_projection t;
+        Error (Persistence_failed failure))
+  in
+  match result with
+  | Ok () ->
+    notify_changed ();
+    Ok ()
+  | Error Unknown_run -> Error Unknown_run
+  | Error (Persistence_failed _ as error) ->
+    notify_changed ();
+    Error error
+;;
+
+let list_runs t = Atomic.get t.projection
+
+let get t ~run_id =
+  List.find_opt (fun run -> String.equal run.run_id run_id) (Atomic.get t.projection)
+;;
 
 let status_label = function
   | Running -> "running"
   | Completed { outcome; _ } -> outcome_label outcome
+  | Completion_persistence_failed { failure = { state = Not_persisted; _ }; _ } ->
+    "completion_persistence_failed"
+  | Completion_persistence_failed
+      { failure = { state = Durability_unknown; _ }; _ } ->
+    "completion_durability_unknown"
 ;;
 
 let run_to_yojson run =
@@ -256,6 +365,25 @@ let run_to_yojson run =
           [ "code", `String code; "detail", `String detail ]
       in
       [ "elapsed_s", `Float elapsed_s; "output", output ] @ detail
+    | Completion_persistence_failed
+        { intended_outcome; elapsed_s; output; failure } ->
+      let intended_failure =
+        match intended_outcome with
+        | Succeeded | Cancelled -> []
+        | Failed { code; detail } ->
+          [ "intended_code", `String code; "intended_detail", `String detail ]
+      in
+      [ "intended_status", `String (outcome_label intended_outcome)
+      ; "elapsed_s", `Float elapsed_s
+      ; "output", output
+      ; "persistence_error", `String failure.detail
+      ; ( "persistence_state"
+        , `String
+            (match failure.state with
+             | Not_persisted -> "not_persisted"
+             | Durability_unknown -> "durability_unknown") )
+      ]
+      @ intended_failure
   in
   `Assoc (base @ completion)
 ;;

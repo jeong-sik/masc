@@ -53,14 +53,11 @@ type t = {
   generation : int;
   turn_count : int option;
   agent_core_turn_count : int option;
-  agent_core_dispatch_mode : string option;
-  agent_core_internal_runtime_disabled : bool;
   current_task_id : string option;
   goal_ids : string list;
   outcome : outcome_kind;
   terminal_reason_code : string;
   response_text_present : bool;
-  model_used : string option;
   completion_contract_result : completion_contract_result;
   actionable_signal : Keeper_contract_classifier.actionable_signal option;
     (** World-observation signal captured at turn time. It is independent of

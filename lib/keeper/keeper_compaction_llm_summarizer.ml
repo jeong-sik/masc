@@ -890,9 +890,10 @@ let execute_prepared_lane_current
       ~net
       ?clock
       ?before_dispatch_authority
+      ?(observation_registry = Exact_lane_run_registry.global ())
       prepared_lane
   =
-  let registry = Exact_lane_run_registry.global () in
+  let registry = observation_registry in
   let run_id = Random_id.prefixed ~prefix:"exact-compaction-" ~bytes:16 in
   let started_at = Time_compat.now () in
   let prior_summary =
@@ -922,12 +923,25 @@ let execute_prepared_lane_current
          ; "source_unit_count", `Int (List.length prepared_lane.window.source_units)
          ]));
   let complete outcome output =
-    Exact_lane_run_registry.mark_completed
-      registry
-      ~run_id
-      ~outcome
-      ~elapsed_s:(Time_compat.now () -. started_at)
-      ~output
+    match
+      Exact_lane_run_registry.mark_completed
+        registry
+        ~run_id
+        ~outcome
+        ~elapsed_s:(Time_compat.now () -. started_at)
+        ~output
+    with
+    | Ok () -> ()
+    | Error error ->
+      (* The exact-lane registry is an observation plane, not compaction's
+         lifecycle authority. Its durable completion must never replace a
+         typed provider/domain terminal with an exception, otherwise the
+         Keeper source remains eligible and can be dispatched again. *)
+      Log.Keeper.error
+        ~keeper_name
+        "compaction exact-run observation completion failed run_id=%s: %s"
+        run_id
+        (Exact_lane_run_registry.completion_error_to_string error)
   in
   (* Process-local derived state only. It identifies the exact AGENT_CORE candidate
      whose dispatch callback passed, so cancellation can retain that source.
@@ -1159,6 +1173,7 @@ let execute_prepared_lane
       ~net
       ?clock
       ?before_dispatch_authority
+      ?observation_registry
       prepared_lane
   =
   execute_prepared_lane_current
@@ -1166,6 +1181,7 @@ let execute_prepared_lane
     ~net
     ?clock
     ?before_dispatch_authority
+    ?observation_registry
     prepared_lane
 ;;
 

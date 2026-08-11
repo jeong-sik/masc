@@ -139,6 +139,8 @@ type error =
   | Process_exited of string
   | Timeout of float
 
+exception Runtime_error of error
+
 let error_to_string = function
   | Invalid_config detail -> "invalid Claude Code config: " ^ detail
   | Spawn_failed detail -> "failed to start Claude Code: " ^ detail
@@ -191,41 +193,19 @@ let error_kind = function
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
 let ( let* ) result f = Result.bind result f
 
-let rec validate_unique_object_keys ~stage ~path = function
-  | `Assoc fields ->
-    let rec loop seen = function
-      | [] -> Ok ()
-      | (name, value) :: rest ->
-        if List.mem name seen
-        then
-          protocol_error
-            stage
-            (Printf.sprintf "duplicate object key %S at %s" name path)
-        else
-          let* () =
-            validate_unique_object_keys
-              ~stage
-              ~path:(path ^ "." ^ name)
-              value
-          in
-          loop (name :: seen) rest
-    in
-    loop [] fields
-  | `List values ->
-    let rec loop index = function
-      | [] -> Ok ()
-      | value :: rest ->
-        let* () =
-          validate_unique_object_keys
-            ~stage
-            ~path:(Printf.sprintf "%s[%d]" path index)
-            value
-        in
-        loop (index + 1) rest
-    in
-    loop 0 values
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Ok ()
-;;
+(* The three official-client runtimes speak the same line-delimited JSON
+   protocol and differ only in the error constructor they fail with. The shape
+   checks live once in {!Runtime_official_client_json}; this instantiates them
+   against this runtime's own [error]. *)
+module Shared_json = Runtime_official_client_json.Make (struct
+  type t = error
+
+  let protocol ~stage ~detail = Protocol_error { stage; detail }
+end)
+
+open Shared_json
+
+let bounded_tail = Runtime_official_client_json.bounded_tail
 
 let parse_json ~stage text =
   let parsed =
@@ -235,40 +215,6 @@ let parse_json ~stage text =
   let* json = parsed in
   let* () = validate_unique_object_keys ~stage ~path:"$" json in
   Ok json
-;;
-
-let assoc_at stage = function
-  | `Assoc fields -> Ok fields
-  | _ -> protocol_error stage "expected a JSON object"
-;;
-
-let required_member stage name fields =
-  match List.assoc_opt name fields with
-  | Some value -> Ok value
-  | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
-;;
-
-let required_string stage name fields =
-  match List.assoc_opt name fields with
-  | Some (`String value) when String.trim value <> "" -> Ok value
-  | Some _ ->
-    protocol_error stage (Printf.sprintf "field %S must be a non-empty string" name)
-  | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
-;;
-
-let optional_string stage name fields =
-  match List.assoc_opt name fields with
-  | None | Some `Null -> Ok None
-  | Some (`String value) -> Ok (Some value)
-  | Some _ ->
-    protocol_error stage (Printf.sprintf "field %S must be a string or null" name)
-;;
-
-let required_bool stage name fields =
-  match List.assoc_opt name fields with
-  | Some (`Bool value) -> Ok value
-  | Some _ -> protocol_error stage (Printf.sprintf "field %S must be a boolean" name)
-  | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
 ;;
 
 let optional_int stage name fields =
@@ -610,6 +556,7 @@ let invoke_state_callback ~stage callback =
     | Error detail -> protocol_error stage detail
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Time.Timeout as exn -> raise exn
   | exn -> protocol_error stage (Printexc.to_string exn)
 ;;
 
@@ -933,12 +880,6 @@ let command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id =
   Ok args
 ;;
 
-let bounded_tail ~limit current addition =
-  let combined = current ^ addition in
-  let length = String.length combined in
-  if length <= limit then combined else String.sub combined (length - limit) limit
-;;
-
 let drain_stderr flow tail =
   let chunk = Cstruct.create stderr_chunk_bytes in
   try
@@ -1021,6 +962,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
       Ok ()
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
     | exn ->
       Error
         (Turn_transport_interrupted
@@ -1049,9 +991,9 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~ignored:0
 ;;
 
-let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
-    ~session_mode ~session_id ~subscription ~prompt ~on_session_ready
-    ~on_turn_starting ~on_turn_started ~on_stream_event =
+let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
+    ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt
+    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_stream_event =
   let* argv =
     command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id
   in
@@ -1061,16 +1003,21 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = ref "" in
     let proc =
-      Eio.Process.spawn
-        ~sw
-        mgr
-        ~cwd
-        ~env:(subscription_only_environment ())
-        ~stdin:stdin_r
-        ~stdout:stdout_w
-        ~stderr:stderr_w
-        argv
+      try
+        Eio.Process.spawn
+          ~sw
+          mgr
+          ~cwd
+          ~env:(subscription_only_environment ())
+          ~stdin:stdin_r
+          ~stdout:stdout_w
+          ~stderr:stderr_w
+          argv
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
     in
+    Option.iter (fun callback -> callback ()) on_spawned;
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
@@ -1097,6 +1044,9 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
     Fun.protect
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->
+        let with_timeout callback =
+          Eio.Time.with_timeout_exn clock config.timeout_s callback
+        in
         run_protocol
           { send; receive }
           ~dynamic_tools
@@ -1104,9 +1054,12 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
           ~session_mode
           ~session_id
           ~prompt
-          ~on_session_ready
-          ~on_turn_starting
-          ~on_turn_started
+          ~on_session_ready:(fun ~session_id ->
+            with_timeout (fun () -> on_session_ready ~session_id))
+          ~on_turn_starting:(fun ~session_id ->
+            with_timeout (fun () -> on_turn_starting ~session_id))
+          ~on_turn_started:(fun ~session_id ~turn_id ->
+            with_timeout (fun () -> on_turn_started ~session_id ~turn_id))
           ~on_stream_event))
 ;;
 
@@ -1174,8 +1127,8 @@ let probe_subscription ~mgr ~clock ~cwd config =
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
-    ?admitted_subscription
-    ~mgr ~clock ~cwd ?(on_session_ready = fun ~session_id:_ -> Ok ())
+    ?admitted_subscription ?on_spawned ~mgr ~clock ~cwd
+    ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
     ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event config
     ~prompt =
@@ -1197,6 +1150,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
       subscription.subscription_type;
     try
       run_spawned
+        ?on_spawned
         ~mgr
         ~clock
         ~cwd
@@ -1214,7 +1168,11 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
-    | exn -> Error (Spawn_failed (Printexc.to_string exn))
+    | Runtime_error error -> Error error
+    | exn ->
+      Error
+        (Protocol_error
+           { stage = "runtime boundary"; detail = Printexc.to_string exn })
   in
   (match result with
    | Ok turn ->

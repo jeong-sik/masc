@@ -221,14 +221,11 @@ let record_pre_dispatch_terminal_observation
          | Some _ -> keeper_turn_id
          | None -> Some meta.runtime.usage.total_turns)
     ; agent_core_turn_count = None
-    ; agent_core_dispatch_mode = None
-    ; agent_core_internal_runtime_disabled = true
     ; current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; goal_ids = meta.active_goal_ids
     ; outcome
     ; terminal_reason_code
     ; response_text_present = false
-    ; model_used = None
     ; completion_contract_result = Keeper_execution_receipt.Completion_not_dispatched
     ; actionable_signal = None
       (* Pre-dispatch receipt: the turn never ran, so no world observation was

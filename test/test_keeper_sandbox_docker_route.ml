@@ -21,6 +21,7 @@ module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
 module Keeper_turn_sandbox_runtime = Masc.Keeper_turn_sandbox_runtime
 module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
 module Keeper_identity = Masc.Keeper_identity
+module Keeper_github_identity = Masc.Keeper_github_identity
 module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
 module Fs_compat = Fs_compat
@@ -1671,15 +1672,6 @@ let test_docker_shell_projects_keeper_secret_dir () =
   ensure_dir (Filename.dirname ssh_path);
   write_file token_path "projected-token\n";
   write_file ssh_path "PRIVATE KEY";
-  let github_config_dir =
-    match
-      Keeper_github_identity.ensure_config_dir
-        ~base_path:config.Workspace.base_path
-        ~keeper_name:meta.name
-    with
-    | Ok path -> path
-    | Error message -> Alcotest.fail message
-  in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   let line = run_docker_shell_command ~config ~meta ~playground ~log_path in
   Alcotest.(check bool) "projected raw token not in docker argv" false
@@ -1749,6 +1741,15 @@ let test_turn_runtime_projects_keeper_secret_dir () =
   ensure_dir (Filename.dirname ssh_path);
   write_file token_path "projected-token\n";
   write_file ssh_path "PRIVATE KEY";
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir
+        ~base_path:config.Workspace.base_path
+        ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->

@@ -8,6 +8,11 @@ type recoverability =
   | Operator_action_required
   | Fatal
 
+type tool_host_cause =
+  | Tool_host_timeout
+  | Tool_host_transport_unavailable
+  | Tool_host_failure
+
 type t = {
   surface : string;
   entity_kind : string;
@@ -44,6 +49,17 @@ let recoverability_of_string = function
   | "fatal" -> Ok Fatal
   | other -> Error ("unknown failure recoverability: " ^ other)
 
+let tool_host_cause_code = function
+  | Tool_host_timeout -> "tool_host_timeout"
+  | Tool_host_transport_unavailable -> "tool_host_transport_unavailable"
+  | Tool_host_failure -> "tool_host_failure"
+
+let tool_host_cause_of_code = function
+  | "tool_host_timeout" -> Ok Tool_host_timeout
+  | "tool_host_transport_unavailable" -> Ok Tool_host_transport_unavailable
+  | "tool_host_failure" -> Ok Tool_host_failure
+  | other -> Error (Printf.sprintf "unknown tool host cause_code: %S" other)
+
 (** Coerce to canonical [Severity.t] for cross-module communication. *)
 let to_severity : severity -> Severity.t = function
   | Warn -> Warning
@@ -53,23 +69,10 @@ let to_severity : severity -> Severity.t = function
 let first_non_empty values =
   List.find_map (fun value -> Option.bind value String_util.trim_to_option) values
 
-let tool_host_cause_code ?timeout_ms message =
-  let lower = String.lowercase_ascii message in
-  if Option.is_some timeout_ms
-     || String_util.contains_substring lower "timed out"
-     || String_util.contains_substring lower "timeout" then
-    "tool_host_timeout"
-  else if String_util.contains_substring lower "port already in use"
-          || String_util.contains_substring lower "connection refused"
-          || String_util.contains_substring lower "transport unavailable" then
-    "tool_host_transport_unavailable"
-  else
-    "tool_host_failure"
-
-let operator_action_for_cause_code = function
-  | "tool_host_timeout" -> Some "masc_operator_digest"
-  | "tool_host_transport_unavailable" -> Some "masc_operator_digest"
-  | _ -> None
+let operator_action_for_tool_host_cause = function
+  | Tool_host_timeout | Tool_host_transport_unavailable ->
+    Some "masc_operator_digest"
+  | Tool_host_failure -> None
 
 let summary_for_tool_host ~client_name ~tool_name ~transport = function
   | Some phase when String.trim phase <> "" ->
@@ -78,21 +81,20 @@ let summary_for_tool_host ~client_name ~tool_name ~transport = function
   | _ -> Printf.sprintf "%s %s failed on %s" client_name tool_name transport
 
 let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
-    ?request_id ?session_id ?trace_id ?timeout_ms ~message () =
-  let cause_code = tool_host_cause_code ?timeout_ms message in
+    ?request_id ?session_id ?trace_id ?timeout_ms ~cause ~message () =
   {
     surface = "tool_host";
     entity_kind = "tool_call";
     entity_id = first_non_empty [ request_id; session_id; trace_id ];
-    cause_code;
+    cause_code = tool_host_cause_code cause;
     severity = Bad;
     summary = summary_for_tool_host ~client_name ~tool_name ~transport phase;
     recoverability =
-      (match cause_code with
-       | "tool_host_timeout" | "tool_host_transport_unavailable" ->
+      (match cause with
+       | Tool_host_timeout | Tool_host_transport_unavailable ->
            Operator_action_required
-       | _ -> Retryable);
-    operator_action = operator_action_for_cause_code cause_code;
+       | Tool_host_failure -> Retryable);
+    operator_action = operator_action_for_tool_host_cause cause;
     evidence_ref =
       `Assoc
         (List.filter_map

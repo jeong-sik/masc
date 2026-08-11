@@ -1273,6 +1273,7 @@ let test_digest_workspace_includes_tool_host_failure_attention () =
           tool_name = "masc_keeper_msg";
           transport = "mcp_http";
           phase = Some "tools/call";
+          cause = Failure_envelope.Tool_host_timeout;
           message = "timed out awaiting tools/call after 90s";
           request_id = Some "opsd-toolhost-1";
           session_id = Some "sess-toolhost-1";
@@ -1437,6 +1438,12 @@ let () =
             "backend serializers do not emit last_compaction_ago_s"
             `Quick
             test_last_compaction_ago_s_removed_from_backend_serializers
+        ] );
+      ( "tool host attention"
+      , [ Alcotest.test_case
+            "digest includes typed tool-host failure"
+            `Quick
+            test_digest_workspace_includes_tool_host_failure_attention
         ] );
       ( "pending-confirm store"
       , [ Alcotest.test_case

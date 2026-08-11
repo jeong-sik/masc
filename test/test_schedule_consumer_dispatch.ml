@@ -785,6 +785,19 @@ let test_routed_schedule_carries_occurrence_destination_to_keeper () =
       fail (Keeper_continuation_delivery_store.error_to_string error)
   in
   persist pending;
+  let active_delivery_dir =
+    match
+      Keeper_continuation_delivery_store.For_testing.active_directory
+        ~config
+        ~keeper_name:pending.keeper_name
+    with
+    | Ok path -> path
+    | Error error ->
+      fail (Keeper_continuation_delivery_store.error_to_string error)
+  in
+  write_file
+    (Filename.concat active_delivery_dir "unrelated-corrupt-peer")
+    "{broken-json";
   let pending_row =
     Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
     |> fun dashboard ->
@@ -792,6 +805,13 @@ let test_routed_schedule_carries_occurrence_destination_to_keeper () =
   in
   check string "persisted obligation is visible independently" "pending"
     (pending_row |> member "result_delivery" |> member "status" |> to_string);
+  check string
+    "unrelated corrupt intent stays observable without hiding the exact occurrence"
+    "unrelated continuation delivery records are malformed"
+    (pending_row
+     |> member "result_delivery"
+     |> member "inventory_warning"
+     |> to_string);
   let attempting =
     match
       Keeper_continuation_delivery_intent.start_attempt
@@ -824,6 +844,103 @@ let test_routed_schedule_carries_occurrence_destination_to_keeper () =
     (delivered_row |> member "result_delivery" |> member "status" |> to_string);
   check string "dispatch terminal remains unchanged" "succeeded"
     (delivered_row |> member "dispatch_status" |> to_string)
+;;
+
+let test_dashboard_result_delivery_follows_transferred_owner () =
+  with_workspace
+  @@ fun config ->
+  let source_keeper = "schedule-keeper" in
+  let target_keeper = "schedule-delivery-target" in
+  let base_path = config.Workspace_utils.base_path in
+  let channel =
+    match
+      Keeper_continuation_channel.dashboard
+        ~thread_id:"schedule-transfer-result-thread"
+    with
+    | Ok channel -> channel
+    | Error detail -> fail detail
+  in
+  let request = create_routed_keeper_wake_schedule config channel in
+  let result = tick_ok config ~now:201.0 in
+  let occurrence_id = single_occurrence_id result in
+  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
+  let target_meta = persist_keeper_meta config target_keeper in
+  let transfer : Keeper_registry_event_queue.accepted_transfer =
+    { source = selection.source
+    ; source_incarnation = selection.admitted_revision
+    ; owner_nonce = 71
+    ; operator_operation_id = "schedule-result-owner-transfer"
+    ; from_keeper = source_keeper
+    ; to_keeper = target_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
+    }
+  in
+  (match
+     Keeper_registry_event_queue.transfer_pending_accepted_result
+       ~base_path
+       source_keeper
+       ~current_owner_nonce:71
+       ~applied_at:201.5
+       ~transfer
+   with
+   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
+   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
+     fail "fresh schedule transfer was already applied"
+   | Ok
+       (Keeper_registry_event_queue.Transition_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail ->
+     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
+  (match
+     Keeper_event_queue_recovery.project_owner_result
+       ~base_path
+       ~keeper_name:source_keeper
+   with
+   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok _ -> fail "schedule transfer projection did not converge"
+   | Error error ->
+     fail
+       (Keeper_event_queue_recovery.projection_error_to_string error));
+  let origin =
+    match
+      Keeper_continuation_delivery_intent.origin_of_payload
+        selection.source.payload
+    with
+    | Ok (Some origin) -> origin
+    | Ok None -> fail "transferred schedule lost its continuation origin"
+    | Error error ->
+      fail (Keeper_continuation_delivery_intent.error_to_string error)
+  in
+  let pending =
+    match
+      Keeper_continuation_delivery_intent.create
+        ~keeper_name:target_keeper
+        ~keeper_turn_id:1
+        ~origin
+        ~response_text:"transferred scheduled work completed"
+    with
+    | Ok intent -> intent
+    | Error error ->
+      fail (Keeper_continuation_delivery_intent.error_to_string error)
+  in
+  (match Keeper_continuation_delivery_store.persist ~config pending with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Keeper_continuation_delivery_store.error_to_string error));
+  let result_delivery =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+    |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+    |> Yojson.Safe.Util.member "result_delivery"
+  in
+  let open Yojson.Safe.Util in
+  check string "dashboard follows the durable transfer owner" target_keeper
+    (result_delivery |> member "delivery_keeper_name" |> to_string);
+  check string "transferred owner's exact intent remains visible" "pending"
+    (result_delivery |> member "status" |> to_string);
+  check string "transfer stays bound to the schedule occurrence" occurrence_id
+    (result_delivery |> member "occurrence_id" |> to_string)
 ;;
 
 let test_recurring_wakes_keep_distinct_occurrence_ids () =
@@ -2216,6 +2333,8 @@ let () =
             test_keeper_wake_consumer_records_wake_receipt
         ; test_case "routed schedule carries occurrence destination to Keeper" `Quick
             test_routed_schedule_carries_occurrence_destination_to_keeper
+        ; test_case "dashboard result delivery follows transferred owner" `Quick
+            test_dashboard_result_delivery_follows_transferred_owner
         ; test_case "recurring wakes keep distinct occurrence ids" `Quick
             test_recurring_wakes_keep_distinct_occurrence_ids
         ; test_case "reused schedule id does not match pruned terminal receipt"

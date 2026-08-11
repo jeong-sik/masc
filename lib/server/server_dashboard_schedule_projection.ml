@@ -158,6 +158,56 @@ let schedule_dispatch_receipt_dashboard_json
 
 module String_set = Set.Make (String)
 
+let transfer_target_for_occurrence ~keeper_name ~occurrence_id queue_state =
+  Keeper_event_queue_state.projected_dispositions queue_state
+  |> List.find_map (fun receipt ->
+    match receipt.Keeper_event_queue_state.transition with
+    | Keeper_event_queue_state.Transfer_accepted transfer
+      when String.equal transfer.from_keeper keeper_name
+           && String.equal transfer.source.post_id occurrence_id ->
+      Some transfer.to_keeper
+    | Keeper_event_queue_state.Cancel_accepted _
+    | Keeper_event_queue_state.Transfer_accepted _
+    | Keeper_event_queue_state.Ack_source_terminal _ ->
+      None)
+;;
+
+let resolve_schedule_delivery_owner ~config ~receipt_keeper ~occurrence_id =
+  let rec loop visited keeper_name =
+    if String_set.mem keeper_name visited
+    then
+      Error
+        (Printf.sprintf
+           "event queue transfer cycle while resolving schedule occurrence %s at Keeper %s"
+           occurrence_id
+           keeper_name)
+    else
+      let visited = String_set.add keeper_name visited in
+      match
+        Keeper_event_queue_persistence.validate_existing_state_read_only_result
+          ~base_path:config.Workspace_utils.base_path
+          ~keeper_name
+      with
+      | Error detail ->
+        Error
+          (Printf.sprintf
+             "failed to resolve current queue owner for schedule occurrence %s from Keeper %s: %s"
+             occurrence_id
+             keeper_name
+             detail)
+      | Ok queue_state ->
+        (match
+           transfer_target_for_occurrence
+             ~keeper_name
+             ~occurrence_id
+             queue_state
+         with
+         | None -> Ok keeper_name
+         | Some target_keeper -> loop visited target_keeper)
+  in
+  loop String_set.empty receipt_keeper
+;;
+
 type keeper_reaction_evidence_batch =
   ( (string * Keeper_reaction_ledger.event_queue_reaction_evidence_outcome) list
   , Keeper_reaction_ledger.event_queue_reaction_evidence_error )
@@ -706,6 +756,7 @@ let result_delivery_state_fields
 
 let schedule_result_delivery_dashboard_json
   ~delivery_inventory_by_keeper
+  ~delivery_owner_by_occurrence
   (request : Schedule_domain.schedule_request)
   (last_wake : Schedule_domain.wake_record option)
   =
@@ -815,7 +866,27 @@ let schedule_result_delivery_dashboard_json
                              "dispatch receipt omitted required reply-to-origin policy" ) ])
                   "destination_conflict"
               | Server_schedule_consumers.Keeper_wake_result_delivery_reply_to_origin ->
-                (match List.assoc_opt keeper_name delivery_inventory_by_keeper with
+                (match List.assoc_opt occurrence_id delivery_owner_by_occurrence with
+                 | None ->
+                   routed_projection
+                     ~extra_fields:
+                       (occurrence_fields
+                        @ [ "detail", `String "current delivery owner snapshot is missing" ])
+                     "read_error"
+                 | Some (Error detail) ->
+                   routed_projection
+                     ~extra_fields:(occurrence_fields @ [ "detail", `String detail ])
+                     "read_error"
+                 | Some (Ok delivery_keeper_name) ->
+                  let occurrence_fields =
+                    occurrence_fields
+                    @ [ "delivery_keeper_name", `String delivery_keeper_name ]
+                  in
+                  (match
+                     List.assoc_opt
+                       delivery_keeper_name
+                       delivery_inventory_by_keeper
+                   with
               | None ->
                 routed_projection
                   ~extra_fields:
@@ -834,23 +905,7 @@ let schedule_result_delivery_dashboard_json
               | Some
                   (Ok
                     Keeper_continuation_delivery_store.
-                      { intents = _
-                      ; record_failures = (_ :: _ as record_failures)
-                      }) ->
-                routed_projection
-                  ~extra_fields:
-                    (occurrence_fields
-                     @ [ ( "detail"
-                         , `String
-                             "continuation delivery inventory contains malformed records" )
-                       ; ( "record_failures"
-                         , result_delivery_record_failures_json record_failures )
-                       ])
-                  "read_error"
-              | Some
-                  (Ok
-                    Keeper_continuation_delivery_store.
-                      { intents; record_failures = [] }) ->
+                      { intents; record_failures }) ->
                 let matching =
                   List.filter
                     (fun
@@ -865,12 +920,33 @@ let schedule_result_delivery_dashboard_json
                          false)
                     intents
                 in
-                (match matching with
-                 | [] ->
+                let record_failure_fields =
+                  match record_failures with
+                  | [] -> []
+                  | _ :: _ ->
+                    [ ( "inventory_warning"
+                      , `String
+                          "unrelated continuation delivery records are malformed" )
+                    ; ( "record_failures"
+                      , result_delivery_record_failures_json record_failures )
+                    ]
+                in
+                (match matching, record_failures with
+                 | [], _ :: _ ->
+                   routed_projection
+                     ~extra_fields:
+                       (occurrence_fields
+                        @ [ ( "detail"
+                            , `String
+                                "no valid matching intent and continuation delivery inventory contains malformed records" )
+                          ]
+                        @ record_failure_fields)
+                     "read_error"
+                 | [], [] ->
                    routed_projection
                      ~extra_fields:occurrence_fields
                      "execution_pending"
-                 | [ intent ]
+                 | [ intent ], _
                    when not
                           (Keeper_continuation_channel.same_route
                              channel
@@ -884,26 +960,30 @@ let schedule_result_delivery_dashboard_json
                                  .to_string
                                    intent.intent_id) )
                           ; "detail", `String "persisted intent destination differs from schedule policy"
-                          ])
+                          ]
+                        @ record_failure_fields)
                      "destination_conflict"
-                 | [ intent ] ->
+                 | [ intent ], _ ->
                    let status, state_fields =
                      result_delivery_state_fields intent
                    in
                    routed_projection
-                     ~extra_fields:(occurrence_fields @ state_fields)
+                     ~extra_fields:
+                       (occurrence_fields @ state_fields @ record_failure_fields)
                      status
-                 | _ :: _ :: _ ->
+                 | _ :: _ :: _, _ ->
                    routed_projection
                      ~extra_fields:
                        (occurrence_fields
-                        @ [ "detail", `String "multiple intents claim one schedule occurrence" ])
-                     "identity_conflict"))))))
+                        @ [ "detail", `String "multiple intents claim one schedule occurrence" ]
+                        @ record_failure_fields)
+                     "identity_conflict")))))))
 ;;
 
 let schedule_request_dashboard_json
   ~now
   ~delivery_inventory_by_keeper
+  ~delivery_owner_by_occurrence
   ~evidence_snapshot
   ?last_wake
   (request : Schedule_domain.schedule_request)
@@ -974,6 +1054,7 @@ let schedule_request_dashboard_json
     ; ( "result_delivery"
       , schedule_result_delivery_dashboard_json
           ~delivery_inventory_by_keeper
+          ~delivery_owner_by_occurrence
           request
           last_wake )
     ; ( "keeper_queue_evidence"
@@ -1189,7 +1270,7 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
         ~config
         (List.map snd request_rows_with_wakes)
     in
-    let delivery_keeper_names =
+    let delivery_occurrence_receipts =
       request_rows_with_wakes
       |> List.filter_map (fun (_, last_wake) ->
         match last_wake with
@@ -1199,11 +1280,12 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
            | Ok
                (Server_schedule_consumers.Keeper_wake_enqueued
                  { keeper_name
+                 ; post_id
                  ; result_delivery_policy =
                      Server_schedule_consumers.Keeper_wake_result_delivery_reply_to_origin
                  ; _
                  }) ->
-             Some keeper_name
+             Some (post_id, keeper_name)
            | Error _
            | Ok
                (Server_schedule_consumers.Keeper_wake_enqueued
@@ -1212,6 +1294,23 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
                  ; _
                  }) ->
              None))
+      |> List.sort_uniq compare
+    in
+    let delivery_owner_by_occurrence =
+      List.map
+        (fun (occurrence_id, receipt_keeper) ->
+           ( occurrence_id
+           , resolve_schedule_delivery_owner
+               ~config
+               ~receipt_keeper
+               ~occurrence_id ))
+        delivery_occurrence_receipts
+    in
+    let delivery_keeper_names =
+      delivery_owner_by_occurrence
+      |> List.filter_map (function
+        | _, Ok keeper_name -> Some keeper_name
+        | _, Error _ -> None)
       |> List.sort_uniq String.compare
     in
     let delivery_inventory_by_keeper =
@@ -1247,6 +1346,7 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
                      schedule_request_dashboard_json
                        ~now
                        ~delivery_inventory_by_keeper
+                       ~delivery_owner_by_occurrence
                        ~evidence_snapshot
                        ?last_wake
                        request)

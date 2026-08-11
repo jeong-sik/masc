@@ -2049,10 +2049,13 @@ let test_keeper_projects_typed_tools_and_hooks () =
     projection_saw_context :=
       List.exists
         (fun (message : Agent_core.Types.message) ->
-          message.role = System
+          message.role = User
           && String.equal
-               "fixture-context"
-               (Agent_core.Types.text_of_content message.content))
+               "[system context] fixture-context"
+               (Agent_core.Types.text_of_content message.content)
+          && Agent_core.Types.Extra_system_context_provenance.classify
+               message.metadata
+             = Agent_core.Types.Extra_system_context_provenance.Present)
         messages;
     Ok messages
   in
@@ -2067,7 +2070,8 @@ let test_keeper_projects_typed_tools_and_hooks () =
     [ init_result
     ; account_chatgpt
     ; thread_result
-    ; turn_result
+    ; {|{"id":4,"result":{}}|}
+    ; {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
     ; tool_call_request
     ; item_completed
     ; turn_completed

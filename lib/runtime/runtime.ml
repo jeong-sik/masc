@@ -1345,10 +1345,15 @@ let provider_id_of_runtime_id (id : string) : string option =
 let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option =
   match get_runtime_by_id id with
   | Some rt ->
+    let credential =
+      Runtime_adapter.effective_credential_reference
+        ~provider_id:rt.provider.id
+        rt.provider.credentials
+    in
     Some
       (Runtime_quota_window.scope_of_credential
          ~provider_id:rt.provider.id
-         rt.provider.credentials)
+         credential)
   | None -> None
 ;;
 

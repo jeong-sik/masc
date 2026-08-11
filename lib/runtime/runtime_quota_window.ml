@@ -35,24 +35,15 @@ let active_until ~scope ~now =
       end)
 
 let demote_order ~now ~quota_scope_of candidates =
-  let demoted =
-    List.filter
+  let kept, demoted =
+    List.partition
       (fun candidate ->
         match quota_scope_of candidate with
-        | None -> false
-        | Some scope -> Option.is_some (active_until ~scope ~now))
+        | None -> true
+        | Some scope -> Option.is_none (active_until ~scope ~now))
       candidates
   in
-  match demoted with
-  | [] -> candidates
-  | _ ->
-    let kept =
-      List.filter
-        (fun candidate ->
-          not (List.exists (String.equal candidate) demoted))
-        candidates
-    in
-    kept @ demoted
+  match demoted with [] -> candidates | _ -> kept @ demoted
 
 let scope_of_credential ~provider_id (credential : Runtime_schema.credential option) =
   match credential with

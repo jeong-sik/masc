@@ -245,6 +245,19 @@ let attempt_runtime_candidates
                  ~resets_at:(Unix.gettimeofday () +. retry_after_s)
              | None -> ())
           | _ -> ());
+         (* The window just learned above must affect this same lane walk.
+            Otherwise a sibling on the same credential is retried before an
+            unrelated candidate even though the provider has already stated
+            that the shared account is exhausted.  This remains ordering,
+            not admission: if every remaining candidate is demoted they are
+            all still attempted in their prior relative order. *)
+         let rest =
+           Runtime_quota_window.demote_order
+             ~now:(Unix.gettimeofday ())
+             ~quota_scope_of:(fun candidate ->
+               Runtime.quota_scope_of_runtime_id (runtime_id_of candidate))
+             rest
+         in
          let retry_admitted =
            allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
          in
@@ -623,7 +636,7 @@ let run_named
            match Runtime.get_runtime_by_id runtime_id with
            | Some runtime -> Resolved_runtime runtime
            | None -> Missing_runtime runtime_id)
-        (deferred_runtime_ids hint)
+        lane_candidate_ids
   in
   let assigned_runtime_context_window =
     Runtime.max_context_of_runtime first_candidate

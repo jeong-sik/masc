@@ -39,9 +39,9 @@ val active_until : scope:scope -> now:float -> float option
 
 val demote_order :
   now:float ->
-  quota_scope_of:(string -> scope option) ->
-  string list ->
-  string list
+  quota_scope_of:('a -> scope option) ->
+  'a list ->
+  'a list
 (** Stable-partition [candidates]: those whose quota scope (via
     [quota_scope_of]) has an active window at [now] move to the tail,
     preserving declared relative order within both partitions.  Candidates

@@ -152,6 +152,23 @@ let test_scope_kinds_do_not_collide () =
     None
     (Q.active_until ~scope:provider_row_scope ~now:100.0)
 
+let test_registry_default_credential_is_shared_scope () =
+  let credential provider_id =
+    Runtime_adapter.effective_credential_reference ~provider_id None
+  in
+  let glm_scope =
+    Q.scope_of_credential ~provider_id:"glm" (credential "glm")
+  in
+  let image_scope =
+    Q.scope_of_credential ~provider_id:"zai-image" (credential "zai-image")
+  in
+  reset ();
+  Q.note_exhausted ~scope:glm_scope ~resets_at:500.0;
+  Alcotest.(check bool)
+    "registry rows sharing ZAI_API_KEY share a quota window"
+    true
+    (Option.is_some (Q.active_until ~scope:image_scope ~now:100.0))
+
 let () =
   Alcotest.run
     "runtime_quota_window"
@@ -186,5 +203,9 @@ let () =
             "scope kinds do not collide"
             `Quick
             test_scope_kinds_do_not_collide
+        ; Alcotest.test_case
+            "registry default credential shares scope"
+            `Quick
+            test_registry_default_credential_is_shared_scope
         ] )
     ]

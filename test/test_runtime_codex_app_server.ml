@@ -1290,14 +1290,25 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
            ~model:"gpt-fixture"
            ()
        with
-       | Error
-           (Agent_core.Error.Provider
-              (Llm_provider.Error.ProviderReportedError
-                 { provider = "codex_app_server"
-                 ; error_type = Some "context_window_exceeded_after_tool_effect"
-                 ; _
-                 })) ->
-         ()
+       | Error (Agent_core.Error.Internal detail) ->
+         (match Keeper_turn_driver.classify_masc_internal_error_of_string detail with
+          | Some
+              (Keeper_turn_driver.Provider_attempt_effect_fenced
+                 { runtime_id; effect_disposition; diagnostic }) ->
+            check string "fenced runtime" "codex.codex" runtime_id;
+            check
+              string
+              "effect disposition"
+              "effect_attempted"
+              (Keeper_provider_attempt_effect_core.to_string effect_disposition);
+            check
+              bool
+              "original context error remains diagnostic"
+              true
+              (Astring.String.is_infix
+                 ~affix:"context_window_exceeded_after_tool_effect"
+                 diagnostic)
+          | _ -> fail "Keeper did not return a typed provider-effect fence")
        | Error error -> fail (Agent_core.Error.to_string error)
        | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;

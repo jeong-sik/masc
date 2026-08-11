@@ -193,6 +193,7 @@ let attempt_runtime_candidates
     ?lane_id
     ?(on_retry_deferred = fun _ -> ())
     ?quota_scope_of
+    ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
        ?status:string ->
@@ -218,23 +219,32 @@ let attempt_runtime_candidates
         Runtime.quota_scope_of_runtime_id (runtime_id_of candidate)
   in
   (* Mid-walk demotion shares the pre-walk rule: never move an
-     exhausted-but-resolvable candidate behind one the runtime table cannot
-     resolve, or the walk fails on the missing head with a non-rotating error
-     before real alternatives are tried (PR #28219 review). Candidates whose
-     id resolves keep quota ordering among themselves; unresolvable ones sink
-     to the tail in declared order. *)
+     exhausted-but-dispatchable candidate behind one that cannot dispatch, or
+     the walk fails on the dead head with a non-rotating error before real
+     alternatives are tried (PR #28219 review). Dispatchability is judged on
+     the candidate value itself — production candidates are materialized
+     snapshots that stay dispatchable across a runtime.toml reload, so a
+     global-registry re-read here would wrongly sink a frozen [Resolved_runtime]
+     and promote a known-exhausted sibling ahead of it (PR #28219 review,
+     frozen-candidates thread). Callers with richer candidate types inject the
+     judgment; the id-table default serves plain-id callers, and a fixture-less
+     table judges everything undispatchable, which leaves order unchanged. *)
+  let candidate_dispatchable =
+    match candidate_dispatchable with
+    | Some candidate_dispatchable -> candidate_dispatchable
+    | None ->
+      fun candidate ->
+        Option.is_some (Runtime.get_runtime_by_id (runtime_id_of candidate))
+  in
   let demote_rest rest =
-    let resolvable, unresolvable =
-      List.partition
-        (fun candidate ->
-          Option.is_some (Runtime.get_runtime_by_id (runtime_id_of candidate)))
-        rest
+    let dispatchable, undispatchable =
+      List.partition candidate_dispatchable rest
     in
     Runtime_quota_window.demote_order
       ~now:(Unix.gettimeofday ())
       ~quota_scope_of
-      resolvable
-    @ unresolvable
+      dispatchable
+    @ undispatchable
   in
   let rec loop ~observed_overflow idx = function
     | [] ->
@@ -817,6 +827,12 @@ let run_named
     ~quota_scope_of:(function
       | Resolved_runtime runtime -> Some (Runtime.quota_scope_of_runtime runtime)
       | Missing_runtime _ -> None)
+    ~candidate_dispatchable:(function
+      (* A materialized snapshot stays dispatchable even if a runtime.toml
+         reload removed its id from the current table; only a candidate that
+         never resolved is a dead head. *)
+      | Resolved_runtime _ -> true
+      | Missing_runtime _ -> false)
     ~emit_runtime_manifest
     ~run_attempt:(fun ~idx:_ ~runtime_id:attempt_runtime_id candidate ->
       match candidate with

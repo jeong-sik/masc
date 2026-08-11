@@ -619,9 +619,6 @@ let add_routes ~sw ~clock router =
                       ~voter:reaction_actor
                   in
                   let reactions_for = board_reactions_lookup reaction_rows in
-                  let contributor_quality_for =
-                    board_contributor_quality_lookup ~config ()
-                  in
                   let posts_json =
                     List.map
                       (fun (p : Board.post) ->
@@ -629,9 +626,8 @@ let add_routes ~sw ~clock router =
                          let post_id = Board.Post_id.to_string p.id in
                          let current_vote = board_current_vote_for_post ~voter ~post_id in
                          let reactions = reactions_for (Board.Reaction_post, post_id) in
-                         let contributor_quality = contributor_quality_for author in
                          board_post_dashboard_json ~include_moderation ~blind_votes
-                           ?contributor_quality ~reactions
+                           ~reactions
                            ?current_vote
                            ~author_karma:(get_karma author) p)
                       paged
@@ -1109,23 +1105,6 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   (* Agent Reputation API *)
-  |> Http.Router.prefix_get "/api/v1/reputation/" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
-         let path = Http.Request.path request in
-         (match extract_path_param ~prefix:"/api/v1/reputation/" path with
-          | None ->
-              Http.Response.json_value
-                (`Assoc [("error", `String "agent_name is required")])
-                ~status:`Bad_request reqd
-          | Some agent_name ->
-              let rep =
-                Reputation.compute_reputation
-                  (Mcp_server.workspace_config state) ~agent_name
-              in
-              Http.Response.json_value
-                (Reputation.agent_reputation_to_yojson rep) reqd)
-       ) request reqd)
-
   (* Prompt Registry API *)
   |> Http.Router.get "/api/v1/prompts" (fun request reqd ->
        with_public_read (fun _state _req reqd ->

@@ -3,6 +3,7 @@ open Alcotest
 module Metrics = Dashboard_http_keeper_metrics
 module Detail = Dashboard_http_keeper_detail
 module Keeper_metrics_record = Masc.Keeper_metrics_record
+module Keeper_context_core_history = Masc.Keeper_context_core_history
 
 let metric ?(channel = "turn") tools =
   let kind =
@@ -227,8 +228,8 @@ let test_history_summary_decodes_content_blocks () =
   let rows =
     String.concat
       "\n"
-      [ {|{"role":"assistant","content_blocks":[{"type":"text","text":"hello from albini"}],"ts_unix":1.0}|}
-      ; {|{"role":"user","content_blocks":[{"type":"text","text":"ping @taskmaster please"}],"ts_unix":2.0}|}
+      [ {|{"role":"assistant","source":"direct_assistant","content_blocks":[{"type":"text","text":"hello from albini"}],"ts_unix":1.0}|}
+      ; {|{"role":"user","source":"direct_user","content_blocks":[{"type":"text","text":"ping @taskmaster please"}],"ts_unix":2.0}|}
       ]
     ^ "\n"
   in
@@ -272,6 +273,20 @@ let test_history_summary_routes_by_source_not_content () =
       ]
     |> Yojson.Safe.to_string
   in
+  let row_without_source ~role ~content ~ts_unix =
+    `Assoc
+      [
+        ("role", `String role);
+        ( "content_blocks",
+          `List
+            [
+              `Assoc
+                [ ("type", `String "text"); ("text", `String content) ];
+            ] );
+        ("ts_unix", `Float ts_unix);
+      ]
+    |> Yojson.Safe.to_string
+  in
   let user_content =
     "## Current World State\n### Namespace State\nthis is user-authored text"
   in
@@ -283,6 +298,10 @@ let test_history_summary_routes_by_source_not_content () =
           ~ts_unix:1.0;
         row ~role:"user" ~source:"world_state_prompt"
           ~content:"ordinary internal prompt text" ~ts_unix:2.0;
+        row ~role:"user" ~source:"world_state_promtp"
+          ~content:"unknown source must not enter conversation" ~ts_unix:3.0;
+        row_without_source ~role:"user"
+          ~content:"missing source must not enter conversation" ~ts_unix:4.0;
       ]
     ^ "\n"
   in
@@ -294,7 +313,7 @@ let test_history_summary_routes_by_source_not_content () =
           ~history_path:path
           ~filter_fragments:false
       in
-      check int "only the explicit internal source is excluded" 1 raw_count;
+      check int "only recognized direct source is included" 1 raw_count;
       match conversation with
       | `List [ item ] ->
           check string "message prose does not control routing" user_content
@@ -302,6 +321,30 @@ let test_history_summary_routes_by_source_not_content () =
       | other ->
           failf "expected one user-authored history item, got %s"
             (Yojson.Safe.to_string other))
+
+let test_history_source_missing_and_unknown_fail_closed () =
+  let check_quarantined source =
+    match Keeper_context_core_history.classify_history_entry ~source with
+    | Keeper_context_core_history.Move_internal -> ()
+    | Keeper_context_core_history.Keep_main ->
+        failf "source %S was incorrectly classified as main history" source
+    | Keeper_context_core_history.Drop_line ->
+        failf "source %S was dropped instead of quarantined" source
+  in
+  check_quarantined "";
+  check_quarantined "world_state_promtp";
+  check string "missing source uses internal history"
+    "/tmp/session/history.internal.jsonl"
+    (Keeper_context_core_history.history_path_for_source
+       ~session_dir:"/tmp/session" ~source:None);
+  check string "unknown source uses internal history"
+    "/tmp/session/history.internal.jsonl"
+    (Keeper_context_core_history.history_path_for_source
+       ~session_dir:"/tmp/session" ~source:(Some "world_state_promtp"));
+  check string "recognized direct source uses main history"
+    "/tmp/session/history.jsonl"
+    (Keeper_context_core_history.history_path_for_source
+       ~session_dir:"/tmp/session" ~source:(Some "direct_user"))
 
 (* [generation_stats] rows are values held in a table: each turn rebinds the
    entry rather than writing through a shared record. Two turns in the same
@@ -383,5 +426,7 @@ let () =
             test_history_summary_decodes_content_blocks;
           test_case "routes by source, not content" `Quick
             test_history_summary_routes_by_source_not_content;
+          test_case "missing and unknown sources fail closed" `Quick
+            test_history_source_missing_and_unknown_fail_closed;
         ] );
     ]

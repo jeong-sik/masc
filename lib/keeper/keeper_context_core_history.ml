@@ -14,19 +14,27 @@ type history_line_action =
   | Move_internal
   | Drop_line
 
+(* Only explicitly classified user/assistant turns belong in the dashboard-facing
+   history. Missing and unknown labels are quarantined in the internal file so
+   legacy or typo'd world-state rows cannot become conversation records. *)
+let is_main_history_source (source : string) =
+  match String.lowercase_ascii (String.trim source) with
+  | "direct_user" | "direct_assistant" -> true
+  | _ -> false
+
 let classify_history_entry ~(source : string) : history_line_action =
   if Keeper_types_support.is_prompt_history_source source
   then Drop_line
-  else if Keeper_types_support.is_internal_history_source source
-  then Move_internal
-  else Keep_main
+  else if is_main_history_source source
+  then Keep_main
+  else Move_internal
 
 let history_path_for_source ~(session_dir : string) ~(source : string option) :
     string =
   match source with
-  | Some source when Keeper_types_support.is_internal_history_source source ->
-      Filename.concat session_dir "history.internal.jsonl"
-  | _ -> Filename.concat session_dir "history.jsonl"
+  | Some source when classify_history_entry ~source = Keep_main ->
+      Filename.concat session_dir "history.jsonl"
+  | _ -> Filename.concat session_dir "history.internal.jsonl"
 
 let persist_message ?source session msg =
   let msg = Inference_utils.sanitize_message_utf8 msg in

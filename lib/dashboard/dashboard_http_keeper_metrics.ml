@@ -89,7 +89,8 @@ let keeper_history_summary_json
           if ts0 > 0.0 then ts0 else Safe_ops.json_float ~default:0.0 "timestamp" j
         in
         if role = "" || content = ""
-           || Keeper_types_support.is_internal_history_source source
+           || Keeper_context_core_history.classify_history_entry ~source
+              <> Keeper_context_core_history.Keep_main
         then
           (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
         else

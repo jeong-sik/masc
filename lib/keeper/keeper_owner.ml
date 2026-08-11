@@ -840,7 +840,7 @@ let start
                        (request
                           t
                           (Child_finished
-                             (Autonomous_child_finished { outcome; resolve }))))));
+                             (Autonomous_child_finished { outcome; resolve })))))));
           loop state shutdown_operation_id
         | Command (Child_finished completion, resolve) ->
           let result =

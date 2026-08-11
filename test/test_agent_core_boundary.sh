@@ -57,6 +57,13 @@ fi
 
 cp "${fixture}/lib/dune.safe" "${fixture}/lib/dune"
 rm "${fixture}/lib/deps.inc"
+printf '\n(library (name bad) (libraries voice_config))\n' >> "${fixture}/lib/dune"
+if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
+  echo "boundary self-test: private coordinator library name was accepted" >&2
+  exit 1
+fi
+
+cp "${fixture}/lib/dune.safe" "${fixture}/lib/dune"
 printf 'open Server_runtime\n' > "${fixture}/lib/open_bypass.ml"
 if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
   echo "boundary self-test: opened coordinator module was accepted" >&2
@@ -64,7 +71,7 @@ if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
 fi
 rm "${fixture}/lib/open_bypass.ml"
 
-rm -rf "${fixture}/lib"
+rm -rf "${fixture:?}/lib"
 if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
   echo "boundary self-test: missing core tree was accepted" >&2
   exit 1

@@ -58,5 +58,13 @@ val matches_continuation_route :
     are not treated as exact matches when the post transport did not carry
     those coordinates. *)
 
+val matches_terminal_continuation_route :
+  target:post_target ->
+  receipt_channel:Keeper_continuation_channel.t ->
+  origin_channel:Keeper_continuation_channel.t ->
+  bool
+(** True when a terminal receipt preserves the full typed route and its
+    concrete target channel matches the admitted continuation origin. *)
+
 val ok_json : surface:string -> ?message_id:string -> unit -> string
 val error_json : string -> string

@@ -332,7 +332,9 @@ let test_terminal_externalization_failure_contract () =
     classify
       (Masc.Keeper_tools_agent_core.Terminal_effect_completed
          (Masc.Keeper_tool_execution.Surface_post_completed
-            Masc.Keeper_surface_post.To_dashboard))
+            { target = Masc.Keeper_surface_post.To_dashboard
+            ; continuation_channel = None
+            }))
       error
   with
   | Some

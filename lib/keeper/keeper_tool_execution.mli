@@ -8,7 +8,10 @@ type deferred_kind =
   | External_effect_deferred
 
 type terminal_effect_receipt =
-  | Surface_post_completed of Keeper_surface_post.post_target
+  | Surface_post_completed of
+      { target : Keeper_surface_post.post_target
+      ; continuation_channel : Keeper_continuation_channel.t option
+      }
 (** Producer-owned proof of the concrete terminal effect that completed. *)
 
 (** [disposition] uses the canonical {!Tool_result.disposition}; this module
@@ -61,8 +64,13 @@ val failure_data
     on every disposition, including a later tool failure. *)
 val with_gate_authorization : Keeper_gate.authorization -> t -> t
 
-val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t
-(** Attach the resolved post target only to a completed execution. *)
+val with_surface_post_receipt :
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  Keeper_surface_post.post_target ->
+  t ->
+  t
+(** Attach the resolved post target and its typed continuation coordinates only
+    to a completed execution. *)
 
 (** Preserve the authoritative {!Tool_result.disposition} from a normal MASC
     handler. A [`String] payload stays opaque and is never interpreted as

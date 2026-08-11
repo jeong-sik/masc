@@ -3,7 +3,10 @@ type deferred_kind =
   | External_effect_deferred
 
 type terminal_effect_receipt =
-  | Surface_post_completed of Keeper_surface_post.post_target
+  | Surface_post_completed of
+      { target : Keeper_surface_post.post_target
+      ; continuation_channel : Keeper_continuation_channel.t option
+      }
 
 type t =
   { raw_output : string
@@ -101,11 +104,12 @@ let with_gate_authorization authorization result =
   }
 ;;
 
-let with_surface_post_receipt target result =
+let with_surface_post_receipt ?continuation_channel target result =
   match result.disposition with
   | Tool_result.Completed () ->
     { result with
-      terminal_effect_receipt = Some (Surface_post_completed target)
+      terminal_effect_receipt =
+        Some (Surface_post_completed { target; continuation_channel })
     }
   | Tool_result.Deferred () | Tool_result.Failed _ -> result
 ;;

@@ -923,6 +923,27 @@ let connector_post_gate_input ~connector ~channel_id ~content ?blocks () =
 
 let connector_post_gate_operation = "connector_post"
 
+let continuation_discord_reply_to_message_id = function
+  | Some
+      (Keeper_continuation_channel.Discord
+         { reply_to_message_id; _ }) ->
+    reply_to_message_id
+  | Some
+      ( Keeper_continuation_channel.Dashboard _
+      | Keeper_continuation_channel.Slack _
+      | Keeper_continuation_channel.Unrouted _ )
+  | None -> None
+;;
+
+let continuation_slack_thread_ts = function
+  | Some (Keeper_continuation_channel.Slack { thread_ts; _ }) -> thread_ts
+  | Some
+      ( Keeper_continuation_channel.Dashboard _
+      | Keeper_continuation_channel.Discord _
+      | Keeper_continuation_channel.Unrouted _ )
+  | None -> None
+;;
+
 type connector_post_replay =
   | Replay_discord_post of
       { input : Yojson.Safe.t
@@ -1068,7 +1089,14 @@ let replay_connector_post_with_outcome
       ?gate_grant
       ~input
     @@ fun () ->
-    (match Channel_gate_discord_state.send_message ~channel_id ~content () with
+    (match
+       Channel_gate_discord_state.send_message
+         ~channel_id
+         ~content
+         ?reply_to_message_id:
+           (continuation_discord_reply_to_message_id continuation_channel)
+         ()
+     with
      | Error send_error ->
        fail
          Keeper_surface_post.discord_label
@@ -1086,8 +1114,19 @@ let replay_connector_post_with_outcome
               (Surface_ref.Discord
                  { guild_id = None
                  ; channel_id
-                 ; parent_channel_id = None
-                 ; thread_id = None
+                 ; parent_channel_id =
+                     (match continuation_channel with
+                      | Some
+                          (Keeper_continuation_channel.Discord
+                             { parent_channel_id; _ }) ->
+                        parent_channel_id
+                      | _ -> None)
+                 ; thread_id =
+                     (match continuation_channel with
+                      | Some
+                          (Keeper_continuation_channel.Discord
+                             { thread_id; _ }) -> thread_id
+                      | _ -> None)
                  })
             ()
         with
@@ -1120,6 +1159,7 @@ let replay_connector_post_with_outcome
      | Some token ->
        (match
           Keeper_chat_slack.send_message_with_blocks
+            ?thread_ts:(continuation_slack_thread_ts continuation_channel)
             ~token
             ~channel:channel_id
             ~content
@@ -1138,7 +1178,11 @@ let replay_connector_post_with_outcome
                ~content
                ~surface:
                  (Surface_ref.Slack
-                    { team_id = None; channel_id; thread_ts = None })
+                    { team_id = None
+                    ; channel_id
+                    ; thread_ts =
+                        continuation_slack_thread_ts continuation_channel
+                    })
                ()
            with
            | Error detail ->
@@ -1163,9 +1207,12 @@ let handle_surface_post_with_outcome
       ~args
       ()
   =
+  let receipt_continuation_channel = continuation_channel in
   let succeed target payload =
     Keeper_tool_execution.success payload
-    |> Keeper_tool_execution.with_surface_post_receipt target
+    |> Keeper_tool_execution.with_surface_post_receipt
+         ?continuation_channel:receipt_continuation_channel
+         target
   in
   let fail
         ?(class_ = Tool_result.Workflow_rejection)
@@ -1280,7 +1327,9 @@ let handle_surface_post_with_outcome
         ?gate_context
         ?gate_grant
         (Replay_discord_post { input; channel_id; content = safe_content })
-      |> Keeper_tool_execution.with_surface_post_receipt target
+      |> Keeper_tool_execution.with_surface_post_receipt
+           ?continuation_channel:receipt_continuation_channel
+           target
     | Ok (Keeper_surface_post.To_slack { channel_id; blocks = _ } as target) ->
       let slack_blocks =
         Keeper_chat_slack.content_blocks_of_text safe_content
@@ -1305,7 +1354,9 @@ let handle_surface_post_with_outcome
            ; content = safe_content
            ; blocks = slack_blocks
            })
-      |> Keeper_tool_execution.with_surface_post_receipt target)
+      |> Keeper_tool_execution.with_surface_post_receipt
+           ?continuation_channel:receipt_continuation_channel
+           target)
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =

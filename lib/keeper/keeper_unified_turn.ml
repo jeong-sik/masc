@@ -1152,10 +1152,14 @@ let run_keeper_cycle
                          , Keeper_turn_outcome.External_effect_completed
                          , Runtime_agent.Completed
                          , Some
-                             (Keeper_tool_execution.Surface_post_completed target) )
-                         when Keeper_surface_post.matches_continuation_route
-                                target
-                                origin.channel ->
+                             (Keeper_tool_execution.Surface_post_completed
+                                { target
+                                ; continuation_channel = Some receipt_channel
+                                }) )
+                         when Keeper_surface_post.matches_terminal_continuation_route
+                                ~target
+                                ~receipt_channel
+                                ~origin_channel:origin.channel ->
                          Continuation_delivery_settled_by_terminal_surface_post
                        | Some _, None, _, Runtime_agent.Completed, _ ->
                          Continuation_delivery_quarantined

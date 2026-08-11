@@ -272,6 +272,51 @@ let test_terminal_receipt_requires_exact_supported_route () =
         | Ok channel -> channel
         | Error message -> fail message))
 
+let test_terminal_receipt_preserves_connector_coordinates () =
+  let discord ?reply_to_message_id channel_id =
+    Keeper_continuation_channel.discord
+      ~guild_id:(Some "guild")
+      ~channel_id
+      ~parent_channel_id:None
+      ~thread_id:None
+      ?reply_to_message_id
+      ~user_id:"user"
+      ()
+    |> Result.get_ok
+  in
+  let slack ?thread_ts channel_id =
+    Keeper_continuation_channel.slack
+      ~team_id:(Some "team")
+      ~channel_id
+      ~thread_ts
+      ~user_id:"user"
+    |> Result.get_ok
+  in
+  let discord_reply = discord ~reply_to_message_id:"message-1" "D1" in
+  let discord_other_reply = discord ~reply_to_message_id:"message-2" "D1" in
+  check bool "Discord reply coordinates settle" true
+    (SP.matches_terminal_continuation_route
+       ~target:(SP.To_discord { channel_id = "D1" })
+       ~receipt_channel:discord_reply
+       ~origin_channel:discord_reply);
+  check bool "Discord mismatched reply is quarantined" false
+    (SP.matches_terminal_continuation_route
+       ~target:(SP.To_discord { channel_id = "D1" })
+       ~receipt_channel:discord_reply
+       ~origin_channel:discord_other_reply);
+  let slack_thread = slack ~thread_ts:"thread-1" "C1" in
+  let slack_other_thread = slack ~thread_ts:"thread-2" "C1" in
+  check bool "Slack thread coordinates settle" true
+    (SP.matches_terminal_continuation_route
+       ~target:(SP.To_slack { channel_id = "C1"; blocks = None })
+       ~receipt_channel:slack_thread
+       ~origin_channel:slack_thread);
+  check bool "Slack mismatched thread is quarantined" false
+    (SP.matches_terminal_continuation_route
+       ~target:(SP.To_slack { channel_id = "C1"; blocks = None })
+       ~receipt_channel:slack_thread
+       ~origin_channel:slack_other_thread)
+
 (* ── append_assistant_message ───────────────────────────────────── *)
 
 let with_temp_base_dir f =
@@ -362,6 +407,8 @@ let () =
         [
           test_case "requires exact supported route" `Quick
             test_terminal_receipt_requires_exact_supported_route;
+          test_case "preserves connector coordinates" `Quick
+            test_terminal_receipt_preserves_connector_coordinates;
         ] );
       ( "assistant append",
         [

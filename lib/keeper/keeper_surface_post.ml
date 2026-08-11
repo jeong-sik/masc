@@ -132,6 +132,30 @@ let matches_continuation_route target channel =
       | Keeper_continuation_channel.Unrouted _ ) ->
     false
 
+let target_matches_continuation_channel target channel =
+  match target, channel with
+  | To_discord { channel_id = posted },
+    Keeper_continuation_channel.Discord { channel_id; _ } ->
+    String.equal posted channel_id
+  | To_slack { channel_id = posted; _ },
+    Keeper_continuation_channel.Slack { channel_id; _ } ->
+    String.equal posted channel_id
+  | To_dashboard, Keeper_continuation_channel.Dashboard _ -> false
+  | (To_dashboard | To_discord _ | To_slack _),
+    ( Keeper_continuation_channel.Dashboard _
+    | Keeper_continuation_channel.Discord _
+    | Keeper_continuation_channel.Slack _
+    | Keeper_continuation_channel.Unrouted _ ) ->
+    false
+
+let matches_terminal_continuation_route
+      ~target
+      ~receipt_channel
+      ~origin_channel
+  =
+  target_matches_continuation_channel target receipt_channel
+  && Keeper_continuation_channel.same_route receipt_channel origin_channel
+
 let ok_json ~surface ?message_id () =
   let fields =
     [ ("status", `String "posted"); ("surface", `String surface) ]

@@ -1,5 +1,13 @@
 (** Keeper projection for the official Antigravity subscription runtime. *)
 
+type attempt_outcome =
+  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; effect_disposition : Keeper_provider_attempt_effect.t
+  }
+(** One Antigravity candidate result plus its typed effect observation.
+    Validation/setup and a typed process-spawn failure are provably
+    pre-dispatch; all other client outcomes remain fail-closed. *)
+
 val run :
   runtime_id:string ->
   keeper_name:string ->
@@ -17,4 +25,4 @@ val run :
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
   config:Runtime_execution.antigravity_cli ->
-  (Runtime_agent.run_result, Agent_core.Error.t) result
+  attempt_outcome

@@ -148,6 +148,7 @@ type blocker_class =
   | Internal_contract_rejected
   | Incomplete_tool_transcript
   | Terminal_effect_failed
+  | Provider_attempt_effect_fenced
   | Receipt_persistence_failed
   | Gate_replay_repair_required
 

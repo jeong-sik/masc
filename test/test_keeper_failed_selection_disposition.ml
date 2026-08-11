@@ -2,9 +2,10 @@
     [Keeper_heartbeat_loop.failed_selection_terminal_detail] (#26546).
 
     With automatic overflow-compaction recovery removed, the heartbeat owns
-    exactly one terminalization opinion for a failed turn holding a pending
-    Event Queue selection: a typed context-overflow terminal route with no
-    deferred runtime lane consumes the selection; every other failure shape
+    two terminalization opinions for a failed turn holding a pending Event
+    Queue selection: a typed context-overflow terminal route, and a provider
+    attempt whose effect fence forbids replay. With no deferred runtime lane,
+    either consumes the selection as failed; every other failure shape
     preserves it. These tests pin each preserving class independently so a
     refactor cannot silently widen the consuming arm back to a blanket
     [Exhausted_visible_alive] match (the 2026-08-01 review regression). *)
@@ -66,6 +67,34 @@ let test_overflow_with_deferred_lane_preserves () =
     None
     (Loop.failed_selection_terminal_detail
        (overflow_failure ~deferred_runtime_lane:deferred_lane ()))
+;;
+
+let test_effect_fenced_failure_terminalizes_exact_source () =
+  let error =
+    Masc.Keeper_turn_driver.core_error_of_masc_internal_error
+      (Masc.Keeper_turn_driver.Provider_attempt_effect_fenced
+         { runtime_id = "effect-owner"
+         ; effect_disposition =
+             Masc.Keeper_provider_attempt_effect.Observation_unavailable
+         ; diagnostic = "provider failed after dispatch"
+         })
+  in
+  let route =
+    KFR.route_of_error ~boundary:KFR.Masc_execution error
+  in
+  match
+    Loop.failed_selection_terminal_detail
+      (failure
+         ~deferred_runtime_lane:deferred_lane
+         ~route
+         ~source_disposition:Turn.Follow_failure_route
+         error)
+  with
+  | Some detail -> check bool "detail is non-empty" true (String.length detail > 0)
+  | None ->
+    fail
+      "effect-fenced failure must terminalize the exact failed source instead \
+       of replaying it on the next heartbeat"
 ;;
 
 let preserving_terminal_classes =
@@ -139,6 +168,10 @@ let () =
             "overflow with deferred lane preserves"
             `Quick
             test_overflow_with_deferred_lane_preserves
+        ; test_case
+            "effect-fenced failure terminalizes the exact source"
+            `Quick
+            test_effect_fenced_failure_terminalizes_exact_source
         ; test_case
             "other terminal classes preserve"
             `Quick

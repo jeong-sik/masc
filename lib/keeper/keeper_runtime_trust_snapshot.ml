@@ -103,6 +103,7 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   | Keeper_meta_contract.Internal_contract_rejected
   | Keeper_meta_contract.Incomplete_tool_transcript
   | Keeper_meta_contract.Terminal_effect_failed
+  | Keeper_meta_contract.Provider_attempt_effect_fenced
   | Keeper_meta_contract.Receipt_persistence_failed
   | Keeper_meta_contract.Gate_replay_repair_required ->
     Keeper_turn_disposition.Provider_error

@@ -311,6 +311,11 @@ type masc_internal_error =
       effect_disposition : Tool_result.failure_effect_disposition;
       diagnostic : string;
     }
+  | Provider_attempt_effect_fenced of {
+      runtime_id : string;
+      effect_disposition : Keeper_provider_attempt_effect_core.t;
+      diagnostic : string;
+    }
   | Receipt_persistence_failed of {
       detail : string;
     }
@@ -508,6 +513,15 @@ let masc_internal_error_to_json = function
         );
         ("diagnostic", `String diagnostic);
       ]
+  | Provider_attempt_effect_fenced
+      { runtime_id; effect_disposition; diagnostic } ->
+    `Assoc
+      [ "kind", `String "provider_attempt_effect_fenced"
+      ; "runtime_id", `String runtime_id
+      ; ( "effect_disposition"
+        , `String (Keeper_provider_attempt_effect_core.to_string effect_disposition) )
+      ; "diagnostic", `String diagnostic
+      ]
   | Receipt_persistence_failed { detail } ->
     `Assoc
       [
@@ -641,6 +655,7 @@ let summary_of_masc_internal_error = function
   | Internal_contract_rejected _
   | Incomplete_tool_transcript _
   | Terminal_effect_failed _
+  | Provider_attempt_effect_fenced _
   | Receipt_persistence_failed _
   | Gate_replay_repair_required _ -> None
 
@@ -654,13 +669,15 @@ let kind_of_masc_internal_error = function
   | Internal_contract_rejected _ -> "internal_contract_rejected"
   | Incomplete_tool_transcript _ -> incomplete_tool_transcript_kind
   | Terminal_effect_failed _ -> "terminal_effect_failed"
+  | Provider_attempt_effect_fenced _ -> "provider_attempt_effect_fenced"
   | Receipt_persistence_failed _ -> "receipt_persistence_failed"
   | Gate_replay_repair_required _ -> "gate_replay_repair_required"
 
 let runtime_id_of_masc_internal_error = function
   | Runtime_exhausted { runtime_id; _ }
   | Capacity_backpressure { runtime_id; _ }
-  | Resumable_cli_session { runtime_id; _ } ->
+  | Resumable_cli_session { runtime_id; _ }
+  | Provider_attempt_effect_fenced { runtime_id; _ } ->
       let runtime_id = runtime_id_to_string runtime_id in
       if String.equal (String.trim runtime_id) "" then "unknown"
       else runtime_id
@@ -704,6 +721,7 @@ let accept_no_progress_retry_kind = function
   | Internal_contract_rejected _
   | Incomplete_tool_transcript _
   | Terminal_effect_failed _
+  | Provider_attempt_effect_fenced _
   | Receipt_persistence_failed _
   | Gate_replay_repair_required _ ->
     None
@@ -902,6 +920,22 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                     { failure_class; effect_disposition; diagnostic })
              | _ -> None)
           | _ -> None)
+      | Some (`String "provider_attempt_effect_fenced")
+        when exact_fields
+               [ "kind"; "runtime_id"; "effect_disposition"; "diagnostic" ]
+               fields ->
+        (match
+           string_opt_of_assoc "runtime_id" json,
+           string_opt_of_assoc "effect_disposition" json,
+           string_opt_of_assoc "diagnostic" json
+         with
+         | Some runtime_id, Some effect_disposition, Some diagnostic ->
+           Option.map
+             (fun effect_disposition ->
+                Provider_attempt_effect_fenced
+                  { runtime_id; effect_disposition; diagnostic })
+             (Keeper_provider_attempt_effect_core.of_string effect_disposition)
+         | _ -> None)
       | Some (`String "receipt_persistence_failed") -> (
           match string_opt_of_assoc "detail" json with
           | Some detail -> Some (Receipt_persistence_failed { detail })

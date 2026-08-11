@@ -55,12 +55,12 @@ type turn_result =
   ; resumed : bool
   }
 
-type dynamic_tool_result =
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
   }
 
-type dynamic_tool =
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
@@ -105,16 +105,7 @@ let history_bytes messages =
   List.fold_left (fun acc message -> acc + String.length message.text) 0 messages
 ;;
 
-let dynamic_tool_bytes tools =
-  List.fold_left
-    (fun acc tool ->
-      acc
-      + String.length tool.name
-      + String.length tool.description
-      + String.length (Yojson.Safe.to_string tool.input_schema))
-    0
-    tools
-;;
+let dynamic_tool_bytes = Runtime_official_client_tool.dynamic_tool_bytes
 
 type error =
   | Invalid_config of string
@@ -733,17 +724,6 @@ let history_item (message : history_message) =
               ]
           ] )
     ]
-;;
-
-let invoke_state_callback ~stage callback =
-  try
-    match callback () with
-    | Ok () -> Ok ()
-    | Error detail -> protocol_error stage detail
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Eio.Time.Timeout as exn -> raise exn
-  | exn -> protocol_error stage (Printexc.to_string exn)
 ;;
 
 let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_effort

@@ -175,6 +175,34 @@ let test_deadline_terminates_command_once () =
       check bool "timeout reported" true
         (contains_substring observed "test command timed out after 1s"))
 
+let test_job_deadline_terminates_command_once () =
+  with_temp_dir "ci-run-tests-job-deadline" (fun dir ->
+      let ci_log = Filename.concat dir "ci.log" in
+      let started_log = Filename.concat dir "started.log" in
+      let done_log = Filename.concat dir "done.log" in
+      let command =
+        Printf.sprintf
+          "printf 'started' > %s; sleep 5; printf 'done' > %s"
+          (Filename.quote started_log)
+          (Filename.quote done_log)
+      in
+      let deadline = int_of_float (Unix.time ()) + 3 in
+      let env =
+        ("CI_TEST_TIMEOUT_SEC", "0")
+        :: ("CI_TEST_DEADLINE_EPOCH", string_of_int deadline)
+        :: base_env ci_log
+      in
+      let code, stdout, stderr = run_ci ~cwd:dir ~env command in
+      check int "job deadline exit code" 124 code;
+      check string "one command started" "started" (read_file started_log);
+      check bool "deadline command did not complete" false
+        (Sys.file_exists done_log);
+      let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
+      check bool "deadline diagnostics" true
+        (contains_substring observed "[ci-diag] reason=job_deadline_timeout_");
+      check bool "deadline reported" true
+        (contains_substring observed "deadline_epoch="))
+
 let test_contract_harness_runs_once () =
   with_temp_dir "ci-run-tests-contract" (fun dir ->
       let ci_log = Filename.concat dir "ci.log" in
@@ -217,6 +245,8 @@ let () =
           test_case "failure is not retried" `Quick test_failure_is_not_retried;
           test_case "deadline terminates one command" `Quick
             test_deadline_terminates_command_once;
+          test_case "job deadline terminates one command" `Quick
+            test_job_deadline_terminates_command_once;
           test_case "contract harness runs once" `Quick
             test_contract_harness_runs_once;
           test_case "retry layers are absent" `Quick

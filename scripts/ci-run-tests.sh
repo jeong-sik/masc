@@ -25,6 +25,7 @@ fi
 
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
 TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-0}"
+TEST_DEADLINE_EPOCH="${CI_TEST_DEADLINE_EPOCH:-}"
 TEST_TIMEOUT_GRACE_SEC=5
 START_EPOCH="$(date +%s)"
 TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp_ci_log)}"
@@ -48,6 +49,13 @@ if [[ ! "${TEST_TIMEOUT_SEC}" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 TEST_TIMEOUT_SEC="$((10#${TEST_TIMEOUT_SEC}))"
+if [[ -n "${TEST_DEADLINE_EPOCH}" && ! "${TEST_DEADLINE_EPOCH}" =~ ^[0-9]+$ ]]; then
+  echo "[ci-run] ERROR: CI_TEST_DEADLINE_EPOCH must be a non-negative integer" >&2
+  exit 2
+fi
+if [[ -n "${TEST_DEADLINE_EPOCH}" ]]; then
+  TEST_DEADLINE_EPOCH="$((10#${TEST_DEADLINE_EPOCH}))"
+fi
 if [[ -z "${CI_TEST_DISK_MIN_AVAILABLE_MB}" || "${CI_TEST_DISK_MIN_AVAILABLE_MB}" -lt 0 ]]; then
   CI_TEST_DISK_MIN_AVAILABLE_MB=1024
 fi
@@ -178,6 +186,20 @@ diag_dump() {
   fi
 }
 
+LAST_TIMEOUT_SEC="${TEST_TIMEOUT_SEC}"
+
+deadline_remaining_sec() {
+  if [[ -z "${TEST_DEADLINE_EPOCH}" ]]; then
+    printf '%s\n' "-1"
+    return 0
+  fi
+  local remaining=$((TEST_DEADLINE_EPOCH - $(date +%s)))
+  if [[ "${remaining}" -lt 0 ]]; then
+    remaining=0
+  fi
+  printf '%s\n' "${remaining}"
+}
+
 heartbeat() {
   while true; do
     echo "[ci-heartbeat] $(iso_now) elapsed_sec=$(elapsed_sec) command still running"
@@ -235,10 +257,28 @@ trap 'cleanup; exit 143' TERM
 run_observed() {
   local cmd="$1"
   local status=0
+  local observed_timeout_sec="${TEST_TIMEOUT_SEC}"
+  local deadline_capped=0
   local command_start_epoch
   command_start_epoch="$(date +%s)"
   local timed_out=0
   local next_disk_check=$(( $(date +%s) + CI_TEST_DISK_CHECK_SEC ))
+
+  if [[ -n "${TEST_DEADLINE_EPOCH}" ]]; then
+    local deadline_remaining
+    deadline_remaining="$(deadline_remaining_sec)"
+    if [[ "${deadline_remaining}" -le 0 ]]; then
+      log_line "[ci-observe] job deadline exceeded before command start"
+      diag_dump "deadline_exceeded"
+      LAST_TIMEOUT_SEC=0
+      return 124
+    fi
+    if [[ "${observed_timeout_sec}" -eq 0 || "${observed_timeout_sec}" -gt "${deadline_remaining}" ]]; then
+      observed_timeout_sec="${deadline_remaining}"
+      deadline_capped=1
+    fi
+  fi
+  LAST_TIMEOUT_SEC="${observed_timeout_sec}"
 
   tail -n 0 -f "${TEST_LOG_FILE}" &
   ACTIVE_LOG_TAIL_PID=$!
@@ -257,10 +297,14 @@ run_observed() {
         diag_dump "disk_pressure_observed"
       fi
     fi
-    if [[ "${TEST_TIMEOUT_SEC}" -gt 0 ]] \
-       && [[ $((now_epoch - command_start_epoch)) -ge "${TEST_TIMEOUT_SEC}" ]]; then
-      log_line "[ci-observe] timeout timeout_sec=${TEST_TIMEOUT_SEC}"
-      diag_dump "timeout_${TEST_TIMEOUT_SEC}s"
+    if [[ "${observed_timeout_sec}" -gt 0 ]] \
+       && [[ $((now_epoch - command_start_epoch)) -ge "${observed_timeout_sec}" ]]; then
+      log_line "[ci-observe] timeout timeout_sec=${observed_timeout_sec}"
+      if [[ "${deadline_capped}" -eq 1 ]]; then
+        diag_dump "job_deadline_timeout_${observed_timeout_sec}s"
+      else
+        diag_dump "timeout_${observed_timeout_sec}s"
+      fi
       terminate_active_cmd_tree
       timed_out=1
       break
@@ -285,6 +329,7 @@ run_observed() {
 log_line "[ci-run] command: ${TEST_CMD}"
 log_line "[ci-run] heartbeat_sec=${HEARTBEAT_SEC}"
 log_line "[ci-run] timeout_sec=${TEST_TIMEOUT_SEC}"
+log_line "[ci-run] deadline_epoch=${TEST_DEADLINE_EPOCH:-none}"
 log_line "[ci-run] disk_min_available_mb=${CI_TEST_DISK_MIN_AVAILABLE_MB} disk_check_sec=${CI_TEST_DISK_CHECK_SEC}"
 log_line "[ci-run] started_at=$(iso_now)"
 log_line "[ci-run] log_file=${TEST_LOG_FILE}"
@@ -297,7 +342,7 @@ status=0
 run_observed "$(effective_test_cmd)" || status=$?
 if [[ "${status}" -ne 0 ]]; then
   if [[ "${status}" -eq 124 ]]; then
-    log_line "[ci-run] ERROR: test command timed out after ${TEST_TIMEOUT_SEC}s"
+    log_line "[ci-run] ERROR: test command timed out after ${LAST_TIMEOUT_SEC}s"
   else
     diag_dump "nonzero_exit_${status}"
     log_line "[ci-run] ERROR: test command failed with exit=${status}"

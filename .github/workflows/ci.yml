@@ -682,6 +682,15 @@ jobs:
     #   - Focused groups have explicit fail-closed deadlines; this job timeout
     #     is the final safety boundary for setup, compilation, and all suites.
     steps:
+      - name: Establish Build and Test deadline
+        env:
+          CI_JOB_TIMEOUT_SEC: "3600"
+        run: |
+          set -euo pipefail
+          deadline_epoch=$(( $(date +%s) + CI_JOB_TIMEOUT_SEC ))
+          echo "CI_TEST_DEADLINE_EPOCH=${deadline_epoch}" >> "${GITHUB_ENV}"
+          echo "::notice::Build and Test deadline epoch=${deadline_epoch}"
+
       - name: Free disk space
         # ubuntu-latest starts with roughly 14 GB free but preinstalls the
         # Android SDK (~9 GB), .NET (~1.6 GB), GHC/Haskell (~1 GB) and the
@@ -1188,6 +1197,9 @@ jobs:
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
           RUN_AGENT_CORE: ${{ needs.changes.outputs.agent_core }}
+          # Keep ten minutes available for the two post-focused harnesses;
+          # the runner also consumes the job-wide CI_TEST_DEADLINE_EPOCH.
+          CI_FOCUSED_SUITE_RESERVE_SEC: "600"
         run: scripts/ci-run-focused-tests.sh
 
       - name: Run transport harness suite
@@ -1196,6 +1208,7 @@ jobs:
         env:
           ME_ROOT: /tmp/me
           CI_TEST_HEARTBEAT_SEC: 15
+          CI_TEST_TIMEOUT_SEC: 300
           DUNE_JOBS: 1
         run: |
           mkdir -p /tmp/me
@@ -1215,6 +1228,7 @@ jobs:
         env:
           ME_ROOT: /tmp/me
           CI_TEST_HEARTBEAT_SEC: 15
+          CI_TEST_TIMEOUT_SEC: 300
           DUNE_JOBS: 1
         run: |
           mkdir -p /tmp/me

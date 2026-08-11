@@ -13,20 +13,93 @@ cd "$(git rev-parse --show-toplevel)" || exit
 export CI_TEST_HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-15}"
 export DUNE_JOBS="${DUNE_JOBS:-1}"
 export ME_ROOT="${ME_ROOT:-/tmp/me}"
+export CI_FOCUSED_SUITE_RESERVE_SEC="${CI_FOCUSED_SUITE_RESERVE_SEC:-600}"
+export CI_FOCUSED_SUITE_BUDGET_SEC="${CI_FOCUSED_SUITE_BUDGET_SEC:-3000}"
 mkdir -p "${ME_ROOT}"
+
+if [[ ! "${CI_FOCUSED_SUITE_RESERVE_SEC}" =~ ^[0-9]+$ ]]; then
+  echo "[ci-focused] ERROR: CI_FOCUSED_SUITE_RESERVE_SEC must be a non-negative integer" >&2
+  exit 2
+fi
+if [[ ! "${CI_FOCUSED_SUITE_BUDGET_SEC}" =~ ^[0-9]+$ ]]; then
+  echo "[ci-focused] ERROR: CI_FOCUSED_SUITE_BUDGET_SEC must be a non-negative integer" >&2
+  exit 2
+fi
+if [[ -n "${CI_TEST_DEADLINE_EPOCH:-}" && ! "${CI_TEST_DEADLINE_EPOCH}" =~ ^[0-9]+$ ]]; then
+  echo "[ci-focused] ERROR: CI_TEST_DEADLINE_EPOCH must be a non-negative integer" >&2
+  exit 2
+fi
+
+CI_FOCUSED_SUITE_RESERVE_SEC="$((10#${CI_FOCUSED_SUITE_RESERVE_SEC}))"
+CI_FOCUSED_SUITE_BUDGET_SEC="$((10#${CI_FOCUSED_SUITE_BUDGET_SEC}))"
+if [[ -n "${CI_TEST_DEADLINE_EPOCH:-}" ]]; then
+  CI_TEST_DEADLINE_EPOCH="$((10#${CI_TEST_DEADLINE_EPOCH}))"
+  export CI_TEST_DEADLINE_EPOCH
+fi
+FOCUSED_START_EPOCH="$(date +%s)"
+FOCUSED_BUDGET_EXHAUSTED=0
+
+focused_budget_remaining_sec() {
+  local remaining
+  if [[ -n "${CI_TEST_DEADLINE_EPOCH:-}" ]]; then
+    remaining=$((CI_TEST_DEADLINE_EPOCH - $(date +%s) - CI_FOCUSED_SUITE_RESERVE_SEC))
+  else
+    remaining=$((FOCUSED_START_EPOCH + CI_FOCUSED_SUITE_BUDGET_SEC - $(date +%s)))
+  fi
+  if [[ "${remaining}" -lt 0 ]]; then
+    remaining=0
+  fi
+  printf '%s\n' "${remaining}"
+}
+
+focused_timeout_sec() {
+  local requested="$1"
+  local remaining
+  remaining="$(focused_budget_remaining_sec)"
+  if [[ "${remaining}" -le 0 ]]; then
+    FOCUSED_BUDGET_EXHAUSTED=1
+    echo "[ci-focused] ERROR: focused suite budget exhausted; later groups are not started" >&2
+    return 124
+  fi
+  if [[ "${requested}" -gt "${remaining}" ]]; then
+    printf '%s\n' "${remaining}"
+  else
+    printf '%s\n' "${requested}"
+  fi
+}
+
+run_command_group() {
+  local label="$1"
+  local timeout_sec="$2"
+  local command="$3"
+  local effective_timeout_sec=""
+  local status=0
+  effective_timeout_sec="$(focused_timeout_sec "${timeout_sec}")" || return $?
+  echo "::group::focused tests: ${label}"
+  echo "[ci-focused] requested_timeout_sec=${timeout_sec} effective_timeout_sec=${effective_timeout_sec} remaining_budget_sec=$(focused_budget_remaining_sec)"
+  CI_TEST_TIMEOUT_SEC="${effective_timeout_sec}" \
+    scripts/ci-run-tests.sh "${command}" || status=$?
+  echo "::endgroup::"
+  if [[ "${status}" -eq 124 && "$(focused_budget_remaining_sec)" -le 0 ]]; then
+    FOCUSED_BUDGET_EXHAUSTED=1
+  fi
+  return "${status}"
+}
 
 run_group() {
   local label="$1"
   local timeout_sec="$2"
   shift 2
   local target_args=""
-  local status=0
   printf -v target_args ' %q' "$@"
-  echo "::group::focused tests: ${label}"
-  CI_TEST_TIMEOUT_SEC="${timeout_sec}" \
-    scripts/ci-run-tests.sh "opam exec -- dune build --root .${target_args}" || status=$?
-  echo "::endgroup::"
-  return "${status}"
+  run_command_group "${label}" "${timeout_sec}" "opam exec -- dune build --root .${target_args}"
+}
+
+stop_if_focused_budget_exhausted() {
+  if [[ "${FOCUSED_BUDGET_EXHAUSTED}" -eq 1 || "$(focused_budget_remaining_sec)" -le 0 ]]; then
+    echo "::error::focused suite deadline reached before all groups completed" >&2
+    exit 124
+  fi
 }
 
 paused_targets=(
@@ -162,18 +235,19 @@ overall_status=0
   export ALCOTEST_QUICK_TESTS=1
   run_group paused-work 600 "${paused_targets[@]}"
 ) || overall_status=1
+stop_if_focused_budget_exhausted
 
-echo "::group::focused tests: host-fd-health-paths"
-if ! bash test/test_monitor_system_health_paths.sh; then
-  overall_status=1
-fi
-echo "::endgroup::"
+run_command_group host-fd-health-paths 120 "bash test/test_monitor_system_health_paths.sh" || overall_status=1
+stop_if_focused_budget_exhausted
 
 run_group board-attention-worker 180 "${board_attention_targets[@]}" || overall_status=1
+stop_if_focused_budget_exhausted
 run_group normal 1200 "${normal_targets[@]}" || overall_status=1
+stop_if_focused_budget_exhausted
 
 if [[ "${RUN_AGENT_CORE:-false}" == "true" ]]; then
   run_group agent-core 900 "${agent_core_targets[@]}" || overall_status=1
+  stop_if_focused_budget_exhausted
 else
   echo "::notice::focused tests: agent-core skipped by changed-surface scope"
 fi
@@ -184,6 +258,7 @@ fi
   export MASC_E2E_TESTS=true
   run_group operator-control 600 "${operator_targets[@]}"
 ) || overall_status=1
+stop_if_focused_budget_exhausted
 
 (
   export MASC_E2E_TESTS=true

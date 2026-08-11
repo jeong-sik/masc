@@ -37,6 +37,12 @@ type run =
 
 type t
 
+type completion_error =
+  | Unknown_run
+  | Persistence_failed of string
+
+val completion_error_to_string : completion_error -> string
+
 (** Current-only durable registry. The v2 file starts at the closed
     [run_input] contract; the removed open-JSON rows are not replayed or
     migrated into this store. *)
@@ -61,7 +67,10 @@ val mark_completed
   -> outcome:outcome
   -> elapsed_s:float
   -> output:Yojson.Safe.t
-  -> unit
+  -> (unit, completion_error) result
+(** Record an observation-plane completion without taking ownership of the
+    caller's primary lifecycle. Persistence failures are returned rather than
+    raised; the durable/in-memory registry entry remains [Running]. *)
 
 val list_runs : t -> run list
 val get : t -> run_id:string -> run option

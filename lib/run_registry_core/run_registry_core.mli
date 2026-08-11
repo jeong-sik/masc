@@ -72,7 +72,11 @@ module Make (Payload : Payload) : sig
     :  t
     -> id:string
     -> completion:Payload.completion
-    -> [ `Completed | `Unknown ]
+    -> [ `Completed | `Persistence_failed of string | `Unknown ]
+  (** Completion persistence is an observation-plane mutation. A durable
+      append failure is returned explicitly and leaves the in-memory entry
+      [Running], so callers can settle their primary lifecycle independently
+      without publishing state that cannot be replayed. *)
 
   val list_entries : t -> entry list
   val get : t -> id:string -> entry option

@@ -6,6 +6,15 @@ let remove_if_exists path =
   | Sys_error _ -> ()
 ;;
 
+let mark_completed_exn t ~run_id ~outcome ~elapsed_s ~output =
+  match R.mark_completed t ~run_id ~outcome ~elapsed_s ~output with
+  | Ok () -> ()
+  | Error error ->
+    failf
+      "exact-lane completion failed: %s"
+      (R.completion_error_to_string error)
+;;
+
 let test_round_trip_preserves_exact_evidence () =
   let path = Filename.temp_file "exact-lane-runs-" ".jsonl" in
   remove_if_exists path;
@@ -18,7 +27,7 @@ let test_round_trip_preserves_exact_evidence () =
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input (`Assoc [ "message_count", `Int 4 ]));
-  R.mark_completed
+  mark_completed_exn
     registry
     ~run_id:"run-1"
     ~outcome:R.Succeeded
@@ -76,7 +85,7 @@ let test_exact_history_is_not_pruned_across_lanes () =
       ~actor:"keeper-a"
       ~started_at:(float_of_int index)
       ~input:(R.Exact_input (`Assoc [ "index", `Int index ]));
-    R.mark_completed
+    mark_completed_exn
       registry
       ~run_id
       ~outcome:R.Succeeded
@@ -125,19 +134,19 @@ let test_failed_durable_completion_keeps_running_state () =
     ~input:(R.Exact_input `Null);
   Sys.remove path;
   Unix.mkdir path 0o700;
-  let failed =
-    try
-      R.mark_completed
-        registry
-        ~run_id:"completion-not-published"
-        ~outcome:R.Succeeded
-        ~elapsed_s:0.1
-        ~output:(`String "must-not-publish");
-      false
-    with
-    | Sys_error _ | Unix.Unix_error _ -> true
+  let completion =
+    R.mark_completed
+      registry
+      ~run_id:"completion-not-published"
+      ~outcome:R.Succeeded
+      ~elapsed_s:0.1
+      ~output:(`String "must-not-publish")
   in
-  check bool "directory cannot receive durable completion" true failed;
+  (match completion with
+   | Error (R.Persistence_failed detail) ->
+     check bool "failure retains durable detail" true (String.trim detail <> "")
+   | Error R.Unknown_run -> fail "registered run became unknown"
+   | Ok () -> fail "directory unexpectedly received durable completion");
   let run = R.get registry ~run_id:"completion-not-published" |> Option.get in
   check string "failed completion remains running" "running" (R.status_label run.status);
   Unix.rmdir path

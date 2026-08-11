@@ -97,6 +97,7 @@ let mark_completed t ~run_id ~outcome =
   match Store.complete t ~id:run_id ~completion:outcome with
   | `Completed -> ()
   | `Unknown -> ()
+  | `Persistence_failed detail -> raise (Sys_error detail)
 ;;
 
 let run_of_entry (entry : Store.entry) =

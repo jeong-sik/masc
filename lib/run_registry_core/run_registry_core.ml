@@ -198,37 +198,58 @@ module Make (Payload : Payload) = struct
     | label -> Error (Printf.sprintf "unknown %s event %S" Payload.name label)
   ;;
 
-  let append_event t event =
+  let append_event_result t event =
     match t.path with
-    | None -> ()
+    | None -> Ok ()
     | Some path ->
       let suffix = Yojson.Safe.to_string (event_to_yojson event) ^ "\n" in
       (match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
-       | Private_file_succeeded () -> ()
+       | exception Sys_error detail ->
+         Error
+           (Printf.sprintf
+              "%s: durable append raised for %s: %s"
+              Payload.name
+              path
+              detail)
+       | exception Unix.Unix_error (error, operation, argument) ->
+         Error
+           (Printf.sprintf
+              "%s: durable append raised for %s: %s(%s): %s"
+              Payload.name
+              path
+              operation
+              argument
+              (Unix.error_message error))
+       | Private_file_succeeded () -> Ok ()
        | Private_file_succeeded_with_cleanup_failure
            { value = (); cleanup_failure } ->
          Log.Misc.error
            "%s: durable append committed for %s but descriptor settlement failed: %s"
            Payload.name
            path
-           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+         Ok ()
        | Private_file_failed error ->
-         raise
-           (Sys_error
-              (Printf.sprintf
-                 "%s: durable append failed for %s: %s"
-                 Payload.name
-                 path
-                 (Fs_compat.private_jsonl_append_error_to_string error)))
+         Error
+           (Printf.sprintf
+              "%s: durable append failed for %s: %s"
+              Payload.name
+              path
+              (Fs_compat.private_jsonl_append_error_to_string error))
        | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-         raise
-           (Sys_error
-              (Printf.sprintf
-                 "%s: durable append failed for %s: %s; descriptor settlement failed: %s"
-                 Payload.name
-                 path
-                 (Fs_compat.private_jsonl_append_error_to_string error)
-                 (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))))
+         Error
+           (Printf.sprintf
+              "%s: durable append failed for %s: %s; descriptor settlement failed: %s"
+              Payload.name
+              path
+              (Fs_compat.private_jsonl_append_error_to_string error)
+              (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
+  ;;
+
+  let append_event_exn t event =
+    match append_event_result t event with
+    | Ok () -> ()
+    | Error detail -> raise (Sys_error detail)
   ;;
 
   let replace_entry_locked t entry =
@@ -248,7 +269,7 @@ module Make (Payload : Payload) = struct
        reaches the path-level append lock. Replay then skips the completion as
        unknown and drops the trailing register as stale Running. *)
     Stdlib.Mutex.protect t.mutation_mutex (fun () ->
-      append_event t (Register { id; started_at; registration });
+      append_event_exn t (Register { id; started_at; registration });
       replace_entry_locked t entry)
   ;;
 
@@ -268,9 +289,11 @@ module Make (Payload : Payload) = struct
             else entry)
           |> prune
         in
-        append_event t (Complete { id; completion });
-        Atomic.set t.entries next;
-        `Completed))
+        match append_event_result t (Complete { id; completion }) with
+        | Error detail -> `Persistence_failed detail
+        | Ok () ->
+          Atomic.set t.entries next;
+          `Completed))
   ;;
 
   let list_entries t =

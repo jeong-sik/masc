@@ -174,6 +174,15 @@ module Store = Run_registry_core.Make (Payload)
 
 type t = Store.t
 
+type completion_error =
+  | Unknown_run
+  | Persistence_failed of string
+
+let completion_error_to_string = function
+  | Unknown_run -> "completion referenced an unknown exact-lane run"
+  | Persistence_failed detail -> detail
+;;
+
 let storage_filename = "exact-lane-runs-v3.jsonl"
 
 let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
@@ -201,8 +210,11 @@ let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
 let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
   let completion = { Payload.outcome; elapsed_s; output } in
   match Store.complete t ~id:run_id ~completion with
-  | `Completed -> notify_changed ()
-  | `Unknown -> ()
+  | `Completed ->
+    notify_changed ();
+    Ok ()
+  | `Unknown -> Error Unknown_run
+  | `Persistence_failed detail -> Error (Persistence_failed detail)
 ;;
 
 let run_of_entry (entry : Store.entry) =

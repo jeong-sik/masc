@@ -187,15 +187,30 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
             | Some "tool_use" -> st
             | _ -> st)
          | Tool_execution_started ->
-           let tool_use_id = Option.value ~default:"" r.tool_use_id in
-           let tool_name = Option.value ~default:"unknown" r.tool_name in
-           let tool_input = Option.value ~default:`Null r.tool_input in
-           let acc =
-             { id = tool_use_id; name = tool_name; input = tool_input; started_at = r.ts }
-           in
-           { st with p_pending_tools = StringMap.add tool_use_id acc st.p_pending_tools }
+           (* A record without a tool_use_id cannot be paired with its finish
+              event. The old "" sentinel keyed every such record onto one map
+              slot, so id-less starts overwrote each other and finish events
+              paired with whichever start happened to be last (RFC-0371 B10).
+              Unpairable records are skipped instead of mispaired. *)
+           (match r.tool_use_id with
+            | None -> st
+            | Some tool_use_id ->
+              let tool_name = Option.value ~default:"unknown" r.tool_name in
+              let tool_input = Option.value ~default:`Null r.tool_input in
+              let acc =
+                { id = tool_use_id
+                ; name = tool_name
+                ; input = tool_input
+                ; started_at = r.ts
+                }
+              in
+              { st with
+                p_pending_tools = StringMap.add tool_use_id acc st.p_pending_tools
+              })
          | Tool_execution_finished ->
-           let tool_use_id = Option.value ~default:"" r.tool_use_id in
+           (match r.tool_use_id with
+            | None -> st
+            | Some tool_use_id ->
            let is_error = Option.value ~default:false r.tool_error in
            let tool_result = r.tool_result in
            (match StringMap.find_opt tool_use_id st.p_pending_tools with
@@ -233,7 +248,7 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
                 ; finished_at = Some r.ts
                 }
               in
-              { st with p_steps = Act { tool_call = tc; ts = r.ts } :: st.p_steps })
+              { st with p_steps = Act { tool_call = tc; ts = r.ts } :: st.p_steps }))
          | Run_finished ->
            let p_success, p_error_msg =
              match r.error with

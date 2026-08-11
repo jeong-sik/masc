@@ -608,10 +608,9 @@ let stated_reason ~(reason : string option)
     match handoff_context with
     | None -> None
     | Some context ->
-      (match context.reason with
-       | Some context_reason when Option.is_some (non_blank context_reason) ->
-         non_blank context_reason
-       | Some _ | None -> non_blank context.summary)
+      (match Option.bind context.reason non_blank with
+       | Some _ as reason -> reason
+       | None -> non_blank context.summary)
   in
   match reason with
   | None -> from_handoff ()

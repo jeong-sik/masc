@@ -383,16 +383,17 @@ let handle_read_file_with_outcome
              ~scan_complete
              body)
          else (
-           match Safe_ops.read_file_safe target with
-           | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
+           match Safe_ops.read_file_result target with
+           | Error (Safe_ops.File_not_found _ as err) ->
              Ok
                (Read_failed_payload
                   (missing_file_error_json
                      ~cwd
                      ~raw_path:(Some path)
                      ~target
-                     ~error:e))
-           | Error e -> Ok (Read_failed_message e)
+                     ~error:(Safe_ops.read_file_error_to_string err)))
+           | Error err ->
+             Ok (Read_failed_message (Safe_ops.read_file_error_to_string err))
            | Ok content ->
              Ok
                (payload_of_slice

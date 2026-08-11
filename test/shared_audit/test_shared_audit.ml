@@ -201,6 +201,27 @@ let test_store_verify_chain_detects_tampering () =
          because its prev_hash no longer matches. *)
       check bool "broken link reported" true (idx >= 2))
 
+(* A fork is what two interleaving appends produce: both entries take the same
+   predecessor, so the chain branches instead of breaking a hash. That is a
+   different shape from tampering — no payload changes and every hash is
+   genuine — and it had no test. [Store.append] now serializes the read of the
+   cursor with the write, but the fork only matters because [verify_chain]
+   catches it, so pin that. *)
+let test_store_verify_chain_detects_fork () =
+  let dir = unique_temp_dir "audit_verify_fork" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let store = Store.create ~base_dir:dir in
+    let e1 = Store.append store ~category:"X" ~payload:(`Int 1) in
+    let e2 = Store.append store ~category:"X" ~payload:(`Int 2) in
+    let e3 = Store.append store ~category:"X" ~payload:(`Int 3) in
+    check (option string) "third links to the second"
+      (Some (Env.hash_for_chain e2)) e3.prev_hash;
+    (* Re-chain the third onto the first, as a lost cursor update would. *)
+    let forked = [ e1; e2; { e3 with prev_hash = Some (Env.hash_for_chain e1) } ] in
+    match Store.verify_chain forked with
+    | Ok () -> fail "a forked chain must not verify"
+    | Error (idx, _) -> check int "fork reported at the branching entry" 2 idx)
+
 let test_store_verify_empty_log () =
   let dir = unique_temp_dir "audit_verify_empty" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
@@ -320,6 +341,7 @@ let () =
       test_case "since filters by timestamp" `Quick test_store_since_filters;
       test_case "verify_chain intact" `Quick test_store_verify_chain_intact;
       test_case "verify_chain detects tampering" `Quick test_store_verify_chain_detects_tampering;
+      test_case "verify_chain detects fork" `Quick test_store_verify_chain_detects_fork;
       test_case "verify empty log" `Quick test_store_verify_empty_log;
       test_case "verify reports intact chain" `Quick test_store_verify_reports_intact_chain;
       test_case "verify reports on-disk tampering" `Quick test_store_verify_reports_on_disk_tampering;

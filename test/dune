@@ -613,7 +613,6 @@
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level
-  test_env_keeper_scrub
   test_relation_materializer
   test_keeper_wire_capture
   test_board_rest_routes

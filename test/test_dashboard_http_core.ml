@@ -124,6 +124,28 @@ let test_keeper_post_route_classifies_catchup_judge () =
     (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path
        Server_dashboard_http_keeper_api.keeper_suffix_catchup_judge)
 
+let test_keeper_name_extractors_use_shared_grammar () =
+  let keeper_name = "release.bot" in
+  check bool "dotted keeper name is valid" true
+    (Server_dashboard_http_keeper_api.is_valid_keeper_name keeper_name);
+  List.iter
+    (fun suffix ->
+       let path = "/api/v1/keepers/" ^ keeper_name ^ suffix in
+       check string (suffix ^ " suffix extraction") keeper_name
+         (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path suffix);
+       check string (suffix ^ " POST extraction") keeper_name
+         (Server_dashboard_http_keeper_api.extract_keeper_name_for_post path suffix))
+    [ Server_dashboard_http_keeper_api.keeper_suffix_github_identity
+    ; Server_dashboard_http_keeper_api.keeper_suffix_github_login
+    ];
+  List.iter
+    (fun reserved ->
+       let suffix = Server_dashboard_http_keeper_api.keeper_suffix_github_login in
+       let path = "/api/v1/keepers/" ^ reserved ^ suffix in
+       check string (reserved ^ " remains reserved") ""
+         (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path suffix))
+    [ "."; ".." ]
+
 let test_keeper_paused_work_route_is_admin_exact () =
   let path = "/api/v1/keepers/idealist/paused-work" in
   check bool
@@ -2979,6 +3001,17 @@ let test_composite_blocked_uses_terminal_contract_not_observational_metadata () 
    live context and triggering a reactive Provider_overflow on the next turn. *)
 module Keeper_config_post = Server_dashboard_http_keeper_api_post
 
+let test_keeper_github_login_stream_headers_include_cors () =
+  let origin = "http://localhost:5173" in
+  let headers =
+    Keeper_config_post.For_testing.github_login_stream_headers origin
+  in
+  Alcotest.(check (option string)) "CORS origin is reflected" (Some origin)
+    (Httpun.Headers.get headers "access-control-allow-origin");
+  Alcotest.(check (option string)) "credentials are allowed" (Some "true")
+    (Httpun.Headers.get headers "access-control-allow-credentials")
+;;
+
 let shrink_base_meta () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -3455,6 +3488,8 @@ let () =
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
           test_case "keeper catch-up judge route is classified" `Quick
             test_keeper_post_route_classifies_catchup_judge;
+          test_case "keeper path extraction uses shared name grammar" `Quick
+            test_keeper_name_extractors_use_shared_grammar;
           test_case "keeper paused-work route is exact" `Quick
             test_keeper_paused_work_route_is_admin_exact;
           test_case "keeper sensitive GET permissions are exact" `Quick
@@ -3473,7 +3508,9 @@ let () =
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );
       ( "dashboard behavior contracts",
-        [ test_case "operator snapshot rejects stale publication races" `Quick
+        [ test_case "GitHub login stream includes CORS" `Quick
+            test_keeper_github_login_stream_headers_include_cors;
+          test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
           test_case "operator snapshot error clears previous success" `Quick
             test_operator_snapshot_error_clears_previous_success;

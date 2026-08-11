@@ -9,29 +9,32 @@ type t
 val empty : t
 
 val snapshot : base_path:string -> keeper_name:string -> t
-(** Snapshot exact secret values from the keeper's projected secret
-    root. Missing or unreadable roots produce {!empty}; redaction must
-    never fail a chat turn. *)
+(** Snapshot exact secret values from the keeper's projected secret root. *)
+
+val snapshot_with_additional_secret_files :
+  additional_secret_files:string list -> base_path:string -> keeper_name:string -> t
+(** Snapshot exact secret values from the keeper's projected secret root and
+    caller-owned structured secret files. For additional files,
+    non-empty mapping scalar values are captured as well as complete lines so
+    emitting only a scalar cannot bypass redaction. Missing or unreadable
+    roots/files are ignored; redaction must never fail a chat turn. *)
 
 val redact_text : t -> string -> string
 (** Replace exact projected secret values and generic sensitive patterns
     with [\[REDACTED\]], preserving message length semantics except for
     the replacements themselves. *)
 
-(* Chunk-streaming redaction ([create_stream_state] / [redact_stream_chunk] /
-   [redact_stream_finish]) was removed. It held raw bytes until the next
-   ['\n'] and re-copied plus re-scanned the whole held buffer on every 4KB
-   chunk, so a stream with newlines far apart cost O(n^2): one 590MB
-   subprocess capture over single-line JSON moved ~3.1TB and held a keeper's
-   Owner child for 115 minutes, which stalled that keeper's event queue.
+type stream_state
 
-   No comparable harness redacts at this layer — claude-code, Codex,
-   OpenHands, SWE-agent and Hermes have no built-in tool-output redaction,
-   and the third-party Claude Code redactors run as PostToolUse hooks over
-   an already-bounded result. The model- and storage-facing paths here keep
-   their redaction: [Keeper_tool_execute_runtime] applies {!redact_text} to
-   the final stdout/stderr, so removing the streaming pass leaves only the
-   dashboard's live view unredacted until the command finishes. *)
+val create_stream_state : t -> stream_state
+val redact_stream_chunk : stream_state -> string -> string
+val redact_stream_finish : stream_state -> string
+(** Boundary-safe streaming redaction. Newline and carriage-return records are
+    emitted immediately. Long unterminated records are emitted in bounded
+    chunks while retaining a suffix large enough for every snapshotted exact
+    secret (and a bounded structural-pattern overlap), so process progress does
+    not require buffering an unbounded line. Call [finish] once to redact and
+    emit the remaining suffix. *)
 
 val redact_json : t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Redact all string leaves in a JSON value, preserving shape. *)

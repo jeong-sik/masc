@@ -152,20 +152,15 @@ let model_input_projection_for_capacity
 
 let codex_dynamic_tool ~observe_effect_attempted (tool : Host.dynamic_tool) :
     Runtime_codex_app_server.dynamic_tool =
-  { name = tool.name
-  ; description = tool.description
-  ; input_schema = tool.input_schema
-  ; call =
+  { tool with
+    call =
       (fun ~call_id input ->
         (* Close the outer same-turn retry boundary before entering user/tool
            code. The handler may commit and then raise or be cancelled, so
            observing only its returned value would reopen a duplicate-effect
            window. *)
         observe_effect_attempted ();
-        let result = tool.call ~call_id input in
-        { Runtime_codex_app_server.success = result.success
-        ; content = result.content
-        })
+        tool.call ~call_id input)
   }
 ;;
 
@@ -275,6 +270,9 @@ let codex_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.UnknownVariant
          { type_name = "codex_app_server.server_request"; value = method_ })
+  (* Effectful failed turns are fenced out of same-turn retry by
+     [Keeper_provider_attempt_effect] at the driver level, so this mapping
+     stays purely descriptive of what the provider reported. *)
   | Runtime_codex_app_server.Turn_failed detail ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
@@ -282,13 +280,25 @@ let codex_error_to_core_error = function
          ; error_type = Some "turn_failed"
          ; detail
          })
-  | Runtime_codex_app_server.Timeout seconds ->
+  | Runtime_codex_app_server.Timeout { seconds; turn_accepted = false } ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
          { message =
-             Printf.sprintf "Codex app-server turn timed out after %.3fs" seconds
+             Printf.sprintf
+               "Codex app-server stream was idle for %.3fs before turn/start"
+               seconds
          ; phase = None
          })
+  (* Idle after [turn/start] was accepted is ambiguous: the upstream turn may
+     still be executing and committing effects. Rotation would run the goal a
+     second time, so this stays non-rotating; session recovery
+     ([Transport_interrupted]) owns reconciliation. *)
+  | Runtime_codex_app_server.Timeout { seconds; turn_accepted = true } ->
+    Agent_core.Error.Internal
+      (Printf.sprintf
+         "Codex app-server stream was idle for %.3fs after turn/start was \
+          accepted (not rotated: the upstream turn may still commit)"
+         seconds)
   (* Server-reported "interrupted" turn status (deliberate host-side stop, for
      example shutdown): not a provider fault, so rotation to another runtime
      would re-run a turn that was intentionally stopped. Stays [Internal]. *)

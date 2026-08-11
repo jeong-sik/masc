@@ -815,10 +815,9 @@ let test_completion_authority_rejection_preserves_human_provenance () =
 (* The frame states its own provenance. Without it the sections read as the
    keeper's own work -- "### Your Recent Board Posts" most of all -- so a keeper
    reporting "I checked the board" over an injected block was misreading the
-   frame rather than inventing a tool call. The header keeps its exact
-   "## Current World State" prefix because
-   [Keeper_context_core_history.has_world_state_signature] matches that literal
-   to keep frames out of persisted chat history. *)
+   frame rather than inventing a tool call. Persistence uses the explicit
+   [world_state_prompt] source; this header is model-facing provenance, not a
+   routing discriminator. *)
 let test_world_state_frame_states_its_provenance () =
   let obs = { base_observation with pending_board_events = [ sample_board_event ] } in
   let { Masc.Keeper_unified_prompt.world_state; _ } =

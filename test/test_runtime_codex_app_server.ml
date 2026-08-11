@@ -54,7 +54,8 @@ let rec drop count values =
     | _ :: rest -> drop (count - 1) rest
 ;;
 
-let fixture_script ?capture_path ?terminal_line_delay_s lines =
+let fixture_script ?capture_path ?terminal_line_delay_s
+    ?(terminal_line_delay_start_index = 0) lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
@@ -81,12 +82,14 @@ let fixture_script ?capture_path ?terminal_line_delay_s lines =
   read_request ();
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
   read_request ();
-  List.iter
-    (fun line ->
-       Option.iter
-         (fun seconds ->
-            output_string output (Printf.sprintf "sleep %.3f\n" seconds))
-         terminal_line_delay_s;
+  List.iteri
+    (fun index line ->
+       if index >= terminal_line_delay_start_index
+       then
+         Option.iter
+           (fun seconds ->
+              output_string output (Printf.sprintf "sleep %.3f\n" seconds))
+           terminal_line_delay_s;
        output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     (drop 3 lines);
   output_string output "while IFS= read -r ignored; do :; done\n";
@@ -95,8 +98,15 @@ let fixture_script ?capture_path ?terminal_line_delay_s lines =
   path
 ;;
 
-let with_fixture ?capture_path ?terminal_line_delay_s lines f =
-  let path = fixture_script ?capture_path ?terminal_line_delay_s lines in
+let with_fixture ?capture_path ?terminal_line_delay_s
+    ?terminal_line_delay_start_index lines f =
+  let path =
+    fixture_script
+      ?capture_path
+      ?terminal_line_delay_s
+      ?terminal_line_delay_start_index
+      lines
+  in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
@@ -728,14 +738,39 @@ let test_progress_resets_stream_idle_timeout () =
 
 let test_stream_idle_timeout_is_typed () =
   with_fixture
-    ~terminal_line_delay_s:0.2
+    ~terminal_line_delay_s:2.0
     [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
     (fun path ->
-       match run_fixture ~timeout_s:0.05 path with
-       | Error (Runtime_codex_app_server.Timeout seconds) ->
-         check (float 0.001) "exact idle timeout" 0.05 seconds
+       match run_fixture ~timeout_s:1.0 path with
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { seconds; turn_accepted = true }) ->
+         check (float 0.001) "exact idle timeout" 1.0 seconds
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { turn_accepted = false; _ }) ->
+         fail "a sent turn/start request was classified as pre-dispatch"
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "silent app-server stream ignored its idle timeout")
+;;
+
+let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
+  with_fixture
+    ~terminal_line_delay_s:2.0
+    ~terminal_line_delay_start_index:1
+    [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
+    (fun path ->
+       match run_fixture ~timeout_s:1.0 path with
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { seconds; turn_accepted = true }) ->
+         check (float 0.001) "exact idle timeout" 1.0 seconds
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { turn_accepted = false; _ }) ->
+         fail "turn/start acceptance was lost before the idle timeout"
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "accepted turn ignored its idle timeout")
 ;;
 
 let test_state_callback_timeout_is_typed () =
@@ -746,7 +781,7 @@ let test_state_callback_timeout_is_typed () =
         ~on_thread_ready_delay_s:0.2
         path
     with
-    | Error (Runtime_codex_app_server.Timeout seconds) ->
+    | Error (Runtime_codex_app_server.Timeout { seconds; _ }) ->
       check (float 0.001) "exact callback timeout" 0.05 seconds
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
     | Ok _ -> fail "blocking app-server callback ignored its timeout")
@@ -1290,15 +1325,31 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
            ~model:"gpt-fixture"
            ()
        with
-       | Error
-           (Agent_core.Error.Provider
-              (Llm_provider.Error.ProviderReportedError
-                 { provider = "codex_app_server"
-                 ; error_type = Some "context_window_exceeded_after_tool_effect"
-                 ; _
-                 })) ->
-         ()
-       | Error error -> fail (Agent_core.Error.to_string error)
+       | Error error ->
+         (* Since #28178 the provider-attempt effect fence intercepts this
+            failure before the raw provider error reaches the caller: an
+            observed tool effect forbids same-turn retry. Decode the typed
+            envelope rather than matching its rendered prose — the fence is
+            what this test is about, and [effect_disposition] is the field
+            that carries it. *)
+         (match Keeper_internal_error.classify_masc_internal_error error with
+          | Some
+              (Keeper_internal_error.Provider_attempt_effect_fenced
+                 { effect_disposition; diagnostic; _ }) ->
+            check
+              bool
+              "the fence forbids same-turn retry"
+              false
+              (Keeper_provider_attempt_effect.allows_same_turn_retry
+                 effect_disposition);
+            check
+              bool
+              "the fenced envelope keeps the provider diagnostic"
+              true
+              (Astring.String.is_infix
+                 ~affix:"context_window_exceeded_after_tool_effect"
+                 diagnostic)
+          | _ -> fail (Agent_core.Error.to_string error))
        | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;
 
@@ -2952,6 +3003,10 @@ let () =
             "stream idle timeout is typed"
             `Quick
             test_stream_idle_timeout_is_typed
+        ; test_case
+            "stream idle timeout preserves turn acceptance"
+            `Quick
+            test_stream_idle_timeout_after_turn_acceptance_is_typed
         ; test_case
             "state callback timeout is typed"
             `Quick

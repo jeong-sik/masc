@@ -20,29 +20,45 @@
     lazily on read; there is no background sweeper and no TTL knob.
     RFC-0370 §3.3. *)
 
-val note_exhausted : provider_id:string -> resets_at:float -> unit
-(** Remember that [provider_id]'s quota window is exhausted until
+type scope
+(** A non-secret quota ownership key.  The representation is deliberately
+    abstract so provider row ids, environment references, and file references
+    cannot be mixed accidentally at call sites. *)
+
+val note_exhausted : scope:scope -> resets_at:float -> unit
+(** Remember that [scope]'s quota window is exhausted until
     [resets_at] (Unix epoch seconds).  A later [resets_at] for the same
-    provider extends the window; an earlier one is ignored so a stale
+    scope extends the window; an earlier one is ignored so a stale
     retry hint cannot shorten a window a fresher response already
     established. *)
 
-val active_until : provider_id:string -> now:float -> float option
-(** [Some resets_at] when [provider_id] has a recorded window that has not
+val active_until : scope:scope -> now:float -> float option
+(** [Some resets_at] when [scope] has a recorded window that has not
     yet passed at [now]; [None] otherwise.  Expired entries are pruned on
     read. *)
 
 val demote_order :
   now:float ->
-  provider_id_of:(string -> string option) ->
-  string list ->
-  string list
-(** Stable-partition [candidates]: those whose provider (via
-    [provider_id_of]) has an active window at [now] move to the tail,
+  quota_scope_of:('a -> scope option) ->
+  'a list ->
+  'a list
+(** Stable-partition [candidates]: those whose quota scope (via
+    [quota_scope_of]) has an active window at [now] move to the tail,
     preserving declared relative order within both partitions.  Candidates
-    whose provider is unknown ([provider_id_of] returns [None]) are left in
+    whose scope is unknown ([quota_scope_of] returns [None]) are left in
     place — an unresolved id is not evidence of exhaustion.  Returns the
     input unchanged when no candidate is demoted. *)
+
+val scope_of_credential :
+  provider_id:string -> Runtime_schema.credential option -> scope
+(** Non-secret quota-scope identity for a provider row.  Provider hard quota
+    is credential-account-owned, not provider-row-owned: two rows sharing one
+    credential share one window (PR #28202 review).  [Env]/[File] carriers
+    are keyed by their non-secret reference without encoding the carrier kind
+    into a string prefix;
+    [Inline] carries the secret itself, so it cannot serve as a shared name
+    and falls back to the row's [provider_id], as does an absent
+    credential. *)
 
 val reset_for_testing : unit -> unit
 (** Drop every remembered window.  Test-only. *)

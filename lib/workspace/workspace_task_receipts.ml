@@ -19,16 +19,20 @@ let hyphen_name name =
     name
 ;;
 
+(* Receipt-directory candidate derivation. The canonical alias parse comes
+   from the shared codec — the local copy this replaces accepted only the
+   hyphen spelling and silently missed keeper_x_agent variants
+   (RFC-0371 B12). The bare "-agent" suffix strip below is NOT identity
+   parsing: it is a deliberately broad lookup heuristic kept so receipts
+   written under historical loose names stay findable. *)
 let keeper_name_from_agent_name agent_name =
   let trimmed = String.trim agent_name in
-  if
-    String.starts_with ~prefix:"keeper-" trimmed
-    && String.ends_with ~suffix:"-agent" trimmed
-    && String.length trimmed > 13
-  then Some (String.sub trimmed 7 (String.length trimmed - 13))
-  else if String.ends_with ~suffix:"-agent" trimmed && String.length trimmed > 6
-  then Some (String.sub trimmed 0 (String.length trimmed - 6))
-  else None
+  match Keeper_name_codec.keeper_name_of_agent_alias trimmed with
+  | Some keeper_name -> Some keeper_name
+  | None ->
+    if String.ends_with ~suffix:"-agent" trimmed && String.length trimmed > 6
+    then Some (String.sub trimmed 0 (String.length trimmed - 6))
+    else None
 ;;
 
 let agent_record_keeper_name config ~agent_name =

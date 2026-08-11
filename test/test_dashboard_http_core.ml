@@ -157,7 +157,7 @@ let test_keeper_sensitive_get_permissions_are_exact () =
          (permission path = Some Masc_domain.CanAdmin);
        check bool (suffix ^ " trailing segment") true
          (permission (path ^ "/extra") = None))
-    [ "raw-traces"; "raw-trace"; "memory-journal" ];
+    [ "raw-traces"; "raw-trace"; "memory-journal"; "paused-work" ];
   check bool "checkpoint permission" true
     (permission "/api/v1/keepers/idealist/checkpoints" = Some Masc_domain.CanAdmin);
   check bool "ordinary keeper read stays public" true

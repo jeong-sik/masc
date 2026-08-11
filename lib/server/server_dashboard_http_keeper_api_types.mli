@@ -93,7 +93,7 @@ val is_keeper_paused_work_get_path : string -> bool
 (** [true] for [GET /api/v1/keepers/<name>/paused-work] paths. *)
 
 val keeper_get_permission : string -> Masc_domain.permission option
-(** Feature-first mode keeps keeper GET routes on the public-read policy. *)
+(** Sensitive keeper diagnostics require [CanAdmin]; ordinary keeper GET projections remain public. *)
 
 (** {1 Trajectory preview helpers} *)
 

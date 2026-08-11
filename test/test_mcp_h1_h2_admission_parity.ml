@@ -760,8 +760,15 @@ let test_h1_h2_dashboard_public_read_route_wiring () =
     ; "/tool-calls"
     ; "/turn-records"
     ];
-  assert_contains "keeper GETs stay on the feature-first public lane"
-    ~needle:"let keeper_get_permission _req_path = None"
+  assert_contains "H2 keeper GETs consult the sensitive permission map"
+    ~needle:
+      "match Server_dashboard_http_keeper_api.keeper_get_permission path with"
+    h2;
+  assert_contains "H2 sensitive keeper GETs use token-bound auth"
+    ~needle:"with_h2_keeper_get_auth h2_reqd ~permission"
+    h2;
+  assert_contains "keeper GETs keep ordinary reads public"
+    ~needle:"let keeper_get_permission req_path ="
     keeper_api_types;
   assert_contains "keeper public projection shares bounded tool stats JSON"
     ~needle:"keeper_tool_stats_json ~config ~name ~window_hours" keeper_api;

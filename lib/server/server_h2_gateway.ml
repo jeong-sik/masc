@@ -225,6 +225,20 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       let _ = permission in
       with_h2_public_read h2_reqd (fun state -> f state "dashboard")
     in
+    let with_h2_keeper_get_auth h2_reqd ~permission f =
+      with_server_state h2_reqd (fun state ->
+        match
+          Server_auth.authorize_token_bound_permission_request
+            ~base_path:(Mcp_server.workspace_config state).base_path
+            ~permission
+            httpun_request
+        with
+        | Ok agent_name ->
+            (match h2_check_agent_rate_limit h2_reqd with
+             | Ok () -> f state agent_name
+             | Error () -> ())
+        | Error error -> h2_respond_auth_error h2_reqd error)
+    in
     (* H2 counterpart of [Server_auth.with_read_auth]: authorize on every
        request.  It remains distinct from [with_h2_public_read], which is an
        intentionally anonymous route-local read surface on both transports. *)
@@ -1025,7 +1039,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                 ~extra_headers:cors)
 
       | `GET, path when String.starts_with ~prefix:"/api/v1/keepers/" path ->
-          with_h2_public_read h2_reqd (fun state ->
+          let dispatch_keeper_get state =
             match Keeper_chat_operations.get_route path with
             | Some route ->
               let response =
@@ -1053,7 +1067,14 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                       ~status:(response.status :> H2.Status.t) ~extra_headers:cors
                   | None ->
                     h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
-                      ~extra_headers:cors)))
+                      ~extra_headers:cors))
+          in
+          (match Server_dashboard_http_keeper_api.keeper_get_permission path with
+           | Some permission ->
+             with_h2_keeper_get_auth h2_reqd ~permission
+               (fun state _agent_name -> dispatch_keeper_get state)
+           | None ->
+             with_h2_public_read h2_reqd dispatch_keeper_get)
 
       | `GET, "/api/v1/dashboard/logs" ->
           with_h2_public_read h2_reqd (fun state ->

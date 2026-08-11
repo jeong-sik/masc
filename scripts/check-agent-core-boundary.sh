@@ -20,8 +20,10 @@ for forbidden in dune-project agent_core.opam .github release-please-config.json
 done
 
 dune_violations="$({
+  # In Dune syntax, [;] starts a comment through end-of-line. Inspect only the
+  # code prefix so documentation cannot be mistaken for a library dependency.
   find "${core_root}" -name dune -type f -print0 \
-    | xargs -0 rg -n 'masc\.' \
+    | xargs -0 rg -n '^[^;]*masc\.' \
     | rg -v '\(public_name masc\.agent_core(\.[a-z_]+)?\)' \
     || true
 })"

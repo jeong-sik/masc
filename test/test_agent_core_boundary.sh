@@ -9,9 +9,11 @@ trap 'rm -rf "${fixture}"' EXIT
 mkdir -p "${fixture}/lib" "${fixture}/test"
 touch "${fixture}/models.toml" "${fixture}/test/dune"
 cat > "${fixture}/lib/dune" <<'EOF'
+; masc.string_util is documentation, not a dependency.
 (library
  (name agent_core_fixture)
- (public_name masc.agent_core))
+ (public_name masc.agent_core)
+ (wrapped false)) ; masc.coordinator is also only a comment.
 EOF
 
 AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null

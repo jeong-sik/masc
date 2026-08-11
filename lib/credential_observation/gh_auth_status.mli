@@ -1,75 +1,81 @@
-(** Parse [gh auth status] output into a typed credential verdict.
+(** Decode [gh auth status --json hosts] into a per-host credential verdict.
 
-    This module is an observation of a product CLI, deliberately outside exec,
-    Gate, and policy (RFC-0369 §3; INV-KEEPER-008). It reads text only: it
-    spawns nothing, reads no environment, and never carries a token value.
+    This is an observation of a product CLI, deliberately outside exec, Gate,
+    and policy (RFC-0369 §3; INV-KEEPER-008). It decodes a string: it spawns
+    nothing, reads no environment, and never carries a token value.
 
-    The exit code is not an input. Measured against gh 2.87.3, it cannot
-    separate the cases this module exists to separate: a host whose keyring
-    account is fine but whose active token comes from the environment exits 1,
-    exactly like a host with no credential at all. The verdict comes from the
-    per-entry source labels instead. *)
+    Two things are deliberately NOT done here.
 
-type token_source =
-  | Keyring  (** gh printed [(keyring)]. *)
-  | Environment of string
-      (** gh printed the environment variable it read, e.g. [(GH_TOKEN)] or
-          [(GITHUB_TOKEN)]. The name is kept because it is what an operator has
-          to unset. *)
-  | Config_default  (** gh printed [(default)] — the on-disk config entry. *)
+    The exit code is not an input. With [--json] gh always exits 0 "regardless
+    of any authentication issues" (its own [--help]); without [--json] a host
+    whose keyring account is fine but whose active token comes from the
+    environment exits 1, exactly like a host with no credential at all. Neither
+    code separates "unset a variable" from "log in".
 
-type outcome =
-  | Logged_in  (** gh marked the entry [✓]. *)
-  | Login_failed  (** gh marked the entry [X]. *)
+    The [error] text is not classified. gh reports the cause of a failed row in
+    prose that has no contract — a 401 body, a DNS failure, a TLS error all
+    arrive as one string. It is carried verbatim to the operator instead of
+    being pattern-matched into a category this module would then be wrong
+    about. The row's [state] is the only failure signal read. *)
 
-type entry =
-  { outcome : outcome
-  ; host : string
-  ; account : string option
-      (** [None] for an environment token, which gh reports as
-          "using token" with no account. *)
-  ; source_label : string
-      (** The label gh printed, verbatim, recognised or not. *)
-  ; source : token_source option
-      (** The interpretation of [source_label], or [None] when this parser does
-          not recognise it. A label gh adds later must not be assumed to be a
-          stored credential: if it names a variable, treating it as stored
-          would hide a shadow. So an unrecognised label is not interpreted at
-          all, and the verdict declines rather than guessing. *)
-  ; active : bool option  (** [None] when gh printed no "Active account" line. *)
+type source_kind =
+  | Environment_variable of string
+      (** gh resolved the token from this variable. The name is kept because it
+          is what an operator has to unset. *)
+  | Stored_credential
+      (** The system keyring, or a config file gh named by absolute path. *)
+  | No_token_found
+      (** gh's [default] source: it looked and found nothing for this host. *)
+
+type row =
+  { host : string
+  ; state : string  (** Verbatim. gh's own vocabulary, e.g. [success], [error], [timeout]. *)
+  ; active : bool  (** Whether gh would use this row for this host. *)
+  ; login : string option  (** Absent on a row that never authenticated. *)
+  ; token_source_label : string  (** Verbatim, recognised or not. *)
+  ; source : source_kind option
+      (** [None] when [token_source_label] is one this module does not
+          recognise. A label gh adds later must not be assumed to be a stored
+          credential: if it names a variable, that assumption hides a shadow.
+          So it is not interpreted, and the host's verdict declines. *)
   ; scopes : string list option
-      (** [None] when gh printed no scopes line, which is not the same as a
-          token with an empty scope set. *)
+      (** [None] when gh emitted no scopes field, which is not the same as a
+          token with no scopes — a fine-grained PAT legitimately has none. *)
+  ; error : string option  (** gh's failure prose, verbatim, never parsed. *)
   }
 
 type verdict =
-  | Authenticated  (** At least one entry is logged in and none shadows it. *)
-  | Unauthenticated  (** Parsed, and no entry is logged in. *)
+  | Authenticated
+  | Unauthenticated
   | Shadowed
-      (** The host carries both an environment-sourced entry and a
-          non-environment one. gh resolves the environment token first, so
-          [gh auth login] and [gh auth refresh] silently no-op and the
-          operator's next action is to unset the variable, not to log in.
-
-          Decided by the presence of the environment row, not by gh's "Active
-          account" line and not by whether either credential is still valid.
-          All three measured shapes agree — an invalid variable over a valid
-          keyring, an invalid variable over an invalid config entry, and a
-          perfectly valid variable over a valid keyring are all shadowed. *)
+      (** This host carries both an environment-sourced row and a stored one.
+          gh resolves the environment first, so [gh auth login] and
+          [gh auth refresh] silently no-op; the operator's action is to unset
+          the variable. Decided by the presence of the environment row within
+          the host, not by [active] and not by whether either credential is
+          valid — a perfectly healthy environment token over a healthy keyring
+          is still a shadow. *)
   | Unknown
-      (** The output matched neither the "not logged into any host" sentence
-          nor any entry line, or an entry carries a source label this parser
-          does not recognise. Never a stand-in for an authenticated or
-          unauthenticated verdict: an unreadable credential surface is
-          reported as unreadable. *)
+      (** Undecidable: an unrecognised [token_source_label], no row marked
+          active, or more than one. Never a stand-in for the other three. *)
 
-type t =
-  { entries : entry list
+type host_status =
+  { host : string
   ; verdict : verdict
+  ; rows : row list
   }
 
-val parse : string -> t
-(** Total over any input. Unrecognised text yields [{ entries = []; verdict =
-    Unknown }] rather than a default. *)
+type t =
+  { hosts : host_status list  (** One entry per key of gh's [hosts] object. *)
+  ; undecodable : string option
+      (** [Some detail] when the payload was not the expected shape, in which
+          case [hosts] is empty. Distinct from "gh knows no hosts", which is a
+          well-formed empty object. *)
+  }
+
+val decode : string -> t
+(** Total over any input. Takes gh's stdout only — the human sentence gh prints
+    when no host is logged in goes to stderr, and mixing the two produces a
+    payload this function reports as undecodable. *)
 
 val verdict_to_string : verdict -> string

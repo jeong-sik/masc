@@ -49,13 +49,18 @@ Antigravity)은 구독 클라이언트에 다른 생성자가 없어서 provider
 MASC 내부 버그와 같은 판정을 받는다. `Internal`을 terminal로 두는 것
 자체는 옳다 — 틀린 것은 provider 실패가 `Internal`에 실려 들어오는 것이다.
 
-**P2 — 노브 8/14개가 죽어 있다.** `runtime_toml.ml`이 받는 14개 키 중
-8개가 config 전역 선언 0건: `turn-timeout-s`, `timeout-s`, `keep-alive`,
-`num-ctx`, `price-input`, `price-output`, `effort`, `agent`, `is-default`.
-파서→스키마→어댑터가 전부 배선돼 있고 카탈로그가 침묵한다. 결과:
+**P2 — 노브가 부분 선언 상태다.** `runtime_toml.ml`이 받는 14개 키 기준,
+repo 템플릿(`config/runtime.toml`)은 8개 키가 선언 0건이고, 라이브
+배포(`$BASE_PATH/.masc/config/runtime.toml`, 1,440줄)는 `turn-timeout-s`를
+**29개 official-client 행 중 5개**(effort 상위 티어: -high/-max/-xhigh)에만
+선언했다. `keep-alive`/`num-ctx`/`price-*`/`effort`/`agent`/`is-default`는
+양쪽 모두 0건. 노브 자체는 라이브에서 유효함이 실측된다 — 선언된 600.0이
+`Antigravity turn timed out after 600.000s`로 발화 (2026-08-11T00:27Z).
+파서→스키마→어댑터가 전부 배선돼 있고 주력 행만 침묵한다. 결과:
 
-- `turn-timeout-s` 0건 → 세 런타임의 하드코딩 `default_timeout_s = 300.0`이
-  fleet 전체를 지배 (`internal:app_server_timeout` 22건/일의 원인).
+- 미선언 24행 → 세 런타임의 하드코딩 `default_timeout_s = 300.0`이 주력
+  행을 지배 (`internal:app_server_timeout` 22건/일의 원인 — sangsu의
+  `gpt-5.3-codex-spark`, 실패 31건의 `claude-sonnet-5` 모두 미선언 행).
   #24386(2026-07-14)이 breaking으로 제거한 총량 집행이 #27690(2026-08-09)
   계열에서 더 낮은 계층에 무단 부활한 형태다.
 - `keep-alive`/`num-ctx` 0건 → ollama_cloud 39행의 모델 상주·컨텍스트가

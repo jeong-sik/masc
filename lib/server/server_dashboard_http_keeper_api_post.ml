@@ -20,6 +20,113 @@ let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
 let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
   Http.Response.json_value ?request ~status (error_json ?ok message) reqd
 
+let github_login_stream_headers =
+  Httpun.Headers.of_list
+    [ "content-type", "text/event-stream"
+    ; "cache-control", "no-cache"
+    ; "connection", "close"
+    ; "x-accel-buffering", "no"
+    ]
+;;
+
+let github_login_stream_send writer event json =
+  Httpun.Body.Writer.write_string
+    writer
+    (Printf.sprintf "event: %s\ndata: %s\n\n" event (Yojson.Safe.to_string json))
+;;
+
+let github_login_process_status = function
+  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped by signal %d" signal
+;;
+
+let handle_keeper_github_login_post state req reqd =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_suffix req_path keeper_suffix_github_login in
+  let config = Mcp_server.workspace_config state in
+  if name = "" then respond_error reqd "keeper name is required"
+  else
+    match Keeper_meta_store.read_meta config name with
+    | Error message -> respond_error ~status:`Internal_server_error reqd message
+    | Ok None ->
+      respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
+    | Ok (Some _) ->
+      let hostname =
+        Server_utils.query_param req "hostname"
+        |> Option.value ~default:"github.com"
+      in
+      (match
+         Keeper_github_identity.login_env
+           ~base_path:config.base_path
+           ~keeper_name:name
+       with
+       | Error message -> respond_error reqd message
+       | Ok env ->
+         let redaction =
+           Keeper_secret_redaction.snapshot
+             ~base_path:config.base_path
+             ~keeper_name:name
+         in
+         let redact = Keeper_secret_redaction.redact_text redaction in
+         let response = Httpun.Response.create ~headers:github_login_stream_headers `OK in
+         let writer = Httpun.Reqd.respond_with_streaming reqd response in
+         Fun.protect
+           ~finally:(fun () -> Httpun.Body.Writer.close writer)
+           (fun () ->
+              let send_output stream chunk =
+                github_login_stream_send
+                  writer
+                  "output"
+                  (`Assoc
+                     [ "stream", `String stream
+                     ; "text", `String (redact chunk)
+                     ])
+              in
+              let status, _, stderr =
+                Process_eio.run_argv_with_status_split_streaming
+                  ~env
+                  ~on_stdout_chunk:(send_output "stdout")
+                  ~on_stderr_chunk:(send_output "stderr")
+                  (Keeper_github_identity.login_argv ~hostname)
+              in
+              match status with
+              | Unix.WEXITED 0 ->
+                Keeper_github_identity.secure_config_files
+                  ~base_path:config.base_path
+                  ~keeper_name:name;
+                (match
+                   Keeper_github_identity.observe
+                     ~base_path:config.base_path
+                     ~keeper_name:name
+                     ~hostname
+                 with
+                 | Ok observation ->
+                   github_login_stream_send
+                     writer
+                     "complete"
+                     (`Assoc
+                        [ ( "observation"
+                          , Keeper_github_identity.observation_to_yojson observation )
+                        ])
+                 | Error message ->
+                   github_login_stream_send
+                     writer
+                     "error"
+                     (`Assoc [ "message", `String message ]))
+              | failed ->
+                let detail = String.trim (redact stderr) in
+                let message =
+                  if String.equal detail ""
+                  then "gh auth login failed: " ^ github_login_process_status failed
+                  else detail
+                in
+                github_login_stream_send
+                  writer
+                  "error"
+                  (`Assoc [ "message", `String message ])))
+;;
+
 (* The rubric and the output sections are the operator's, not this handler's:
    they live in config/prompts/judge.catchup.md next to the two other judge
    prompts, so all three are read and overridden in one place. *)

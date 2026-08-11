@@ -1,0 +1,14 @@
+(copy_files ../../lib/keeper/keeper_github_identity.ml)
+(copy_files ../../lib/keeper/keeper_github_identity.mli)
+
+(test
+ (name test_keeper_github_identity)
+ (modules
+  common
+  keeper_config
+  keeper_secret_projection
+  keeper_secret_redaction
+  time_compat
+  keeper_github_identity
+  test_keeper_github_identity)
+ (libraries alcotest yojson unix))

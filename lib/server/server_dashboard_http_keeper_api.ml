@@ -1502,7 +1502,38 @@ let handle_keeper_get_subroutes state req request reqd =
     let slen = String.length suffix in
     String.trim (String.sub req_path plen (tlen - plen - slen))
   in
-  if ends_with "/digest" then (
+  if ends_with keeper_suffix_github_identity then (
+    let name = extract_name keeper_suffix_github_identity in
+    if name = "" then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json "missing keeper name")
+    else
+      let config = Mcp_server.workspace_config state in
+      match Keeper_meta_store.read_meta config name with
+      | Error message ->
+        Server_auth.respond_json_value_with_cors ~status:`Internal_server_error request reqd
+          (error_json message)
+      | Ok None ->
+        Server_auth.respond_json_value_with_cors ~status:`Not_found request reqd
+          (error_json (Printf.sprintf "keeper %S not found" name))
+      | Ok (Some _) ->
+        let hostname =
+          Server_utils.query_param req "hostname"
+          |> Option.value ~default:"github.com"
+        in
+        (match
+           Keeper_github_identity.observe
+             ~base_path:config.base_path
+             ~keeper_name:name
+             ~hostname
+         with
+         | Error message ->
+           Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+             (error_json message)
+         | Ok observation ->
+           Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+             (Keeper_github_identity.observation_to_yojson observation)))
+  else if ends_with "/digest" then (
     (* Keeper catch-up digest (since-last-seen). The enclosing keeper GET
        router leaves this route on its public-read policy; sensitive sibling
        routes declare a mandatory token-bound permission before dispatch. *)

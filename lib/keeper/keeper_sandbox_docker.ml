@@ -516,6 +516,18 @@ let run_docker_shell_command_with_status_internal
                         | Error err ->
                           sandbox_error ("docker_shell_failed: secret_projection: " ^ err)
                         | Ok secret_projection ->
+                          let github_identity_args =
+                            match
+                              Keeper_github_identity.docker_args
+                                ~base_path:config.base_path
+                                ~keeper_name:meta.name
+                                ~container_masc_dir:
+                                  (Keeper_sandbox_runtime_setup.container_masc_dir
+                                     ~container_root)
+                            with
+                            | Ok args -> args
+                            | Error err -> failwith ("github_identity: " ^ err)
+                          in
                           let argv =
                             docker_run_argv
                               ~config
@@ -530,7 +542,9 @@ let run_docker_shell_command_with_status_internal
                               ~gid
                               ~seccomp_args
                               ~identity_mounts
-                              ~secret_args:secret_projection.docker_args
+                              ~secret_args:
+                                (secret_projection.docker_args
+                                 @ github_identity_args)
                               ~image
                               ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
                           in

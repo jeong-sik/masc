@@ -582,16 +582,24 @@ let test_blank_success_requires_fresh_conversation () =
                       ()
                   in
                   (match run () with
-                   | Error
-                       (Agent_core.Error.Provider
-                          (Llm_provider.Error.ProviderReportedError
-                             { provider = "antigravity_cli"
-                             ; error_type = Some "turn_failed"
-                             ; detail =
-                                 "successful result response has no deliverable content"
-                             })) ->
-                     ()
-                   | Error error -> fail (Agent_core.Error.to_string error)
+                   | Error error ->
+                     (match Keeper_turn_driver.classify_masc_internal_error error with
+                      | Some
+                          (Keeper_turn_driver.Provider_attempt_effect_fenced
+                             { runtime_id = "antigravity.gemini"
+                             ; effect_disposition =
+                                 Keeper_provider_attempt_effect
+                                 .Observation_unavailable
+                             ; diagnostic
+                             }) ->
+                        check bool
+                          "effect fence retains provider diagnostic"
+                          true
+                          (String.trim diagnostic <> "")
+                      | Some other ->
+                        fail
+                          (Keeper_turn_driver.kind_of_masc_internal_error other)
+                      | None -> fail (Agent_core.Error.to_string error))
                    | Ok _ -> fail "blank Antigravity result settled as success");
                   let failed_session =
                     Keeper_official_client_session_store.load

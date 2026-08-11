@@ -497,21 +497,28 @@ let task_status_of_yojson json =
     | "done" ->
         Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
     | "awaiting_verification" ->
+        (* Write-boundary format validation: the field stays the wire string
+           because no in-process consumer reads it as a time (rg: the only
+           parse_iso8601 of a task started_at is this check; graphql carries
+           it as display text). RFC-0371 audit reclassified this from
+           validate-then-discard on that evidence. *)
         (match Json_util.get_string json "started_at" with
-         | Some started_at when Option.is_some (parse_iso8601_opt started_at) ->
-           Ok
-             (AwaitingVerification
-                { assignee = req "assignee"
-                ; started_at
-                ; submitted_at = req "submitted_at"
-                ; verification_id = req "verification_id"
-                })
+         | None -> Error "awaiting_verification requires started_at"
          | Some started_at ->
-           Error
-             (Printf.sprintf
-                "awaiting_verification started_at must be RFC 3339, got %S"
-                started_at)
-         | None -> Error "awaiting_verification requires started_at")
+           (match parse_iso8601_opt started_at with
+            | Some _ ->
+              Ok
+                (AwaitingVerification
+                   { assignee = req "assignee"
+                   ; started_at
+                   ; submitted_at = req "submitted_at"
+                   ; verification_id = req "verification_id"
+                   })
+            | None ->
+              Error
+                (Printf.sprintf
+                   "awaiting_verification started_at must be RFC 3339, got %S"
+                   started_at)))
     | "cancelled" ->
         Ok (Cancelled
               { cancelled_by = req "cancelled_by"

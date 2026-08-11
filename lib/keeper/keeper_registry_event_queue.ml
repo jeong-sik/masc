@@ -91,26 +91,36 @@ type source_ack_result =
    in the transition outbox: the next terminal ACK is deliberately rejected in
    that state. Complete the existing handoff on the owner-facing path instead
    of making the next Keeper turn wait for the maintenance sweep. *)
+let project_source_ack_receipt ~base_path ~keeper_name receipt success =
+  match
+    Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+      ~base_path
+      ~keeper_name
+      ~expected_transition_id:
+        receipt.Keeper_event_queue_state.transition_id
+  with
+  | Ok () -> Ok (success receipt)
+  | Error detail ->
+    Ok
+      (Ack_committed_followup_failed
+         { receipt; stage = `Projection; detail })
+;;
+
 let project_source_ack_result ~base_path ~keeper_name result =
-  let project receipt success =
-    match
-      Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-        ~base_path
-        ~keeper_name
-        ~expected_transition_id:
-          receipt.Keeper_event_queue_state.transition_id
-    with
-    | Ok () -> Ok (success receipt)
-    | Error detail ->
-      Ok
-        (Ack_committed_followup_failed
-           { receipt; stage = `Projection; detail })
-  in
   match result with
   | Error _ as error -> error
-  | Ok (Transition_applied receipt) -> project receipt (fun receipt -> Acked receipt)
+  | Ok (Transition_applied receipt) ->
+    project_source_ack_receipt
+      ~base_path
+      ~keeper_name
+      receipt
+      (fun receipt -> Acked receipt)
   | Ok (Transition_already_applied receipt) ->
-    project receipt (fun receipt -> Already_acked receipt)
+    project_source_ack_receipt
+      ~base_path
+      ~keeper_name
+      receipt
+      (fun receipt -> Already_acked receipt)
   | Ok (Transition_committed_followup_failed { receipt; stage; detail }) ->
     Ok (Ack_committed_followup_failed { receipt; stage; detail })
 ;;

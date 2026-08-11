@@ -160,6 +160,19 @@ let check_applied = function
          { cause = failure; reservation_release = None })
 ;;
 
+let transition_receipt_of_applied = function
+  | Transaction.Applied
+      (Keeper_registry_event_queue.Acked receipt
+      | Keeper_registry_event_queue.Already_acked receipt) -> receipt
+  | Transaction.Applied
+      (Keeper_registry_event_queue.Ack_committed_followup_failed { detail; _ }) ->
+    Alcotest.fail detail
+  | Transaction.Committed_followup_failed failure ->
+    Alcotest.fail
+      (Transaction.error_to_string
+         { cause = failure; reservation_release = None })
+;;
+
 let replace_field name value fields =
   List.map (fun (field, current) -> if String.equal field name then field, value else field, current) fields
 ;;
@@ -501,23 +514,22 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
       |> require_ok "commit source-terminal ACK"
     in
     check_applied first.projection;
+    let transition_receipt =
+      transition_receipt_of_applied first.projection
+    in
     let staged =
       Persistence.load_state_result
         ~base_path:config.Workspace.base_path
         ~keeper_name
-      |> require_ok "load unprojected source-terminal ACK"
+      |> require_ok "load owner-projected source-terminal ACK"
     in
-    let outbox_entry =
-      match State.transition_outbox staged with
-      | [ entry ] -> entry
-      | [] | _ :: _ :: _ ->
-        Alcotest.fail "source-terminal ACK must retain one transition outbox entry"
+    Alcotest.(check int)
+      "owner-facing source-terminal ACK retires its transition outbox"
+      0
+      (List.length (State.transition_outbox staged));
+    let outbox_entry : State.outbox_entry =
+      { receipt = transition_receipt; stimuli = [ request.source ] }
     in
-    Persistence.project_transition_outbox_result
-      ~append_before_retire:(fun _entry -> Ok ())
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-    |> require_ok "project source-terminal ACK transition";
     let projected =
       Persistence.load_state_result
         ~base_path:config.Workspace.base_path
@@ -631,22 +643,22 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       |> require_ok "commit first source-terminal ACK"
     in
     check_applied first.projection;
+    let first_transition_receipt =
+      transition_receipt_of_applied first.projection
+    in
     let staged =
       Persistence.load_state_result
         ~base_path:config.Workspace.base_path
         ~keeper_name
-      |> require_ok "load first source-terminal ACK outbox"
+      |> require_ok "load first owner-projected source-terminal ACK"
     in
-    let first_outbox =
-      match State.transition_outbox staged with
-      | [ entry ] -> entry
-      | [] | _ :: _ :: _ -> Alcotest.fail "first ACK must retain one transition outbox entry"
+    Alcotest.(check int)
+      "first owner-facing ACK retires its transition outbox"
+      0
+      (List.length (State.transition_outbox staged));
+    let first_outbox : State.outbox_entry =
+      { receipt = first_transition_receipt; stimuli = [ first_request.source ] }
     in
-    Persistence.project_transition_outbox_result
-      ~append_before_retire:(fun _entry -> Ok ())
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-    |> require_ok "project first source-terminal ACK";
     let transition_wal_path =
       Filename.concat
         (Filename.concat
@@ -691,11 +703,6 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       |> require_ok "commit second source-terminal ACK"
     in
     check_applied second.projection;
-    Persistence.project_transition_outbox_result
-      ~append_before_retire:(fun _entry -> Ok ())
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-    |> require_ok "project second source-terminal ACK after recovery";
     let final =
       Persistence.load_state_result
         ~base_path:config.Workspace.base_path

@@ -108,46 +108,19 @@ let error_to_string = function
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
 let ( let* ) result f = Result.bind result f
 
-let rec validate_unique_object_keys ~stage ~path = function
-  | `Assoc fields ->
-    let rec loop seen = function
-      | [] -> Ok ()
-      | (name, value) :: rest ->
-        if List.mem name seen
-        then protocol_error stage (Printf.sprintf "duplicate object key %S at %s" name path)
-        else
-          let* () =
-            validate_unique_object_keys ~stage ~path:(path ^ "." ^ name) value
-          in
-          loop (name :: seen) rest
-    in
-    loop [] fields
-  | `List values ->
-    let rec loop index = function
-      | [] -> Ok ()
-      | value :: rest ->
-        let* () =
-          validate_unique_object_keys
-            ~stage
-            ~path:(Printf.sprintf "%s[%d]" path index)
-            value
-        in
-        loop (index + 1) rest
-    in
-    loop 0 values
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Ok ()
-;;
+(* The three official-client runtimes speak the same line-delimited JSON
+   protocol and differ only in the error constructor they fail with. The shape
+   checks live once in {!Runtime_official_client_json}; this instantiates them
+   against this runtime's own [error]. *)
+module Shared_json = Runtime_official_client_json.Make (struct
+  type t = error
 
-let assoc_at stage = function
-  | `Assoc fields -> Ok fields
-  | _ -> protocol_error stage "expected a JSON object"
-;;
+  let protocol ~stage ~detail = Protocol_error { stage; detail }
+end)
 
-let required_member stage name fields =
-  match List.assoc_opt name fields with
-  | Some value -> Ok value
-  | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
-;;
+open Shared_json
+
+let bounded_tail = Runtime_official_client_json.bounded_tail
 
 let required_string ?(nonempty = true) stage name fields =
   match List.assoc_opt name fields with
@@ -156,13 +129,6 @@ let required_string ?(nonempty = true) stage name fields =
     protocol_error stage (Printf.sprintf "field %S must not be empty" name)
   | Some _ -> protocol_error stage (Printf.sprintf "field %S must be a string" name)
   | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
-;;
-
-let optional_string stage name fields =
-  match List.assoc_opt name fields with
-  | None | Some `Null -> Ok None
-  | Some (`String value) -> Ok (Some value)
-  | Some _ -> protocol_error stage (Printf.sprintf "field %S must be a string or null" name)
 ;;
 
 let required_nonnegative_int stage name fields =
@@ -477,12 +443,6 @@ let argv config ~conversation_mode =
     match conversation_mode with
     | Start -> values @ [ "--new-project" ]
     | Resume { conversation_id } -> values @ [ "--conversation"; conversation_id ])
-;;
-
-let bounded_tail ~limit current addition =
-  let combined = current ^ addition in
-  let length = String.length combined in
-  if length <= limit then combined else String.sub combined (length - limit) limit
 ;;
 
 let drain_stderr flow tail =

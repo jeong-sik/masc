@@ -60,6 +60,14 @@ let test_snapshot_marks_recovery_as_non_authoritative () =
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
+      (* Recovery reads <backlog>.last-good, and only Workspace.write_backlog
+         writes that copy - Workspace.init writes the primary as raw JSON. Without
+         a committed backlog first, corrupting the primary leaves nothing to
+         recover from, so the snapshot reports the count unavailable instead of
+         recovered, and this test cannot reach what it is about. *)
+      Workspace.write_backlog
+        config
+        { Types.tasks = []; last_updated = "2026-06-26T00:00:00Z"; version = 1 };
       write_text (Workspace.backlog_path config) "{not-json";
       let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
       let workspace = Yojson.Safe.Util.(snapshot |> member "workspace") in

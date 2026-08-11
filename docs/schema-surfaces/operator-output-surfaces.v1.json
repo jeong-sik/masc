@@ -41,7 +41,7 @@
       "tests": ["dashboard/src/schemas/sse.test.ts", "test/test_sse.ml"],
       "stability": "operator_internal",
       "version_field": null,
-      "external_refs": ["agent core.event_bus.v1"],
+      "external_refs": ["agent_core.event_bus.v1"],
       "notes": "SSE freshness signals are not authoritative read models; consumers re-fetch authoritative snapshots."
     },
     {
@@ -59,7 +59,7 @@
       ],
       "stability": "operator_internal",
       "version_field": "schema_version",
-      "external_refs": ["agent core.runtime_protocol.v1", "agent core.event_bus.v1"],
+      "external_refs": ["agent_core.runtime_protocol.v2", "agent_core.event_bus.v1"],
       "notes": "Records decision context before and during provider attempts; narrower than execution receipts."
     },
     {
@@ -73,12 +73,11 @@
       "validator": "Keeper_execution_receipt.to_json and receipt invariant tests",
       "tests": [
         "test/test_keeper_receipt_authoritative.ml",
-        "test/test_keeper_receipt_authoritative_matrix.ml",
-        "test/test_keeper_receipt_outcome_tla_parity.ml"
+        "test/test_keeper_receipt_authoritative_matrix.ml"
       ],
       "stability": "operator_internal",
       "version_field": "schema",
-      "external_refs": ["agent core.raw_trace_record.v1"],
+      "external_refs": ["agent_core.raw_trace_record.v1"],
       "notes": "Terminal keeper turn receipt, including completion contract and runtime outcome summary."
     },
     {
@@ -93,7 +92,7 @@
       "tests": ["test/test_keeper_tool_call_log.ml"],
       "stability": "operator_internal",
       "version_field": null,
-      "external_refs": ["agent core.raw_trace_record.v1"],
+      "external_refs": ["agent_core.raw_trace_record.v1"],
       "notes": "Persists redacted full I/O and effective turn policy context for keeper tool calls."
     },
     {
@@ -145,7 +144,7 @@
       "tests": ["test/test_keeper_execution_join.ml"],
       "stability": "operator_internal",
       "version_field": null,
-      "external_refs": ["agent core.event_bus.v1", "agent core.runtime_protocol.v1"],
+      "external_refs": ["agent_core.event_bus.v1", "agent_core.runtime_protocol.v2"],
       "notes": "MASC domain events stay MASC-owned and correlate with agent core via bridge payloads."
     }
   ]

@@ -113,7 +113,7 @@ let claude_stream_callback on_event =
                          (String.sub text (String.length streamed) suffix_length)
                    })
           end;
-          emit Agent_core.Types.MessageStop
+          emit Agent_core.Types.MessageStop)
 ;;
 
 let retry_after_of_rate_limit = function

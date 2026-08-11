@@ -278,6 +278,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       in
       let observed_trace_ref = ref None in
       let observed_initial_prompt = ref None in
+      let observed_resumed_prompt = ref None in
       let stream_events = ref [] in
       let cli_path = fixture_script ~base_path in
       let runtime_path = Filename.concat base_path "runtime.toml" in
@@ -298,6 +299,21 @@ let test_keeper_projects_mcp_tool_and_settles () =
           (fun input ->
             observed := input;
             Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+      in
+      let dynamic_context = "ANTIGRAVITY_DYNAMIC_SYSTEM\nsecond line" in
+      let hooks =
+        { Agent_core.Hooks.empty with
+          before_turn_params =
+            Some
+              (fun event ->
+                 match event with
+                 | Agent_core.Hooks.BeforeTurnParams { current_params; _ } ->
+                   Agent_core.Hooks.AdjustParams
+                     { current_params with
+                       extra_system_context = Some dynamic_context
+                     }
+                 | _ -> Agent_core.Hooks.Continue)
+        }
       in
       seed_ambiguous_resumed_session ~base_path ~tool;
       let tool_history : Agent_core.Types.message =
@@ -351,6 +367,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~goal:"Call masc_probe once"
                       ~tools:[ tool ]
                       ~initial_messages:large_history
+                      ~hooks
                       ~context:(Agent_core.Context.create ())
                       ~raw_trace
                       ~on_event:(fun event -> stream_events := event :: !stream_events)
@@ -408,6 +425,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         ~goal:"Call masc_probe once"
                         ~tools:[ tool ]
                         ~initial_messages:large_history
+                        ~hooks
                         ~context:(Agent_core.Context.create ())
                         ~raw_trace
                         ~sw
@@ -418,6 +436,11 @@ let test_keeper_projects_mcp_tool_and_settles () =
                     | Ok resumed ->
                       let resumed = resumed.Keeper_turn_driver.run_result in
                       observed_trace_ref := resumed.trace_ref;
+                      observed_resumed_prompt :=
+                        Some
+                          (In_channel.with_open_bin
+                             (Filename.concat base_path "antigravity-prompt.txt")
+                             In_channel.input_all);
                       check int
                         "provider cumulative turn count"
                         73
@@ -447,6 +470,31 @@ let test_keeper_projects_mcp_tool_and_settles () =
         "prompt preserves prior tool output"
         true
         (String_util.contains_substring prompt "prior tool output");
+      check bool
+        "fresh prompt carries dynamic System context"
+        true
+        (String_util.contains_substring prompt dynamic_context);
+      let resumed_prompt =
+        match !observed_resumed_prompt with
+        | Some prompt -> prompt
+        | None -> fail "resumed Antigravity prompt was not captured"
+      in
+      check bool
+        "resume carries dynamic System context"
+        true
+        (String_util.contains_substring resumed_prompt dynamic_context);
+      check bool
+        "resume keeps the goal"
+        true
+        (String.ends_with ~suffix:"Call masc_probe once" resumed_prompt);
+      check bool
+        "resume does not replay seeded history"
+        false
+        (String_util.contains_substring resumed_prompt "history-00");
+      check bool
+        "resume does not replay prior tool output"
+        false
+        (String_util.contains_substring resumed_prompt "prior tool output");
       let trace_ref =
         match !observed_trace_ref with
         | Some trace_ref -> trace_ref

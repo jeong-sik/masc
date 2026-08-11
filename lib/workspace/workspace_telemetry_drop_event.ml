@@ -16,12 +16,10 @@ type lifecycle_kind =
 type t =
   | Agent_lifecycle of lifecycle_kind
   | Task_transition of Masc_domain.task_action
-  | Accountability of Masc_domain.task_action
 
 let family_to_wire = function
   | Agent_lifecycle _ -> "agent_lifecycle"
   | Task_transition _ -> "task_transition"
-  | Accountability _ -> "accountability"
 ;;
 
 let lifecycle_kind_to_wire = function
@@ -32,8 +30,7 @@ let lifecycle_kind_to_wire = function
 
 let kind_to_wire = function
   | Agent_lifecycle k -> lifecycle_kind_to_wire k
-  | Task_transition action | Accountability action ->
-    Masc_domain.task_action_to_string action
+  | Task_transition action -> Masc_domain.task_action_to_string action
 ;;
 
 let to_metric_labels t =

@@ -639,10 +639,6 @@ let inventory_error_kind_to_string = function
   | Inventory_candidate_ledger_unavailable -> "candidate_ledger_unavailable"
 ;;
 
-let option_float_to_json = function
-  | None -> `Null
-  | Some value -> `Float value
-;;
 
 let attempt_provenance_to_json = function
   | None -> `Null
@@ -667,8 +663,8 @@ let inventory_item_to_json (item : inventory_item) =
           (Candidate.quarantine_failure_category_to_string item.failure_category) )
     ; "attempt_provenance", attempt_provenance_to_json item.attempt_provenance
     ; "quarantined_at", `Float item.quarantined_at
-    ; "requested_at", option_float_to_json item.requested_at
-    ; "requeued_at", option_float_to_json item.requeued_at
+    ; "requested_at", Json_util.float_opt_to_json item.requested_at
+    ; "requeued_at", Json_util.float_opt_to_json item.requeued_at
     ]
 ;;
 

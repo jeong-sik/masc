@@ -71,19 +71,6 @@ let tool_calls_dir ~base_path =
   List.fold_left Filename.concat (masc_root ~base_path) [ "tool_calls" ]
 
 (** Naive substring check — avoids pulling in [Str] for one call. *)
-let contains_substring s sub =
-  let lens = String.length s in
-  let lensub = String.length sub in
-  if lensub = 0 then true
-  else if lensub > lens then false
-  else
-    let rec loop i =
-      if i > lens - lensub then false
-      else if String.sub s i lensub = sub then true
-      else loop (i + 1)
-    in
-    loop 0
-
 let dump_receipts ~base_path ~keeper ~turn_id =
   let dir = receipts_dir ~base_path ~keeper in
   if not (Sys.file_exists dir) then begin
@@ -302,7 +289,7 @@ let dump_fsm_transitions ~base_path ~keeper ~turn_id =
                        ~default:""
                    in
                    let is_fsm =
-                     contains_substring msg "[fsm:transition]"
+                     String_util.contains_substring msg "[fsm:transition]"
                    in
                    if keeper_match && turn_match && is_fsm then
                      Some json

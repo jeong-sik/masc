@@ -2,16 +2,6 @@
 
 open Repo_manager_types
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  if n_len = 0 then true else loop 0
-
 let is_symlink path =
   try (Unix.lstat path).st_kind = Unix.S_LNK
   with Unix.Unix_error _ | Sys_error _ -> false
@@ -140,7 +130,7 @@ let test_add_duplicate_fails () =
           | Ok _ -> Alcotest.fail "expected error for duplicate"
           | Error msg ->
               Alcotest.(check bool) "mentions already exists" true
-              (contains_substring msg "already exists")))
+              (String_util.contains_substring msg "already exists")))
 
 let test_add_rejects_blank_local_path () =
   with_temp_base_path (fun base_path ->
@@ -149,7 +139,7 @@ let test_add_rejects_blank_local_path () =
       | Ok _ -> Alcotest.fail "blank local_path must be rejected"
       | Error error ->
         Alcotest.(check bool) "names local_path" true
-          (contains_substring error "local_path"))
+          (String_util.contains_substring error "local_path"))
 
 let test_find_existing () =
   with_temp_base_path (fun base_path ->
@@ -166,7 +156,7 @@ let test_find_missing () =
       match Repo_store.find ~base_path "missing" with
       | Ok _ -> Alcotest.fail "expected error for missing repo"
       | Error msg ->
-          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+          Alcotest.(check bool) "mentions not found" true (String_util.contains_substring msg "not found"))
 
 let test_remove_existing () =
   with_temp_base_path (fun base_path ->
@@ -187,7 +177,7 @@ let test_remove_missing () =
       match Repo_store.remove ~base_path "missing" with
       | Ok _ -> Alcotest.fail "expected error for missing repo"
       | Error msg ->
-          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+          Alcotest.(check bool) "mentions not found" true (String_util.contains_substring msg "not found"))
 
 let test_update_status_existing () =
   with_temp_base_path (fun base_path ->
@@ -210,7 +200,7 @@ let test_update_status_missing () =
       match Repo_store.update_status ~base_path "missing" Paused with
       | Ok _ -> Alcotest.fail "expected error for missing repo"
       | Error msg ->
-          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+          Alcotest.(check bool) "mentions not found" true (String_util.contains_substring msg "not found"))
 
 let test_update_existing () =
   with_temp_base_path (fun base_path ->
@@ -231,7 +221,7 @@ let test_update_missing () =
       match Repo_store.update ~base_path "missing" (sample_repo "missing") with
       | Ok _ -> Alcotest.fail "expected error for missing repo"
       | Error msg ->
-          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+          Alcotest.(check bool) "mentions not found" true (String_util.contains_substring msg "not found"))
 
 let test_update_rejects_blank_local_path () =
   with_temp_base_path (fun base_path ->
@@ -244,7 +234,7 @@ let test_update_rejects_blank_local_path () =
         | Ok _ -> Alcotest.fail "blank local_path must be rejected"
         | Error error ->
           Alcotest.(check bool) "names local_path" true
-            (contains_substring error "local_path"))
+            (String_util.contains_substring error "local_path"))
 
 let test_local_path_absolute_preserved () =
   let repo = { (sample_repo "abs") with local_path = "/absolute/path" } in
@@ -286,7 +276,7 @@ let test_load_rejects_incomplete_repository () =
       | Ok _ -> Alcotest.fail "incomplete repository row must be rejected"
       | Error error ->
           Alcotest.(check bool) "names first missing field" true
-            (contains_substring error "repository.demo.local_path"))
+            (String_util.contains_substring error "repository.demo.local_path"))
 
 let test_load_rejects_missing_repository_table () =
   with_temp_base_path (fun base_path ->
@@ -296,7 +286,7 @@ let test_load_rejects_missing_repository_table () =
       | Ok _ -> Alcotest.fail "catalog without repository table must be rejected"
       | Error error ->
           Alcotest.(check bool) "names required table" true
-            (contains_substring error "required repository table"))
+            (String_util.contains_substring error "required repository table"))
 
 let test_load_rejects_unknown_top_level_field () =
   with_temp_base_path (fun base_path ->
@@ -306,7 +296,7 @@ let test_load_rejects_unknown_top_level_field () =
       | Ok _ -> Alcotest.fail "unknown top-level field must be rejected"
       | Error error ->
         Alcotest.(check bool) "names unknown top-level field" true
-          (contains_substring error "unknown top-level field answer"))
+          (String_util.contains_substring error "unknown top-level field answer"))
 
 let test_load_rejects_noncanonical_status () =
   with_temp_base_path (fun base_path ->
@@ -328,7 +318,7 @@ let test_load_rejects_noncanonical_status () =
       | Ok _ -> Alcotest.fail "noncanonical status must be rejected"
       | Error error ->
           Alcotest.(check bool) "names rejected status" true
-            (contains_substring error "Unknown repository status: active"))
+            (String_util.contains_substring error "Unknown repository status: active"))
 
 let test_load_rejects_unknown_field () =
   with_temp_base_path (fun base_path ->
@@ -351,7 +341,7 @@ let test_load_rejects_unknown_field () =
       | Ok _ -> Alcotest.fail "unknown repository field must be rejected"
       | Error error ->
           Alcotest.(check bool) "names unknown field" true
-            (contains_substring error "repository.demo.retired_path"))
+            (String_util.contains_substring error "repository.demo.retired_path"))
 
 let test_load_rejects_wrong_field_type () =
   with_temp_base_path (fun base_path ->
@@ -361,7 +351,7 @@ let test_load_rejects_wrong_field_type () =
       | Ok _ -> Alcotest.fail "wrong field type must be rejected"
       | Error error ->
         Alcotest.(check bool) "names wrong field" true
-          (contains_substring error "repository.demo.aliases"))
+          (String_util.contains_substring error "repository.demo.aliases"))
 
 let test_error_status_requires_message () =
   with_temp_base_path (fun base_path ->
@@ -371,7 +361,7 @@ let test_error_status_requires_message () =
       | Ok _ -> Alcotest.fail "Error status without status_error must be rejected"
       | Error error ->
         Alcotest.(check bool) "names required status_error" true
-          (contains_substring error "repository.demo.status_error"))
+          (String_util.contains_substring error "repository.demo.status_error"))
 
 let run_git_quiet args =
   let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
@@ -727,7 +717,7 @@ let test_lookup_preserves_catalog_error () =
       match Repo_store.find_url_by_id ~base_path "masc" with
       | Error error ->
         Alcotest.(check bool) "catalog error preserved" true
-          (contains_substring error "repository must be a table")
+          (String_util.contains_substring error "repository must be a table")
       | Ok _ -> Alcotest.fail "catalog error must not become a missing lookup")
 
 let () =

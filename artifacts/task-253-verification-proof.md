@@ -2,7 +2,7 @@
 
 - Branch: `sangsu/task-253-dashboard-auth`
 - Code commit: `e12b44a5f8`
-- Final branch head (including this proof): `74e0996255`
+- Verification proof snapshot commit: `74e0996255`
 - Base PR head inspected: `bdbdf7aefb7f8a69dd36ac0fba320ef8b56c8429`
 
 ## Change

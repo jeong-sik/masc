@@ -11,7 +11,6 @@ type MockToolsResponse = {
   generated_at?: string
   tool_inventory: { tools: unknown[] }
   tool_usage: Record<string, unknown>
-  scheduled_automation?: DashboardScheduledAutomation
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
   keeper_background?: DashboardKeeperBackground
 }
@@ -20,15 +19,26 @@ const mocks = vi.hoisted(() => ({
   loadTools: vi.fn(),
   toolsData: { value: null as null | MockToolsResponse },
   toolsLoading: { value: false },
-  toolsError: { value: null as string | null },
+  loadScheduledAutomation: vi.fn(),
+  scheduledAutomation: { value: null as null | DashboardScheduledAutomation },
+  scheduledAutomationLoading: { value: false },
+  scheduledAutomationError: { value: null as string | null },
+  subscribeScheduledAutomationRefresh: vi.fn(() => () => {}),
   pruneSchedules: vi.fn(),
 }))
 
 vi.mock('../tools/tool-state', () => ({
   loadTools: mocks.loadTools,
   toolsData: mocks.toolsData,
-  toolsError: mocks.toolsError,
   toolsLoading: mocks.toolsLoading,
+}))
+
+vi.mock('./schedule-state', () => ({
+  loadScheduledAutomation: mocks.loadScheduledAutomation,
+  scheduledAutomation: mocks.scheduledAutomation,
+  scheduledAutomationError: mocks.scheduledAutomationError,
+  scheduledAutomationLoading: mocks.scheduledAutomationLoading,
+  subscribeScheduledAutomationRefresh: mocks.subscribeScheduledAutomationRefresh,
 }))
 
 vi.mock('../../api/dashboard-schedule', () => ({
@@ -166,7 +176,11 @@ describe('ScheduleSurface', () => {
     mocks.pruneSchedules.mockReset()
     mocks.toolsData.value = null
     mocks.toolsLoading.value = false
-    mocks.toolsError.value = null
+    mocks.loadScheduledAutomation.mockClear()
+    mocks.subscribeScheduledAutomationRefresh.mockClear()
+    mocks.scheduledAutomation.value = null
+    mocks.scheduledAutomationLoading.value = false
+    mocks.scheduledAutomationError.value = null
   })
 
   afterEach(() => {
@@ -192,11 +206,11 @@ describe('ScheduleSurface', () => {
   })
 
   it('renders backed schedule summary and reuses read-only schedule cards', async () => {
+    mocks.scheduledAutomation.value = sampleAutomation()
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
       tool_usage: {},
-      scheduled_automation: sampleAutomation(),
       keeper_waiting_inventory: sampleWaitingInventory(),
       keeper_background: sampleKeeperBackground(),
     }
@@ -247,11 +261,11 @@ describe('ScheduleSurface', () => {
   })
 
   it('renders the read-only operations aside in a two-column shell', async () => {
+    mocks.scheduledAutomation.value = sampleAutomation()
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
       tool_usage: {},
-      scheduled_automation: sampleAutomation(),
     }
 
     render(html`<${ScheduleSurface} />`, container)
@@ -280,11 +294,11 @@ describe('ScheduleSurface', () => {
         status: 'scheduled',
       },
     ]
+    mocks.scheduledAutomation.value = automation
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
       tool_usage: {},
-      scheduled_automation: automation,
     }
 
     render(html`<${ScheduleSurface} />`, container)
@@ -313,11 +327,11 @@ describe('ScheduleSurface', () => {
         keeper_reaction_evidence: { projection_status: 'not_found' },
       },
     ]
+    mocks.scheduledAutomation.value = automation
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
       tool_usage: {},
-      scheduled_automation: automation,
     }
 
     render(html`<${ScheduleSurface} />`, container)
@@ -330,26 +344,26 @@ describe('ScheduleSurface', () => {
   })
 
   it('surfaces projection load errors without hiding stale schedule data', async () => {
-    mocks.toolsError.value = 'dashboard tools unavailable'
+    mocks.scheduledAutomationError.value = 'schedule projection unavailable'
+    mocks.scheduledAutomation.value = sampleAutomation()
     mocks.toolsData.value = {
       tool_inventory: { tools: [] },
       tool_usage: {},
-      scheduled_automation: sampleAutomation(),
     }
 
     render(html`<${ScheduleSurface} />`, container)
     await flush()
 
-    expect(container.textContent).toContain('dashboard tools unavailable')
+    expect(container.textContent).toContain('schedule projection unavailable')
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
   })
 
   it('prunes completed schedules through the live dashboard API and refreshes projection', async () => {
+    mocks.scheduledAutomation.value = sampleAutomation()
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
       tool_usage: {},
-      scheduled_automation: sampleAutomation(),
     }
     mocks.pruneSchedules.mockResolvedValue({ ok: true, pruned_count: 5 })
     const originalConfirm = window.confirm
@@ -366,7 +380,8 @@ describe('ScheduleSurface', () => {
 
       expect(window.confirm).toHaveBeenCalledTimes(1)
       expect(mocks.pruneSchedules).toHaveBeenCalledTimes(1)
-      expect(mocks.loadTools).toHaveBeenCalledTimes(1)
+      // Prune refreshes the schedule projection, not the tool inventory.
+      expect(mocks.loadScheduledAutomation).toHaveBeenCalledTimes(1)
     } finally {
       window.confirm = originalConfirm
     }
@@ -377,7 +392,6 @@ describe('ScheduleSurface', () => {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
       tool_usage: {},
-      scheduled_automation: sampleAutomation(),
     }
 
     render(html`<${ScheduleSurface} />`, container)
@@ -396,11 +410,11 @@ describe('ScheduleSurface', () => {
   })
 
   it('toggles to the list view revealing the diagnostic wake-signal feed', async () => {
+    mocks.scheduledAutomation.value = sampleAutomation()
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
       tool_usage: {},
-      scheduled_automation: sampleAutomation(),
     }
 
     render(html`<${ScheduleSurface} />`, container)
@@ -422,11 +436,11 @@ describe('ScheduleSurface', () => {
       { ...automation.requests[0]!, schedule_id: 'sched-oneshot', recurrence: { kind: 'one_shot' }, recurrence_kind: 'one_shot' },
       { ...automation.requests[0]!, schedule_id: 'sched-interval', recurrence: { kind: 'interval', interval_sec: 3600 }, recurrence_kind: 'interval' },
     ]
+    mocks.scheduledAutomation.value = automation
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
       tool_usage: {},
-      scheduled_automation: automation,
     }
 
     render(html`<${ScheduleSurface} />`, container)

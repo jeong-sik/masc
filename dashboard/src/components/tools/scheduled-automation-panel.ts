@@ -2129,6 +2129,10 @@ export function ScheduledAutomationPanel({
     ]),
   )
   const unsupportedPayloads = automation.payload_support?.unsupported_request_count ?? 0
+  // The server reports null counts when the schedule ledger could not be read.
+  // Rendering those as 0 would claim "no schedules" on a read failure.
+  const countText = (value: number | null | undefined): string =>
+    typeof value === 'number' ? value.toLocaleString() : '—'
   const unknownPayloads = automation.payload_support?.unknown_request_count ?? 0
   const unsupportedKinds = automation.payload_support?.unsupported_kinds ?? []
 
@@ -2142,10 +2146,10 @@ export function ScheduledAutomationPanel({
           <//>
         </div>
         <span class="text-[var(--color-fg-muted)]">
-          활성 <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.active_count.toLocaleString()}</span>
+          활성 <span class="font-mono text-[var(--color-fg-secondary)]">${countText(automation.fsm.active_count)}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          종료 <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.terminal_count.toLocaleString()}</span>
+          종료 <span class="font-mono text-[var(--color-fg-secondary)]">${countText(automation.fsm.terminal_count)}</span>
         </span>
         <span class=${unsupportedPayloads > 0 ? 'text-[var(--color-danger-fg)]' : 'text-[var(--color-fg-muted)]'}>
           unsupported payload <span class="font-mono">${unsupportedPayloads.toLocaleString()}</span>
@@ -2278,7 +2282,7 @@ export function ScheduledAutomationPanel({
               </aside>
             </div>
             ${automation.truncated
-              ? html`<div class="text-3xs text-[var(--color-fg-muted)]">표시 ${rows.length.toLocaleString()} / 전체 ${automation.request_count.toLocaleString()}건</div>`
+              ? html`<div class="text-3xs text-[var(--color-fg-muted)]">표시 ${rows.length.toLocaleString()} / 전체 ${countText(automation.request_count)}건</div>`
               : null}
           `
         : html`<div class="text-xs text-[var(--color-fg-muted)]">예약 요청 없음</div>`}

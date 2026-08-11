@@ -1143,57 +1143,6 @@ describe('fetchDashboardTools', () => {
     expect(tools[0]).not.toHaveProperty('tier')
   })
 
-  it('normalizes drifted scheduled automation projection fields', async () => {
-    const rawResponse = {
-      tool_inventory: { tools: [] },
-      tool_usage: {
-        total_calls: 0,
-        distinct_tools_called: 0,
-        top_20: [],
-        never_called_count: 0,
-        dispatch_v2_enabled: false,
-        registered_count: 1,
-      },
-      scheduled_automation: {
-        schema: 'masc.dashboard.scheduled_automation.v1',
-        source: 'schedule_store',
-        generated_at: '2026-06-21T00:00:00Z',
-        request_count: null,
-        request_limit: null,
-        truncated: null,
-        counts: null,
-        fsm: null,
-        signals: null,
-        requests: null,
-      },
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardTools()
-
-    expect(result.scheduled_automation).toBeDefined()
-    expect(result.scheduled_automation?.counts).toEqual({})
-    expect(result.scheduled_automation?.signals).toEqual([])
-    expect(result.scheduled_automation?.requests).toEqual([])
-    expect(result.scheduled_automation?.warnings).toEqual([])
-    expect(result.scheduled_automation?.fsm).toEqual({
-      state: 'unknown',
-      active_count: 0,
-      terminal_count: 0,
-      next_due_at: null,
-    })
-    expect(result.scheduled_automation?.request_count).toBe(0)
-    expect(result.scheduled_automation?.request_limit).toBe(0)
-    expect(result.scheduled_automation?.truncated).toBe(false)
-  })
-
   it('handles missing tool_inventory gracefully', async () => {
     const rawResponse = {
       tool_inventory: {},

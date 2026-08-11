@@ -826,6 +826,33 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             let json = Env_config_introspect.to_json () in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
+      (* Same owner and same shape as the HTTP/1 route; a client that reaches
+         the server over H2 must not see a different projection. *)
+      | `GET, "/api/v1/dashboard/scheduled-automation" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let json =
+              Domain_pool_ref.submit_io_or_inline (fun () ->
+                Server_dashboard_schedule_projection
+                .scheduled_automation_dashboard_json
+                  (Mcp_server.workspace_config state))
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      (* The tool inventory had no H2 route at all: an H2 client got 404 where
+         an HTTP/1 client got the inventory. Same selector as the HTTP/1 route,
+         so the snapshot fast path and the per-actor fallback both apply. *)
+      | `GET, "/api/v1/dashboard/tools" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let json =
+              Server_dashboard_snapshot_select.select_tools_json
+                ?actor:
+                  (dashboard_actor_for_request
+                     ~base_path:(Mcp_server.workspace_config state).base_path
+                     httpun_request)
+                (Mcp_server.workspace_config state)
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/project-snapshot"
       | `GET, "/api/v1/dashboard/namespace-truth" ->
           with_h2_public_read h2_reqd (fun state ->

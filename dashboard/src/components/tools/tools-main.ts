@@ -20,6 +20,10 @@ import { formatElapsedCompact } from '../../lib/format-time'
 import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
+import {
+  scheduledAutomation,
+  subscribeScheduledAutomationRefresh,
+} from '../schedule/schedule-state'
 
 type ToolsView = 'inventory' | 'executor'
 const activeView = signal<ToolsView>('inventory')
@@ -43,6 +47,9 @@ export function Tools() {
     if (!toolsData.value && !toolsLoading.value) {
       void loadTools()
     }
+    // The FSM panel below renders the schedule projection, which is no longer
+    // part of the tools response.
+    return subscribeScheduledAutomationRefresh()
   }, [])
 
   return html`
@@ -71,7 +78,7 @@ export function Tools() {
       <//>
 
       <${SectionCard} label="예약 자동화 FSM" class="section v2-lab-panel mb-4">
-        <${ScheduledAutomationPanel} automation=${data?.scheduled_automation ?? null} />
+        <${ScheduledAutomationPanel} automation=${scheduledAutomation.value ?? null} />
       <//>
 
       <${SectionCard} label="Keeper Waiting Inventory" class="section v2-lab-panel mb-4">

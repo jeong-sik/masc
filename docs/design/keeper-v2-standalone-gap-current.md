@@ -18,9 +18,10 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   and is backed by the dashboard runtime config API rather than prototype globals.
 - Approvals are already represented by `dashboard/src/components/approvals/approvals-surface.ts`
   and use the live approval queue API.
-- Schedule automation data is already exposed by `/api/v1/dashboard/tools` as
-  `scheduled_automation` with request rows, derived counts, wake readiness,
-  keeper next action/tool, approval policy, payload metadata, and last wake.
+- Schedule automation data is already exposed by
+  `/api/v1/dashboard/scheduled-automation` with request rows, derived counts,
+  wake readiness, keeper next action/tool, approval policy, payload metadata,
+  and last wake.
 - The Tools surface already hosts the schedule automation projection under
   `예약 자동화 FSM`.
 

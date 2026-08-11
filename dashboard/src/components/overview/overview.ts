@@ -50,7 +50,10 @@ import { createAsyncResource, type AsyncResource, type AsyncState } from '../../
 import { navigate } from '../../router'
 import { gateData } from '../gate-signals'
 import type { TabId } from '../../types/sse'
-import { toolsData } from '../tools/tool-state'
+import {
+  scheduledAutomation,
+  subscribeScheduledAutomationRefresh,
+} from '../schedule/schedule-state'
 import {
   fetchTelemetry,
   fetchTelemetrySummary,
@@ -1481,7 +1484,14 @@ export function Overview() {
       void loadOverviewTelemetry()
       void loadOverviewFullHealth()
     }, 60_000)
-    return () => window.clearInterval(interval)
+    // Schedule state is its own projection with its own poller. Root used to
+    // reach it through the tool inventory, which meant entering the home
+    // surface fetched the whole tool registry.
+    const stopScheduleRefresh = subscribeScheduledAutomationRefresh()
+    return () => {
+      window.clearInterval(interval)
+      stopScheduleRefresh()
+    }
   }, [])
   const taskList = tasks.value
   const keeperList = keepers.value
@@ -1492,7 +1502,7 @@ export function Overview() {
     approvalQueueState?.state === 'ready'
       ? gateData.value?.approval_queue?.length ?? null
       : null
-  const scheduledAutomation = toolsData.value?.scheduled_automation ?? null
+  const scheduledAutomationData = scheduledAutomation.value ?? null
   const scheduleRunnerStatus =
     overviewFullHealthResource.state.value.status === 'loaded'
       ? overviewFullHealthResource.state.value.data.schedule_runner ?? null
@@ -1504,8 +1514,8 @@ export function Overview() {
   const fleet = useMemo(() => resolveKeeperFleetExecutionCounts(fleetSafety), [fleetSafety])
   const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
   const digest = useMemo(
-    () => computeOverviewDigest(openGateRequests, goalList, fusionList, scheduledAutomation, scheduleRunnerStatus),
-    [openGateRequests, goalList, fusionList, scheduledAutomation, scheduleRunnerStatus],
+    () => computeOverviewDigest(openGateRequests, goalList, fusionList, scheduledAutomationData, scheduleRunnerStatus),
+    [openGateRequests, goalList, fusionList, scheduledAutomationData, scheduleRunnerStatus],
   )
   const telemetry = overviewTelemetryResource.state.value
 

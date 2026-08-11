@@ -1,6 +1,7 @@
 // Dedicated Schedule surface.
 //
-// Two views over one schedule projection (data.scheduled_automation):
+// Two views over one schedule projection, read from the shared schedule
+// resource (GET /api/v1/dashboard/scheduled-automation):
 //   · 캘린더 — the always-on polling strip (interval) above a day agenda
 //     (scheduled + oneshot). Ported from the keeper-v2 prototype (schedule.jsx).
 //   · 목록   — the mature diagnostic list/cards/signal feed in
@@ -31,9 +32,14 @@ import { countQueueDrainMisses } from './queue-drain-status'
 import {
   loadTools,
   toolsData,
-  toolsError,
-  toolsLoading,
 } from '../tools/tool-state'
+import {
+  loadScheduledAutomation,
+  scheduledAutomation,
+  scheduledAutomationError,
+  scheduledAutomationLoading,
+  subscribeScheduledAutomationRefresh,
+} from './schedule-state'
 import { pruneSchedules } from '../../api/dashboard-schedule'
 
 type ScheduleView = 'calendar' | 'list'
@@ -74,11 +80,13 @@ function countByStatus(
 
 export function ScheduleSurface() {
   const data = toolsData.value
-  const automation = data?.scheduled_automation ?? null
+  // Schedule rows come from the schedule projection; the keeper diagnostics
+  // panels below still read the tool inventory, which is why both are loaded.
+  const automation = scheduledAutomation.value ?? null
   const waitingInventory = data?.keeper_waiting_inventory ?? null
   const keeperBackground = data?.keeper_background ?? null
-  const loading = toolsLoading.value
-  const error = toolsError.value
+  const loading = scheduledAutomationLoading.value
+  const error = scheduledAutomationError.value
   const scheduledCount = countByStatus(automation, ['scheduled'])
   const dueCount = countByStatus(automation, ['due'])
   const runningCount = countByStatus(automation, ['running'])
@@ -103,9 +111,10 @@ export function ScheduleSurface() {
   const [diagOpen, setDiagOpen] = useState(false)
 
   useEffect(() => {
-    if (!toolsData.value && !toolsLoading.value) {
-      void loadTools()
-    }
+    const stopScheduleRefresh = subscribeScheduledAutomationRefresh()
+    // Tool inventory is still needed for the keeper waiting/background panels.
+    if (!toolsData.value) void loadTools()
+    return stopScheduleRefresh
   }, [])
 
   function switchView(next: ScheduleView) {
@@ -115,7 +124,7 @@ export function ScheduleSurface() {
     setView(next)
   }
 
-  const refresh = (): Promise<void> => loadTools()
+  const refresh = (): Promise<void> => loadScheduledAutomation()
   async function handlePrune() {
     if (
       !window.confirm(

@@ -25,7 +25,7 @@ dune_violations="$({
   # prefix so comments cannot hide or imitate a library dependency.
   find "${core_root}" -name dune -type f -print0 \
     | while IFS= read -r -d '' dune_file; do
-        awk '
+        if matches="$(awk '
           BEGIN {
             in_string = 0
             escaped = 0
@@ -44,13 +44,21 @@ dune_violations="$({
                 in_string = !in_string
               }
             }
-            print FILENAME ":" FNR ":" code
+            print code
           }
-        ' "${dune_file}"
-      done \
-    | rg 'masc\.' \
-    | rg -v '\(public_name masc\.agent_core(\.[a-z_]+)?\)' \
-    || true
+        ' "${dune_file}" \
+          | perl -0777 -pe \
+              's{\(\s*public_name\s+masc\.agent_core(?:\.[a-z_]+)?\s*\)}{}g' \
+          | rg -n 'masc\.')"; then
+          printf '%s\n' "${matches}" | sed "s#^#${dune_file}:#"
+        else
+          status=$?
+          # ripgrep uses 1 for "no matches". Any other status means the
+          # scanner itself failed, which must fail closed rather than silently
+          # accepting a dependency.
+          [[ "${status}" -eq 1 ]] || exit "${status}"
+        fi
+      done
 })"
 [[ -z "${dune_violations}" ]] || {
   printf '%s\n' "${dune_violations}" >&2

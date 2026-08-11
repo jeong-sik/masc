@@ -604,38 +604,50 @@ let validate_keeper_dispatch_request_caps
   let runtime_by_id id =
     List.find_opt (fun (runtime : t) -> String.equal runtime.id id) runtimes
   in
-  match
-    List.find_map
-      (fun id ->
-         match runtime_by_id id with
-         | None -> None
-         | Some runtime ->
-           (match runtime.execution with
-            | Runtime_execution.Codex_app_server _
-            | Runtime_execution.Claude_code _
-            | Runtime_execution.Antigravity_cli _ -> None
-            | Runtime_execution.Agent_core provider_config ->
-              (match
-                 validate_request_body_cap
-                   ~runtime_id:runtime.id
-                   provider_config
-               with
-               | Ok _ -> None
-               | Error _ -> Some runtime)))
-      ids
-  with
+  (* Both execution kinds need a declared ceiling on what a turn may send; they
+     differ only in which one, because they are bounded at different places.
+
+     Agent_core measures the serialized request body, so its ceiling is
+     max-request-body-bytes. An official-client turn never builds that body —
+     it seeds a spawned client's conversation on turn 1 and sends only the goal
+     afterwards — so its ceiling is max-prompt-bytes, on the seed.
+
+     Leaving official-client unbounded was not a smaller version of the same
+     rule; it was the absence of one. An undeclared seed does not fail once: it
+     overflows the model window on turn 1, so the session never reaches turn 2,
+     and a recovery to a fresh session makes the next turn a start turn again.
+     Measured while rotating keepers across the declared runtimes: 13 of 13
+     official-client runtimes without the declaration failed this way, and all
+     13 completed once it was declared. The four that already carried it were
+     the four that were already working. *)
+  let missing_ceiling runtime =
+    match runtime.execution with
+    | Runtime_execution.Agent_core provider_config ->
+      (match validate_request_body_cap ~runtime_id:runtime.id provider_config with
+       | Ok _ -> None
+       | Error _ -> Some (runtime, "max-request-body-bytes", "the exact serialized request"))
+    | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Claude_code _
+    | Runtime_execution.Antigravity_cli _ ->
+      (match runtime.model.max_prompt_bytes with
+       | Some n when n > 0 -> None
+       | Some _ | None ->
+         Some (runtime, "max-prompt-bytes", "the start-turn conversation seed"))
+  in
+  match List.find_map (fun id -> Option.bind (runtime_by_id id) missing_ceiling) ids with
   | None -> Ok ()
-  | Some runtime ->
+  | Some (runtime, key, what) ->
     Error
       (Printf.sprintf
-         "%s: Keeper-dispatch runtime %S has no positive \
-          max-request-body-bytes; declare [%s.%s].max-request-body-bytes before \
-          dispatch so the exact serialized request has an explicit admission \
-          ceiling"
+         "%s: Keeper-dispatch runtime %S has no positive %s; declare \
+          [%s.%s].%s before dispatch so %s has an explicit admission ceiling"
          config_path
          runtime.id
+         key
          runtime.binding.provider_id
-         runtime.binding.model_id)
+         runtime.binding.model_id
+         key
+         what)
 ;;
 
 (* Every runtime binding's provider/model pair must be known to the AGENT_CORE

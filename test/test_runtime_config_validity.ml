@@ -1839,6 +1839,80 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
            (String_util.contains_substring detail "local.lane"))
 ;;
 
+(* The Agent_core rule above bounds the serialized request body. An
+   official-client turn never builds that body — it seeds a spawned client's
+   conversation on turn 1 and sends only the goal afterwards — so its ceiling
+   sits on the seed instead. Leaving that side unbounded was the absence of a
+   rule, not a lighter version of one: an undeclared seed overflows the model
+   window on turn 1, the session never reaches turn 2, and recovery to a fresh
+   session makes the next turn a start turn again.
+
+   Measured while rotating keepers across the declared runtimes: 13 of 13
+   official-client runtimes without the declaration failed this way, and all 13
+   completed once it was declared. *)
+let test_runtime_config_validation_rejects_unbounded_official_client_seed () =
+  let content bound =
+    Printf.sprintf
+      "[providers.local]\n\
+       protocol = \"openai-compatible-http\"\n\
+       endpoint = \"http://127.0.0.1:1/v1\"\n\
+       \n\
+       [providers.subscription]\n\
+       protocol = \"claude-code\"\n\
+       command = \"/usr/bin/true\"\n\
+       is-non-interactive = true\n\
+       \n\
+       [models.sample]\n\
+       api-name = \"sample\"\n\
+       max-context = 1024\n\
+       \n\
+       [models.seeded]\n\
+       api-name = \"seeded\"\n\
+       max-context = 1024\n%s\
+       \n\
+       [local.sample]\n\
+       max-request-body-bytes = 65536\n\
+       \n\
+       [subscription.seeded]\n\
+       \n\
+       [runtime]\n\
+       default = \"local.sample\"\n\
+       \n\
+       [runtime.assignments]\n\
+       \"probe\" = \"subscription.seeded\"\n"
+      bound
+  in
+  let attempt text =
+    let snapshot = Runtime.For_testing.snapshot () in
+    let path = Filename.temp_file "official_seed_" ".toml" in
+    let oc = open_out path in
+    output_string oc text;
+    close_out oc;
+    Fun.protect
+      ~finally:(fun () ->
+        Runtime.For_testing.restore snapshot;
+        try Sys.remove path with
+        | Sys_error _ -> ())
+      (fun () -> Runtime.save_config_text ~runtime_config_path:path text)
+  in
+  (match attempt (content "") with
+   | Ok () ->
+     fail "an official-client Keeper runtime with no max-prompt-bytes must be rejected"
+   | Error detail ->
+     check bool "the diagnostic names the key an operator must add" true
+       (String_util.contains_substring detail "max-prompt-bytes");
+     check bool "the diagnostic names the runtime" true
+       (String_util.contains_substring detail "subscription.seeded");
+     (* The Agent_core key would send the operator to the wrong line. *)
+     check bool "the diagnostic does not name the Agent_core key" false
+       (String_util.contains_substring detail "max-request-body-bytes"));
+  (* Control: the same config with the bound declared must load. Without this a
+     check that rejected every official-client runtime would pass. *)
+  match attempt (content "max-prompt-bytes = 131072\n") with
+  | Ok () -> ()
+  | Error detail -> failf "a declared seed bound must load: %s" detail
+;;
+
 let test_runtime_config_validation_rejects_uncapped_special_runtime () =
   let content route =
     Printf.sprintf
@@ -3807,6 +3881,10 @@ let () =
             "runtime config rejects an uncapped cross-verifier runtime"
             `Quick
             test_runtime_config_validation_rejects_uncapped_special_runtime;
+          test_case
+            "runtime config rejects an unbounded official-client seed"
+            `Quick
+            test_runtime_config_validation_rejects_unbounded_official_client_seed;
           test_case
             "runtime config allows uncapped dormant lane candidate"
             `Quick

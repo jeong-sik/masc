@@ -272,6 +272,31 @@ let test_tool_call_json_missing_id_roundtrip () =
     Alcotest.(check (option string)) "missing id stays typed" None decoded.tool_use_id
 ;;
 
+let test_tool_call_json_empty_ids_are_none () =
+  let base_fields =
+    [ "tool_name", `String "read"
+    ; "tool_input", `Assoc []
+    ; "tool_result", `Null
+    ; "is_error", `Bool false
+    ; "started_at", `Float 1.0
+    ; "finished_at", `Null
+    ]
+  in
+  let cases =
+    [ "empty", `Assoc ([ "tool_use_id", `String "" ] @ base_fields)
+    ; "whitespace", `Assoc ([ "tool_use_id", `String " \t " ] @ base_fields)
+    ; "null", `Assoc ([ "tool_use_id", `Null ] @ base_fields)
+    ; "missing", `Assoc base_fields
+    ]
+  in
+  List.iter
+    (fun (label, json) ->
+       match Trajectory.tool_call_of_json json with
+       | Error e -> Alcotest.fail (Printf.sprintf "%s: %s" label e)
+       | Ok decoded -> Alcotest.(check (option string)) label None decoded.tool_use_id)
+    cases
+;;
+
 let test_tool_call_of_json_error () =
   let bad_json = `Assoc [ "tool_use_id", `Int 123 ] in
   match Trajectory.tool_call_of_json bad_json with
@@ -451,6 +476,7 @@ let () =
       , [ tc "roundtrip" test_tool_call_json_roundtrip
         ; tc "null finished" test_tool_call_json_null_finished
         ; tc "missing id roundtrip" test_tool_call_json_missing_id_roundtrip
+        ; tc "empty ids are none" test_tool_call_json_empty_ids_are_none
         ; tc "parse error" test_tool_call_of_json_error
         ] )
     ; ( "step_json"

@@ -347,7 +347,8 @@ let tool_call_of_json json =
   let open Yojson.Safe.Util in
   try
     Ok
-      { tool_use_id = json |> member "tool_use_id" |> to_string_option
+      { tool_use_id =
+          json |> member "tool_use_id" |> to_string_option |> tool_use_id_of_raw
       ; tool_name = json |> member "tool_name" |> to_string
       ; tool_input = json |> member "tool_input"
       ; tool_result = json |> member "tool_result" |> to_string_option

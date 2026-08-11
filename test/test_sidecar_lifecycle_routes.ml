@@ -62,13 +62,6 @@ let attempt_next_retry_at (record : Routes.attempt_record) =
   Option.map Masc_domain.iso8601_of_unix_seconds record.Routes.attempt.next_retry_unix
 ;;
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
 ;;
 
 let rec mkdir_p path =
@@ -275,12 +268,12 @@ let test_runtime_base_path_result_fails_without_base_path () =
   match Routes.runtime_sidecar_dir_result "discord" with
   | Ok dir -> failf "expected missing base path error, got %s" dir
   | Error msg ->
-    check bool "mentions request base path" true (contains_substring msg "base_path");
+    check bool "mentions request base path" true (String_util.contains_substring msg "base_path");
     check
       bool
       "mentions env base path"
       true
-      (contains_substring msg Env_config_core.base_path_env_key)
+      (String_util.contains_substring msg Env_config_core.base_path_env_key)
 ;;
 
 let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
@@ -294,22 +287,22 @@ let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
     bool
     "mentions explicit env hint"
     true
-    (contains_substring message "MASC_SIDECAR_ROOT=/path/to/masc");
+    (String_util.contains_substring message "MASC_SIDECAR_ROOT=/path/to/masc");
   check
     bool
     "mentions launcher flag hint"
     true
-    (contains_substring message "--sidecar-root /path/to/masc");
+    (String_util.contains_substring message "--sidecar-root /path/to/masc");
   check
     bool
     "includes searched runtime path"
     true
-    (contains_substring message "/tmp/runtime-root/sidecars/discord-bot");
+    (String_util.contains_substring message "/tmp/runtime-root/sidecars/discord-bot");
   check
     bool
     "includes searched project path"
     true
-    (contains_substring message "/tmp/project-root/sidecars/discord-bot")
+    (String_util.contains_substring message "/tmp/project-root/sidecars/discord-bot")
 ;;
 
 let test_runtime_base_path_uses_resolver_precedence () =
@@ -986,8 +979,8 @@ let test_read_attempt_record_result_reports_semantic_corruption () =
       {|{"connector_id":"discord","generation":1,"attempt_id":"1:1","attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
     match Routes.read_attempt_record_result ~base_path "discord" with
     | Error msg ->
-      check bool "mentions field" true (contains_substring msg "next_retry_at");
-      check bool "mentions bad value" true (contains_substring msg "not-an-iso-stamp")
+      check bool "mentions field" true (String_util.contains_substring msg "next_retry_at");
+      check bool "mentions bad value" true (String_util.contains_substring msg "not-an-iso-stamp")
     | Ok None -> failf "corrupt persisted attempt state must not look absent"
     | Ok (Some _) -> failf "corrupt persisted attempt state should not decode")
 ;;
@@ -1006,8 +999,8 @@ let test_status_json_surfaces_invalid_attempt_state () =
       | `String msg -> msg
       | other -> failf "expected attempt_read_error string, got %s" (Yojson.Safe.to_string other)
     in
-    check bool "mentions field" true (contains_substring error "next_retry_at");
-    check bool "mentions bad value" true (contains_substring error "not-an-iso-stamp"))
+    check bool "mentions field" true (String_util.contains_substring error "next_retry_at");
+    check bool "mentions bad value" true (String_util.contains_substring error "not-an-iso-stamp"))
 ;;
 
 let test_retry_backoff_fail_closed_on_malformed_now () =
@@ -1101,7 +1094,7 @@ let test_fetch_schema_error_on_nonzero_exit () =
         bool
         "error mentions schema_dump failure"
         true
-        (contains_substring msg "schema_dump failed"))
+        (String_util.contains_substring msg "schema_dump failed"))
 ;;
 
 let () =

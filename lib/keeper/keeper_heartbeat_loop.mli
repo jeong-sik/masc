@@ -191,7 +191,6 @@ val continuation_delivery_authorizes_source_ack :
   bool
 (** Boolean compatibility projection of {!continuation_source_disposition}. *)
 
-
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];
     [0] maps to [Turn_succeeded]. *)
@@ -258,6 +257,20 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> unit
 
 module For_testing : sig
+  type failed_continuation_settlement =
+    | Failed_continuation_no_obligation
+    | Failed_continuation_committed of
+        Keeper_unified_turn.continuation_delivery_completion
+    | Failed_continuation_quarantined of { detail : string }
+
+  val settle_failed_continuation_source :
+    config:Workspace.config ->
+    keeper_name:string ->
+    origin:Keeper_continuation_delivery_intent.origin ->
+    failed_continuation_settlement
+  (** Recover a delivery obligation precommitted before a later turn-finalization
+      failure. Test-only exposure of the production failure-path helper. *)
+
   val consume_deferred_runtime_lane_hint :
     Keeper_turn_driver.deferred_runtime_lane option ref ->
     Keeper_turn_driver.deferred_runtime_lane ->

@@ -216,6 +216,33 @@ let test_precommit_is_recoverable_before_response_finalization () =
         (Intent.same_origin durable.Intent.origin pending.Intent.origin))
 ;;
 
+let test_precommit_is_settled_after_finalization_failure () =
+  with_temp_config "precommit-finalization-failure" (fun config ->
+    let pending = intent_for Fusion (dashboard_channel Fusion) in
+    ignore
+      (Keeper_agent_run_finalize_response.precommit_continuation_delivery_intent
+         ~config
+         (Some pending)
+       |> Result.fold
+            ~ok:Fun.id
+            ~error:(fun error -> fail (Store.error_to_string error)));
+    match
+      Keeper_heartbeat_loop.For_testing.settle_failed_continuation_source
+        ~config
+        ~keeper_name:pending.Intent.keeper_name
+        ~origin:pending.Intent.origin
+    with
+    | Keeper_heartbeat_loop.For_testing.Failed_continuation_committed completion ->
+      check bool "failed finalization keeps the committed delivery authority" true
+        (Keeper_heartbeat_loop.continuation_delivery_authorizes_source_ack
+           ~source_requires:true
+           completion)
+    | Keeper_heartbeat_loop.For_testing.Failed_continuation_no_obligation ->
+      fail "precommitted obligation disappeared after finalization failure"
+    | Keeper_heartbeat_loop.For_testing.Failed_continuation_quarantined { detail } ->
+      fail detail)
+;;
+
 let test_all_producers_leave_one_delivered_correlation_bundle () =
   with_temp_config "delivered" (fun config ->
     let append_count = ref 0 in
@@ -407,6 +434,10 @@ let () =
             "precommit is recoverable before response finalization"
             `Quick
             test_precommit_is_recoverable_before_response_finalization
+        ; test_case
+            "precommit is settled after response finalization failure"
+            `Quick
+            test_precommit_is_settled_after_finalization_failure
         ; test_case
             "all producers leave one delivered correlation bundle"
             `Quick

@@ -736,6 +736,12 @@ let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
   let* status, state, stderr = run_result in
   let wall_duration_s = max 0.0 (Eio.Time.now clock -. started_at) in
   match status, state.init, state.result with
+  | `Exited 0, Some _, Some (Success, text, _, _, _)
+    when not
+           (Agent_core.Response_shape.has_deliverable_content
+              (Agent_core.Response_shape.summarize_blocks
+                 [ Agent_core.Types.Text text ])) ->
+    Error (Turn_failed "successful result response has no deliverable content")
   | `Exited 0, Some (conversation_id, model, permission_mode),
     Some (Success, text, _, num_turns, usage) ->
     Ok

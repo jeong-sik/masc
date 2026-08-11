@@ -20,12 +20,13 @@ val handle_keeper_up : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_r
     If streaming fails, the function falls back to batch automatically.
 
     @since 2.110.0 *)
-val preflight_keeper_msg :
-  _ Keeper_types_profile.context ->
+val preflight_keeper_msg_resolved :
+  meta:Keeper_meta_contract.keeper_meta ->
   Keeper_invocation_contract.direct_message ->
   (Keeper_invocation_contract.direct_message, string) result
 (** Run synchronous validation for [handle_keeper_msg] before an async wrapper
-    accepts the turn for later execution. *)
+    accepts the turn for later execution. Takes the effective meta the
+    resolution step already read, so no second store read happens here. *)
 
 val preflight_keeper_delegate :
   _ Keeper_types_profile.context ->

@@ -656,6 +656,15 @@ let reprioritize_pending_result
     ()
 ;;
 
+let defer_pending_result ~base_path name ~selection =
+  Keeper_event_queue_persistence.defer_pending_result
+    ~base_path
+    ~keeper_name:name
+    ~selection
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
 let peek_when_result ~base_path name ~ready =
   match Keeper_registry.get ~base_path name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" name)

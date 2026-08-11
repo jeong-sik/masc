@@ -162,19 +162,24 @@ and connector_attention = {
     message; content/surface are read from that store on the turn path. *)
 
 and scheduled_wake = {
+  occurrence_id : string;
   schedule_instance_id : string;
   schedule_id : string;
   due_at : float;
   payload_digest : string;
   title : string option;
   message : string;
+  result_delivery : Keeper_continuation_channel.t option;
 }
 (** Payload for [Schedule_due]: the schedule consumer has already validated the
     request and enqueued this wake for the named keeper. The schedule instance
     identity prevents a terminal receipt from a pruned request from matching a
     later request that reuses the same public [schedule_id]. [payload_digest]
     preserves a stable audit correlation to the schedule payload without
-    duplicating its raw JSON envelope in the keeper queue. *)
+    duplicating its raw JSON envelope in the keeper queue. [result_delivery]
+    is [None] for an explicit no-delivery policy and [Some channel] only when
+    schedule creation captured an authorized originating continuation.
+    [occurrence_id] is the exact schedule occurrence correlation key. *)
 
 and goal_assignment = {
   ga_goal_id : string;

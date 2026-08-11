@@ -145,17 +145,51 @@ val compaction_outcomes_of_cycle_outcome :
     commit/failure observation it contains. Only committed outcomes mutate
     durable compaction state. *)
 
-val failed_selection_terminal_detail :
-  Keeper_unified_turn.turn_failure -> string option
-(** Pure source-disposal decision for a failed turn that consumed a pending
-    Event Queue selection. [Some detail] only for a typed context-overflow
-    terminal route with no pending [deferred_runtime_lane]: with automatic
-    overflow-compaction recovery removed (#26546), retry has no evidence of a
-    smaller request, so the loop terminalizes the selection. [None]
-    preserves the selection — a deferred lane freezes a successor runtime for
-    this exact selection, other terminal classes may resolve without
-    compaction, retryable routes stay pending, and transcript corruption is
-    consumed by its own pause path. *)
+type failed_source_disposition =
+  | Preserve_for_deferred_runtime
+  | Defer_to_queue_tail
+  | Quarantine_source of { detail : string }
+  | Pause_keeper_for_integrity of { detail : string }
+
+val failed_source_disposition :
+  Keeper_unified_turn.turn_failure -> failed_source_disposition
+(** Pure liveness policy for one failed source turn. Only transcript integrity
+    corruption pauses the Keeper. A frozen successor runtime retains the exact
+    source, transient failures move it behind independent work, and deterministic
+    failures quarantine that source with its durable receipt. *)
+
+val source_requires_continuation_delivery :
+  Keeper_event_queue.stimulus list -> bool
+
+val continuation_delivery_origin_for_stimuli :
+  Keeper_event_queue.stimulus list ->
+  (Keeper_continuation_delivery_intent.origin option, string) result
+(** Resolve the exact singleton continuation source before inference. A source
+    that claims delivery but has no valid routable origin, or a batch that
+    mixes continuation work, fails closed instead of regenerating responses. *)
+
+type continuation_source_disposition =
+  | Acknowledge_source
+  | Defer_continuation_source
+  | Retain_source
+  | Quarantine_continuation_source of { detail : string }
+
+val continuation_source_disposition :
+  source_requires:bool ->
+  Keeper_unified_turn.continuation_delivery_completion ->
+  continuation_source_disposition
+(** Producer-specific active-queue policy. A terminal delivery settlement ACKs
+    the source. A durable but recovery-pending obligation moves the source to
+    the queue tail as a recovery token: it releases the active head and never
+    regenerates inference, but remains durable until connector settlement is
+    terminal. Missing delivery proof retains non-delivery work and quarantines
+    a required continuation source. *)
+
+val continuation_delivery_authorizes_source_ack :
+  source_requires:bool ->
+  Keeper_unified_turn.continuation_delivery_completion ->
+  bool
+(** Boolean compatibility projection of {!continuation_source_disposition}. *)
 
 
 (** Pure: post-turn status event derived from the registry

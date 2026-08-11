@@ -24,8 +24,6 @@ open Otel_spans
 
 type tool_result = Keeper_types_profile.tool_result
 
-exception Direct_owner_meta_commit_failed of string
-
 let handle_keeper_up = Keeper_turn_up.handle_keeper_up
 let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
@@ -38,52 +36,6 @@ let restart_keepalive_after_message_turn ctx meta =
       meta.name
       (start_keepalive_outcome_to_string outcome)
 ;;
-
-let turn_cost_for_result (result : Keeper_agent_run.run_result) : float =
-  (* cost_usd is accounted independently of token-count trust (token⊥cost). The
-     provider's authoritative cost field is used verbatim; only missing cost
-     uses the aggregate identity 0.0. *)
-  Keeper_unified_metrics.estimate_usage_cost_usd result.usage
-
-let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
-    (result : Keeper_agent_run.run_result) : keeper_meta =
-  let now_ts = Time_compat.now () in
-  let turn_cost = turn_cost_for_result result in
-  let observed_input_tokens = result.usage.input_tokens in
-  let observed_output_tokens = result.usage.output_tokens in
-  let observed_total_tokens = Inference_utils.total_tokens result.usage in
-  let updated_meta = {
-    meta with
-    updated_at = now_iso ();
-    runtime =
-      {
-        meta.runtime with
-        usage =
-          with_last_reported_usage
-            {
-              meta.runtime.usage with
-              total_turns = meta.runtime.usage.total_turns + 1;
-              total_input_tokens =
-                meta.runtime.usage.total_input_tokens + observed_input_tokens;
-              total_output_tokens =
-                meta.runtime.usage.total_output_tokens + observed_output_tokens;
-              total_tokens =
-                meta.runtime.usage.total_tokens + observed_total_tokens;
-              total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
-              last_turn_ts = now_ts;
-              last_latency_ms = latency_ms;
-            }
-            ~usage_reported:result.usage_reported
-            ~input_tokens:observed_input_tokens
-            ~output_tokens:observed_output_tokens
-            ~total_tokens:observed_total_tokens
-            ~observed_at:now_ts;
-      };
-  } in
-  Keeper_unified_metrics.record_keeper_total_cost_usd
-    ~keeper_name:updated_meta.name
-    ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
-  updated_meta
 
 let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
     Keeper_world_observation.world_observation =
@@ -297,8 +249,9 @@ let preflight_keeper_delegate ctx request =
     [docs/audit/2026-06-13-masc-fsm-drift-audit.md] (finding #3).  This
     wrapper emits the canonical start sequence
     [Idle -> Phase_gating -> Runtime_routing -> Awaiting_provider -> Streaming]
-    before invoking [f], then records the matching terminal state
-    ([Done], [Failed], or [Cancelled]) from the result or exception.
+    before invoking [f], then records [Failed] or [Cancelled] from the error
+    boundary. Successful terminal transitions are owned by the shared
+    [Keeper_unified_turn_success] pipeline.
 
     The wrapper is intentionally thin: it does not duplicate metrics,
     receipt, or meta writes — those remain in
@@ -328,17 +281,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
   try
     let result = f () in
     (match result with
-     | Ok _ ->
-       Keeper_turn_fsm.emit_transition
-         ~keeper_name
-         ~turn_id
-         ~prev:Keeper_turn_fsm.Streaming
-         Keeper_turn_fsm.Completing;
-       Keeper_turn_fsm.emit_transition
-         ~keeper_name
-         ~turn_id
-         ~prev:Keeper_turn_fsm.Completing
-         Keeper_turn_fsm.Done
+     | Ok _ -> ()
      | Error err ->
        let reason =
          Keeper_turn_fsm.Failure_provider_error
@@ -778,79 +721,33 @@ let run_keeper_invocation_turn_admitted_inner
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
-              let lifecycle =
-                Keeper_context_runtime.apply_post_turn_lifecycle
-                  ~meta
-                  ~checkpoint:result.checkpoint
+              let degraded_retry_applied =
+                not (String.equal result.runtime_id initial_execution.runtime_id)
               in
-              Keeper_context_runtime.dispatch_post_turn_lifecycle_events
-                ~config:ctx.config
-                ~keeper_name:meta.name
-                lifecycle;
-              let updated_meta =
-                update_direct_turn_meta lifecycle.updated_meta ~latency_ms result
+              let degraded_retry_runtime =
+                if degraded_retry_applied then Some result.runtime_id else None
+              in
+              let execution_outcome =
+                Keeper_execution_outcome.create
+                  ~lane:Keeper_execution_outcome.Direct
+                  result
               in
               let updated_meta =
                 match
-                  Keeper_owner_registry.commit_turn_runtime
-                    ~base_path:ctx.config.base_path
-                    ~keeper_name:meta.name
-                    ~before:meta
-                    ~after:updated_meta
+                  Keeper_unified_turn_success.handle
+                    ~config:ctx.config
+                    ~meta
+                    ~turn_ctx_cell
+                    ~observation:world_observation
+                    ~latency_ms
+                    ~degraded_retry_applied
+                    ~degraded_retry_runtime
+                    ~fallback_reason:None
+                    ~keeper_turn_id
+                    execution_outcome
                 with
-                | Ok (Some committed) -> committed
-                | Ok None ->
-                  raise
-                    (Direct_owner_meta_commit_failed
-                       "Keeper Owner removed metadata during direct turn commit")
-                | Error error ->
-                  let detail = Keeper_owner_registry.command_error_to_string error in
-                  Otel_metric_store.inc_counter
-                    Keeper_metrics.(to_string WriteMetaFailures)
-                    ~labels:[ "keeper", meta.name; "phase", "keeper_msg_turn" ]
-                    ();
-                  raise (Direct_owner_meta_commit_failed detail)
+                | Keeper_unified_turn_success.Completed updated_meta -> updated_meta
               in
-              (try
-                 Keeper_unified_metrics.append_metrics_snapshot
-                   ~config:ctx.config
-                   ~meta:updated_meta
-                   ~observation:(direct_turn_observation ~config:ctx.config updated_meta)
-                   ~result
-                   ~latency_ms
-                   ~turn_cost:(turn_cost_for_result result)
-                   ~turn_generation:lifecycle.turn_generation
-                   ~channel:Keeper_world_observation.Reactive
-                   ~checkpoint_bytes:lifecycle.checkpoint_bytes
-                   ~message_count:lifecycle.message_count
-                   ~handoff_json:lifecycle.handoff_json
-                   ()
-               with
-               | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn ->
-                   (* #10047: surface the drop as a Otel_metric_store counter so
-                      dashboards can alert when state advances without a
-                      matching metric record. The log alone was too easy
-                      to miss and operators trusted metric jsonl as
-                      ground truth. *)
-                   Otel_metric_store.inc_counter
-                     Keeper_metrics.(to_string MetricEmitDropped)
-                     ~labels:[
-                       ("keeper", updated_meta.name);
-                       ("channel", "turn");
-                       ("site", "keeper_turn_msg");
-                     ] ();
-                   Otel_metric_store.inc_counter
-                     Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
-                     ~labels:[("keeper", updated_meta.name); ("site", "turn")]
-                     ();
-                   Log.Keeper.error
-                     "write metrics snapshot failed after keeper_msg turn: %s"
-                     (Printexc.to_string exn));
-              Keeper_unified_metrics.broadcast_lifecycle_events
-                ~name:updated_meta.name
-                ~turn_generation:lifecycle.turn_generation
-                ~handoff_json:lifecycle.handoff_json;
               restart_keepalive_after_message_turn ctx updated_meta;
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" (Keeper_agent_result.tool_call_count result)) ();

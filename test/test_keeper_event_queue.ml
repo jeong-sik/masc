@@ -441,12 +441,14 @@ let () =
   (* Scheduled wake is a non-board stimulus whose enclosing occurrence id and
      payload both survive restart replay. *)
   let scheduled_wake =
-    { schedule_instance_id = "instance-sched-1"
+    { occurrence_id = "schedule-occurrence:test"
+    ; schedule_instance_id = "instance-sched-1"
     ; schedule_id = "sched-1"
     ; due_at = 200.0
     ; payload_digest = "digest-1"
     ; title = Some "Scheduled lane wake"
     ; message = "Run the scheduled maintenance lane now."
+    ; result_delivery = None
     }
   in
   let schedule_payload () = Schedule_due scheduled_wake in
@@ -465,13 +467,43 @@ let () =
      assert (String.equal s.post_id "schedule-occurrence:codec");
      (match s.payload with
       | Schedule_due wake ->
+        assert (String.equal wake.occurrence_id "schedule-occurrence:test");
         assert (String.equal wake.schedule_id "sched-1");
         assert (Float.equal wake.due_at 200.0);
         assert (String.equal wake.payload_digest "digest-1");
         assert (wake.title = Some "Scheduled lane wake");
-        assert (String.equal wake.message "Run the scheduled maintenance lane now.")
+        assert (String.equal wake.message "Run the scheduled maintenance lane now.");
+        assert (Option.is_none wake.result_delivery)
       | _ -> Alcotest.fail "Schedule_due codec round-trip changed payload shape")
    | Error msg -> Alcotest.fail ("Schedule_due stimulus round-trip failed: " ^ msg));
+
+  let schedule_result_channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"schedule-result-thread" with
+    | Ok channel -> channel
+    | Error detail -> Alcotest.fail detail
+  in
+  let routed_scheduled_wake =
+    { scheduled_wake with result_delivery = Some schedule_result_channel }
+  in
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = "schedule-occurrence:routed-codec"
+          ; urgency = Immediate
+          ; arrived_at = 6.0
+          ; payload = Schedule_due routed_scheduled_wake
+          })
+   with
+   | Ok { payload = Schedule_due wake; _ } ->
+     (match wake.result_delivery with
+      | Some restored ->
+        assert
+          (Keeper_continuation_channel.same_route
+             schedule_result_channel
+             restored)
+      | None -> Alcotest.fail "Schedule_due codec dropped result delivery route")
+   | Ok _ -> Alcotest.fail "routed Schedule_due decoded as another payload"
+   | Error msg -> Alcotest.fail ("routed Schedule_due round-trip failed: " ^ msg));
 
   (* Hitl_resolved survives the codec round-trip: the wake is persisted for
      replay when the target keeper is not registered yet, so approval_id and

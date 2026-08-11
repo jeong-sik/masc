@@ -1441,10 +1441,17 @@ let handle_masc_agent_timeline_with_outcome ~(config : Workspace.config) ~(meta 
   |> dispatch_option_to_execution ~name
 ;;
 
-let handle_masc_schedule_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_schedule_with_outcome
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ~name
+      ~args
+  =
   let ctx : Tool_schedule.context =
     { config
     ; agent_name = meta.name
+    ; continuation_channel
     ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
     }
   in

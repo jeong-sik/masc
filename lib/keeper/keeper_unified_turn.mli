@@ -140,14 +140,39 @@ type turn_failure =
     The heartbeat queue transitions from this value; it must not reconstruct a
     possibly rotated runtime from Keeper meta. *)
 
+type continuation_delivery_state =
+  | Delivery_delivered
+  | Delivery_failed
+  | Delivery_ambiguous
+  | Delivery_recovery_pending
+
+type continuation_delivery_completion =
+  | Continuation_delivery_not_required
+  | Continuation_delivery_committed of
+      { intent_id : Keeper_continuation_delivery_intent.Intent_id.t
+      ; delivery_state : continuation_delivery_state
+      }
+  | Continuation_delivery_quarantined of { detail : string }
+(** [Continuation_delivery_committed] means the response and exact destination
+    crossed the durable outbox boundary.  Connector settlement is deliberately
+    separate: a failed, ambiguous, or recovery-pending projection must not keep
+    the source at the active queue head or cause another model run.
+    [Continuation_delivery_quarantined] means even that durable boundary could
+    not be established.  The exact source is moved to a source-bearing terminal
+    receipt for repair while the Keeper continues with other work. *)
+
 type turn_success =
-  | Turn_completed of Keeper_meta_contract.keeper_meta
+  | Turn_completed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; continuation_delivery : continuation_delivery_completion
+      }
   | Turn_checkpointed of Keeper_meta_contract.keeper_meta
   | Turn_input_required of Keeper_meta_contract.keeper_meta
   | Turn_cancelled of Keeper_meta_contract.keeper_meta
   | Turn_skipped of Keeper_meta_contract.keeper_meta
 (** Typed non-error result of the unified turn boundary. Only
-    [Turn_completed] proves that the requested action path finished.
+    [Turn_completed] proves that the requested action path finished, and its
+    delivery evidence distinguishes sources that required a connector receipt.
     [Turn_checkpointed] and [Turn_input_required] are healthy runtime exits but
     preserve the durable source for continuation. Supervisor cancellation and a
     non-executable phase remain distinct so a durable source cannot be
@@ -155,6 +180,7 @@ type turn_success =
 
 val turn_success_of_stop_reason
   :  meta:Keeper_meta_contract.keeper_meta
+  -> continuation_delivery:continuation_delivery_completion
   -> Runtime_agent.stop_reason
   -> turn_success
 (** Total typed projection used at the successful runtime boundary. *)
@@ -168,6 +194,14 @@ val manual_compaction_preemption_request
     durable-stimulus yield only when a separate owner-lane manual compaction is
     pending. The summary names that exact runtime stimulus as the next
     source; a turn already consuming manual compaction never yields to itself. *)
+
+val continuation_delivery_origin_of_wake :
+  admitted_channel:Keeper_continuation_channel.t option ->
+  Keeper_registry.wake_reason ->
+  (Keeper_continuation_delivery_intent.origin option, string) result
+(** Join an admitted route to the exact singleton continuation producer that
+    caused the turn. A supplied route without an exact typed source match is
+    an error, never a successful unrouted delivery. *)
 
 val run_keeper_cycle
   :  before_dispatch_authority:(unit -> (unit, string) result)
@@ -184,7 +218,7 @@ val run_keeper_cycle
   -> ?shared_context:Agent_core.Context.t
   -> ?event_bus:Agent_core.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
-  -> ?continuation_delivery_channel:Keeper_continuation_channel.t
+  -> ?continuation_delivery_origin:Keeper_continuation_delivery_intent.origin
   -> unit
   -> (turn_success, turn_failure) result
 

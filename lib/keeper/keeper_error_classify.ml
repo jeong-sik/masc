@@ -693,22 +693,20 @@ let is_context_overflow (err : Agent_core.Error.t) : bool =
      [recoverable_runtime_failure_reason] maps it to [Capacity_backpressure]
      and [degraded_rotation_after_recoverable_error] walks the untried
      runtime catalog once, then stops (it never invents a timed retry cycle).
-   - transient network: exempt with NO compensating counter.  Rotation
-     deliberately does not apply ([recoverable_runtime_failure_reason]
-     returns [None] for network/timeout errors and the failure route is
-     [Retry_after_observed Network_transient]), and no per-keeper counter
-     advances.  A persistently failing transport therefore retries once per
-     keeper cycle with [consecutive] pinned at 0; only the per-turn attempt
-     count is bounded (by the runtime candidate list).  If this class ever
-     needs a bound, add a real counter — do not claim one here without the
-     device.
+   - transient network: exempt from Keeper crash accounting. Rotation does not
+     apply ([recoverable_runtime_failure_reason] returns [None] for
+     network/timeout errors and the failure route is [Retry_after_observed
+     Network_transient]). The heartbeat durably moves the exact source to its
+     urgency-lane tail, so a persistently failing transport cannot monopolize
+     other independent queued sources. The source is
+     retained with a new incarnation and may be retried after independent work.
    - context overflow: NOT exempt (#26546). The automatic in-lane compaction
      recovery was removed after producing no committed compaction. A provider
      overflow without a state-changing successor has no evidence that
      mechanical retry will fit. The ordinary consecutive-failure threshold
-     bounds it, and the heartbeat additionally terminalizes the selected
-     source unless the failure carries a deferred runtime lane
-     ([Keeper_heartbeat_loop.failed_selection_terminal_detail]).
+     bounds it, and the heartbeat quarantines the selected source unless the
+     failure carries a deferred runtime lane
+     ([Keeper_heartbeat_loop.failed_source_disposition]).
    - 0-byte empty completion: bounded by
      [Keeper_unified_turn_failure]'s per-keeper exemption budget — after
      [empty_completion_exemption_budget] consecutive exempted empty

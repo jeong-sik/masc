@@ -1,7 +1,11 @@
 (** Keeper cycle execution with error-class handling. *)
 
 type cycle_outcome =
-  | Completed of Keeper_meta_contract.keeper_meta
+  | Completed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; continuation_delivery :
+          Keeper_unified_turn.continuation_delivery_completion
+      }
   | Checkpointed of Keeper_meta_contract.keeper_meta
   | Input_required of Keeper_meta_contract.keeper_meta
   | Cancelled of Keeper_meta_contract.keeper_meta
@@ -46,7 +50,7 @@ val run_keeper_cycle
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?event_bus:Agent_core.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
-  -> ?continuation_delivery_channel:Keeper_continuation_channel.t
+  -> ?continuation_delivery_origin:Keeper_continuation_delivery_intent.origin
   -> ctx:_ Keeper_types_profile.context
   -> meta_after_triage:Keeper_meta_contract.keeper_meta
   -> stop:bool Atomic.t

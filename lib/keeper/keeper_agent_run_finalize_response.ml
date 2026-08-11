@@ -40,7 +40,7 @@ let finalize
     ~turn_outcome
     ~capture_replay_response
     ?continuation_channel
-    ?continuation_delivery_channel
+    ?continuation_delivery_origin
     () =
   let completion_contract_result = acc.receipt_completion_contract_result in
   let control_checkpoint =
@@ -218,6 +218,21 @@ let finalize
   match saved_checkpoint_result with
   | Error e -> Error e
   | Ok saved_checkpoint ->
+    let continuation_delivery_intent =
+      continuation_delivery_intent_for_result
+        ~keeper_name:meta.name
+        ~keeper_turn_id:manifest_keeper_turn_id
+        ~origin:continuation_delivery_origin
+        ~response_text
+        ~turn_outcome
+      |> Result.map_error (fun error ->
+        Agent_core.Error.Internal
+          ("continuation delivery intent construction failed: "
+           ^ Keeper_continuation_delivery_intent.error_to_string error))
+    in
+    (match continuation_delivery_intent with
+     | Error error -> Error error
+     | Ok continuation_delivery_intent ->
     (* Retired proof-ledger evaluation is absent. Strict Task completion
        judgment is owned by the authenticated operator or typed judge
        boundary. *)
@@ -240,6 +255,7 @@ let finalize
     Ok
       { response_text
       ; turn_outcome
+      ; continuation_delivery_intent
       ; model_used = model
       ; runtime_id = runtime_id_string
       ; max_context
@@ -259,5 +275,5 @@ let finalize
       ; stop_reason = result.stop_reason
       ; inference_telemetry = result.response.telemetry
       ; tool_surface = acc.tool_surface
-      }
+      })
 ;;

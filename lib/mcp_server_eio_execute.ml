@@ -367,6 +367,7 @@ let execute_tool_eio
                    Tool_schedule.dispatch
                      { Tool_schedule.config
                      ; agent_name
+                     ; continuation_channel = None
                      ; admit_keeper_wake_creation =
                          Keeper_schedule_creation_admission.run
                      }

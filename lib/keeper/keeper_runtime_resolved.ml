@@ -34,23 +34,6 @@ let source_to_string = function
   | Default -> "default"
   | Failsafe_floor -> "failsafe_floor"
 
-(* Per-call CLI subprocess idle timeout. Read fresh each turn rather than
-   frozen at server boot — the value sits outside the keepalive budget
-   contract enforced by the [t] snapshot. Range [10, 600] mirrors
-   the CLI transport contract; it is independent of the opt-in HTTP stream
-   idle deadline.
-
-   SSOT: must match Env_config_keeper.KeeperKeepalive.cli_subprocess_idle_sec
-   (same default 120, same range [10, 600]). *)
-let cli_subprocess_idle_sec_live () =
-  Float.max 10.0
-    (Float.min 600.0
-       (Env_config_core.get_float
-          ~default:120.0
-          "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC"))
-
-let cli_subprocess_idle_sec = cli_subprocess_idle_sec_live
-
 (* SSOT: Env_config_keeper.KeeperKeepalive.body_timeout_sec_override
    (same env var, same clamp [10, 600]). Opt-in: unset -> None.
    AGENT_CORE applies this only to non-streaming sync body reads; streaming

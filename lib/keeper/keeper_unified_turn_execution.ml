@@ -67,10 +67,11 @@ type ctx =
       base_system_prompt:string -> messages:Agent_core.Types.message list ->
       Keeper_agent_run.turn_prompt
   ; channel : Keeper_world_observation.keeper_cycle_channel
-  ; continuation_delivery_channel : Keeper_continuation_channel.t option
-      (* Exact originating channel for a continuation-bearing wake. Non-board
-         intake admits one stimulus per turn, so this never chooses between
-         unrelated conversations. [None] fails closed to no external delivery. *)
+  ; continuation_delivery_origin :
+      Keeper_continuation_delivery_intent.origin option
+      (* Exact producer identity and route for a continuation-bearing wake.
+         Non-board intake admits one stimulus per turn, so this never chooses
+         between unrelated conversations. *)
   ; hitl_resolution : Keeper_event_queue.hitl_resolution option
       (* Typed decision for the originating Keeper's exact external-effect
          Gate. It is never converted to a generic AGENT_CORE approval. *)
@@ -117,7 +118,7 @@ let run (ctx : ctx)
       ; keeper_turn_id
       ; turn_id
       ; channel
-      ; continuation_delivery_channel
+      ; continuation_delivery_origin
       ; hitl_resolution
       ; shared_context
       ; base_dir
@@ -135,6 +136,12 @@ let run (ctx : ctx)
       ; on_deferred_runtime_consumed
       } =
     ctx
+  in
+  let continuation_delivery_channel =
+    Option.map
+      (fun (origin : Keeper_continuation_delivery_intent.origin) ->
+         origin.channel)
+      continuation_delivery_origin
   in
   (match Eio_context.get_clock () with
    | Error msg -> Error (Agent_core.Error.Internal msg), turn_state
@@ -199,7 +206,7 @@ let run (ctx : ctx)
                  ~publication_recovery
                  ~profile_defaults
                  ?continuation_channel:continuation_delivery_channel
-                 ?continuation_delivery_channel
+                 ?continuation_delivery_origin
                  ?hitl_resolution
                  ~turn_ctx_cell
                  ~base_dir

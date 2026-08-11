@@ -96,7 +96,6 @@ val keeper_batch_limit : unit -> int
 val keeper_board_attention_settlements_per_turn : unit -> int
 
 val keeper_unified_temperature : unit -> float
-val keeper_unified_max_tokens : unit -> int
 
 val keeper_status_fast_default : unit -> bool
 

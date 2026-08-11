@@ -322,6 +322,27 @@ let reprioritize_pending
       Ok (with_pending sorted_pending state, next_revision)
 ;;
 
+let defer_pending ~(selection : pending_selection) state =
+  match validate_pending_selection ~selection state with
+  | Error _ as error -> error
+  | Ok () ->
+    if Int64.equal state.revision Int64.max_int
+    then Error "event queue revision exhausted"
+    else
+      let next_revision = Int64.succ state.revision in
+      let deferred = { selection with admitted_revision = next_revision } in
+      let same_urgency, other_urgency =
+        state.pending_entries
+        |> List.filter (Fun.negate (( = ) selection))
+        |> List.partition (fun entry ->
+          entry.source.urgency = selection.source.urgency)
+      in
+      let pending_entries = same_urgency @ [ deferred ] @ other_urgency in
+      let state = { state with pending_entries } in
+      let sorted_pending = state |> pending |> Keeper_event_queue.sort_by_urgency in
+      Ok (with_pending sorted_pending state, next_revision)
+;;
+
 let ( let* ) = Result.bind
 
 let pending_transition_id = function

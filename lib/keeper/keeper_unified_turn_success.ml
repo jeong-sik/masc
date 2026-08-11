@@ -3,6 +3,7 @@
 module KCB = Keeper_turn_runtime_budget
 module KEC = Keeper_context_runtime
 module KUM = Keeper_unified_metrics
+module KTP = Keeper_terminal_effect_policy
 open Keeper_meta_contract
 
 (* RFC-0132 PR-2: success-path keeper-facing metric label = external boundary; redact via SSOT. *)
@@ -21,10 +22,19 @@ let apply_lifecycle
   let lifecycle : KEC.post_turn_lifecycle =
     KEC.apply_post_turn_lifecycle ~meta ~checkpoint:result.checkpoint
   in
-  KEC.dispatch_post_turn_lifecycle_events
-    ~config
-    ~keeper_name:meta.name
-    lifecycle;
+  KTP.run_best_effort
+    ~terminal_effect:KTP.Lifecycle_projection
+    ~on_error:(fun exn ->
+      Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+        ~config
+        ~keeper_name:meta.name
+        ~side_effect:(KTP.effect_label KTP.Lifecycle_projection)
+        (Printexc.to_string exn))
+    (fun () ->
+       KEC.dispatch_post_turn_lifecycle_events
+         ~config
+         ~keeper_name:meta.name
+         lifecycle);
   lifecycle
 ;;
 
@@ -94,51 +104,55 @@ let append_metrics_snapshot
       ~turn_cost
       ~(lifecycle : KEC.post_turn_lifecycle)
       ~terminal_outcome
+      ~execution_outcome
   =
   (* Single typed channel for the whole cycle: post helpers + the metrics
      snapshot + the failure-path label all derive from one value, so the
      reactive/autonomous decision can no longer drift between sites. *)
   let channel_tag = Keeper_world_observation.channel_to_string channel in
-  try
-    (match post_action_of_channel channel with
-     | Assign_task ->
-       Keeper_turn_helpers.post_assign_task ~channel:channel_tag
-     | Empty_queue_sleep ->
-       Keeper_turn_helpers.post_empty_queue_sleep ~channel:channel_tag);
-    KUM.append_metrics_snapshot
-      ~config
-      ~meta:updated_meta
-      ~observation
-      ~result
-      ~latency_ms
-      ~turn_cost
-      ~turn_generation:lifecycle.KEC.turn_generation
-      ~channel
-      ~checkpoint_bytes:lifecycle.checkpoint_bytes
-      ~message_count:lifecycle.message_count
-      ~handoff_json:lifecycle.handoff_json
-      ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string MetricEmitDropped)
-      ~labels:
-        [ "keeper", updated_meta.name
-        ; "channel", channel_tag
-        ; "site", Keeper_metric_emit_dropped_site.(to_label Keeper_unified_turn)
-        ]
-      ();
-    Log.Keeper.error
-      "write metrics snapshot failed after keeper cycle: %s"
-      (Printexc.to_string exn);
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
-      ~labels:
-        [ "keeper", meta.Keeper_meta_contract.name
-        ; "site", Keeper_turn_metrics_snapshot_failure_site.(to_label Post_cycle)
-        ]
-      ()
+  KTP.run_best_effort
+    ~terminal_effect:KTP.Metrics_snapshot
+    ~on_error:(fun exn ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string MetricEmitDropped)
+        ~labels:
+          [ "keeper", updated_meta.name
+          ; "channel", channel_tag
+          ; "site", Keeper_metric_emit_dropped_site.(to_label Keeper_unified_turn)
+          ]
+        ();
+      Log.Keeper.error
+        "write metrics snapshot failed after keeper cycle: %s"
+        (Printexc.to_string exn);
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
+        ~labels:
+          [ "keeper", meta.Keeper_meta_contract.name
+          ; "site", Keeper_turn_metrics_snapshot_failure_site.(to_label Post_cycle)
+          ]
+        ())
+    (fun () ->
+       (match Keeper_execution_outcome.lane execution_outcome with
+        | Keeper_execution_outcome.Direct -> ()
+        | Keeper_execution_outcome.Autonomous _ ->
+          (match post_action_of_channel channel with
+           | Assign_task ->
+             Keeper_turn_helpers.post_assign_task ~channel:channel_tag
+           | Empty_queue_sleep ->
+             Keeper_turn_helpers.post_empty_queue_sleep ~channel:channel_tag));
+       KUM.append_metrics_snapshot
+         ~config
+         ~meta:updated_meta
+         ~observation
+         ~result
+         ~latency_ms
+         ~turn_cost
+         ~turn_generation:lifecycle.KEC.turn_generation
+         ~channel
+         ~checkpoint_bytes:lifecycle.checkpoint_bytes
+         ~message_count:lifecycle.message_count
+         ~handoff_json:lifecycle.handoff_json
+         ())
 ;;
 
 let emit_activity_graph
@@ -153,16 +167,24 @@ let emit_activity_graph
       ~wall_tokens_per_second
       ~terminal_outcome
   =
-  try
-    let activity_kind = terminal_outcome_to_activity_kind terminal_outcome in
-    let cache_miss_input_tokens =
-      Keeper_hooks_agent_core.cache_miss_input_tokens
-        ~input_tokens:result.Keeper_agent_run.usage.input_tokens
-        ~cache_creation_input_tokens:result.usage.cache_creation_input_tokens
-        ~cache_read_input_tokens:result.usage.cache_read_input_tokens
-    in
-    let event =
-      Activity_graph.emit
+  KTP.run_best_effort
+    ~terminal_effect:KTP.Activity_graph
+    ~on_error:(fun exn ->
+      Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+        ~config
+        ~keeper_name:updated_meta.name
+        ~side_effect:(KTP.effect_label KTP.Activity_graph)
+        (Printexc.to_string exn))
+    (fun () ->
+       let activity_kind = terminal_outcome_to_activity_kind terminal_outcome in
+       let cache_miss_input_tokens =
+         Keeper_hooks_agent_core.cache_miss_input_tokens
+           ~input_tokens:result.Keeper_agent_run.usage.input_tokens
+           ~cache_creation_input_tokens:result.usage.cache_creation_input_tokens
+           ~cache_read_input_tokens:result.usage.cache_read_input_tokens
+       in
+       let event =
+         Activity_graph.emit
         config
         ~actor:{ kind = "agent"; id = updated_meta.Keeper_meta_contract.agent_name }
         ~kind:activity_kind
@@ -218,20 +240,12 @@ let emit_activity_graph
                | None -> []))
         ~tags:[ "keeper"; "turn"; "metrics" ]
         ()
-    in
-    Log.Keeper.debug
-      "%s: activity graph %s emitted seq=%d"
-      updated_meta.name
-      activity_kind
-      event.seq
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
-      ~config
-      ~keeper_name:updated_meta.name
-      ~side_effect:"activity graph turn terminal emit"
-      (Printexc.to_string exn)
+       in
+       Log.Keeper.debug
+         "%s: activity graph %s emitted seq=%d"
+         updated_meta.name
+         activity_kind
+         event.seq)
 ;;
 
 let emit_usage_metrics_and_log
@@ -532,14 +546,26 @@ let handle
       ~meta
       ~turn_ctx_cell
       ~observation
-      ~channel
       ~latency_ms
       ~degraded_retry_applied
       ~degraded_retry_runtime
       ~fallback_reason
       ~keeper_turn_id
-      result
+      execution_outcome
   =
+  let result = Keeper_execution_outcome.result execution_outcome in
+  let channel = Keeper_execution_outcome.metrics_channel execution_outcome in
+  let run_projection terminal_effect f =
+    KTP.run_best_effort
+      ~terminal_effect
+      ~on_error:(fun exn ->
+        Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+          ~config
+          ~keeper_name:meta.name
+          ~side_effect:(KTP.effect_label terminal_effect)
+          (Printexc.to_string exn))
+      f
+  in
   let turn_cost = turn_cost result in
   let lifecycle =
     apply_lifecycle
@@ -552,9 +578,14 @@ let handle
       lifecycle.KEC.updated_meta
       ~latency_ms
       ~observation
+      ~is_autonomous_turn:(Keeper_execution_outcome.is_autonomous execution_outcome)
       result
   in
-  let updated_meta = acknowledge_pending_messages updated_meta observation in
+  let updated_meta =
+    if Keeper_execution_outcome.is_autonomous execution_outcome
+    then acknowledge_pending_messages updated_meta observation
+    else updated_meta
+  in
   (* RFC-0303 Phase 3: the no-progress loop detector is retired, so the
      metrics-updated meta flows through unchanged (no loop-detection rebind). *)
   let terminal_outcome = terminal_outcome_of_result result in
@@ -568,7 +599,8 @@ let handle
     ~latency_ms
     ~turn_cost
     ~lifecycle
-    ~terminal_outcome;
+    ~terminal_outcome
+    ~execution_outcome;
   let turn_mode = KUM.turn_mode_of_result result in
   let turn_mode_label = KUM.turn_mode_to_string turn_mode in
   let usage_trust =
@@ -592,34 +624,38 @@ let handle
     ~lifecycle
     ~wall_tokens_per_second
     ~terminal_outcome;
-  KUM.broadcast_lifecycle_events
-    ~name:updated_meta.name
-    ~turn_generation:lifecycle.turn_generation
-    ~handoff_json:lifecycle.handoff_json;
-  KUM.append_decision_record
-    ~config
-    ~meta:updated_meta
-    ~turn_ctx_cell
-    ~observation
-    ~latency_ms
-    ~outcome:
-      (decision_outcome_to_label
-         (decision_outcome_of_terminal_outcome terminal_outcome))
-    ~degraded_retry_applied
-    ?degraded_retry_runtime
-    ?fallback_reason:(Option.map Keeper_error_classify.degraded_retry_reason_to_string fallback_reason)
-    ~turn_mode
-    ~terminal_reason:(terminal_reason_of_outcome result terminal_outcome)
-    ~result:(Some result)
-    ();
-  emit_usage_metrics_and_log
-    ~updated_meta
-    ~result
-    ~latency_ms
-    ~usage_trust
-    ~turn_mode_label
-    ~lifecycle
-    ~terminal_outcome;
+  run_projection KTP.Lifecycle_broadcast (fun () ->
+    KUM.broadcast_lifecycle_events
+      ~name:updated_meta.name
+      ~turn_generation:lifecycle.turn_generation
+      ~handoff_json:lifecycle.handoff_json);
+  run_projection KTP.Decision_record (fun () ->
+    KUM.append_decision_record
+      ~config
+      ~meta:updated_meta
+      ~turn_ctx_cell
+      ~observation
+      ~latency_ms
+      ~outcome:
+        (decision_outcome_to_label
+           (decision_outcome_of_terminal_outcome terminal_outcome))
+      ~degraded_retry_applied
+      ?degraded_retry_runtime
+      ?fallback_reason:
+        (Option.map Keeper_error_classify.degraded_retry_reason_to_string fallback_reason)
+      ~turn_mode
+      ~terminal_reason:(terminal_reason_of_outcome result terminal_outcome)
+      ~result:(Some result)
+      ());
+  run_projection KTP.Usage_metrics (fun () ->
+    emit_usage_metrics_and_log
+      ~updated_meta
+      ~result
+      ~latency_ms
+      ~usage_trust
+      ~turn_mode_label
+      ~lifecycle
+      ~terminal_outcome);
   (* Every terminal outcome has consumed a keeper turn id. *)
   let updated_meta =
     persist_terminal_turn_meta
@@ -630,10 +666,15 @@ let handle
   (* Single source of truth for success-path terminal FSM transitions.
      Completion-contract observations never rewrite a successful runtime turn
      into a failed Keeper lifecycle transition. *)
-  emit_terminal_fsm
-    ~config
-    ~meta
-    ~keeper_turn_id
-    ~updated_meta
-    result
+  run_projection KTP.Terminal_fsm_projection (fun () ->
+    match
+      emit_terminal_fsm
+        ~config
+        ~meta
+        ~keeper_turn_id
+        ~updated_meta
+        result
+    with
+    | Completed _ -> ());
+  Completed updated_meta
 ;;

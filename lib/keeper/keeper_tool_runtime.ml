@@ -341,6 +341,7 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_in_process_runtime.handle_masc_schedule_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
          ~name
          ~args)
   | Tool_masc_keeper_dispatch ->

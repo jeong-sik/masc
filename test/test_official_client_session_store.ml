@@ -139,6 +139,28 @@ let test_roundtrip_and_settlement () =
       "resume surface requirement"
       (Some empty_surface)
       resume_plan.required_tool_surface_sha256;
+    let changed_client_plan =
+      plan_claim
+        ~expected:(Some settled)
+        ~client_kind:Claude_code
+        ~runtime_id:"claude-code.default"
+      |> Result.get_ok
+    in
+    check int "cross-client failover starts at turn one" 1 changed_client_plan.turn_count;
+    check (option string) "cross-client failover never resumes old session"
+      None changed_client_plan.previous_settlement;
+    check (option string) "cross-client failover has no stale tool-surface requirement"
+      None changed_client_plan.required_tool_surface_sha256;
+    let changed_runtime_plan =
+      plan_claim
+        ~expected:(Some settled)
+        ~client_kind:Codex
+        ~runtime_id:"codex.fallback"
+      |> Result.get_ok
+    in
+    check int "cross-runtime failover starts at turn one" 1 changed_runtime_plan.turn_count;
+    check (option string) "cross-runtime failover never resumes old session"
+      None changed_runtime_plan.previous_settlement;
     match load ~base_path ~keeper_name with
     | Error detail -> fail detail
     | Ok None -> fail "durable session disappeared"

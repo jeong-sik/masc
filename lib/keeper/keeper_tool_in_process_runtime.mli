@@ -242,7 +242,11 @@ val handle_masc_agent_timeline_with_outcome
 (** RFC-0234 — [handle_masc_schedule_with_outcome] is the descriptor-projection
     cluster handler for [masc_schedule_*] tools. *)
 val handle_masc_schedule_with_outcome
-  : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> name:string
+  -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
 (** RFC-0252 — [handle_masc_fusion_with_outcome] is the in-process handler for the

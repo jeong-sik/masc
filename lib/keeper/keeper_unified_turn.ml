@@ -120,15 +120,32 @@ let execution_boundary_of_turn_failure ~transcript_corruption error =
     Keeper_runtime_failure_route.Agent_core_execution
 ;;
 
+type continuation_delivery_state =
+  | Delivery_delivered
+  | Delivery_failed
+  | Delivery_ambiguous
+  | Delivery_recovery_pending
+
+type continuation_delivery_completion =
+  | Continuation_delivery_not_required
+  | Continuation_delivery_committed of
+      { intent_id : Keeper_continuation_delivery_intent.Intent_id.t
+      ; delivery_state : continuation_delivery_state
+      }
+  | Continuation_delivery_quarantined of { detail : string }
+
 type turn_success =
-  | Turn_completed of keeper_meta
+  | Turn_completed of
+      { meta : keeper_meta
+      ; continuation_delivery : continuation_delivery_completion
+      }
   | Turn_checkpointed of keeper_meta
   | Turn_input_required of keeper_meta
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
 
-let turn_success_of_stop_reason ~meta = function
-  | Runtime_agent.Completed -> Turn_completed meta
+let turn_success_of_stop_reason ~meta ~continuation_delivery = function
+  | Runtime_agent.Completed -> Turn_completed { meta; continuation_delivery }
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
@@ -275,6 +292,29 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
     fun () -> autonomous_yield_request ~base_path ~keeper_name
 ;;
 
+let continuation_delivery_origin_of_wake ~admitted_channel wake =
+  match admitted_channel with
+  | None -> Ok None
+  | Some channel when not (Keeper_continuation_channel.is_routable channel) ->
+    Error "continuation delivery admitted an unroutable channel"
+  | Some channel ->
+    (match wake with
+     | Keeper_registry.Woken [ payload ] ->
+       (match Keeper_continuation_delivery_intent.origin_of_payload payload with
+        | None ->
+          Error
+            "continuation delivery channel has no singleton typed source"
+        | Some origin ->
+          if Keeper_continuation_channel.same_route origin.channel channel
+          then Ok (Some origin)
+          else Error "continuation delivery source and admitted route differ")
+     | Keeper_registry.Woken []
+     | Keeper_registry.Woken (_ :: _ :: _)
+     | Keeper_registry.Proactive_tick
+     | Keeper_registry.Chat_request ->
+       Error "continuation delivery route requires one exact wake source")
+;;
+
 
 let run_keeper_cycle
       ~(before_dispatch_authority : unit -> (unit, string) result)
@@ -291,7 +331,7 @@ let run_keeper_cycle
       ?shared_context
       ?event_bus
       ?hitl_resolution
-      ?continuation_delivery_channel
+      ?continuation_delivery_origin
       ()
   : (turn_success, turn_failure) result
   =
@@ -744,7 +784,7 @@ let run_keeper_cycle
                            ; base_dir
                            ; build_turn_prompt
                            ; channel
-                           ; continuation_delivery_channel
+                           ; continuation_delivery_origin
                            ; hitl_resolution
                            ; cleanup
                            ; config
@@ -1073,28 +1113,89 @@ let run_keeper_cycle
                    with
                    | Error missing_err -> Error missing_err, turn_state
                    | Ok final_execution ->
+                     let committed_delivery intent delivery_state =
+                       Continuation_delivery_committed
+                         { intent_id = intent.Keeper_continuation_delivery_intent.intent_id
+                         ; delivery_state
+                         }
+                     in
+                     let delivery_settlement =
+                       match
+                         ( continuation_delivery_origin
+                         , result.Keeper_agent_run.continuation_delivery_intent
+                         , result.Keeper_agent_run.stop_reason )
+                       with
+                       | Some _, None, Runtime_agent.Completed ->
+                         Continuation_delivery_quarantined
+                           { detail =
+                               "routable continuation completed without a visible delivery intent"
+                           }
+                       | _, None, _ -> Continuation_delivery_not_required
+                       | _, Some intent, _ ->
+                         (match Keeper_continuation_delivery_store.persist ~config intent with
+                          | Error error ->
+                            Continuation_delivery_quarantined
+                              { detail =
+                                  "continuation outbox commit failed: "
+                                  ^ Keeper_continuation_delivery_store.error_to_string
+                                      error
+                              }
+                          | Ok _ ->
+                            (match
+                               Keeper_continuation_delivery_publisher.publish
+                                 ~config
+                                 intent
+                             with
+                             | Ok
+                                 (Keeper_continuation_delivery_publisher.Delivered
+                                    terminal) ->
+                               committed_delivery terminal Delivery_delivered
+                             | Ok
+                                 (Keeper_continuation_delivery_publisher.Failed
+                                    terminal) ->
+                               committed_delivery terminal Delivery_failed
+                             | Ok
+                                 (Keeper_continuation_delivery_publisher.Ambiguous
+                                    terminal) ->
+                               committed_delivery terminal Delivery_ambiguous
+                             | Error error ->
+                               Log.Keeper.warn
+                                 ~keeper_name:meta.name
+                                 "continuation delivery projection deferred after durable outbox commit: intent_id=%s detail=%s"
+                                 (Keeper_continuation_delivery_intent.Intent_id.to_string
+                                    intent.intent_id)
+                                 (Keeper_continuation_delivery_publisher.error_to_string
+                                    error);
+                               committed_delivery
+                                 intent
+                                 Delivery_recovery_pending))
+                     in
                      finalize_trajectory_acc
-                       ~config
-                       ~keeper_name:meta.name
-                       trajectory_acc
-                       Trajectory.Completed;
+                          ~config
+                          ~keeper_name:meta.name
+                          trajectory_acc
+                          Trajectory.Completed;
                   (* SSOT: success-path terminal FSM transitions
                      (Streaming -> Completing -> Done) are emitted once inside
                      [Keeper_unified_turn_success.handle]. Do not duplicate them
                      here; this is the sole caller of that function. *)
                   let success =
+                    let execution_outcome =
+                      Keeper_execution_outcome.create
+                        ~lane:(Keeper_execution_outcome.Autonomous channel)
+                        result
+                    in
                     Keeper_unified_turn_success.handle
                       ~config
                       ~meta
                       ~turn_ctx_cell
                       ~observation
-                      ~channel
                       ~latency_ms
                       ~degraded_retry_applied
                       ~degraded_retry_runtime
                       ~fallback_reason
                       ~keeper_turn_id
-                      result
+                      execution_outcome
                   in
                   (match success with
                    | Keeper_unified_turn_success.Completed updated_meta ->
@@ -1106,8 +1207,10 @@ let run_keeper_cycle
                      Ok
                        (turn_success_of_stop_reason
                           ~meta:updated_meta
+                          ~continuation_delivery:delivery_settlement
                           result.Keeper_agent_run.stop_reason),
-                     turn_state)))))
+                     turn_state))))
+                     )
   in
   let append_phase_gate_decision_for_gate turn_plan turn_state =
     Keeper_unified_turn_manifest.append_phase_gate_decision

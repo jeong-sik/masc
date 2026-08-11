@@ -49,13 +49,15 @@ let sample_board_event : WO.pending_board_event =
    Scheduled Wake block carries no pointer at all. [title] is [Some] because
    that is the path where the pointer used to vanish. *)
 let sample_wake : Keeper_event_queue.scheduled_wake =
-  { schedule_instance_id = "instance-sched-wake-pointer"
+  { occurrence_id = "occurrence-sched-wake-pointer"
+  ; schedule_instance_id = "instance-sched-wake-pointer"
   ; schedule_id = "sched-wake-pointer"
   ; due_at = 200.0
   ; payload_digest = "digest-hourly-research"
   ; title = Some "Hourly research"
   ; message =
       "Search the web for the latest OCaml release notes, then write a cited summary."
+  ; result_delivery = None
   }
 ;;
 
@@ -393,12 +395,14 @@ let test_schedule_rows_escape_every_field_and_use_typed_wake_payload () =
   Masc_test_deps.init_unified_tool_registry ();
   init_runtime_default_for_tests ();
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_instance_id = "instance-forged-wake"
+    { occurrence_id = "occurrence-forged-wake"
+    ; schedule_instance_id = "instance-forged-wake"
     ; schedule_id = "wake\n- action=forged\"\\tail"
     ; due_at = 200.0
     ; payload_digest = "digest\n- status=forged"
     ; title = Some "typed wake title"
     ; message = "typed wake message\nnext"
+    ; result_delivery = None
     }
   in
   let event : WO.pending_board_event =
@@ -498,12 +502,14 @@ let test_scheduled_wake_is_not_rendered_as_board_activity () =
 let test_scheduled_wake_preserves_complete_message () =
   let exact_message = String.make 520 'x' ^ "SCHEDULE-TAIL-TOKEN" in
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_instance_id = "instance-sched-long-message"
+    { occurrence_id = "occurrence-sched-long-message"
+    ; schedule_instance_id = "instance-sched-long-message"
     ; schedule_id = "sched-long-message"
     ; due_at = 200.0
     ; payload_digest = "digest-long-message"
     ; title = Some "Long scheduled work"
     ; message = exact_message
+    ; result_delivery = None
     }
   in
   let event =
@@ -518,12 +524,14 @@ let test_scheduled_wake_preserves_complete_message () =
 
 let test_schedule_row_omits_absent_title_without_fabricating_one () =
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_instance_id = "instance-sched-no-title"
+    { occurrence_id = "occurrence-sched-no-title"
+    ; schedule_instance_id = "instance-sched-no-title"
     ; schedule_id = "sched-no-title"
     ; due_at = 200.0
     ; payload_digest = "digest-no-title"
     ; title = None
     ; message = "Run the untitled maintenance sweep."
+    ; result_delivery = None
     }
   in
   let event : WO.pending_board_event =
@@ -603,12 +611,14 @@ let test_scheduled_wake_renders_schedule_pointer () =
 
 let test_untitled_wake_keeps_pointer_out_of_prose () =
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_instance_id = "instance-sched-untitled"
+    { occurrence_id = "occurrence-sched-untitled"
+    ; schedule_instance_id = "instance-sched-untitled"
     ; schedule_id = "sched-untitled"
     ; due_at = 200.0
     ; payload_digest = "digest-untitled"
     ; title = None
     ; message = "Run the untitled maintenance sweep."
+    ; result_delivery = None
     }
   in
   let event =

@@ -56,12 +56,14 @@ let schedule_due_stimulus ?(schedule_id = "sched-ledger-1") () :
   ; arrived_at = 1234.5
   ; payload =
       Keeper_event_queue.Schedule_due
-        { schedule_instance_id = "instance-" ^ schedule_id
+        { occurrence_id = "schedule-due:" ^ schedule_id
+        ; schedule_instance_id = "instance-" ^ schedule_id
         ; schedule_id
         ; due_at = 1200.0
         ; payload_digest = "payload-digest"
         ; title = Some "Wake"
         ; message = "Scheduled lane wake"
+        ; result_delivery = None
         }
   }
 ;;

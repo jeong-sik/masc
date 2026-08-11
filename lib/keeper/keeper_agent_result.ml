@@ -80,6 +80,8 @@ let tool_names_of_calls (tool_calls : tool_call_detail list) : string list =
 type run_result =
   { response_text : string
   ; turn_outcome : Keeper_turn_outcome.t
+  ; continuation_delivery_intent :
+      Keeper_continuation_delivery_intent.t option
   ; model_used : string
   ; runtime_id : string
   ; max_context : int
@@ -100,6 +102,30 @@ type run_result =
   ; inference_telemetry : Agent_core.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
   }
+
+let continuation_delivery_intent_for_result
+      ~keeper_name
+      ~keeper_turn_id
+      ~origin
+      ~response_text
+      ~turn_outcome
+  =
+  match turn_outcome, origin with
+  | Keeper_turn_outcome.Visible_reply, Some origin ->
+    Keeper_continuation_delivery_intent.create
+      ~keeper_name
+      ~keeper_turn_id
+      ~origin
+      ~response_text
+    |> Result.map Option.some
+  | Keeper_turn_outcome.Visible_reply, None -> Ok None
+  | ( Keeper_turn_outcome.Continuation_checkpoint
+    | Keeper_turn_outcome.External_effect_completed
+    | Keeper_turn_outcome.External_effect_pending
+    | Keeper_turn_outcome.No_visible_reply ),
+    _ ->
+    Ok None
+;;
 
 let tool_names (result : run_result) = tool_names_of_calls result.tool_calls
 let tool_call_count (result : run_result) = List.length result.tool_calls

@@ -1,7 +1,29 @@
-type t = {
-  base_dir : string;
+type writer_owner = {
+  canonical_base_dir : string;
+  append_lock : Cross_context_mutex.t;
   mutable latest_hash : string option;
 }
+
+type t = {
+  base_dir : string;
+  writer_owner : writer_owner;
+}
+
+module Writer_owner_key = struct
+  type t = string
+
+  let equal = String.equal
+  let hash = Hashtbl.hash
+end
+
+module Writer_owner_table = Ephemeron.K1.Make (Writer_owner_key)
+
+(* The key is also held by every live [writer_owner]. Ephemeron ownership lets
+   an inactive base directory disappear without an arbitrary registry cap,
+   while every store for a live canonical directory resolves to one cursor and
+   one cross-context append lock. *)
+let writer_owners : writer_owner Writer_owner_table.t = Writer_owner_table.create 0
+let writer_owners_mutex = Stdlib.Mutex.create ()
 
 exception Corrupt_jsonl of {
   path : string;
@@ -71,23 +93,54 @@ let load_latest_hash ~base_dir =
     in
     find_in_months months
 
+let writer_owner_for_base_dir ~base_dir ~canonical_base_dir =
+  let find () =
+    Stdlib.Mutex.protect writer_owners_mutex (fun () ->
+      Writer_owner_table.find_opt writer_owners canonical_base_dir)
+  in
+  match find () with
+  | Some owner -> owner, false
+  | None ->
+    let candidate =
+      { canonical_base_dir
+      ; append_lock = Cross_context_mutex.create ()
+      ; latest_hash = load_latest_hash ~base_dir
+      }
+    in
+    Stdlib.Mutex.protect writer_owners_mutex (fun () ->
+      match Writer_owner_table.find_opt writer_owners canonical_base_dir with
+      | Some owner -> owner, false
+      | None ->
+        Writer_owner_table.clean writer_owners;
+        Writer_owner_table.add writer_owners canonical_base_dir candidate;
+        candidate, true)
+
 let create ~base_dir =
   if not (Sys.file_exists base_dir) then Fs_compat.mkdir_p base_dir;
-  let latest_hash = load_latest_hash ~base_dir in
-  { base_dir; latest_hash }
+  let canonical_base_dir = Fs_compat.realpath base_dir in
+  let writer_owner, owner_is_new =
+    writer_owner_for_base_dir ~base_dir ~canonical_base_dir
+  in
+  if not owner_is_new
+  then
+    Cross_context_mutex.with_durable_lock writer_owner.append_lock (fun () ->
+      writer_owner.latest_hash <- load_latest_hash ~base_dir);
+  { base_dir; writer_owner }
 
 let base_dir t = t.base_dir
 
 let append t ~category ~payload =
-  let entry = Envelope.make ~category ~payload ~prev_hash:t.latest_hash in
-  ignore
-    (Jsonl_writer.append_dated_jsonl
-       ~base_dir:t.base_dir
-       ~ts:entry.ts
-       (Envelope.to_json entry)
-      : Jsonl_writer.dated_path);
-  t.latest_hash <- Some (Envelope.hash_for_chain entry);
-  entry
+  let owner = t.writer_owner in
+  Cross_context_mutex.with_durable_lock owner.append_lock (fun () ->
+    let entry = Envelope.make ~category ~payload ~prev_hash:owner.latest_hash in
+    ignore
+      (Jsonl_writer.append_dated_jsonl
+         ~base_dir:t.base_dir
+         ~ts:entry.ts
+         (Envelope.to_json entry)
+        : Jsonl_writer.dated_path);
+    owner.latest_hash <- Some (Envelope.hash_for_chain entry);
+    entry)
 
 let read_all_entries t =
   if not (Sys.file_exists t.base_dir) then []

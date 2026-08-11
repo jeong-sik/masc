@@ -11,6 +11,8 @@ vi.mock('../../api/dashboard-scheduled-automation', () => ({
 
 import {
   SCHEDULED_AUTOMATION_REFRESH_MS,
+  loadScheduledAutomation,
+  refreshScheduledAutomation,
   subscribeScheduledAutomationRefresh,
 } from './schedule-state'
 
@@ -84,5 +86,47 @@ describe('scheduled automation refresh', () => {
     } finally {
       stop()
     }
+  })
+
+  it('retries immediately when a new subscriber sees an unavailable projection', async () => {
+    mocks.fetchDashboardScheduledAutomation
+      .mockResolvedValueOnce({ state: 'unavailable', reason: 'ledger read failed' })
+      .mockResolvedValueOnce(emptyProjection())
+
+    await loadScheduledAutomation()
+    expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(1)
+
+    const stop = subscribeScheduledAutomationRefresh()
+    try {
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(2)
+    } finally {
+      stop()
+    }
+  })
+
+  it('forces a fresh read after a mutation instead of joining a stale GET', async () => {
+    let resolveFirst!: (projection: DashboardScheduledAutomationProjection) => void
+    let firstSignal: AbortSignal | undefined
+    mocks.fetchDashboardScheduledAutomation.mockImplementationOnce(
+      ({ signal }: { signal?: AbortSignal }) => {
+        firstSignal = signal
+        return new Promise<DashboardScheduledAutomationProjection>((resolve) => {
+          resolveFirst = resolve
+        })
+      },
+    )
+    mocks.fetchDashboardScheduledAutomation.mockResolvedValueOnce(emptyProjection())
+
+    const first = loadScheduledAutomation()
+    expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(1)
+    const fresh = refreshScheduledAutomation()
+    expect(mocks.fetchDashboardScheduledAutomation).toHaveBeenCalledTimes(2)
+    expect(firstSignal?.aborted).toBe(true)
+
+    await fresh
+    resolveFirst(emptyProjection())
+    await first
   })
 })

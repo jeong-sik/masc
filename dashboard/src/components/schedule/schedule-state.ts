@@ -44,8 +44,8 @@ export const scheduledAutomationLoading = computed(
 
 let loadInFlight: Promise<void> | null = null
 
-export function loadScheduledAutomation(): Promise<void> {
-  if (loadInFlight) return loadInFlight
+export function loadScheduledAutomation(options: { force?: boolean } = {}): Promise<void> {
+  if (loadInFlight && !options.force) return loadInFlight
 
   let request: Promise<void>
   request = scheduledAutomationResource
@@ -58,6 +58,13 @@ export function loadScheduledAutomation(): Promise<void> {
   return request
 }
 
+/** Mutations must observe their post-write ledger, even if a polling GET is
+ * still in flight with a pre-mutation snapshot. The managed resource aborts
+ * that stale request and starts a fresh one. */
+export function refreshScheduledAutomation(): Promise<void> {
+  return loadScheduledAutomation({ force: true })
+}
+
 export const SCHEDULED_AUTOMATION_REFRESH_MS = 15_000
 
 let subscriberCount = 0
@@ -68,7 +75,8 @@ let stopRefresh: (() => void) | null = null
 export function subscribeScheduledAutomationRefresh(): () => void {
   subscriberCount += 1
   if (subscriberCount === 1) {
-    if (!scheduledAutomationProjection.value && !scheduledAutomationLoading.value) {
+    const projection = scheduledAutomationProjection.value
+    if ((!projection || projection.state === 'unavailable') && !scheduledAutomationLoading.value) {
       void loadScheduledAutomation()
     }
     stopRefresh = setupVisibleAutoRefresh(() => {

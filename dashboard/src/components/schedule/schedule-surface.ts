@@ -34,7 +34,7 @@ import {
   toolsData,
 } from '../tools/tool-state'
 import {
-  loadScheduledAutomation,
+  refreshScheduledAutomation,
   scheduledAutomationError,
   scheduledAutomationLoading,
   scheduledAutomationProjection,
@@ -129,7 +129,7 @@ export function ScheduleSurface() {
     setView(next)
   }
 
-  const refresh = (): Promise<void> => loadScheduledAutomation()
+  const refresh = (): Promise<void> => refreshScheduledAutomation()
   async function handlePrune() {
     if (
       !window.confirm(

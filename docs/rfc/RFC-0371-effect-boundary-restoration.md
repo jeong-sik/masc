@@ -161,8 +161,26 @@ else `Bad_gateway
 
 ## 6. 범위 밖 / 후속
 
-- unverified 5건(keeper_internal_error:963, runtime_agent:259, fusion_agent_core:63, keeper_agent_error:281, workspace_task_receipts:23)은 B12 착수 전 검증 패스에서 재판정.
-- agent_core Error 확장점 방식(opaque payload vs sub-sum split)은 별도 설계 결정 — 경계 제약(MASC 는 agent_core 를 알지만 역방향 금지)을 유지하는 안만 허용.
+- ~~unverified 5건은 B12 착수 전 검증 패스에서 재판정~~ → **재판정 완료 (2026-08-12)**: keeper_internal_error:963 · workspace_task_receipts:23 · runtime_agent:259 · keeper_agent_error:281 confirmed, fusion_agent_core:63 은 boundary-smell 로 강등(표시 귀속만 바꾸고 제어 흐름 분기 없음).
+
+### 6.1 B12 설계 결정 (선행 조건 해소)
+
+**(1) agent_core Error 확장점 — extensible variant carrier 채택, sub-sum split 기각.**
+
+문제의 실물: `keeper_internal_error.ml:963` 은 typed `masc_internal_error` 를 JSON 으로 렌더해 `Agent_core.Error.Internal` 의 message **문자열 안에** prefix 와 함께 박고, 같은 프로세스가 수동 prefix 스캔으로 되찾아 재파싱한다. agent_core 의 Error 에 masc 페이로드를 실을 자리가 없어서 생긴 터널이다.
+
+- **기각 — sub-sum split**: agent_core 에 masc 의 에러 형상별 생성자를 추가하는 안은 agent_core 가 masc 어휘를 알게 되므로 경계 제약(agent_core 는 masc 를 모른다) 위반. 기각.
+- **채택 — extensible variant carrier**: agent_core 가 `type carrier = ..` 를 선언하고 Error 페이로드에 `carrier option` 슬롯을 둔다. masc 쪽에서 `type Agent_core.Error.carrier += Masc_internal of Masc_internal_error.t` 로 확장하고, 소비자는 생성자 match 로 다운캐스트한다. agent_core 는 masc 를 계속 모르고, JSON 렌더·prefix 스캔·재파싱이 전부 사라진다. 유일한 비용은 extensible variant 의 비-exhaustive match (`| _ ->` 필수) — 이 슬롯의 소비자는 자기가 실은 것만 찾는 다운캐스트이므로 이 한정된 자리에서는 수용한다.
+- terminal code 왕복 3건(`keeper_provider_runtime_boundary:117/:155`, `keeper_execution_receipt:127`)도 같은 처방: wire 문자열은 receipt 직렬화 시점에만 렌더하고, in-process 전달은 `Keeper_turn_terminal_code.t` 를 그대로 운반한다. wire 호환은 직렬화 계층이 소유하므로 receipt 파일 포맷은 불변.
+
+**(2) keeper↔agent 이름 codec — leaf 추출 (masc.string_util 선례).**
+
+`workspace_task_receipts.ml:23` 이 정본(`Keeper_identity`, 4철자 수용)의 **2철자 열화 사본**을 보유한 원인은 게으름이 아니라 의존 방향이다: codec 은 `lib/keeper`(masc 본체) 에 살고, `masc_workspace` 는 keeper 에 의존하지 않는다(실측: `lib/workspace/dune` 의존 목록에 keeper 없음). — contains_substring 91사본과 동일한 근본 원인.
+
+처방도 동일: 이름 codec(4철자 수용 + `keeper_agent_name` 렌더)을 의존성 0 leaf (`lib/keeper_identity_codec` 또는 기존 `masc.string_util` 급의 신설 leaf)로 내리고, `Keeper_identity` 와 `workspace_task_receipts` 둘 다 위임한다. 렌더 산포 4곳(keeper_identity:94, tool_agent:94, server_auth 외)도 같은 leaf 로 수렴. leaf dune 에는 string_util 과 같은 anti-regrowth 주석을 박는다.
+
+- `runtime_agent:259` (description 필드의 `"runtime:%s/runtime"` 밀수) 는 carrier 와 무관 — config 레코드에 typed `runtime_id` 필드를 추가하고 description 은 사람용으로 되돌린다.
+- 잔여 unverified 없음: B12 는 위 두 설계로 착수 가능하다.
 - permissive default 값 자체의 변경(예: tool_catalog unknown→true)은 동작 변화이므로 범위 밖 — 별도 이슈로.
 - 테스트 코드의 같은 패턴(에러 메시지 문구에 결합된 단언 ~142곳, fixture cwd 추측)은 프로덕션 정리 후 별도 트랙.
 

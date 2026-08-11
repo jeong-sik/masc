@@ -332,9 +332,6 @@ let to_json_with_operator_disposition
     ; "generation", `Int receipt.generation
     ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
     ; ( "agent_core_turn_count", Json_util.int_opt_to_json receipt.agent_core_turn_count )
-    ; ( "agent_core_dispatch_mode", string_opt_json receipt.agent_core_dispatch_mode )
-    ; ( "agent_core_internal_runtime_disabled"
-      , `Bool receipt.agent_core_internal_runtime_disabled )
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
     ; "goal_ids", list_json receipt.goal_ids
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
@@ -344,7 +341,6 @@ let to_json_with_operator_disposition
     ; "runtime_contract", runtime_contract
     ; "action_radius", action_radius
     ; "response_text_present", `Bool receipt.response_text_present
-    ; "model_used", `Null
     ; ( "completion_contract_result"
       , `String (completion_contract_result_to_string receipt.completion_contract_result) )
     ; ( "actionable_signal"
@@ -455,7 +451,6 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
           ; ( "network_mode"
             , `String (Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode) )
           ] )
-    ; "model_used", `Null
     ; ( "stop_reason"
       , match receipt.stop_reason with
         | Some value -> `String (stop_reason_to_string value)

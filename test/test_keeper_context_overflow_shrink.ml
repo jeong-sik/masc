@@ -188,6 +188,33 @@ let test_custom_shrink_replaces_only_the_exceptional_start () =
     (List.rev !attempted_capacities)
 ;;
 
+let test_non_decreasing_custom_shrink_does_not_repeat_provider_attempt () =
+  let attempted_capacities = ref [] in
+  let shrink_events = ref 0 in
+  let result =
+    Try_provider.context_overflow_shrink_sequence
+      ~starting_capacity_bytes:400
+      ~same_run_retry_authorized:always_authorized
+      ~shrink_capacity:(fun ~capacity_bytes ~default_capacity_bytes:_ ->
+        capacity_bytes)
+      ~record_success:(fun ~capacity_bytes:_ -> fail "overflow never succeeds here")
+      ~on_shrink_retry:
+        (fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes:_ ->
+          incr shrink_events)
+      ~attempt:(fun ~capacity_bytes ->
+        attempted_capacities := capacity_bytes :: !attempted_capacities;
+        Error (context_overflow ()))
+      ()
+  in
+  check bool "the original overflow is preserved" true
+    (match result with
+     | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) -> true
+     | Error _ | Ok _ -> false);
+  check (list int) "the provider sees one request" [ 400 ]
+    (List.rev !attempted_capacities);
+  check int "no false shrink event is emitted" 0 !shrink_events
+;;
+
 (* {1 Keeper_context_overflow_shrink_state} *)
 
 let test_state_defaults_to_max_capacity_when_unseen () =
@@ -260,6 +287,10 @@ let () =
             "custom shrink replaces only the exceptional start"
             `Quick
             test_custom_shrink_replaces_only_the_exceptional_start
+        ; test_case
+            "a non-decreasing custom shrink does not repeat the provider attempt"
+            `Quick
+            test_non_decreasing_custom_shrink_does_not_repeat_provider_attempt
         ] )
     ; ( "shrink_state"
       , [ test_case

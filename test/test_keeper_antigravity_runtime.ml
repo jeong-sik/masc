@@ -631,6 +631,77 @@ let test_blank_success_requires_fresh_conversation () =
       | _ -> fail "fresh Antigravity conversation did not settle")
 ;;
 
+let test_spawn_failure_is_pre_dispatch () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+      Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+      let oauth_source = Filename.concat base_path "operator-oauth-token" in
+      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      let missing_cli = Filename.concat base_path "missing-antigravity" in
+      let runtime_path = Filename.concat base_path "runtime.toml" in
+      write_file
+        ~mode:0o600
+        runtime_path
+        (runtime_toml ~cli_path:missing_cli ~oauth_source);
+      let runtime_snapshot = Runtime.For_testing.snapshot () in
+      Fun.protect
+        ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+        (fun () ->
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Eio_context.set_env env;
+              Eio_context.with_test_env
+                ~net:(Eio.Stdenv.net env)
+                ~clock:(Eio.Stdenv.clock env)
+                ~mono_clock:(Eio.Stdenv.mono_clock env)
+                ~sw
+                (fun () ->
+                  Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                  let config =
+                    match Runtime.get_runtime_by_id "antigravity.gemini" with
+                    | Some
+                        { Runtime.execution =
+                            Runtime_execution.Antigravity_cli config
+                        ; _
+                        } ->
+                      config
+                    | Some _ | None -> fail "Antigravity runtime fixture did not resolve"
+                  in
+                  let attempt =
+                    Keeper_antigravity_runtime.run
+                      ~runtime_id:"antigravity.gemini"
+                      ~keeper_name:"antigravity-pre-dispatch"
+                      ~base_path
+                      ~goal:"spawn should fail"
+                      ~goal_blocks:None
+                      ~system_prompt:""
+                      ~tools:[]
+                      ~initial_messages:[]
+                      ~model_input_projection:None
+                      ~hooks:None
+                      ~context_injector:None
+                      ~context:None
+                      ~event_bus:None
+                      ~raw_trace:None
+                      ~on_event:None
+                      ~config
+                  in
+                  (match attempt.result with
+                   | Error
+                       (Agent_core.Error.Provider
+                          (Llm_provider.Error.ProviderUnavailable _)) ->
+                     ()
+                   | Error error -> fail (Agent_core.Error.to_string error)
+                   | Ok _ -> fail "missing Antigravity CLI unexpectedly ran");
+                  check string
+                    "spawn is proven pre-dispatch"
+                    "no_effect_observed"
+                    (Keeper_provider_attempt_effect.to_string
+                       attempt.effect_disposition)))))
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -643,6 +714,10 @@ let () =
               "blank result starts fresh next turn"
               `Quick
               test_blank_success_requires_fresh_conversation
+          ; test_case
+              "spawn failure is pre-dispatch"
+              `Quick
+              test_spawn_failure_is_pre_dispatch
         ] )
     ]
 ;;

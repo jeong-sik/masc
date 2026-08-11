@@ -1160,7 +1160,6 @@ let run_turn
            ~runtime_rotation_attempts
            ~turn_result
            ~receipt_turn_count_ref
-           ~receipt_model_used_ref
            ~receipt_stop_reason_ref
            ~receipt_runtime_observation_ref
            ~receipt_response_text_present_ref

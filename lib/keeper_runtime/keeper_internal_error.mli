@@ -154,6 +154,14 @@ type masc_internal_error =
       effect_disposition : Tool_result.failure_effect_disposition;
       diagnostic : string;
     }
+  | Provider_attempt_effect_fenced of {
+      runtime_id : string;
+      effect_disposition : Keeper_provider_attempt_effect_core.t;
+      diagnostic : string;
+    }
+      (** A provider attempt failed after an effect was attempted or after the
+          runtime lost complete effect observation. The exact source must be
+          terminalized as failed, never replayed automatically. *)
   | Receipt_persistence_failed of { detail : string }
   | Gate_replay_repair_required of {
       approval_id : string;

@@ -9,6 +9,11 @@ let internal_error detail = Agent_core.Error.Internal detail
 module Host = Keeper_official_client_host
 module Session_store = Keeper_official_client_session_store
 
+type attempt_outcome =
+  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; effect_disposition : Keeper_provider_attempt_effect.t
+  }
+
 let runtime_label = "Claude Code"
 
 let project_messages messages =
@@ -185,7 +190,7 @@ let recovery_failure_of_client_error = function
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~raw_trace ~on_event
+    ~context ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~(config : Runtime_execution.claude_code) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -254,8 +259,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       Host.prepare_turn
         ~configured_reasoning_effort:
           (Runtime_inference.resolve_reasoning_effort ~runtime_id)
-        ~max_prompt_bytes:
-          (Runtime_inference.resolve_max_prompt_bytes ~runtime_id)
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -458,7 +461,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     let turn_result =
       let on_stream_event = claude_stream_callback on_event in
       try
-        (match
+        let client_result =
            Runtime_claude_code.run_turn
              ~mgr:process_mgr
              ~clock
@@ -496,7 +499,17 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              ?on_stream_event
              client_config
              ~prompt
-         with
+        in
+        Atomic.set
+          effect_disposition
+          (match client_result with
+           | Error (Runtime_claude_code.Spawn_failed _) ->
+             Keeper_provider_attempt_effect.No_effect_observed
+           | Ok _ | Error _ ->
+             (match tools with
+              | [] -> Keeper_provider_attempt_effect.No_effect_observed
+              | _ :: _ -> Keeper_provider_attempt_effect.Observation_unavailable));
+        (match client_result with
          | Error error ->
            if not !state_persistence_failed
            then recovery_failure := recovery_failure_of_client_error error;
@@ -712,22 +725,29 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context ~event_bus ~raw_trace ~on_event ~config =
-  Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-    run_without_lifecycle
-      ~runtime_id
-      ~keeper_name
-      ~base_path
-      ~goal
-      ~goal_blocks
-      ~system_prompt
-      ~tools
-      ~initial_messages
-      ~model_input_projection
-      ~hooks
-      ~context_injector
-      ~context
-      ~event_bus
-      ~raw_trace
-      ~on_event
-      ~config)
+  let effect_disposition =
+    Atomic.make Keeper_provider_attempt_effect.No_effect_observed
+  in
+  let result =
+    Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+      run_without_lifecycle
+        ~runtime_id
+        ~keeper_name
+        ~base_path
+        ~goal
+        ~goal_blocks
+        ~system_prompt
+        ~tools
+        ~initial_messages
+        ~model_input_projection
+        ~hooks
+        ~context_injector
+        ~context
+        ~event_bus
+        ~raw_trace
+        ~on_event
+        ~effect_disposition
+        ~config)
+  in
+  { result; effect_disposition = Atomic.get effect_disposition }
 ;;

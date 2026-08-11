@@ -413,15 +413,11 @@ let redact_message redaction msg =
     audio;
   }
 
-let opt_string_field key = function
-  | None -> []
-  | Some value -> [ (key, `String value) ]
-
 let speaker_fields = function
   | None -> []
   | Some sp ->
-      opt_string_field "speaker_id" sp.speaker_id
-      @ opt_string_field "speaker_name" sp.speaker_name
+      Json_util.string_field_if_present "speaker_id" sp.speaker_id
+      @ Json_util.string_field_if_present "speaker_name" sp.speaker_name
       @ [ ("speaker_authority", `String (authority_label sp.speaker_authority)) ]
 
 (* RFC-0235 P1: nested ["audio"] assoc so the clip stays one unit on the
@@ -581,16 +577,16 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     @ attachment_fields
     @ mention_fields
     @ kind_field
-    @ opt_string_field "tool_call_id" tool_call_id
-    @ opt_string_field "tool_call_name" tool_call_name
+    @ Json_util.string_field_if_present "tool_call_id" tool_call_id
+    @ Json_util.string_field_if_present "tool_call_name" tool_call_name
     @ surface_field
-    @ opt_string_field "conversation_id" conversation_id
-    @ opt_string_field "external_message_id" external_message_id
-    @ opt_string_field "workspace_id" workspace_id
+    @ Json_util.string_field_if_present "conversation_id" conversation_id
+    @ Json_util.string_field_if_present "external_message_id" external_message_id
+    @ Json_util.string_field_if_present "workspace_id" workspace_id
     @ speaker_fields speaker
     @ audio_fields audio
     @ blocks_fields blocks
-    @ opt_string_field "turn_ref" (Option.map Ids.Turn_ref.to_string turn_ref)
+    @ Json_util.string_field_if_present "turn_ref" (Option.map Ids.Turn_ref.to_string turn_ref)
     @ stream_lifecycle_fields stream_lifecycle
     @ (match provenance with
        | None -> []
@@ -1844,7 +1840,7 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
   let field key value = (key, value) in
   let string_field key value = field key (`String value) in
   let base_fields =
-    opt_string_field "turn_ref" (Option.map Ids.Turn_ref.to_string m.turn_ref)
+    Json_util.string_field_if_present "turn_ref" (Option.map Ids.Turn_ref.to_string m.turn_ref)
   in
   match m.stream_lifecycle with
   | Some (_ :: _ as events) ->
@@ -1858,7 +1854,7 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
              (`List (List.map (fun label -> `String label) labels))
          ]
         @ stream_delivery_receipt_field "server_lifecycle_replay_only"
-        @ opt_string_field "event_name" (last_opt labels)
+        @ Json_util.string_field_if_present "event_name" (last_opt labels)
         @ base_fields)
   | None | Some [] -> (
       match m.turn_ref with
@@ -1917,14 +1913,14 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                  | Row_kind.Utterance -> []
                  | Row_kind.Transport_failure ->
                      [ ("kind", `String (Row_kind.to_label m.kind)) ])
-              @ opt_string_field "tool_call_id" m.tool_call_id
-              @ opt_string_field "tool_call_name" m.tool_call_name
+              @ Json_util.string_field_if_present "tool_call_id" m.tool_call_id
+              @ Json_util.string_field_if_present "tool_call_name" m.tool_call_name
               @ (match m.surface with
                  | None -> []
                  | Some s -> [ ("surface", Surface_ref.to_json s) ])
-              @ opt_string_field "conversation_id" m.conversation_id
-              @ opt_string_field "external_message_id" m.external_message_id
-              @ opt_string_field "workspace_id" m.workspace_id
+              @ Json_util.string_field_if_present "conversation_id" m.conversation_id
+              @ Json_util.string_field_if_present "external_message_id" m.external_message_id
+              @ Json_util.string_field_if_present "workspace_id" m.workspace_id
               @ speaker_fields m.speaker
               @ (match m.attachments with
                  | None | Some [] -> []
@@ -1947,7 +1943,7 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                       ~trace_block m )
                 ]
               @ blocks_fields_of_list (blocks_with_trace_block ~trace_block m)
-              @ opt_string_field "turn_ref"
+              @ Json_util.string_field_if_present "turn_ref"
                   (Option.map Ids.Turn_ref.to_string m.turn_ref)
               (* Expose the persisted delivery identity so the dashboard can
                  reconcile a history reload against its optimistic turn rows

@@ -4,10 +4,16 @@ type t =
   ; max_exact_value_len : int
   }
 
+type structural_mode =
+  | Bearer_token
+  | Sk_token
+  | Url_credential
+
 type stream_state =
   { redaction : t
   ; pending_line : Buffer.t
   ; mutable next_bounded_flush_at : int
+  ; mutable structural_mode : structural_mode option
   }
 
 let empty = { patterns = []; exact_values = []; max_exact_value_len = 0 }
@@ -15,6 +21,12 @@ let empty = { patterns = []; exact_values = []; max_exact_value_len = 0 }
 let min_secret_len = 8
 let max_secret_file_bytes = 64 * 1024
 let stream_emit_bytes = 4 * 1024
+
+(* [Observability_redact] deliberately matches URL credentials, Bearer tokens,
+   and [sk-] tokens by their structural prefixes with unbounded bodies. The
+   numeric overlap below protects only fixed prefixes; [structural_mode] owns
+   any candidate that reaches a bounded cut so an incomplete secret is never
+   passed to the whole-record matcher as an emitted fragment. *)
 let structural_pattern_overlap_bytes = 4 * 1024
 
 let path_exists path =
@@ -203,6 +215,7 @@ let create_stream_state redaction =
   { redaction
   ; pending_line = Buffer.create 256
   ; next_bounded_flush_at = stream_flush_threshold redaction
+  ; structural_mode = None
   }
 ;;
 
@@ -221,12 +234,90 @@ let exact_value_at redaction text index =
   List.find_opt (exact_value_starts_at text ~index) redaction.exact_values
 ;;
 
-let emit_bounded_prefix state emitted stop =
-  let pending = Buffer.contents state.pending_line in
+let is_ascii_alphanumeric char =
+  (char >= 'a' && char <= 'z')
+  || (char >= 'A' && char <= 'Z')
+  || (char >= '0' && char <= '9')
+;;
+
+let is_ascii_word_char char = is_ascii_alphanumeric char || Char.equal char '_'
+
+let literal_starts_at text ~index literal =
+  let literal_len = String.length literal in
+  index >= 0
+  && index + literal_len <= String.length text
+  && String.sub text index literal_len = literal
+;;
+
+let is_bearer_delimiter char =
+  Char.equal char ' '
+  || Char.equal char '\t'
+  || Char.equal char '\r'
+  || Char.equal char '\n'
+;;
+
+let is_sk_body_char char =
+  is_ascii_alphanumeric char || Char.equal char '-'
+;;
+
+let is_url_body_delimiter char =
+  Char.equal char '@' || Char.equal char ' '
+;;
+
+let body_reaches_stop text ~body_start ~stop ~is_delimiter =
+  if body_start >= stop
+  then true
+  else if is_delimiter text.[body_start]
+  then false
+  else
+    let cursor = ref (body_start + 1) in
+    while !cursor < stop && not (is_delimiter text.[!cursor]) do
+      incr cursor
+    done;
+    !cursor >= stop
+;;
+
+let structural_candidate_is_incomplete
+      text
+      ~stop
+      ~start
+      ~prefix_len
+      ~is_delimiter
+  =
+  let body_start = start + prefix_len in
+  body_reaches_stop text ~body_start ~stop ~is_delimiter
+;;
+
+let find_incomplete_structural_candidate pending stop =
+  let candidate = ref None in
+  let consider start mode prefix_len is_delimiter =
+    if Option.is_none !candidate
+       && structural_candidate_is_incomplete
+            pending
+            ~stop
+            ~start
+            ~prefix_len
+            ~is_delimiter
+    then candidate := Some (start, mode)
+  in
+  for index = 0 to stop - 1 do
+    if literal_starts_at pending ~index "Bearer "
+    then consider index Bearer_token 7 is_bearer_delimiter;
+    if
+      (index = 0 || not (is_ascii_word_char pending.[index - 1]))
+      && literal_starts_at pending ~index "sk-"
+    then consider index Sk_token 3 (fun char -> not (is_sk_body_char char));
+    if literal_starts_at pending ~index "://"
+    then consider index Url_credential 3 is_url_body_delimiter
+  done;
+  !candidate
+;;
+
+let emit_exact_redacted_prefix redaction pending stop =
   let safely_redacted = Buffer.create stop in
   let cursor = ref 0 in
   while !cursor < stop do
-    match exact_value_at state.redaction pending !cursor with
+    match exact_value_at redaction pending !cursor with
     | Some value ->
       Buffer.add_string safely_redacted "[REDACTED]";
       cursor := !cursor + String.length value
@@ -234,20 +325,73 @@ let emit_bounded_prefix state emitted stop =
       Buffer.add_char safely_redacted pending.[!cursor];
       incr cursor
   done;
-  Buffer.add_string
-    emitted
-    (Observability_redact.redact_text (Buffer.contents safely_redacted));
-  Buffer.clear state.pending_line;
-  Buffer.add_substring
-    state.pending_line
-    pending
-    !cursor
-    (String.length pending - !cursor)
+  Observability_redact.redact_text (Buffer.contents safely_redacted)
+;;
+
+let consume_structural_char state char =
+  match state.structural_mode with
+  | None ->
+      Buffer.add_char state.pending_line char;
+      false
+  | Some Bearer_token ->
+      if is_bearer_delimiter char
+      then (
+        state.structural_mode <- None;
+        Buffer.add_char state.pending_line char;
+        Char.equal char '\n' || Char.equal char '\r')
+      else false
+  | Some Sk_token ->
+      if is_sk_body_char char
+      then false
+      else (
+        state.structural_mode <- None;
+        Buffer.add_char state.pending_line char;
+        Char.equal char '\n' || Char.equal char '\r')
+  | Some Url_credential ->
+      if Char.equal char '@'
+      then (
+        state.structural_mode <- None;
+        false)
+      else if Char.equal char ' '
+      then (
+        state.structural_mode <- None;
+        Buffer.add_char state.pending_line char;
+        false)
+      else if Char.equal char '\n' || Char.equal char '\r'
+      then (
+        state.structural_mode <- None;
+        Buffer.add_char state.pending_line char;
+        true)
+      else false
+;;
+
+let emit_bounded_prefix state emitted stop =
+  let pending = Buffer.contents state.pending_line in
+  match find_incomplete_structural_candidate pending stop with
+  | None ->
+      Buffer.add_string emitted (emit_exact_redacted_prefix state.redaction pending stop);
+      Buffer.clear state.pending_line;
+      Buffer.add_substring
+        state.pending_line
+        pending
+        stop
+        (String.length pending - stop)
+  | Some (candidate_start, mode) ->
+      Buffer.add_string
+        emitted
+        (emit_exact_redacted_prefix state.redaction pending candidate_start);
+      Buffer.add_string emitted "[REDACTED]";
+      state.structural_mode <- Some mode;
+      Buffer.clear state.pending_line;
+      for index = stop to String.length pending - 1 do
+        ignore (consume_structural_char state pending.[index])
+      done
 ;;
 
 let flush_complete_record state emitted =
   Buffer.add_string emitted (redact_text state.redaction (Buffer.contents state.pending_line));
   Buffer.clear state.pending_line;
+  state.structural_mode <- None;
   state.next_bounded_flush_at <- stream_flush_threshold state.redaction
 ;;
 
@@ -265,8 +409,14 @@ let redact_stream_chunk state chunk =
   let emitted = Buffer.create (String.length chunk) in
   String.iter
     (fun char ->
-       Buffer.add_char state.pending_line char;
-       if Char.equal char '\n' || Char.equal char '\r'
+       let record_boundary =
+         match state.structural_mode with
+         | Some _ -> consume_structural_char state char
+         | None ->
+             Buffer.add_char state.pending_line char;
+             Char.equal char '\n' || Char.equal char '\r'
+       in
+       if record_boundary
        then flush_complete_record state emitted
        else flush_bounded_prefix_if_needed state emitted)
     chunk;
@@ -276,6 +426,7 @@ let redact_stream_chunk state chunk =
 let redact_stream_finish state =
   let trailing = redact_text state.redaction (Buffer.contents state.pending_line) in
   Buffer.clear state.pending_line;
+  state.structural_mode <- None;
   state.next_bounded_flush_at <- stream_flush_threshold state.redaction;
   trailing
 ;;

@@ -268,6 +268,42 @@ let test_stream_bounds_overlapping_repeated_secret () =
   not_contains "repeated secret bytes do not escape" (emitted ^ trailing) secret;
   contains "repeated secret produces markers" emitted "[REDACTED]"
 
+let assert_long_structural_stream_redacted
+      ~label
+      ~input
+      ~secret
+      ~raw_fragment
+  =
+  let state = R.create_stream_state R.empty in
+  let emitted = R.redact_stream_chunk state input in
+  let output = emitted ^ R.redact_stream_finish state in
+  Alcotest.(check bool) (label ^ " emits before finish") true
+    (String.length emitted > 0);
+  not_contains (label ^ " full secret hidden") output secret;
+  not_contains (label ^ " raw secret body hidden") output raw_fragment;
+  contains (label ^ " marker present") output "[REDACTED]"
+;;
+
+let test_stream_redacts_long_structural_secret_crossing_bounded_flush () =
+  let bearer_secret = "Bearer " ^ String.make 9_000 'a' in
+  let sk_secret = "sk-" ^ String.make 9_000 'b' in
+  let url_secret = "https://user:" ^ String.make 9_000 'x' ^ "@" in
+  assert_long_structural_stream_redacted
+    ~label:"long Bearer token"
+    ~input:("prefix " ^ bearer_secret ^ " suffix")
+    ~secret:bearer_secret
+    ~raw_fragment:(String.make 128 'a');
+  assert_long_structural_stream_redacted
+    ~label:"long sk token"
+    ~input:("prefix " ^ sk_secret ^ " suffix")
+    ~secret:sk_secret
+    ~raw_fragment:(String.make 128 'b');
+  assert_long_structural_stream_redacted
+    ~label:"long URL credential"
+    ~input:("prefix " ^ url_secret ^ " suffix")
+    ~secret:url_secret
+    ~raw_fragment:(String.make 128 'x')
+
 let () =
   Alcotest.run
     "keeper secret redaction"
@@ -296,5 +332,7 @@ let () =
             test_stream_redacts_secret_crossing_bounded_flush;
           Alcotest.test_case "bounds an overlapping repeated secret" `Quick
             test_stream_bounds_overlapping_repeated_secret;
+          Alcotest.test_case "redacts long structural secrets across a bounded flush" `Quick
+            test_stream_redacts_long_structural_secret_crossing_bounded_flush;
         ] )
     ]

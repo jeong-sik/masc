@@ -32,9 +32,11 @@ val redact_stream_finish : stream_state -> string
 (** Boundary-safe streaming redaction. Newline and carriage-return records are
     emitted immediately. Long unterminated records are emitted in bounded
     chunks while retaining a suffix large enough for every snapshotted exact
-    secret (and a bounded structural-pattern overlap), so process progress does
-    not require buffering an unbounded line. Call [finish] once to redact and
-    emit the remaining suffix. *)
+    secret. When an unbounded structural prefix (URL credential, Bearer token,
+    or [sk-] token) reaches a bounded cut, the prefix is replaced immediately
+    and the state machine consumes the remaining token until its delimiter;
+    an incomplete structural prefix is never emitted as raw text. Call
+    [finish] once to redact and emit the remaining suffix. *)
 
 val redact_json : t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Redact all string leaves in a JSON value, preserving shape. *)

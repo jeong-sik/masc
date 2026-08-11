@@ -301,6 +301,7 @@ let keeper_list_row_json ~runtime_class config name =
       in
       let diagnostic =
         Keeper_status_runtime.keeper_diagnostic_json
+          ~config
           ~meta
           ~agent_status
           ~keepalive_running ~history_items:[] ~now_ts

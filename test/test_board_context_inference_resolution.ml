@@ -259,6 +259,91 @@ let test_cadence_change_wakes_only_live_sleepers_when_shortened () =
       check string "unchanged cadence is explicit" "unchanged"
         (unchanged |> member "change" |> to_string))
 
+let test_keeper_metric_producer_tracks_turn_and_failed_sleep () =
+  let base_path = "/tmp/test_keeper_metric_producer_active" in
+  Keeper_registry.For_testing.clear ();
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    (fun () ->
+      let entry =
+        Keeper_registry.For_testing.register
+          ~base_path
+          "producer"
+          (make_meta "producer")
+      in
+      check bool "idle running lane is not an active producer" false
+        (Keeper_status_runtime.keeper_metric_producer_active ~base_path);
+      Keeper_registry.mark_turn_started
+        ~base_path
+        ~wake:Keeper_registry.Proactive_tick
+        entry.name;
+      check bool "live turn is an active producer" true
+        (Keeper_status_runtime.keeper_metric_producer_active ~base_path);
+      Keeper_registry.mark_turn_finished ~base_path entry.name;
+      let failed =
+        Keeper_registry.get ~base_path entry.name
+        |> Option.value ~default:entry
+      in
+      let failed = { failed with phase = Keeper_state_machine.Failing } in
+      Keeper_registry.For_testing.unsafe_put_entry ~base_path entry.name failed;
+      Atomic.set failed.cadence_sleeping true;
+      check bool "failed inter-cycle sleep is still producing" true
+        (Keeper_status_runtime.keeper_metric_producer_active ~base_path);
+      Atomic.set failed.cadence_sleeping false;
+      check bool "failed awake lane does not mask stale telemetry" false
+        (Keeper_status_runtime.keeper_metric_producer_active ~base_path))
+
+let test_cadence_mutation_and_wake_are_serialized () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let param_key =
+    Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec
+  in
+  let first_entered, resolve_first_entered = Eio.Promise.create () in
+  let release_first, resolve_release_first = Eio.Promise.create () in
+  let second_attempting, resolve_second_attempting = Eio.Promise.create () in
+  let second_entered = Atomic.make false in
+  let first_done, resolve_first_done = Eio.Promise.create () in
+  let second_done, resolve_second_done = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      Server_routes_http_routes_activity.mutate_runtime_param_with_effects
+        ~base_path:"/tmp/test_cadence_effect_serialization"
+        ~param_key
+        (fun () ->
+          Eio.Promise.resolve resolve_first_entered ();
+          Eio.Promise.await release_first;
+          Ok
+            { Runtime_params.old_value = `Int 300
+            ; new_value = `Int 30
+            })
+    in
+    Eio.Promise.resolve resolve_first_done result);
+  Eio.Promise.await first_entered;
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve resolve_second_attempting ();
+    let result =
+      Server_routes_http_routes_activity.mutate_runtime_param_with_effects
+        ~base_path:"/tmp/test_cadence_effect_serialization"
+        ~param_key
+        (fun () ->
+          Atomic.set second_entered true;
+          Ok
+            { Runtime_params.old_value = `Int 30
+            ; new_value = `Int 600
+            })
+    in
+    Eio.Promise.resolve resolve_second_done result);
+  Eio.Promise.await second_attempting;
+  Eio.Fiber.yield ();
+  check bool "later cadence mutation waits through the earlier wake" false
+    (Atomic.get second_entered);
+  Eio.Promise.resolve resolve_release_first ();
+  ignore (Eio.Promise.await first_done);
+  ignore (Eio.Promise.await second_done);
+  check bool "later cadence mutation enters after wake completion" true
+    (Atomic.get second_entered)
+
 let () =
   run "Server board context inference resolution"
     [ ( "parse_request",
@@ -272,5 +357,9 @@ let () =
     ; ( "runtime_params",
         [ test_case "cadence decrease wakes only live sleepers" `Quick
             test_cadence_change_wakes_only_live_sleepers_when_shortened
+        ; test_case "cadence mutation and wake are serialized" `Quick
+            test_cadence_mutation_and_wake_are_serialized
+        ; test_case "Keeper metric producer tracks live work" `Quick
+            test_keeper_metric_producer_tracks_turn_and_failed_sleep
         ] )
     ]

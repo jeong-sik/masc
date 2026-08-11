@@ -41,6 +41,14 @@ let empty_keeper_cadence_wakeup_summary =
   }
 ;;
 
+let keeper_cadence_effect_mu = Eio.Mutex.create ()
+
+let is_keeper_cadence_param param_key =
+  String.equal
+    param_key
+    (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec)
+;;
+
 let wake_keepers_after_runtime_param_change
       ~base_path
       ~param_key
@@ -48,10 +56,7 @@ let wake_keepers_after_runtime_param_change
       ~new_interval_s
   =
   if
-    not
-      (String.equal
-         param_key
-         (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec))
+    not (is_keeper_cadence_param param_key)
   then None
   else
     let change, wake_required =
@@ -138,10 +143,7 @@ let runtime_param_effect_fields
       (change : Runtime_params.json_change)
   =
   if
-    not
-      (String.equal
-         param_key
-         (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec))
+    not (is_keeper_cadence_param param_key)
   then []
   else
     match change.old_value, change.new_value with
@@ -161,6 +163,24 @@ let runtime_param_effect_fields
         (Yojson.Safe.to_string old_value)
         (Yojson.Safe.to_string new_value);
       []
+;;
+
+let mutate_runtime_param_with_effects ~base_path ~param_key mutate =
+  let mutate_and_apply_effects () =
+    match mutate () with
+    | Error _ as error -> error
+    | Ok change ->
+      Ok
+        ( change
+        , runtime_param_effect_fields ~base_path ~param_key change )
+  in
+  if is_keeper_cadence_param param_key
+  then
+    Eio.Mutex.use_rw
+      ~protect:true
+      keeper_cadence_effect_mu
+      mutate_and_apply_effects
+  else mutate_and_apply_effects ()
 ;;
 
 let respond_board_reaction_result request reqd = function
@@ -1370,18 +1390,19 @@ let add_routes ~sw ~clock router =
                     [ ("ok", `Bool false); ("error", `String "value is required") ])
              | Some value ->
                (match
-                  Runtime_params.set_by_key_with_change param_key value ~actor
+                  mutate_runtime_param_with_effects
+                    ~base_path
+                    ~param_key
+                    (fun () ->
+                      Runtime_params.set_by_key_with_change
+                        param_key
+                        value
+                        ~actor)
                 with
                 | Error msg ->
                   respond_json_value_with_cors ~status:`Bad_request request reqd
                     (`Assoc [ "ok", `Bool false; "error", `String msg ])
-                | Ok change ->
-                  let effect_fields =
-                    runtime_param_effect_fields
-                      ~base_path
-                      ~param_key
-                      change
-                  in
+                | Ok (change, effect_fields) ->
                   Sse.broadcast
                     (`Assoc
                        ([ "type", `String "runtime_param_changed"
@@ -1430,17 +1451,17 @@ let add_routes ~sw ~clock router =
                  (`Assoc
                     [ ("ok", `Bool false); ("error", `String "param_key is required") ])
              else
-               (match Runtime_params.clear_by_key_with_change param_key ~actor with
+               (match
+                  mutate_runtime_param_with_effects
+                    ~base_path
+                    ~param_key
+                    (fun () ->
+                      Runtime_params.clear_by_key_with_change param_key ~actor)
+                with
                 | Error msg ->
                   respond_json_value_with_cors ~status:`Bad_request request reqd
                     (`Assoc [ "ok", `Bool false; "error", `String msg ])
-                | Ok change ->
-                  let effect_fields =
-                    runtime_param_effect_fields
-                      ~base_path
-                      ~param_key
-                      change
-                  in
+                | Ok (change, effect_fields) ->
                   Sse.broadcast
                     (`Assoc
                        ([ "type", `String "runtime_param_changed"

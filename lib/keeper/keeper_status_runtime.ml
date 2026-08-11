@@ -37,6 +37,26 @@ let keeper_turn_record_source_health
   | Some _, false -> "ok", ""
 ;;
 
+let keeper_metric_producer_active ~base_path =
+  Keeper_registry.all ~base_path ()
+  |> List.exists (fun (entry : Keeper_registry.registry_entry) ->
+       Option.is_some entry.current_turn_observation
+       ||
+       match entry.phase with
+       | Keeper_state_machine.Failing -> Atomic.get entry.cadence_sleeping
+       | Keeper_state_machine.Offline
+       | Keeper_state_machine.Running
+       | Keeper_state_machine.Overflowed
+       | Keeper_state_machine.Compacting
+       | Keeper_state_machine.HandingOff
+       | Keeper_state_machine.Draining
+       | Keeper_state_machine.Paused
+       | Keeper_state_machine.Stopped
+       | Keeper_state_machine.Crashed
+       | Keeper_state_machine.Restarting
+       | Keeper_state_machine.Dead -> false)
+;;
+
 let unknown_model_label =
   Boundary_redaction.to_string Boundary_redaction.unknown_model_label
 
@@ -315,6 +335,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
         (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec))
     ?(snapshot_interval_s =
       float_of_int (Runtime_params.get Runtime_settings.keeper_snapshot_sec))
+    ?last_heartbeat_age_s
     ~meta ~keepalive_running ~agent_status ~quiet_reason () : keeper_health =
   (* Supervisor-level health takes priority *)
   match fiber_health with
@@ -326,6 +347,14 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   let last_seen_ago_s =
     json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
   in
+  let keeper_signal_present, keeper_signal_age_s =
+    match last_heartbeat_age_s, agent_registry_status_present with
+    | Some heartbeat_age_s, true ->
+      true, Float.min heartbeat_age_s last_seen_ago_s
+    | Some heartbeat_age_s, false -> true, heartbeat_age_s
+    | None, true -> true, last_seen_ago_s
+    | None, false -> false, max_float
+  in
   let stale_threshold_s = agent_staleness_threshold_s in
   if
     (not keepalive_running)
@@ -335,8 +364,8 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   then KH_offline
   else if keepalive_running then
     if
-      agent_registry_status_present
-      && last_seen_ago_s
+      keeper_signal_present
+      && keeper_signal_age_s
          > keeper_heartbeat_stale_after_s
              ~keepalive_interval_s
              ~snapshot_interval_s
@@ -521,16 +550,43 @@ let keeper_surface_status
   surface_status_to_string surface
 
 let keeper_diagnostic_json
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(agent_status : Yojson.Safe.t)
     ~(keepalive_running : bool)
     ~(history_items : Yojson.Safe.t list)
     ~(now_ts : float) : Yojson.Safe.t =
+  let heartbeat_snapshot, heartbeat_observation_error =
+    match
+      Keeper_heartbeat_persisted_snapshot.latest
+        ~config
+        ~keeper_name:meta.name
+    with
+    | Ok snapshot -> snapshot, None
+    | Error error ->
+      Log.Keeper.warn
+        ~keeper_name:meta.name
+        "keeper heartbeat snapshot read failed: %s"
+        error;
+      None, Some error
+  in
+  let last_heartbeat_age_s =
+    Option.map
+      (fun (snapshot : Keeper_heartbeat_persisted_snapshot.t) ->
+         Float.max 0.0 (now_ts -. snapshot.timestamp_unix))
+      heartbeat_snapshot
+  in
   let quiet_reason =
     classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts
   in
   let health_state =
-    keeper_health_state ~meta ~keepalive_running ~agent_status ~quiet_reason ()
+    keeper_health_state
+      ?last_heartbeat_age_s
+      ~meta
+      ~keepalive_running
+      ~agent_status
+      ~quiet_reason
+      ()
   in
   let next_action_path = keeper_next_action_path ~health_state ~quiet_reason in
   let last_reply_status, last_reply_at, last_reply_preview =
@@ -557,6 +613,14 @@ let keeper_diagnostic_json
       ("last_reply_preview", last_reply_preview);
       ("last_error", last_error);
       ("keepalive_running", `Bool keepalive_running);
+      ( "last_heartbeat"
+      , match heartbeat_snapshot with
+        | Some snapshot -> `String snapshot.timestamp
+        | None -> `Null );
+      ( "last_heartbeat_age_s"
+      , Json_util.float_opt_to_json last_heartbeat_age_s );
+      ( "heartbeat_observation_error"
+      , Json_util.string_opt_to_json heartbeat_observation_error );
     ]
 
 (** Derive pipeline stage directly from the Keeper lifecycle phase. *)

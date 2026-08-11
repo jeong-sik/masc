@@ -148,7 +148,8 @@ let freshness_fields ~now latest_ts =
     [ ("latest_ts_unix", `Null); ("latest_ts_iso", `Null); ("latest_age_s", `Null) ]
 
 let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
-    ?(optional_when_missing = false) ?(read_error = false) ?coverage_gap () =
+    ?(optional_when_missing = false) ?(read_error = false)
+    ?(producer_active = false) ?coverage_gap () =
   match coverage_gap with
   | Some gap ->
     [
@@ -174,7 +175,7 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
         | None -> ("empty", "no_entries")
         | Some ts ->
           let latest_age_s = max 0.0 (now -. ts) in
-          if latest_age_s > freshness_slo_s then
+          if latest_age_s > freshness_slo_s && not producer_active then
             ("stale", "freshness_slo_exceeded")
           else ("ok", "")
     in
@@ -858,7 +859,8 @@ let goal_event_summary_stats ~masc_root =
     in
     (List.length entries, latest_ts_of_entries entries)
 
-let summary_json ?keeper_keepalive_interval_s ~base_path ~masc_root ()
+let summary_json ?keeper_keepalive_interval_s
+    ?(keeper_metric_producer_active = false) ~base_path ~masc_root ()
   : Yojson.Safe.t
   =
   let now = Unix.gettimeofday () in
@@ -927,12 +929,14 @@ let summary_json ?keeper_keepalive_interval_s ~base_path ~masc_root ()
                     keeper_dirs) );
              ("keeper_count", `Int (List.length keeper_dirs));
              ("entry_count", `Int keeper_total);
+             ("producer_active", `Bool keeper_metric_producer_active);
           ]
           @ metadata_fields
           @ coverage_gap_fields
           @ freshness_fields ~now keeper_latest_ts
           @ source_health_fields ~now ~exists ~entry_count:keeper_total
               ~latest_ts:keeper_latest_ts ~freshness_slo_s
+              ~producer_active:keeper_metric_producer_active
               ~optional_when_missing:(source_optional_when_missing source)
               ?coverage_gap ()),
         keeper_total )

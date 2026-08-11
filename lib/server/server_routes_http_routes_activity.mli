@@ -41,3 +41,12 @@ val wake_keepers_after_runtime_param_change :
     [Failing] sleepers only when the effective interval decreases. Lengthened,
     unchanged, in-flight, and inactive lanes remain explicit in the returned
     operator-visible summary. Other runtime parameters return [None]. *)
+
+val mutate_runtime_param_with_effects :
+  base_path:string ->
+  param_key:string ->
+  (unit -> (Runtime_params.json_change, string) result) ->
+  (Runtime_params.json_change * (string * Yojson.Safe.t) list, string) result
+(** Run a string-keyed parameter mutation and derive its wake effects as one
+    serialized operation for the Keeper cadence key. Other keys remain
+    independent and do not contend on the cadence side-effect lock. *)

@@ -682,6 +682,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               in
               let diagnostic =
 	                Keeper_status_runtime.keeper_diagnostic_json
+	                  ~config
 	                  ~meta:m
 	                  ~agent_status:agent
 	                  ~keepalive_running
@@ -1027,6 +1028,7 @@ let execution_trust_row_of_meta
      that state, so the trust surface must not read the conversation log. *)
   let diagnostic =
     Keeper_status_runtime.keeper_diagnostic_json
+      ~config
       ~meta:m
       ~agent_status:agent
       ~keepalive_running

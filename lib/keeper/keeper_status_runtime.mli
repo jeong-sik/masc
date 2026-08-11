@@ -26,6 +26,11 @@ val keeper_turn_record_source_health :
     even when its previous completed record is old; live-turn progress/stall
     diagnosis remains on the dedicated turn observation surface. Incompatible
     stored rows remain fail-visible. *)
+val keeper_metric_producer_active : base_path:string -> bool
+(** [true] while a registered Keeper is inside a live turn, or while a failed
+    turn's lane is in its legitimate inter-cycle cadence sleep. These are the
+    two intervals in which the next metrics-ledger append is still owned by a
+    live producer even when the prior row exceeds its age-only SLO. *)
 (** Parse the "status" field of an agent-status snapshot blob (produced by
     {!parse_agent_status}) into the closed [Masc_domain.agent_status] ADT.
     An absent agent-registry record is represented by an empty object; the
@@ -38,6 +43,7 @@ val agent_runtime_status_opt : Yojson.Safe.t -> Masc_domain.agent_status option
 val agent_runtime_has_live_signal : Yojson.Safe.t -> bool
 val parse_agent_status : Workspace.config -> agent_name:string -> Yojson.Safe.t
 val keeper_diagnostic_json :
+  config:Workspace.config ->
   meta:keeper_meta ->
   agent_status:Yojson.Safe.t ->
   keepalive_running:bool ->

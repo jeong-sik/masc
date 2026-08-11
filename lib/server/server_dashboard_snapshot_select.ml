@@ -96,12 +96,16 @@ let select_telemetry_summary_json
       Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
       |> float_of_int
     in
+    let keeper_metric_producer_active =
+      Keeper_status_runtime.keeper_metric_producer_active ~base_path
+    in
     Server_timing.measure
       timing_obj
       Server_timing.Telemetry_summary_aggregate
       (fun () ->
          Telemetry_unified.summary_json
            ~keeper_keepalive_interval_s
+           ~keeper_metric_producer_active
            ~base_path
            ~masc_root
            ())

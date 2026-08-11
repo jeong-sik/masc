@@ -88,6 +88,7 @@ val read_unified_result :
 
 val summary_json :
   ?keeper_keepalive_interval_s:float ->
+  ?keeper_metric_producer_active:bool ->
   base_path:string ->
   masc_root:string ->
   unit ->
@@ -95,7 +96,9 @@ val summary_json :
 (** [summary_json ~base_path ~masc_root ()] returns a JSON overview of
     each source: path, entry count, whether the store directory exists,
     and freshness metadata ([latest_ts_unix], [latest_ts_iso],
-    [latest_age_s]).  [masc_root] is the cluster-aware .masc directory. *)
+    [latest_age_s]). A live Keeper metrics producer suppresses only
+    age-derived staleness; missing, empty, read-error, and coverage-gap states
+    remain fail-visible. [masc_root] is the cluster-aware .masc directory. *)
 
 val replay_retention_json :
   ?keeper_keepalive_interval_s:float ->

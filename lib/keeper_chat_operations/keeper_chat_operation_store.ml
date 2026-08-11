@@ -5,7 +5,11 @@ module Id = Operation.Operation_id
 type t =
   { db : Sqlite3.db
   ; path : string
-  ; mutable closed : bool
+  (* [close] used to test this and then set it. Two closers could both see
+     [false] and both call [Sqlite3.db_close] on the same handle. As an
+     [Atomic] the test and the set are one step, so exactly one caller
+     reaches the close. *)
+  ; closed : bool Atomic.t
   }
 
 type error =
@@ -209,7 +213,9 @@ let single_text db ~operation sql =
 ;;
 
 let ensure_open store =
-  if store.closed then Error (Store_unavailable "database handle is closed") else Ok ()
+  if Atomic.get store.closed
+  then Error (Store_unavailable "database handle is closed")
+  else Ok ()
 ;;
 
 let rollback db = ignore (Sqlite3.exec db "ROLLBACK" : Sqlite3.Rc.t)
@@ -558,22 +564,21 @@ let open_or_create ~path =
               | Error error -> rollback db; fail error
               | Ok () ->
                 (match validate_schema db with
-                 | Ok () -> Ok { db; path; closed = false }
+                 | Ok () -> Ok { db; path; closed = Atomic.make false }
                  | Error error -> fail error))))
      | Ok _ ->
        (match validate_schema db with
-        | Ok () -> Ok { db; path; closed = false }
+        | Ok () -> Ok { db; path; closed = Atomic.make false }
         | Error error -> fail error))
 ;;
 
 let close store =
-  if store.closed
-  then Ok ()
-  else (
-    store.closed <- true;
+  if Atomic.compare_and_set store.closed false true
+  then
     if Sqlite3.db_close store.db
     then Ok ()
-    else Error (Store_unavailable "failed to close SQLite database"))
+    else Error (Store_unavailable "failed to close SQLite database")
+  else Ok ()
 ;;
 
 let next_sequence db =

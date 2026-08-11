@@ -560,7 +560,10 @@ let test_codex_runtime_cannot_enter_agent_core_runner () =
       Alcotest.(check bool)
         "typed ownership diagnostic"
           true
-          (string_contains detail "not the AGENT_CORE agent_core"))
+          (* Matches provider_config_of_runtime's Codex_app_server arm verbatim
+             minus the runtime id, so the assertion pins both the ownership
+             claim and which owner is denied. *)
+          (string_contains detail "is owned by an official client, not Agent Core"))
 ;;
 
 let test_codex_runtime_has_no_agent_core_thinking_seed () =

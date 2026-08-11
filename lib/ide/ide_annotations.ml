@@ -37,8 +37,13 @@ let ensure_store ~base_dir ?(partition = Ide_paths.Legacy_default) () =
 ;;
 
 let now_ms () =
-  let ns = Mtime.to_uint64_ns (Mtime_clock.now ()) in
-  Int64.div ns 1_000_000L
+  (* NDT-OK: annotation timestamps are operator-facing metadata and the CAS
+     version token; they make no deterministic decisions. This must be wall
+     clock, matching Ide_bridge.now_ms — the Mtime_clock (monotonic,
+     boot-relative) that sat here stamped records with 1970-era values that
+     were meaningless to operators and not comparable across restarts
+     (#28148). *)
+  Int64.of_float (Unix.gettimeofday () *. 1000.0)
 ;;
 
 let next_compaction_id () =

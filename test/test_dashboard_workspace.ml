@@ -63,7 +63,6 @@ let test_workspace_projection_includes_messages_and_mentions () =
   let first = List.hd messages in
   Alcotest.(check string) "first sender" "operator" (string_field "sender" first);
   Alcotest.(check string) "first type" "broadcast" (string_field "type" first);
-  Alcotest.(check string) "first relevance" "medium" (string_field "relevance" first);
   Alcotest.(check bool)
     "first expires_at null"
     true

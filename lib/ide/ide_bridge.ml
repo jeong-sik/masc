@@ -116,7 +116,12 @@ let maybe_rotate ~path ~max_segment_bytes =
     | Some size when size >= max_segment_bytes ->
       let next = 1 + List.fold_left max 0 (archive_indices ~path) in
       ignore
-        (Fs_compat.rename_if_exists ~src:path ~dst:(archive_path ~path next) : bool)
+        (Fs_compat.rename_if_exists ~src:path ~dst:(archive_path ~path next) : bool);
+      (* The rename moves the inode out from under any cached O_APPEND channel
+         for [path]. Without this the next append writes into the archive we
+         just created and the live segment is never recreated, so readers that
+         tail the live path see the stream stop. *)
+      Fs_compat.invalidate_cached_writer path
     | Some _ | None -> ())
 ;;
 

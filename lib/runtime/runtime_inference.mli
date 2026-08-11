@@ -5,6 +5,10 @@ val resolve_reasoning_effort :
     declared reasoning control. *)
 
 val resolve_turn_timeout_s : runtime_id:string -> float option
+
+val resolve_max_prompt_bytes : runtime_id:string -> int option
+(** Per-model ceiling, in bytes, on the history an official-client start turn
+    seeds its conversation with. [None] applies no ceiling. *)
 (** The per-model [turn-timeout-s] declared for [runtime_id], or [None] when
     the model leaves it unset. Callers keep their existing bound on [None]:
     this overrides a timeout, it does not supply one. *)

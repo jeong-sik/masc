@@ -7,6 +7,7 @@ import {
   interruptKeeperTurn as apiInterruptKeeperTurn,
   streamKeeperMessage,
 } from './api/keeper'
+import type { KeeperStreamSurfaceContext } from './api/keeper'
 import { fetchKeeperToolCalls } from './api/dashboard'
 import {
   markToolCallOutputsHydrated,
@@ -97,6 +98,9 @@ interface KeeperInterjectCommand {
   readonly kind: KeeperInterjectActionKind
   readonly keeperName: string
   readonly message?: string
+  /** Wire shape of `surface_context` on /api/v1/keepers/chat/stream; rendered
+   *  into the keeper prompt by keeper_turn.surface_context_fields. */
+  readonly surfaceContext?: KeeperStreamSurfaceContext
 }
 
 async function refreshDashboardState(): Promise<void> {
@@ -227,7 +231,9 @@ export async function dispatchKeeperInterjectAction(command: KeeperInterjectComm
   if (command.kind === 'send') {
     const message = command.message?.trim() ?? ''
     if (!message) throw new Error('INTERJECT send requires a message.')
-    await sendKeeperThreadMessage(keeperName, message)
+    await sendKeeperThreadMessage(keeperName, message, {
+      surfaceContext: command.surfaceContext,
+    })
     return
   }
 
@@ -889,6 +895,7 @@ export async function sendKeeperThreadMessage(
     clientActionIds?: readonly string[]
     blocks?: ChatBlock[]
     userBlocks?: KeeperUserInputBlock[]
+    surfaceContext?: KeeperStreamSurfaceContext
   } = {},
 ): Promise<void> {
   const keeperName = name.trim()
@@ -957,6 +964,7 @@ export async function sendKeeperThreadMessage(
       signal: controller.signal,
       attachments,
       userBlocks,
+      surfaceContext: options.surfaceContext,
       onEvent: event => {
         markKeeperStreamSignal(keeperName)
         if (

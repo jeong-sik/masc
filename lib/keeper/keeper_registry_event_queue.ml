@@ -87,6 +87,43 @@ type source_ack_result =
       ; detail : string
       }
 
+(* A source has not settled while its exact reaction evidence is still waiting
+   in the transition outbox: the next terminal ACK is deliberately rejected in
+   that state. Complete the existing handoff on the owner-facing path instead
+   of making the next Keeper turn wait for the maintenance sweep. *)
+let project_source_ack_receipt ~base_path ~keeper_name receipt success =
+  match
+    Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+      ~base_path
+      ~keeper_name
+      ~expected_transition_id:
+        receipt.Keeper_event_queue_state.transition_id
+  with
+  | Ok () -> Ok (success receipt)
+  | Error detail ->
+    Ok
+      (Ack_committed_followup_failed
+         { receipt; stage = `Projection; detail })
+;;
+
+let project_source_ack_result ~base_path ~keeper_name result =
+  match result with
+  | Error _ as error -> error
+  | Ok (Transition_applied receipt) ->
+    project_source_ack_receipt
+      ~base_path
+      ~keeper_name
+      receipt
+      (fun receipt -> Acked receipt)
+  | Ok (Transition_already_applied receipt) ->
+    project_source_ack_receipt
+      ~base_path
+      ~keeper_name
+      receipt
+      (fun receipt -> Already_acked receipt)
+  | Ok (Transition_committed_followup_failed { receipt; stage; detail }) ->
+    Ok (Ack_committed_followup_failed { receipt; stage; detail })
+;;
 
 let enqueue_if_missing queue stimulus =
   if Keeper_event_queue.contains queue stimulus
@@ -730,11 +767,7 @@ let ack_pending_source_terminal_result
     ~source_terminal
     ~after_commit:(publish_pending ~base_path name)
     ()
-  |> Result.map (function
-    | Transition_applied receipt -> Acked receipt
-    | Transition_already_applied receipt -> Already_acked receipt
-    | Transition_committed_followup_failed { receipt; stage; detail } ->
-      Ack_committed_followup_failed { receipt; stage; detail })
+  |> project_source_ack_result ~base_path ~keeper_name:name
 ;;
 
 let terminalize_pending_turn_attempt_result
@@ -754,11 +787,7 @@ let terminalize_pending_turn_attempt_result
     ~detail
     ~after_commit:(publish_pending ~base_path name)
     ()
-  |> Result.map (function
-    | Transition_applied receipt -> Acked receipt
-    | Transition_already_applied receipt -> Already_acked receipt
-    | Transition_committed_followup_failed { receipt; stage; detail } ->
-      Ack_committed_followup_failed { receipt; stage; detail })
+  |> project_source_ack_result ~base_path ~keeper_name:name
 ;;
 
 let terminalize_pending_turn_completed_result
@@ -776,9 +805,5 @@ let terminalize_pending_turn_completed_result
     ~selection
     ~after_commit:(publish_pending ~base_path name)
     ()
-  |> Result.map (function
-    | Transition_applied receipt -> Acked receipt
-    | Transition_already_applied receipt -> Already_acked receipt
-    | Transition_committed_followup_failed { receipt; stage; detail } ->
-      Ack_committed_followup_failed { receipt; stage; detail })
+  |> project_source_ack_result ~base_path ~keeper_name:name
 ;;

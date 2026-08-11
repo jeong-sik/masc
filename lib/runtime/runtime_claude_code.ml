@@ -554,6 +554,7 @@ let invoke_state_callback ~stage callback =
     | Error detail -> protocol_error stage detail
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Time.Timeout as exn -> raise exn
   | exn -> protocol_error stage (Printexc.to_string exn)
 ;;
 
@@ -959,6 +960,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
       Ok ()
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
     | exn ->
       Error
         (Turn_transport_interrupted
@@ -1040,6 +1042,9 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     Fun.protect
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->
+        let with_timeout callback =
+          Eio.Time.with_timeout_exn clock config.timeout_s callback
+        in
         run_protocol
           { send; receive }
           ~dynamic_tools
@@ -1047,9 +1052,12 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           ~session_mode
           ~session_id
           ~prompt
-          ~on_session_ready
-          ~on_turn_starting
-          ~on_turn_started
+          ~on_session_ready:(fun ~session_id ->
+            with_timeout (fun () -> on_session_ready ~session_id))
+          ~on_turn_starting:(fun ~session_id ->
+            with_timeout (fun () -> on_turn_starting ~session_id))
+          ~on_turn_started:(fun ~session_id ~turn_id ->
+            with_timeout (fun () -> on_turn_started ~session_id ~turn_id))
           ~on_stream_event))
 ;;
 

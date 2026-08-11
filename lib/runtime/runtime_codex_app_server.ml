@@ -742,6 +742,7 @@ let invoke_state_callback ~stage callback =
     | Error detail -> protocol_error stage detail
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Time.Timeout as exn -> raise exn
   | exn -> protocol_error stage (Printexc.to_string exn)
 ;;
 
@@ -1006,6 +1007,9 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
     ~reasoning_effort ~thread_mode ~history ~prompt ~on_thread_ready
     ~on_turn_starting ~on_turn_started ~on_stream_event =
   with_spawned_client ~mgr ~clock ~cwd config (fun io ->
+    let with_timeout callback =
+      Eio.Time.with_timeout_exn clock config.timeout_s callback
+    in
     run_protocol
       io
       config
@@ -1015,9 +1019,12 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
       ~thread_mode
       ~history
       ~prompt
-      ~on_thread_ready
-      ~on_turn_starting
-      ~on_turn_started
+      ~on_thread_ready:(fun ~thread_id ->
+        with_timeout (fun () -> on_thread_ready ~thread_id))
+      ~on_turn_starting:(fun ~thread_id ->
+        with_timeout (fun () -> on_turn_starting ~thread_id))
+      ~on_turn_started:(fun ~thread_id ~turn_id ->
+        with_timeout (fun () -> on_turn_started ~thread_id ~turn_id))
       ~on_stream_event)
 ;;
 

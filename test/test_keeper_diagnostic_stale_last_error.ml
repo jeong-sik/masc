@@ -80,6 +80,13 @@ let external_live_agent_status ~last_seen =
     ]
 ;;
 
+let agent_status_with_age last_seen_ago_s =
+  `Assoc
+    [ ("status", `String "active")
+    ; ("last_seen_ago_s", `Float last_seen_ago_s)
+    ]
+;;
+
 let last_error_of_diagnostic ~meta ~agent_status ~keepalive_running =
   Keeper_status_runtime.keeper_diagnostic_json
     ~meta
@@ -150,6 +157,43 @@ let test_external_live_signal_hides_stale_error () =
     (last_error_of_diagnostic ~meta ~agent_status ~keepalive_running:true)
 ;;
 
+(* A long snapshot cadence must not widen the agent-registry liveness
+   threshold. [last_seen_ago_s] is an agent signal, not a snapshot timestamp:
+   with a 30-second keepalive and one-hour snapshot cadence, 180 seconds old
+   is already stale. *)
+let test_snapshot_cadence_does_not_mask_stale_agent_signal () =
+  Runtime_settings.ensure_init ();
+  Runtime_params.clear Runtime_settings.keeper_keepalive_interval_sec;
+  Runtime_params.clear Runtime_settings.keeper_snapshot_sec;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_params.clear Runtime_settings.keeper_keepalive_interval_sec;
+      Runtime_params.clear Runtime_settings.keeper_snapshot_sec)
+    (fun () ->
+      (match
+         Runtime_params.set Runtime_settings.keeper_keepalive_interval_sec 30
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.failf "set keepalive interval failed: %s" error);
+      (match Runtime_params.set Runtime_settings.keeper_snapshot_sec 3600 with
+       | Ok () -> ()
+       | Error error -> Alcotest.failf "set snapshot interval failed: %s" error);
+      let meta =
+        meta_with_persisted_error
+          ~proactive_ts:proactive_error_ts
+          ~last_turn_ts:later_turn_ts
+      in
+      let diagnostic =
+        diagnostic_of
+          ~meta
+          ~agent_status:(agent_status_with_age 180.0)
+          ~keepalive_running:true
+      in
+      Alcotest.(check (option string))
+        "180s old agent signal is stale despite one-hour snapshots"
+        (Some "stale")
+        (string_member "health_state" diagnostic))
+
 (* Keepers run as supervised fibers and do not normally publish a separate
    [.masc/agents/<agent>.json] record. A live keepalive loop is therefore the
    stronger liveness signal; missing agent-registry state must not make the
@@ -193,6 +237,10 @@ let () =
             "external live signal hides stale error"
             `Quick
             test_external_live_signal_hides_stale_error
+        ; Alcotest.test_case
+            "snapshot cadence does not mask stale signal"
+            `Quick
+            test_snapshot_cadence_does_not_mask_stale_agent_signal
         ; Alcotest.test_case
             "keepalive without agent record is healthy"
             `Quick

@@ -132,6 +132,8 @@ let test_record_writes_audit_ring_and_telemetry () =
       | Audit_log.Failure reason ->
           check string "failure reason" report.message reason
       | Audit_log.Success -> fail "expected failure outcome");
+      check string "audit timeout cause code" "tool_host_timeout"
+        Yojson.Safe.Util.(entry.details |> member "cause_code" |> to_string);
       let latest =
         match
           Log.Ring.recent ~limit:20 ()
@@ -174,6 +176,45 @@ let test_record_writes_audit_ring_and_telemetry () =
           telemetry_events
       in
       check bool "telemetry error recorded" true has_client_error)
+
+let test_record_persists_transport_cause () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Workspace.default_config base_dir in
+      let report =
+        {
+          Dashboard_tool_host_events.agent_name = "codex";
+          client_name = "codex";
+          tool_name = "masc_keeper_msg";
+          transport = "mcp_http";
+          phase = Some "tools/call";
+          cause = Failure_envelope.Tool_host_transport_unavailable;
+          message = "timed out after connection refused";
+          request_id = Some "transport-99";
+          session_id = None;
+          trace_id = None;
+          timeout_ms = Some 120000;
+        }
+      in
+      Dashboard_tool_host_events.record ~fs:() config report;
+      let entry =
+        Audit_log.read_entries ~n:20 config
+        |> List.find_opt (fun (entry : Audit_log.audit_entry) ->
+               match entry.action with
+               | Audit_log.Custom "client_tool_host_failure" -> true
+               | _ -> false)
+      in
+      match entry with
+      | None -> fail "expected transport client_tool_host_failure audit entry"
+      | Some entry ->
+          check string "audit transport cause code" "tool_host_transport_unavailable"
+            Yojson.Safe.Util.(
+              entry.details |> member "cause_code" |> to_string))
+;;
 
 let test_generic_failure_envelope_is_retryable_without_operator_action () =
   let details =
@@ -265,6 +306,8 @@ let () =
             test_report_rejects_missing_or_unknown_cause;
           test_case "record writes audit ring and telemetry" `Quick
             test_record_writes_audit_ring_and_telemetry;
+          test_case "record persists transport cause" `Quick
+            test_record_persists_transport_cause;
           test_case "generic failure envelope stays retryable" `Quick
             test_generic_failure_envelope_is_retryable_without_operator_action;
           test_case "message does not override typed cause" `Quick

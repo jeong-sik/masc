@@ -126,9 +126,10 @@ let record ?fs config (report : report) =
     (ring_message report);
   Audit_log.log_client_tool_host_failure config ~agent_id:report.agent_name
     ~client_name:report.client_name ~tool_name:report.tool_name
-    ~transport:report.transport ~message:report.message ?phase:report.phase
-    ?request_id:report.request_id ?session_id:report.session_id
-    ?trace_id:report.trace_id ?timeout_ms:report.timeout_ms ();
+    ~transport:report.transport ~cause:report.cause ~message:report.message
+    ?phase:report.phase ?request_id:report.request_id
+    ?session_id:report.session_id ?trace_id:report.trace_id
+    ?timeout_ms:report.timeout_ms ();
   if Option.is_some fs then
     Telemetry_eio.track_error ?fs config ~code:"client_tool_host_failure"
       ~message:report.message

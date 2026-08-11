@@ -189,6 +189,7 @@ val log_client_tool_host_failure :
   client_name:string ->
   tool_name:string ->
   transport:string ->
+  cause:Failure_envelope.tool_host_cause ->
   message:string ->
   ?phase:string ->
   ?request_id:string ->

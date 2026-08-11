@@ -403,6 +403,39 @@ let edit_message_with_blocks ?clock
      | Yojson.Json_error message ->
        Error (Other ("Slack chat.update JSON parse error: " ^ message)))
 
+let delete_message ?clock
+    ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~token ~channel ~message_id () =
+  let body =
+    `Assoc [ "channel", `String channel; "ts", `String message_id ]
+    |> Yojson.Safe.to_string
+  in
+  match
+    Masc_http_client.post_sync ?clock ~timeout_sec
+      ~url:"https://slack.com/api/chat.delete"
+      ~headers:
+        [ "Authorization", "Bearer " ^ token
+        ; "Content-Type", "application/json"
+        ]
+      ~body ()
+  with
+  | Error error -> Error (Network error)
+  | Ok (code, response_body) when code < 200 || code >= 300 ->
+    Error (Http_status { code; body = response_body })
+  | Ok (_, response_body) ->
+    (try
+       let json = Yojson.Safe.from_string response_body in
+       match Json_util.get_bool json "ok" with
+       | Some true -> Ok ()
+       | Some false ->
+         (match Json_util.get_string json "error" with
+          | Some error -> Error (Slack_api { error })
+          | None -> Error (Other "Slack chat.delete returned ok=false"))
+       | None -> Error (Other "Slack chat.delete response is missing ok")
+     with
+     | Yojson.Json_error message ->
+       Error (Other ("Slack chat.delete JSON parse error: " ^ message)))
+
 (* ── Adapter loop ────────────────────────────────────────────────── *)
 
 let add_block acc block = block :: acc
@@ -412,8 +445,10 @@ let adapter_loop_with_transport
     ?post_stream
     ?edit_stream
     ?edit_blocks
+    ?delete_stream
     (* NDT-OK: wall time only paces external Slack edits; tests inject [now]. *)
     ?(now = Unix.gettimeofday)
+    ?(sleep = fun _ -> ())
     ~(send_plain : content:string -> (unit, error) result)
     ~(send_blocks :
        content:string -> blocks:Yojson.Safe.t list -> (unit, error) result)
@@ -421,6 +456,7 @@ let adapter_loop_with_transport
     ?base_url
     ?(on_send_result = fun _ -> ()) () =
   let external_effect_completed = ref false in
+  let external_effect_cleanup_result = ref (Ok ()) in
   let activity_error_logged = ref false in
   let last_activity_status = ref None in
   let update_activity status =
@@ -441,10 +477,15 @@ let adapter_loop_with_transport
   in
   let clear_activity () = update_activity "" in
   let streaming_transport =
-    match post_stream, edit_stream, edit_blocks with
-    | Some post, Some edit, Some edit_final -> Some (post, edit, edit_final)
-    | None, None, None -> None
+    match post_stream, edit_stream, edit_blocks, delete_stream with
+    | Some post, Some edit, Some edit_final, Some delete ->
+      Some (post, edit, edit_final, delete)
+    | None, None, None, None -> None
     | _ -> invalid_arg "Slack streaming transport must be supplied as one closed set"
+  in
+  let pace_edit last_edit_time =
+    let remaining = min_edit_interval_s -. (now () -. last_edit_time) in
+    if remaining > 0.0 then sleep remaining
   in
   let rec loop ~acc_text ~acc_blocks ~run_id_opt ~message_id
       ~last_edit_time ~last_edited_text =
@@ -463,7 +504,7 @@ let adapter_loop_with_transport
          | None, _ -> continue ~acc_text ()
          | Some _, None when patch_content = "" ->
            continue ~acc_text ()
-         | Some (post, _, _), None ->
+         | Some (post, _, _, _), None ->
            (match post ~content:patch_content with
             | Ok created_id ->
               continue ~acc_text ~message_id:(Some created_id)
@@ -473,7 +514,7 @@ let adapter_loop_with_transport
                 "keeper_chat_slack: streaming POST failed: %s"
                 (Format.asprintf "%a" pp_error error);
               continue ~acc_text ())
-         | Some (_, edit, _), Some message_id ->
+         | Some (_, edit, _, _), Some message_id ->
            let elapsed = now () -. last_edit_time in
            if patch_content = last_edited_text || elapsed < min_edit_interval_s
            then continue ~acc_text ()
@@ -491,8 +532,9 @@ let adapter_loop_with_transport
     | Text_message_end ->
         let final_content = final_stream_content acc_text in
         (match streaming_transport, message_id with
-         | Some (_, edit, _), Some message_id
+         | Some (_, edit, _, _), Some message_id
            when final_content <> last_edited_text ->
+           pace_edit last_edit_time;
            (match edit ~message_id ~content:final_content with
             | Ok () ->
               continue ~last_edit_time:(now ())
@@ -506,7 +548,7 @@ let adapter_loop_with_transport
          | _ -> continue ())
     | Run_finished { run_id = _ } ->
         if !external_effect_completed
-        then on_send_result (Ok ())
+        then on_send_result !external_effect_cleanup_result
         else begin
           let blocks =
             final_message_blocks ~content:acc_text
@@ -516,8 +558,14 @@ let adapter_loop_with_transport
           then
             let result =
               match streaming_transport, message_id with
-              | Some (_, _, edit_final), Some message_id ->
-                edit_final ~message_id ~content:acc_text ~blocks
+              | Some (_, _, edit_final, _), Some message_id ->
+                let final_content = final_stream_content acc_text in
+                if final_content = last_edited_text && blocks = []
+                then Ok ()
+                else begin
+                  pace_edit last_edit_time;
+                  edit_final ~message_id ~content:acc_text ~blocks
+                end
               | _ -> send_blocks ~content:acc_text ~blocks
             in
             on_send_result result
@@ -529,12 +577,17 @@ let adapter_loop_with_transport
         ()
     | External_effect_completed ->
         external_effect_completed := true;
+        (match streaming_transport, message_id with
+         | Some (_, _, _, delete), Some message_id ->
+           external_effect_cleanup_result := delete ~message_id
+         | _ -> ());
         continue ()
     | Event_error { message } ->
         let content = "Keeper error: " ^ message in
         let result =
           match streaming_transport, message_id with
-          | Some (_, edit, _), Some message_id ->
+          | Some (_, edit, _, _), Some message_id ->
+            pace_edit last_edit_time;
             edit ~message_id ~content:(final_stream_content content)
           | _ -> send_plain ~content
         in
@@ -625,6 +678,9 @@ let adapter_loop ~clock ~token ~channel ?thread_ts ~events ?base_url
     ~edit_blocks:(fun ~message_id ~content ~blocks ->
       edit_message_with_blocks ~clock ~token ~channel ~message_id ~content
         ~blocks ())
+    ~delete_stream:(fun ~message_id ->
+      delete_message ~clock ~token ~channel ~message_id ())
+    ~sleep:(Eio.Time.sleep clock)
     ~send_plain:(fun ~content ->
       send_message ~clock ?thread_ts ~token ~channel ~content ())
     ~send_blocks:(fun ~content ~blocks ->

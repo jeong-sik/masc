@@ -575,7 +575,7 @@ let test_keeper_streams_text_and_tool_events () =
          [ Emit_and_read mcp_initialize
          ; Emit mcp_initialized_notification
          ; Emit_and_read mcp_list
-         ; Emit (assistant ~turn_id:"turn-stream-1" "MASC_CLAUDE_STREAM")
+         ; Emit (assistant ~turn_id:"turn-stream-1" "MASC_")
          ; Emit_and_read mcp_call
          ; Emit (result ~turn_id:"turn-stream-1" "MASC_CLAUDE_STREAM")
          ]
@@ -597,7 +597,7 @@ let test_keeper_streams_text_and_tool_events () =
                    ; model = "claude-fixture"
                    ; usage = None
                    }
-               ; ContentBlockDelta { index = 0; delta = TextDelta "MASC_CLAUDE_STREAM" }
+               ; ContentBlockDelta { index = 0; delta = TextDelta "MASC_" }
                ; ContentBlockStart
                    { index = 1
                    ; content_type = "tool_use"
@@ -609,6 +609,8 @@ let test_keeper_streams_text_and_tool_events () =
                    ; delta = InputJsonSnapshot arguments
                    }
                ; ContentBlockStop { index = 1 }
+               ; ContentBlockDelta
+                   { index = 0; delta = TextDelta "CLAUDE_STREAM" }
                ; MessageStop
                ] ->
                check string

@@ -227,6 +227,28 @@ describe('applyKeeperStreamEvent tool calls', () => {
     ])
   })
 
+  it('keeps a ready tool delivered when the provider end arrives later', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-ready-first',
+      toolCallName: 'masc_status',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { tool_call_id: 'tc-ready-first' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_END',
+      toolCallId: 'tc-ready-first',
+    })
+
+    const finished = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-ready-first')
+    expect(finished?.delivery).toBe('delivered')
+    expect(finished?.streamState).toBeNull()
+  })
+
   it('replaces tool-call args when Agent Core emits argument snapshots', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {

@@ -64,11 +64,9 @@ let claude_stream_callback on_event =
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
     let streamed_text = Buffer.create 256 in
-    let turn_identity = ref None in
     Some
       (function
         | Runtime_claude_code.Turn_started { turn_id; model } ->
-          turn_identity := Some (turn_id, model);
           emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
         | Runtime_claude_code.Text_delta text ->
           Buffer.add_string streamed_text text;
@@ -101,19 +99,21 @@ let claude_stream_callback on_event =
                emit (Agent_core.Types.ContentBlockStop { index }))
             (Hashtbl.find_opt tool_indexes call_id)
         | Runtime_claude_code.Turn_finished { text } ->
-          emit Agent_core.Types.MessageStop;
-          if not (String.equal (Buffer.contents streamed_text) text)
-          then
-            Option.iter
-              (fun (turn_id, model) ->
-                 emit
-                   (Agent_core.Types.MessageStart
-                      { id = turn_id ^ "-terminal"
-                      ; model
-                      ; usage = None
-                      });
-                 emit Agent_core.Types.MessageStop)
-              !turn_identity)
+          let streamed = Buffer.contents streamed_text in
+          if String.starts_with ~prefix:streamed text
+          then begin
+            let suffix_length = String.length text - String.length streamed in
+            if suffix_length > 0
+            then
+              emit
+                (Agent_core.Types.ContentBlockDelta
+                   { index = 0
+                   ; delta =
+                       Agent_core.Types.TextDelta
+                         (String.sub text (String.length streamed) suffix_length)
+                   })
+          end;
+          emit Agent_core.Types.MessageStop
 ;;
 
 let retry_after_of_rate_limit = function

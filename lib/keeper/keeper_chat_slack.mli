@@ -143,7 +143,9 @@ module For_testing : sig
        content:string ->
        blocks:Yojson.Safe.t list ->
        (unit, error) result) ->
+    ?delete_stream:(message_id:string -> (unit, error) result) ->
     ?now:(unit -> float) ->
+    ?sleep:(float -> unit) ->
     send_plain:(content:string -> (unit, error) result) ->
     send_blocks:(content:string -> blocks:Yojson.Safe.t list -> (unit, error) result) ->
     ?set_activity_status:(status:string -> (unit, error) result) ->
@@ -151,7 +153,8 @@ module For_testing : sig
     ?on_send_result:((unit, error) result -> unit) ->
     unit ->
     unit
-  (** Test seam for the outbound transport. [post_stream], [edit_stream], and
-      [edit_blocks] are supplied together to exercise incremental delivery.
+  (** Test seam for the outbound transport. [post_stream], [edit_stream],
+      [edit_blocks], and [delete_stream] are supplied together to exercise
+      incremental delivery. [now] and [sleep] make update pacing deterministic.
       Activity failures never settle terminal delivery. *)
 end

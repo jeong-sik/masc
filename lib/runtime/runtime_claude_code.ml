@@ -1077,8 +1077,9 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let send json =
-      Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
-      Eio.Flow.copy_string "\n" stdin_w
+      Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+        Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
+        Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
       try

@@ -1418,9 +1418,8 @@ let test_keeper_projects_codex_live_stream () =
             ; ContentBlockDelta
                 { index = 1; delta = InputJsonSnapshot arguments }
             ; ContentBlockStop { index = 1 }
-            ; MessageStop
-            ; MessageStart
-                { id = "turn-1-terminal"; model = "gpt-fixture"; usage = None }
+            ; ContentBlockDelta
+                { index = 0; delta = TextDelta "SUBSCRIPTION_OK" }
             ; MessageStop
             ] ->
             check string

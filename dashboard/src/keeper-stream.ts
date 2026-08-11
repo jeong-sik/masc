@@ -582,12 +582,15 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (toolCallId) {
-        updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
-          ...entry,
-          delivery: 'streaming',
-          streamState: 'streaming',
-          streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_END' }),
-        }))
+        updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => {
+          if (entry.delivery === 'delivered') return entry
+          return {
+            ...entry,
+            delivery: 'streaming',
+            streamState: 'streaming',
+            streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_END' }),
+          }
+        })
       }
       return null
     }

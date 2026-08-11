@@ -261,6 +261,47 @@ let test_next_shrink_rejects_larger_framed_retry () =
       capacity_bytes
 ;;
 
+let test_next_shrink_accounts_for_gate_replay_projection () =
+  (* Gate replay is a source projection: it appends a User evidence message
+     after the bounded history. The rejected request is therefore larger than
+     the pre-projection [windowed] list used by the old oracle. *)
+  let oldest = padded ~role:Types.User ~tag:"oldest|" 100 in
+  let newest = padded ~role:Types.Assistant ~tag:"newest|" 600 in
+  let replay_evidence = padded ~role:Types.User ~tag:"gate-replay|" 500 in
+  let pre_projection = [ oldest; newest ] in
+  let provider_bound = pre_projection @ [ replay_evidence ] in
+  let target_capacity_bytes = 700 in
+  let pre_projection_boundary =
+    Window.next_shrink_capacity_bytes
+      ~measure_message_bytes
+      ~target_capacity_bytes
+      pre_projection
+  in
+  let provider_bound_boundary =
+    Window.next_shrink_capacity_bytes
+      ~measure_message_bytes
+      ~target_capacity_bytes
+      provider_bound
+  in
+  Alcotest.(check (option int))
+    "pre-projection history has no safe framed retry"
+    None
+    pre_projection_boundary;
+  match provider_bound_boundary with
+  | None -> Alcotest.fail "provider-bound replay evidence must retain a safe retry"
+  | Some capacity_bytes ->
+    Alcotest.(check bool)
+      "retry is smaller than the provider-bound rejected request"
+      true
+      (capacity_bytes < total_bytes provider_bound);
+    let projected =
+      ok_exn
+        ~what:"provider-bound replay shrink"
+        (project ~capacity_bytes provider_bound)
+    in
+    fits_budget ~capacity_bytes ~reserved_bytes:0 projected
+;;
+
 let test_cut_is_quantized_when_a_quantized_cut_fits () =
   (* Cache stability (#26535): when some multiple of [k] fits, the drop count
      is that multiple, so the transmitted prefix only moves in whole
@@ -521,6 +562,10 @@ let () =
             "next shrink rejects larger framed retry"
             `Quick
             test_next_shrink_rejects_larger_framed_retry
+        ; Alcotest.test_case
+            "next shrink accounts for Gate replay projection"
+            `Quick
+            test_next_shrink_accounts_for_gate_replay_projection
         ; Alcotest.test_case "cut is quantized when a quantized cut fits" `Quick
             test_cut_is_quantized_when_a_quantized_cut_fits
         ; Alcotest.test_case "cut point is stable while the budget holds" `Quick

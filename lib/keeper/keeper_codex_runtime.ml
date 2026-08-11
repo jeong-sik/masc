@@ -113,11 +113,17 @@ let model_input_projection_for_capacity
             (Runtime_model_input_tail_window.budget_error_to_string error))
   in
   let* windowed = windowed in
-  (* Compute the next structural retry boundary from the current bounded
-     history before source projections append synthetic evidence (for example
-     Gate replay). Using the current window also means the oracle reaches
-     [None] at the newest-atom floor instead of authorizing an identical
-     provider retry from the original unwindowed history. *)
+  let* projected =
+    match source_projection with
+    | None -> Ok windowed
+    | Some project -> project windowed
+  in
+  (* Compute the next structural retry boundary from the exact provider-bound
+     request. Source projections may append synthetic evidence (for example
+     Gate replay), and that evidence is part of the request the provider
+     rejected. Measuring [projected] keeps the strict comparison in
+     [next_shrink_capacity_bytes] aligned with that rejected request instead
+     of authorizing an identical retry from the pre-projection history. *)
   let () =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
       let full_bytes =
@@ -125,7 +131,7 @@ let model_input_projection_for_capacity
           (fun total message ->
              total + measure_model_input_message_bytes message)
           0
-          windowed
+          projected
       in
       let target_capacity_bytes =
         if capacity_bytes = unbounded_model_input_capacity_bytes
@@ -140,12 +146,7 @@ let model_input_projection_for_capacity
         Runtime_model_input_tail_window.next_shrink_capacity_bytes
           ~measure_message_bytes:measure_model_input_message_bytes
           ~target_capacity_bytes
-          windowed)
-  in
-  let* projected =
-    match source_projection with
-    | None -> Ok windowed
-    | Some project -> project windowed
+          projected)
   in
   Ok projected
 ;;

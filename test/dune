@@ -1740,6 +1740,8 @@
 
 (include stanzas/test_gate_protocol.inc)
 
+(include stanzas/test_gh_auth_status.inc)
+
 (include stanzas/test_git_fetch_retry_script.inc)
 
 (include stanzas/test_goal_phase_all.inc)

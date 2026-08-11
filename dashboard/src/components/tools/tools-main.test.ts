@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomation } from '../../api'
+import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomationProjection } from '../../api'
 
 type MockToolsResponse = {
   generated_at?: string
@@ -20,11 +20,11 @@ const mocks = vi.hoisted(() => ({
   toolsData: { value: null as null | MockToolsResponse },
   toolsLoading: { value: false },
   toolsError: { value: null as string | null },
-  scheduledAutomation: { value: null as null | DashboardScheduledAutomation },
+  scheduledAutomationProjection: { value: null as null | DashboardScheduledAutomationProjection },
 }))
 
 vi.mock('../schedule/schedule-state', () => ({
-  scheduledAutomation: mocks.scheduledAutomation,
+  scheduledAutomationProjection: mocks.scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh: () => () => {},
 }))
 
@@ -112,6 +112,7 @@ describe('Tools', () => {
     mocks.toolsData.value = null
     mocks.toolsLoading.value = false
     mocks.toolsError.value = null
+    mocks.scheduledAutomationProjection.value = null
   })
 
   afterEach(() => {
@@ -143,48 +144,55 @@ describe('Tools', () => {
   })
 
   it('renders scheduled automation FSM projection', async () => {
-    mocks.scheduledAutomation.value = {
-      schema: 'masc.dashboard.scheduled_automation.v1',
-      source: 'schedule_store',
-      generated_at: '2026-06-13T00:00:00Z',
-      request_count: 1,
-      request_limit: 20,
-      truncated: false,
-      counts: { due: 1 },
-      payload_support: {
-        supported_kinds: ['masc.board_post'],
-        unsupported_request_count: 1,
-        unsupported_kinds: [{ kind: 'test.reminder', count: 1 }],
-        unknown_request_count: 0,
-      },
-      fsm: {
-        state: 'due',
-        active_count: 1,
-        terminal_count: 0,
-        next_due_at: '2026-06-13T01:00:00Z',
-      },
-      requests: [
-        {
-          schedule_id: 'sched-1',
-          status: 'due',
-          source: 'operator_request',
-          requested_by: { id: 'operator', kind: 'human_operator', display_name: null },
-          scheduled_by: { id: 'scheduler-agent', kind: 'automated_actor', display_name: null },
-          recurrence: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Seoul' },
-          recurrence_kind: 'cron',
-          payload_kind: 'test.reminder',
-          payload_support: 'unsupported',
-          requested_at_iso: '2026-06-13T00:00:00Z',
-          due_at_iso: '2026-06-13T01:00:00Z',
-          expires_at_iso: '2026-06-13T02:00:00Z',
-          last_wake: {
-            schedule_id: 'sched-1',
-            started_at_iso: '2026-06-13T00:30:00Z',
-            finished_at_iso: '2026-06-13T00:30:01Z',
-            status: 'succeeded',
-          },
+    mocks.scheduledAutomationProjection.value = {
+      state: 'available',
+      page: { visibleCount: 1, totalCount: 1, limit: 20, truncated: false },
+      data: {
+        schema: 'masc.dashboard.scheduled_automation.v1',
+        source: 'schedule_store',
+        generated_at: '2026-06-13T00:00:00Z',
+        status: 'ok',
+        schedule_store_known: true,
+        schedule_store_read_error: null,
+        request_count: 1,
+        request_limit: 20,
+        truncated: false,
+        counts: { due: 1 },
+        payload_support: {
+          supported_kinds: ['masc.board_post'],
+          unsupported_request_count: 1,
+          unsupported_kinds: [{ kind: 'test.reminder', count: 1 }],
+          unknown_request_count: 0,
         },
-      ],
+        fsm: {
+          state: 'due',
+          active_count: 1,
+          terminal_count: 0,
+          next_due_at: '2026-06-13T01:00:00Z',
+        },
+        requests: [
+          {
+            schedule_id: 'sched-1',
+            status: 'due',
+            source: 'operator_request',
+            requested_by: { id: 'operator', kind: 'human_operator', display_name: null },
+            scheduled_by: { id: 'scheduler-agent', kind: 'automated_actor', display_name: null },
+            recurrence: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Seoul' },
+            recurrence_kind: 'cron',
+            payload_kind: 'test.reminder',
+            payload_support: 'unsupported',
+            requested_at_iso: '2026-06-13T00:00:00Z',
+            due_at_iso: '2026-06-13T01:00:00Z',
+            expires_at_iso: '2026-06-13T02:00:00Z',
+            last_wake: {
+              schedule_id: 'sched-1',
+              started_at_iso: '2026-06-13T00:30:00Z',
+              finished_at_iso: '2026-06-13T00:30:01Z',
+              status: 'succeeded',
+            },
+          },
+        ],
+      },
     }
     mocks.toolsData.value = {
       tool_inventory: { tools: [] },

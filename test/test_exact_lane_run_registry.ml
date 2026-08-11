@@ -138,7 +138,7 @@ let test_failed_durable_completion_is_explicitly_visible () =
     R.mark_completed
       registry
       ~run_id:"completion-not-published"
-      ~outcome:R.Succeeded
+      ~outcome:(R.Failed { code = "model_error"; detail = "typed failure detail" })
       ~elapsed_s:0.1
       ~output:(`String "must-not-publish")
   in
@@ -153,8 +153,14 @@ let test_failed_durable_completion_is_explicitly_visible () =
     (not (String.equal "running" (R.status_label run.status)));
   (match run.status with
    | R.Completion_persistence_failed
-       { intended_outcome = R.Succeeded; output = `String output; failure; _ } ->
+       { intended_outcome = R.Failed { code; detail }
+       ; output = `String output
+       ; failure
+       ; _
+       } ->
      check string "intended output remains observable" "must-not-publish" output;
+     check string "intended failure code remains observable" "model_error" code;
+     check string "intended failure detail remains observable" "typed failure detail" detail;
      check bool "persistence failure remains explicit" true
        (String.trim failure.detail <> "")
    | _ -> fail "expected explicit completion persistence failure");
@@ -163,9 +169,74 @@ let test_failed_durable_completion_is_explicitly_visible () =
      check bool "serialized persistence error" true
        (List.mem_assoc "persistence_error" fields);
      check bool "serialized persistence state" true
-       (List.mem_assoc "persistence_state" fields)
+       (List.mem_assoc "persistence_state" fields);
+     check (option string) "serialized intended failure code" (Some "model_error")
+       (List.assoc_opt "intended_code" fields
+        |> Option.bind (function `String value -> Some value | _ -> None));
+     check (option string) "serialized intended failure detail" (Some "typed failure detail")
+       (List.assoc_opt "intended_detail" fields
+        |> Option.bind (function `String value -> Some value | _ -> None))
    | _ -> fail "run serializer must emit an object");
   Unix.rmdir path
+;;
+
+let test_observation_reads_do_not_wait_for_durable_writer () =
+  let path = Filename.temp_file "exact-lane-read-projection-" ".jsonl" in
+  let registry = R.create ~path () in
+  let ready_read, ready_write = Unix.pipe ~cloexec:true () in
+  match Unix.fork () with
+  | 0 ->
+    Unix.close ready_read;
+    (try
+       let fd = Unix.openfile path [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0 in
+       Unix.lockf fd Unix.F_LOCK 0;
+       ignore (Unix.write_substring ready_write "x" 0 1 : int);
+       Unix.sleepf 0.5;
+       Unix.close fd;
+       Unix._exit 0
+     with
+     | _ -> Unix._exit 2)
+  | child ->
+    Unix.close ready_write;
+    let ready = Bytes.create 1 in
+    ignore (Unix.read ready_read ready 0 1 : int);
+    Unix.close ready_read;
+    Fun.protect
+      ~finally:(fun () ->
+        (match Unix.waitpid [] child with
+         | _, Unix.WEXITED 0 -> ()
+         | _, status ->
+           failf
+             "durable-lock child failed: %s"
+             (match status with
+              | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+              | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+              | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal));
+        remove_if_exists path;
+        remove_if_exists (Fs_compat.private_jsonl_lock_path path))
+      (fun () ->
+         Eio_main.run @@ fun env ->
+         let clock = Eio.Stdenv.clock env in
+         Eio.Switch.run @@ fun sw ->
+         let started, set_started = Eio.Promise.create () in
+         Eio.Fiber.fork ~sw (fun () ->
+           Eio.Promise.resolve set_started ();
+           R.register_running
+             registry
+             ~run_id:"writer-blocked-on-durable-lock"
+             ~lane:R.Compaction
+             ~subject_id:"trace"
+             ~actor:"keeper-a"
+             ~started_at:1.0
+             ~input:(R.Exact_input `Null));
+         Eio.Promise.await started;
+         Eio.Time.sleep clock 0.05;
+         let read_started_at = Eio.Time.now clock in
+         let visible = R.list_runs registry in
+         let read_elapsed_s = Eio.Time.now clock -. read_started_at in
+         check int "pre-commit projection remains unchanged" 0 (List.length visible);
+         check bool "Atomic projection read does not wait for durable writer" true
+           (read_elapsed_s < 0.2))
 ;;
 
 let () =
@@ -181,5 +252,7 @@ let () =
             test_failed_durable_registration_is_not_published_in_memory
         ; test_case "failed durable completion is explicitly visible" `Quick
             test_failed_durable_completion_is_explicitly_visible
+        ; test_case "observation reads do not wait for durable writer" `Quick
+            test_observation_reads_do_not_wait_for_durable_writer
         ] )
     ]

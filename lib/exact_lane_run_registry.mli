@@ -58,9 +58,7 @@ type completion_error =
 
 val completion_error_to_string : completion_error -> string
 
-(** Current-only durable registry. The v2 file starts at the closed
-    [run_input] contract; the removed open-JSON rows are not replayed or
-    migrated into this store. *)
+(** Current-only durable registry with the closed [run_input] contract. *)
 val storage_filename : string
 
 val create : ?path:string -> unit -> t

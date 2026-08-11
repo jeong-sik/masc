@@ -197,6 +197,7 @@ type failed_completion =
 type t =
   { store : Store.t
   ; failed_completions : (string * failed_completion) list Atomic.t
+  ; projection : run list Atomic.t
   ; observation_mutex : Stdlib.Mutex.t
   }
 
@@ -222,72 +223,15 @@ let notify_changed () =
       (Printexc.to_string exn)
 ;;
 
-let create ?path () =
-  { store = Store.create ?path ()
-  ; failed_completions = Atomic.make []
-  ; observation_mutex = Stdlib.Mutex.create ()
-  }
-;;
-
-let replay path =
-  { store = Store.replay path
-  ; failed_completions = Atomic.make []
-  ; observation_mutex = Stdlib.Mutex.create ()
-  }
-;;
-
 let remove_failed_completion t run_id =
   Atomic.set
     t.failed_completions
     (List.remove_assoc run_id (Atomic.get t.failed_completions))
 ;;
 
-let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
-  Stdlib.Mutex.protect t.observation_mutex (fun () ->
-    Store.register
-      t.store
-      ~id:run_id
-      ~started_at
-      ~registration:{ Payload.lane; subject_id; actor; input };
-    remove_failed_completion t run_id);
-  notify_changed ()
-;;
-
-let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
-  let completion = { Payload.outcome; elapsed_s; output } in
-  let result =
-    Stdlib.Mutex.protect t.observation_mutex (fun () ->
-      match Store.complete t.store ~id:run_id ~completion with
-      | `Completed ->
-        remove_failed_completion t run_id;
-        Ok ()
-      | `Unknown -> Error Unknown_run
-      | `Persistence_failed failure ->
-        let state =
-          match failure.state with
-          | Run_registry_core.Not_persisted -> Not_persisted
-          | Run_registry_core.Durability_unknown -> Durability_unknown
-        in
-        let failure = { detail = failure.detail; state } in
-        let failed = { intended_outcome = outcome; elapsed_s; output; failure } in
-        Atomic.set
-          t.failed_completions
-          ((run_id, failed) :: List.remove_assoc run_id (Atomic.get t.failed_completions));
-        Error (Persistence_failed failure))
-  in
-  match result with
-  | Ok () ->
-    notify_changed ();
-    Ok ()
-  | Error Unknown_run -> Error Unknown_run
-  | Error (Persistence_failed _ as error) ->
-    notify_changed ();
-    Error error
-;;
-
-let run_of_entry t (entry : Store.entry) =
+let run_of_entry failed_completions (entry : Store.entry) =
   let status =
-    match List.assoc_opt entry.id (Atomic.get t.failed_completions), entry.status with
+    match List.assoc_opt entry.id failed_completions, entry.status with
     | Some failed, Store.Running ->
       Completion_persistence_failed
         { intended_outcome = failed.intended_outcome
@@ -315,14 +259,78 @@ let run_of_entry t (entry : Store.entry) =
   }
 ;;
 
-let list_runs t =
-  Stdlib.Mutex.protect t.observation_mutex (fun () ->
-    List.map (run_of_entry t) (Store.list_entries t.store))
+let publish_projection t =
+  let failed_completions = Atomic.get t.failed_completions in
+  Store.list_entries t.store
+  |> List.map (run_of_entry failed_completions)
+  |> Atomic.set t.projection
 ;;
 
-let get t ~run_id =
+let make store =
+  let t =
+    { store
+    ; failed_completions = Atomic.make []
+    ; projection = Atomic.make []
+    ; observation_mutex = Stdlib.Mutex.create ()
+    }
+  in
+  publish_projection t;
+  t
+;;
+
+let create ?path () = make (Store.create ?path ())
+let replay path = make (Store.replay path)
+
+let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
   Stdlib.Mutex.protect t.observation_mutex (fun () ->
-    Option.map (run_of_entry t) (Store.get t.store ~id:run_id))
+    Store.register
+      t.store
+      ~id:run_id
+      ~started_at
+      ~registration:{ Payload.lane; subject_id; actor; input };
+    remove_failed_completion t run_id;
+    publish_projection t);
+  notify_changed ()
+;;
+
+let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
+  let completion = { Payload.outcome; elapsed_s; output } in
+  let result =
+    Stdlib.Mutex.protect t.observation_mutex (fun () ->
+      match Store.complete t.store ~id:run_id ~completion with
+      | `Completed ->
+        remove_failed_completion t run_id;
+        publish_projection t;
+        Ok ()
+      | `Unknown -> Error Unknown_run
+      | `Persistence_failed failure ->
+        let state =
+          match failure.state with
+          | Run_registry_core.Not_persisted -> Not_persisted
+          | Run_registry_core.Durability_unknown -> Durability_unknown
+        in
+        let failure = { detail = failure.detail; state } in
+        let failed = { intended_outcome = outcome; elapsed_s; output; failure } in
+        Atomic.set
+          t.failed_completions
+          ((run_id, failed) :: List.remove_assoc run_id (Atomic.get t.failed_completions));
+        publish_projection t;
+        Error (Persistence_failed failure))
+  in
+  match result with
+  | Ok () ->
+    notify_changed ();
+    Ok ()
+  | Error Unknown_run -> Error Unknown_run
+  | Error (Persistence_failed _ as error) ->
+    notify_changed ();
+    Error error
+;;
+
+let list_runs t = Atomic.get t.projection
+
+let get t ~run_id =
+  List.find_opt (fun run -> String.equal run.run_id run_id) (Atomic.get t.projection)
 ;;
 
 let status_label = function
@@ -359,6 +367,12 @@ let run_to_yojson run =
       [ "elapsed_s", `Float elapsed_s; "output", output ] @ detail
     | Completion_persistence_failed
         { intended_outcome; elapsed_s; output; failure } ->
+      let intended_failure =
+        match intended_outcome with
+        | Succeeded | Cancelled -> []
+        | Failed { code; detail } ->
+          [ "intended_code", `String code; "intended_detail", `String detail ]
+      in
       [ "intended_status", `String (outcome_label intended_outcome)
       ; "elapsed_s", `Float elapsed_s
       ; "output", output
@@ -369,6 +383,7 @@ let run_to_yojson run =
              | Not_persisted -> "not_persisted"
              | Durability_unknown -> "durability_unknown") )
       ]
+      @ intended_failure
   in
   `Assoc (base @ completion)
 ;;

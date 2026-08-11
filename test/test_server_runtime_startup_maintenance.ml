@@ -91,13 +91,16 @@ let test_top_level_store_list_is_ssot () =
      tool_calls/transition-audit). Pin the shared list. *)
   Alcotest.(check (list string))
     "top-level dated stores pinned"
+    (* Compared against List.sort String.compare, so this literal is sorted.
+       agent-core-events sits second because a < u; it was oas-events until
+       #27945, which sorted after messages. *)
     [ "activity-events"
+    ; "agent-core-events"
     ; "audit"
     ; "audit-approvals"
     ; "costs"
     ; "events"
     ; "messages"
-    ; "agent-core-events"
     ; "telemetry"
     ; "tool_calls"
     ; "transition-audit"

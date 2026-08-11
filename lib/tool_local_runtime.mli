@@ -11,8 +11,6 @@
     - {!Tool_local_runtime_http}: HTTP helpers (curl wrappers, JSON
       member access).
     - {!Tool_local_runtime_verify}: runtime contract verification.
-    - {!Tool_local_runtime_bench}: concurrency benchmark.
-    - {!Tool_local_runtime_status}: runtime pool status reporting.
     - {!Tool_local_runtime_probe}: native Ollama timing / KV
       inference probe.
 

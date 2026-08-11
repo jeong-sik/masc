@@ -119,9 +119,13 @@ let keepers_json
     Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
     |> float_of_int
   in
+  let keeper_snapshot_interval_s =
+    Runtime_params.get Runtime_settings.keeper_snapshot_sec |> float_of_int
+  in
   let heartbeat_stale_after_s =
     Keeper_status_runtime.keeper_heartbeat_stale_after_s
       ~keepalive_interval_s:keeper_keepalive_interval_s
+      ~snapshot_interval_s:keeper_snapshot_interval_s
   in
   (* Parallel keeper I/O with concurrency cap: at most
      _keeper_snapshot_max_concurrency fibers run simultaneously.
@@ -230,6 +234,8 @@ let keepers_json
                            ; "turn_count", `Int meta.runtime.usage.total_turns
                            ; ( "keeper_keepalive_interval_s"
                              , `Float keeper_keepalive_interval_s )
+                           ; ( "keeper_snapshot_interval_s"
+                             , `Float keeper_snapshot_interval_s )
                            ; "heartbeat_stale_after_s", `Float heartbeat_stale_after_s
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
@@ -406,6 +412,8 @@ let keepers_json
                          ; "turn_count", `Int meta.runtime.usage.total_turns
                          ; ( "keeper_keepalive_interval_s"
                            , `Float keeper_keepalive_interval_s )
+                         ; ( "keeper_snapshot_interval_s"
+                           , `Float keeper_snapshot_interval_s )
                          ; "heartbeat_stale_after_s", `Float heartbeat_stale_after_s
                          ; "last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s
                          ; "last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s

@@ -32,7 +32,12 @@ val resolve_board_context_inference_target :
   (string * board_context_inference_target_source, [ `Bad_request of string | `Internal_server_error of string ]) result
 
 val wake_keepers_after_runtime_param_change :
-  base_path:string -> param_key:string -> Yojson.Safe.t option
-(** For the Keeper cadence parameter, signals every admitted live Keeper and
-    returns an operator-visible outcome summary. Other runtime parameters
-    return [None] without waking Keeper lanes. *)
+  base_path:string ->
+  param_key:string ->
+  previous_interval_s:int ->
+  new_interval_s:int ->
+  Yojson.Safe.t option
+(** For the Keeper cadence parameter, signals exact admitted [Running] or
+    [Failing] sleepers only when the effective interval decreases. Lengthened,
+    unchanged, in-flight, and inactive lanes remain explicit in the returned
+    operator-visible summary. Other runtime parameters return [None]. *)

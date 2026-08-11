@@ -5,15 +5,27 @@ open Keeper_types_profile
 val active_model_of_meta : keeper_meta -> string
 val active_model_label_of_meta : keeper_meta -> string
 val string_of_fiber_health : fiber_health -> string
-val keeper_heartbeat_stale_after_s : keepalive_interval_s:float -> float
-(** Operator-facing Keeper freshness window. The ordinary-agent 120-second
-    floor is preserved for short cadences; longer Keeper cadences receive one
-    minute of scheduling/transport slack. *)
+val keeper_heartbeat_stale_after_s :
+  keepalive_interval_s:float -> snapshot_interval_s:float -> float
+(** Operator-facing Keeper freshness window. The persisted heartbeat producer
+    is bounded by both the cycle cadence and the snapshot cadence, so the
+    window follows the slower resolved cadence plus one minute of scheduling /
+    transport jitter. The ordinary-agent 120-second floor is preserved. *)
 val keeper_turn_record_freshness_slo_s : keepalive_interval_s:float -> float
 (** Turn-record freshness window.  A record is emitted after a Keeper cycle,
     so the SLO covers the configured sleep cadence plus two minutes of cycle
     execution/scheduling slack while preserving the historical 300-second
     floor for short cadences. *)
+val keeper_turn_record_source_health :
+  skipped_rows:int ->
+  live_turn_in_progress:bool ->
+  latest_age_s:float option ->
+  freshness_slo_s:float ->
+  string * string
+(** Classify the turn-record source. A live turn keeps the producer healthy
+    even when its previous completed record is old; live-turn progress/stall
+    diagnosis remains on the dedicated turn observation surface. Incompatible
+    stored rows remain fail-visible. *)
 (** Parse the "status" field of an agent-status snapshot blob (produced by
     {!parse_agent_status}) into the closed [Masc_domain.agent_status] ADT.
     An absent agent-registry record is represented by an empty object; the

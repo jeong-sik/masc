@@ -12,12 +12,29 @@ open Keeper_types_profile
    and zombie/stale assessment. *)
 let agent_staleness_threshold_s = 120.0
 
-let keeper_heartbeat_stale_after_s ~keepalive_interval_s =
-  Float.max agent_staleness_threshold_s (keepalive_interval_s +. 60.0)
+let keeper_heartbeat_stale_after_s ~keepalive_interval_s ~snapshot_interval_s =
+  Float.max
+    agent_staleness_threshold_s
+    (Float.max keepalive_interval_s snapshot_interval_s +. 60.0)
 ;;
 
 let keeper_turn_record_freshness_slo_s ~keepalive_interval_s =
   Float.max 300.0 (keepalive_interval_s +. 120.0)
+;;
+
+let keeper_turn_record_source_health
+      ~skipped_rows
+      ~live_turn_in_progress
+      ~latest_age_s
+      ~freshness_slo_s
+  =
+  match latest_age_s, live_turn_in_progress with
+  | None, _ when skipped_rows > 0 -> "incompatible", "incompatible_rows"
+  | _, true -> "ok", ""
+  | None, false -> "empty", "no_entries"
+  | Some age, false when age > freshness_slo_s ->
+    "stale", "freshness_slo_exceeded"
+  | Some _, false -> "ok", ""
 ;;
 
 let unknown_model_label =
@@ -296,6 +313,8 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     ?(keepalive_interval_s =
       float_of_int
         (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec))
+    ?(snapshot_interval_s =
+      float_of_int (Runtime_params.get Runtime_settings.keeper_snapshot_sec))
     ~meta ~keepalive_running ~agent_status ~quiet_reason () : keeper_health =
   (* Supervisor-level health takes priority *)
   match fiber_health with
@@ -318,7 +337,9 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     if
       agent_registry_status_present
       && last_seen_ago_s
-         > keeper_heartbeat_stale_after_s ~keepalive_interval_s
+         > keeper_heartbeat_stale_after_s
+             ~keepalive_interval_s
+             ~snapshot_interval_s
     then KH_stale
     else
       (match quiet_reason with

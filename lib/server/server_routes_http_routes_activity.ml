@@ -19,21 +19,32 @@ let activity_result_json ~ok ~message =
 type keeper_cadence_wakeup_summary =
   { requested : int
   ; signaled : int
-  ; deferred_unregistered : int
-  ; deferred_not_running : int
+  ; deferred_missing : int
+  ; deferred_replaced : int
+  ; deferred_in_flight : int
+  ; deferred_inactive : int
   ; deferred_lifecycle : int
+  ; deferred_lifecycle_reserved : int
   }
 
 let empty_keeper_cadence_wakeup_summary =
   { requested = 0
   ; signaled = 0
-  ; deferred_unregistered = 0
-  ; deferred_not_running = 0
+  ; deferred_missing = 0
+  ; deferred_replaced = 0
+  ; deferred_in_flight = 0
+  ; deferred_inactive = 0
   ; deferred_lifecycle = 0
+  ; deferred_lifecycle_reserved = 0
   }
 ;;
 
-let wake_keepers_after_runtime_param_change ~base_path ~param_key =
+let wake_keepers_after_runtime_param_change
+      ~base_path
+      ~param_key
+      ~previous_interval_s
+      ~new_interval_s
+  =
   if
     not
       (String.equal
@@ -41,30 +52,41 @@ let wake_keepers_after_runtime_param_change ~base_path ~param_key =
          (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec))
   then None
   else
-    let entries = Keeper_registry.all ~base_path () in
+    let change, wake_required =
+      if new_interval_s < previous_interval_s
+      then "shortened", true
+      else if new_interval_s > previous_interval_s
+      then "lengthened", false
+      else "unchanged", false
+    in
+    let entries =
+      if wake_required then Keeper_registry.all ~base_path () else []
+    in
     let summary =
       List.fold_left
         (fun summary (entry : Keeper_registry.registry_entry) ->
            let summary = { summary with requested = summary.requested + 1 } in
-           match
-             Keeper_registry.wakeup_running
-               ~intent:Keeper_registry.Runtime_parameter_change
-               ~base_path:entry.base_path
-               entry.name
-           with
-           | Keeper_registry.Signaled ->
+           match Keeper_registry.wakeup_cadence_sleeper_exact entry with
+           | Keeper_registry.Cadence_sleeper_signaled ->
              { summary with signaled = summary.signaled + 1 }
-           | Keeper_registry.Deferred_unregistered ->
+           | Keeper_registry.Cadence_sleeper_missing ->
+             { summary with deferred_missing = summary.deferred_missing + 1 }
+           | Keeper_registry.Cadence_sleeper_replaced ->
+             { summary with deferred_replaced = summary.deferred_replaced + 1 }
+           | Keeper_registry.Cadence_sleeper_in_flight ->
              { summary with
-               deferred_unregistered = summary.deferred_unregistered + 1
+               deferred_in_flight = summary.deferred_in_flight + 1
              }
-           | Keeper_registry.Deferred_not_running _ ->
-             { summary with
-               deferred_not_running = summary.deferred_not_running + 1
-             }
-           | Keeper_registry.Deferred_lifecycle _ ->
+           | Keeper_registry.Cadence_sleeper_inactive _ ->
+             { summary with deferred_inactive = summary.deferred_inactive + 1 }
+           | Keeper_registry.Cadence_sleeper_lifecycle_denied _ ->
              { summary with
                deferred_lifecycle = summary.deferred_lifecycle + 1
+             }
+           | Keeper_registry.Cadence_sleeper_lifecycle_reserved _ ->
+             { summary with
+               deferred_lifecycle_reserved =
+                 summary.deferred_lifecycle_reserved + 1
              })
         empty_keeper_cadence_wakeup_summary
         entries
@@ -73,26 +95,51 @@ let wake_keepers_after_runtime_param_change ~base_path ~param_key =
     if deferred > 0
     then
       Log.Keeper.warn
-        "keeper cadence changed: signaled=%d requested=%d deferred_unregistered=%d \
-         deferred_not_running=%d deferred_lifecycle=%d"
+        "keeper cadence shortened: signaled=%d requested=%d deferred_missing=%d \
+         deferred_replaced=%d deferred_in_flight=%d deferred_inactive=%d \
+         deferred_lifecycle=%d deferred_lifecycle_reserved=%d"
         summary.signaled
         summary.requested
-        summary.deferred_unregistered
-        summary.deferred_not_running
-        summary.deferred_lifecycle;
+        summary.deferred_missing
+        summary.deferred_replaced
+        summary.deferred_in_flight
+        summary.deferred_inactive
+        summary.deferred_lifecycle
+        summary.deferred_lifecycle_reserved;
     Some
       (`Assoc
-         [ "requested", `Int summary.requested
+         [ "change", `String change
+         ; "previous_interval_s", `Int previous_interval_s
+         ; "new_interval_s", `Int new_interval_s
+         ; "wake_required", `Bool wake_required
+         ; "requested", `Int summary.requested
          ; "signaled", `Int summary.signaled
-         ; "deferred_unregistered", `Int summary.deferred_unregistered
-         ; "deferred_not_running", `Int summary.deferred_not_running
+         ; "deferred_missing", `Int summary.deferred_missing
+         ; "deferred_replaced", `Int summary.deferred_replaced
+         ; "deferred_in_flight", `Int summary.deferred_in_flight
+         ; "deferred_inactive", `Int summary.deferred_inactive
          ; "deferred_lifecycle", `Int summary.deferred_lifecycle
+         ; ( "deferred_lifecycle_reserved"
+           , `Int summary.deferred_lifecycle_reserved )
          ; "fully_signaled", `Bool (deferred = 0)
          ])
 ;;
 
-let runtime_param_effect_fields ~base_path ~param_key =
-  match wake_keepers_after_runtime_param_change ~base_path ~param_key with
+let runtime_param_effect_fields
+      ~base_path
+      ~param_key
+      ~previous_keepalive_interval_s
+  =
+  let new_keepalive_interval_s =
+    Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
+  in
+  match
+    wake_keepers_after_runtime_param_change
+      ~base_path
+      ~param_key
+      ~previous_interval_s:previous_keepalive_interval_s
+      ~new_interval_s:new_keepalive_interval_s
+  with
   | None -> []
   | Some summary -> [ "keeper_cadence_wakeup", summary ]
 ;;
@@ -1303,6 +1350,9 @@ let add_routes ~sw ~clock router =
                  (`Assoc
                     [ ("ok", `Bool false); ("error", `String "value is required") ])
              | Some value ->
+               let previous_keepalive_interval_s =
+                 Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
+               in
                let old_value =
                  match Runtime_params.registry ()
                    |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
@@ -1315,7 +1365,10 @@ let add_routes ~sw ~clock router =
                     (`Assoc [ "ok", `Bool false; "error", `String msg ])
                 | Ok () ->
                   let effect_fields =
-                    runtime_param_effect_fields ~base_path ~param_key
+                    runtime_param_effect_fields
+                      ~base_path
+                      ~param_key
+                      ~previous_keepalive_interval_s
                   in
                   Sse.broadcast
                     (`Assoc
@@ -1365,6 +1418,9 @@ let add_routes ~sw ~clock router =
                  (`Assoc
                     [ ("ok", `Bool false); ("error", `String "param_key is required") ])
              else
+               let previous_keepalive_interval_s =
+                 Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
+               in
                let old_value =
                  match Runtime_params.registry ()
                    |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
@@ -1383,7 +1439,10 @@ let add_routes ~sw ~clock router =
                     | None -> `Null
                   in
                   let effect_fields =
-                    runtime_param_effect_fields ~base_path ~param_key
+                    runtime_param_effect_fields
+                      ~base_path
+                      ~param_key
+                      ~previous_keepalive_interval_s
                   in
                   Sse.broadcast
                     (`Assoc

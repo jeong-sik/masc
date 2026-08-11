@@ -462,6 +462,58 @@ let wakeup_running_exact ~intent (expected : registry_entry) =
           | Deferred_lifecycle denial -> Exact_wake_lifecycle_denied denial)))
 ;;
 
+type cadence_sleeper_wakeup_outcome =
+  | Cadence_sleeper_signaled
+  | Cadence_sleeper_missing
+  | Cadence_sleeper_replaced
+  | Cadence_sleeper_in_flight
+  | Cadence_sleeper_inactive of Keeper_state_machine.phase
+  | Cadence_sleeper_lifecycle_denied of
+      Keeper_lifecycle_admission.autonomous_denial
+  | Cadence_sleeper_lifecycle_reserved of
+      Keeper_lifecycle_reservation.snapshot
+
+let wakeup_cadence_sleeper_exact (expected : registry_entry) =
+  let base_path = expected.base_path in
+  let name = expected.name in
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+    match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name () with
+    | Error owner -> Cadence_sleeper_lifecycle_reserved owner
+    | Ok () ->
+      let key = registry_key ~base_path name in
+      (match StringMap.find_opt key (Atomic.get registry) with
+       | None -> Cadence_sleeper_missing
+       | Some current
+         when not
+                (Keeper_lane.Id.equal
+                   (Keeper_lane.id current.lane)
+                   (Keeper_lane.id expected.lane)) ->
+         Cadence_sleeper_replaced
+       | Some current ->
+         let lifecycle_state =
+           Keeper_lifecycle_admission.state
+             ~paused:current.meta.paused
+             ~latched_reason:current.meta.latched_reason
+         in
+         (match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+          | Keeper_lifecycle_admission.Autonomous_denied denial ->
+            record_lifecycle_wakeup_denial
+              ~intent:Runtime_parameter_change
+              current
+              denial;
+            Cadence_sleeper_lifecycle_denied denial
+          | Keeper_lifecycle_admission.Autonomous_admitted ->
+            (match current.current_turn_observation with
+             | Some _ -> Cadence_sleeper_in_flight
+             | None ->
+               (match current.phase with
+                | Keeper_state_machine.Running | Keeper_state_machine.Failing ->
+                  (* tla-lint: allow-mutation: cadence decrease interrupts a live sleeper *)
+                  Atomic.set current.fiber_wakeup true;
+                  Cadence_sleeper_signaled
+                | phase -> Cadence_sleeper_inactive phase)))))
+;;
+
 let fiber_health_of ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> Fiber_unknown

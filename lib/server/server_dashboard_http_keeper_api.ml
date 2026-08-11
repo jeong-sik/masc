@@ -2165,14 +2165,18 @@ let handle_keeper_get_subroutes state req request reqd =
         | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
         | None -> None
       in
+      let live_turn =
+        match Keeper_registry.get ~base_path:config.base_path name with
+        | Some { current_turn_observation = Some observation; _ } ->
+          Some observation
+        | Some _ | None -> None
+      in
       let health, stale_reason =
-        match latest_age_s with
-        | None when skipped_rows > 0 ->
-            ("incompatible", "incompatible_rows")
-        | None -> ("empty", "no_entries")
-        | Some age when age > turn_record_freshness_slo_s ->
-            ("stale", "freshness_slo_exceeded")
-        | Some _ -> ("ok", "")
+        Keeper_status_runtime.keeper_turn_record_source_health
+          ~skipped_rows
+          ~live_turn_in_progress:(Option.is_some live_turn)
+          ~latest_age_s
+          ~freshness_slo_s:turn_record_freshness_slo_s
       in
       let json = `Assoc [
         ("keeper", `String name);
@@ -2187,6 +2191,15 @@ let handle_keeper_get_subroutes state req request reqd =
                (Printf.sprintf "keepers/%s/turn-records" name)) );
         ("dashboard_surface", `String "/api/v1/keepers/:name/turn-records");
         ("freshness_slo_s", `Float turn_record_freshness_slo_s);
+        ("live_turn_in_progress", `Bool (Option.is_some live_turn));
+        ( "live_turn_started_at_unix",
+          match live_turn with
+          | Some observation -> `Float observation.started_at
+          | None -> `Null );
+        ( "live_turn_last_progress_at_unix",
+          match live_turn with
+          | Some observation -> `Float observation.last_progress_at
+          | None -> `Null );
         ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
         ( "latest_ts_iso",
           match latest_ts with

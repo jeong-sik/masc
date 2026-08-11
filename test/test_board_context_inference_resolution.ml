@@ -153,7 +153,7 @@ let test_target_resolution_implicit_unregistered_author () =
          "error message"
          "target_keeper is required because board post author \"operator\" is not a registered keeper")
 
-let test_cadence_change_wakes_registered_keepers () =
+let test_cadence_change_wakes_only_live_sleepers_when_shortened () =
   let base_path = "/tmp/test_runtime_param_keeper_wakeup" in
   Keeper_registry.For_testing.clear ();
   Fun.protect
@@ -165,11 +165,27 @@ let test_cadence_change_wakes_registered_keepers () =
       let second =
         Keeper_registry.For_testing.register ~base_path "second" (make_meta "second")
       in
+      let second = { second with phase = Keeper_state_machine.Failing } in
+      Keeper_registry.For_testing.unsafe_put_entry ~base_path "second" second;
+      let in_flight =
+        Keeper_registry.For_testing.register
+          ~base_path
+          "in-flight"
+          (make_meta "in-flight")
+      in
+      Keeper_registry.mark_turn_started
+        ~base_path
+        ~wake:Keeper_registry.Proactive_tick
+        "in-flight";
       Atomic.set first.fiber_wakeup false;
       Atomic.set second.fiber_wakeup false;
+      Atomic.set in_flight.fiber_wakeup false;
       let unrelated =
         Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
-          ~base_path ~param_key:"keeper.max_turns"
+          ~base_path
+          ~param_key:"keeper.max_turns"
+          ~previous_interval_s:300
+          ~new_interval_s:30
       in
       check bool "unrelated param has no wake effect" true
         (Option.is_none unrelated);
@@ -182,17 +198,56 @@ let test_cadence_change_wakes_registered_keepers () =
           ~base_path
           ~param_key:
             (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec)
+          ~previous_interval_s:300
+          ~new_interval_s:30
         |> Option.value ~default:`Null
       in
       let open Yojson.Safe.Util in
       check bool "cadence change wakes first" true (Atomic.get first.fiber_wakeup);
-      check bool "cadence change wakes second" true (Atomic.get second.fiber_wakeup);
-      check int "summary requested both keepers" 2
+      check bool "cadence decrease wakes failing sleeper" true
+        (Atomic.get second.fiber_wakeup);
+      check bool "cadence decrease does not queue behind active turn" false
+        (Atomic.get in_flight.fiber_wakeup);
+      check int "summary requested all live lanes" 3
         (summary |> member "requested" |> to_int);
-      check int "summary signaled both keepers" 2
+      check int "summary signaled both sleepers" 2
         (summary |> member "signaled" |> to_int);
-      check bool "summary reports full delivery" true
-        (summary |> member "fully_signaled" |> to_bool))
+      check int "summary exposes in-flight deferral" 1
+        (summary |> member "deferred_in_flight" |> to_int);
+      check bool "summary does not claim full delivery" false
+        (summary |> member "fully_signaled" |> to_bool);
+      Atomic.set first.fiber_wakeup false;
+      Atomic.set second.fiber_wakeup false;
+      let lengthened =
+        Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
+          ~base_path
+          ~param_key:
+            (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec)
+          ~previous_interval_s:30
+          ~new_interval_s:300
+        |> Option.value ~default:`Null
+      in
+      check bool "cadence increase wakes no running sleeper" false
+        (Atomic.get first.fiber_wakeup);
+      check bool "cadence increase wakes no failing sleeper" false
+        (Atomic.get second.fiber_wakeup);
+      check int "lengthening requests no wakes" 0
+        (lengthened |> member "requested" |> to_int);
+      check string "lengthening is explicit" "lengthened"
+        (lengthened |> member "change" |> to_string);
+      let unchanged =
+        Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
+          ~base_path
+          ~param_key:
+            (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec)
+          ~previous_interval_s:300
+          ~new_interval_s:300
+        |> Option.value ~default:`Null
+      in
+      check int "unchanged cadence requests no wakes" 0
+        (unchanged |> member "requested" |> to_int);
+      check string "unchanged cadence is explicit" "unchanged"
+        (unchanged |> member "change" |> to_string))
 
 let () =
   run "Server board context inference resolution"
@@ -205,7 +260,7 @@ let () =
         ; test_case "implicit unregistered author" `Quick test_target_resolution_implicit_unregistered_author
         ] )
     ; ( "runtime_params",
-        [ test_case "cadence changes wake registered keepers" `Quick
-            test_cadence_change_wakes_registered_keepers
+        [ test_case "cadence decrease wakes only live sleepers" `Quick
+            test_cadence_change_wakes_only_live_sleepers_when_shortened
         ] )
     ]

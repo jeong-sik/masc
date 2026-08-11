@@ -41,12 +41,14 @@ let test_keepalive_interval_positive () =
   check bool "interval is positive" true (v > 0)
 
 let test_keeper_heartbeat_stale_window_tracks_cadence () =
-  check (float 0.1) "30s cadence keeps the 120s agent floor" 120.0
+  check (float 0.1) "30s cycle respects the 300s snapshot producer" 360.0
     (Masc.Keeper_status_runtime.keeper_heartbeat_stale_after_s
-       ~keepalive_interval_s:30.0);
+       ~keepalive_interval_s:30.0
+       ~snapshot_interval_s:300.0);
   check (float 0.1) "300s cadence receives 60s slack" 360.0
     (Masc.Keeper_status_runtime.keeper_heartbeat_stale_after_s
-       ~keepalive_interval_s:300.0)
+       ~keepalive_interval_s:300.0
+       ~snapshot_interval_s:30.0)
 ;;
 
 let test_keeper_turn_record_freshness_tracks_cadence () =
@@ -56,6 +58,28 @@ let test_keeper_turn_record_freshness_tracks_cadence () =
   check (float 0.1) "300s cadence receives full-cycle slack" 420.0
     (Masc.Keeper_status_runtime.keeper_turn_record_freshness_slo_s
        ~keepalive_interval_s:300.0)
+;;
+
+let test_live_turn_keeps_turn_record_source_healthy () =
+  let health, stale_reason =
+    Masc.Keeper_status_runtime.keeper_turn_record_source_health
+      ~skipped_rows:0
+      ~live_turn_in_progress:true
+      ~latest_age_s:(Some 900.0)
+      ~freshness_slo_s:420.0
+  in
+  check string "live producer is healthy" "ok" health;
+  check string "live producer has no stale reason" "" stale_reason;
+  let health, stale_reason =
+    Masc.Keeper_status_runtime.keeper_turn_record_source_health
+      ~skipped_rows:0
+      ~live_turn_in_progress:false
+      ~latest_age_s:(Some 900.0)
+      ~freshness_slo_s:420.0
+  in
+  check string "idle old producer is stale" "stale" health;
+  check string "idle old producer explains staleness"
+    "freshness_slo_exceeded" stale_reason
 ;;
 
 let test_keepalive_interval_has_one_resolved_ssot () =
@@ -217,6 +241,8 @@ let () =
         test_keeper_heartbeat_stale_window_tracks_cadence;
       test_case "turn-record freshness tracks cadence" `Quick
         test_keeper_turn_record_freshness_tracks_cadence;
+      test_case "live turn keeps record source healthy" `Quick
+        test_live_turn_keeps_turn_record_source_healthy;
       test_case "interval has one resolved SSOT" `Quick
         test_keepalive_interval_has_one_resolved_ssot;
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;

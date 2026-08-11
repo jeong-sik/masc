@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { Keeper } from '../types'
 import type { KeeperRuntimeTraceResponse } from '../api/keeper'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { deriveKeeperRuntimeProjection } from './keeper-runtime-projection'
+import { keeperNeedsDiagnosticAttention } from '../components/keeper-detail-helpers'
 
 const NOW_MS = Date.parse('2026-05-21T00:10:00Z')
 
@@ -150,6 +151,42 @@ describe('deriveKeeperRuntimeProjection', () => {
     expect(shortCadence.heartbeat.stale).toBe(true)
     expect(defaultCadence.heartbeat.thresholdMs).toBe(360_000)
     expect(defaultCadence.heartbeat.stale).toBe(false)
+  })
+
+  it('keeps detail attention and runtime projection on the legacy fallback', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW_MS)
+    try {
+      for (const heartbeat_stale_after_s of [undefined, null]) {
+        const freshKeeper = keeper({
+          last_heartbeat: new Date(NOW_MS - 4 * 60_000).toISOString(),
+          heartbeat_stale_after_s,
+        })
+        const freshProjection = deriveKeeperRuntimeProjection({
+          keeper: freshKeeper,
+          composite: composite(),
+          nowMs: NOW_MS,
+        })
+        expect(freshProjection.heartbeat.thresholdMs).toBe(300_000)
+        expect(freshProjection.heartbeat.stale).toBe(false)
+        expect(keeperNeedsDiagnosticAttention(freshKeeper)).toBe(false)
+
+        const staleKeeper = keeper({
+          last_heartbeat: new Date(NOW_MS - 6 * 60_000).toISOString(),
+          heartbeat_stale_after_s,
+        })
+        const staleProjection = deriveKeeperRuntimeProjection({
+          keeper: staleKeeper,
+          composite: composite(),
+          nowMs: NOW_MS,
+        })
+        expect(staleProjection.heartbeat.thresholdMs).toBe(300_000)
+        expect(staleProjection.heartbeat.stale).toBe(true)
+        expect(keeperNeedsDiagnosticAttention(staleKeeper)).toBe(true)
+      }
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('couples heartbeat, context, fiber, stop, trace, tool, and FSM lanes', () => {

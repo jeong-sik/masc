@@ -53,7 +53,9 @@ export const SHELL_TTL_MS = 5_000
 // parameter projection; the fallback is deliberately conservative for an old
 // server that does not expose that field yet.
 export const AGENT_HEARTBEAT_STALE_MS = 120_000
-export const KEEPER_HEARTBEAT_STALE_FALLBACK_MS = 120_000
+// Keep the operator-facing legacy window when an older server omits the
+// cadence-aware heartbeat field.
+export const KEEPER_HEARTBEAT_STALE_FALLBACK_MS = 300_000
 export function keeperHeartbeatStaleMs(staleAfterSeconds: unknown): number {
   return typeof staleAfterSeconds === 'number'
     && Number.isFinite(staleAfterSeconds)

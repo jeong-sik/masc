@@ -79,8 +79,8 @@ let owner_ok = function
   | Error error -> fail (Owner.error_to_string error)
 ;;
 
-let start_owner_with_executor
-      ?(operation_ready = fun ~keeper_name:_ -> true)
+let start_owner_with_executor_ready
+      ~operation_ready
       ~sw
       ~store
       ~operation_executor
@@ -100,6 +100,16 @@ let start_owner_with_executor
       (Option.map
          (fun execute -> Owner.{ ready = operation_ready; execute })
          operation_executor)
+    ~keeper_name
+    ~initial_meta
+;;
+
+let start_owner_with_executor ~sw ~store ~operation_executor ~keeper_name ~initial_meta =
+  start_owner_with_executor_ready
+    ~operation_ready:(fun ~keeper_name:_ -> true)
+    ~sw
+    ~store
+    ~operation_executor
     ~keeper_name
     ~initial_meta
 ;;
@@ -1460,7 +1470,7 @@ let test_pending_chat_blocks_autonomous_until_runner_ready () =
   in
   let owner =
     owner_ok
-      (start_owner_with_executor
+      (start_owner_with_executor_ready
          ~operation_ready:(fun ~keeper_name:_ -> Atomic.get runner_ready)
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }

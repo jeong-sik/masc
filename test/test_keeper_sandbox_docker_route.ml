@@ -1675,7 +1675,7 @@ let test_docker_shell_projects_keeper_secret_dir () =
   let github_config_dir =
     match
       Keeper_github_identity.ensure_config_dir
-        ~base_path:config.Workspace.base_path
+        ~config
         ~keeper_name:meta.name
     with
     | Ok path -> path
@@ -1750,6 +1750,15 @@ let test_turn_runtime_projects_keeper_secret_dir () =
   ensure_dir (Filename.dirname ssh_path);
   write_file token_path "projected-token\n";
   write_file ssh_path "PRIVATE KEY";
+  let github_config_dir =
+    match
+      Keeper_github_identity.ensure_config_dir
+        ~config
+        ~keeper_name:meta.name
+    with
+    | Ok path -> path
+    | Error message -> Alcotest.fail message
+  in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->

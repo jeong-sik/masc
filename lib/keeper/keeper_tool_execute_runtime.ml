@@ -235,7 +235,7 @@ let handle_tool_execute_typed
              | Some env ->
                (match
                   Keeper_github_identity.runtime_env_for_tool
-                    ~base_path:config.base_path
+                    ~config
                     ~keeper_name:meta.name
                     env
                 with
@@ -244,7 +244,7 @@ let handle_tool_execute_typed
                     (Keeper_sandbox_shell_ir_target.target_error
                        ~fields:extra_fields
                        ("local_github_identity_invalid: " ^ err))
-                | Ok (env, identity_state) ->
+                | Ok (env, identity_state, cleanup) ->
                   let identity_field =
                     match identity_state with
                     | Keeper_github_identity.Unconfigured -> "unconfigured"
@@ -253,7 +253,8 @@ let handle_tool_execute_typed
                   Ok
                     ( Masc_exec.Sandbox_target.host ()
                     , ("github_identity", `String identity_field) :: extra_fields
-                    , Some env )))
+                    , Some env
+                    , cleanup )))
         in
         let dispatch_sandbox =
           match sandbox_profile with
@@ -270,7 +271,7 @@ let handle_tool_execute_typed
                 (match target with
                  | Masc_exec.Sandbox_target.Host ->
                    local_dispatch_sandbox ~extra_fields:fields ()
-                 | Docker _ -> Ok (target, fields, None))
+                 | Docker _ -> Ok (target, fields, None, Fun.id))
               | Some _ | None ->
                 docker_sandbox_target
                   ~turn_sandbox_factory
@@ -284,7 +285,8 @@ let handle_tool_execute_typed
                     ; "via", `String "docker"
                     ; "sandbox_profile", `String "docker"
                     ]
-                  , None )))
+                  , None
+                  , Fun.id )))
         in
         (match dispatch_sandbox with
          | Error ({ message; fields } : Keeper_sandbox_shell_ir_target.target_error) ->
@@ -295,7 +297,8 @@ let handle_tool_execute_typed
                    @ model_location_fields
                    @ fields)
                 message)
-         | Ok (dispatch_sandbox, sandbox_extra_fields, base_host_env) ->
+         | Ok (dispatch_sandbox, sandbox_extra_fields, base_host_env, cleanup) ->
+        Fun.protect ~finally:cleanup (fun () ->
         let dispatched_model_location_fields =
           match dispatch_sandbox with
           | Masc_exec.Sandbox_target.Host ->
@@ -573,7 +576,7 @@ let handle_tool_execute_typed
               (if succeeded
                then Keeper_tool_execution.success payload
                else Keeper_tool_execution.failure payload)
-        )))
+        ))))
 
 let handle_tool_execute_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

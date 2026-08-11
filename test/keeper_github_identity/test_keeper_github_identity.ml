@@ -45,7 +45,10 @@ let with_temp_base run =
   in
   mkdir_p base_path;
   mkdir_p (Common.keepers_runtime_dir_of_base ~base_path);
-  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> run base_path)
+  let config = Workspace.default_config base_path in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () -> run base_path config)
 ;;
 
 let env_value name env =
@@ -114,7 +117,7 @@ esac
 ;;
 
 let test_fake_gh_login_and_effective_identity () =
-  with_temp_base @@ fun base_path ->
+  with_temp_base @@ fun base_path config ->
   let keeper_name = "github-test-keeper" in
   let fake_bin = Filename.concat base_path "fake-bin" in
   let fake_gh = Filename.concat fake_bin "gh" in
@@ -128,13 +131,13 @@ let test_fake_gh_login_and_effective_identity () =
     ~finally:(fun () -> Unix.putenv "PATH" previous_path)
     (fun () ->
        Alcotest.(check int) "fake login exits successfully" 0
-         (Github.run_cli_login ~base_path ~keeper_name ~hostname:"github.com");
-       let keeper_config = Github.config_dir ~base_path ~keeper_name in
+         (Github.run_cli_login ~config ~keeper_name ~hostname:"github.com");
+       let keeper_config = Github.config_dir ~config ~keeper_name in
        let login_args = read_file (Filename.concat keeper_config "login-args") in
        Alcotest.(check bool) "web login argv reached fake gh" true
          (String.contains login_args '\n'
           && String.ends_with ~suffix:"--insecure-storage\n" login_args);
-       match Github.observe ~base_path ~keeper_name ~hostname:"github.com" with
+       match Github.observe ~config ~keeper_name ~hostname:"github.com" with
        | Error message -> Alcotest.fail message
        | Ok observation ->
          Alcotest.(check (option string)) "stored identity uses Keeper config"
@@ -150,17 +153,38 @@ let test_fake_gh_login_and_effective_identity () =
 ;;
 
 let test_config_dir_does_not_chmod_ancestor () =
-  with_temp_base @@ fun base_path ->
+  with_temp_base @@ fun base_path config ->
   Unix.chmod base_path 0o755;
-  (match Github.ensure_config_dir ~base_path ~keeper_name:"mode-test" with
+  (match Github.ensure_config_dir ~config ~keeper_name:"mode-test" with
    | Error message -> Alcotest.fail message
    | Ok _ -> ());
   let mode = (Unix.stat base_path).Unix.st_perm land 0o777 in
   Alcotest.(check int) "workspace mode is unchanged" 0o755 mode
 ;;
 
+let test_config_dir_is_cluster_scoped () =
+  with_temp_base @@ fun base_path default_config ->
+  let config =
+    { default_config with
+      backend_config =
+        { default_config.backend_config with cluster_name = "identity-cluster" }
+    }
+  in
+  mkdir_p (Workspace.keepers_runtime_dir config);
+  let keeper_name = "same-name" in
+  let cluster_path = Github.config_dir ~config ~keeper_name in
+  let default_path = Github.config_dir ~config:default_config ~keeper_name in
+  Alcotest.(check bool) "cluster identity is not the default identity" true
+    (not (String.equal cluster_path default_path));
+  (match Github.ensure_config_dir ~config ~keeper_name with
+   | Error message -> Alcotest.fail message
+   | Ok path -> Alcotest.(check string) "cluster path is authoritative" cluster_path path);
+  Alcotest.(check bool) "default cluster identity remains absent" false
+    (Sys.file_exists default_path)
+;;
+
 let test_config_dir_rejects_symlink () =
-  with_temp_base @@ fun base_path ->
+  with_temp_base @@ fun base_path config ->
   let keeper_name = "directory-symlink-test" in
   let keeper_root =
     Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
@@ -168,35 +192,35 @@ let test_config_dir_rejects_symlink () =
   mkdir_p keeper_root;
   let target = Filename.concat base_path "redirected-config" in
   mkdir_p target;
-  Unix.symlink target (Github.config_dir ~base_path ~keeper_name);
-  match Github.ensure_config_dir ~base_path ~keeper_name with
+  Unix.symlink target (Github.config_dir ~config ~keeper_name);
+  match Github.ensure_config_dir ~config ~keeper_name with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "symbolic-link GitHub config directory was accepted"
 ;;
 
 let test_config_dir_rejects_credential_symlink () =
-  with_temp_base @@ fun base_path ->
+  with_temp_base @@ fun base_path config ->
   let keeper_name = "credential-symlink-test" in
   let config_dir =
-    match Github.ensure_config_dir ~base_path ~keeper_name with
+    match Github.ensure_config_dir ~config ~keeper_name with
     | Error message -> Alcotest.fail message
     | Ok path -> path
   in
   let target = Filename.concat base_path "redirected-hosts.yml" in
   write_file target "oauth_token: do-not-touch\n";
   Unix.symlink target (Filename.concat config_dir "hosts.yml");
-  match Github.ensure_config_dir ~base_path ~keeper_name with
+  match Github.ensure_config_dir ~config ~keeper_name with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "symbolic-link GitHub credential file was accepted"
 ;;
 
 let test_tool_projection_is_nonblocking_without_identity () =
-  with_temp_base @@ fun base_path ->
+  with_temp_base @@ fun base_path config ->
   let keeper_name = "missing-identity" in
-  let env, state =
+  let env, state, cleanup =
     match
       Github.runtime_env_for_tool
-        ~base_path
+        ~config
         ~keeper_name
         [| "KEEP=value"; "GH_CONFIG_DIR=/host/account" |]
     with
@@ -206,15 +230,20 @@ let test_tool_projection_is_nonblocking_without_identity () =
   (match state with
    | Github.Unconfigured -> ()
    | Configured _ -> Alcotest.fail "missing identity reported configured");
-  Alcotest.(check (option string)) "host account is not reused"
-    (Some (Github.config_dir ~base_path ~keeper_name))
-    (env_value "GH_CONFIG_DIR" env);
+  let projected_dir = env_value "GH_CONFIG_DIR" env |> Option.get in
+  Alcotest.(check bool) "host account is not reused" true
+    (not (String.equal projected_dir (Github.config_dir ~config ~keeper_name)));
+  Alcotest.(check bool) "empty local projection exists" true
+    (Sys.file_exists projected_dir);
   Alcotest.(check (option string)) "unrelated env survives" (Some "value")
     (env_value "KEEP" env);
+  cleanup ();
+  Alcotest.(check bool) "empty local projection is cleaned" false
+    (Sys.file_exists projected_dir);
   let docker_args, docker_state =
     match
       Github.docker_args_for_tool
-        ~base_path
+        ~config
         ~keeper_name
         ~container_masc_dir:"/tmp/masc-runtime/.masc"
     with
@@ -234,11 +263,11 @@ let test_tool_projection_is_nonblocking_without_identity () =
 ;;
 
 let test_observe_does_not_provision_missing_identity () =
-  with_temp_base @@ fun base_path ->
+  with_temp_base @@ fun base_path config ->
   let keeper_name = "observe-missing-identity" in
-  let config_dir = Github.config_dir ~base_path ~keeper_name in
+  let config_dir = Github.config_dir ~config ~keeper_name in
   Alcotest.(check bool) "identity starts absent" false (Sys.file_exists config_dir);
-  (match Github.observe ~base_path ~keeper_name ~hostname:"github.com" with
+  (match Github.observe ~config ~keeper_name ~hostname:"github.com" with
    | Error message -> Alcotest.fail message
    | Ok observation ->
      Alcotest.(check bool) "stored identity is unconfigured" false
@@ -250,27 +279,37 @@ let test_observe_does_not_provision_missing_identity () =
 ;;
 
 let test_tool_projection_uses_safe_existing_identity () =
-  with_temp_base @@ fun base_path ->
+  with_temp_base @@ fun base_path config ->
   let keeper_name = "configured-identity" in
   let host_dir =
-    match Github.ensure_config_dir ~base_path ~keeper_name with
+    match Github.ensure_config_dir ~config ~keeper_name with
     | Error message -> Alcotest.fail message
     | Ok path -> path
   in
-  let env, state =
-    match Github.runtime_env_for_tool ~base_path ~keeper_name [| "KEEP=value" |] with
+  let hosts = Filename.concat host_dir "hosts.yml" in
+  write_file hosts "github.com:\n  user: stored-user\n";
+  Unix.chmod hosts 0o600;
+  let env, state, cleanup =
+    match Github.runtime_env_for_tool ~config ~keeper_name [| "KEEP=value" |] with
     | Error message -> Alcotest.fail message
     | Ok projection -> projection
   in
   (match state with
    | Github.Configured path -> Alcotest.(check string) "configured path" host_dir path
    | Unconfigured -> Alcotest.fail "existing identity reported unconfigured");
-  Alcotest.(check (option string)) "keeper account is projected" (Some host_dir)
-    (env_value "GH_CONFIG_DIR" env);
+  let projected_dir = env_value "GH_CONFIG_DIR" env |> Option.get in
+  Alcotest.(check bool) "local tool never receives operator-owned path" true
+    (not (String.equal projected_dir host_dir));
+  let projected_hosts = Filename.concat projected_dir "hosts.yml" in
+  Unix.chmod projected_hosts 0o600;
+  write_file projected_hosts "locally mutated\n";
+  Alcotest.(check string) "local mutation cannot rewrite operator identity"
+    "github.com:\n  user: stored-user\n" (read_file hosts);
+  cleanup ();
   let container_masc_dir = "/tmp/masc-runtime/.masc" in
   let container_dir = Github.container_config_dir ~container_masc_dir ~keeper_name in
   let docker_args, docker_state =
-    match Github.docker_args_for_tool ~base_path ~keeper_name ~container_masc_dir with
+    match Github.docker_args_for_tool ~config ~keeper_name ~container_masc_dir with
     | Error message -> Alcotest.fail message
     | Ok projection -> projection
   in
@@ -287,7 +326,7 @@ let test_tool_projection_uses_safe_existing_identity () =
 ;;
 
 let test_tool_projection_rejects_malformed_identity () =
-  with_temp_base @@ fun base_path ->
+  with_temp_base @@ fun base_path config ->
   let keeper_name = "malformed-identity" in
   let keeper_root =
     Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
@@ -295,10 +334,10 @@ let test_tool_projection_rejects_malformed_identity () =
   mkdir_p keeper_root;
   let target = Filename.concat base_path "redirected-tool-config" in
   mkdir_p target;
-  Unix.symlink target (Github.config_dir ~base_path ~keeper_name);
+  Unix.symlink target (Github.config_dir ~config ~keeper_name);
   (match
      Github.runtime_env_for_tool
-       ~base_path
+       ~config
        ~keeper_name
        [| "GH_CONFIG_DIR=/host/account" |]
    with
@@ -306,7 +345,7 @@ let test_tool_projection_rejects_malformed_identity () =
    | Ok _ -> Alcotest.fail "malformed local identity was collapsed into absence");
   match
     Github.docker_args_for_tool
-      ~base_path
+      ~config
       ~keeper_name
       ~container_masc_dir:"/tmp/masc-runtime/.masc"
   with
@@ -315,15 +354,15 @@ let test_tool_projection_rejects_malformed_identity () =
 ;;
 
 let test_tool_projection_rejects_permissive_identity () =
-  with_temp_base @@ fun base_path ->
+  with_temp_base @@ fun base_path config ->
   let keeper_name = "permissive-identity" in
   let config_dir =
-    match Github.ensure_config_dir ~base_path ~keeper_name with
+    match Github.ensure_config_dir ~config ~keeper_name with
     | Error message -> Alcotest.fail message
     | Ok path -> path
   in
   Unix.chmod config_dir 0o755;
-  (match Github.runtime_env_for_tool ~base_path ~keeper_name [||] with
+  (match Github.runtime_env_for_tool ~config ~keeper_name [||] with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "world-readable config directory was accepted");
   Unix.chmod config_dir 0o700;
@@ -332,7 +371,7 @@ let test_tool_projection_rejects_permissive_identity () =
   Unix.chmod hosts 0o644;
   match
     Github.docker_args_for_tool
-      ~base_path
+      ~config
       ~keeper_name
       ~container_masc_dir:"/tmp/masc-runtime/.masc"
   with
@@ -353,6 +392,10 @@ let () =
             "config directory keeps ancestor mode"
             `Quick
             test_config_dir_does_not_chmod_ancestor
+        ; Alcotest.test_case
+            "config directory is cluster scoped"
+            `Quick
+            test_config_dir_is_cluster_scoped
         ; Alcotest.test_case
             "config directory rejects symlink"
             `Quick

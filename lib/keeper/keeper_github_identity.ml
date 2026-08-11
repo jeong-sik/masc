@@ -23,9 +23,9 @@ type observation =
   ; checked_at_unix : float
   }
 
-let config_dir ~base_path ~keeper_name =
+let config_dir ~config ~keeper_name =
   Filename.concat
-    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    (Filename.concat (Workspace.keepers_runtime_dir config) keeper_name)
     "github-cli"
 ;;
 
@@ -184,11 +184,11 @@ let validate_existing_config_dir path =
     else validate_config_files_in path
 ;;
 
-let ensure_config_dir ~base_path ~keeper_name =
+let ensure_config_dir ~config ~keeper_name =
   if not (Keeper_config.validate_name keeper_name)
   then Error (Printf.sprintf "invalid keeper name: %s" keeper_name)
   else begin
-    let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
+    let keepers_root = Workspace.keepers_runtime_dir config in
     try
       match require_directory keepers_root with
       | Error _ as error -> error
@@ -250,8 +250,8 @@ let projected_token_env_names env =
     github_token_env_names
 ;;
 
-let runtime_env ~base_path ~keeper_name env =
-  match ensure_config_dir ~base_path ~keeper_name with
+let runtime_env ~config ~keeper_name env =
+  match ensure_config_dir ~config ~keeper_name with
   | Error _ as error -> error
   | Ok keeper_config_dir -> Ok (overlay_config_env ~config_dir:keeper_config_dir env)
 ;;
@@ -273,11 +273,11 @@ let inspect_optional_directory path =
          path)
 ;;
 
-let existing_config_dir ~base_path ~keeper_name =
+let existing_config_dir ~config ~keeper_name =
   if not (Keeper_config.validate_name keeper_name)
   then Error (Printf.sprintf "invalid keeper name: %s" keeper_name)
   else begin
-    let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
+    let keepers_root = Workspace.keepers_runtime_dir config in
     let keeper_root = Filename.concat keepers_root keeper_name in
     let keeper_config_dir = Filename.concat keeper_root "github-cli" in
     match inspect_optional_directory keepers_root with
@@ -298,18 +298,65 @@ let existing_config_dir ~base_path ~keeper_name =
   end
 ;;
 
-let runtime_env_for_tool ~base_path ~keeper_name env =
-  match existing_config_dir ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok None ->
-    Ok
-      ( overlay_config_env ~config_dir:(config_dir ~base_path ~keeper_name) env
-      , Unconfigured )
-  | Ok (Some path) -> Ok (overlay_config_env ~config_dir:path env, Configured path)
+let copy_local_tool_config_snapshot existing =
+  let snapshot = Filename.temp_dir "masc-gh-tool-" "" in
+  Unix.chmod snapshot 0o700;
+  let cleanup () =
+    if Sys.file_exists snapshot then Unix.chmod snapshot 0o700;
+    Fs_compat.remove_tree snapshot
+  in
+  let copy_file filename =
+    let source = Filename.concat existing filename in
+    let target = Filename.concat snapshot filename in
+    match Fs_compat.load_owned_regular_file ~ownership_root:existing source with
+    | Error error ->
+      Error (Fs_compat.owned_regular_file_read_error_to_string error)
+    | Ok None -> Ok ()
+    | Ok (Some content) ->
+      (match Fs_compat.save_file_atomic target content with
+       | Error _ as error -> error
+       | Ok () ->
+         Unix.chmod target 0o400;
+         Ok ())
+  in
+  match copy_file "hosts.yml" with
+  | Error error ->
+    cleanup ();
+    Error error
+  | Ok () ->
+    (match copy_file "config.yml" with
+     | Error error ->
+       cleanup ();
+       Error error
+     | Ok () ->
+       Unix.chmod snapshot 0o500;
+       Ok (snapshot, cleanup))
 ;;
 
-let docker_args ~base_path ~keeper_name ~container_masc_dir =
-  match ensure_config_dir ~base_path ~keeper_name with
+let empty_local_tool_config_snapshot () =
+  let snapshot = Filename.temp_dir "masc-gh-tool-empty-" "" in
+  Unix.chmod snapshot 0o500;
+  ( snapshot
+  , fun () ->
+      if Sys.file_exists snapshot then Unix.chmod snapshot 0o700;
+      Fs_compat.remove_tree snapshot )
+;;
+
+let runtime_env_for_tool ~config ~keeper_name env =
+  match existing_config_dir ~config ~keeper_name with
+  | Error _ as error -> error
+  | Ok None ->
+    let snapshot, cleanup = empty_local_tool_config_snapshot () in
+    Ok (overlay_config_env ~config_dir:snapshot env, Unconfigured, cleanup)
+  | Ok (Some path) ->
+    (match copy_local_tool_config_snapshot path with
+     | Error _ as error -> error
+     | Ok (snapshot, cleanup) ->
+       Ok (overlay_config_env ~config_dir:snapshot env, Configured path, cleanup))
+;;
+
+let docker_args ~config ~keeper_name ~container_masc_dir =
+  match ensure_config_dir ~config ~keeper_name with
   | Error _ as error -> error
   | Ok host_dir ->
     let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
@@ -321,8 +368,8 @@ let docker_args ~base_path ~keeper_name ~container_masc_dir =
       ]
 ;;
 
-let docker_args_for_tool ~base_path ~keeper_name ~container_masc_dir =
-  match existing_config_dir ~base_path ~keeper_name with
+let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
+  match existing_config_dir ~config ~keeper_name with
   | Error _ as error -> error
   | Ok None ->
     let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
@@ -375,14 +422,15 @@ let projected_base_env ~base_path ~keeper_name =
   | Ok (Some env) -> Ok env
 ;;
 
-let projected_env ~base_path ~keeper_name =
+let projected_env ~config ~keeper_name =
+  let base_path = config.Workspace.base_path in
   match projected_base_env ~base_path ~keeper_name with
   | Error _ as error -> error
-  | Ok env -> runtime_env ~base_path ~keeper_name env
+  | Ok env -> runtime_env ~config ~keeper_name env
 ;;
 
-let login_env ~base_path ~keeper_name =
-  match projected_env ~base_path ~keeper_name with
+let login_env ~config ~keeper_name =
+  match projected_env ~config ~keeper_name with
   | Error _ as error -> error
   | Ok env -> Ok (strip_github_token_env env)
 ;;
@@ -418,7 +466,8 @@ let auth_result_of_command ~redact ~env ~hostname =
     { authenticated = false; login = None; error = Some detail }
 ;;
 
-let observe ~base_path ~keeper_name ~hostname =
+let observe ~config ~keeper_name ~hostname =
+  let base_path = config.Workspace.base_path in
   let hostname = String.trim hostname in
   if String.equal hostname "" then Error "GitHub hostname must not be empty"
   else
@@ -428,7 +477,7 @@ let observe ~base_path ~keeper_name ~hostname =
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let redact = Keeper_secret_redaction.redact_text redaction in
       let token_env_names = projected_token_env_names base_env in
-      (match existing_config_dir ~base_path ~keeper_name with
+      (match existing_config_dir ~config ~keeper_name with
        | Error _ as error -> error
        | Ok existing ->
          let unconfigured =
@@ -468,7 +517,7 @@ let observe ~base_path ~keeper_name ~hostname =
          Ok
            { keeper = keeper_name
            ; hostname
-           ; config_dir = config_dir ~base_path ~keeper_name
+           ; config_dir = config_dir ~config ~keeper_name
            ; projected_token_env_names = token_env_names
            ; stored
            ; effective
@@ -500,8 +549,8 @@ let observation_to_yojson observation =
     ]
 ;;
 
-let secure_config_files ~base_path ~keeper_name =
-  let root = config_dir ~base_path ~keeper_name in
+let secure_config_files ~config ~keeper_name =
+  let root = config_dir ~config ~keeper_name in
   try
     match require_directory root with
     | Error _ as error -> error
@@ -519,7 +568,8 @@ let secure_config_files ~base_path ~keeper_name =
          (Unix.error_message error))
 ;;
 
-let stream_login ~base_path ~keeper_name ~hostname ~env ~is_closed ~send_event =
+let stream_login ~config ~keeper_name ~hostname ~env ~is_closed ~send_event =
+  let base_path = config.Workspace.base_path in
   let send event json =
     if is_closed ()
     then raise (Eio.Cancel.Cancelled (Failure "GitHub login response closed"))
@@ -583,10 +633,10 @@ let stream_login ~base_path ~keeper_name ~hostname ~env ~is_closed ~send_event =
        let stderr = Keeper_secret_redaction.redact_text redaction stderr in
        (match status with
         | Unix.WEXITED 0 ->
-          (match secure_config_files ~base_path ~keeper_name with
+          (match secure_config_files ~config ~keeper_name with
            | Error message -> send "error" (`Assoc [ "message", `String message ])
            | Ok () ->
-             (match observe ~base_path ~keeper_name ~hostname with
+             (match observe ~config ~keeper_name ~hostname with
               | Ok observation ->
                 send
                   "complete"
@@ -606,8 +656,8 @@ let stream_login ~base_path ~keeper_name ~hostname ~env ~is_closed ~send_event =
      | exn -> Error (Printexc.to_string exn))
 ;;
 
-let print_observation ~base_path ~keeper_name ~hostname =
-  match observe ~base_path ~keeper_name ~hostname with
+let print_observation ~config ~keeper_name ~hostname =
+  match observe ~config ~keeper_name ~hostname with
   | Error message ->
     prerr_endline message;
     false
@@ -645,8 +695,8 @@ let run_inherited ~env = function
        Unix.WEXITED 127)
 ;;
 
-let run_cli_login ~base_path ~keeper_name ~hostname =
-  match login_env ~base_path ~keeper_name with
+let run_cli_login ~config ~keeper_name ~hostname =
+  match login_env ~config ~keeper_name with
   | Error message ->
     prerr_endline message;
     1
@@ -655,7 +705,7 @@ let run_cli_login ~base_path ~keeper_name ~hostname =
     let secured =
       match status with
       | Unix.WEXITED 0 ->
-        (match secure_config_files ~base_path ~keeper_name with
+        (match secure_config_files ~config ~keeper_name with
          | Ok () -> true
          | Error message ->
            prerr_endline message;
@@ -664,16 +714,16 @@ let run_cli_login ~base_path ~keeper_name ~hostname =
         prerr_endline ("gh auth login failed: " ^ process_exit_text status);
         false
     in
-    let observed = print_observation ~base_path ~keeper_name ~hostname in
+    let observed = print_observation ~config ~keeper_name ~hostname in
     if secured && observed then 0 else 1
 ;;
 
-let run_cli_status ~base_path ~keeper_name ~hostname =
-  if print_observation ~base_path ~keeper_name ~hostname then 0 else 1
+let run_cli_status ~config ~keeper_name ~hostname =
+  if print_observation ~config ~keeper_name ~hostname then 0 else 1
 ;;
 
-let run_cli_logout ~base_path ~keeper_name ~hostname =
-  match login_env ~base_path ~keeper_name with
+let run_cli_logout ~config ~keeper_name ~hostname =
+  match login_env ~config ~keeper_name with
   | Error message ->
     prerr_endline message;
     1
@@ -686,6 +736,6 @@ let run_cli_logout ~base_path ~keeper_name ~hostname =
         prerr_endline ("gh auth logout failed: " ^ process_exit_text status);
         false
     in
-    let observed = print_observation ~base_path ~keeper_name ~hostname in
+    let observed = print_observation ~config ~keeper_name ~hostname in
     if logged_out && observed then 0 else 1
 ;;

@@ -131,7 +131,7 @@ export function KeeperGithubIdentityPanel({
             <p class="mt-1 text-3xs text-slate-500">Docker 이미지의 gh·네트워크 동작을 증명하지 않습니다.</p>
             ${observation.effective.error && html`<p class="mt-1 text-3xs text-red-700">확인 실패: ${observation.effective.error}</p>`}
             ${observation.projected_token_env_names.length > 0 && html`
-              <p class="mt-1 text-3xs text-amber-700">토큰 우선 적용: ${observation.projected_token_env_names.join(', ')}</p>
+              <p class="mt-1 text-3xs text-amber-700">투영된 토큰 변수: ${observation.projected_token_env_names.join(', ')}</p>
             `}
           </div>
         </div>

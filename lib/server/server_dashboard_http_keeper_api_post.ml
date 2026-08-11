@@ -55,7 +55,7 @@ let handle_keeper_github_login_post state req reqd =
       in
       (match
          Keeper_github_identity.login_env
-           ~base_path:config.base_path
+           ~config
            ~keeper_name:name
        with
        | Error message -> respond_error reqd message
@@ -67,7 +67,7 @@ let handle_keeper_github_login_post state req reqd =
            (fun () ->
               match
                 Keeper_github_identity.stream_login
-                  ~base_path:config.base_path
+                  ~config
                   ~keeper_name:name
                   ~hostname
                   ~env

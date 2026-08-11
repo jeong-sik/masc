@@ -1527,7 +1527,7 @@ let handle_keeper_get_subroutes state req request reqd =
         in
         (match
            Keeper_github_identity.observe
-             ~base_path:config.base_path
+             ~config
              ~keeper_name:name
              ~hostname
          with

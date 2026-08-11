@@ -518,7 +518,7 @@ let run_docker_shell_command_with_status_internal
                         | Ok secret_projection ->
                           (match
                              Keeper_github_identity.docker_args_for_tool
-                               ~base_path:config.base_path
+                               ~config
                                ~keeper_name:meta.name
                                ~container_masc_dir:
                                  (Keeper_sandbox_runtime_setup.container_masc_dir

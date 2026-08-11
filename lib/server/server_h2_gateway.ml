@@ -1134,7 +1134,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                    in
                    (match
                       Keeper_github_identity.observe
-                        ~base_path:config.base_path
+                        ~config
                         ~keeper_name
                         ~hostname
                     with
@@ -1211,7 +1211,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                    in
                    (match
                       Keeper_github_identity.login_env
-                        ~base_path:config.base_path
+                        ~config
                         ~keeper_name
                     with
                     | Error message ->
@@ -1250,7 +1250,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                         (fun () ->
                            match
                              Keeper_github_identity.stream_login
-                               ~base_path:config.base_path
+                               ~config
                                ~keeper_name
                                ~hostname
                                ~env

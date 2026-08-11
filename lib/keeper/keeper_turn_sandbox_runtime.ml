@@ -373,7 +373,7 @@ let start_container ?timeout_sec (t : t) =
         | Ok secret_projection ->
          (match
             Keeper_github_identity.docker_args_for_tool
-              ~base_path:t.config.base_path
+              ~config:t.config
               ~keeper_name:t.meta.name
               ~container_masc_dir:
                 (Keeper_sandbox_runtime_setup.container_masc_dir

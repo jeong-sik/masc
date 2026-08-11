@@ -20,15 +20,15 @@ type observation =
   ; checked_at_unix : float
   }
 
-val config_dir : base_path:string -> keeper_name:string -> string
+val config_dir : config:Workspace.config -> keeper_name:string -> string
 val container_config_dir : container_masc_dir:string -> keeper_name:string -> string
-val ensure_config_dir : base_path:string -> keeper_name:string -> (string, string) result
+val ensure_config_dir : config:Workspace.config -> keeper_name:string -> (string, string) result
 val overlay_config_env : config_dir:string -> string array -> string array
 val strip_github_token_env : string array -> string array
 val projected_token_env_names : string array -> string list
 
 val runtime_env :
-  base_path:string -> keeper_name:string -> string array -> (string array, string) result
+  config:Workspace.config -> keeper_name:string -> string array -> (string array, string) result
 
 type tool_identity_state =
   | Unconfigured
@@ -38,13 +38,15 @@ type tool_identity_state =
     state is [Unconfigured]; malformed or unsafe state is a typed error rather
     than being collapsed into absence. *)
 val runtime_env_for_tool :
-  base_path:string ->
+  config:Workspace.config ->
   keeper_name:string ->
   string array ->
-  (string array * tool_identity_state, string) result
+  (string array * tool_identity_state * (unit -> unit), string) result
+(** Local tools receive a per-dispatch copy-on-write snapshot and an explicit
+    cleanup capability. They never receive the operator-owned identity path. *)
 
 val docker_args :
-  base_path:string ->
+  config:Workspace.config ->
   keeper_name:string ->
   container_masc_dir:string ->
   (string list, string) result
@@ -53,17 +55,17 @@ val docker_args :
     mounted read-only; an absent identity shadows its deterministic container
     path with an empty read-only tmpfs. Malformed state remains a typed error. *)
 val docker_args_for_tool :
-  base_path:string ->
+  config:Workspace.config ->
   keeper_name:string ->
   container_masc_dir:string ->
   (string list * tool_identity_state, string) result
 
 val login_argv : hostname:string -> string list
 val logout_argv : hostname:string -> string list
-val login_env : base_path:string -> keeper_name:string -> (string array, string) result
+val login_env : config:Workspace.config -> keeper_name:string -> (string array, string) result
 
 val observe :
-  base_path:string -> keeper_name:string -> hostname:string -> (observation, string) result
+  config:Workspace.config -> keeper_name:string -> hostname:string -> (observation, string) result
 (** [effective] verifies projected credentials with the host process only.
     [effective_probe_scope] prevents callers from presenting it as proof that a
     Docker image contains a usable CLI/network stack. *)
@@ -71,10 +73,10 @@ val observe :
 val auth_result_to_yojson : auth_result -> Yojson.Safe.t
 val observation_to_yojson : observation -> Yojson.Safe.t
 val secure_config_files :
-  base_path:string -> keeper_name:string -> (unit, string) result
+  config:Workspace.config -> keeper_name:string -> (unit, string) result
 
 val stream_login :
-  base_path:string ->
+  config:Workspace.config ->
   keeper_name:string ->
   hostname:string ->
   env:string array ->
@@ -85,6 +87,6 @@ val stream_login :
     the response cancels and reaps the child; a bounded timeout is also
     enforced. The caller must validate Keeper existence before invoking it. *)
 
-val run_cli_login : base_path:string -> keeper_name:string -> hostname:string -> int
-val run_cli_status : base_path:string -> keeper_name:string -> hostname:string -> int
-val run_cli_logout : base_path:string -> keeper_name:string -> hostname:string -> int
+val run_cli_login : config:Workspace.config -> keeper_name:string -> hostname:string -> int
+val run_cli_status : config:Workspace.config -> keeper_name:string -> hostname:string -> int
+val run_cli_logout : config:Workspace.config -> keeper_name:string -> hostname:string -> int

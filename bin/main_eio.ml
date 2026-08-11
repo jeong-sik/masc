@@ -1201,7 +1201,7 @@ let keeper_github_action_cmd name doc run =
       | Ok None ->
         prerr_endline (Printf.sprintf "keeper %S not found" keeper_name);
         1
-      | Ok (Some _) -> run ~base_path ~keeper_name ~hostname
+      | Ok (Some _) -> run ~config ~keeper_name ~hostname
   in
   Cmd.v
     (Cmd.info name ~doc)

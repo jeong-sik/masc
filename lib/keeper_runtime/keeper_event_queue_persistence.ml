@@ -502,35 +502,54 @@ let load_existing_state_result ~base_path ~keeper_name =
             (Printexc.to_string exn)))
 ;;
 
+let read_state_read_only_unlocked ~require_existing owner =
+  match read_primary_unlocked owner with
+  | Error _ as error -> error
+  | Ok (Primary_current state) ->
+    replay_transition_wal_read_only_unlocked owner state
+  | Ok Primary_missing
+    when require_existing && not (durable_state_exists_unlocked owner) ->
+    Error
+      (Printf.sprintf
+         "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
+         (keeper_name_of_owner owner)
+         (snapshot_path_of_owner owner)
+         (transition_wal_path_of_owner owner))
+  | Ok Primary_missing ->
+    replay_transition_wal_read_only_unlocked
+      ~wal_only:true
+      owner
+      State.empty
+;;
+
 let validate_state_read_only_result_with ~require_existing ~base_path ~keeper_name =
   match resolve_owner ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok owner ->
     (try
        Owner_lock.with_durable_lock owner (fun () ->
-         match read_primary_unlocked owner with
-         | Error _ as error -> error
-         | Ok (Primary_current state) ->
-           replay_transition_wal_read_only_unlocked owner state
-         | Ok Primary_missing
-           when require_existing && not (durable_state_exists_unlocked owner) ->
-           Error
-             (Printf.sprintf
-                "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
-                (keeper_name_of_owner owner)
-                (snapshot_path_of_owner owner)
-                (transition_wal_path_of_owner owner))
-         | Ok Primary_missing ->
-           replay_transition_wal_read_only_unlocked
-             ~wal_only:true
-             owner
-             State.empty)
+         read_state_read_only_unlocked ~require_existing owner)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Error
          (Printf.sprintf
             "event queue read-only validation raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let observe_state_read_only_result ~base_path ~keeper_name =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try read_state_read_only_unlocked ~require_existing:false owner with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue lock-free observation raised keeper=%s path=%s: %s"
             (keeper_name_of_owner owner)
             (snapshot_path_of_owner owner)
             (Printexc.to_string exn)))
@@ -598,6 +617,15 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
 
 let load_snapshot_with_errors ~base_path ~keeper_name =
   match load_state_result ~base_path ~keeper_name with
+  | Ok state -> { pending = State.pending state; read_errors = [] }
+  | Error message ->
+    { pending = Keeper_event_queue.empty
+    ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
+    }
+;;
+
+let observe_snapshot_with_errors ~base_path ~keeper_name =
+  match observe_state_read_only_result ~base_path ~keeper_name with
   | Ok state -> { pending = State.pending state; read_errors = [] }
   | Error message ->
     { pending = Keeper_event_queue.empty

@@ -13,6 +13,11 @@ val scheduled_automation_dashboard_json : Workspace.config -> Yojson.Safe.t
     Reads the schedule ledger from disk, so callers on an Eio fiber wrap this
     in [Domain_pool_ref.submit_io_or_inline].
 
+    Keeper queue evidence uses a lock-free, non-compacting durable observer,
+    and reaction evidence is indexed once per Keeper for the bounded request
+    rows. A GET therefore never enters the queue-owner transaction boundary
+    and never rescans one Keeper's complete reaction ledger per row.
+
     A ledger read failure is reported, not hidden: [status] is ["unknown"],
     [counts] / [request_count] / [fsm.active_count] are [null], and
     [schedule_store_read_error] carries the reason. Consumers must render that

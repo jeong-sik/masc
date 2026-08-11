@@ -1006,6 +1006,71 @@ let test_missing_identity_does_not_claim_an_occurrence_identity () =
   check_member_string "identity quarantine reason" "missing_stimulus_id" "reason" reason
 ;;
 
+let test_event_queue_reaction_evidence_batch_indexes_multiple_occurrences () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "batch-evidence-keeper" in
+  let first = schedule_due_stimulus ~schedule_id:"batch-first" () in
+  let second = schedule_due_stimulus ~schedule_id:"batch-second" () in
+  let first_id = Keeper_reaction_ledger.stimulus_id_of_event_queue first in
+  let second_id = Keeper_reaction_ledger.stimulus_id_of_event_queue second in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    first;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name
+    first;
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    second;
+  let batch =
+    match
+      Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+        ~base_path
+        ~keeper_name
+        ~stimulus_ids:[ second_id; first_id; second_id ]
+    with
+    | Ok batch -> batch
+    | Error error ->
+      fail
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+           error)
+  in
+  check (list string) "first-request order with duplicates collapsed"
+    [ second_id; first_id ]
+    (List.map fst batch);
+  let complete stimulus_id =
+    match List.assoc_opt stimulus_id batch with
+    | Some (Keeper_reaction_ledger.Evidence_complete evidence) -> evidence
+    | Some (Keeper_reaction_ledger.Evidence_quarantined _) ->
+      fail "batch evidence unexpectedly quarantined"
+    | None -> fail "requested batch evidence is missing"
+  in
+  let second_evidence = complete second_id in
+  check bool "second stimulus is visible" true second_evidence.stimulus_seen;
+  check bool "second turn has not started" false second_evidence.turn_started_seen;
+  check int "second has one exact row" 1 second_evidence.matched_record_count;
+  let first_evidence = complete first_id in
+  check bool "first stimulus is visible" true first_evidence.stimulus_seen;
+  check bool "first turn start is visible" true first_evidence.turn_started_seen;
+  check int "first has two exact rows" 2 first_evidence.matched_record_count;
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_ids:[ "" ]
+  with
+  | Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id -> ()
+  | Error error ->
+    failf
+      "empty batch identity returned the wrong error: %s"
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+         error)
+  | Ok _ -> fail "empty batch identity was accepted"
+;;
+
 
 (* The post-append fault seam is declared in the .mli as a boundary contract:
    it must exist exactly once as a definition and once as a declaration, so the
@@ -1109,6 +1174,10 @@ let () =
             "reaction_kind string round-trip drift guard"
             `Quick
             test_reaction_kind_string_roundtrip
+        ; test_case
+            "reaction evidence batch indexes multiple occurrences"
+            `Quick
+            test_event_queue_reaction_evidence_batch_indexes_multiple_occurrences
         ; test_case
             "after_ledger_append seam is reachable through the interface"
             `Quick

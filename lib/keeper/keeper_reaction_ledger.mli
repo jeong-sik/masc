@@ -120,6 +120,21 @@ val event_queue_reaction_evidence_result :
     terminals remain distinct typed evidence. Empty query identities and
     storage failures remain typed errors. *)
 
+val event_queue_reaction_evidence_batch_result :
+  base_path:string ->
+  keeper_name:string ->
+  stimulus_ids:string list ->
+  ( (string * event_queue_reaction_evidence_outcome) list
+  , event_queue_reaction_evidence_error )
+  result
+(** Read the complete keeper-local ledger exactly once and build exact
+    evidence for every requested stimulus identity. Duplicate identities are
+    collapsed while preserving first-request order. This is the request-level
+    projection seam for bounded dashboards: rendering N rows for one Keeper
+    performs one ledger scan, not N complete scans. An empty identity rejects
+    the whole batch with {!Evidence_invalid_stimulus_id}; an empty query list
+    returns [Ok []]. *)
+
 val event_queue_turn_started_seen_for_source_result :
   base_path:string ->
   keeper_name:string ->

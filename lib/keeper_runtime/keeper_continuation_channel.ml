@@ -299,6 +299,7 @@ let of_yojson json =
       ~thread_id
       ?reply_to_message_id
       ~user_id
+      ()
   | "slack" ->
     let* () =
       validate_allowed_fields

@@ -237,6 +237,18 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
     let read_error_count = queue_assoc_int "read_error_count" fields in
     let transition_outbox_count = queue_assoc_int "transition_outbox_count" fields in
     let runnable_backlog_count = queue_assoc_int "runnable_backlog_count" fields in
+    let recoverable_backlog_count =
+      queue_assoc_int "recoverable_backlog_count" fields
+    in
+    let retained_disabled_backlog_count =
+      queue_assoc_int "retained_disabled_backlog_count" fields
+    in
+    let paused_dead_backlog_count =
+      queue_assoc_int "paused_dead_backlog_count" fields
+    in
+    let shutdown_fenced_backlog_count =
+      queue_assoc_int "shutdown_fenced_backlog_count" fields
+    in
     let runnable_oldest_age_seconds =
       queue_assoc_float_opt "runnable_oldest_age_seconds" fields
     in
@@ -288,6 +300,22 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
         else reasons)
       |> (fun reasons ->
         if runnable_backlog_count > 0 then "runnable_backlog" :: reasons else reasons)
+      |> (fun reasons ->
+        if recoverable_backlog_count > 0
+        then "recoverable_backlog" :: reasons
+        else reasons)
+      |> (fun reasons ->
+        if retained_disabled_backlog_count > 0
+        then "retained_disabled_backlog" :: reasons
+        else reasons)
+      |> (fun reasons ->
+        if paused_dead_backlog_count > 0
+        then "paused_dead_backlog" :: reasons
+        else reasons)
+      |> (fun reasons ->
+        if shutdown_fenced_backlog_count > 0
+        then "shutdown_fenced_backlog" :: reasons
+        else reasons)
       |> (fun reasons ->
         if backlog_stale then "runnable_backlog_stale" :: reasons else reasons)
       |> List.rev

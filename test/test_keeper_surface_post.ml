@@ -238,6 +238,40 @@ let test_set_blocks_ignores_other_targets () =
     (SP.To_discord { channel_id = "D1" })
     (SP.set_blocks (SP.To_discord { channel_id = "D1" }) (Some [ block ]))
 
+let test_terminal_receipt_requires_exact_supported_route () =
+  let discord ?reply_to_message_id channel_id =
+    match
+      Keeper_continuation_channel.discord
+        ~guild_id:(Some "guild")
+        ~channel_id
+        ~parent_channel_id:None
+        ~thread_id:None
+        ?reply_to_message_id
+        ~user_id:"user"
+        ()
+    with
+    | Ok channel -> channel
+    | Error message -> fail message
+  in
+  check bool "same direct Discord channel" true
+    (SP.matches_continuation_route
+       (SP.To_discord { channel_id = "D1" })
+       (discord "D1"));
+  check bool "different Discord channel" false
+    (SP.matches_continuation_route
+       (SP.To_discord { channel_id = "D2" })
+       (discord "D1"));
+  check bool "Discord post does not satisfy exact reply" false
+    (SP.matches_continuation_route
+       (SP.To_discord { channel_id = "D1" })
+       (discord ~reply_to_message_id:"message-1" "D1"));
+  check bool "keeper-global dashboard post has no exact thread receipt" false
+    (SP.matches_continuation_route
+       SP.To_dashboard
+       (match Keeper_continuation_channel.dashboard ~thread_id:"thread-1" with
+        | Ok channel -> channel
+        | Error message -> fail message))
+
 (* ── append_assistant_message ───────────────────────────────────── *)
 
 let with_temp_base_dir f =
@@ -323,6 +357,11 @@ let () =
             test_set_blocks_attaches_to_slack;
           test_case "ignores non-slack targets" `Quick
             test_set_blocks_ignores_other_targets;
+        ] );
+      ( "terminal receipt",
+        [
+          test_case "requires exact supported route" `Quick
+            test_terminal_receipt_requires_exact_supported_route;
         ] );
       ( "assistant append",
         [

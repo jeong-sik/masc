@@ -4,7 +4,7 @@ let decision = function
     Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting)
   | Keeper_tools_agent_core.External_effect_deferred ->
     Ok (Runtime_agent.Yield Runtime_agent.External_effect_deferred)
-  | Keeper_tools_agent_core.Terminal_effect_completed ->
+  | Keeper_tools_agent_core.Terminal_effect_completed _ ->
     Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)
   | Keeper_tools_agent_core.Terminal_effect_failed
       { failure_class; effect_disposition; diagnostic } ->

@@ -159,7 +159,7 @@ let test_schedule_delivery_requirement_is_persisted_policy () =
     ; result_delivery = None
     }
   in
-  let stimulus wake : Keeper_event_queue.stimulus =
+  let stimulus (wake : Keeper_event_queue.scheduled_wake) : Keeper_event_queue.stimulus =
     { post_id = wake.occurrence_id
     ; urgency = Keeper_event_queue.Normal
     ; arrived_at = 100.0

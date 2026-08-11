@@ -74,7 +74,7 @@ let test_retired_keys_have_no_active_mapping () =
 
 let test_active_toml_rows_prove_a_consumer () =
   Keeper_runtime_setting_registry.active_toml
-  |> List.iter (fun row ->
+  |> List.iter (fun (row : Keeper_runtime_setting_registry.setting) ->
     check bool (row.env_name ^ " has consumer proof") true (row.consumers <> []))
 ;;
 

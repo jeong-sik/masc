@@ -191,7 +191,8 @@ let test_is_routable () =
          ~channel_id:"c"
          ~parent_channel_id:None
          ~thread_id:None
-         ~user_id:"u"));
+         ~user_id:"u"
+         ()));
   assert (
     is_routable
       (slack_channel ~team_id:None ~channel_id:"c" ~thread_ts:None ~user_id:"u"));
@@ -207,7 +208,8 @@ let test_kind_label () =
             ~channel_id:"c"
             ~parent_channel_id:None
             ~thread_id:None
-            ~user_id:"u"))
+            ~user_id:"u"
+            ()))
       "discord");
   assert (
     String.equal
@@ -226,13 +228,15 @@ let test_same_route () =
          ~channel_id:"c"
          ~parent_channel_id:(Some "p")
          ~thread_id:(Some "t")
-         ~user_id:"u")
+         ~user_id:"u"
+         ())
       (discord_channel
          ~guild_id:(Some "g")
          ~channel_id:"c"
          ~parent_channel_id:(Some "p")
          ~thread_id:(Some "t")
-         ~user_id:"u"));
+         ~user_id:"u"
+         ()));
   (* differing coordinate -> different route *)
   assert (not (same_route (dashboard_channel "t1") (dashboard_channel "t2")));
   assert (
@@ -243,13 +247,15 @@ let test_same_route () =
             ~channel_id:"c"
             ~parent_channel_id:(Some "p")
             ~thread_id:(Some "t")
-            ~user_id:"u")
+            ~user_id:"u"
+            ())
          (discord_channel
             ~guild_id:(Some "g")
             ~channel_id:"c"
             ~parent_channel_id:(Some "p")
             ~thread_id:(Some "t2")
-            ~user_id:"u")));
+            ~user_id:"u"
+            ())));
   assert (
     not
       (same_route
@@ -259,14 +265,16 @@ let test_same_route () =
             ~parent_channel_id:(Some "p")
             ~thread_id:(Some "t")
             ~reply_to_message_id:"message-1"
-            ~user_id:"u")
+            ~user_id:"u"
+            ())
          (discord_channel
             ~guild_id:(Some "g")
             ~channel_id:"c"
             ~parent_channel_id:(Some "p")
             ~thread_id:(Some "t")
             ~reply_to_message_id:"message-2"
-            ~user_id:"u")));
+            ~user_id:"u"
+            ())));
   (* different constructor -> different route *)
   assert (
     not
@@ -284,6 +292,7 @@ let test_discord_thread_parent_preserves_thread_target () =
       ~parent_channel_id:None
       ~thread_id:None
       ~user_id:"U1"
+      ()
   in
   match discord_thread_parent channel ~parent_channel_id:"P1" with
   | Discord

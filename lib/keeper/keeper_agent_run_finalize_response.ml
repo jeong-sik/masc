@@ -38,6 +38,7 @@ let finalize
     ~history_assistant_source
     ~raw_response_text
     ~turn_outcome
+    ~terminal_effect_receipt
     ~capture_replay_response
     ?continuation_channel
     ?continuation_delivery_origin
@@ -256,6 +257,7 @@ let finalize
       { response_text
       ; turn_outcome
       ; continuation_delivery_intent
+      ; terminal_effect_receipt
       ; model_used = model
       ; runtime_id = runtime_id_string
       ; max_context

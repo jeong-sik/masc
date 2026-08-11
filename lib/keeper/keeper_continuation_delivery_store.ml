@@ -187,7 +187,7 @@ let state_transition_allowed
     false
 ;;
 
-let persist ~config intent =
+let persist ~config (intent : Keeper_continuation_delivery_intent.t) =
   let* keeper_name = validate_keeper_name intent.keeper_name in
   let* base_path = canonical_base_path config in
   let path = record_path ~base_path keeper_name intent.intent_id in

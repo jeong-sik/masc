@@ -26,7 +26,7 @@ let terminal_externalization_failure
       ({ message; _ } : Tool_bridge.externalization_error)
   =
   match state with
-  | Keeper_tools_agent_core.Terminal_effect_completed ->
+  | Keeper_tools_agent_core.Terminal_effect_completed _ ->
     Some
       { Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure
       ; effect_disposition = Tool_result.Proven_post_effect
@@ -165,7 +165,7 @@ let make_tool_bundle_for_descriptors
     let rec transition () =
       match Atomic.get terminal_effect_state with
       | External_effect_deferred
-      | Terminal_effect_completed
+      | Terminal_effect_completed _
       | Terminal_effect_failed _ ->
         ()
       | (Terminal_effect_open | Deferred_tool_result) as current ->
@@ -179,10 +179,10 @@ let make_tool_bundle_for_descriptors
     in
     transition ()
   in
-  let mark_terminal_effect_completed () =
+  let mark_terminal_effect_completed receipt =
     let rec transition () =
       match Atomic.get terminal_effect_state with
-      | Terminal_effect_completed | Terminal_effect_failed _ -> ()
+      | Terminal_effect_completed _ | Terminal_effect_failed _ -> ()
       | ( Terminal_effect_open
         | Deferred_tool_result
         | External_effect_deferred ) as current ->
@@ -191,7 +191,7 @@ let make_tool_bundle_for_descriptors
             (Atomic.compare_and_set
                terminal_effect_state
                current
-               Terminal_effect_completed)
+               (Terminal_effect_completed receipt))
         then transition ()
     in
     transition ()
@@ -203,7 +203,7 @@ let make_tool_bundle_for_descriptors
       | ( Terminal_effect_open
         | Deferred_tool_result
         | External_effect_deferred
-        | Terminal_effect_completed ) as current ->
+        | Terminal_effect_completed _ ) as current ->
         if
           not
             (Atomic.compare_and_set
@@ -234,7 +234,16 @@ let make_tool_bundle_for_descriptors
          let on_completed, on_failed, on_externalization_error =
            match completion_boundary_of_runtime_handler descriptor.runtime_handler with
            | Terminal_effect ->
-             ( Some mark_terminal_effect_completed
+             ( Some
+                 (function
+                   | Some receipt -> mark_terminal_effect_completed receipt
+                   | None ->
+                     mark_terminal_effect_failed
+                       { failure_class = Tool_result.Runtime_failure
+                       ; effect_disposition = Tool_result.Effect_outcome_unknown
+                       ; diagnostic =
+                           "terminal surface post completed without a typed target receipt"
+                       })
              , Some mark_terminal_effect_failed
              , Some mark_completed_terminal_externalization_failed )
            | Continue_after_success -> None, None, None

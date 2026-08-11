@@ -82,6 +82,7 @@ type run_result =
   ; turn_outcome : Keeper_turn_outcome.t
   ; continuation_delivery_intent :
       Keeper_continuation_delivery_intent.t option
+  ; terminal_effect_receipt : Keeper_tool_execution.terminal_effect_receipt option
   ; model_used : string
   ; runtime_id : string
   ; max_context : int

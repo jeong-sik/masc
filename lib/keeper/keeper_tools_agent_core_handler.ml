@@ -44,11 +44,14 @@ let make_keeper_tool_handler
   let observe_terminal_execution_result
         ~failure_effect_disposition
         ~deferred_kind
+        (execution : Keeper_tools_agent_core_handler_exec.execution_result)
         (result : Tool_result.result)
     =
     (match result with
      | Tool_result.Completed _ ->
-       Option.iter (fun completed -> completed ()) on_completed
+       Option.iter
+         (fun completed -> completed execution.terminal_effect_receipt)
+         on_completed
      | Tool_result.Deferred _ ->
        (match deferred_kind with
         | Some Keeper_tool_execution.External_effect_deferred ->
@@ -178,6 +181,7 @@ let make_keeper_tool_handler
                  ~failure_effect_disposition:
                    execution.failure_effect_disposition
                  ~deferred_kind:execution.deferred_kind
+                 execution
           in
           run_with_current_eio_context ?clock:current_clock ()
 ;;

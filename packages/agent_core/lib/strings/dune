@@ -5,7 +5,7 @@
 ; private copies instead. This library sits below all of them.
 ;
 ; The module is named Agent_core_strings rather than String_util because both
-; this library and masc.string_util are (wrapped false); two modules of the
+; this library and the coordinator String_util library are (wrapped false); two modules of the
 ; same name would collide when linked into one executable.
 ;
 ; Keep this library dependency-free. A dependency added here is inherited by

@@ -228,36 +228,37 @@ let read_file_if_exists path =
     Automatically extracts variables if not provided. *)
 (** {1 Template Rendering} *)
 
+(* Total by construction: [template_variable_regex] wraps group 1 in every
+   match, so [Re.Group.get] cannot raise here, and the list operations are
+   pure. The previous blanket [try] could only fold asynchronous exceptions
+   into a stringly error. *)
 let render_template ?template_variables ~template ~vars () : (string, string) result =
-  try
-    let vars = List.map (fun (name, value) -> (String.trim name, value)) vars in
-    let missing =
-      let effective_variables = extract_variables template in
-      let declared_variables =
-        match template_variables with
-        | Some variables ->
-            variables
-            |> List.map String.trim
-            |> List.filter (fun name -> name <> "")
-        | None -> []
-      in
-      List.sort_uniq String.compare
-        (effective_variables @ declared_variables)
-      |> List.filter (fun name -> not (List.mem_assoc name vars))
+  let vars = List.map (fun (name, value) -> (String.trim name, value)) vars in
+  let missing =
+    let effective_variables = extract_variables template in
+    let declared_variables =
+      match template_variables with
+      | Some variables ->
+          variables
+          |> List.map String.trim
+          |> List.filter (fun name -> name <> "")
+      | None -> []
     in
-    if missing <> [] then
-      Error
-        (Printf.sprintf "Unresolved variables in template: %s"
-           (String.concat ", " missing))
-    else
-      Ok
-        (Re.replace template_variable_regex template ~f:(fun group ->
-             let name = Re.Group.get group 1 |> String.trim in
-             match List.assoc_opt name vars with
-             | Some value -> value
-             | None -> Re.Group.get group 0))
-  with e ->
-    Error (Printf.sprintf "Render error: %s" (Printexc.to_string e))
+    List.sort_uniq String.compare
+      (effective_variables @ declared_variables)
+    |> List.filter (fun name -> not (List.mem_assoc name vars))
+  in
+  if missing <> [] then
+    Error
+      (Printf.sprintf "Unresolved variables in template: %s"
+         (String.concat ", " missing))
+  else
+    Ok
+      (Re.replace template_variable_regex template ~f:(fun group ->
+           let name = Re.Group.get group 1 |> String.trim in
+           match List.assoc_opt name vars with
+           | Some value -> value
+           | None -> Re.Group.get group 0))
 
 (** {1 Utility Functions} *)
 

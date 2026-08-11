@@ -58,4 +58,12 @@ module For_testing : sig
     stdout:string ->
     stderr:string ->
     string * string * string
+
+  val redact_execute_output_with_additional_secret_files :
+    additional_secret_files:string list ->
+    base_path:string ->
+    keeper_name:string ->
+    stdout:string ->
+    stderr:string ->
+    string * string * string
 end

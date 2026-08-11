@@ -144,33 +144,10 @@ let test_attributed_empty_completion_is_auto_recoverable () =
     false
     (EC.is_server_rejected_parse_error err)
 
-(* Defensive shape: at pinned Agent Core 5851df2e no production code surfaces an
-   all-empty completion as a [ParseError] — the marker text is rendered only
-   by backend_openai_parse [parse_error_to_string], whose callers are
-   test-only.  This test pins the defensive classification in [is_empty_-
-   completion_error] so a future Agent Core that promotes this shape keeps it both
-   auto-recoverable and budget-bounded. *)
-let test_parse_error_empty_completion_is_auto_recoverable () =
-  let err =
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ParseError
-         { detail =
-             "openai_parse: empty completion (no thinking, text, or tool \
-              calls; model=glm-5, stop_reason=end_turn)"
-         })
-  in
-  Alcotest.(check bool)
-    "parse-error empty completion is an empty completion error"
-    true
-    (EC.is_empty_completion_error err);
-  Alcotest.(check bool)
-    "parse-error empty completion is still a server parse rejection"
-    true
-    (EC.is_server_rejected_parse_error err);
-  Alcotest.(check bool)
-    "parse-error empty completion is auto-recoverable"
-    true
-    (EC.is_auto_recoverable_turn_error err)
+(* The pinning test for a ParseError-carried empty completion was removed
+   with the guard it pinned: no production producer of that shape exists at
+   the pinned Agent Core, and locking a message substring in place is the
+   drift-guard anti-pattern RFC-0371 §5.4 removes. *)
 
 (* AGENT_CORE surfaces an empty completion with an unmodeled stop_reason as a
    non-retryable [InvalidRequest].  It must NOT be promoted to the
@@ -312,8 +289,6 @@ let () =
           test_provider_wire_error_is_not_rate_limit_or_request_parse;
         Alcotest.test_case "attributed empty completion is auto-recoverable" `Quick
           test_attributed_empty_completion_is_auto_recoverable;
-        Alcotest.test_case "parse-error empty completion is auto-recoverable" `Quick
-          test_parse_error_empty_completion_is_auto_recoverable;
         Alcotest.test_case
           "unmodeled stop_reason InvalidRequest is not empty completion" `Quick
           test_unmodeled_stop_reason_invalid_request_is_not_empty_completion;

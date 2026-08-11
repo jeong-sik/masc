@@ -37,6 +37,14 @@ module Make (E : Error) : sig
 
   val required_bool :
     string -> string -> (string * Yojson.Safe.t) list -> (bool, E.t) result
+
+  val invoke_state_callback :
+    stage:string -> (unit -> (unit, string) result) -> (unit, E.t) result
+  (** Run a caller-supplied state callback and convert its failure into a
+      protocol error at [stage]. A raised exception becomes the same error,
+      except for [Eio.Cancel.Cancelled] and [Eio.Time.Timeout], which are
+      re-raised so cancellation and deadlines stay control flow rather than
+      turning into a reported protocol failure. *)
 end
 
 val bounded_tail : limit:int -> string -> string -> string

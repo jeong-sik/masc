@@ -68,12 +68,12 @@ type turn_result =
   ; usage : turn_usage option
   }
 
-type dynamic_tool_result =
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
   }
 
-type dynamic_tool =
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
@@ -106,16 +106,7 @@ let emit_stream_event on_stream_event event =
          (Printexc.to_string exn))
 ;;
 
-let dynamic_tool_bytes tools =
-  List.fold_left
-    (fun acc tool ->
-       acc
-       + String.length tool.name
-       + String.length tool.description
-       + String.length (Yojson.Safe.to_string tool.input_schema))
-    0
-    tools
-;;
+let dynamic_tool_bytes = Runtime_official_client_tool.dynamic_tool_bytes
 
 type error =
   | Invalid_config of string
@@ -547,17 +538,6 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~request_id
     protocol_error
       "initialize"
       (Printf.sprintf "unexpected message type %S before control response" other)
-;;
-
-let invoke_state_callback ~stage callback =
-  try
-    match callback () with
-    | Ok () -> Ok ()
-    | Error detail -> protocol_error stage detail
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Eio.Time.Timeout as exn -> raise exn
-  | exn -> protocol_error stage (Printexc.to_string exn)
 ;;
 
 let user_message prompt =

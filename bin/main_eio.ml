@@ -16,10 +16,12 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Workspace = Masc.Workspace
 module Workspace_utils = Workspace_utils
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_config = Masc.Keeper_config
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_memory = Masc.Keeper_memory
 module Keeper_execution = Masc.Keeper_execution
 module Keeper_runtime = Masc.Keeper_runtime
+module Keeper_github_identity = Masc.Keeper_github_identity
 module Tool_operator = Masc.Tool_operator
 module Operator_control = Operator_control
 module Dashboard_execution = Dashboard_execution
@@ -1176,6 +1178,62 @@ let schedule_prune_cmd =
   let info = Cmd.info "schedule-prune" ~doc in
   Cmd.v info Term.(const schedule_prune_cmd_exit $ base_path)
 
+let keeper_github_keeper_arg =
+  let doc = "Keeper name whose GitHub CLI identity is managed." in
+  Arg.(required & opt (some string) None & info [ "keeper" ] ~docv:"NAME" ~doc)
+
+let keeper_github_hostname_arg =
+  let doc = "GitHub hostname." in
+  Arg.(value & opt string "github.com" & info [ "hostname" ] ~docv:"HOST" ~doc)
+
+let keeper_github_action_cmd name doc run =
+  let invoke base_path keeper_name hostname =
+    let config = Workspace_utils.default_config base_path in
+    if not (Keeper_config.validate_name keeper_name)
+    then (
+      prerr_endline (Printf.sprintf "invalid keeper name: %s" keeper_name);
+      1)
+    else
+      match Keeper_meta_store.read_meta config keeper_name with
+      | Error message ->
+        prerr_endline message;
+        1
+      | Ok None ->
+        prerr_endline (Printf.sprintf "keeper %S not found" keeper_name);
+        1
+      | Ok (Some _) -> run ~config ~keeper_name ~hostname
+  in
+  Cmd.v
+    (Cmd.info name ~doc)
+    Term.(
+      const invoke
+      $ base_path
+      $ keeper_github_keeper_arg
+      $ keeper_github_hostname_arg)
+
+let keeper_github_cmd =
+  let login =
+    keeper_github_action_cmd
+      "login"
+      "Log a Keeper into GitHub CLI."
+      Keeper_github_identity.run_cli_login
+  in
+  let status =
+    keeper_github_action_cmd
+      "status"
+      "Observe stored and effective Keeper GitHub identities."
+      Keeper_github_identity.run_cli_status
+  in
+  let logout =
+    keeper_github_action_cmd
+      "logout"
+      "Remove a Keeper GitHub CLI login."
+      Keeper_github_identity.run_cli_logout
+  in
+  Cmd.group
+    (Cmd.info "keeper-github" ~doc:"Manage Keeper-specific GitHub CLI identity.")
+    [ login; status; logout ]
+
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
      main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
@@ -1203,6 +1261,7 @@ let cmd =
     ; runtime_default_set_cmd
     ; runtime_wizard_catalog_cmd
     ; schedule_prune_cmd
+    ; keeper_github_cmd
     ]
 
 let () =

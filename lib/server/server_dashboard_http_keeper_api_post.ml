@@ -20,6 +20,73 @@ let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
 let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
   Http.Response.json_value ?request ~status (error_json ?ok message) reqd
 
+let github_login_stream_headers origin =
+  Httpun.Headers.of_list
+    ([ "content-type", "text/event-stream"
+     ; "cache-control", "no-cache"
+     ; "connection", "close"
+     ; "x-accel-buffering", "no"
+     ]
+     @ Server_auth.cors_headers origin)
+;;
+
+let github_login_stream_send writer event json =
+  Httpun.Body.Writer.write_string
+    writer
+    (Printf.sprintf "event: %s\ndata: %s\n\n" event (Yojson.Safe.to_string json))
+;;
+
+let handle_keeper_github_login_post state req reqd =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_suffix req_path keeper_suffix_github_login in
+  let config = Mcp_server.workspace_config state in
+  if name = "" then respond_error reqd "keeper name is required"
+  else if not (Keeper_config.validate_name name) then
+    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
+  else
+    match Keeper_meta_store.read_meta config name with
+    | Error message -> respond_error ~status:`Internal_server_error reqd message
+    | Ok None ->
+      respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
+    | Ok (Some _) ->
+      let hostname =
+        match Server_utils.query_param req "hostname" with
+        | Some hostname -> hostname
+        | None -> "github.com"
+      in
+      (match
+         Keeper_github_identity.login_env
+           ~config
+           ~keeper_name:name
+       with
+       | Error message -> respond_error reqd message
+       | Ok env ->
+         let headers =
+           github_login_stream_headers (Server_auth.get_origin req)
+         in
+         let response = Httpun.Response.create ~headers `OK in
+         let writer = Httpun.Reqd.respond_with_streaming reqd response in
+         Fun.protect
+           ~finally:(fun () -> Httpun.Body.Writer.close writer)
+           (fun () ->
+              match
+                Keeper_github_identity.stream_login
+                  ~config
+                  ~keeper_name:name
+                  ~hostname
+                  ~env
+                  ~is_closed:(fun () -> Httpun.Body.Writer.is_closed writer)
+                  ~send_event:(github_login_stream_send writer)
+              with
+              | Ok () -> ()
+              | Error message when not (Httpun.Body.Writer.is_closed writer) ->
+                github_login_stream_send
+                  writer
+                  "error"
+                  (`Assoc [ "message", `String message ])
+              | Error _ -> ()))
+;;
+
 (* The rubric and the output sections are the operator's, not this handler's:
    they live in config/prompts/judge.catchup.md next to the two other judge
    prompts, so all three are read and overridden in one place. *)
@@ -1116,6 +1183,8 @@ let parse_bulk_directive_json json =
   | None -> Error "missing \"action\" field"
 
 module For_testing = struct
+  let github_login_stream_headers = github_login_stream_headers
+
   let parse_resume_request json =
     match parse_keeper_directive_json json with
     | Ok (Resume_owner request) ->

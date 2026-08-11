@@ -75,7 +75,7 @@ let test_command_targets_one_host_without_token () =
      ; "--json"
      ; "hosts"
     |]
-    (Gh_auth_status.command_argv ~hostname:"ghe.example.com")
+    (Gh_auth_status.command_argv ~hostname:"  GHE.Example.COM ")
 ;;
 
 let test_command_rejects_empty_hostname () =
@@ -123,23 +123,28 @@ let test_actual_cli_json_decodes () =
 ;;
 
 let test_relative_config_and_documented_environment_sources () =
-  let config_json =
-    document
-      [ ( "github.com"
-        , `List
-            [ replace_token_source "hosts.yml" (keyring_entry ()) ] ) ]
+  let config_sources =
+    [ "hosts.yml"; Filename.concat (Filename.get_temp_dir_name ()) "hosts.yml" ]
   in
-  let parsed = Gh_auth_status.parse config_json in
-  check (option string) "bare hosts.yml schema" None parsed.schema_error;
-  (match parsed.entries with
-   | [ observed ] ->
-     (match observed.source with
-      | Gh_auth_status.Config_file "hosts.yml" -> ()
-      | Gh_auth_status.Config_file other ->
-        failf "unexpected config source %s" other
-      | Gh_auth_status.Keyring | Gh_auth_status.Environment _ ->
-        fail "bare hosts.yml was not classified as a config source")
-   | entries -> failf "expected one entry, got %d" (List.length entries));
+  List.iter
+    (fun config_source ->
+       let config_json =
+         document
+           [ ( "github.com"
+             , `List
+                 [ replace_token_source config_source (keyring_entry ()) ] ) ]
+       in
+       let parsed = Gh_auth_status.parse config_json in
+       check (option string) "config source schema" None parsed.schema_error;
+       match parsed.entries with
+       | [ observed ] ->
+         (match observed.source with
+          | Gh_auth_status.Config_file observed_source ->
+            check string "config source identity" config_source observed_source
+          | Gh_auth_status.Keyring | Gh_auth_status.Environment _ ->
+            fail "hosts.yml was not classified as a config source")
+       | entries -> failf "expected one entry, got %d" (List.length entries))
+    config_sources;
   List.iter
     (fun token_source ->
        let json =
@@ -167,7 +172,7 @@ let test_environment_shadows_stored_account_on_same_host () =
       ]
   in
   let parsed = Gh_auth_status.parse json in
-  check string "same-host shadow" "shadowed" (verdict parsed "github.com")
+  check string "same-host shadow" "shadowed" (verdict parsed " GITHUB.COM ")
 ;;
 
 let test_hosts_are_isolated () =
@@ -282,6 +287,13 @@ let test_schema_drift_is_unknown () =
              then name, `String "NOT_DOCUMENTED_TOKEN"
              else name, value)
           valid_fields )
+    ; ( "relative path with hosts.yml suffix"
+      , List.map
+          (fun (name, value) ->
+             if String.equal name "tokenSource"
+             then name, `String "VAULT_TOKEN/hosts.yml"
+             else name, value)
+          valid_fields )
     ; "token exposure", ("token", `String "must-not-be-ingested") :: valid_fields
     ]
 ;;
@@ -325,6 +337,7 @@ let () =
             "relative config and documented environment sources"
             `Quick
             test_relative_config_and_documented_environment_sources
+        ; test_case
             "same-host environment shadows stored account"
             `Quick
             test_environment_shadows_stored_account_on_same_host

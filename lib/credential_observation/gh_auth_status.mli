@@ -17,11 +17,10 @@ type outcome =
   | Login_failed
   | Timed_out
 
-type entry =
+type entry = private
   { outcome : outcome
   ; host : string
   ; account : string option
-  ; source_label : string
   ; source : token_source
   ; active : bool
   ; scopes : string list option
@@ -35,14 +34,15 @@ type verdict =
   | Shadowed
   | Unknown
 
-type t =
+type t = private
   { entries : entry list
   ; schema_error : string option
   }
 
 val command_argv : hostname:string -> string array
-(** Exact token-free command for one target host. Raises [Invalid_argument]
-    when the hostname is empty after trimming. *)
+(** Exact token-free command for one normalized target host. Surrounding
+    whitespace is removed and ASCII hostname case is canonicalized. Raises
+    [Invalid_argument] when the resulting hostname is empty. *)
 
 val parse : string -> t
 (** Decode the closed JSON schema. Invalid JSON, duplicate/unknown fields,

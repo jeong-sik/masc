@@ -12,7 +12,6 @@ type entry =
   { outcome : outcome
   ; host : string
   ; account : string option
-  ; source_label : string
   ; source : token_source
   ; active : bool
   ; scopes : string list option
@@ -49,11 +48,16 @@ let json_kind = function
   | `List _ -> "array"
 ;;
 
+let normalize_target_hostname hostname =
+  match String.trim hostname with
+  | "" -> None
+  | hostname -> Some (String.lowercase_ascii hostname)
+;;
+
 let command_argv ~hostname =
-  let hostname = String.trim hostname in
-  if String.equal hostname ""
-  then invalid_arg "gh auth status requires a non-empty hostname"
-  else
+  match normalize_target_hostname hostname with
+  | None -> invalid_arg "gh auth status requires a non-empty hostname"
+  | Some hostname ->
     [| "gh"; "auth"; "status"; "--hostname"; hostname; "--json"; "hosts" |]
 ;;
 
@@ -170,11 +174,18 @@ let source_of_label label =
   then Ok (Environment label)
   else if
     String.equal label "hosts.yml"
-    ||
-    String.ends_with ~suffix:"/hosts.yml" label
-    || String.ends_with ~suffix:"\\hosts.yml" label
-  then Ok (Config_file label)
+    || ((not (Filename.is_relative label))
+        && String.equal (Filename.basename label) "hosts.yml")
+  then
+    Ok (Config_file label)
   else Error "unknown gh token source label"
+;;
+
+let observed_hostname context hostname =
+  let trimmed = String.trim hostname in
+  if String.equal trimmed "" || not (String.equal trimmed hostname)
+  then Error (context ^ " must be a non-empty hostname without surrounding space")
+  else Ok (String.lowercase_ascii hostname)
 ;;
 
 let outcome_of_state = function
@@ -203,9 +214,11 @@ let parse_entry ~map_host ~index json =
   let* state = string_field context "state" fields in
   let* outcome = outcome_of_state state in
   let* active = bool_field context "active" fields in
-  let* host = string_field context "host" fields in
+  let* host_raw = string_field context "host" fields in
+  let* host = observed_hostname (context ^ ".host") host_raw in
+  let* map_host = observed_hostname (context ^ " map key") map_host in
   let* () =
-    if String.equal (String.lowercase_ascii host) (String.lowercase_ascii map_host)
+    if String.equal host map_host
     then Ok ()
     else
       Error (context ^ ".host does not match its map key")
@@ -228,7 +241,6 @@ let parse_entry ~map_host ~index json =
     { outcome
     ; host
     ; account = account_of_login login
-    ; source_label
     ; source
     ; active
     ; scopes = scopes_of_header scopes
@@ -287,23 +299,23 @@ let verdict_for_host parsed ~hostname =
   match parsed.schema_error with
   | Some _ -> Unknown
   | None ->
-    let hostname = String.lowercase_ascii hostname in
-    let entries =
-      List.filter
-        (fun entry -> String.equal (String.lowercase_ascii entry.host) hostname)
-        parsed.entries
-    in
-    (match List.filter (fun entry -> entry.active) entries with
-     | [] when entries = [] -> Unauthenticated
-     | [ active ] ->
-       if
-         is_environment active.source
-         && List.exists (fun entry -> not (is_environment entry.source)) entries
-       then Shadowed
-       else
-         (match active.outcome with
-          | Logged_in -> Authenticated
-          | Login_failed -> Unauthenticated
-          | Timed_out -> Unknown)
-     | [] | _ :: _ :: _ -> Unknown)
+    (match normalize_target_hostname hostname with
+     | None -> Unknown
+     | Some hostname ->
+       let entries =
+         List.filter (fun entry -> String.equal entry.host hostname) parsed.entries
+       in
+       (match List.filter (fun entry -> entry.active) entries with
+        | [] when entries = [] -> Unauthenticated
+        | [ active ] ->
+          if
+            is_environment active.source
+            && List.exists (fun entry -> not (is_environment entry.source)) entries
+          then Shadowed
+          else
+            (match active.outcome with
+             | Logged_in -> Authenticated
+             | Login_failed -> Unauthenticated
+             | Timed_out -> Unknown)
+        | [] | _ :: _ :: _ -> Unknown))
 ;;

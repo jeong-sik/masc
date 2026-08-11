@@ -17,4 +17,4 @@
  (modules gh_auth_status)
  (flags
   (:standard -w +4 -w +33))
- (libraries masc_core yojson))
+ (libraries yojson))

@@ -31,6 +31,15 @@ let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 8192
 let max_wire_line_bytes = 8 * 1024 * 1024
 
+(* [--print-timeout] is a wall-clock deadline owned by agy, not an idle
+   deadline. It ended a live turn after 9.45s despite an agent response, a
+   completed 4.25s tool, and a checkpoint inside a 10s window (agy 1.1.12,
+   2026-08-11). MASC owns liveness below by timing each JSONL read, so the CLI
+   deadline must be non-authoritative. This is Go's maximum time.Duration,
+   accepted by the installed CLI; it is finite and therefore keeps argv strict
+   without imposing a practical wall-clock ceiling. *)
+let cli_non_authoritative_timeout = "2562047h47m16.854775807s"
+
 let default_config ~cwd ~model =
   { cli_path = "agy"
   ; cwd
@@ -122,7 +131,7 @@ let error_to_string = function
   | State_callback_failed detail -> "Antigravity conversation state callback failed: " ^ detail
   | Turn_failed detail -> "Antigravity turn failed: " ^ detail
   | Process_exited detail -> "Antigravity CLI exited before completion: " ^ detail
-  | Timeout seconds -> Printf.sprintf "Antigravity turn timed out after %.3fs" seconds
+  | Timeout seconds -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
 ;;
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
@@ -463,10 +472,6 @@ let official_client_environment ?home_dir () =
   | Some home_dir -> Array.of_list (("HOME=" ^ home_dir) :: inherited)
 ;;
 
-let duration_argument seconds = Printf.sprintf "%.3fs" seconds
-
-let cli_timeout_s timeout_s = max 0.001 (timeout_s *. 0.95)
-
 let argv config ~conversation_mode =
   let base =
     [ config.cli_path
@@ -479,7 +484,7 @@ let argv config ~conversation_mode =
     ; "--add-dir"
     ; config.cwd
     ; "--print-timeout"
-    ; duration_argument (cli_timeout_s config.timeout_s)
+    ; cli_non_authoritative_timeout
     ]
   in
   let with_optional flag value values =
@@ -700,7 +705,10 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
     let state = ref initial_protocol_state in
     (try
        while true do
-         let line = Eio.Buf_read.line reader in
+         let line =
+           Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+             Eio.Buf_read.line reader)
+         in
          match parse_wire_line line with
          | Error error -> abort_with_runtime_error error
          | Ok event ->
@@ -722,6 +730,7 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
        signal_spawned_process proc stdin_w;
        process_settled := true;
        raise exn
+     | Eio.Time.Timeout -> abort_with_runtime_error (Timeout config.timeout_s)
      | Runtime_error _ as exn -> raise exn
      | exn ->
        abort_with_runtime_error
@@ -747,17 +756,16 @@ let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
   let run_result =
     try
       Ok
-        (Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
-           run_spawned
-             ?home_dir
-             ~mgr
-             ~clock
-             ~cwd
-             config
-             ~conversation_mode
-             ~prompt
-             ~on_conversation_ready
-             ~on_stream_event))
+        (run_spawned
+           ?home_dir
+           ~mgr
+           ~clock
+           ~cwd
+           config
+           ~conversation_mode
+           ~prompt
+           ~on_conversation_ready
+           ~on_stream_event)
     with
     | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
     | Eio.Cancel.Cancelled _ as exn -> raise exn

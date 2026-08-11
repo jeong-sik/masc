@@ -23,6 +23,8 @@ type config =
   ; sandbox : bool
   ; disable_slash_commands : bool
   ; timeout_s : float
+    (** Maximum silence between valid stream-json messages. It is not a total
+        turn-duration bound. *)
   }
 
 val default_config : cwd:string -> model:string -> config

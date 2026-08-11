@@ -223,10 +223,10 @@ type model_spec =
         [temperature] path. *)
   ; turn_timeout_s : float option
     (** [turn-timeout-s] — per-model liveness window for one official-client
-        turn, in seconds. Codex and Claude reset it on every protocol message,
-        so progressing turns have no wall-clock limit. Antigravity also passes
-        the value to its CLI-owned print boundary. [None] keeps the provider
-        value where one exists and the adapter default otherwise.
+        turn, in seconds. Codex, Claude, and Antigravity reset it on every
+        protocol message, so progressing turns have no wall-clock limit.
+        [None] keeps the provider value where one exists and the adapter default
+        otherwise.
         Resolved via {!Runtime.turn_timeout_s_of_runtime_id} →
         {!Runtime_inference.resolve_turn_timeout_s}. *)
   ; max_prompt_bytes : int option

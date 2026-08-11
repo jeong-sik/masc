@@ -309,7 +309,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       ; execution_mode = Plan
       ; sandbox = true
       ; disable_slash_commands = true
-      ; (* A per-model [turn-timeout-s] overrides the admission-time bound.
+      ; (* A per-model [turn-timeout-s] overrides the stream-idle bound.
            Absent, [config.timeout_s] stands, so a config that declares none
            behaves exactly as before. *)
         timeout_s =

@@ -358,9 +358,9 @@ val reasoning_effort_of_runtime_id : string -> Llm_provider.Reasoning_effort.t o
 
 val turn_timeout_s_of_runtime_id : string -> float option
 (** Per-model [turn-timeout-s] from runtime.toml, or [None] when unset or the
-    runtime id is unknown. Codex and Claude interpret it as the maximum silence
-    between protocol messages, not total turn duration. [None] means "keep
-    whatever bound the caller already has". Consumed by
+    runtime id is unknown. Official-client adapters interpret it as the maximum
+    silence between protocol messages, not total turn duration. [None] means
+    "keep whatever bound the caller already has". Consumed by
     {!Runtime_inference.resolve_turn_timeout_s}. *)
 
 val max_prompt_bytes_of_runtime_id : string -> int option

@@ -1084,7 +1084,7 @@ let test_pause_rechecks_pending_claim_admission () =
         ; detail = "pause closed chat-operation admission"
         ; outcome_ref = None
         }
-    | Ok (Some operation) ->
+    | Ok (Some (operation : Chat_operation.t)) ->
       Owner.Operation_failed
         { kind = Chat_operation.Turn_exception
         ; detail =

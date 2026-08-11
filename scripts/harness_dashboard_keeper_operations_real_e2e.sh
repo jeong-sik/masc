@@ -69,17 +69,19 @@ if ! harness_wait_for_health "${PORT}" 60; then
 fi
 
 deadline=$(( $(date +%s) + 60 ))
+keeper_ready=0
 while [[ "$(date +%s)" -lt "${deadline}" ]]; do
   if curl -fsS "http://127.0.0.1:${PORT}/health?full=1" \
     | jq -e --arg keeper "${KEEPER_NAME}" \
       '.keeper_fleet_safety.running_keeper_names | index($keeper) != null' \
       >/dev/null; then
+    keeper_ready=1
     break
   fi
   sleep 1
 done
 
-if [[ "$(date +%s)" -ge "${deadline}" ]]; then
+if [[ "${keeper_ready}" != "1" ]]; then
   echo "isolated Keeper did not install its runtime resources" >&2
   exit 1
 fi

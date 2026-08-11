@@ -110,19 +110,27 @@ try {
 
   let panel = await openControls(page)
   const initialRows = probeRows(panel)
-  await waitFor(async () => (await initialRows.count()) >= 2, 'at least two durable Queued operations')
+  await waitFor(async () => {
+    const rowCount = await initialRows.count()
+    const noActiveTurn = await panel
+      .getByText('현재 실행 중인 턴이 없습니다.', { exact: true })
+      .count()
+    return rowCount === 4 && noActiveTurn === 1
+  }, 'all four durable Queued operations remain queued with no active turn')
   const acceptedIds = await operationIds(initialRows)
-  if (acceptedIds.some(id => !id)) throw new Error('queued operation row omitted operation_id')
+  if (acceptedIds.length !== 4 || acceptedIds.some(id => !id)) {
+    throw new Error(`expected four queued operation ids, observed=${acceptedIds}`)
+  }
   await page.screenshot({ path: queuedScreenshot, fullPage: true })
 
   await page.reload()
   await page.getByLabel('메시지 입력').waitFor()
   panel = await openControls(page)
   const hydratedRows = probeRows(panel)
-  await waitFor(async () => (await hydratedRows.count()) >= 2, 'operation-id reconnect hydration')
+  await waitFor(async () => (await hydratedRows.count()) === 4, 'operation-id reconnect hydration')
   const hydratedIds = await operationIds(hydratedRows)
   const preservedIds = acceptedIds.filter(id => hydratedIds.includes(id))
-  if (preservedIds.length < 2) {
+  if (preservedIds.length !== 4) {
     throw new Error(`reconnect lost operation identities: accepted=${acceptedIds} hydrated=${hydratedIds}`)
   }
 

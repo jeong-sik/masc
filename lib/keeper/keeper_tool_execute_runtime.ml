@@ -102,12 +102,54 @@ let redact_execute_output redaction ~stdout ~stderr =
   in
   stdout, stderr, output
 
+let close_execute_stream ~keeper_name ~task_id ~status =
+  try
+    Keeper_keepalive_signal.record_execute_stream_end
+      ~keeper_name
+      ~task_id
+      ~status
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Dashboard.warn
+      "execute stream end callback failed keeper=%s: %s"
+      keeper_name
+      (Printexc.to_string exn)
+;;
+
+let close_rejected_execute_stream
+      ~keeper_name
+      ~task_id
+      ~(kind : [ `Gate_reject | `Cannot_parse | `Too_complex | `Path_reject ])
+      ~detail
+  =
+  let kind =
+    match kind with
+    | `Gate_reject -> "gate_reject"
+    | `Cannot_parse -> "cannot_parse"
+    | `Too_complex -> "too_complex"
+    | `Path_reject -> "path_reject"
+  in
+  close_execute_stream
+    ~keeper_name
+    ~task_id
+    ~status:
+      (`Assoc
+        [ "kind", `String "exit"
+        ; "code", `Int 1
+        ; "error", `String kind
+        ; "detail", `String detail
+        ])
+;;
+
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let model_execute_location_fields = model_execute_location_fields
   let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
     let redaction = execute_secret_redaction ~base_path ~keeper_name in
     redact_execute_output redaction ~stdout ~stderr
+
+  let close_rejected_execute_stream = close_rejected_execute_stream
 
 end
 
@@ -384,6 +426,9 @@ let handle_tool_execute_typed
           let task_id =
             Option.map Keeper_id.Task_id.to_string meta.current_task_id
           in
+          let close_stream ~status =
+            close_execute_stream ~keeper_name:meta.name ~task_id ~status
+          in
           (* Execute output always streams. The MASC_STREAM_EXECUTE_OUTPUT
              kill switch was read here on every tool execution — an env
              effect inside the dispatch path — while nothing in the
@@ -445,23 +490,45 @@ let handle_tool_execute_typed
           match dispatch_result with
           | Error (Keeper_tooling.Execute_shell_ir.Gate_reject diagnostic) ->
             (* RFC-0208 P1: gate denial audit line. *)
+            let detail = message_for_log diagnostic in
             Log.Keeper.warn
               "shell_ir gate_reject keeper=%s cmd=%s diagnostic=%s"
               meta.name
               cmd_for_log
-              (message_for_log diagnostic);
+              detail;
+            close_rejected_execute_stream
+              ~keeper_name:meta.name
+              ~task_id
+              ~kind:`Gate_reject
+              ~detail;
             authorized (typed_error_json diagnostic)
           | Error Keeper_tooling.Execute_shell_ir.Cannot_parse ->
+            close_rejected_execute_stream
+              ~keeper_name:meta.name
+              ~task_id
+              ~kind:`Cannot_parse
+              ~detail:"Cannot parse command";
             authorized (typed_error_json "Cannot parse command")
           | Error Keeper_tooling.Execute_shell_ir.Too_complex ->
+            close_rejected_execute_stream
+              ~keeper_name:meta.name
+              ~task_id
+              ~kind:`Too_complex
+              ~detail:"Command too complex";
             authorized (typed_error_json "Command too complex")
           | Error (Keeper_tooling.Execute_shell_ir.Path_reject e) ->
             (* RFC-0208 P1: path-policy denial audit line. *)
+            let detail = message_for_log e in
             Log.Keeper.warn
               "shell_ir path_reject keeper=%s cmd=%s reason=%s"
               meta.name
               cmd_for_log
-              (message_for_log e);
+              detail;
+            close_rejected_execute_stream
+              ~keeper_name:meta.name
+              ~task_id
+              ~kind:`Path_reject
+              ~detail;
             authorized
               (typed_error_json
                  ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]
@@ -488,18 +555,7 @@ let handle_tool_execute_typed
             in
             (* No end-of-stream flush: chunks are forwarded as they are read,
                so nothing is held back waiting for a line terminator. *)
-            (try
-               Keeper_keepalive_signal.record_execute_stream_end
-                 ~keeper_name:meta.name
-                 ~task_id
-                 ~status:status_json
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Dashboard.warn
-                 "execute stream end callback failed keeper=%s: %s"
-                 meta.name
-                 (Printexc.to_string exn));
+            close_stream ~status:status_json;
             (try
                Keeper_keepalive_signal.record_execute_output
                  ~keeper_name:meta.name

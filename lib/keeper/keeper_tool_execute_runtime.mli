@@ -58,4 +58,11 @@ module For_testing : sig
     stdout:string ->
     stderr:string ->
     string * string * string
+
+  val close_rejected_execute_stream :
+    keeper_name:string ->
+    task_id:string option ->
+    kind:[ `Gate_reject | `Cannot_parse | `Too_complex | `Path_reject ] ->
+    detail:string ->
+    unit
 end

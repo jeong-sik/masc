@@ -67,6 +67,11 @@ val observe_checkpoint_stage :
 
 val same_run_retry_allowed : bool Atomic.t -> bool
 
+val default_context_overflow_shrink_capacity : capacity_bytes:int -> int
+(** The shared provider-oracle target for one ordinary shrink step. The
+    runtime-specific caller may clamp this target further to structural
+    message boundaries. *)
+
 val context_overflow_shrink_sequence :
   ?shrink_capacity:
     (capacity_bytes:int -> default_capacity_bytes:int -> int) ->

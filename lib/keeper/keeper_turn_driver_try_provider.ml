@@ -736,6 +736,10 @@ let context_overflow_shrink_max_attempts = 3
    estimate. *)
 let context_overflow_shrink_divisor = 2
 
+let default_context_overflow_shrink_capacity ~capacity_bytes =
+  capacity_bytes / context_overflow_shrink_divisor
+;;
+
 (* The shrink-retry policy is expressed over an injected [attempt] callback
    rather than calling [run_try_provider] directly, so it stays testable
    without an Eio-backed provider: [run_try_provider_with_context_overflow_shrink]
@@ -777,7 +781,7 @@ let context_overflow_shrink_sequence
          && shrink_attempt < context_overflow_shrink_max_attempts
       then (
         let default_capacity_bytes =
-          capacity_bytes / context_overflow_shrink_divisor
+          default_context_overflow_shrink_capacity ~capacity_bytes
         in
         let shrunk_capacity_bytes =
           shrink_capacity ~capacity_bytes ~default_capacity_bytes

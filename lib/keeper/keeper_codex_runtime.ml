@@ -90,8 +90,7 @@ let measure_model_input_message_bytes (message : Agent_core.Types.message) =
    provider-bound copy without rewriting the durable conversation. *)
 let model_input_projection_for_capacity
     ~capacity_bytes
-    ~observed_full_bytes
-    ~observed_history_atoms
+    ~observed_next_shrink_capacity_bytes
     source_projection
     messages =
   let windowed =
@@ -118,7 +117,6 @@ let model_input_projection_for_capacity
     | Some project -> project windowed
   in
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    let _, history_atoms = Runtime_model_input_tail_window.annotate projected in
     let full_bytes =
       List.fold_left
         (fun total message ->
@@ -126,8 +124,20 @@ let model_input_projection_for_capacity
         0
         projected
     in
-    observed_full_bytes := Some full_bytes;
-    observed_history_atoms := Some history_atoms);
+    let target_capacity_bytes =
+      if capacity_bytes = unbounded_model_input_capacity_bytes
+      then
+        Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+          ~capacity_bytes:full_bytes
+      else
+        Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+          ~capacity_bytes
+    in
+    observed_next_shrink_capacity_bytes :=
+      Runtime_model_input_tail_window.next_shrink_capacity_bytes
+        ~measure_message_bytes:measure_model_input_message_bytes
+        ~target_capacity_bytes
+        projected);
   Ok projected
 ;;
 
@@ -735,8 +745,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~event_bus ~raw_trace ~on_event ~config =
-  let observed_full_bytes = ref None in
-  let observed_history_atoms = ref None in
+  let observed_next_shrink_capacity_bytes = ref None in
   let starting_capacity_bytes =
     Keeper_context_overflow_shrink_state.starting_capacity_bytes
       ~keeper_name
@@ -746,19 +755,12 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
   Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
     Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
       ~starting_capacity_bytes
-      (* The newest atom is indivisible. With fewer than two atoms there is
-         no older provider-bound history for the tail window to remove. *)
       ~same_run_retry_authorized:(fun () ->
-        match !observed_history_atoms with
-        | Some history_atoms -> history_atoms > 1
-        | None -> false)
-      ~shrink_capacity:(fun ~capacity_bytes ~default_capacity_bytes ->
-        if capacity_bytes <> unbounded_model_input_capacity_bytes
-        then max 1 default_capacity_bytes
-        else
-          match !observed_full_bytes with
-          | Some full_bytes -> max 1 (full_bytes / 2)
-          | None -> max 1 default_capacity_bytes)
+        Option.is_some !observed_next_shrink_capacity_bytes)
+      ~shrink_capacity:(fun ~capacity_bytes:_ ~default_capacity_bytes ->
+        Option.value
+          !observed_next_shrink_capacity_bytes
+          ~default:(max 1 default_capacity_bytes))
       ~record_success:(fun ~capacity_bytes ->
         if capacity_bytes <> unbounded_model_input_capacity_bytes
         then
@@ -788,8 +790,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             (Some
                (model_input_projection_for_capacity
                   ~capacity_bytes
-                  ~observed_full_bytes
-                  ~observed_history_atoms
+                  ~observed_next_shrink_capacity_bytes
                   model_input_projection))
           ~hooks
           ~context_injector

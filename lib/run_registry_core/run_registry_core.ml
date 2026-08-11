@@ -84,6 +84,15 @@ module type Payload = sig
   val completed_retention : [ `All | `Latest of int ]
 end
 
+type persistence_state =
+  | Not_persisted
+  | Durability_unknown
+
+type persistence_failure =
+  { detail : string
+  ; state : persistence_state
+  }
+
 module Make (Payload : Payload) = struct
   type status =
     | Running
@@ -198,37 +207,81 @@ module Make (Payload : Payload) = struct
     | label -> Error (Printf.sprintf "unknown %s event %S" Payload.name label)
   ;;
 
-  let append_event t event =
+  let append_event_result t event =
     match t.path with
-    | None -> ()
+    | None -> Ok ()
     | Some path ->
       let suffix = Yojson.Safe.to_string (event_to_yojson event) ^ "\n" in
       (match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
-       | Private_file_succeeded () -> ()
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception exn ->
+         Error
+           { detail =
+               Printf.sprintf
+                 "%s: durable append raised for %s: %s"
+                 Payload.name
+                 path
+                 (Printexc.to_string exn)
+           ; state = Durability_unknown
+           }
+       | Private_file_succeeded () -> Ok ()
        | Private_file_succeeded_with_cleanup_failure
            { value = (); cleanup_failure } ->
          Log.Misc.error
            "%s: durable append committed for %s but descriptor settlement failed: %s"
            Payload.name
            path
-           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+         Ok ()
        | Private_file_failed error ->
-         raise
-           (Sys_error
-              (Printf.sprintf
+         let state =
+           match error with
+           | Durable_jsonl_append_failed { rollback_failures = _ :: _; _ } ->
+             Durability_unknown
+           | Incomplete_jsonl_tail
+           | Invalid_jsonl_suffix
+           | Negative_expected_end_offset _
+           | End_offset_mismatch _
+           | Durable_jsonl_append_failed { rollback_failures = []; _ } ->
+             Not_persisted
+         in
+         Error
+           { detail =
+               Printf.sprintf
                  "%s: durable append failed for %s: %s"
                  Payload.name
                  path
-                 (Fs_compat.private_jsonl_append_error_to_string error)))
+                 (Fs_compat.private_jsonl_append_error_to_string error)
+           ; state
+           }
        | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-         raise
-           (Sys_error
-              (Printf.sprintf
+         let state =
+           match error with
+           | Durable_jsonl_append_failed { rollback_failures = _ :: _; _ } ->
+             Durability_unknown
+           | Incomplete_jsonl_tail
+           | Invalid_jsonl_suffix
+           | Negative_expected_end_offset _
+           | End_offset_mismatch _
+           | Durable_jsonl_append_failed { rollback_failures = []; _ } ->
+             Not_persisted
+         in
+         Error
+           { detail =
+               Printf.sprintf
                  "%s: durable append failed for %s: %s; descriptor settlement failed: %s"
                  Payload.name
                  path
                  (Fs_compat.private_jsonl_append_error_to_string error)
-                 (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))))
+                 (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+           ; state
+           })
+  ;;
+
+  let append_event_exn t event =
+    match append_event_result t event with
+    | Ok () -> ()
+    | Error failure -> raise (Sys_error failure.detail)
   ;;
 
   let replace_entry_locked t entry =
@@ -248,7 +301,7 @@ module Make (Payload : Payload) = struct
        reaches the path-level append lock. Replay then skips the completion as
        unknown and drops the trailing register as stale Running. *)
     Stdlib.Mutex.protect t.mutation_mutex (fun () ->
-      append_event t (Register { id; started_at; registration });
+      append_event_exn t (Register { id; started_at; registration });
       replace_entry_locked t entry)
   ;;
 
@@ -268,9 +321,11 @@ module Make (Payload : Payload) = struct
             else entry)
           |> prune
         in
-        append_event t (Complete { id; completion });
-        Atomic.set t.entries next;
-        `Completed))
+        match append_event_result t (Complete { id; completion }) with
+        | Error detail -> `Persistence_failed detail
+        | Ok () ->
+          Atomic.set t.entries next;
+          `Completed))
   ;;
 
   let list_entries t =

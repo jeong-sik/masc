@@ -134,6 +134,7 @@ val run_turn :
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
   ?session_mode:session_mode ->
   ?admitted_subscription:subscription ->
+  ?on_spawned:(unit -> unit) ->
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->

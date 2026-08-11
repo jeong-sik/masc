@@ -303,6 +303,7 @@ let mark_completed t ~verification_id ~outcome ~tools ?evaluator_runtime ~elapse
   match Store.complete t ~id:verification_id ~completion with
   | `Completed -> notify_changed ()
   | `Unknown -> ()
+  | `Persistence_failed failure -> raise (Sys_error failure.detail)
 ;;
 
 let observe_tool_result ~input ~finished_at (result : Tool_result.result) =

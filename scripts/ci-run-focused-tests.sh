@@ -27,6 +27,29 @@ run_group() {
   return "${status}"
 }
 
+run_group_with_timeout() {
+  local label="$1"
+  local timeout_sec="$2"
+  shift 2
+  local target_args=""
+  local status=0
+  printf -v target_args ' %q' "$@"
+  echo "::group::focused tests: ${label}"
+  timeout \
+    --foreground \
+    --signal=TERM \
+    --kill-after=15s \
+    "${timeout_sec}s" \
+    scripts/ci-run-tests.sh \
+      "opam exec -- dune build --root .${target_args}" \
+    || status=$?
+  if [[ "${status}" -eq 124 || "${status}" -eq 137 ]]; then
+    echo "::error::focused test target timed out label=${label} timeout_sec=${timeout_sec}"
+  fi
+  echo "::endgroup::"
+  return "${status}"
+}
+
 paused_targets=(
   @test/runtest-test_keeper_turn_outcome
   @test/runtest-test_keeper_paused_work_transfer_transaction
@@ -164,7 +187,20 @@ if ! bash test/test_monitor_system_health_paths.sh; then
 fi
 echo "::endgroup::"
 
-run_group normal "${normal_targets[@]}" || overall_status=1
+# Keep the ordinary suites independently attributable and bounded. A single
+# wedged executable previously hid inside one batched Dune invocation for more
+# than 30 minutes while the observer could report only that the group was
+# alive. The 150s boundary is above the slowest healthy target in recent CI
+# history and names the exact target that failed to terminate.
+for target in "${normal_targets[@]}"; do
+  label="normal:${target#@test/runtest-}"
+  if run_group_with_timeout "${label}" 150 "${target}"; then
+    :
+  else
+    overall_status=1
+    break
+  fi
+done
 
 if [[ "${RUN_AGENT_CORE:-false}" == "true" ]]; then
   run_group agent-core "${agent_core_targets[@]}" || overall_status=1

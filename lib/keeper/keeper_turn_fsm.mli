@@ -22,7 +22,6 @@ val emit_transition :
   ?prev:_ turn_state ->
   _ turn_state ->
   unit
-(** Emit a structured FSM transition log line (+ [Keeper_transition_audit] WAL
-    row + Otel_metric_store counters). The line format is
-    [\[fsm:transition\] <prev> -> <state> action=<action> stop_before=.. stop_after=..];
-    a missing [?prev] renders as ["-"]. Pinned by [test_keeper_turn_fsm_emit]. *)
+(** Build one structured FSM transition record and send that value to the log
+    details, [Keeper_transition_audit] WAL, and Otel_metric_store boundary. A
+    missing [?prev] records ["-"]. Pinned by [test_keeper_turn_fsm_emit]. *)

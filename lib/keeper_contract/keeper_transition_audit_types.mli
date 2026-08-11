@@ -38,4 +38,9 @@ val completed_turn_outcome_to_json : completed_turn_outcome -> Yojson.Safe.t
 val completed_turn_outcome_of_json : Yojson.Safe.t -> completed_turn_outcome option
 val completed_turn_to_json : completed_turn_record -> Yojson.Safe.t
 val turn_fsm_transition_to_json : turn_fsm_transition_record -> Yojson.Safe.t
+val turn_fsm_transition_of_json :
+  Yojson.Safe.t -> (turn_fsm_transition_record, string) result
+(** Strict inverse of {!turn_fsm_transition_to_json}. All current fields are
+    required; duplicate, unknown, missing, or ill-typed fields fail closed. *)
+
 val completed_turn_of_json : Yojson.Safe.t -> completed_turn_record option

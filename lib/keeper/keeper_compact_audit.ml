@@ -229,7 +229,9 @@ let persist_start ~base_path ~retention_days (r : start_record) :
        Dated_jsonl.append (get_store base_path) j;
        prune_best_effort base_path ~retention_days;
        Ok ()
-     with e -> Error (Io_failure (Printexc.to_string e)))
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | e -> Error (Io_failure (Printexc.to_string e)))
 
 let persist_complete ~base_path ~retention_days (r : complete_record) :
   (unit, write_error) result =
@@ -244,7 +246,9 @@ let persist_complete ~base_path ~retention_days (r : complete_record) :
        Dated_jsonl.append (get_store base_path) j;
        prune_best_effort base_path ~retention_days;
        Ok ()
-     with e -> Error (Io_failure (Printexc.to_string e)))
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | e -> Error (Io_failure (Printexc.to_string e)))
 
 (* ── Retention ─────────────────────────────────────────────────── *)
 
@@ -279,7 +283,9 @@ let read_events ~base_path ~since ~until ?keeper () :
     let sort_ts = function Start r -> r.ts_unix | Complete r -> r.ts_unix in
     let sorted = List.sort (fun a b -> compare (sort_ts a) (sort_ts b)) all in
     Ok sorted
-  with e -> Error (Io_failure (Printexc.to_string e))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Io_failure (Printexc.to_string e))
 
 (* ── Pairing ───────────────────────────────────────────────────── *)
 

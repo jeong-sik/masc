@@ -19,7 +19,7 @@ let mk_tool_call
       ()
   : Trajectory.tool_call
   =
-  { tool_use_id = id
+  { tool_use_id = Some id
   ; tool_name = name
   ; tool_input = `Assoc [ "cmd", `String "ls" ]
   ; tool_result = result
@@ -244,7 +244,7 @@ let test_tool_call_json_roundtrip () =
   match Trajectory.tool_call_of_json json with
   | Error e -> Alcotest.fail ("roundtrip failed: " ^ e)
   | Ok tc2 ->
-    Alcotest.(check string) "id" tc.tool_use_id tc2.tool_use_id;
+    Alcotest.(check (option string)) "id" tc.tool_use_id tc2.tool_use_id;
     Alcotest.(check string) "name" tc.tool_name tc2.tool_name;
     Alcotest.(check bool) "is_error" tc.is_error tc2.is_error;
     Alcotest.(check (float 0.001)) "started" tc.started_at tc2.started_at;
@@ -259,6 +259,17 @@ let test_tool_call_json_null_finished () =
   | Error e -> Alcotest.fail ("roundtrip failed: " ^ e)
   | Ok tc2 ->
     Alcotest.(check (option (float 0.001))) "finished is None" None tc2.finished_at
+;;
+
+let test_tool_call_json_missing_id_roundtrip () =
+  let tc = { (mk_tool_call ()) with tool_use_id = None } in
+  let json = Trajectory.tool_call_to_json tc in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool) "missing id encodes as null" true (member "tool_use_id" json = `Null);
+  match Trajectory.tool_call_of_json json with
+  | Error e -> Alcotest.fail ("roundtrip failed: " ^ e)
+  | Ok decoded ->
+    Alcotest.(check (option string)) "missing id stays typed" None decoded.tool_use_id
 ;;
 
 let test_tool_call_of_json_error () =
@@ -286,7 +297,8 @@ let test_step_json_act () =
   let json = Trajectory.step_to_json s in
   match Trajectory.step_of_json json with
   | Error e -> Alcotest.fail ("act roundtrip: " ^ e)
-  | Ok (Act { tool_call = tc2; _ }) -> Alcotest.(check string) "id" "a1" tc2.tool_use_id
+  | Ok (Act { tool_call = tc2; _ }) ->
+    Alcotest.(check (option string)) "id" (Some "a1") tc2.tool_use_id
   | Ok _ -> Alcotest.fail "expected Act"
 ;;
 
@@ -438,6 +450,7 @@ let () =
     ; ( "tool_call_json"
       , [ tc "roundtrip" test_tool_call_json_roundtrip
         ; tc "null finished" test_tool_call_json_null_finished
+        ; tc "missing id roundtrip" test_tool_call_json_missing_id_roundtrip
         ; tc "parse error" test_tool_call_of_json_error
         ] )
     ; ( "step_json"

@@ -9,8 +9,6 @@ let error_json ?(fields = []) (message : string) =
   Yojson.Safe.to_string (`Assoc (("error", `String message) :: fields))
 ;;
 
-let file_not_found_prefix = "File not found:"
-
 let missing_file_error_json
       ~(raw_path : string option)
       ~(cwd : string option)

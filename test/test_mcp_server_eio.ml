@@ -1389,8 +1389,11 @@ let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
     [ "masc_messages"; "masc_status" ] names;
   cleanup_dir base_path
 
+(* The MASC_PLACEHOLDER_TOOLS_ENABLED putenv wrapper is gone with the knob
+   (RFC-0371 B7): the assertion below never depended on it — placeholder
+   removal from tools/list is decided elsewhere. *)
 let test_handle_request_tools_list_with_placeholder_flag () =
-  with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" "1" (fun () ->
+  (
     Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
     let clock = Eio.Stdenv.clock env in

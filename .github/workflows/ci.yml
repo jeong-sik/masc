@@ -312,7 +312,7 @@ jobs:
             tla=true
           fi
 
-          if has_match '^(packages/agent_core/|lib/keeper/keeper_event_bridge\.ml$|test/test_keeper_execution_join\.ml$|test/test_keeper_hooks_agent_core_introspection\.ml$|dune-project$|.*\.opam$|masc\.opam\.locked$)'; then
+          if has_match '^(packages/agent_core/|lib/keeper/keeper_event_bridge\.ml$|scripts/check-agent-core-boundary\.sh$|test/test_agent_core_boundary\.sh$|test/test_keeper_execution_join\.ml$|test/test_keeper_hooks_agent_core_introspection\.ml$|dune-project$|.*\.opam$|masc\.opam\.locked$)'; then
             agent_core=true
           fi
 

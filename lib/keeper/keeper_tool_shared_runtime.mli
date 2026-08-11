@@ -8,8 +8,6 @@ val error_json : ?fields:(string * Yojson.Safe.t) list -> string -> string
 
 (** Render a failed [Tool_result.result] as [error_json], preserving
     [failure_class] for keeper-facing routing and diagnostics. *)
-val file_not_found_prefix : string
-
 (** Render a missing-file JSON envelope with the error, path, and
     path-resolution guidance.
     #10349: directory entries are intentionally excluded to prevent

@@ -8,8 +8,12 @@
 
 (** {1 Tool Call} *)
 
+(** [tool_use_id = None] means the raw trace did not carry a non-empty
+    correlation identity. Such records are never paired by position or a
+    manufactured sentinel. *)
+
 type tool_call =
-  { tool_use_id : string
+  { tool_use_id : string option
   ; tool_name : string
   ; tool_input : Yojson.Safe.t
   ; tool_result : string option

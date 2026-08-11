@@ -616,16 +616,13 @@ let commit_prepared_compaction_with
             Eio.Cancel.protect
             @@ fun () ->
             after_checkpoint_installed ();
-            (try
-               Otel_metric_store.inc_counter
-                 Keeper_metrics.(to_string Compactions)
-                 ~labels:[ "keeper", retry_meta.name ]
-                 ()
-             with
-             | exn ->
-               log_keeper_exn
-                 ~label:"compaction committed metric emission"
-                 exn);
+            (* [inc_counter] is best-effort by construction (its wrapper
+               swallows and logs); the catch that sat here was a second
+               swallow around a total call. *)
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string Compactions)
+              ~labels:[ "keeper", retry_meta.name ]
+              ();
             Committed recovery
           with
           | Eio.Cancel.Cancelled _ as exn ->

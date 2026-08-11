@@ -821,18 +821,14 @@ let pass_reason ~schema ~args ~prepared_args =
   | None -> "missing_schema"
 ;;
 
+(* Typed end to end: the params this hook already holds go straight into the
+   authoritative constructor. The previous version rendered them to JSON and
+   reparsed via [tool_schema_of_json], with a [failwith] on the reparse — a
+   round-trip through a wire format that never left the process
+   (RFC-0371 §3.1). *)
 let validation_schema_of_json ~name json_schema : Agent_core.Types.tool_schema =
-  let params = Tool_bridge.params_of_json_schema json_schema in
-  let json =
-    `Assoc
-      [ ("name", `String name)
-      ; ("description", `String "")
-      ; ("parameters", `List (List.map Agent_core.Types.tool_param_to_json params))
-      ]
-  in
-  match Agent_core.Types.tool_schema_of_json json with
-  | Ok schema -> schema
-  | Error err -> failwith ("validation_schema_of_json: " ^ err)
+  let parameters = Tool_bridge.params_of_json_schema json_schema in
+  Agent_core.Types.tool_schema_of_params ~name ~description:"" ~parameters ()
 ;;
 
 let reject_validation ~name ~reason ~message =

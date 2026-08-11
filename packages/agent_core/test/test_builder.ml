@@ -26,20 +26,6 @@ let make_tool name =
     Ok { Types.content = Yojson.Safe.to_string input; _meta = None })
 ;;
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop idx =
-    if needle_len = 0
-    then true
-    else if idx + needle_len > haystack_len
-    then false
-    else if String.sub haystack idx needle_len = needle
-    then true
-    else loop (idx + 1)
-  in
-  loop 0
-;;
 
 (** Helper: compare model fields via string. *)
 let check_model msg expected actual = Alcotest.(check string) msg expected actual
@@ -605,25 +591,23 @@ let test_with_contract_composes_prompt () =
   Alcotest.(check bool)
     "base prompt preserved"
     true
-    (contains_substring ~needle:"Base prompt." prompt);
+    (Agent_core_strings.contains_substring ~needle:"Base prompt." ~haystack:prompt);
   Alcotest.(check bool)
     "runtime awareness section"
     true
-    (contains_substring ~needle:"[Runtime Awareness]" prompt
-     && contains_substring
-          ~needle:"You are running inside an explicit runtime contract."
-          prompt);
+    (Agent_core_strings.contains_substring ~needle:"[Runtime Awareness]" ~haystack:prompt
+     && Agent_core_strings.contains_substring ~needle:"You are running inside an explicit runtime contract." ~haystack:prompt);
   Alcotest.(check bool)
     "trigger section rendered"
     true
-    (contains_substring ~needle:"[Trigger Context]" prompt
-     && contains_substring ~needle:"kind: direct_mention" prompt
-     && contains_substring ~needle:"source: room" prompt);
+    (Agent_core_strings.contains_substring ~needle:"[Trigger Context]" ~haystack:prompt
+     && Agent_core_strings.contains_substring ~needle:"kind: direct_mention" ~haystack:prompt
+     && Agent_core_strings.contains_substring ~needle:"source: room" ~haystack:prompt);
   Alcotest.(check bool)
     "instruction layer rendered"
     true
-    (contains_substring ~needle:"[Instruction Layer: role]" prompt
-     && contains_substring ~needle:"Prefer concise, factual answers." prompt)
+    (Agent_core_strings.contains_substring ~needle:"[Instruction Layer: role]" ~haystack:prompt
+     && Agent_core_strings.contains_substring ~needle:"Prefer concise, factual answers." ~haystack:prompt)
 ;;
 
 (* --- 19. with_skill appends skill prompt --- *)
@@ -654,11 +638,11 @@ let test_with_skill_appends_prompt () =
   Alcotest.(check bool)
     "skill label present"
     true
-    (contains_substring ~needle:"[Skill: reviewer]" prompt);
+    (Agent_core_strings.contains_substring ~needle:"[Skill: reviewer]" ~haystack:prompt);
   Alcotest.(check bool)
     "skill body present"
     true
-    (contains_substring ~needle:"State concrete findings first." prompt)
+    (Agent_core_strings.contains_substring ~needle:"State concrete findings first." ~haystack:prompt)
 ;;
 
 (* --- 20. with_contract injects context metadata --- *)

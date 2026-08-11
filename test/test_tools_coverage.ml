@@ -66,16 +66,6 @@ let property_description schema property =
        | _ -> None)
   | Some _ | None -> None
 
-let contains_substring ~needle value =
-  let needle_len = String.length needle in
-  let value_len = String.length value in
-  let rec loop index =
-    if index + needle_len > value_len then false
-    else if String.sub value index needle_len = needle then true
-    else loop (index + 1)
-  in
-  needle_len = 0 || loop 0
-
 (* ============================================================ *)
 (* 1. Schema Structure Tests                                     *)
 (* ============================================================ *)
@@ -226,22 +216,22 @@ let test_masc_transition_schema () =
   | Some schema ->
       Alcotest.(check bool) "description omits task required_tools"
         false
-        (contains_substring ~needle:"required_tools" schema.description);
+        (String_util.string_contains_substring ~needle:"required_tools" schema.description);
       Alcotest.(check bool) "description omits mandatory tools routing"
         false
-        (contains_substring ~needle:"mandatory tools" schema.description);
+        (String_util.string_contains_substring ~needle:"mandatory tools" schema.description);
       Alcotest.(check bool) "description omits requires tools routing"
         false
-        (contains_substring ~needle:"requires tools" schema.description);
+        (String_util.string_contains_substring ~needle:"requires tools" schema.description);
       Alcotest.(check bool) "description omits configured completion reviewer"
         false
-        (contains_substring
+        (String_util.string_contains_substring
            ~needle:"configured LLM completion reviewer"
            schema.description);
       (* RFC-0323 G-4: the weak-lane teaching sentence must stay gone. *)
       Alcotest.(check bool) "description omits the verifier-bypass teaching"
         false
-        (contains_substring
+        (String_util.string_contains_substring
            ~needle:"do not route normal completion"
            schema.description);
       (match get_json_assoc "properties" schema.input_schema with
@@ -331,11 +321,11 @@ let test_masc_add_task_schema () =
                   Option.value ~default:"" (get_json_string "description" goal_id_schema)
                 in
                 Alcotest.(check bool) "goal_id is optional in prose" true
-                  (contains_substring ~needle:"Optional structured goal link" description);
+                  (String_util.string_contains_substring ~needle:"Optional structured goal link" description);
                 Alcotest.(check bool) "goal_id does not reference prompt markers" false
-                  (contains_substring ~needle:"<available_goals>" description);
+                  (String_util.string_contains_substring ~needle:"<available_goals>" description);
                 Alcotest.(check bool) "goal_id does not label omitted links orphaned" false
-                  (contains_substring ~needle:"orphaned" description)
+                  (String_util.string_contains_substring ~needle:"orphaned" description)
             | None -> Alcotest.fail "masc_add_task missing goal_id property")
           ; (match List.assoc_opt "contract" props with
              | Some contract_schema ->

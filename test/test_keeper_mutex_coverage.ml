@@ -98,23 +98,6 @@ let wait_for_cancelled ~base_path request_id =
   loop 200
 ;;
 
-let contains_substring ~needle value =
-  let needle_len = String.length needle in
-  let value_len = String.length value in
-  if needle_len = 0
-  then true
-  else if needle_len > value_len
-  then false
-  else (
-    let rec loop i =
-      if i + needle_len > value_len
-      then false
-      else if String.equal (String.sub value i needle_len) needle
-      then true
-      else loop (i + 1)
-    in
-    loop 0)
-;;
 
 let temp_dir prefix =
   let path = Filename.temp_file prefix "" in
@@ -930,7 +913,7 @@ let test_keeper_msg_async_marks_cancelled_worker_cancelled () =
   | { Keeper_msg_async.status = Cancelled { reason; cancelled_by }; completed_at = Some _; _ } ->
     Alcotest.(check string) "cancelled_by runtime" "runtime" cancelled_by;
     Alcotest.(check bool) "cancelled reason mentions cancellation" true
-      (contains_substring ~needle:"cancelled" (String.lowercase_ascii reason))
+      (String_util.string_contains_substring ~needle:"cancelled" (String.lowercase_ascii reason))
   | { Keeper_msg_async.status = Cancelled _; completed_at = None; _ } ->
     Alcotest.fail "expected cancelled request to have completed_at"
   | entry ->
@@ -970,7 +953,7 @@ let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
    | { Keeper_msg_async.status = Cancelled { reason; cancelled_by }; completed_at = Some _; _ } ->
      Alcotest.(check string) "cancelled_by operator" "operator" cancelled_by;
      Alcotest.(check bool) "reason mentions operator" true
-       (contains_substring ~needle:"operator" (String.lowercase_ascii reason))
+       (String_util.string_contains_substring ~needle:"operator" (String.lowercase_ascii reason))
    | { Keeper_msg_async.status = Cancelled _; completed_at = None; _ } ->
      Alcotest.fail "expected operator-cancelled request to have completed_at"
    | entry ->
@@ -2264,7 +2247,7 @@ let test_keeper_msg_async_load_record_missing_status_is_unreadable () =
          Alcotest.(check bool)
            "reason mentions missing fields"
            true
-           (contains_substring ~needle:"missing required string field \"status\"" reason)
+           (String_util.string_contains_substring ~needle:"missing required string field \"status\"" reason)
        | Keeper_msg_async.Found _ -> Alcotest.fail "expected unreadable, got found"
        | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent"
        | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected unreadable, got rejected")
@@ -2296,7 +2279,7 @@ let test_keeper_msg_async_load_record_unknown_status_is_unreadable () =
          Alcotest.(check bool)
            "reason mentions unknown status"
            true
-           (contains_substring ~needle:"unknown status" reason)
+           (String_util.string_contains_substring ~needle:"unknown status" reason)
        | Keeper_msg_async.Found _ -> Alcotest.fail "expected unreadable, got found"
        | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent"
        | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected unreadable, got rejected")
@@ -2328,7 +2311,7 @@ let test_keeper_msg_async_rejects_filename_request_id_mismatch () =
          Alcotest.(check bool)
            "filename/request id consistency is enforced"
            true
-           (contains_substring ~needle:"does not match filename request_id" reason)
+           (String_util.string_contains_substring ~needle:"does not match filename request_id" reason)
        | Keeper_msg_async.Found _ -> Alcotest.fail "mismatched request id must not load"
        | Keeper_msg_async.Absent -> Alcotest.fail "mismatched record unexpectedly absent"
        | Keeper_msg_async.Rejected _ -> Alcotest.fail "mismatched id is a record error")

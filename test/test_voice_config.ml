@@ -56,17 +56,6 @@ let parse json_str =
   let json = Yojson.Safe.from_string json_str in
   Vc.parse_json json
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      idx + needle_len <= haystack_len
-      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
-    in
-    loop 0
-
 let rec mkdir_p path =
   if path <> "" && not (Sys.file_exists path) then begin
     mkdir_p (Filename.dirname path);
@@ -108,7 +97,7 @@ let test_load_detailed_invalid_json () =
     match Vc.load_detailed () with
     | Error (Vc.Invalid msg) ->
       check bool "json syntax error surfaced" true
-        (contains_substring ~needle:"invalid voice config json" msg)
+        (String_util.string_contains_substring ~needle:"invalid voice config json" msg)
     | Error Vc.Not_configured ->
       fail "expected Invalid, got Not_configured"
     | Ok _ -> fail "expected Invalid, got Ok")
@@ -118,7 +107,7 @@ let test_load_detailed_schema_error_is_invalid () =
     match Vc.load_detailed () with
     | Error (Vc.Invalid msg) ->
       check bool "schema error surfaced" true
-        (contains_substring ~needle:"required" msg)
+        (String_util.string_contains_substring ~needle:"required" msg)
     | Error Vc.Not_configured ->
       fail "expected Invalid, got Not_configured"
     | Ok _ -> fail "expected Invalid, got Ok")
@@ -143,13 +132,13 @@ let test_load_legacy_strings_preserved () =
     match Vc.load () with
     | Error msg ->
       check bool "missing reported" true
-        (contains_substring ~needle:"voice config missing at" msg)
+        (String_util.string_contains_substring ~needle:"voice config missing at" msg)
     | Ok _ -> fail "expected missing-config Error, got Ok");
   with_explicit_voice_config "{ this is not json" (fun () ->
     match Vc.load () with
     | Error msg ->
       check bool "json error surfaced" true
-        (contains_substring ~needle:"invalid voice config json" msg)
+        (String_util.string_contains_substring ~needle:"invalid voice config json" msg)
     | Ok _ -> fail "expected invalid-config Error, got Ok")
 
 let test_session_empty_endpoints_ok () =

@@ -187,18 +187,6 @@ let make_kimi_config ?request_path base_url =
 
 let messages = [ Types.user_msg "hello" ]
 
-let contains_substring ~sub text =
-  let sub_len = String.length sub in
-  let text_len = String.length text in
-  let rec loop idx =
-    if idx + sub_len > text_len
-    then false
-    else if String.sub text idx sub_len = sub
-    then true
-    else loop (idx + 1)
-  in
-  sub_len = 0 || loop 0
-;;
 
 let mock_transport_response text =
   { Types.id = "transport-response"
@@ -2277,7 +2265,7 @@ let test_complete_stream_wire_observer_rejection_is_typed_nonfatal () =
              bool
              "raw token absent"
              false
-             (contains_substring ~sub:token observation.redacted_chunk))
+             (Agent_core_strings.contains_substring ~needle:token ~haystack:observation.redacted_chunk))
         !observations;
       check
         bool
@@ -2285,7 +2273,7 @@ let test_complete_stream_wire_observer_rejection_is_typed_nonfatal () =
         true
         (List.exists
            (fun (observation : Wire_observer.observation) ->
-              contains_substring ~sub:"[REDACTED]" observation.redacted_chunk)
+              Agent_core_strings.contains_substring ~needle:"[REDACTED]" ~haystack:observation.redacted_chunk)
            !observations);
       let failures =
         List.filter_map
@@ -2362,8 +2350,8 @@ let test_complete_stream_wire_failure_telemetry_exception_is_nonfatal () =
            (List.exists
               (fun (ctx, message) ->
                  String.equal ctx "wire_observer"
-                 && contains_substring ~sub:"telemetry observer unavailable" message
-                 && contains_substring ~sub:"wire observer unavailable" message)
+                 && Agent_core_strings.contains_substring ~needle:"telemetry observer unavailable" ~haystack:message
+                 && Agent_core_strings.contains_substring ~needle:"wire observer unavailable" ~haystack:message)
               !diagnostics);
          Eio.Switch.fail sw Exit
        with
@@ -3345,7 +3333,7 @@ let test_complete_deadline_preflight_precedes_cache_hit () =
 
 let check_accept_rejected ~label ~needle = function
   | Error (Http_client.AcceptRejected { reason }) ->
-    check bool (label ^ " reason") true (contains_substring ~sub:needle reason)
+    check bool (label ^ " reason") true (Agent_core_strings.contains_substring ~needle:needle ~haystack:reason)
   | Ok _ -> failf "%s unexpectedly succeeded" label
   | Error _ -> failf "%s returned a non-AcceptRejected error" label
 ;;

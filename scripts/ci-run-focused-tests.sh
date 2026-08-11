@@ -99,6 +99,7 @@ normal_targets=(
   @test/runtest-test_masc_log
   @test/runtest-test_schema_surface_index
   @test/runtest-test_exec_policy_cwd_hint
+  @test/runtest-test_server_runtime_startup_maintenance
   @test/runtest-test_host_fd_pressure_poller
   @test/runtest-test_keeper_turn_driver_failover
   @test/runtest-test_keeper_turn_driver_accept

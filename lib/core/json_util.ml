@@ -157,6 +157,24 @@ let kind_name : Yojson.Safe.t -> string = function
 
 let json_string_list xs = `List (List.map (fun s -> `String s) xs)
 
+let string_assoc_to_json fields =
+  `Assoc (List.map (fun (key, value) -> (key, `String value)) fields)
+
+let string_assoc_of_json = function
+  | `Assoc fields ->
+    Ok
+      (List.filter_map
+         (fun (key, value) ->
+           match value with
+           | `String s -> Some (key, s)
+           | _ -> None)
+         fields)
+  | _ -> Error "expected string object"
+
+let string_field_if_present key = function
+  | None -> []
+  | Some value -> [ (key, `String value) ]
+
 (** {1 Option serialization helpers}
 
     Canonical [None -> `Null] converters for building JSON.
@@ -240,6 +258,11 @@ let assoc_float_opt name json =
   match assoc_member_opt name json with
   | Some (`Float value) -> Some value
   | Some (`Int value) -> Some (Float.of_int value)
+  | _ -> None
+
+let assoc_object_opt name json =
+  match assoc_member_opt name json with
+  | Some (`Assoc _ as obj) -> Some obj
   | _ -> None
 
 (** Scans a JSON array for the first [`Assoc] row whose [field] member is

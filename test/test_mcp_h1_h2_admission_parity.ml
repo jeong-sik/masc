@@ -760,6 +760,12 @@ let test_h1_h2_dashboard_public_read_route_wiring () =
     ; "/tool-calls"
     ; "/turn-records"
     ];
+  assert_contains "H1 keeper GETs consult the sensitive permission map"
+    ~needle:"Keeper_api.keeper_get_permission (Http.Request.path request)"
+    h1;
+  assert_contains "H1 sensitive keeper GETs use token-bound auth"
+    ~needle:"with_token_permission_auth ~permission"
+    h1;
   assert_contains "H2 keeper GETs consult the sensitive permission map"
     ~needle:
       "match Server_dashboard_http_keeper_api.keeper_get_permission path with"

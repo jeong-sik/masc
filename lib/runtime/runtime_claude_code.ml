@@ -987,9 +987,9 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~ignored:0
 ;;
 
-let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
-    ~session_mode ~session_id ~subscription ~prompt ~on_session_ready
-    ~on_turn_starting ~on_turn_started ~on_stream_event =
+let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
+    ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt
+    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_stream_event =
   let* argv =
     command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id
   in
@@ -1013,6 +1013,7 @@ let run_spawned ~mgr ~clock ~cwd config ~dynamic_tools ~reasoning_effort
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
     in
+    Option.iter (fun callback -> callback ()) on_spawned;
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
@@ -1116,8 +1117,8 @@ let probe_subscription ~mgr ~clock ~cwd config =
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
-    ?admitted_subscription
-    ~mgr ~clock ~cwd ?(on_session_ready = fun ~session_id:_ -> Ok ())
+    ?admitted_subscription ?on_spawned ~mgr ~clock ~cwd
+    ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
     ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event config
     ~prompt =
@@ -1139,6 +1140,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
       subscription.subscription_type;
     try
       run_spawned
+        ?on_spawned
         ~mgr
         ~clock
         ~cwd

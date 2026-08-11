@@ -113,6 +113,19 @@ esac
 |}
 ;;
 
+let hanging_gh_script =
+  {|#!/bin/sh
+sleep 30
+|}
+;;
+
+let write_executable_script base_path name content =
+  let path = Filename.concat base_path name in
+  write_file path content;
+  Unix.chmod path 0o700;
+  path
+;;
+
 let test_fake_gh_login_and_effective_identity () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "github-test-keeper" in
@@ -143,6 +156,40 @@ let test_fake_gh_login_and_effective_identity () =
            (Some "token-user") observation.effective.login;
          Alcotest.(check (list string)) "effective token source is observable by name"
            [ "GH_TOKEN" ] observation.projected_token_env_names)
+;;
+
+let test_capture_timeout_reaps_hung_status_probe () =
+  with_temp_base @@ fun base_path ->
+  let hanging_gh = write_executable_script base_path "hanging-gh" hanging_gh_script in
+  let started_at = Unix.gettimeofday () in
+  let status, _, _ =
+    Github.For_testing.run_capture
+      ~timeout_sec:0.05
+      ~env:(Unix.environment ())
+      [ hanging_gh ]
+  in
+  let elapsed = Unix.gettimeofday () -. started_at in
+  (match status with
+   | Unix.WEXITED code -> Alcotest.(check int) "capture timeout status" 124 code
+   | _ -> Alcotest.fail "capture timeout did not reap with exit 124");
+  Alcotest.(check bool) "capture timeout is bounded" true (elapsed < 1.0)
+;;
+
+let test_inherited_timeout_reaps_hung_logout () =
+  with_temp_base @@ fun base_path ->
+  let hanging_gh = write_executable_script base_path "hanging-gh" hanging_gh_script in
+  let started_at = Unix.gettimeofday () in
+  let status =
+    Github.For_testing.run_inherited
+      ~timeout_sec:0.05
+      ~env:(Unix.environment ())
+      [ hanging_gh ]
+  in
+  let elapsed = Unix.gettimeofday () -. started_at in
+  (match status with
+   | Unix.WEXITED code -> Alcotest.(check int) "inherited timeout status" 124 code
+   | _ -> Alcotest.fail "inherited timeout did not reap with exit 124");
+  Alcotest.(check bool) "inherited timeout is bounded" true (elapsed < 1.0)
 ;;
 
 let test_config_dir_does_not_chmod_ancestor () =
@@ -317,6 +364,14 @@ let () =
             "fake gh login and effective identity"
             `Quick
             test_fake_gh_login_and_effective_identity
+        ; Alcotest.test_case
+            "capture timeout reaps hung status probe"
+            `Quick
+            test_capture_timeout_reaps_hung_status_probe
+        ; Alcotest.test_case
+            "inherited timeout reaps hung logout"
+            `Quick
+            test_inherited_timeout_reaps_hung_logout
         ; Alcotest.test_case
             "config directory keeps ancestor mode"
             `Quick

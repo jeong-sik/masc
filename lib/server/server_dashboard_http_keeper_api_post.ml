@@ -67,12 +67,14 @@ let handle_keeper_github_login_post state req reqd =
            (fun () ->
               match
                 Keeper_github_identity.stream_login
+                  ~timeout_sec:Keeper_github_identity.interactive_timeout_sec
                   ~base_path:config.base_path
                   ~keeper_name:name
                   ~hostname
                   ~env
                   ~is_closed:(fun () -> Httpun.Body.Writer.is_closed writer)
                   ~send_event:(github_login_stream_send writer)
+                  ()
               with
               | Ok () -> ()
               | Error message when not (Httpun.Body.Writer.is_closed writer) ->

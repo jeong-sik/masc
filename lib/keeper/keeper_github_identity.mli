@@ -69,13 +69,17 @@ val observation_to_yojson : observation -> Yojson.Safe.t
 val secure_config_files :
   base_path:string -> keeper_name:string -> (unit, string) result
 
+val interactive_timeout_sec : float
+
 val stream_login :
+  ?timeout_sec:float ->
   base_path:string ->
   keeper_name:string ->
   hostname:string ->
   env:string array ->
   is_closed:(unit -> bool) ->
   send_event:(string -> Yojson.Safe.t -> unit) ->
+  unit ->
   (unit, string) result
 (** Run interactive [gh auth login] with redacted streaming events. Closing
     the response cancels and reaps the child; a bounded timeout is also
@@ -84,3 +88,14 @@ val stream_login :
 val run_cli_login : base_path:string -> keeper_name:string -> hostname:string -> int
 val run_cli_status : base_path:string -> keeper_name:string -> hostname:string -> int
 val run_cli_logout : base_path:string -> keeper_name:string -> hostname:string -> int
+
+module For_testing : sig
+  val run_capture :
+    timeout_sec:float ->
+    env:string array ->
+    string list ->
+    Unix.process_status * string * string
+
+  val run_inherited :
+    timeout_sec:float -> env:string array -> string list -> Unix.process_status
+end

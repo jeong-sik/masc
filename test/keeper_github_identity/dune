@@ -5,6 +5,9 @@
  (name test_keeper_github_identity)
  (modules
   common
+  eio
+  eio_context
+  fs_compat
   keeper_config
   keeper_secret_projection
   keeper_secret_redaction

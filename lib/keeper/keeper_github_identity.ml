@@ -330,11 +330,25 @@ let process_exit_text = function
   | Unix.WSTOPPED signal -> Printf.sprintf "stopped by signal %d" signal
 ;;
 
-let run_capture ~env = function
+let github_probe_timeout_sec = 15.0
+let github_interactive_timeout_sec = 600.0
+let interactive_timeout_sec = github_interactive_timeout_sec
+
+let validate_timeout_sec timeout_sec =
+  if Float.is_finite timeout_sec && Float.compare timeout_sec 0.0 > 0
+  then timeout_sec
+  else
+    invalid_arg
+      (Printf.sprintf
+         "GitHub CLI timeout must be finite and greater than zero (got %g)"
+         timeout_sec)
+;;
+
+let run_capture ?(timeout_sec = github_probe_timeout_sec) ~env = function
   | [] -> Unix.WEXITED 127, "", "GitHub CLI argv must not be empty"
   | argv ->
     Process_eio.run_argv_with_status_split
-      ~timeout_sec:15.0
+      ~timeout_sec:(validate_timeout_sec timeout_sec)
       ~env
       argv
 ;;
@@ -454,7 +468,17 @@ let secure_config_files ~base_path ~keeper_name =
          (Unix.error_message error))
 ;;
 
-let stream_login ~base_path ~keeper_name ~hostname ~env ~is_closed ~send_event =
+let stream_login
+      ?(timeout_sec = interactive_timeout_sec)
+      ~base_path
+      ~keeper_name
+      ~hostname
+      ~env
+      ~is_closed
+      ~send_event
+      ()
+  =
+  let timeout_sec = validate_timeout_sec timeout_sec in
   let send event json =
     if is_closed ()
     then raise (Eio.Cancel.Cancelled (Failure "GitHub login response closed"))
@@ -491,7 +515,7 @@ let stream_login ~base_path ~keeper_name ~hostname ~env ~is_closed ~send_event =
                   process_result :=
                     Some
                       (Process_eio.run_argv_with_status_split_streaming
-                         ~timeout_sec:600.0
+                         ~timeout_sec
                          ~env
                          ~on_stdout_chunk:
                            (send_redacted_output "stdout" stdout_redaction)
@@ -551,9 +575,36 @@ let print_observation ~base_path ~keeper_name ~hostname =
     true
 ;;
 
-let run_inherited ~env = function
+let run_inherited ?(timeout_sec = interactive_timeout_sec) ~env = function
   | [] -> Unix.WEXITED 127
   | command :: _ as argv ->
+    let timeout_sec = validate_timeout_sec timeout_sec in
+    let waitpid_blocking pid =
+      let rec wait () =
+        try snd (Unix.waitpid [] pid) with
+        | Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+        | Unix.Unix_error (Unix.ECHILD, _, _) -> Unix.WEXITED 127
+      in
+      wait ()
+    in
+    let terminate_and_reap pid =
+      (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+      waitpid_blocking pid
+    in
+    let wait_with_timeout pid =
+      let deadline = Unix.gettimeofday () +. timeout_sec in
+      let rec wait () =
+        match Unix.waitpid [ Unix.WNOHANG ] pid with
+        | 0, _ when Unix.gettimeofday () >= deadline ->
+          ignore (terminate_and_reap pid);
+          Unix.WEXITED 124
+        | 0, _ ->
+          ignore (Unix.select [] [] [] (min 0.05 (deadline -. Unix.gettimeofday ())));
+          wait ()
+        | _, status -> status
+      in
+      wait ()
+    in
     (try
        let process =
          Unix.create_process_env
@@ -564,11 +615,10 @@ let run_inherited ~env = function
            Unix.stdout
            Unix.stderr
        in
-       let rec wait () =
-         try snd (Unix.waitpid [] process) with
-         | Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
-       in
-       wait ()
+       (try wait_with_timeout process with
+        | Eio.Cancel.Cancelled _ as exn ->
+          ignore (terminate_and_reap process);
+          raise exn)
      with
      | Unix.Unix_error (error, operation, target) ->
        prerr_endline
@@ -623,4 +673,10 @@ let run_cli_logout ~base_path ~keeper_name ~hostname =
     in
     let observed = print_observation ~base_path ~keeper_name ~hostname in
     if logged_out && observed then 0 else 1
+;;
+
+module For_testing = struct
+  let run_capture ~timeout_sec ~env argv = run_capture ~timeout_sec ~env argv
+  let run_inherited ~timeout_sec ~env argv = run_inherited ~timeout_sec ~env argv
+end
 ;;

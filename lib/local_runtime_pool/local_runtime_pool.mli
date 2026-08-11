@@ -15,8 +15,9 @@
     if leasing semantics are needed in the future, the design
     should land at the AGENT_CORE runtime layer per RFC-0026 (the
     same architectural rollback as [admission_queue]).
-    The read-only accessors below remain in active use by
-    [tool_local_runtime_status] / [tool_local_runtime_verify]. See
+    The read-only accessors below are currently unconsumed: the
+    local-runtime status tool that surfaced them was removed. They
+    are retained as the pool's query API. See
     [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
     §7.1 for the verification matrix.
 

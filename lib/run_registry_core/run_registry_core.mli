@@ -41,6 +41,15 @@ module type Payload = sig
   val completed_retention : [ `All | `Latest of int ]
 end
 
+type persistence_state =
+  | Not_persisted
+  | Durability_unknown
+
+type persistence_failure =
+  { detail : string
+  ; state : persistence_state
+  }
+
 module Make (Payload : Payload) : sig
   type status =
     | Running
@@ -72,11 +81,12 @@ module Make (Payload : Payload) : sig
     :  t
     -> id:string
     -> completion:Payload.completion
-    -> [ `Completed | `Persistence_failed of string | `Unknown ]
+    -> [ `Completed | `Persistence_failed of persistence_failure | `Unknown ]
   (** Completion persistence is an observation-plane mutation. A durable
-      append failure is returned explicitly and leaves the in-memory entry
-      [Running], so callers can settle their primary lifecycle independently
-      without publishing state that cannot be replayed. *)
+      append failure is returned explicitly with whether rollback established
+      that it was not persisted or durability remains unknown. The in-memory
+      entry remains [Running], so the caller chooses how to expose that failed
+      observation without claiming a replayable completion. *)
 
   val list_entries : t -> entry list
   val get : t -> id:string -> entry option

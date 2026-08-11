@@ -15,12 +15,27 @@ type outcome =
       ; detail : string
       }
 
+type persistence_state =
+  | Not_persisted
+  | Durability_unknown
+
+type persistence_failure =
+  { detail : string
+  ; state : persistence_state
+  }
+
 type run_status =
   | Running
   | Completed of
       { outcome : outcome
       ; elapsed_s : float
       ; output : Yojson.Safe.t
+      }
+  | Completion_persistence_failed of
+      { intended_outcome : outcome
+      ; elapsed_s : float
+      ; output : Yojson.Safe.t
+      ; failure : persistence_failure
       }
 
 type run_input = Exact_input of Yojson.Safe.t
@@ -39,7 +54,7 @@ type t
 
 type completion_error =
   | Unknown_run
-  | Persistence_failed of string
+  | Persistence_failed of persistence_failure
 
 val completion_error_to_string : completion_error -> string
 
@@ -70,7 +85,9 @@ val mark_completed
   -> (unit, completion_error) result
 (** Record an observation-plane completion without taking ownership of the
     caller's primary lifecycle. Persistence failures are returned rather than
-    raised; the durable/in-memory registry entry remains [Running]. *)
+    raised. The durable core entry remains [Running], while [get]/[list_runs]
+    expose [Completion_persistence_failed] with an explicit durability state;
+    callers never silently present a terminal run as still executing. *)
 
 val list_runs : t -> run list
 val get : t -> run_id:string -> run option

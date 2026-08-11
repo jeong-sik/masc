@@ -120,7 +120,7 @@ let test_failed_durable_registration_is_not_published_in_memory () =
   Unix.rmdir directory
 ;;
 
-let test_failed_durable_completion_keeps_running_state () =
+let test_failed_durable_completion_is_explicitly_visible () =
   let path = Filename.temp_file "exact-lane-completion-failure-" ".jsonl" in
   remove_if_exists path;
   let registry = R.create ~path () in
@@ -143,12 +143,28 @@ let test_failed_durable_completion_keeps_running_state () =
       ~output:(`String "must-not-publish")
   in
   (match completion with
-   | Error (R.Persistence_failed detail) ->
-     check bool "failure retains durable detail" true (String.trim detail <> "")
+   | Error (R.Persistence_failed failure) ->
+     check bool "failure retains durable detail" true
+       (String.trim failure.detail <> "")
    | Error R.Unknown_run -> fail "registered run became unknown"
    | Ok () -> fail "directory unexpectedly received durable completion");
   let run = R.get registry ~run_id:"completion-not-published" |> Option.get in
-  check string "failed completion remains running" "running" (R.status_label run.status);
+  check bool "failed completion is not reported as running" true
+    (not (String.equal "running" (R.status_label run.status)));
+  (match run.status with
+   | R.Completion_persistence_failed
+       { intended_outcome = R.Succeeded; output = `String output; failure; _ } ->
+     check string "intended output remains observable" "must-not-publish" output;
+     check bool "persistence failure remains explicit" true
+       (String.trim failure.detail <> "")
+   | _ -> fail "expected explicit completion persistence failure");
+  (match R.run_to_yojson run with
+   | `Assoc fields ->
+     check bool "serialized persistence error" true
+       (List.mem_assoc "persistence_error" fields);
+     check bool "serialized persistence state" true
+       (List.mem_assoc "persistence_state" fields)
+   | _ -> fail "run serializer must emit an object");
   Unix.rmdir path
 ;;
 
@@ -163,7 +179,7 @@ let () =
             test_exact_history_is_not_pruned_across_lanes
         ; test_case "failed durable registration is not published" `Quick
             test_failed_durable_registration_is_not_published_in_memory
-        ; test_case "failed durable completion keeps running state" `Quick
-            test_failed_durable_completion_keeps_running_state
+        ; test_case "failed durable completion is explicitly visible" `Quick
+            test_failed_durable_completion_is_explicitly_visible
         ] )
     ]

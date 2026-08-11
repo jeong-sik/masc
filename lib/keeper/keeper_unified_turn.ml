@@ -335,13 +335,13 @@ let run_keeper_cycle
      phases like Overflowed. *)
   let registry_base_path = config.base_path in
   let exact_failure_execution = ref None in
+  (* Quota expiry is wall-clock provider evidence. Freeze this observation so
+     shaping and dispatch share one ordered runtime suffix. NDT-OK. *)
+  let quota_snapshot_now = Unix.gettimeofday () in
   let deferred_runtime_lane =
     Option.map
       (Keeper_turn_driver.quota_ordered_deferred_runtime_lane
-         (* NDT-OK: quota expiry is wall-clock provider evidence. Freeze the
-            reordered typed hint once so pre-dispatch shaping and the driver
-            consume the same first runtime. *)
-         ~now:(Unix.gettimeofday ()))
+         ~now:quota_snapshot_now)
       deferred_runtime_lane
   in
   (* Decide turn_id at function entry so phase-gate and runtime-routing

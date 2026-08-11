@@ -35,6 +35,7 @@ type turn_in_flight =
 
 type autonomous_block =
   | Turn_busy of turn_in_flight option
+  | Chat_operations_pending of operation_projection
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
 type shutdown_reservation =

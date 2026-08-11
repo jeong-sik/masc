@@ -36,16 +36,6 @@ let decode_request_or_raise ~rpc decode bytes =
       (Printf.sprintf "%s request decode failed: %s" rpc msg)
 ;;
 
-(** Read a file to string. Returns [""] on non-cancellation errors.
-    Propagates [Eio.Cancel.Cancelled] so cooperative cancellation is preserved. *)
-let read_file_safe path =
-  try Fs_compat.load_file path with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Transport.warn "read_file_safe failed for %s: %s" path (Printexc.to_string exn);
-    ""
-;;
-
 (** Safe filename: replace non-alphanumeric chars with underscores. *)
 let safe_filename name =
   String.map
@@ -111,39 +101,34 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
 let handle_get_status (workspace_config : Workspace_utils_backend_setup.config) (_bytes : string)
   : string
   =
-  let masc_dir = Common.masc_dir_from_base_path ~base_path:workspace_config.base_path in
-  let agents_dir = Filename.concat masc_dir "agents" in
+  let agents_dir = Workspace_utils_paths_backend.agents_dir workspace_config in
   let agents =
-    if Sys.file_exists agents_dir && Sys.is_directory agents_dir
-    then
-      Sys.readdir agents_dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.filter_map (fun f ->
-        let path = Filename.concat agents_dir f in
-        try
-          let json = Yojson.Safe.from_string (read_file_safe path) in
-          match Masc_domain.agent_of_yojson json with
-          | Ok agent ->
-            let status_str =
-              Masc_domain.agent_status_to_string agent.Masc_domain.status
-            in
-            Some
-              ({ T.name = agent.name
-               ; status = status_str
-               ; capabilities = agent.capabilities
-               ; last_heartbeat_ms = now_ms ()
-               ; session_bound_at_ms = now_ms ()
-               ; current_task_id = Option.value ~default:"" agent.current_task
-               }
-               : T.agent_info)
-          | _ -> None
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Transport.debug "gRPC status: agent parse skip: %s" (Printexc.to_string exn);
-          None)
-    else []
+    Workspace_utils_paths_backend.list_dir workspace_config agents_dir
+    |> List.filter (fun f -> Filename.check_suffix f ".json")
+    |> List.filter_map (fun f ->
+      let path = Filename.concat agents_dir f in
+      try
+        let json = Workspace_utils.read_json workspace_config path in
+        match Masc_domain.agent_of_yojson json with
+        | Ok agent ->
+          let status_str =
+            Masc_domain.agent_status_to_string agent.Masc_domain.status
+          in
+          Some
+            ({ T.name = agent.name
+             ; status = status_str
+             ; capabilities = agent.capabilities
+             ; last_heartbeat_ms = now_ms ()
+             ; session_bound_at_ms = now_ms ()
+             ; current_task_id = Option.value ~default:"" agent.current_task
+             }
+             : T.agent_info)
+        | _ -> None
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Transport.debug "gRPC status: agent parse skip: %s" (Printexc.to_string exn);
+        None)
   in
   let tasks = Workspace.get_tasks_safe workspace_config |> List.map task_info_of_task in
   T.StatusResponse.(
@@ -235,18 +220,17 @@ let compute_directives
       ~(agent_name : string)
   : Keeper_directive.t list
   =
-  let masc_dir = Common.masc_dir_from_base_path ~base_path:workspace_config.base_path in
   let directives = ref [] in
   (* 1. Pause directive: check if agent is marked paused *)
   let agent_file =
     Filename.concat
-      (Filename.concat masc_dir "agents")
+      (Workspace_utils_paths_backend.agents_dir workspace_config)
       (safe_filename agent_name ^ ".json")
   in
-  if Sys.file_exists agent_file
+  if Workspace_utils.path_exists workspace_config agent_file
   then (
     try
-      let json = Yojson.Safe.from_string (read_file_safe agent_file) in
+      let json = Workspace_utils.read_json workspace_config agent_file in
       match Json_util.assoc_member_opt "paused" json with
       | Some (`Bool true) -> directives := Keeper_directive.Pause :: !directives
       | Some (`Bool false)
@@ -325,25 +309,21 @@ let handle_heartbeat
               (try
                  let agent_file =
                    Filename.concat
-                     (Filename.concat
-                        (Common.masc_dir_from_base_path ~base_path:workspace_config.base_path)
-                        "agents")
+                     (Workspace_utils_paths_backend.agents_dir workspace_config)
                      (safe_filename ping.agent_name ^ ".json")
                  in
-                 if Sys.file_exists agent_file
+                 if Workspace_utils.path_exists workspace_config agent_file
                  then (
-                   let json = Yojson.Safe.from_string (read_file_safe agent_file) in
+                   let json = Workspace_utils.read_json workspace_config agent_file in
                    match Masc_domain.agent_of_yojson json with
                    | Ok agent ->
                      let now = Unix.gettimeofday () in
                      let iso_now = Masc_domain.iso8601_of_unix_seconds now in
                      let updated = { agent with Masc_domain.last_seen = iso_now } in
-                     let content =
-                       Yojson.Safe.to_string (Masc_domain.agent_to_yojson updated)
-                     in
-                     let tmp_path = agent_file ^ ".tmp" in
-                     Fs_compat.save_file tmp_path content;
-                     Unix.rename tmp_path agent_file
+                     Workspace_utils.write_json
+                       workspace_config
+                       agent_file
+                       (Masc_domain.agent_to_yojson updated)
                    | Error e ->
                      Log.Transport.warn
                        "gRPC heartbeat: invalid agent JSON for %s: %s"
@@ -356,19 +336,16 @@ let handle_heartbeat
                    "gRPC heartbeat update failed: %s"
                    (Printexc.to_string exn));
               (* Count active agents and pending tasks *)
-              let masc_dir =
-                Common.masc_dir_from_base_path ~base_path:workspace_config.base_path
-              in
               (* Backend-aware counts: bare [Sys.readdir] here saw only the
                  local mirror, so a Memory-backend workspace reported zero
                  agents and zero pending tasks over gRPC (RFC-0371 B9).
                  [list_dir] is total — missing dirs read as []. *)
-              let agents_dir = Filename.concat masc_dir "agents" in
+              let agents_dir = Workspace_utils_paths_backend.agents_dir workspace_config in
               let agent_count =
                 Workspace_utils_paths_backend.list_dir workspace_config agents_dir
                 |> List.length
               in
-              let tasks_dir = Filename.concat masc_dir "tasks" in
+              let tasks_dir = Workspace_utils_paths_backend.tasks_dir workspace_config in
               let pending_count =
                 Workspace_utils_paths_backend.list_dir workspace_config tasks_dir
                 |> List.filter (fun f -> Filename.check_suffix f ".json")

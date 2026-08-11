@@ -169,6 +169,45 @@ let test_registry_default_credential_is_shared_scope () =
     true
     (Option.is_some (Q.active_until ~scope:image_scope ~now:100.0))
 
+let with_env_values bindings f =
+  let previous =
+    List.map (fun (key, _) -> key, Sys.getenv_opt key) bindings
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (key, value) ->
+           Unix.putenv key (Option.value ~default:"" value))
+        previous)
+    (fun () ->
+       List.iter (fun (key, value) -> Unix.putenv key value) bindings;
+       f ())
+;;
+
+let test_selected_environment_alias_owns_scope () =
+  with_env_values
+    [ "OLLAMA_CLOUD_API_KEY", ""; "OLLAMA_API_KEY", "legacy-test-key" ]
+    (fun () ->
+       let selected =
+         Runtime_adapter.effective_credential_reference
+           ~provider_id:"ollama_cloud"
+           (Some (Runtime_schema.Env "OLLAMA_CLOUD_API_KEY"))
+       in
+       let selected_scope =
+         Q.scope_of_credential ~provider_id:"ollama_cloud" selected
+       in
+       let legacy_scope =
+         Q.scope_of_credential
+           ~provider_id:"ollama_cloud"
+           (Some (Runtime_schema.Env "OLLAMA_API_KEY"))
+       in
+       reset ();
+       Q.note_exhausted ~scope:selected_scope ~resets_at:500.0;
+       Alcotest.(check bool)
+         "the environment alias that supplied the key shares the window"
+         true
+         (Option.is_some (Q.active_until ~scope:legacy_scope ~now:100.0)))
+
 let () =
   Alcotest.run
     "runtime_quota_window"
@@ -207,5 +246,9 @@ let () =
             "registry default credential shares scope"
             `Quick
             test_registry_default_credential_is_shared_scope
+        ; Alcotest.test_case
+            "selected environment alias owns scope"
+            `Quick
+            test_selected_environment_alias_owns_scope
         ] )
     ]

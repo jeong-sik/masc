@@ -77,6 +77,12 @@ type deferred_runtime_lane = private
   }
 
 val deferred_runtime_ids : deferred_runtime_lane -> string list
+val quota_ordered_deferred_runtime_lane :
+  now:float -> deferred_runtime_lane -> deferred_runtime_lane
+(** Apply active quota-window ordering to a frozen deferred suffix while
+    preserving its assignment and failure evidence. Call once before building
+    pre-dispatch execution so prompt shaping and dispatch consume the same
+    selected runtime. *)
 val equal_deferred_runtime_lane :
   deferred_runtime_lane -> deferred_runtime_lane -> bool
 

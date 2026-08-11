@@ -91,6 +91,20 @@ type deferred_runtime_lane =
 let deferred_runtime_ids hint =
   hint.next_runtime_id :: hint.later_runtime_ids
 
+let quota_ordered_runtime_ids ~now runtime_ids =
+  Runtime_quota_window.demote_order
+    ~now
+    ~quota_scope_of:Runtime.quota_scope_of_runtime_id
+    runtime_ids
+;;
+
+let quota_ordered_deferred_runtime_lane ~now hint =
+  match quota_ordered_runtime_ids ~now (deferred_runtime_ids hint) with
+  | next_runtime_id :: later_runtime_ids ->
+    { hint with next_runtime_id; later_runtime_ids }
+  | [] -> hint
+;;
+
 let equal_deferred_runtime_lane left right =
   String.equal left.assignment_id right.assignment_id
   && String.equal left.failed_runtime_id right.failed_runtime_id
@@ -540,11 +554,10 @@ let run_named
      suffix, whose next candidate may sit on an account whose window was
      recorded after the freeze (PR #28202 review P2). *)
   let demote_quota_exhausted candidates =
-    Runtime_quota_window.demote_order
+    quota_ordered_runtime_ids
       (* NDT-OK: scheduling intentionally compares the stored expiry with
          wall clock; [demote_order] stays pure via injected [now]. *)
       ~now:(Unix.gettimeofday ())
-      ~quota_scope_of:Runtime.quota_scope_of_runtime_id
       candidates
   in
   let lane_id_opt, lane_candidate_ids =

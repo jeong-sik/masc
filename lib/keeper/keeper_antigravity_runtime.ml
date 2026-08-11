@@ -76,9 +76,28 @@ let render_messages messages =
   loop [] messages
 ;;
 
+let extra_system_context_messages messages =
+  List.filter
+    (fun (message : Agent_core.Types.message) ->
+      Agent_core.Types.Extra_system_context_provenance.classify message.metadata
+      = Agent_core.Types.Extra_system_context_provenance.Present)
+    messages
+;;
+
 let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
   if is_resume
-  then Ok goal
+  then (
+    (* The provider conversation already owns the static system prompt and
+       seeded history. The hook context is turn-local, though, so dropping its
+       typed carrier on resume changes provider meaning. Prefix only that
+       provenance-marked System material and keep the legacy goal bytes exact
+       when no dynamic context was supplied. *)
+    let* context =
+      prepared.messages |> extra_system_context_messages |> render_messages
+    in
+    match String_util.trim_to_option context with
+    | None -> Ok goal
+    | Some context -> Ok (context ^ "\n\n" ^ goal))
   else
     let* history = render_messages prepared.messages in
     Ok

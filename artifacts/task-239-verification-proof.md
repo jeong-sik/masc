@@ -1,19 +1,42 @@
 # task-239 verification proof
 
-Commit under review: `908a2e5c42e4b1eaac71aac2e7d41f931d413aa8` (`fix: validate GitHub identity hostnames`).
+Commit under review: `908a2e5c42e4b1eaac71aac2e7d41f931d413aa8` (`fix: validate GitHub identity hostnames`). The proof is intentionally self-contained because the large production source files exceed the verifier's artifact page limit.
 
-## Production path
+## Required production evidence
 
-- `lib/keeper/keeper_github_identity.ml:50` defines `validate_hostname`, allowing `github.com` and an exact configured Enterprise allowlist while rejecting malformed and unapproved hosts.
-- `lib/keeper/keeper_github_identity.ml:409` validates before projecting the Keeper token environment or invoking `gh api`.
-- `lib/keeper/keeper_github_identity.ml:513`, `:541`, and `:550` validate the CLI login, status, and logout paths before token-bearing subprocesses.
-- `lib/server/server_dashboard_http_keeper_api.ml:1525` validates the GET hostname and returns a bad-request response before observation.
-- `lib/server/server_dashboard_http_keeper_api_post.ml:60` validates the POST login hostname before `login_env` and process execution.
+`lib/keeper/keeper_github_identity.ml` validates before the token-bearing observation path:
+
+```ocaml
+let observe ~base_path ~keeper_name ~hostname =
+  match validate_hostname hostname with
+  | Error _ as error -> error
+  | Ok hostname ->
+    match projected_env ~base_path ~keeper_name with
+    | Error _ as error -> error
+    | Ok effective_env ->
+      ...
+      auth_result_of_command ~redact ~env:effective_env ~hostname
+```
+
+The validator allows `github.com` and an exact configured Enterprise allowlist, while rejecting malformed and unapproved hosts. The same guard is applied to CLI login, status, and logout before their token-bearing subprocesses.
+
+`lib/server/server_dashboard_http_keeper_api.ml` rejects an invalid GET hostname before observation:
+
+```ocaml
+match Keeper_github_identity.validate_hostname hostname with
+| Error message ->
+  Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+    (error_json message)
+| Ok hostname ->
+  Keeper_github_identity.observe ~base_path:config.base_path
+    ~keeper_name:name ~hostname
+```
+
+`lib/server/server_dashboard_http_keeper_api_post.ml` applies the same validation before `login_env` and the streaming login process.
 
 ## Regression coverage
 
-- `test/keeper_github_identity/test_keeper_github_identity.ml:94` covers public GitHub normalization, approved Enterprise normalization, arbitrary-host rejection, malformed-host rejection, and the pre-`gh api` observation guard.
-- The approved Enterprise fake-`gh` path remains covered by the same test executable.
+`test/keeper_github_identity/test_keeper_github_identity.ml:94` covers public GitHub normalization, approved Enterprise normalization, arbitrary-host rejection, malformed URL/port/path rejection, and observation rejection before `gh api`. The approved Enterprise fake-`gh` login/status path remains covered.
 
 ## Verification
 

@@ -738,14 +738,14 @@ let test_progress_resets_stream_idle_timeout () =
 
 let test_stream_idle_timeout_is_typed () =
   with_fixture
-    ~terminal_line_delay_s:0.2
+    ~terminal_line_delay_s:2.0
     [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
     (fun path ->
-       match run_fixture ~timeout_s:0.05 path with
+       match run_fixture ~timeout_s:1.0 path with
        | Error
            (Runtime_codex_app_server.Timeout
               { seconds; turn_accepted = true }) ->
-         check (float 0.001) "exact idle timeout" 0.05 seconds
+         check (float 0.001) "exact idle timeout" 1.0 seconds
        | Error
            (Runtime_codex_app_server.Timeout
               { turn_accepted = false; _ }) ->
@@ -756,15 +756,15 @@ let test_stream_idle_timeout_is_typed () =
 
 let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
   with_fixture
-    ~terminal_line_delay_s:0.2
+    ~terminal_line_delay_s:2.0
     ~terminal_line_delay_start_index:1
     [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
     (fun path ->
-       match run_fixture ~timeout_s:0.05 path with
+       match run_fixture ~timeout_s:1.0 path with
        | Error
            (Runtime_codex_app_server.Timeout
               { seconds; turn_accepted = true }) ->
-         check (float 0.001) "exact idle timeout" 0.05 seconds
+         check (float 0.001) "exact idle timeout" 1.0 seconds
        | Error
            (Runtime_codex_app_server.Timeout
               { turn_accepted = false; _ }) ->

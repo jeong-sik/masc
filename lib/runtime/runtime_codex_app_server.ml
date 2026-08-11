@@ -854,12 +854,13 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
               "effort"
               (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)));
   let* turn =
-    try await_response io ~id:turn_request_id ~method_:"turn/start" with
-    | Eio.Time.Timeout ->
+    match await_response io ~id:turn_request_id ~method_:"turn/start" with
+    | Error (Timeout { seconds; turn_accepted = _ }) ->
       (* The request has been written. A missing response cannot prove that
          the app-server rejected it, so rotating here could duplicate a turn
          that is already executing upstream. *)
-      Error (Timeout { seconds = config.timeout_s; turn_accepted = true })
+      Error (Timeout { seconds; turn_accepted = true })
+    | response -> response
   in
   let* turn_id = parse_turn_start turn in
   let* () =

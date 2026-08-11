@@ -2028,6 +2028,18 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
   | execution -> execution
 ;;
 
+let operation_runner ~state ~clock : Keeper_owner.operation_runner =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  { ready =
+      (fun ~keeper_name ->
+         match Keeper_registry.get_with_health ~base_path keeper_name with
+         | Some (_, Keeper_registry.Healthy) -> true
+         | Some (_, _)
+         | None -> false)
+  ; execute = operation_executor ~state ~clock
+  }
+;;
+
 let keeper_chat_stream_headers origin =
   Httpun.Headers.of_list
     ([

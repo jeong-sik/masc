@@ -26,7 +26,7 @@ exception Install_failed of install_error
 
 val install_from_store
   :  sw:Eio.Switch.t
-  -> operation_executor:Keeper_owner.operation_executor option
+  -> operation_runner:Keeper_owner.operation_runner option
   -> Workspace.config
   -> (int, install_error) result
 (** Load each valid persisted Keeper independently and start exactly one owner
@@ -47,6 +47,12 @@ val operation_projection
   -> keeper_name:string
   -> (Keeper_owner.operation_projection, lookup_error) result
 (** Lock-free immutable operation inventory for routine read models. *)
+
+val wake_operation_drain
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit, command_error) result
+(** Notify one Owner that its operation runner dependency is ready. *)
 
 val run_autonomous_if_idle
   :  base_path:string

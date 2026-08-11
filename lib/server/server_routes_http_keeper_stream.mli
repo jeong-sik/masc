@@ -199,13 +199,14 @@ val process_single_turn :
     With no visible blocks, the operation records a typed terminal failure
     rather than inventing assistant prose. *)
 
-val operation_executor :
+val operation_runner :
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  Keeper_owner.operation_executor
-(** Production executor installed into every Keeper Owner. It claims the FIFO
-    head only after the Keeper Owner starts it, streams Dashboard events by
-    operation id, and joins Discord/Slack terminal delivery before returning. *)
+  Keeper_owner.operation_runner
+(** Production runner installed into every Keeper Owner. It leaves the FIFO
+    head Queued until the Keeper registry entry exists and is healthy, then
+    claims exactly once, streams events by operation id, and joins terminal
+    connector delivery before returning. *)
 
 (** {1 Testing helpers} *)
 

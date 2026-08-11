@@ -27,7 +27,7 @@ type pool =
   ; owners_mu : Eio.Mutex.t
   ; owner_handles : Keeper_owner.t list Atomic.t
   ; stopping : bool Atomic.t
-  ; operation_executor : Keeper_owner.operation_executor option
+  ; operation_runner : Keeper_owner.operation_runner option
   }
 
 let pools : (string, pool) Hashtbl.t = Hashtbl.create 4
@@ -165,7 +165,7 @@ let start_owner pool ~keeper_name ~initial_meta =
       ~operation_store_path
       (* NDT-OK: wall time is injected once at the Owner persistence boundary. *)
       ~now:Unix.gettimeofday
-      ~operation_executor:pool.operation_executor
+      ~operation_runner:pool.operation_runner
       ~keeper_name
       ~initial_meta
 ;;
@@ -241,7 +241,7 @@ let ensure_empty_in_pool pool keeper_name =
               Ok owner)))
 ;;
 
-let install_from_store ~sw ~operation_executor config =
+let install_from_store ~sw ~operation_runner config =
   let base_path = pool_key config.Workspace.base_path in
   match load_all config with
   | Error _ as error -> error
@@ -254,7 +254,7 @@ let install_from_store ~sw ~operation_executor config =
       ; owners_mu = Eio.Mutex.create ()
       ; owner_handles = Atomic.make []
       ; stopping = Atomic.make false
-      ; operation_executor
+      ; operation_runner
       }
     in
     let installed =
@@ -330,6 +330,14 @@ let operation_projection ~base_path ~keeper_name =
   match get ~base_path ~keeper_name with
   | Error error -> Error error
   | Ok owner -> Ok (Keeper_owner.operation_projection owner)
+;;
+
+let wake_operation_drain ~base_path ~keeper_name =
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    Keeper_owner.wake_operation_drain owner
+    |> Result.map_error (fun error -> Command_rejected error)
 ;;
 
 let shutdown_operation_id ~base_path ~keeper_name =

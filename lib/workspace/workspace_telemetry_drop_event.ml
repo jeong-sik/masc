@@ -4,8 +4,7 @@
    See [.mli] for the public contract. The wire strings are chosen to be
    explicit names owned by the typed call sites in
    [lib/workspace.ml] (lifecycle: "agent_lifecycle/{session_bound,session_rebound,session_ended}",
-   task transition: "task_transition/<task_action>", accountability:
-   "accountability/<task_action>") so the Grafana / alerting rules
+   task transition: "task_transition/<task_action>") so the Grafana / alerting rules
    filtering on the existing label values keep matching. *)
 
 type lifecycle_kind =

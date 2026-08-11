@@ -359,21 +359,20 @@ let handle_heartbeat
               let masc_dir =
                 Common.masc_dir_from_base_path ~base_path:workspace_config.base_path
               in
+              (* Backend-aware counts: bare [Sys.readdir] here saw only the
+                 local mirror, so a Memory-backend workspace reported zero
+                 agents and zero pending tasks over gRPC (RFC-0371 B9).
+                 [list_dir] is total — missing dirs read as []. *)
               let agents_dir = Filename.concat masc_dir "agents" in
               let agent_count =
-                if Sys.file_exists agents_dir
-                then Array.length (Sys.readdir agents_dir)
-                else 0
+                Workspace_utils_paths_backend.list_dir workspace_config agents_dir
+                |> List.length
               in
               let tasks_dir = Filename.concat masc_dir "tasks" in
               let pending_count =
-                if Sys.file_exists tasks_dir
-                then
-                  Sys.readdir tasks_dir
-                  |> Array.to_list
-                  |> List.filter (fun f -> Filename.check_suffix f ".json")
-                  |> List.length
-                else 0
+                Workspace_utils_paths_backend.list_dir workspace_config tasks_dir
+                |> List.filter (fun f -> Filename.check_suffix f ".json")
+                |> List.length
               in
               let directives =
                 compute_directives ~workspace_config ~agent_name:ping.agent_name

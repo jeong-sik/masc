@@ -88,8 +88,15 @@ let replay_args_of_gate_input input =
   | _ -> Error "approved Gate input is not an object"
 ;;
 
-let execute_secret_redaction ~base_path ~keeper_name =
-  Keeper_secret_redaction.snapshot ~base_path ~keeper_name
+let execute_secret_redaction
+      ~additional_secret_files
+      ~base_path
+      ~keeper_name
+  =
+  Keeper_secret_redaction.snapshot_with_additional_secret_files
+    ~additional_secret_files
+    ~base_path
+    ~keeper_name
 
 let redact_execute_text redaction text =
   Keeper_secret_redaction.redact_text redaction text
@@ -105,9 +112,28 @@ let redact_execute_output redaction ~stdout ~stderr =
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let model_execute_location_fields = model_execute_location_fields
-  let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
-    let redaction = execute_secret_redaction ~base_path ~keeper_name in
+  let redact_execute_output_with_additional_secret_files
+        ~additional_secret_files
+        ~base_path
+        ~keeper_name
+        ~stdout
+        ~stderr
+    =
+    let redaction =
+      execute_secret_redaction
+        ~additional_secret_files
+        ~base_path
+        ~keeper_name
+    in
     redact_execute_output redaction ~stdout ~stderr
+
+  let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
+    redact_execute_output_with_additional_secret_files
+      ~additional_secret_files:[]
+      ~base_path
+      ~keeper_name
+      ~stdout
+      ~stderr
 
 end
 
@@ -119,6 +145,12 @@ let typed_input_command_text = Keeper_tool_execute_input.typed_input_command_tex
 let typed_input_has_env = Keeper_tool_execute_input.typed_input_has_env
 let typed_input_timeout_sec = Keeper_tool_execute_input.typed_input_timeout_sec
 let typed_validation_error_text = Keeper_tool_execute_input.typed_validation_error_text
+
+let typed_input_env = function
+  | Keeper_tool_execute_typed_input.Exec { env; _ }
+  | Keeper_tool_execute_typed_input.Pipeline { env; _ } ->
+    env
+;;
 
 let normalize_path_for_keeper_tool_execute_shell_ir_containment path =
   Keeper_alerting_path.normalize_path_for_check path
@@ -157,9 +189,6 @@ let handle_tool_execute_typed
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
-  let output_redaction =
-    execute_secret_redaction ~base_path:config.base_path ~keeper_name:meta.name
-  in
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
       ~config
@@ -213,48 +242,55 @@ let handle_tool_execute_typed
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
         let local_dispatch_sandbox ?(extra_fields = []) () =
-          match
-            Keeper_secret_projection.local_env_for_keeper
-              ~host_env:(Unix.environment ())
-              ~base_path:config.base_path
-              ~keeper_name:meta.name
-              ()
-          with
+          match Keeper_github_identity.validate_local_tool_env (typed_input_env input) with
           | Error err ->
             Error
               (Keeper_sandbox_shell_ir_target.target_error
                  ~fields:extra_fields
-                 ("local_secret_projection_failed: " ^ err))
-          | Ok base_host_env ->
-            (match base_host_env with
-             | None ->
+                 err)
+          | Ok () ->
+            (match
+               Keeper_secret_projection.local_env_for_keeper
+                 ~host_env:(Unix.environment ())
+                 ~base_path:config.base_path
+                 ~keeper_name:meta.name
+                 ()
+             with
+             | Error err ->
                Error
                  (Keeper_sandbox_shell_ir_target.target_error
                     ~fields:extra_fields
-                    "local_secret_projection_failed: projection returned no environment")
-             | Some env ->
-               (match
-                  Keeper_github_identity.runtime_env_for_tool
-                    ~config
-                    ~keeper_name:meta.name
-                    env
-                with
-                | Error err ->
+                    ("local_secret_projection_failed: " ^ err))
+             | Ok base_host_env ->
+               (match base_host_env with
+                | None ->
                   Error
                     (Keeper_sandbox_shell_ir_target.target_error
                        ~fields:extra_fields
-                       ("local_github_identity_invalid: " ^ err))
-                | Ok (env, identity_state, cleanup) ->
-                  let identity_field =
-                    match identity_state with
-                    | Keeper_github_identity.Unconfigured -> "unconfigured"
-                    | Configured _ -> "configured"
-                  in
-                  Ok
-                    ( Masc_exec.Sandbox_target.host ()
-                    , ("github_identity", `String identity_field) :: extra_fields
-                    , Some env
-                    , cleanup )))
+                       "local_secret_projection_failed: projection returned no environment")
+                | Some env ->
+                  (match
+                     Keeper_github_identity.runtime_env_for_tool
+                       ~config
+                       ~keeper_name:meta.name
+                       env
+                   with
+                   | Error err ->
+                     Error
+                       (Keeper_sandbox_shell_ir_target.target_error
+                          ~fields:extra_fields
+                          ("local_github_identity_invalid: " ^ err))
+                   | Ok (env, identity_state, cleanup) ->
+                     let identity_field =
+                       match identity_state with
+                       | Keeper_github_identity.Unconfigured -> "unconfigured"
+                       | Configured _ -> "configured"
+                     in
+                     Ok
+                       ( Masc_exec.Sandbox_target.host ()
+                       , ("github_identity", `String identity_field) :: extra_fields
+                       , Some env
+                       , cleanup ))))
         in
         let dispatch_sandbox =
           match sandbox_profile with
@@ -299,6 +335,22 @@ let handle_tool_execute_typed
                 message)
          | Ok (dispatch_sandbox, sandbox_extra_fields, base_host_env, cleanup) ->
         Fun.protect ~finally:cleanup (fun () ->
+        let github_config_dir =
+          match base_host_env with
+          | Some env ->
+            (match Keeper_github_identity.projected_config_dir env with
+             | Some path -> path
+             | None ->
+               Keeper_github_identity.config_dir ~config ~keeper_name:meta.name)
+          | None -> Keeper_github_identity.config_dir ~config ~keeper_name:meta.name
+        in
+        let output_redaction =
+          execute_secret_redaction
+            ~additional_secret_files:
+              [ Filename.concat github_config_dir "hosts.yml" ]
+            ~base_path:config.base_path
+            ~keeper_name:meta.name
+        in
         let dispatched_model_location_fields =
           match dispatch_sandbox with
           | Masc_exec.Sandbox_target.Host ->
@@ -418,6 +470,12 @@ let handle_tool_execute_typed
           let stream_dispatch =
             Sys.getenv_opt "MASC_STREAM_EXECUTE_OUTPUT" <> Some "false"
           in
+          let stdout_stream_redaction =
+            Keeper_secret_redaction.create_stream_state output_redaction
+          in
+          let stderr_stream_redaction =
+            Keeper_secret_redaction.create_stream_state output_redaction
+          in
           if stream_dispatch
           then (
             try
@@ -431,19 +489,9 @@ let handle_tool_execute_typed
                 "execute stream start callback failed keeper=%s: %s"
                 meta.name
                 (Printexc.to_string exn));
-          (* Chunks reach the dashboard's live view unredacted; the model- and
-             storage-facing copies are redacted below by [redact_execute_output].
-             The removed per-chunk redactor re-copied and re-scanned its whole
-             held buffer on every 4KB read, so output whose newlines are far
-             apart cost O(n^2) inside the Owner child. *)
-          let on_output_chunk chunk =
-            if stream_dispatch
+          let record_stream_chunk stream data =
+            if stream_dispatch && not (String.equal data "")
             then (
-              let stream, data =
-                match chunk with
-                | `Stdout s -> `Stdout, s
-                | `Stderr s -> `Stderr, s
-              in
               try
                 Keeper_keepalive_signal.record_execute_stream_chunk
                   ~keeper_name:meta.name
@@ -456,6 +504,19 @@ let handle_tool_execute_typed
                   "execute stream chunk callback failed keeper=%s: %s"
                   meta.name
                   (Printexc.to_string exn))
+          in
+          (* The line-buffered redactor is boundary-safe when a credential is
+             split across process chunks and scans every byte once. *)
+          let on_output_chunk chunk =
+            if stream_dispatch
+            then (
+              let stream, state, data =
+                match chunk with
+                | `Stdout s -> `Stdout, stdout_stream_redaction, s
+                | `Stderr s -> `Stderr, stderr_stream_redaction, s
+              in
+              let data = Keeper_secret_redaction.redact_stream_chunk state data in
+              record_stream_chunk stream data)
           in
           let dispatch () =
             Keeper_tooling.Execute_shell_ir.dispatch
@@ -520,8 +581,12 @@ let handle_tool_execute_typed
             in
             if stream_dispatch
             then (
-              (* No end-of-stream flush: chunks are forwarded as they are read,
-                 so nothing is held back waiting for a line terminator. *)
+              record_stream_chunk
+                `Stdout
+                (Keeper_secret_redaction.redact_stream_finish stdout_stream_redaction);
+              record_stream_chunk
+                `Stderr
+                (Keeper_secret_redaction.redact_stream_finish stderr_stream_redaction);
               try
                 Keeper_keepalive_signal.record_execute_stream_end
                   ~keeper_name:meta.name

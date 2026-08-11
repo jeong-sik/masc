@@ -24,6 +24,11 @@ val config_dir : config:Workspace.config -> keeper_name:string -> string
 val container_config_dir : container_masc_dir:string -> keeper_name:string -> string
 val ensure_config_dir : config:Workspace.config -> keeper_name:string -> (string, string) result
 val overlay_config_env : config_dir:string -> string array -> string array
+val projected_config_dir : string array -> string option
+(** Read the exact [GH_CONFIG_DIR] installed by {!overlay_config_env}. *)
+val validate_local_tool_env : (string * string) list -> (unit, string) result
+(** Reject caller-authored bindings that would replace the Keeper-owned
+    GitHub identity projection. *)
 val strip_github_token_env : string array -> string array
 val projected_token_env_names : string array -> string list
 
@@ -35,8 +40,9 @@ type tool_identity_state =
   | Configured of string
 
 (** Projects the deterministic Keeper path without provisioning it. Missing
-    state is [Unconfigured]; malformed or unsafe state is a typed error rather
-    than being collapsed into absence. *)
+    state and a safe directory without a non-empty [hosts.yml] are
+    [Unconfigured]; malformed or unsafe state is a typed error rather than
+    being collapsed into absence. *)
 val runtime_env_for_tool :
   config:Workspace.config ->
   keeper_name:string ->

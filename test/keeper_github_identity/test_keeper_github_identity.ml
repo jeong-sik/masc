@@ -74,6 +74,9 @@ let test_pure_environment_contract () =
   let configured = Github.overlay_config_env ~config_dir:"/keeper/github" input in
   Alcotest.(check (option string)) "keeper config wins" (Some "/keeper/github")
     (env_value "GH_CONFIG_DIR" configured);
+  Alcotest.(check (option string)) "projected config is recoverable"
+    (Some "/keeper/github")
+    (Github.projected_config_dir configured);
   Alcotest.(check (option string)) "unrelated env preserved" (Some "value")
     (env_value "KEEP" configured);
   let stripped = Github.strip_github_token_env configured in
@@ -97,6 +100,7 @@ case "${1-}:${2-}" in
     fi
     printf '%s\n' "$@" > "$GH_CONFIG_DIR/login-args"
     printf '%s\n' "stored-user" > "$GH_CONFIG_DIR/stored-login"
+    printf '%s\n' "github.com:" "  user: stored-user" "  oauth_token: fixture-token" > "$GH_CONFIG_DIR/hosts.yml"
     ;;
   api:--hostname)
     if [ -n "${GH_TOKEN-}" ]; then
@@ -286,6 +290,47 @@ let test_tool_projection_is_nonblocking_without_identity () =
     after_login_args
 ;;
 
+let test_empty_existing_identity_remains_unconfigured () =
+  with_temp_base @@ fun _base_path config ->
+  let keeper_name = "empty-existing-identity" in
+  let host_dir =
+    match Github.ensure_config_dir ~config ~keeper_name with
+    | Error message -> Alcotest.fail message
+    | Ok path -> path
+  in
+  let env, state, cleanup =
+    match Github.runtime_env_for_tool ~config ~keeper_name [||] with
+    | Error message -> Alcotest.fail message
+    | Ok projection -> projection
+  in
+  Fun.protect ~finally:cleanup @@ fun () ->
+  ignore env;
+  (match state with
+   | Github.Unconfigured -> ()
+   | Configured _ -> Alcotest.fail "empty GitHub CLI store reported configured");
+  let hosts = Filename.concat host_dir "hosts.yml" in
+  write_file hosts "";
+  Unix.chmod hosts 0o600;
+  let _env, state, cleanup =
+    match Github.runtime_env_for_tool ~config ~keeper_name [||] with
+    | Error message -> Alcotest.fail message
+    | Ok projection -> projection
+  in
+  Fun.protect ~finally:cleanup @@ fun () ->
+  match state with
+  | Github.Unconfigured -> ()
+  | Configured _ -> Alcotest.fail "zero-byte hosts.yml reported configured"
+;;
+
+let test_local_tool_env_rejects_identity_override () =
+  (match Github.validate_local_tool_env [ "KEEP", "value" ] with
+   | Ok () -> ()
+   | Error message -> Alcotest.fail message);
+  match Github.validate_local_tool_env [ "GH_CONFIG_DIR", "/host/account" ] with
+  | Error _ -> ()
+  | Ok () -> Alcotest.fail "GH_CONFIG_DIR override was accepted"
+;;
+
 let test_observe_does_not_provision_missing_identity () =
   with_temp_base @@ fun base_path config ->
   let keeper_name = "observe-missing-identity" in
@@ -432,6 +477,14 @@ let () =
             "tool projection is nonblocking without identity"
             `Quick
             test_tool_projection_is_nonblocking_without_identity
+        ; Alcotest.test_case
+            "empty existing identity remains unconfigured"
+            `Quick
+            test_empty_existing_identity_remains_unconfigured
+        ; Alcotest.test_case
+            "local tool env rejects identity override"
+            `Quick
+            test_local_tool_env_rejects_identity_override
         ; Alcotest.test_case
             "observation does not provision missing identity"
             `Quick

@@ -9,9 +9,15 @@ type t
 val empty : t
 
 val snapshot : base_path:string -> keeper_name:string -> t
-(** Snapshot exact secret values from the keeper's projected secret
-    root. Missing or unreadable roots produce {!empty}; redaction must
-    never fail a chat turn. *)
+(** Snapshot exact secret values from the keeper's projected secret root. *)
+
+val snapshot_with_additional_secret_files :
+  additional_secret_files:string list -> base_path:string -> keeper_name:string -> t
+(** Snapshot exact secret values from the keeper's projected secret root and
+    caller-owned structured secret files. For additional files,
+    non-empty mapping scalar values are captured as well as complete lines so
+    emitting only a scalar cannot bypass redaction. Missing or unreadable
+    roots/files are ignored; redaction must never fail a chat turn. *)
 
 val redact_text : t -> string -> string
 (** Replace exact projected secret values and generic sensitive patterns

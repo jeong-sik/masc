@@ -242,6 +242,28 @@ let overlay_config_env ~config_dir env =
     (remove_env_keys [ "GH_CONFIG_DIR" ] env)
 ;;
 
+let projected_config_dir env =
+  let prefix = "GH_CONFIG_DIR=" in
+  Array.find_map
+    (fun entry ->
+       if String.starts_with ~prefix entry
+       then
+         Some
+           (String.sub
+              entry
+              (String.length prefix)
+              (String.length entry - String.length prefix))
+       else None)
+    env
+;;
+
+let validate_local_tool_env bindings =
+  match List.find_opt (fun (key, _) -> String.equal key "GH_CONFIG_DIR") bindings with
+  | None -> Ok ()
+  | Some _ ->
+    Error "typed Execute env must not override Keeper-owned GH_CONFIG_DIR"
+;;
+
 let strip_github_token_env env = remove_env_keys github_token_env_names env
 
 let projected_token_env_names env =
@@ -294,7 +316,21 @@ let existing_config_dir ~config ~keeper_name =
           | Ok true ->
             (match validate_existing_config_dir keeper_config_dir with
              | Error _ as error -> error
-             | Ok () -> Ok (Some keeper_config_dir))))
+             | Ok () ->
+               let hosts_path = Filename.concat keeper_config_dir "hosts.yml" in
+               (match lstat_opt hosts_path with
+                | Error _ as error -> error
+                | Ok None -> Ok None
+                | Ok (Some stats) when stats.Unix.st_kind = Unix.S_REG ->
+                  if stats.Unix.st_size > 0
+                  then Ok (Some keeper_config_dir)
+                  else Ok None
+                | Ok (Some stats) ->
+                  Error
+                    (Printf.sprintf
+                       "GitHub CLI credential must be a regular file, not a %s: %s"
+                       (file_kind_to_string stats.Unix.st_kind)
+                       hosts_path)))))
   end
 ;;
 

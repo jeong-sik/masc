@@ -170,6 +170,47 @@ let test_stream_redaction_hides_secret_across_chunks () =
   contains "joined line has marker" second "[REDACTED]";
   Alcotest.(check string) "final unterminated line is emitted" "next" trailing
 
+let test_execute_output_redacts_github_hosts_scalar () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let token = "classic-token-without-structural-prefix" in
+  let hosts = Filename.concat base "hosts.yml" in
+  write_file hosts
+    ("github.com:\n  user: keeper-user\n  oauth_token: " ^ token ^ "\n");
+  let stdout, stderr, output =
+    Execute.redact_execute_output_with_additional_secret_files
+      ~additional_secret_files:[ hosts ]
+      ~base_path:base
+      ~keeper_name:"github-output"
+      ~stdout:("token=" ^ token)
+      ~stderr:""
+  in
+  not_contains "GitHub token hidden from stdout" stdout token;
+  not_contains "GitHub token hidden from combined output" output token;
+  Alcotest.(check string) "empty stderr remains empty" "" stderr;
+  contains "GitHub token redaction marker present" stdout "[REDACTED]"
+
+let test_stream_redacts_github_hosts_scalar_across_chunks () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let token = "github-token-split-across-chunks" in
+  let hosts = Filename.concat base "hosts.yml" in
+  write_file hosts ("github.com:\n  oauth_token: " ^ token ^ "\n");
+  let state =
+    R.snapshot_with_additional_secret_files
+      ~additional_secret_files:[ hosts ]
+      ~base_path:base
+      ~keeper_name:"github-stream"
+    |> R.create_stream_state
+  in
+  let first = R.redact_stream_chunk state "github-token-split-" in
+  let second = R.redact_stream_chunk state "across-chunks\n" in
+  Alcotest.(check string) "partial token is withheld" "" first;
+  not_contains "streamed GitHub token is hidden" second token;
+  contains "streamed GitHub token marker present" second "[REDACTED]"
+
 let () =
   Alcotest.run
     "keeper secret redaction"
@@ -186,5 +227,9 @@ let () =
             test_execute_output_redaction_uses_keeper_snapshot;
           Alcotest.test_case "redacts a secret split across chunks" `Quick
             test_stream_redaction_hides_secret_across_chunks;
+          Alcotest.test_case "redacts GitHub hosts scalar from Execute output" `Quick
+            test_execute_output_redacts_github_hosts_scalar;
+          Alcotest.test_case "redacts streamed GitHub scalar across chunks" `Quick
+            test_stream_redacts_github_hosts_scalar_across_chunks;
         ] )
     ]

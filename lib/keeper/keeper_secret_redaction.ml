@@ -57,6 +57,43 @@ let values_from_file path acc =
            |> add_lines value)
   | _ -> acc
 
+let strip_matching_quotes value =
+  let len = String.length value in
+  if len >= 2
+     && ((Char.equal value.[0] '"' && Char.equal value.[len - 1] '"')
+         || (Char.equal value.[0] '\'' && Char.equal value.[len - 1] '\''))
+  then String.sub value 1 (len - 2)
+  else value
+
+let add_mapping_scalar_values value acc =
+  value
+  |> String.split_on_char '\n'
+  |> List.fold_left
+       (fun acc line ->
+          match String.index_opt line ':' with
+          | None -> acc
+          | Some separator ->
+            let value_start = separator + 1 in
+            let scalar =
+              String.sub line value_start (String.length line - value_start)
+              |> String.trim
+              |> strip_matching_quotes
+            in
+            add_value scalar acc)
+       acc
+
+let values_from_structured_secret_file path acc =
+  match lstat_opt path with
+  | Some st when st.Unix.st_kind = Unix.S_REG ->
+      (match read_regular_file path st with
+       | None -> acc
+       | Some value ->
+           acc
+           |> add_value (strip_one_final_newline value)
+           |> add_lines value
+           |> add_mapping_scalar_values value)
+  | _ -> acc
+
 let collect_env_values env_root acc =
   if not (path_exists env_root) then acc
   else
@@ -101,7 +138,11 @@ let dedupe values =
   |> List.sort (fun a b ->
        compare (String.length b, b) (String.length a, a))
 
-let snapshot ~base_path ~keeper_name =
+let snapshot_with_additional_secret_files
+      ~additional_secret_files
+      ~base_path
+      ~keeper_name
+  =
   let values =
     Keeper_secret_projection.secret_roots ~base_path ~keeper_name
     |> List.fold_left
@@ -112,12 +153,24 @@ let snapshot ~base_path ~keeper_name =
             in
             acc |> collect_env_values env_root |> collect_file_values files_root)
          []
+    |> fun values ->
+    List.fold_left
+      (fun acc path -> values_from_structured_secret_file path acc)
+      values
+      additional_secret_files
     |> dedupe
   in
   let patterns =
     List.map (fun value -> Re.compile (Re.str value)) values
   in
   { patterns }
+
+let snapshot ~base_path ~keeper_name =
+  snapshot_with_additional_secret_files
+    ~additional_secret_files:[]
+    ~base_path
+    ~keeper_name
+;;
 
 let redact_text t text =
   let text =

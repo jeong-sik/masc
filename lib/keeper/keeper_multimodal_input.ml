@@ -152,6 +152,19 @@ let parse_user_media_block ~(kind : string) fields =
         ; size
         }
 
+(* Shared body for the media block kinds. The constructor is chosen at the
+   single point where the kind string is matched, so no arm can be
+   unreachable and no wildcard can silently misclassify a new kind. *)
+let parse_media_input_block json ~kind make =
+  let* fields =
+    exact_object_fields
+      ~field:("user_blocks " ^ kind ^ " block")
+      ~allowed:[ "type"; "attachment_id"; "name"; "mime_type"; "size" ]
+      json
+  in
+  let* media = parse_user_media_block ~kind fields in
+  Ok (make media)
+
 let parse_user_input_block json =
   let* base_fields =
     exact_object_fields
@@ -170,20 +183,10 @@ let parse_user_input_block json =
     let text = String.trim text in
     if text = "" then Error "user_blocks text block requires non-empty text"
     else Ok (User_text text)
-  | ("image" | "document" | "audio") as kind ->
-    let* fields =
-      exact_object_fields
-        ~field:("user_blocks " ^ kind ^ " block")
-        ~allowed:[ "type"; "attachment_id"; "name"; "mime_type"; "size" ]
-        json
-    in
-    let* media = parse_user_media_block ~kind fields in
-    Ok
-      (match kind with
-       | "image" -> User_image media
-       | "document" -> User_document media
-       | "audio" -> User_audio media
-       | _ -> assert false)
+  | "image" -> parse_media_input_block json ~kind:"image" (fun media -> User_image media)
+  | "document" ->
+    parse_media_input_block json ~kind:"document" (fun media -> User_document media)
+  | "audio" -> parse_media_input_block json ~kind:"audio" (fun media -> User_audio media)
   | "" -> Error "user_blocks block requires type"
   | other ->
     Error

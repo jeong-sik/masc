@@ -366,7 +366,16 @@ let test_statement_finalize_survives_gc_pressure () =
     if i mod 64 = 0 then Gc.minor ()
   done;
   ignore (Sys.opaque_identity !churn);
-  check bool "all inventory statements finalized under GC pressure" true
+  (* [check bool msg true] is a partial application: it is [bool -> unit], so
+     this case had the type [unit -> bool -> unit] and never ran an assertion.
+     The observable it was reaching for is that the store still answers after
+     the churn — a statement finalized out from under it surfaces as a failing
+     inventory, not as a silent one, so the read has to be taken and checked. *)
+  check
+    bool
+    "inventory still answers after GC pressure"
+    true
+    (Result.is_ok (Store.inventory store))
 ;;
 
 let () =

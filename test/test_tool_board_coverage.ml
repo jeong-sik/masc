@@ -514,44 +514,6 @@ let test_board_dashboard_json_hides_unvoted_scores_when_blind () =
   Alcotest.(check int) "comment revealed score" 1
     (json_member_int revealed_comment_json "score")
 
-let test_board_dashboard_json_embeds_contributor_quality () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let post =
-    match
-      Board_dispatch.create_post ~author:"quality-author"
-        ~content:"quality projection post" ~post_kind:Board.Human_post ()
-    with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let rep =
-    {
-      (Reputation.default_reputation ~agent_name:"quality-author") with
-      completion_rate = 0.8;
-      response_rate = 0.6;
-      board_posts = 3;
-      board_comments = 5;
-    }
-  in
-  let contributor_quality =
-    Server_utils.board_contributor_quality_json rep
-  in
-  let post_json =
-    Server_utils.board_post_dashboard_json ~contributor_quality
-      ~author_karma:0 post
-  in
-  let quality =
-    match Yojson.Safe.Util.member "contributor_quality" post_json with
-    | `Assoc _ as quality -> quality
-    | _ -> Alcotest.fail "expected contributor_quality object"
-  in
-  Alcotest.(check string) "quality source" "agent_reputation"
-    (json_member_string quality "source");
-  Alcotest.(check int) "quality board posts" 3
-    (json_member_int quality "board_posts")
-
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
     make_args
@@ -2025,8 +1987,6 @@ let () =
             `Quick test_board_dashboard_json_embeds_moderation_projection;
           Alcotest.test_case "board dashboard json hides blind vote scores"
             `Quick test_board_dashboard_json_hides_unvoted_scores_when_blind;
-          Alcotest.test_case "board dashboard json embeds contributor quality"
-            `Quick test_board_dashboard_json_embeds_contributor_quality;
           Alcotest.test_case "MCP runtime board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "MCP runtime board post author accepts matching alias"

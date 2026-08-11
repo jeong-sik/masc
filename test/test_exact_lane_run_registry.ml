@@ -171,13 +171,13 @@ let test_failed_durable_completion_is_explicitly_visible () =
      check bool "serialized persistence state" true
        (List.mem_assoc "persistence_state" fields);
      check (option string) "serialized intended failure code" (Some "model_error")
-       (match List.assoc_opt "intended_code" fields with
-        | Some (`String value) -> Some value
-        | _ -> None);
+       (Option.bind
+          (List.assoc_opt "intended_code" fields)
+          (function `String value -> Some value | _ -> None));
      check (option string) "serialized intended failure detail" (Some "typed failure detail")
-       (match List.assoc_opt "intended_detail" fields with
-        | Some (`String value) -> Some value
-        | _ -> None)
+       (Option.bind
+          (List.assoc_opt "intended_detail" fields)
+          (function `String value -> Some value | _ -> None))
    | _ -> fail "run serializer must emit an object");
   Unix.rmdir path
 ;;
@@ -203,13 +203,13 @@ let test_observation_reads_do_not_wait_for_durable_writer () =
     let ready = Bytes.create 1 in
     ignore (Unix.read ready_read ready 0 1 : int);
     Unix.close ready_read;
-    let rec waitpid_reap pid =
-      try Unix.waitpid [] pid with
-      | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_reap pid
-    in
     Fun.protect
       ~finally:(fun () ->
-        (match waitpid_reap child with
+        let rec wait_child () =
+          try Unix.waitpid [] child with
+          | Unix.Unix_error (Unix.EINTR, _, _) -> wait_child ()
+        in
+        (match wait_child () with
          | _, Unix.WEXITED 0 -> ()
          | _, status ->
            failf

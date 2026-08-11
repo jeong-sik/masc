@@ -659,21 +659,24 @@ let status_to_string = function
 let run_spawned ?home_dir ?on_spawn_failure ~mgr ~clock ~cwd config
     ~conversation_mode ~prompt ~on_conversation_ready ~on_stream_event =
   Eio.Switch.run (fun sw ->
-    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = ref "" in
-    let proc =
+    let stdin_r, stdin_w, stdout_r, stdout_w, stderr_r, stderr_w, proc =
       try
-        Eio.Process.spawn
-          ~sw
-          mgr
-          ~cwd
-          ~env:(official_client_environment ?home_dir ())
-          ~stdin:stdin_r
-          ~stdout:stdout_w
-          ~stderr:stderr_w
-          (argv config ~conversation_mode)
+        let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
+        let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
+        let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
+        let proc =
+          Eio.Process.spawn
+            ~sw
+            mgr
+            ~cwd
+            ~env:(official_client_environment ?home_dir ())
+            ~stdin:stdin_r
+            ~stdout:stdout_w
+            ~stderr:stderr_w
+            (argv config ~conversation_mode)
+        in
+        stdin_r, stdin_w, stdout_r, stdout_w, stderr_r, stderr_w, proc
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->

@@ -1056,21 +1056,24 @@ let run_spawned ?on_spawn_failure ~mgr ~clock ~cwd config ~dynamic_tools
     command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id
   in
   Eio.Switch.run (fun sw ->
-    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = ref "" in
-    let proc =
+    let stdin_r, stdin_w, stdout_r, stdout_w, stderr_r, stderr_w, proc =
       try
-        Eio.Process.spawn
-          ~sw
-          mgr
-          ~cwd
-          ~env:(subscription_only_environment ())
-          ~stdin:stdin_r
-          ~stdout:stdout_w
-          ~stderr:stderr_w
-          argv
+        let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
+        let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
+        let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
+        let proc =
+          Eio.Process.spawn
+            ~sw
+            mgr
+            ~cwd
+            ~env:(subscription_only_environment ())
+            ~stdin:stdin_r
+            ~stdout:stdout_w
+            ~stderr:stderr_w
+            argv
+        in
+        stdin_r, stdin_w, stdout_r, stdout_w, stderr_r, stderr_w, proc
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->

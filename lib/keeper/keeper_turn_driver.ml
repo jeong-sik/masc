@@ -791,10 +791,7 @@ let run_named
         , codex_attempt.effect_disposition )
       | Runtime_execution.Antigravity_cli config ->
         let antigravity_effect_disposition =
-          ref
-            (match tools with
-             | [] -> Keeper_provider_attempt_effect.No_effect_observed
-             | _ :: _ -> Keeper_provider_attempt_effect.Observation_unavailable)
+          ref Keeper_provider_attempt_effect.Observation_unavailable
         in
         let run_antigravity ~initial_messages () =
           Keeper_antigravity_runtime.run

@@ -189,8 +189,9 @@ let schedule_evidence_snapshot ~config wakes =
        | None -> ()
        | Some (keeper_name, stimulus_id) ->
          let existing =
-           Hashtbl.find_opt requested_stimulus_ids keeper_name
-           |> Option.value ~default:String_set.empty
+           match Hashtbl.find_opt requested_stimulus_ids keeper_name with
+           | Some existing -> existing
+           | None -> String_set.empty
          in
          let requested =
            match stimulus_id with

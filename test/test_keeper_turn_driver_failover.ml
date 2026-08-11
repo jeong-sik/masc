@@ -138,8 +138,9 @@ max-concurrent = 1
 max-request-body-bytes = 65536
 |}
 
-let runtime_toml_quota_lane =
-  {|
+let runtime_toml_quota_lane_with_shared_credential shared_credential =
+  Printf.sprintf
+    {|
 [runtime]
 default = "shared_a.test_model"
 
@@ -154,7 +155,7 @@ endpoint = "http://127.0.0.1:1"
 
 [providers.shared_a.credentials]
 type = "env"
-key = "SHARED_QUOTA_TEST_KEY"
+key = %S
 
 [providers.shared_b]
 display-name = "Shared account B"
@@ -163,7 +164,7 @@ endpoint = "http://127.0.0.1:2"
 
 [providers.shared_b.credentials]
 type = "env"
-key = "SHARED_QUOTA_TEST_KEY"
+key = %S
 
 [providers.other]
 display-name = "Other account"
@@ -190,6 +191,13 @@ max-request-body-bytes = 65536
 [other.test_model]
 max-request-body-bytes = 65536
 |}
+    shared_credential
+    shared_credential
+;;
+
+let runtime_toml_quota_lane =
+  runtime_toml_quota_lane_with_shared_credential "SHARED_QUOTA_TEST_KEY"
+;;
 
 let runtime_toml_official_provider_named_like_registry =
   {|
@@ -429,6 +437,18 @@ let with_runtime_config toml f =
        match Runtime.init_default ~config_path:path with
        | Ok () -> f ()
        | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e)
+
+let reload_runtime_config toml =
+  let path = Filename.temp_file "runtime_failover_reload_" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       write_file path toml;
+       match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error e -> Alcotest.failf "Runtime.init_default reload failed: %s" e)
 
 let test_lane_loads_ordered_candidates () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -1482,6 +1502,59 @@ let test_attempt_loop_reorders_shared_quota_sibling_same_turn () =
            [ "shared_a.test_model"; "other.test_model" ]
            !attempts))
 
+let test_attempt_quota_scope_survives_runtime_reload () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let attempted_runtime =
+           Option.get (Runtime.get_runtime_by_id "shared_a.test_model")
+         in
+         let attempted_scope = Runtime.quota_scope_of_runtime attempted_runtime in
+         let result =
+           Driver.For_testing.attempt_runtime_candidates
+             ~runtime_id:"quota_lane"
+             ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
+             ~quota_scope_of:(fun runtime ->
+               Some (Runtime.quota_scope_of_runtime runtime))
+             ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+             ~run_attempt:(fun ~idx:_ ~runtime_id:_ _candidate ->
+               reload_runtime_config
+                 (runtime_toml_quota_lane_with_shared_credential
+                    "REBOUND_QUOTA_TEST_KEY");
+               attempt_without_effect
+                 (Error
+                    (Agent_core.Error.Provider
+                       (Llm_provider.Error.HardQuota
+                          { provider = "shared_a"
+                          ; retry_after = Some 300.0
+                          ; detail = "old account quota exhausted"
+                          })))
+                 None)
+             [ attempted_runtime ]
+         in
+         (match result with
+          | Error (Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)) -> ()
+          | Error error ->
+            Alcotest.failf
+              "expected hard-quota result, got %s"
+              (Agent_core.Error.to_string error)
+          | Ok _ -> Alcotest.fail "hard-quota attempt unexpectedly succeeded");
+         let rebound_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
+         in
+         let now = Unix.gettimeofday () in
+         Alcotest.(check bool)
+           "response remains attributed to attempted credential"
+           true
+           (Option.is_some
+              (Runtime_quota_window.active_until ~scope:attempted_scope ~now));
+         Alcotest.(check (option (float 0.0)))
+           "replacement credential is not charged for old response"
+           None
+           (Runtime_quota_window.active_until ~scope:rebound_scope ~now)))
+
 let test_deferred_quota_order_is_frozen_before_predispatch () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Runtime_quota_window.reset_for_testing ();
@@ -2185,6 +2258,10 @@ let () =
             "hard quota reorders shared sibling in same turn"
             `Quick
             test_attempt_loop_reorders_shared_quota_sibling_same_turn;
+          Alcotest.test_case
+            "hard quota keeps attempted scope across runtime reload"
+            `Quick
+            test_attempt_quota_scope_survives_runtime_reload;
           Alcotest.test_case
             "deferred quota order is frozen before pre-dispatch"
             `Quick

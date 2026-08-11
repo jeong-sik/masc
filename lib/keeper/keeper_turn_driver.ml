@@ -180,6 +180,7 @@ let attempt_runtime_candidates
       true)
     ?lane_id
     ?(on_retry_deferred = fun _ -> ())
+    ?quota_scope_of
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
        ?status:string ->
@@ -197,6 +198,13 @@ let attempt_runtime_candidates
      stops on a non-recoverable error keeps that error: it is the immediate
      operator signal, and the overflow will be observed again on the next
      cycle. *)
+  let quota_scope_of =
+    match quota_scope_of with
+    | Some quota_scope_of -> quota_scope_of
+    | None ->
+      fun candidate ->
+        Runtime.quota_scope_of_runtime_id (runtime_id_of candidate)
+  in
   let rec loop ~observed_overflow idx = function
     | [] ->
       (match observed_overflow with
@@ -210,6 +218,11 @@ let attempt_runtime_candidates
     | candidate :: rest ->
       let is_last = rest = [] in
       let attempt_runtime_id = runtime_id_of candidate in
+      (* Bind quota ownership to the exact candidate that will be dispatched.
+         [run_attempt] may span a runtime.toml reload; resolving the id after
+         the provider returns could then attribute the old credential's
+         response to the replacement catalog row. *)
+      let attempt_quota_scope = quota_scope_of candidate in
       emit_runtime_manifest
         ~status:"attempt"
         ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
@@ -250,7 +263,7 @@ let attempt_runtime_candidates
             (* Quota is credential-account-owned, so the window is keyed by
                the row's quota scope: siblings sharing the credential are
                demoted together (PR #28202 review P2). *)
-            (match Runtime.quota_scope_of_runtime_id attempt_runtime_id with
+            (match attempt_quota_scope with
              | Some scope ->
                Runtime_quota_window.note_exhausted
                  ~scope
@@ -268,8 +281,7 @@ let attempt_runtime_candidates
          let rest =
            Runtime_quota_window.demote_order
              ~now:(Unix.gettimeofday ())
-             ~quota_scope_of:(fun candidate ->
-               Runtime.quota_scope_of_runtime_id (runtime_id_of candidate))
+             ~quota_scope_of
              rest
          in
          let retry_admitted =
@@ -776,6 +788,9 @@ let run_named
     ~runtime_id_of:(function
       | Resolved_runtime runtime -> runtime.Runtime.id
       | Missing_runtime runtime_id -> runtime_id)
+    ~quota_scope_of:(function
+      | Resolved_runtime runtime -> Some (Runtime.quota_scope_of_runtime runtime)
+      | Missing_runtime _ -> None)
     ~emit_runtime_manifest
     ~run_attempt:(fun ~idx:_ ~runtime_id:attempt_runtime_id candidate ->
       match candidate with

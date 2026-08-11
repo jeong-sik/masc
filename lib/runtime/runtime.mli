@@ -367,6 +367,11 @@ val provider_id_of_runtime_id : string -> string option
 (** Owning provider id ([providers.<id>] in runtime.toml) of the runtime with
     this binding-key id, or [None] when the runtime id is unknown. *)
 
+val quota_scope_of_runtime : t -> Runtime_quota_window.scope
+(** Non-secret quota-scope identity derived from this resolved runtime
+    snapshot.  Use this form across a provider call so a concurrent catalog
+    reload cannot rebind the response to a different credential account. *)
+
 val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
 (** Non-secret quota-scope identity of the runtime's provider
     ({!Runtime_quota_window.scope_of_credential}): rows sharing one

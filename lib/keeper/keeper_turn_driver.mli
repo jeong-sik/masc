@@ -239,6 +239,7 @@ module For_testing : sig
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
     ?lane_id:string ->
     ?on_retry_deferred:(deferred_runtime_lane -> unit) ->
+    ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
     emit_runtime_manifest:

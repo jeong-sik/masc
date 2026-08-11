@@ -188,16 +188,90 @@ let test_final_message_blocks_merges_text_and_event_blocks () =
   check bool "event block preserved" true
     (contains second "https://event.example.com")
 
-let run_adapter ?set_activity_status events ~send_plain ~send_blocks =
+let run_adapter ?post_stream ?edit_stream ?edit_blocks ?now
+    ?set_activity_status events ~send_plain ~send_blocks =
   Eio_main.run @@ fun _env ->
   let stream = Masc.Keeper_chat_events.create () in
   List.iter (Masc.Keeper_chat_events.publish stream) events;
   let outcomes = ref [] in
   S.adapter_loop ~events:stream ~send_plain ~send_blocks
+    ?post_stream ?edit_stream ?edit_blocks ?now
     ?set_activity_status
     ~on_send_result:(fun result -> outcomes := result :: !outcomes)
     ();
   List.rev !outcomes
+
+let test_adapter_streams_one_edited_reply () =
+  let posts = ref [] in
+  let stream_edits = ref [] in
+  let final_edits = ref [] in
+  let clock = ref 0.0 in
+  let now () =
+    let current = !clock in
+    clock := current +. 4.0;
+    current
+  in
+  let outcomes =
+    run_adapter
+      ~now
+      ~post_stream:(fun ~content ->
+        posts := content :: !posts;
+        Ok "slack-message-1")
+      ~edit_stream:(fun ~message_id ~content ->
+        check string "stream message identity" "slack-message-1" message_id;
+        stream_edits := content :: !stream_edits;
+        Ok ())
+      ~edit_blocks:(fun ~message_id ~content ~blocks ->
+        check string "final message identity" "slack-message-1" message_id;
+        final_edits := (content, blocks) :: !final_edits;
+        Ok ())
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-stream"; thread_id = "thread-stream" }
+      ; Masc.Keeper_chat_events.Text_delta "hello "
+      ; Masc.Keeper_chat_events.Text_delta "world "
+      ; Masc.Keeper_chat_events.Text_message_end
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-stream" }
+      ]
+      ~send_plain:(fun ~content:_ -> fail "streaming success needs no side message")
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        fail "streaming success must finalize the accepted message")
+  in
+  check bool "terminal callback succeeds" true (outcomes = [ Ok () ]);
+  check (list string) "one initial Slack post" [ "hello " ] (List.rev !posts);
+  check (list string)
+    "rate-limited incremental edit"
+    [ "hello world " ]
+    (List.rev !stream_edits);
+  match List.rev !final_edits with
+  | [ content, [] ] -> check string "final exact text" "hello world " content
+  | _ -> fail "terminal delivery did not edit the streaming message exactly once"
+;;
+
+let test_adapter_stream_error_edits_accepted_reply () =
+  let error_edits = ref [] in
+  let outcomes =
+    run_adapter
+      ~post_stream:(fun ~content:_ -> Ok "slack-message-error")
+      ~edit_stream:(fun ~message_id ~content ->
+        error_edits := (message_id, content) :: !error_edits;
+        Ok ())
+      ~edit_blocks:(fun ~message_id:_ ~content:_ ~blocks:_ ->
+        fail "failed run must not use the success finalizer")
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-error"; thread_id = "thread-error" }
+      ; Masc.Keeper_chat_events.Text_delta "partial "
+      ; Masc.Keeper_chat_events.Event_error { message = "tool failed" }
+      ]
+      ~send_plain:(fun ~content:_ ->
+        fail "streaming error must replace the accepted reply")
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        fail "streaming error must not create a second reply")
+  in
+  check bool "error callback succeeds" true (outcomes = [ Ok () ]);
+  check (list (pair string string)) "same reply becomes terminal error"
+    [ "slack-message-error", "Keeper error: tool failed" ]
+    (List.rev !error_edits)
+;;
 
 let test_adapter_terminal_success_once () =
   let sends = ref [] in
@@ -417,6 +491,10 @@ let () =
     ; ( "terminal-receipt"
       , [ test_case "terminal success settles once" `Quick
             test_adapter_terminal_success_once
+        ; test_case "streams one edited reply" `Quick
+            test_adapter_streams_one_edited_reply
+        ; test_case "stream error edits accepted reply" `Quick
+            test_adapter_stream_error_edits_accepted_reply
         ; test_case "protocol diagnostic cannot mask final failure" `Quick
             test_protocol_diagnostic_cannot_mask_final_failure
         ; test_case "empty terminal is explicit failure" `Quick

@@ -60,6 +60,14 @@ let env_value name env =
     else None)
 ;;
 
+let docker_mount_source = function
+  | [ "--env"; _; "-v"; mount ] ->
+    (match String.index_opt mount ':' with
+     | None -> Alcotest.fail "Docker identity mount is missing a destination"
+     | Some separator -> String.sub mount 0 separator)
+  | _ -> Alcotest.fail "unexpected Docker identity projection argv"
+;;
+
 let test_pure_environment_contract () =
   let input =
     [| "PATH=/bin"
@@ -92,6 +100,10 @@ let test_pure_environment_contract () =
 let fake_gh_script =
   {|#!/bin/sh
 set -eu
+if [ -n "${KEEP_SECRET-}" ]; then
+  echo "unrelated Keeper secret leaked into GitHub CLI" >&2
+  exit 42
+fi
 case "${1-}:${2-}" in
   auth:login)
     if [ -n "${GH_TOKEN-}${GITHUB_TOKEN-}${GH_ENTERPRISE_TOKEN-}${GITHUB_ENTERPRISE_TOKEN-}" ]; then
@@ -129,6 +141,12 @@ let test_fake_gh_login_and_effective_identity () =
   Unix.chmod fake_gh 0o700;
   let secret_root = Secret_projection.secret_root ~base_path ~keeper_name in
   write_file (Filename.concat (Filename.concat secret_root "env") "GH_TOKEN") "projected-token\n";
+  write_file
+    (Filename.concat (Filename.concat secret_root "env") "KEEP_SECRET")
+    "must-not-reach-github-cli\n";
+  write_file
+    (Filename.concat (Filename.concat secret_root "env") "PATH")
+    "/keeper-controlled-path-must-not-run-gh\n";
   let previous_path = Sys.getenv "PATH" in
   Unix.putenv "PATH" (fake_bin ^ ":" ^ previous_path);
   Fun.protect
@@ -243,7 +261,7 @@ let test_tool_projection_is_nonblocking_without_identity () =
   cleanup ();
   Alcotest.(check bool) "empty local projection is cleaned" false
     (Sys.file_exists projected_dir);
-  let docker_args, docker_state =
+  let docker_args, docker_state, docker_cleanup =
     match
       Github.docker_args_for_tool
         ~config
@@ -257,20 +275,30 @@ let test_tool_projection_is_nonblocking_without_identity () =
    | Github.Unconfigured -> ()
    | Configured _ -> Alcotest.fail "missing Docker identity reported configured");
   let host_dir = Github.config_dir ~config ~keeper_name in
-  Alcotest.(check bool) "empty Keeper config directory is provisioned" true
-    (Sys.file_exists host_dir && Sys.is_directory host_dir);
+  let first_snapshot = docker_mount_source docker_args in
+  Alcotest.(check bool) "read-only empty snapshot exists" true
+    (Sys.file_exists first_snapshot && Sys.is_directory first_snapshot);
+  Alcotest.(check bool) "missing host identity remains unprovisioned" false
+    (Sys.file_exists host_dir);
   Alcotest.(check (list string)) "docker config path is mounted read-only"
     [ "--env"
     ; "GH_CONFIG_DIR=/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli"
     ; "-v"
-    ; host_dir
+    ; first_snapshot
       ^ ":/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli:ro"
     ]
     docker_args;
+  let host_dir =
+    match Github.ensure_config_dir ~config ~keeper_name with
+    | Error message -> Alcotest.fail message
+    | Ok path -> path
+  in
   let hosts = Filename.concat host_dir "hosts.yml" in
   write_file hosts "github.com:\n  user: first-login\n";
   Unix.chmod hosts 0o600;
-  let after_login_args, after_login_state =
+  Alcotest.(check bool) "running snapshot cannot see later login" false
+    (Sys.file_exists (Filename.concat first_snapshot "hosts.yml"));
+  let after_login_args, after_login_state, after_login_cleanup =
     match
       Github.docker_args_for_tool
         ~config
@@ -282,12 +310,20 @@ let test_tool_projection_is_nonblocking_without_identity () =
   in
   (match after_login_state with
    | Github.Configured path ->
-     Alcotest.(check string) "first login uses the existing mount source" host_dir path
+     Alcotest.(check string) "next dispatch observes the host identity" host_dir path
    | Unconfigured -> Alcotest.fail "first login remained unconfigured");
-  Alcotest.(check (list string))
-    "first login does not require a different container mount"
-    docker_args
-    after_login_args
+  let after_login_snapshot = docker_mount_source after_login_args in
+  Alcotest.(check bool) "next dispatch gets a distinct snapshot" true
+    (not (String.equal first_snapshot after_login_snapshot));
+  Alcotest.(check string) "next snapshot contains the login state"
+    "github.com:\n  user: first-login\n"
+    (read_file (Filename.concat after_login_snapshot "hosts.yml"));
+  docker_cleanup ();
+  after_login_cleanup ();
+  Alcotest.(check bool) "empty Docker snapshot is cleaned" false
+    (Sys.file_exists first_snapshot);
+  Alcotest.(check bool) "configured Docker snapshot is cleaned" false
+    (Sys.file_exists after_login_snapshot)
 ;;
 
 let test_empty_existing_identity_remains_unconfigured () =
@@ -326,9 +362,17 @@ let test_local_tool_env_rejects_identity_override () =
   (match Github.validate_local_tool_env [ "KEEP", "value" ] with
    | Ok () -> ()
    | Error message -> Alcotest.fail message);
-  match Github.validate_local_tool_env [ "GH_CONFIG_DIR", "/host/account" ] with
-  | Error _ -> ()
-  | Ok () -> Alcotest.fail "GH_CONFIG_DIR override was accepted"
+  List.iter
+    (fun key ->
+       match Github.validate_local_tool_env [ key, "caller-controlled" ] with
+       | Error _ -> ()
+       | Ok () -> Alcotest.fail (key ^ " override was accepted"))
+    [ "GH_CONFIG_DIR"
+    ; "GH_TOKEN"
+    ; "GITHUB_TOKEN"
+    ; "GH_ENTERPRISE_TOKEN"
+    ; "GITHUB_ENTERPRISE_TOKEN"
+    ]
 ;;
 
 let test_observe_does_not_provision_missing_identity () =
@@ -377,7 +421,7 @@ let test_tool_projection_uses_safe_existing_identity () =
   cleanup ();
   let container_masc_dir = "/tmp/masc-runtime/.masc" in
   let container_dir = Github.container_config_dir ~container_masc_dir ~keeper_name in
-  let docker_args, docker_state =
+  let docker_args, docker_state, docker_cleanup =
     match Github.docker_args_for_tool ~config ~keeper_name ~container_masc_dir with
     | Error message -> Alcotest.fail message
     | Ok projection -> projection
@@ -385,13 +429,23 @@ let test_tool_projection_uses_safe_existing_identity () =
   (match docker_state with
    | Github.Configured path -> Alcotest.(check string) "mounted path" host_dir path
    | Unconfigured -> Alcotest.fail "existing Docker identity reported unconfigured");
-  Alcotest.(check (list string)) "safe identity is mounted read-only"
+  let docker_snapshot = docker_mount_source docker_args in
+  Alcotest.(check bool) "Docker never receives the operator-owned path" true
+    (not (String.equal docker_snapshot host_dir));
+  Alcotest.(check (list string)) "safe identity snapshot is mounted read-only"
     [ "--env"
     ; "GH_CONFIG_DIR=" ^ container_dir
     ; "-v"
-    ; host_dir ^ ":" ^ container_dir ^ ":ro"
+    ; docker_snapshot ^ ":" ^ container_dir ^ ":ro"
     ]
-    docker_args
+    docker_args;
+  write_file hosts "github.com:\n  user: changed-after-dispatch\n";
+  Alcotest.(check string) "Docker snapshot is immutable across host login changes"
+    "github.com:\n  user: stored-user\n"
+    (read_file (Filename.concat docker_snapshot "hosts.yml"));
+  docker_cleanup ();
+  Alcotest.(check bool) "Docker snapshot is cleaned" false
+    (Sys.file_exists docker_snapshot)
 ;;
 
 let test_tool_projection_rejects_malformed_identity () =

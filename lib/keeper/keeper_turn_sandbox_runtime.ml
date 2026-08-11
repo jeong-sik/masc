@@ -17,10 +17,17 @@ type t =
   ; gid : int
   ; network_mode : network_mode
   ; state : state Atomic.t
+  ; github_identity_cleanup : (unit -> unit) option Atomic.t
   }
 
 let get_state t = Atomic.get t.state
 let set_state t state = Atomic.set t.state state
+
+let release_github_identity_snapshot t =
+  match Atomic.exchange t.github_identity_cleanup None with
+  | None -> ()
+  | Some cleanup -> cleanup ()
+;;
 
 module For_testing = struct
   let create_minimal ~config ~meta ~state =
@@ -34,6 +41,7 @@ module For_testing = struct
     ; gid = 0
     ; network_mode = Network_none
     ; state = Atomic.make state
+    ; github_identity_cleanup = Atomic.make None
     }
   ;;
 
@@ -68,6 +76,7 @@ let create
   ; gid = Unix.getgid ()
   ; network_mode
   ; state = Atomic.make Not_started
+  ; github_identity_cleanup = Atomic.make None
   }
 ;;
 
@@ -386,7 +395,16 @@ let start_container ?timeout_sec (t : t) =
                  Error
                    ("docker_container_start_failed: github_identity_invalid: "
                     ^ err))
-          | Ok (github_identity_args, _identity_state) ->
+          | Ok (github_identity_args, _identity_state, github_identity_cleanup) ->
+         let keep_github_identity_snapshot = ref false in
+         Eio_guard.protect
+           ~finally:(fun () ->
+             Fun.protect
+               ~finally:secret_projection.cleanup
+               (fun () ->
+                 if not !keep_github_identity_snapshot
+                 then github_identity_cleanup ()))
+           (fun () ->
          let argv =
            Keeper_sandbox_runtime.docker_command_argv ()
            @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
@@ -432,11 +450,7 @@ let start_container ?timeout_sec (t : t) =
            @ network_args
            @ [ image; "tail"; "-f"; "/dev/null" ]
          in
-         let st, out =
-           Eio_guard.protect
-             ~finally:secret_projection.cleanup
-             (fun () -> run_argv_with_status ?timeout_sec argv)
-         in
+         let st, out = run_argv_with_status ?timeout_sec argv in
          (match st with
          | Unix.WEXITED 0 ->
             (match
@@ -445,6 +459,8 @@ let start_container ?timeout_sec (t : t) =
                  container_name
              with
              | Ok () ->
+               Atomic.set t.github_identity_cleanup (Some github_identity_cleanup);
+               keep_github_identity_snapshot := true;
                set_state t (Running { container_name });
                Ok container_name
              | Error inspect_out ->
@@ -488,7 +504,7 @@ let start_container ?timeout_sec (t : t) =
               (Printf.sprintf
                  "docker_container_start_failed: %s%s"
                  (Keeper_sandbox_runtime.docker_failure_output_for_log out)
-                 mount_context))))))
+                 mount_context)))))))
 ;;
 
 let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
@@ -503,6 +519,7 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
       | Ok () -> Ok container_name
       | Error _ ->
         set_state t Not_started;
+        release_github_identity_snapshot t;
         start_container ?timeout_sec t)
   | Not_started -> start_container ?timeout_sec t
 ;;
@@ -607,6 +624,7 @@ let run_exec_with_status_split
      | Preserve_failed_exec -> failed
      | Restart_failed_exec ->
        set_state t Not_started;
+       release_github_identity_snapshot t;
        (match
           run_exec_with_status_split_once
             ?stdin_content
@@ -738,6 +756,7 @@ let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
      | Preserve_failed_exec -> failed
      | Restart_failed_exec ->
        set_state t Not_started;
+       release_github_identity_snapshot t;
        (match
           run_exec_pipeline_with_status_once
             ?timeout_sec
@@ -830,6 +849,7 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
         | Preserve_failed_exec -> Ok (st, out)
         | Restart_failed_exec ->
         set_state t Not_started;
+        release_github_identity_snapshot t;
         (match ensure_started t ~timeout_sec with
          | Error _ as err -> err
          | Ok container_name ->
@@ -844,6 +864,9 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
 ;;
 
 let cleanup (t : t) =
+  Fun.protect
+    ~finally:(fun () -> release_github_identity_snapshot t)
+    (fun () ->
   match get_state t with
   | Not_started -> ()
   | Running { container_name } ->
@@ -936,5 +959,5 @@ let cleanup (t : t) =
             Log.Keeper.info
               "%s: docker rm -f %s reported failure but container is gone"
               t.meta.name
-              container_name))
+              container_name)))
 ;;

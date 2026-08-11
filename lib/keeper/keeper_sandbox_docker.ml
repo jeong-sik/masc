@@ -531,7 +531,10 @@ let run_docker_shell_command_with_status_internal
                                   sandbox_error
                                     ("docker_shell_failed: github_identity_invalid: "
                                      ^ err))
-                           | Ok (github_identity_args, _identity_state) ->
+                           | Ok
+                               ( github_identity_args
+                               , _identity_state
+                               , github_identity_cleanup ) ->
                              let argv =
                             docker_run_argv
                               ~config
@@ -560,7 +563,10 @@ let run_docker_shell_command_with_status_internal
                                  argv
                              in
                              Eio_guard.protect
-                               ~finally:(fun () -> secret_projection.cleanup ())
+                               ~finally:(fun () ->
+                                 Fun.protect
+                                   ~finally:(fun () -> secret_projection.cleanup ())
+                                   github_identity_cleanup)
                                (fun () ->
                                   let status, stdout, stderr =
                                     Eio_guard.protect

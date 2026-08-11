@@ -57,15 +57,16 @@ val docker_args :
   container_masc_dir:string ->
   (string list, string) result
 
-(** Docker counterpart of [runtime_env_for_tool]. The Keeper-owned config
-    directory is mounted read-only even while unconfigured, so an operator
-    login becomes visible to an already-running turn container without
-    restarting it. Malformed state remains a typed error. *)
+(** Docker counterpart of [runtime_env_for_tool]. Each dispatch receives an
+    immutable read-only snapshot, including when the Keeper is unconfigured,
+    plus an explicit cleanup capability. A host login that happens while a
+    tool is running cannot change that tool's credential authority. Malformed
+    state remains a typed error. *)
 val docker_args_for_tool :
   config:Workspace.config ->
   keeper_name:string ->
   container_masc_dir:string ->
-  (string list * tool_identity_state, string) result
+  (string list * tool_identity_state * (unit -> unit), string) result
 
 val login_argv : hostname:string -> string list
 val logout_argv : hostname:string -> string list

@@ -211,6 +211,63 @@ let test_stream_redacts_github_hosts_scalar_across_chunks () =
   not_contains "streamed GitHub token is hidden" second token;
   contains "streamed GitHub token marker present" second "[REDACTED]"
 
+let test_stream_emits_bounded_unterminated_output () =
+  let input = String.make 200_000 'x' in
+  let state = R.create_stream_state R.empty in
+  let emitted = R.redact_stream_chunk state input in
+  let trailing = R.redact_stream_finish state in
+  Alcotest.(check bool) "long line streams before finish" true
+    (String.length emitted > 0);
+  Alcotest.(check bool) "only a bounded suffix remains" true
+    (String.length trailing < 10_000);
+  Alcotest.(check string) "streaming preserves ordinary bytes" input
+    (emitted ^ trailing)
+
+let test_stream_emits_carriage_return_progress () =
+  let state = R.create_stream_state R.empty in
+  let emitted = R.redact_stream_chunk state "step 1\rstep 2\rpartial" in
+  Alcotest.(check string) "carriage-return records stream immediately"
+    "step 1\rstep 2\r"
+    emitted;
+  Alcotest.(check string) "partial progress remains for finish" "partial"
+    (R.redact_stream_finish state)
+
+let test_stream_redacts_secret_crossing_bounded_flush () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "bounded-crossing" in
+  let root = secret_root_default ~base ~keeper_name in
+  let secret = "bounded.flush.secret.value" in
+  write_file (Filename.concat (Filename.concat root "env") "TOKEN") secret;
+  let state = R.snapshot ~base_path:base ~keeper_name |> R.create_stream_state in
+  let body = String.make 4_090 'x' ^ secret ^ String.make 5_000 'y' in
+  let first = R.redact_stream_chunk state body in
+  let emitted = first ^ R.redact_stream_chunk state "\n" in
+  let trailing = R.redact_stream_finish state in
+  Alcotest.(check bool) "bounded line emits before its terminator" true
+    (String.length first > 0);
+  not_contains "secret crossing the bounded cut is hidden" (emitted ^ trailing) secret;
+  contains "crossing secret leaves a marker" (emitted ^ trailing) "[REDACTED]"
+
+let test_stream_bounds_overlapping_repeated_secret () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "bounded-overlap" in
+  let root = secret_root_default ~base ~keeper_name in
+  let secret = "aaaaaaaa" in
+  write_file (Filename.concat (Filename.concat root "env") "TOKEN") secret;
+  let state = R.snapshot ~base_path:base ~keeper_name |> R.create_stream_state in
+  let emitted = R.redact_stream_chunk state (String.make 200_000 'a') in
+  let trailing = R.redact_stream_finish state in
+  Alcotest.(check bool) "overlapping secret stream emits before finish" true
+    (String.length emitted > 0);
+  Alcotest.(check bool) "overlapping secret leaves a bounded suffix" true
+    (String.length trailing < 10_000);
+  not_contains "repeated secret bytes do not escape" (emitted ^ trailing) secret;
+  contains "repeated secret produces markers" emitted "[REDACTED]"
+
 let () =
   Alcotest.run
     "keeper secret redaction"
@@ -231,5 +288,13 @@ let () =
             test_execute_output_redacts_github_hosts_scalar;
           Alcotest.test_case "redacts streamed GitHub scalar across chunks" `Quick
             test_stream_redacts_github_hosts_scalar_across_chunks;
+          Alcotest.test_case "bounds unterminated stream buffering" `Quick
+            test_stream_emits_bounded_unterminated_output;
+          Alcotest.test_case "streams carriage-return progress" `Quick
+            test_stream_emits_carriage_return_progress;
+          Alcotest.test_case "redacts a secret crossing a bounded flush" `Quick
+            test_stream_redacts_secret_crossing_bounded_flush;
+          Alcotest.test_case "bounds an overlapping repeated secret" `Quick
+            test_stream_bounds_overlapping_repeated_secret;
         ] )
     ]

@@ -29,11 +29,12 @@ type stream_state
 val create_stream_state : t -> stream_state
 val redact_stream_chunk : stream_state -> string -> string
 val redact_stream_finish : stream_state -> string
-(** Boundary-safe streaming redaction. Input is accumulated one byte at a
-    time only until a newline, then redacted once and emitted. This preserves
-    secrets split across process chunks without the old O(n^2) behavior that
-    recopied the full pending buffer on every chunk. Call [finish] once to
-    redact and emit the final unterminated line. *)
+(** Boundary-safe streaming redaction. Newline and carriage-return records are
+    emitted immediately. Long unterminated records are emitted in bounded
+    chunks while retaining a suffix large enough for every snapshotted exact
+    secret (and a bounded structural-pattern overlap), so process progress does
+    not require buffering an unbounded line. Call [finish] once to redact and
+    emit the remaining suffix. *)
 
 val redact_json : t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Redact all string leaves in a JSON value, preserving shape. *)

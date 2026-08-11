@@ -258,10 +258,14 @@ let projected_config_dir env =
 ;;
 
 let validate_local_tool_env bindings =
-  match List.find_opt (fun (key, _) -> String.equal key "GH_CONFIG_DIR") bindings with
+  let reserved_names = "GH_CONFIG_DIR" :: github_token_env_names in
+  match List.find_opt (fun (key, _) -> List.mem key reserved_names) bindings with
   | None -> Ok ()
-  | Some _ ->
-    Error "typed Execute env must not override Keeper-owned GH_CONFIG_DIR"
+  | Some (key, _) ->
+    Error
+      (Printf.sprintf
+         "typed Execute env must not override Keeper-owned GitHub identity variable %s"
+         key)
 ;;
 
 let strip_github_token_env env = remove_env_keys github_token_env_names env
@@ -408,26 +412,29 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
   match existing_config_dir ~config ~keeper_name with
   | Error _ as error -> error
   | Ok None ->
-    (match ensure_config_dir ~config ~keeper_name with
-     | Error _ as error -> error
-     | Ok host_dir ->
-       let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
-       Ok
-         ( [ "--env"
-           ; "GH_CONFIG_DIR=" ^ container_dir
-           ; "-v"
-           ; host_dir ^ ":" ^ container_dir ^ ":ro"
-           ]
-         , Unconfigured ))
-  | Ok (Some host_dir) ->
+    let snapshot, cleanup = empty_local_tool_config_snapshot () in
     let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
     Ok
       ( [ "--env"
         ; "GH_CONFIG_DIR=" ^ container_dir
         ; "-v"
-        ; host_dir ^ ":" ^ container_dir ^ ":ro"
+        ; snapshot ^ ":" ^ container_dir ^ ":ro"
         ]
-      , Configured host_dir )
+      , Unconfigured
+      , cleanup )
+  | Ok (Some host_dir) ->
+    (match copy_local_tool_config_snapshot host_dir with
+     | Error _ as error -> error
+     | Ok (snapshot, cleanup) ->
+       let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
+       Ok
+         ( [ "--env"
+           ; "GH_CONFIG_DIR=" ^ container_dir
+           ; "-v"
+           ; snapshot ^ ":" ^ container_dir ^ ":ro"
+           ]
+         , Configured host_dir
+         , cleanup ))
 ;;
 
 let login_argv ~hostname =
@@ -461,17 +468,47 @@ let projected_base_env ~base_path ~keeper_name =
   | Ok (Some env) -> Ok env
 ;;
 
-let projected_env ~config ~keeper_name =
-  let base_path = config.Workspace.base_path in
-  match projected_base_env ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok env -> runtime_env ~config ~keeper_name env
+let host_process_env_names =
+  [ "PATH"
+  ; "HOME"
+  ; "TMPDIR"
+  ; "LANG"
+  ; "LC_ALL"
+  ; "LC_CTYPE"
+  ; "SSL_CERT_FILE"
+  ; "SSL_CERT_DIR"
+  ; "HTTP_PROXY"
+  ; "HTTPS_PROXY"
+  ; "NO_PROXY"
+  ; "http_proxy"
+  ; "https_proxy"
+  ; "no_proxy"
+  ]
+;;
+
+let entries_for_names names env =
+  Array.to_list env
+  |> List.filter (fun entry -> List.mem (env_key entry) names)
+  |> Array.of_list
+;;
+
+let minimal_host_process_env () =
+  Unix.environment ()
+  |> remove_env_keys ("GH_CONFIG_DIR" :: github_token_env_names)
+  |> entries_for_names host_process_env_names
+;;
+
+let github_probe_env projected_env =
+  Array.append
+    (entries_for_names github_token_env_names projected_env)
+    (minimal_host_process_env ())
 ;;
 
 let login_env ~config ~keeper_name =
-  match projected_env ~config ~keeper_name with
+  match ensure_config_dir ~config ~keeper_name with
   | Error _ as error -> error
-  | Ok env -> Ok (strip_github_token_env env)
+  | Ok keeper_config_dir ->
+    Ok (overlay_config_env ~config_dir:keeper_config_dir (minimal_host_process_env ()))
 ;;
 
 let process_exit_text = function
@@ -525,6 +562,8 @@ let observe ~config ~keeper_name ~hostname =
            ; error = Some "Keeper GitHub CLI identity is not configured"
            }
          in
+         let host_env = minimal_host_process_env () in
+         let effective_host_env = github_probe_env base_env in
          let probe_with_ephemeral_config env =
            let probe_dir = Filename.temp_dir "masc-gh-observe-" "" in
            Unix.chmod probe_dir 0o700;
@@ -539,17 +578,18 @@ let observe ~config ~keeper_name ~hostname =
          let stored, effective =
            match existing with
            | Some path ->
-             let effective_env = overlay_config_env ~config_dir:path base_env in
+             let stored_env = overlay_config_env ~config_dir:path host_env in
+             let effective_env = overlay_config_env ~config_dir:path effective_host_env in
              ( auth_result_of_command
                  ~redact
-                 ~env:(strip_github_token_env effective_env)
+                 ~env:stored_env
                  ~hostname
              , auth_result_of_command ~redact ~env:effective_env ~hostname )
            | None ->
              let effective =
                match token_env_names with
                | [] -> unconfigured
-               | _ :: _ -> probe_with_ephemeral_config base_env
+               | _ :: _ -> probe_with_ephemeral_config effective_host_env
              in
              unconfigured, effective
          in

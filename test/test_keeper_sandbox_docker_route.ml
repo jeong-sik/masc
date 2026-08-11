@@ -108,6 +108,18 @@ let env_file_path_from_docker_line line =
   in
   loop (String.split_on_char ' ' line)
 
+let mount_source_for_destination line destination =
+  let suffix = ":" ^ destination ^ ":ro" in
+  let rec loop = function
+    | "-v" :: mount :: rest ->
+      if String.ends_with ~suffix mount
+      then Some (String.sub mount 0 (String.length mount - String.length suffix))
+      else loop rest
+    | _ :: rest -> loop rest
+    | [] -> None
+  in
+  loop (String.split_on_char ' ' line)
+
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
   else if Sys.file_exists path then ()
@@ -1695,10 +1707,15 @@ let test_docker_shell_projects_keeper_secret_dir () =
       ~container_masc_dir
       ~keeper_name:meta.name
   in
-  Alcotest.(check bool) "Keeper GitHub config mounted read-only" true
-    (contains_substring
-       line
-       (github_config_dir ^ ":" ^ github_container_dir ^ ":ro"));
+  let github_snapshot =
+    match mount_source_for_destination line github_container_dir with
+    | None -> Alcotest.fail "missing read-only Keeper GitHub snapshot mount"
+    | Some path -> path
+  in
+  Alcotest.(check bool) "operator-owned GitHub config is not mounted" true
+    (not (String.equal github_snapshot github_config_dir));
+  Alcotest.(check bool) "one-shot GitHub snapshot is cleaned" false
+    (Sys.file_exists github_snapshot);
   Alcotest.(check bool) "projected raw token not in docker argv" false
     (contains_substring line "projected-token");
   Alcotest.(check bool) "projected env uses env-file" true
@@ -1777,7 +1794,8 @@ let test_turn_runtime_projects_keeper_secret_dir () =
   in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
-  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let github_snapshot_path = ref None in
+  with_turn_sandbox_factory ~config ~meta (fun factory ->
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute
       ~turn_sandbox_factory:(Some factory)
@@ -1795,14 +1813,36 @@ let test_turn_runtime_projects_keeper_secret_dir () =
     (contains_substring log "--env-file ");
   Alcotest.(check bool) "turn container mounts file read-only" true
     (contains_substring log (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
-  Alcotest.(check bool) "turn container mounts Keeper GitHub identity read-only" true
-    (contains_substring log (github_config_dir ^ ":")
-     && contains_substring log "/github-cli:ro");
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let container_masc_dir =
+    Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+    |> Filename.dirname
+  in
+  let github_container_dir =
+    Keeper_github_identity.container_config_dir
+      ~container_masc_dir
+      ~keeper_name:meta.name
+  in
+  let github_snapshot =
+    match mount_source_for_destination log github_container_dir with
+    | None -> Alcotest.fail "missing turn-scoped Keeper GitHub snapshot mount"
+    | Some path -> path
+  in
+  github_snapshot_path := Some github_snapshot;
+  Alcotest.(check bool) "turn container does not mount operator identity" true
+    (not (String.equal github_snapshot github_config_dir));
+  Alcotest.(check bool) "turn GitHub snapshot lives with its container" true
+    (Sys.file_exists github_snapshot);
   (match env_file_path_from_docker_line log with
    | None -> Alcotest.fail "missing --env-file path in docker log"
    | Some env_file ->
      Alcotest.(check bool) "env-file cleaned after container start" false
-       (Sys.file_exists env_file))
+       (Sys.file_exists env_file)));
+  match !github_snapshot_path with
+  | None -> Alcotest.fail "turn-scoped GitHub snapshot was not recorded"
+  | Some github_snapshot ->
+    Alcotest.(check bool) "turn GitHub snapshot is cleaned with its container" false
+      (Sys.file_exists github_snapshot)
 
 let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->

@@ -117,6 +117,35 @@ let quota_ordered_deferred_runtime_lane ~now hint =
   | [] -> hint
 ;;
 
+(* Ordered candidate ids for a fresh (non-deferred) lane walk: sticky
+   last-good preference first, then quota demotion. Extracted so pre-dispatch
+   request shaping selects the same head the walk will dispatch first — a lane
+   head with an active quota window otherwise shapes the prompt budget and
+   temperature for a runtime the walk immediately demotes past, sending a
+   request built for the exhausted head to a fallback with a different context
+   window (PR #28219 review). [runtime_id] that is not a lane returns the
+   single resolved runtime id, or [[]] when nothing resolves. *)
+let quota_ordered_fresh_lane_candidate_ids ~now runtime_id =
+  match Runtime.resolve_assignment runtime_id with
+  | `Missing -> []
+  | `Single_runtime runtime -> [ runtime.Runtime.id ]
+  | `Lane lane ->
+    let lane_id = Runtime_lane.id lane in
+    Runtime_lane_preference.prefer_order
+      ~lane_id
+      (Runtime_lane.ordered_candidates lane)
+    |> quota_ordered_runtime_ids ~now
+;;
+
+(* The id that pre-dispatch should shape the request for on a fresh lane: the
+   quota-ordered head, falling back to [runtime_id] itself when the lane has no
+   resolvable candidate (the walk then reports the same not-found error). *)
+let quota_ordered_fresh_lane_head ~now runtime_id =
+  match quota_ordered_fresh_lane_candidate_ids ~now runtime_id with
+  | head :: _ -> head
+  | [] -> runtime_id
+;;
+
 let equal_deferred_runtime_lane left right =
   String.equal left.assignment_id right.assignment_id
   && String.equal left.failed_runtime_id right.failed_runtime_id
@@ -597,34 +626,24 @@ let run_named
      order passes through the sticky last-good preference so a known-healthy
      failover candidate is tried before re-hitting a dead head candidate. *)
   (* Quota-window demotion is ordering only — a demoted candidate is still
-     attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
-     selecting a fresh lane walk. A deferred suffix was already frozen before
-     pre-dispatch shaping, so re-reading wall-clock quota state here could make
-     the actual provider differ from the runtime used to shape the request. *)
-  let demote_quota_exhausted candidates =
-    quota_ordered_runtime_ids
-      (* NDT-OK: scheduling intentionally compares the stored expiry with
-         wall clock; [demote_order] stays pure via injected [now]. *)
-      ~now:(Unix.gettimeofday ())
-      candidates
-  in
+     attempted when the lane has nothing else (RFC-0370 §3.3). A deferred
+     suffix was already frozen before pre-dispatch shaping, so its order is
+     used as-is; a fresh lane is quota-ordered here through the same helper
+     ([quota_ordered_fresh_lane_candidate_ids]) that pre-dispatch shaping uses,
+     so the request is built for the same head the walk dispatches first
+     (PR #28219 review). *)
+  let now = Unix.gettimeofday () in
   let lane_id_opt, lane_candidate_ids =
     match deferred_runtime_lane with
     | Some hint ->
       Some hint.assignment_id, deferred_runtime_ids hint
     | None ->
-      (match Runtime.resolve_assignment runtime_id with
-       | `Missing -> None, []
-       | `Single_runtime runtime -> None, [ runtime.Runtime.id ]
-       | `Lane lane ->
-         let lane_id = Runtime_lane.id lane in
-         ( Some lane_id
-         , (* Demotion runs after sticky preference: a provider that stated
-              "exhausted until T" outranks a remembered last-good candidate
-              on that same account. *)
-           Runtime_lane_preference.prefer_order ~lane_id
-             (Runtime_lane.ordered_candidates lane)
-           |> demote_quota_exhausted ))
+      let lane_id_opt =
+        match Runtime.resolve_assignment runtime_id with
+        | `Lane lane -> Some (Runtime_lane.id lane)
+        | `Missing | `Single_runtime _ -> None
+      in
+      lane_id_opt, quota_ordered_fresh_lane_candidate_ids ~now runtime_id
   in
   if lane_candidate_ids = []
   then

@@ -426,7 +426,14 @@ let run_keeper_cycle
       let effective_runtime_id =
         match deferred_runtime_lane with
         | Some hint -> hint.Keeper_turn_driver.next_runtime_id
-        | None -> Keeper_meta_contract.runtime_id_of_meta meta
+        | None ->
+          (* Shape the request for the same head the fresh-lane walk will
+             dispatch first: an active quota window on the lane head otherwise
+             builds prompt budget and temperature for a runtime the walk
+             immediately demotes past (PR #28219 review). *)
+          Keeper_turn_driver.quota_ordered_fresh_lane_head
+            ~now:(Time_compat.now ())
+            (Keeper_meta_contract.runtime_id_of_meta meta)
       in
       let source =
         match Runtime.runtime_id_for_keeper meta.name with

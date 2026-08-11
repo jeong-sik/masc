@@ -1555,6 +1555,37 @@ let test_attempt_quota_scope_survives_runtime_reload () =
            None
            (Runtime_quota_window.active_until ~scope:rebound_scope ~now)))
 
+let test_fresh_lane_head_matches_quota_demoted_walk () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         (* No active window: pre-dispatch shapes for the declared lane head. *)
+         Alcotest.(check string)
+           "declared head with no active window"
+           "shared_a.test_model"
+           (Driver.quota_ordered_fresh_lane_head ~now:100.0 "quota_lane");
+         (* The declared head's account is exhausted, so both the walk and
+            pre-dispatch shaping must select the first non-exhausted candidate;
+            otherwise the request is shaped for shared_a but dispatched to
+            other (PR #28219 review). *)
+         let shared_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
+         in
+         Runtime_quota_window.note_exhausted ~scope:shared_scope ~resets_at:500.0;
+         Alcotest.(check string)
+           "exhausted head demotes pre-dispatch to the same first candidate"
+           "other.test_model"
+           (Driver.quota_ordered_fresh_lane_head ~now:100.0 "quota_lane");
+         (* A non-lane runtime id shapes for itself. *)
+         Alcotest.(check string)
+           "non-lane id shapes for itself"
+           "shared_a.test_model"
+           (Driver.quota_ordered_fresh_lane_head
+              ~now:100.0
+              "shared_a.test_model")))
+
 let test_deferred_quota_order_is_frozen_before_predispatch () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Runtime_quota_window.reset_for_testing ();
@@ -2262,6 +2293,10 @@ let () =
             "hard quota keeps attempted scope across runtime reload"
             `Quick
             test_attempt_quota_scope_survives_runtime_reload;
+          Alcotest.test_case
+            "fresh lane head matches quota-demoted walk"
+            `Quick
+            test_fresh_lane_head_matches_quota_demoted_walk;
           Alcotest.test_case
             "deferred quota order is frozen before pre-dispatch"
             `Quick

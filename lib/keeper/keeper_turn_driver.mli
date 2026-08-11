@@ -83,6 +83,14 @@ val quota_ordered_deferred_runtime_lane :
     preserving its assignment and failure evidence. Call once before building
     pre-dispatch execution so prompt shaping and dispatch consume the same
     selected runtime. *)
+
+val quota_ordered_fresh_lane_head : now:float -> string -> string
+(** Runtime id that pre-dispatch should shape the request for on a fresh
+    (non-deferred) lane: the lane's sticky-then-quota-ordered head. For a
+    non-lane [runtime_id] and for a lane with no resolvable candidate, returns
+    [runtime_id] itself. The lane walk selects its first candidate through the
+    same ordering, so the shaped request matches the dispatched head instead of
+    an exhausted head the walk immediately demotes past (PR #28219 review). *)
 val equal_deferred_runtime_lane :
   deferred_runtime_lane -> deferred_runtime_lane -> bool
 

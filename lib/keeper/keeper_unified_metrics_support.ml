@@ -333,30 +333,6 @@ let select_proactive_preview
     | Some preview -> preview
     | None -> previous
 
-let accountability_evidence_refs
-    ~(trace_id : string)
-    ~(turn_number : int)
-    ~(result : Keeper_agent_run.run_result)
-    ~(validated_evidence : Agent_core.Raw_trace.run_validation option) =
-  let tool_refs =
-    Keeper_agent_result.tool_names result
-    |> List.filter_map (fun tool_name ->
-           let trimmed = String.trim tool_name in
-           if trimmed = "" then None
-           else Some ("tool:" ^ trimmed))
-  in
-  let validation_refs =
-    match validated_evidence with
-    | Some validation ->
-      validation.evidence
-      |> List.map String.trim
-      |> List.filter (fun entry -> entry <> "")
-      |> List.map (fun entry -> "validation:" ^ entry)
-    | None -> []
-  in
-  let turn_refs = [ Printf.sprintf "turn:%s:%d" trace_id turn_number ] in
-  tool_refs @ validation_refs @ turn_refs
-
 let scheduled_autonomous_outcome_for_result
     (result : Keeper_agent_run.run_result) :
     proactive_cycle_outcome =

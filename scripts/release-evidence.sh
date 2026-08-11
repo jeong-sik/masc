@@ -11,6 +11,8 @@ The bundle includes:
   - local boot + /health capture
   - MCP initialize + tools/list + masc_status captures
   - dashboard read-path captures for briefing + namespace truth
+  - Keeper V01-V15 compile/regression conformance logs + correlated bundle
+  - RW01-RW16 real-world multi-Keeper bundle is verified separately after an isolated runtime run
 
 Raw files are written next to OUTPUT_MARKDOWN.
 EOF
@@ -71,12 +73,20 @@ namespace_json="$out_dir/namespace-truth.json"
 dev_token_json="$out_dir/dashboard-dev-token.json"
 install_version_stdout="$out_dir/install-version.stdout"
 install_version_stderr="$out_dir/install-version.stderr"
+lifecycle_dir="$out_dir/keeper-full-lifecycle"
+lifecycle_bundle_json="$lifecycle_dir/bundle.json"
+lifecycle_bundle_md="$lifecycle_dir/bundle.md"
 
-cleanup() {
+stop_server() {
   if [[ -n "${SERVER_PID:-}" ]]; then
     kill "${SERVER_PID}" >/dev/null 2>&1 || true
     wait "${SERVER_PID}" 2>/dev/null || true
+    SERVER_PID=""
   fi
+}
+
+cleanup() {
+  stop_server
   rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -341,6 +351,14 @@ curl -sS -D "$namespace_headers" -o "$namespace_body" \
 normalize_http_json "$namespace_headers" "$namespace_body" "$namespace_json" \
   "/api/v1/dashboard/namespace-truth"
 
+# The live smoke has completed. Stop its isolated server before executing the
+# lifecycle matrix so process/port-sensitive scenarios observe a clean host.
+stop_server
+python3 scripts/keeper-full-lifecycle-evidence.py --output-dir "$lifecycle_dir"
+python3 scripts/keeper-full-lifecycle-evidence.py \
+  --verify \
+  --output-dir "$lifecycle_dir"
+
 python3 - \
   "$OUTFILE" \
   "$installed_version" \
@@ -355,7 +373,9 @@ python3 - \
   "$briefing_json" \
   "$namespace_json" \
   "$initialize_json" \
-  "$server_log" <<'PY'
+  "$server_log" \
+  "$lifecycle_bundle_json" \
+  "$lifecycle_bundle_md" <<'PY'
 import json
 import pathlib
 import sys
@@ -376,6 +396,8 @@ from datetime import datetime, timezone
     namespace_json,
     initialize_json,
     server_log,
+    lifecycle_bundle_json,
+    lifecycle_bundle_md,
 ) = sys.argv[1:]
 
 def load(path):
@@ -388,6 +410,7 @@ status = load(status_json)
 briefing = load(briefing_json)
 namespace_truth = load(namespace_json)
 initialize = load(initialize_json)
+lifecycle = load(lifecycle_bundle_json)
 
 tool_count = len(tools.get("result", {}).get("tools", []))
 status_text = None
@@ -441,6 +464,14 @@ md = f"""# Release Evidence Bundle
 - `/api/v1/dashboard/briefing` returned HTTP-shaped JSON with keys: `{", ".join(briefing_keys)}`
 - `/api/v1/dashboard/namespace-truth` returned keys: `{", ".join(namespace_keys)}`
 
+## Keeper Full-Lifecycle Conformance
+
+- Evidence schema: `{lifecycle.get("schema", "<missing>")}`
+- Source SHA: `{lifecycle.get("source_sha", "<missing>")}`
+- Correlation bundle: `{lifecycle.get("bundle_id", "<missing>")}`
+- Result: `{lifecycle.get("status", "<missing>")}` ({lifecycle.get("passed_count", 0)}/{lifecycle.get("scenario_count", 0)})
+- Human-readable matrix: `{pathlib.Path(lifecycle_bundle_md).resolve().relative_to(pathlib.Path(outfile).resolve().parent)}`
+
 ## Raw Captures
 
 - `install-version.stdout`
@@ -453,6 +484,9 @@ md = f"""# Release Evidence Bundle
 - `dashboard-briefing.json`
 - `namespace-truth.json`
 - `server.log`
+- `keeper-full-lifecycle/bundle.json`
+- `keeper-full-lifecycle/bundle.md`
+- `keeper-full-lifecycle/v01-*.log` through `v15-*.log`
 
 ## Re-run
 

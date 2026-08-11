@@ -1416,12 +1416,9 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
       in
       let reactions_for = board_reactions_lookup reaction_rows in
       let reactions = reactions_for (Board.Reaction_post, post_id) in
-      let contributor_quality =
-        board_contributor_quality_lookup ?config () author
-      in
       let post_json =
         board_post_dashboard_json ~include_moderation ~blind_votes ?current_vote
-          ?contributor_quality ~reactions ~author_karma post
+          ~reactions ~author_karma post
       in
       let comments_json =
         `List (List.map (fun (comment : Board.comment) ->

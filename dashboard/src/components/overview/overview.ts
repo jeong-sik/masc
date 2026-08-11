@@ -22,7 +22,7 @@ import { SCHED_TERMINAL_SET } from '../v2/schedule-constants'
 import { tasks, keepers, boardPosts, boardTotal, lastBoardRefreshAt, goals, fusionRuns, shellRuntimeResolution } from '../../store'
 import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
 import type {
-  DashboardScheduledAutomation,
+  DashboardScheduledAutomationProjection,
   DashboardScheduledAutomationRequest,
   FusionRunRecord,
 } from '../../api/dashboard'
@@ -51,7 +51,7 @@ import { navigate } from '../../router'
 import { gateData } from '../gate-signals'
 import type { TabId } from '../../types/sse'
 import {
-  scheduledAutomation,
+  scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh,
 } from '../schedule/schedule-state'
 import {
@@ -257,13 +257,14 @@ export interface OverviewScheduleRunnerDigest {
     | null
 }
 
-export interface OverviewScheduledAutomationDigest {
-  /** Whether the scheduled-automation projection is present on this surface. */
-  hasProjection: boolean
-  /** Total request count (projection or inferred). */
-  requestCount: number
+interface OverviewScheduledAutomationAvailableDigest {
+  state: 'available'
+  /** Rows materialized in this projection page. */
+  visibleCount: number
+  /** Total rows reported by the schedule ledger. */
+  totalCount: number
   /** Projection quota metadata for diagnostics. */
-  requestLimit: number
+  limit: number
   /** FSM state from the scheduler surface. */
   fsmState: string
   /** FSM active_count from scheduler projection. */
@@ -289,6 +290,18 @@ export interface OverviewScheduledAutomationDigest {
   /** Recommended card tone derived from the above state. */
   tone: 'ok' | 'warn' | 'bad' | 'volt'
 }
+
+export type OverviewScheduledAutomationDigest =
+  | OverviewScheduledAutomationAvailableDigest
+  | {
+    state: 'unavailable'
+    reason: string
+    tone: 'bad'
+  }
+  | {
+    state: 'not_loaded'
+    tone: 'warn'
+  }
 
 function requestCountByStatus(requests: readonly DashboardScheduledAutomationRequest[], target: string): number {
   let count = 0
@@ -465,30 +478,25 @@ function summarizeKeeperQueueHealth(
 }
 
 export function summarizeScheduledAutomation(
-  automation: DashboardScheduledAutomation | null | undefined,
+  projection: DashboardScheduledAutomationProjection | null | undefined,
 ): OverviewScheduledAutomationDigest {
-  if (!automation) {
+  if (!projection) {
     return {
-      hasProjection: false,
-      requestCount: 0,
-      requestLimit: 0,
-      fsmState: 'unknown',
-      fsmActiveCount: 0,
-      fsmTerminalCount: 0,
-      nextDueAt: null,
-      dueCount: 0,
-      runningCount: 0,
-      scheduledCount: 0,
-      warningCount: 0,
-      unsupportedPayloadCount: 0,
-      unknownPayloadCount: 0,
-      truncated: false,
+      state: 'not_loaded',
       tone: 'warn',
     }
   }
+  if (projection.state === 'unavailable') {
+    return {
+      state: 'unavailable',
+      reason: projection.reason,
+      tone: 'bad',
+    }
+  }
 
+  const automation = projection.data
   const requests = automation.requests ?? []
-  const counts = automation.counts && typeof automation.counts === 'object' ? automation.counts : {}
+  const counts = automation.counts
   const payloadSupport = automation.payload_support
 
   const warningCount = automation.warnings?.length ?? 0
@@ -501,29 +509,15 @@ export function summarizeScheduledAutomation(
     requestCountByPayloadSupport(requests, 'unknown'),
   )
 
-  const fsmActiveCount = Math.max(0, Number(automation.fsm?.active_count ?? 0))
+  const fsmActiveCount = Math.max(0, automation.fsm.active_count)
   const fsmTerminalCount = Math.max(
     0,
-    Number(automation.fsm?.terminal_count ?? 0),
+    automation.fsm.terminal_count,
     sumTerminalCountFromProjection(counts),
   )
   const dueCount = requestCountByProjectionCount(requests, counts, 'due')
   const runningCount = requestCountByProjectionCount(requests, counts, 'running')
   const scheduledCount = requestCountByProjectionCount(requests, counts, 'scheduled')
-
-  const hasProjection = true
-  const requestCount = Math.max(
-    0,
-    Number.isFinite(automation.request_count ?? Number.NaN)
-      ? Number(automation.request_count)
-      : requests.length,
-  )
-  const requestLimit = Math.max(
-    0,
-    Number.isFinite(automation.request_limit ?? Number.NaN)
-      ? Number(automation.request_limit)
-      : requests.length,
-  )
 
   const fsmState = automation.fsm?.state?.trim() ? automation.fsm.state.trim() : 'unknown'
   const nextDueAt = automation.fsm?.next_due_at?.trim() ? automation.fsm.next_due_at.trim() : null
@@ -532,9 +526,10 @@ export function summarizeScheduledAutomation(
   const hasWarnings = unsupportedPayloadCount > 0 || unknownPayloadCount > 0 || warningCount > 0
 
   return {
-    hasProjection,
-    requestCount,
-    requestLimit,
+    state: 'available',
+    visibleCount: projection.page.visibleCount,
+    totalCount: projection.page.totalCount,
+    limit: projection.page.limit,
     fsmState,
     fsmActiveCount,
     fsmTerminalCount,
@@ -545,7 +540,7 @@ export function summarizeScheduledAutomation(
     warningCount,
     unsupportedPayloadCount,
     unknownPayloadCount,
-    truncated: typeof automation.truncated === 'boolean' ? automation.truncated : false,
+    truncated: projection.page.truncated,
     tone: hasWarnings ? 'warn' : hasActive ? 'volt' : 'ok',
   }
 }
@@ -561,7 +556,7 @@ export function computeOverviewDigest(
   openGateRequests: number | null,
   goalList: readonly Goal[],
   fusionList: readonly FusionRunRecord[],
-  scheduledAutomation?: DashboardScheduledAutomation | null,
+  scheduledAutomation?: DashboardScheduledAutomationProjection | null,
   scheduleRunnerStatus?: DashboardScheduleRunnerStatus | null,
   keeperQueueHealth?: DashboardKeeperEventQueueHealth | null,
 ): OverviewDigest {
@@ -1381,15 +1376,21 @@ function OverviewDomainSection({
       <!-- SCHEDULE · overview.jsx:201-215 -->
       <${DomainCard}
         title="예약 · 자동화"
-        count=${scheduleSummary.hasProjection ? String(scheduleSummary.requestCount) : null}
-        tone=${scheduleSummary.hasProjection ? scheduleSummary.tone : 'warn'}
+        count=${scheduleSummary.state === 'available' ? String(scheduleSummary.totalCount) : '—'}
+        tone=${scheduleSummary.tone}
         linkLabel="예약"
         nav=${{ tab: 'schedule' }}
         testId="domain-schedule"
       >
-      ${scheduleSummary.hasProjection
+      ${scheduleSummary.state === 'available'
         ? html`
               <div class="ov-mini-list">
+                <div class="ov-mini-row" data-testid="overview-schedule-page-metadata">
+                  <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                  <span class="ov-mini-txt">
+                    ${`표시 ${scheduleSummary.visibleCount} / 전체 ${scheduleSummary.totalCount} · 최대 ${scheduleSummary.limit}${scheduleSummary.truncated ? ' · 일부만 표시' : ''}`}
+                  </span>
+                </div>
                 <div class="ov-mini-row">
                   <span class="inline-block size-1.5 rounded-full bg-warning"></span>
                   <span class="ov-mini-txt">상태: ${scheduleSummary.fsmState}</span>
@@ -1434,7 +1435,22 @@ function OverviewDomainSection({
                 `)}
               </div>
             `
-          : html`
+          : scheduleSummary.state === 'unavailable'
+            ? html`
+              <div class="ov-mini-list" data-testid="overview-schedule-unavailable">
+                <div class="ov-mini-row">
+                  <span class="inline-block size-1.5 rounded-full bg-destructive"></span>
+                  <span class="ov-mini-txt">schedule ledger 읽기 실패: ${scheduleSummary.reason}</span>
+                </div>
+                ${scheduleRunnerRows.map((row, index) => html`
+                  <div class="ov-mini-row" key=${index}>
+                    <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                    <span class="ov-mini-txt">${row}</span>
+                  </div>
+                `)}
+              </div>
+            `
+            : html`
               <div class="ov-mini-list">
                 <div class="ov-mini-empty ov-empty">예약 자동화 projection 미연결</div>
                 ${scheduleRunnerRows.map((row, index) => html`
@@ -1561,7 +1577,7 @@ export function Overview() {
     approvalQueueState?.state === 'ready'
       ? gateData.value?.approval_queue?.length ?? null
       : null
-  const scheduledAutomationData = scheduledAutomation.value ?? null
+  const scheduledAutomationData = scheduledAutomationProjection.value ?? null
   const scheduleRunnerStatus =
     overviewFullHealthResource.state.value.status === 'loaded'
       ? overviewFullHealthResource.state.value.data.schedule_runner ?? null

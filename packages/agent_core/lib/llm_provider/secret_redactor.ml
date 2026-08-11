@@ -50,18 +50,6 @@ let starts_with_ci_at s pos ~prefix =
     loop 0)
 ;;
 
-let contains_substring_ci s needle =
-  let len = String.length s in
-  let needle_len = String.length needle in
-  let rec matches_at pos i =
-    i = needle_len
-    || (Char.equal (Char.lowercase_ascii s.[pos + i]) (Char.lowercase_ascii needle.[i])
-        && matches_at pos (i + 1))
-  in
-  let rec scan pos = pos + needle_len <= len && (matches_at pos 0 || scan (pos + 1)) in
-  needle_len = 0 || scan 0
-;;
-
 let is_data_url_boundary s pos = pos = 0 || not (is_uri_scheme_char s.[pos - 1])
 
 let find_data_url_comma s pos =
@@ -111,7 +99,7 @@ let find_media_data_url s pos =
       | None -> scan (i + 1)
       | Some comma ->
         let header = String.sub s i (comma - i) in
-        if contains_substring_ci header ";base64"
+        if Agent_core_strings.contains_substring_ci ~haystack:header ~needle:";base64"
         then Some (i, comma, base64_payload_end s (comma + 1))
         else scan (i + 1))
     else scan (i + 1)

@@ -353,9 +353,11 @@ let record_compaction_outcome_metric ~keeper_name outcome =
 (* Pure liveness policy for a [Cycle.Failed] outcome holding one exact source.
    A frozen runtime successor keeps that selection bound to the failover walk.
    Retryable failures rotate to the urgency-lane tail. Deterministic failures
-   move only the source into a durable terminal receipt. Transcript corruption
-   alone pauses the Keeper because continuing with a structurally invalid
-   history can duplicate or misattribute external effects. *)
+   move only the source into a durable terminal receipt. An effect-fenced
+   provider failure always moves the exact source to that receipt even when a
+   stale deferred successor exists, because replay could duplicate an external
+   effect. Transcript corruption alone pauses the Keeper because continuing
+   with a structurally invalid history can duplicate or misattribute effects. *)
 type failed_source_disposition =
   | Preserve_for_deferred_runtime
   | Defer_to_queue_tail
@@ -369,29 +371,21 @@ let failed_source_disposition
   | Keeper_unified_turn.Pause_after_transcript_corruption { detail } ->
     Pause_keeper_for_integrity { detail }
   | Keeper_unified_turn.Follow_failure_route ->
-    (match failure.Keeper_unified_turn.deferred_runtime_lane with
-     | Some _ -> Preserve_for_deferred_runtime
-     | None ->
-       (match failure.Keeper_unified_turn.route with
-        | Keeper_runtime_failure_route.Exhausted_visible_alive
-            { terminal =
-                ( Keeper_runtime_failure_route.Config_mismatch
-                | Keeper_runtime_failure_route.Provider_integration
-                | Keeper_runtime_failure_route.Deterministic_request
-                | Keeper_runtime_failure_route.Context_overflow
-                | Keeper_runtime_failure_route.Contract_violation
-                | Keeper_runtime_failure_route.Protocol_error
-                | Keeper_runtime_failure_route.Terminal_effect_transient_failure
-                | Keeper_runtime_failure_route.Terminal_effect_policy_rejection
-                | Keeper_runtime_failure_route.Terminal_effect_runtime_failure
-                | Keeper_runtime_failure_route.Terminal_effect_workflow_rejection
-                | Keeper_runtime_failure_route.Internal_opaque )
-            ; detail
-            ; _
-            } ->
-          Quarantine_source { detail }
-        | Keeper_runtime_failure_route.Retry_after_observed _
-        | Keeper_runtime_failure_route.Rotate_now _ -> Defer_to_queue_tail))
+    (match failure.Keeper_unified_turn.route with
+     | Keeper_runtime_failure_route.Exhausted_visible_alive
+         { terminal = Keeper_runtime_failure_route.Provider_attempt_effect_fenced
+         ; detail
+         ; _
+         } -> Quarantine_source { detail }
+     | route ->
+       (match failure.Keeper_unified_turn.deferred_runtime_lane with
+        | Some _ -> Preserve_for_deferred_runtime
+        | None ->
+          (match route with
+           | Keeper_runtime_failure_route.Exhausted_visible_alive
+               { detail; _ } -> Quarantine_source { detail }
+           | Keeper_runtime_failure_route.Retry_after_observed _
+           | Keeper_runtime_failure_route.Rotate_now _ -> Defer_to_queue_tail)))
 ;;
 
 module For_testing = struct

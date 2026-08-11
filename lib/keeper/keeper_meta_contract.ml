@@ -129,6 +129,8 @@ type blocker_class =
     (** Tool transcript was quarantined as incomplete. *)
   | Terminal_effect_failed
     (** A terminal tool effect failed after the turn's terminal outcome. *)
+  | Provider_attempt_effect_fenced
+    (** A provider failure cannot be retried without risking a duplicate effect. *)
   | Receipt_persistence_failed
     (** Execution receipt persistence failed. *)
   | Gate_replay_repair_required
@@ -149,6 +151,7 @@ let blocker_class_to_string = function
   | Internal_contract_rejected -> "internal_contract_rejected"
   | Incomplete_tool_transcript -> "incomplete_tool_transcript"
   | Terminal_effect_failed -> "terminal_effect_failed"
+  | Provider_attempt_effect_fenced -> "provider_attempt_effect_fenced"
   | Receipt_persistence_failed -> "receipt_persistence_failed"
   | Gate_replay_repair_required -> "gate_replay_repair_required"
 ;;
@@ -168,6 +171,7 @@ let blocker_class_of_serialized_string = function
   | "internal_contract_rejected" -> Some Internal_contract_rejected
   | "incomplete_tool_transcript" -> Some Incomplete_tool_transcript
   | "terminal_effect_failed" -> Some Terminal_effect_failed
+  | "provider_attempt_effect_fenced" -> Some Provider_attempt_effect_fenced
   | "receipt_persistence_failed" -> Some Receipt_persistence_failed
   | "gate_replay_repair_required" -> Some Gate_replay_repair_required
   | _ -> None

@@ -319,6 +319,7 @@ export interface DashboardScheduledAutomation {
   schema?: string
   source?: string
   generated_at?: string
+  schedule_store_known?: boolean
   schedule_store_read_error?: string | null
   status?: string
   request_count: number | null

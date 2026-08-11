@@ -76,6 +76,23 @@ val annotate
     a second implementation of it would let the two stages disagree about
     where an atom begins. *)
 
+val next_shrink_capacity_bytes
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  -> target_capacity_bytes:int
+  -> Agent_core.Types.message list
+  -> int option
+(** Choose a smaller projection capacity at an atom boundary after a provider
+    has rejected [messages]. [None] means there is no older atom that can be
+    removed while preserving the newest atom.
+
+    The returned capacity is never below the bytes required by pinned
+    messages, the synthetic preamble, and the newest atom. It is also strictly
+    smaller than the exact rejected window after synthetic framing is charged;
+    otherwise this function returns [None]. Thus applying {!project} cannot
+    replace a size-driven refusal with an equal or larger request.
+    [target_capacity_bytes] is used when it lies inside those structural
+    bounds (for example, the ordinary halving policy). *)
+
 type budget_error =
   | Reservation_exceeds_capacity of
       { capacity_bytes : int

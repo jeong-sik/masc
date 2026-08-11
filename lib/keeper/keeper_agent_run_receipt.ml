@@ -57,7 +57,6 @@ let finalize
     ~runtime_rotation_attempts
     ~turn_result
     ~receipt_turn_count_ref
-    ~receipt_model_used_ref
     ~receipt_stop_reason_ref
     ~receipt_runtime_observation_ref
     ~receipt_response_text_present_ref
@@ -132,8 +131,6 @@ let finalize
     ; generation
     ; turn_count = !receipt_turn_count_ref
     ; agent_core_turn_count = !receipt_turn_count_ref
-    ; agent_core_dispatch_mode = Some "single_provider_agent_run"
-    ; agent_core_internal_runtime_disabled = true
     ; current_task_id =
         Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
     ; goal_ids = meta.active_goal_ids
@@ -144,7 +141,6 @@ let finalize
            Keeper_agent_error.receipt_outcome_kind_of_core_error err)
     ; terminal_reason_code
     ; response_text_present = !receipt_response_text_present_ref
-    ; model_used = !receipt_model_used_ref
     ; completion_contract_result
     ; actionable_signal = acc.receipt_actionable_signal
     ; tool_surface =

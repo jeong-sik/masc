@@ -44,6 +44,7 @@ let is_transient_internal_runner_error (err : Agent_core.Error.t) : bool =
       | Keeper_turn_driver.Internal_contract_rejected _
       | Keeper_turn_driver.Incomplete_tool_transcript _
       | Keeper_turn_driver.Terminal_effect_failed _
+      | Keeper_turn_driver.Provider_attempt_effect_fenced _
       | Keeper_turn_driver.Receipt_persistence_failed _
       | Keeper_turn_driver.Gate_replay_repair_required _ )
   | None -> false
@@ -246,6 +247,7 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_core.Error.t) : boo
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
   | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
+  | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.Gate_replay_repair_required _)
   | None ->
@@ -268,6 +270,7 @@ let is_accept_no_usable_progress_error (err : Agent_core.Error.t) : bool =
       | Keeper_turn_driver.Internal_contract_rejected _
       | Keeper_turn_driver.Incomplete_tool_transcript _
       | Keeper_turn_driver.Terminal_effect_failed _
+      | Keeper_turn_driver.Provider_attempt_effect_fenced _
       | Keeper_turn_driver.Receipt_persistence_failed _
       | Keeper_turn_driver.Gate_replay_repair_required _ )
   | None ->
@@ -390,6 +393,7 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Internal_contract_rejected _)
     | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
     | Some (Keeper_turn_driver.Terminal_effect_failed _)
+    | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
     | Some (Keeper_turn_driver.Receipt_persistence_failed _)
     | Some (Keeper_turn_driver.Gate_replay_repair_required _)
     | None ->
@@ -431,6 +435,7 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
     | Some (Keeper_turn_driver.Internal_contract_rejected _)
     | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
     | Some (Keeper_turn_driver.Terminal_effect_failed _)
+    | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
     | Some (Keeper_turn_driver.Receipt_persistence_failed _)
     | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
         None
@@ -755,6 +760,7 @@ let should_warn_keeper_cycle_failed (err : Agent_core.Error.t) : bool =
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
   | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
+  | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.Gate_replay_repair_required _)
   | None ->
@@ -810,6 +816,7 @@ let is_runtime_exhausted_error (err : Agent_core.Error.t) : bool =
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
   | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
+  | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.Gate_replay_repair_required _) -> false
   | None -> false

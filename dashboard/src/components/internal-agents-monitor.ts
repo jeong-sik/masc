@@ -355,6 +355,9 @@ function Details({ row }: { row: Row }) {
           <${JsonViewerCard} title="실제 입력 · typed" data=${row.run.input.payload} expandAll=${true} />
           <${JsonViewerCard} title="실제 출력 · typed" data=${output} expandAll=${true} />
         </div>
+        ${row.run.persistenceError === undefined
+          ? null
+          : html`<p class="text-xs text-[var(--color-danger)]">완료 의도 <code>${row.run.intendedStatus}</code> · persistence <code>${row.run.persistenceState}</code>: ${row.run.persistenceError}${row.run.intendedCode ? ` · ${row.run.intendedCode}: ${row.run.intendedDetail}` : ''}</p>`}
         <p class="text-xs text-[var(--color-fg-muted)]"><span class="mr-2 inline-flex rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">TOOL-FREE</span>이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.</p>
         ${memoryEvidence === null
           ? null

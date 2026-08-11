@@ -604,22 +604,14 @@ let validate_keeper_dispatch_request_caps
   let runtime_by_id id =
     List.find_opt (fun (runtime : t) -> String.equal runtime.id id) runtimes
   in
-  (* Both execution kinds need a declared ceiling on what a turn may send; they
-     differ only in which one, because they are bounded at different places.
-
-     Agent_core measures the serialized request body, so its ceiling is
-     max-request-body-bytes. An official-client turn never builds that body —
-     it seeds a spawned client's conversation on turn 1 and sends only the goal
-     afterwards — so its ceiling is max-prompt-bytes, on the seed.
-
-     Leaving official-client unbounded was not a smaller version of the same
-     rule; it was the absence of one. An undeclared seed does not fail once: it
-     overflows the model window on turn 1, so the session never reaches turn 2,
-     and a recovery to a fresh session makes the next turn a start turn again.
-     Measured while rotating keepers across the declared runtimes: 13 of 13
-     official-client runtimes without the declaration failed this way, and all
-     13 completed once it was declared. The four that already carried it were
-     the four that were already working. *)
+  (* Only Agent_core is checked here, because only Agent_core builds the
+     request whose size this bounds. An official-client turn hands its
+     conversation to a spawned vendor client that owns its own context window
+     and refuses an oversized one in a typed terminal; the shrink sequence
+     consumes that terminal and retries with less. Requiring a declared
+     max-prompt-bytes there added a second authority over the same window,
+     measured in wire bytes rather than tokens, and made its absence a boot
+     refusal — so a deployment could not choose to let the provider decide. *)
   let missing_ceiling runtime =
     match runtime.execution with
     | Runtime_execution.Agent_core provider_config ->
@@ -629,34 +621,23 @@ let validate_keeper_dispatch_request_caps
          Some
            ( runtime
            , Otoml.string_of_path
-               [ runtime.binding.provider_id; runtime.binding.model_id ]
-           , "max-request-body-bytes"
-           , "the exact serialized request" ))
+               [ runtime.binding.provider_id; runtime.binding.model_id ] ))
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
-    | Runtime_execution.Antigravity_cli _ ->
-      (match runtime.model.max_prompt_bytes with
-       | Some n when n > 0 -> None
-       | Some _ | None ->
-         Some
-           ( runtime
-           , Otoml.string_of_path [ "models"; runtime.binding.model_id ]
-           , "max-prompt-bytes"
-           , "the start-turn conversation seed" ))
+    | Runtime_execution.Antigravity_cli _ -> None
   in
   match List.find_map (fun id -> Option.bind (runtime_by_id id) missing_ceiling) ids with
   | None -> Ok ()
-  | Some (runtime, table_path, key, what) ->
+  | Some (runtime, table_path) ->
     Error
       (Printf.sprintf
-         "%s: Keeper-dispatch runtime %S has no positive %s; declare \
-          [%s].%s before dispatch so %s has an explicit admission ceiling"
+         "%s: Keeper-dispatch runtime %S has no positive \
+          max-request-body-bytes; declare [%s].max-request-body-bytes before \
+          dispatch so the exact serialized request has an explicit admission \
+          ceiling"
          config_path
          runtime.id
-         key
-         table_path
-         key
-         what)
+         table_path)
 ;;
 
 (* Every runtime binding's provider/model pair must be known to the AGENT_CORE
@@ -1352,6 +1333,12 @@ let reasoning_effort_of_runtime_id (id : string)
 let turn_timeout_s_of_runtime_id (id : string) : float option =
   match get_runtime_by_id id with
   | Some rt -> rt.model.turn_timeout_s
+  | None -> None
+;;
+
+let provider_id_of_runtime_id (id : string) : string option =
+  match get_runtime_by_id id with
+  | Some rt -> Some rt.provider.id
   | None -> None
 ;;
 

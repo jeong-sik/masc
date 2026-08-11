@@ -24,12 +24,12 @@
   system_error_class
   executable_path
   safe_identifier
-  string_util
   list_util
   set_util
   read_drop_reason
   eval_tool_selector)
  (libraries
+  (re_export masc_string_util)
   yojson
   unix
   re

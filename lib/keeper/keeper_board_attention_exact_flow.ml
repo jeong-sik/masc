@@ -369,12 +369,21 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
     ~started_at
     ~input:(Exact_lane_run_registry.Exact_input prepared.candidate.judgment_request);
   let complete outcome output =
-    Exact_lane_run_registry.mark_completed
-      registry
-      ~run_id
-      ~outcome
-      ~elapsed_s:(Time_compat.now () -. started_at)
-      ~output
+    match
+      Exact_lane_run_registry.mark_completed
+        registry
+        ~run_id
+        ~outcome
+        ~elapsed_s:(Time_compat.now () -. started_at)
+        ~output
+    with
+    | Ok () -> ()
+    | Error error ->
+      Log.Keeper.error
+        ~keeper_name:prepared.candidate.keeper_name
+        "board-attention exact-run observation completion failed run_id=%s: %s"
+        run_id
+        (Exact_lane_run_registry.completion_error_to_string error)
   in
   let bound = ref None in
   let agent_core_before_dispatch receipt =

@@ -894,108 +894,196 @@ let max_recorded_at current candidate =
   | Some left, Some right -> Some (Float.max left right)
 ;;
 
-let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
-  if String.equal stimulus_id ""
+type event_queue_reaction_evidence_accumulator =
+  { mutable stimulus_seen : bool
+  ; mutable turn_started_seen : bool
+  ; mutable event_queue_ack_seen : bool
+  ; mutable event_queue_cancelled_seen : bool
+  ; mutable stimulus_recorded_at : float option
+  ; mutable turn_started_recorded_at : float option
+  ; mutable event_queue_ack_recorded_at : float option
+  ; mutable event_queue_cancelled_recorded_at : float option
+  ; mutable latest_recorded_at : float option
+  ; mutable matched_record_count : int
+  ; mutable quarantined_record_count : int
+  ; mutable first_matching_quarantine_reason : row_quarantine_reason option
+  ; mutable seen_event_ids : Event_id_set.t
+  }
+
+let empty_event_queue_reaction_evidence_accumulator () =
+  { stimulus_seen = false
+  ; turn_started_seen = false
+  ; event_queue_ack_seen = false
+  ; event_queue_cancelled_seen = false
+  ; stimulus_recorded_at = None
+  ; turn_started_recorded_at = None
+  ; event_queue_ack_recorded_at = None
+  ; event_queue_cancelled_recorded_at = None
+  ; latest_recorded_at = None
+  ; matched_record_count = 0
+  ; quarantined_record_count = 0
+  ; first_matching_quarantine_reason = None
+  ; seen_event_ids = Event_id_set.empty
+  }
+;;
+
+let note_event_queue_reaction_evidence_row ~keeper_name accumulator row =
+  let is_replay =
+    match string_field "event_id" row with
+    | Some event_id
+      when not (String.equal event_id "")
+           && Event_id_set.mem event_id accumulator.seen_event_ids -> true
+    | Some event_id when not (String.equal event_id "") ->
+      accumulator.seen_event_ids
+        <- Event_id_set.add event_id accumulator.seen_event_ids;
+      false
+    | Some _ | None -> false
+  in
+  if not is_replay
+  then
+    match decode_current_row ~keeper_name row with
+    | Error reason ->
+      accumulator.quarantined_record_count
+        <- accumulator.quarantined_record_count + 1;
+      (match accumulator.first_matching_quarantine_reason with
+       | Some _ -> ()
+       | None -> accumulator.first_matching_quarantine_reason <- Some reason)
+    | Ok current_row ->
+      accumulator.matched_record_count <- accumulator.matched_record_count + 1;
+      let metadata =
+        match current_row with
+        | Current_stimulus { metadata; _ }
+        | Current_reaction { metadata; _ } -> metadata
+      in
+      let recorded_at = Some metadata.recorded_at in
+      accumulator.latest_recorded_at
+        <- max_recorded_at accumulator.latest_recorded_at recorded_at;
+      (match current_row with
+       | Current_stimulus _ ->
+         accumulator.stimulus_seen <- true;
+         accumulator.stimulus_recorded_at
+           <- max_recorded_at accumulator.stimulus_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Turn_started; _ } ->
+         accumulator.turn_started_seen <- true;
+         accumulator.turn_started_recorded_at
+           <- max_recorded_at accumulator.turn_started_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
+         accumulator.event_queue_ack_seen <- true;
+         accumulator.event_queue_ack_recorded_at
+           <- max_recorded_at accumulator.event_queue_ack_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
+         accumulator.event_queue_cancelled_seen <- true;
+         accumulator.event_queue_cancelled_recorded_at
+           <- max_recorded_at
+                accumulator.event_queue_cancelled_recorded_at
+                recorded_at)
+;;
+
+let event_queue_reaction_evidence_of_accumulator
+      ~keeper_name
+      ~stimulus_id
+      accumulator
+  =
+  let evidence =
+    { keeper_name
+    ; stimulus_id
+    ; stimulus_seen = accumulator.stimulus_seen
+    ; turn_started_seen = accumulator.turn_started_seen
+    ; event_queue_ack_seen = accumulator.event_queue_ack_seen
+    ; event_queue_cancelled_seen = accumulator.event_queue_cancelled_seen
+    ; stimulus_recorded_at = accumulator.stimulus_recorded_at
+    ; turn_started_recorded_at = accumulator.turn_started_recorded_at
+    ; event_queue_ack_recorded_at = accumulator.event_queue_ack_recorded_at
+    ; event_queue_cancelled_recorded_at =
+        accumulator.event_queue_cancelled_recorded_at
+    ; latest_recorded_at = accumulator.latest_recorded_at
+    ; matched_record_count = accumulator.matched_record_count
+    ; quarantined_record_count = accumulator.quarantined_record_count
+    }
+  in
+  match accumulator.first_matching_quarantine_reason with
+  | Some first_reason -> Evidence_quarantined { evidence; first_reason }
+  | None -> Evidence_complete evidence
+;;
+
+let unique_stimulus_ids stimulus_ids =
+  let seen = Hashtbl.create (List.length stimulus_ids) in
+  List.fold_left
+    (fun unique stimulus_id ->
+       if Hashtbl.mem seen stimulus_id
+       then unique
+       else (
+         Hashtbl.add seen stimulus_id ();
+         stimulus_id :: unique))
+    []
+    stimulus_ids
+  |> List.rev
+;;
+
+let event_queue_reaction_evidence_batch_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_ids
+  =
+  if List.exists (String.equal "") stimulus_ids
   then Error Evidence_invalid_stimulus_id
-  else begin
-  let stimulus_seen = ref false in
-  let turn_started_seen = ref false in
-  let event_queue_ack_seen = ref false in
-  let event_queue_cancelled_seen = ref false in
-  let stimulus_recorded_at = ref None in
-  let turn_started_recorded_at = ref None in
-  let event_queue_ack_recorded_at = ref None in
-  let event_queue_cancelled_recorded_at = ref None in
-  let latest_recorded_at = ref None in
-  let matched_record_count = ref 0 in
-  let quarantined_record_count = ref 0 in
-  let first_matching_quarantine_reason = ref None in
-  let seen_event_ids = ref Event_id_set.empty in
-  let remember_first slot value =
-    match !slot with
-    | Some _ -> ()
-    | None -> slot := Some value
-  in
-  let note_matching_row row =
-    let is_replay =
-      match string_field "event_id" row with
-      | Some event_id
-        when not (String.equal event_id "")
-             && Event_id_set.mem event_id !seen_event_ids -> true
-      | Some event_id when not (String.equal event_id "") ->
-        seen_event_ids := Event_id_set.add event_id !seen_event_ids;
-        false
-      | Some _ | None -> false
-    in
-    if not is_replay
-    then
-      match decode_current_row ~keeper_name row with
-      | Error reason ->
-        incr quarantined_record_count;
-        remember_first first_matching_quarantine_reason reason
-      | Ok current_row ->
-        incr matched_record_count;
-        let metadata =
-          match current_row with
-          | Current_stimulus { metadata; _ }
-          | Current_reaction { metadata; _ } -> metadata
-        in
-        let recorded_at = Some metadata.recorded_at in
-        latest_recorded_at := max_recorded_at !latest_recorded_at recorded_at;
-        (match current_row with
-         | Current_stimulus _ ->
-           stimulus_seen := true;
-           stimulus_recorded_at
-             := max_recorded_at !stimulus_recorded_at recorded_at
-         | Current_reaction { reaction_kind = Turn_started; _ } ->
-           turn_started_seen := true;
-           turn_started_recorded_at
-             := max_recorded_at !turn_started_recorded_at recorded_at
-         | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
-           event_queue_ack_seen := true;
-           event_queue_ack_recorded_at
-             := max_recorded_at !event_queue_ack_recorded_at recorded_at
-         | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
-           event_queue_cancelled_seen := true;
-           event_queue_cancelled_recorded_at
-             := max_recorded_at !event_queue_cancelled_recorded_at recorded_at)
-  in
-  let note_parsed_row row =
-    match string_field "stimulus_id" row with
-    | Some row_stimulus_id when String.equal row_stimulus_id stimulus_id ->
-      note_matching_row row
-    | Some _ | None -> ()
-  in
-  let store = store_for_base_path ~base_path ~keeper_name in
-  let iteration =
-    Dated_jsonl.iter_all_entries_result store (function
-      | Dated_jsonl.Parsed row -> note_parsed_row row
-      | Dated_jsonl.Malformed_json _ -> ())
-  in
-  match iteration with
-  | Error error -> Error (Evidence_read_error error)
-  | Ok () ->
-    let evidence =
-      { keeper_name
-      ; stimulus_id
-      ; stimulus_seen = !stimulus_seen
-      ; turn_started_seen = !turn_started_seen
-      ; event_queue_ack_seen = !event_queue_ack_seen
-      ; event_queue_cancelled_seen = !event_queue_cancelled_seen
-      ; stimulus_recorded_at = !stimulus_recorded_at
-      ; turn_started_recorded_at = !turn_started_recorded_at
-      ; event_queue_ack_recorded_at = !event_queue_ack_recorded_at
-      ; event_queue_cancelled_recorded_at = !event_queue_cancelled_recorded_at
-      ; latest_recorded_at = !latest_recorded_at
-      ; matched_record_count = !matched_record_count
-      ; quarantined_record_count = !quarantined_record_count
-      }
-    in
-    (match !first_matching_quarantine_reason with
-     | Some first_reason ->
-       Ok (Evidence_quarantined { evidence; first_reason })
-     | None -> Ok (Evidence_complete evidence))
-  end
+  else
+    let stimulus_ids = unique_stimulus_ids stimulus_ids in
+    match stimulus_ids with
+    | [] -> Ok []
+    | _ ->
+      let accumulators = Hashtbl.create (List.length stimulus_ids) in
+      let requested =
+        List.map
+          (fun stimulus_id ->
+             stimulus_id, empty_event_queue_reaction_evidence_accumulator ())
+          stimulus_ids
+      in
+      List.iter
+        (fun (stimulus_id, accumulator) ->
+           Hashtbl.add accumulators stimulus_id accumulator)
+        requested;
+      let note_parsed_row row =
+        match string_field "stimulus_id" row with
+        | Some stimulus_id ->
+          (match Hashtbl.find_opt accumulators stimulus_id with
+           | Some accumulator ->
+             note_event_queue_reaction_evidence_row
+               ~keeper_name
+               accumulator
+               row
+           | None -> ())
+        | None -> ()
+      in
+      let store = store_for_base_path ~base_path ~keeper_name in
+      (match
+         Dated_jsonl.iter_all_entries_result store (function
+           | Dated_jsonl.Parsed row -> note_parsed_row row
+           | Dated_jsonl.Malformed_json _ -> ())
+       with
+       | Error error -> Error (Evidence_read_error error)
+       | Ok () ->
+         Ok
+           (List.map
+              (fun (stimulus_id, accumulator) ->
+                 ( stimulus_id
+                 , event_queue_reaction_evidence_of_accumulator
+                     ~keeper_name
+                     ~stimulus_id
+                     accumulator ))
+              requested))
+;;
+
+let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
+  match
+    event_queue_reaction_evidence_batch_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_ids:[ stimulus_id ]
+  with
+  | Error _ as error -> error
+  | Ok [ (_, evidence) ] -> Ok evidence
+  | Ok _ -> Error Evidence_invalid_stimulus_id
 ;;
 
 let event_queue_turn_started_seen_for_source_result

@@ -177,6 +177,7 @@ type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
+  | Incoherent_read
 
 type snapshot_read_error =
   { kind : snapshot_read_error_kind
@@ -188,6 +189,7 @@ let snapshot_read_error_kind_to_string = function
   | Invalid_path -> "invalid_path"
   | Read_failed -> "read_failed"
   | Parse_failed -> "parse_failed"
+  | Incoherent_read -> "incoherent_read"
 ;;
 
 let reset_required_message ~path ~surface detail =
@@ -502,29 +504,33 @@ let load_existing_state_result ~base_path ~keeper_name =
             (Printexc.to_string exn)))
 ;;
 
+let read_state_read_only_unlocked ~require_existing owner =
+  match read_primary_unlocked owner with
+  | Error _ as error -> error
+  | Ok (Primary_current state) ->
+    replay_transition_wal_read_only_unlocked owner state
+  | Ok Primary_missing
+    when require_existing && not (durable_state_exists_unlocked owner) ->
+    Error
+      (Printf.sprintf
+         "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
+         (keeper_name_of_owner owner)
+         (snapshot_path_of_owner owner)
+         (transition_wal_path_of_owner owner))
+  | Ok Primary_missing ->
+    replay_transition_wal_read_only_unlocked
+      ~wal_only:true
+      owner
+      State.empty
+;;
+
 let validate_state_read_only_result_with ~require_existing ~base_path ~keeper_name =
   match resolve_owner ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok owner ->
     (try
        Owner_lock.with_durable_lock owner (fun () ->
-         match read_primary_unlocked owner with
-         | Error _ as error -> error
-         | Ok (Primary_current state) ->
-           replay_transition_wal_read_only_unlocked owner state
-         | Ok Primary_missing
-           when require_existing && not (durable_state_exists_unlocked owner) ->
-           Error
-             (Printf.sprintf
-                "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
-                (keeper_name_of_owner owner)
-                (snapshot_path_of_owner owner)
-                (transition_wal_path_of_owner owner))
-         | Ok Primary_missing ->
-           replay_transition_wal_read_only_unlocked
-             ~wal_only:true
-             owner
-             State.empty)
+         read_state_read_only_unlocked ~require_existing owner)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -534,6 +540,62 @@ let validate_state_read_only_result_with ~require_existing ~base_path ~keeper_na
             (keeper_name_of_owner owner)
             (snapshot_path_of_owner owner)
             (Printexc.to_string exn)))
+;;
+
+type read_only_observation_error =
+  | Observation_read_failed of string
+  | Observation_changed of
+      { keeper_name : string
+      ; first_revision : int64
+      ; second_revision : int64
+      }
+
+let read_only_observation_error_to_string = function
+  | Observation_read_failed message -> message
+  | Observation_changed { keeper_name; first_revision; second_revision } ->
+    Printf.sprintf
+      "event queue changed during lock-free observation keeper=%s first_revision=%Ld second_revision=%Ld"
+      keeper_name
+      first_revision
+      second_revision
+;;
+
+let stable_read_only_observation ~keeper_name first second =
+  if State.to_yojson first = State.to_yojson second
+  then Ok second
+  else
+    Error
+      (Observation_changed
+         { keeper_name
+         ; first_revision = State.revision first
+         ; second_revision = State.revision second
+         })
+;;
+
+let observe_state_read_only_typed_with ~between_samples ~base_path ~keeper_name =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error message -> Error (Observation_read_failed message)
+  | Ok owner ->
+    (try
+       Result.bind
+         (read_state_read_only_unlocked ~require_existing:false owner
+          |> Result.map_error (fun message -> Observation_read_failed message))
+         (fun first ->
+            between_samples ();
+            Result.bind
+              (read_state_read_only_unlocked ~require_existing:false owner
+               |> Result.map_error (fun message -> Observation_read_failed message))
+              (stable_read_only_observation ~keeper_name))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Observation_read_failed
+            (Printf.sprintf
+               "event queue lock-free observation raised keeper=%s path=%s: %s"
+               (keeper_name_of_owner owner)
+               (snapshot_path_of_owner owner)
+               (Printexc.to_string exn))))
 ;;
 
 let validate_state_read_only_result ~base_path ~keeper_name =
@@ -604,6 +666,42 @@ let load_snapshot_with_errors ~base_path ~keeper_name =
     ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
     }
 ;;
+
+let observe_snapshot_with_errors_with ~between_samples ~base_path ~keeper_name =
+  match
+    observe_state_read_only_typed_with
+      ~between_samples
+      ~base_path
+      ~keeper_name
+  with
+  | Ok state -> { pending = State.pending state; read_errors = [] }
+  | Error (Observation_read_failed message) ->
+    { pending = Keeper_event_queue.empty
+    ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
+    }
+  | Error (Observation_changed _ as error) ->
+    { pending = Keeper_event_queue.empty
+    ; read_errors =
+        [ { kind = Incoherent_read
+          ; path = None
+          ; message = read_only_observation_error_to_string error
+          }
+        ]
+    }
+;;
+
+let observe_snapshot_with_errors ~base_path ~keeper_name =
+  observe_snapshot_with_errors_with
+    ~between_samples:(fun () -> ())
+    ~base_path
+    ~keeper_name
+;;
+
+module For_testing = struct
+  let observe_snapshot_with_errors_with_interleave =
+    observe_snapshot_with_errors_with
+  ;;
+end
 
 type durable_state_discovery =
   { keeper_names : string list

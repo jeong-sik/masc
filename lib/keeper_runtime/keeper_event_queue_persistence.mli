@@ -131,6 +131,7 @@ type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
+  | Incoherent_read
 
 type snapshot_read_error =
   { kind : snapshot_read_error_kind
@@ -153,6 +154,23 @@ val discover_keeper_names_with_durable_state :
   base_path:string -> durable_state_discovery
 val load_snapshot_with_errors :
   base_path:string -> keeper_name:string -> snapshot_with_errors
+
+val observe_snapshot_with_errors :
+  base_path:string -> keeper_name:string -> snapshot_with_errors
+(** Read-only operator projection of the pending queue. Unlike
+    {!load_snapshot_with_errors}, this observer never acquires the canonical
+    queue-owner transaction lock and never checkpoints or compacts the
+    transition WAL. It accepts only two identical full-state observations, so
+    a concurrent snapshot/WAL generation change is an explicit read error
+    rather than a healthy empty projection. *)
+
+module For_testing : sig
+  val observe_snapshot_with_errors_with_interleave :
+    between_samples:(unit -> unit) ->
+    base_path:string ->
+    keeper_name:string ->
+    snapshot_with_errors
+end
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result

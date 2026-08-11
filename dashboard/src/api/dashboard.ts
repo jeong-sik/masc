@@ -239,6 +239,17 @@ export {
   parseDashboardKeeperWaitingSource,
 } from './dashboard-tools-prompts'
 
+export {
+  fetchDashboardScheduledAutomation,
+  normalizeScheduledAutomation,
+} from './dashboard-scheduled-automation'
+
+export type {
+  DashboardScheduledAutomationAvailableData,
+  DashboardScheduledAutomationPage,
+  DashboardScheduledAutomationProjection,
+} from './dashboard-scheduled-automation'
+
 export { fetchDashboardMissionBriefing, fetchDashboardPlanning } from './dashboard-mission'
 
 

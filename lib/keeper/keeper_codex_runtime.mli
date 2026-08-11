@@ -1,5 +1,13 @@
 (** Keeper projection for the official Codex app-server turn runtime. *)
 
+type attempt_outcome =
+  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; effect_disposition : Keeper_provider_attempt_effect.t
+  }
+(** One Codex candidate result plus the typed tool-effect fact observed while
+    producing it. The outer runtime-lane owner consumes [effect_disposition]
+    directly; provider error strings carry no retry authority. *)
+
 val run :
   runtime_id:string ->
   keeper_name:string ->
@@ -17,4 +25,12 @@ val run :
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
   config:Runtime_execution.codex_app_server ->
-  (Runtime_agent.run_result, Agent_core.Error.t) result
+  attempt_outcome
+
+module For_testing : sig
+  (** Typed carriage of Codex app-server client errors into agent-core
+      errors; rotation class per constructor is pinned by
+      [test_keeper_codex_error_carriage]. RFC-0370 §3.1. *)
+  val codex_error_to_core_error :
+    Runtime_codex_app_server.error -> Agent_core.Error.t
+end

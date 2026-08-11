@@ -169,17 +169,7 @@ let observe_task_transition_event
        | Masc_domain.Release | Masc_domain.Submit_for_verification -> ())
    with
    | Stdlib.Effect.Unhandled _ as exn ->
-     warn_telemetry_drop ~event:(Task_transition transition) exn);
-  try
-    Keeper_accountability.record_task_transition
-      config
-      ~agent_name
-      ~task_id
-      ~transition
-      ~details
-  with
-  | Stdlib.Effect.Unhandled _ as exn ->
-    warn_telemetry_drop ~event:(Accountability transition) exn
+     warn_telemetry_drop ~event:(Task_transition transition) exn)
 ;;
 
 let record_workspace_broadcast ~msg_type ~elapsed_s =

@@ -5,7 +5,8 @@
     typed liveness disposition for a failed turn holding a pending Event Queue
     selection: a frozen successor preserves it, transient failure rotates it
     behind independent work, deterministic failure quarantines only the source,
-    and transcript corruption alone pauses the Keeper. *)
+    an effect-fenced provider failure quarantines that source even if a stale
+    successor exists, and transcript corruption alone pauses the Keeper. *)
 
 open Alcotest
 
@@ -70,6 +71,37 @@ let test_overflow_with_deferred_lane_preserves () =
      | Loop.Quarantine_source _
      | Loop.Pause_keeper_for_integrity _ ->
        false)
+;;
+
+let test_effect_fenced_failure_terminalizes_exact_source () =
+  let error =
+    Masc.Keeper_turn_driver.core_error_of_masc_internal_error
+      (Masc.Keeper_turn_driver.Provider_attempt_effect_fenced
+         { runtime_id = "effect-owner"
+         ; effect_disposition =
+             Masc.Keeper_provider_attempt_effect.Observation_unavailable
+         ; diagnostic = "provider failed after dispatch"
+         })
+  in
+  let route =
+    KFR.route_of_error ~boundary:KFR.Masc_execution error
+  in
+  match
+    Loop.failed_source_disposition
+      (failure
+         ~deferred_runtime_lane:deferred_lane
+         ~route
+         ~source_disposition:Turn.Follow_failure_route
+         error)
+  with
+  | Loop.Quarantine_source { detail } ->
+    check bool "detail is non-empty" true (String.length detail > 0)
+  | Loop.Preserve_for_deferred_runtime
+  | Loop.Defer_to_queue_tail
+  | Loop.Pause_keeper_for_integrity _ ->
+    fail
+      "effect-fenced failure must terminalize the exact failed source instead \
+       of replaying it on the next heartbeat"
 ;;
 
 let preserving_terminal_classes =
@@ -230,6 +262,10 @@ let () =
             "overflow with deferred lane preserves"
             `Quick
             test_overflow_with_deferred_lane_preserves
+        ; test_case
+            "effect-fenced failure terminalizes the exact source"
+            `Quick
+            test_effect_fenced_failure_terminalizes_exact_source
         ; test_case
             "other terminal classes quarantine source"
             `Quick

@@ -1229,12 +1229,21 @@ let spawn_with
            ; "partial_context", `Bool (Option.is_none entry.request_context)
            ]));
     let complete outcome output =
-      Exact_lane_run_registry.mark_completed
-        registry
-        ~run_id
-        ~outcome
-        ~elapsed_s:(Time_compat.now () -. started_at)
-        ~output
+      match
+        Exact_lane_run_registry.mark_completed
+          registry
+          ~run_id
+          ~outcome
+          ~elapsed_s:(Time_compat.now () -. started_at)
+          ~output
+      with
+      | Ok () -> ()
+      | Error error ->
+        Log.Keeper.error
+          ~keeper_name:entry.keeper_name
+          "HITL exact-run observation completion failed run_id=%s: %s"
+          run_id
+          (Exact_lane_run_registry.completion_error_to_string error)
     in
     Eio.Fiber.fork ~sw (fun () ->
     let execution_outcome =

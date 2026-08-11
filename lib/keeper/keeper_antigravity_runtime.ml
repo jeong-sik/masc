@@ -3,13 +3,15 @@ open Result.Syntax
 module Host = Keeper_official_client_host
 module Session_store = Keeper_official_client_session_store
 
+type attempt_outcome =
+  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; effect_disposition : Keeper_provider_attempt_effect.t
+  }
+
 let runtime_label = "Antigravity"
 
-let config_error ~field detail =
-  Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })
-;;
-
-let internal_error detail = Agent_core.Error.Internal detail
+let config_error = Keeper_official_client_host.config_error
+let internal_error = Keeper_official_client_host.internal_error
 
 let runtime_error_to_core_error = function
   | Runtime_antigravity.Invalid_config detail ->
@@ -203,7 +205,7 @@ let stream_projection ~turn_count on_event =
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
-    ~context_injector ~context ~event_bus ~raw_trace ~on_event
+    ~context_injector ~context ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -266,8 +268,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       Host.prepare_turn
         ~configured_reasoning_effort:
           (Runtime_inference.resolve_reasoning_effort ~runtime_id)
-        ~max_prompt_bytes:
-          (Runtime_inference.resolve_max_prompt_bytes ~runtime_id)
         ~runtime_label
         ~keeper_name
         ~turn_count
@@ -466,35 +466,43 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
               recovery_failure := Session_store.State_persistence_failed;
               home_error_to_core_error error)
           in
-          Runtime_antigravity.run_turn
-            ~conversation_mode
-            ~home_dir:(Runtime_antigravity_home.home_dir home)
-            ~mgr:process_mgr
-            ~clock
-            ~cwd:process_cwd
-            ~on_conversation_ready:(fun ~conversation_id ->
-              let* () =
-                update_session "active transition" (fun expected ->
-                  Session_store.mark_active
+          let client_result =
+            Runtime_antigravity.run_turn
+              ~conversation_mode
+              ~home_dir:(Runtime_antigravity_home.home_dir home)
+              ~on_spawned:(fun () ->
+                Atomic.set
+                  effect_disposition
+                  Keeper_provider_attempt_effect.Observation_unavailable)
+              ~mgr:process_mgr
+              ~clock
+              ~cwd:process_cwd
+              ~on_conversation_ready:(fun ~conversation_id ->
+                let* () =
+                  update_session "active transition" (fun expected ->
+                    Session_store.mark_active
+                      ~base_path
+                      ~keeper_name
+                      ~expected
+                      ~session_id:conversation_id
+                      ~updated_at:(Time_compat.now ()))
+                in
+                update_session "turn-starting transition" (fun expected ->
+                  Session_store.mark_turn_starting
                     ~base_path
                     ~keeper_name
                     ~expected
                     ~session_id:conversation_id
-                    ~updated_at:(Time_compat.now ()))
-              in
-              update_session "turn-starting transition" (fun expected ->
-                Session_store.mark_turn_starting
-                  ~base_path
-                  ~keeper_name
-                  ~expected
-                  ~session_id:conversation_id
-                  ~updated_at:(Time_compat.now ())))
-            ~on_stream_event:stream.on_runtime_event
-            client_config
-            ~prompt
-          |> Result.map_error (fun error ->
-            recovery_failure := recovery_failure_of_runtime_error error;
-            runtime_error_to_core_error error))
+                    ~updated_at:(Time_compat.now ())))
+              ~on_stream_event:stream.on_runtime_event
+              client_config
+              ~prompt
+          in
+          Result.map_error
+            (fun error ->
+               recovery_failure := recovery_failure_of_runtime_error error;
+               runtime_error_to_core_error error)
+            client_result)
       in
       match !cleanup_error with
       | None -> turn_result
@@ -683,22 +691,29 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context ~event_bus ~raw_trace ~on_event ~config =
-  Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-    run_without_lifecycle
-      ~runtime_id
-      ~keeper_name
-      ~base_path
-      ~goal
-      ~goal_blocks
-      ~system_prompt
-      ~tools
-      ~initial_messages
-      ~model_input_projection
-      ~hooks
-      ~context_injector
-      ~context
-      ~event_bus
-      ~raw_trace
-      ~on_event
-      ~config)
+  let effect_disposition =
+    Atomic.make Keeper_provider_attempt_effect.No_effect_observed
+  in
+  let result =
+    Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+      run_without_lifecycle
+        ~runtime_id
+        ~keeper_name
+        ~base_path
+        ~goal
+        ~goal_blocks
+        ~system_prompt
+        ~tools
+        ~initial_messages
+        ~model_input_projection
+        ~hooks
+        ~context_injector
+        ~context
+        ~event_bus
+        ~raw_trace
+        ~on_event
+        ~effect_disposition
+        ~config)
+  in
+  { result; effect_disposition = Atomic.get effect_disposition }
 ;;

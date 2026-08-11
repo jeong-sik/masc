@@ -84,7 +84,10 @@ type error =
       }
   | Subscription_required of string
   | Unsupported_server_request of string
-  | Context_window_exceeded of { message : string }
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      }
   | Turn_failed of string
   | Turn_interrupted
   | Process_exited of string

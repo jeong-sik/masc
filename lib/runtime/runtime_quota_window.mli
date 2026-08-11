@@ -34,15 +34,25 @@ val active_until : provider_id:string -> now:float -> float option
 
 val demote_order :
   now:float ->
-  provider_id_of:(string -> string option) ->
+  quota_scope_of:(string -> string option) ->
   string list ->
   string list
-(** Stable-partition [candidates]: those whose provider (via
-    [provider_id_of]) has an active window at [now] move to the tail,
+(** Stable-partition [candidates]: those whose quota scope (via
+    [quota_scope_of]) has an active window at [now] move to the tail,
     preserving declared relative order within both partitions.  Candidates
-    whose provider is unknown ([provider_id_of] returns [None]) are left in
+    whose scope is unknown ([quota_scope_of] returns [None]) are left in
     place — an unresolved id is not evidence of exhaustion.  Returns the
     input unchanged when no candidate is demoted. *)
+
+val scope_of_credential :
+  provider_id:string -> Runtime_schema.credential option -> string
+(** Non-secret quota-scope identity for a provider row.  Provider hard quota
+    is credential-account-owned, not provider-row-owned: two rows sharing one
+    credential share one window (PR #28202 review).  [Env]/[File] carriers
+    are named by their non-secret reference ("env:KEY" / "file:PATH");
+    [Inline] carries the secret itself, so it cannot serve as a shared name
+    and falls back to the row's [provider_id], as does an absent
+    credential. *)
 
 val reset_for_testing : unit -> unit
 (** Drop every remembered window.  Test-only. *)

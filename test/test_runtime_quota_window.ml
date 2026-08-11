@@ -6,9 +6,9 @@ module Q = Runtime_quota_window
 
 let reset () = Q.reset_for_testing ()
 
-(* provider mapping used by demote tests: "prov.model" ids, unknown for
+(* scope mapping used by demote tests: "prov.model" ids, unknown for
    ids without a dot — mirrors candidates the driver cannot resolve. *)
-let provider_id_of candidate =
+let quota_scope_of candidate =
   match String.index_opt candidate '.' with
   | Some i -> Some (String.sub candidate 0 i)
   | None -> None
@@ -56,24 +56,24 @@ let test_demote_moves_exhausted_provider_to_tail () =
   Alcotest.(check (list string))
     "exhausted provider's candidates keep order at the tail"
     [ "ollama.qwen"; "codex.spark"; "claude_code.sonnet"; "claude_code.opus" ]
-    (Q.demote_order ~now:100.0 ~provider_id_of candidates)
+    (Q.demote_order ~now:100.0 ~quota_scope_of candidates)
 
 let test_demote_noop_paths () =
   reset ();
   Alcotest.(check (list string))
     "no windows: unchanged"
     candidates
-    (Q.demote_order ~now:100.0 ~provider_id_of candidates);
+    (Q.demote_order ~now:100.0 ~quota_scope_of candidates);
   Q.note_exhausted ~provider_id:"claude_code" ~resets_at:500.0;
   Alcotest.(check (list string))
     "window passed: unchanged"
     candidates
-    (Q.demote_order ~now:501.0 ~provider_id_of candidates);
+    (Q.demote_order ~now:501.0 ~quota_scope_of candidates);
   Q.note_exhausted ~provider_id:"unrelated_provider" ~resets_at:900.0;
   Alcotest.(check (list string))
     "window on a provider with no candidate: unchanged"
     candidates
-    (Q.demote_order ~now:100.0 ~provider_id_of candidates)
+    (Q.demote_order ~now:100.0 ~quota_scope_of candidates)
 
 let test_unknown_provider_stays_in_place () =
   reset ();
@@ -83,7 +83,7 @@ let test_unknown_provider_stays_in_place () =
     [ "no-dot-id"; "ollama.qwen"; "claude_code.sonnet" ]
     (Q.demote_order
        ~now:100.0
-       ~provider_id_of
+       ~quota_scope_of
        [ "no-dot-id"; "claude_code.sonnet"; "ollama.qwen" ]
      |> fun reordered ->
      (* stable partition keeps no-dot-id and ollama.qwen in declared order,
@@ -98,8 +98,51 @@ let test_all_demoted_keeps_declared_order () =
     [ "claude_code.sonnet"; "claude_code.opus" ]
     (Q.demote_order
        ~now:100.0
-       ~provider_id_of
+       ~quota_scope_of
        [ "claude_code.sonnet"; "claude_code.opus" ])
+
+(* Quota is credential-account-owned: two provider rows sharing one
+   credential share one scope, so exhausting either demotes both
+   (PR #28202 review P2). *)
+let test_shared_credential_scope_demotes_siblings () =
+  reset ();
+  let scope_of = function
+    (* two rows, one account *)
+    | "ollama_cloud.qwen" | "ollama_cloud_native.qwen" ->
+      Some "env:OLLAMA_CLOUD_API_KEY"
+    | "claude_code.sonnet" -> Some "env:ANTHROPIC_KEY"
+    | _ -> None
+  in
+  Q.note_exhausted ~provider_id:"env:OLLAMA_CLOUD_API_KEY" ~resets_at:500.0;
+  Alcotest.(check (list string))
+    "both rows on the exhausted account move to the tail"
+    [ "claude_code.sonnet"; "ollama_cloud.qwen"; "ollama_cloud_native.qwen" ]
+    (Q.demote_order
+       ~now:100.0
+       ~quota_scope_of:scope_of
+       [ "ollama_cloud.qwen"; "claude_code.sonnet"; "ollama_cloud_native.qwen" ])
+
+let test_scope_of_credential () =
+  Alcotest.(check string)
+    "env credential names the account"
+    "env:OLLAMA_CLOUD_API_KEY"
+    (Q.scope_of_credential
+       ~provider_id:"ollama_cloud"
+       (Some (Runtime_schema.Env "OLLAMA_CLOUD_API_KEY")));
+  Alcotest.(check string)
+    "file credential names the file"
+    "file:/etc/key"
+    (Q.scope_of_credential
+       ~provider_id:"p"
+       (Some (Runtime_schema.File "/etc/key")));
+  Alcotest.(check string)
+    "inline credential cannot name a shared account: row scope"
+    "p"
+    (Q.scope_of_credential ~provider_id:"p" (Some (Runtime_schema.Inline "s3cret")));
+  Alcotest.(check string)
+    "absent credential: row scope"
+    "p"
+    (Q.scope_of_credential ~provider_id:"p" None)
 
 let () =
   Alcotest.run
@@ -125,5 +168,15 @@ let () =
             "all demoted keeps order"
             `Quick
             test_all_demoted_keeps_declared_order
+        ; Alcotest.test_case
+            "shared credential demotes siblings"
+            `Quick
+            test_shared_credential_scope_demotes_siblings
+        ] )
+    ; ( "scope"
+      , [ Alcotest.test_case
+            "credential to scope"
+            `Quick
+            test_scope_of_credential
         ] )
     ]

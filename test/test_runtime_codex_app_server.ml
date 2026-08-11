@@ -134,21 +134,30 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 ;;
 
 let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp")
-    ?(timeout_s = 2.0) ?on_stream_event path =
+    ?(timeout_s = 2.0) ?on_thread_ready_delay_s ?on_stream_event path =
   Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
       ; timeout_s
       }
     in
+    let on_thread_ready =
+      Option.map
+        (fun delay_s ~thread_id:_ ->
+           Eio.Time.sleep clock delay_s;
+           Ok ())
+        on_thread_ready_delay_s
+    in
     Runtime_codex_app_server.run_turn
       ~mgr:(Eio.Stdenv.process_mgr env)
-      ~clock:(Eio.Stdenv.clock env)
+      ~clock
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / cwd)
       ~dynamic_tools
       ?thread_mode
       ~history
+      ?on_thread_ready
       ?on_stream_event
       config
       ~prompt:"Return the fixture marker")
@@ -727,6 +736,20 @@ let test_stream_idle_timeout_is_typed () =
          check (float 0.001) "exact idle timeout" 0.05 seconds
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "silent app-server stream ignored its idle timeout")
+;;
+
+let test_state_callback_timeout_is_typed () =
+  with_fixture [ init_result; account_chatgpt; thread_result ] (fun path ->
+    match
+      run_fixture
+        ~timeout_s:0.05
+        ~on_thread_ready_delay_s:0.2
+        path
+    with
+    | Error (Runtime_codex_app_server.Timeout seconds) ->
+      check (float 0.001) "exact callback timeout" 0.05 seconds
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok _ -> fail "blocking app-server callback ignored its timeout")
 ;;
 
 let test_terminal_error_notification_uses_official_context_error_enum () =
@@ -2929,6 +2952,10 @@ let () =
             "stream idle timeout is typed"
             `Quick
             test_stream_idle_timeout_is_typed
+        ; test_case
+            "state callback timeout is typed"
+            `Quick
+            test_state_callback_timeout_is_typed
         ; test_case
             "terminal error notification uses official context error enum"
             `Quick

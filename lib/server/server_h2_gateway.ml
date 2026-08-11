@@ -216,14 +216,31 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       match response.Server_ide_http.status, response.body with
       | `No_content, _ ->
           h2_respond_empty h2_reqd ~status:`No_content ~extra_headers:cors
-      | (`Created | `Bad_request | `Internal_server_error as status), Some body ->
+      | (`Created | `Bad_request | `Forbidden | `Internal_server_error as status), Some body ->
           h2_respond_json_value h2_reqd body ~status ~extra_headers:cors
-      | (`Created | `Bad_request | `Internal_server_error), None ->
+      | (`Created | `Bad_request | `Forbidden | `Internal_server_error), None ->
           h2_respond_empty h2_reqd ~status:`Internal_server_error ~extra_headers:cors
     in
     let with_h2_token_permission_auth h2_reqd ~permission f =
       let _ = permission in
       with_h2_public_read h2_reqd (fun state -> f state "dashboard")
+    in
+    (* Annotation writes must carry the canonical identity returned by the
+       bearer token. Keep this separate from the legacy board-reaction helper
+       until that route's own authorization migration is complete. *)
+    let with_h2_ide_annotation_auth h2_reqd f =
+      with_server_state h2_reqd (fun state ->
+        match
+          authorize_token_bound_permission_request
+            ~base_path:(Mcp_server.workspace_config state).base_path
+            ~permission:Masc_domain.CanBroadcast
+            httpun_request
+        with
+        | Error err -> h2_respond_auth_error h2_reqd err
+        | Ok agent_name ->
+          (match h2_check_agent_rate_limit h2_reqd with
+           | Ok () -> f state agent_name
+           | Error () -> ()))
     in
     (* H2 counterpart of [Server_auth.with_read_auth]: authorize on every
        request.  It remains distinct from [with_h2_public_read], which is an
@@ -1649,25 +1666,26 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
-      (* IDE writes use the same public feature projection as HTTP/1.  The
-         body adapter is transport-specific, but no selected repository or
-         bearer is required to create/delete an annotation or publish a
-         cursor. *)
+      (* Annotation writes use token-bound identity on both HTTP
+         transports. Cursor publication remains in the public observation
+         projection below. *)
       | `POST, "/api/v1/ide/annotations" ->
-          with_h2_public_read h2_reqd (fun state ->
+          with_h2_ide_annotation_auth h2_reqd (fun state auth_identity ->
             h2_read_body h2_reqd (fun body ->
               h2_respond_ide_public_mutation
                 (Server_ide_http.public_annotation_create_response
                    ~state
+                   ~auth_identity
                    ~request:httpun_request
                    ~body)))
 
       | `DELETE, path
         when String.starts_with ~prefix:"/api/v1/ide/annotations/" path ->
-          with_h2_public_read h2_reqd (fun state ->
+          with_h2_ide_annotation_auth h2_reqd (fun state auth_identity ->
             h2_respond_ide_public_mutation
               (Server_ide_http.public_annotation_delete_response
                  ~state
+                 ~auth_identity
                  ~request:httpun_request))
 
       | `POST, "/api/v1/ide/cursors" ->

@@ -428,18 +428,35 @@ let test_presence_last_seen_ms_shared_projection () =
     (Server_presence.last_seen_ms ~context:"test presence" invalid)
 ;;
 
-let test_post_annotations_accepts_client_keeper_id_without_auth () =
+let test_post_annotations_rejects_anonymous_create () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request =
+      http_request
+        ~meth:`POST
+        ~path:"/api/v1/ide/annotations"
+        ~body:(annotation_body ~file_path:"lib/a.ml")
+        ()
+    in
+    let response = dispatch router request in
+    check_status "anonymous annotation create is rejected" 401 response)
+;;
+
+let test_post_annotations_rejects_client_keeper_id () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
     let body =
       {|{"file_path":"lib/a.ml","line_start":1,"line_end":2,"content":"note","keeper_id":"bob"}|}
     in
-    let request = http_request ~meth:`POST ~path:"/api/v1/ide/annotations" ~body () in
+    let request =
+      http_request
+        ~meth:`POST
+        ~path:"/api/v1/ide/annotations"
+        ~body
+        ~token:(Some token)
+        ()
+    in
     let response = dispatch router request in
-    check_status "POST with keeper_id returns 201" 201 response;
-    let json = response |> response_body |> Yojson.Safe.from_string in
-    let annotation = Json.member "data" json in
-    check string "client keeper id is retained" "bob"
-      (json_string_member "created annotation" "keeper_id" annotation))
+    check_status "client keeper_id cannot override token identity" 403 response)
 ;;
 
 let test_post_annotations_rejects_unknown_route_fields () =
@@ -797,19 +814,26 @@ let test_post_annotations_uses_file_path_partition_over_stale_canonical_scope ()
       (annotation_count router "/api/v1/ide/annotations?repo_id=agent_core"))
 ;;
 
-let test_post_annotations_works_without_auth () =
-  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
-    let body = {|{"file_path":"lib/a.ml","line_start":1,"line_end":2,"content":"note"}|} in
-    let request = http_request ~meth:`POST ~path:"/api/v1/ide/annotations" ~body () in
+let test_post_annotations_binds_token_identity () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
+    let request =
+      http_request
+        ~meth:`POST
+        ~path:"/api/v1/ide/annotations"
+        ~body:(annotation_body ~file_path:"lib/a.ml")
+        ~token:(Some token)
+        ()
+    in
     let response = dispatch router request in
-    check_status "POST without token returns 201" 201 response;
+    check_status "authenticated annotation create returns 201" 201 response;
     let json = response |> response_body |> Yojson.Safe.from_string in
     let annotation = Json.member "data" json in
-    check string "unauthenticated annotation uses dashboard identity" "dashboard"
-      (json_string_member "public annotation" "keeper_id" annotation))
+    check string "annotation uses token-bound identity" "alice"
+      (json_string_member "authenticated annotation" "keeper_id" annotation))
 ;;
 
-let test_delete_annotation_works_without_auth_or_owner () =
+let test_delete_annotation_rejects_cross_owner () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let annotation =
       match
@@ -824,16 +848,32 @@ let test_delete_annotation_works_without_auth_or_owner () =
           ()
       with
       | Ok annotation -> annotation
-      | Error msg -> failf "seed annotation for public delete failed: %s" msg
+      | Error msg -> failf "seed annotation for owner-delete test failed: %s" msg
     in
-    let request =
+    let bob_token = create_worker_token base_path "bob" in
+    let bob_request =
       http_request
         ~meth:`DELETE
         ~path:("/api/v1/ide/annotations/" ^ annotation.id)
+        ~token:(Some bob_token)
         ()
     in
-    let response = dispatch router request in
-    check_status "DELETE without token returns 204" 204 response)
+    let bob_response = dispatch router bob_request in
+    check_status "cross-owner annotation delete is rejected" 403 bob_response;
+    check int "cross-owner delete leaves annotation stored" 1
+      (annotation_count router "/api/v1/ide/annotations");
+    let alice_token = create_worker_token base_path "alice" in
+    let alice_request =
+      http_request
+        ~meth:`DELETE
+        ~path:("/api/v1/ide/annotations/" ^ annotation.id)
+        ~token:(Some alice_token)
+        ()
+    in
+    let alice_response = dispatch router alice_request in
+    check_status "owner annotation delete returns 204" 204 alice_response;
+    check int "owner delete removes annotation" 0
+      (annotation_count router "/api/v1/ide/annotations"))
 ;;
 
 let test_read_annotations_uses_default_scope () =
@@ -1246,8 +1286,10 @@ let () =
             test_get_memory_rejects_non_positive_limit
         ] )
     ; ( "public_mutation_flow"
-      , [ test_case "POST annotation accepts client keeper_id without auth" `Quick
-            test_post_annotations_accepts_client_keeper_id_without_auth
+      , [ test_case "POST annotation rejects anonymous create" `Quick
+            test_post_annotations_rejects_anonymous_create
+        ; test_case "POST annotation rejects client keeper_id override" `Quick
+            test_post_annotations_rejects_client_keeper_id
         ; test_case "POST annotation rejects unknown route fields" `Quick
             test_post_annotations_rejects_unknown_route_fields
         ; test_case "POST cursor accepts client keeper_id without auth" `Quick
@@ -1272,10 +1314,10 @@ let () =
             test_post_annotations_uses_file_path_partition_over_stale_repo_scope
         ; test_case "POST annotation follows file path over stale canonical scope" `Quick
             test_post_annotations_uses_file_path_partition_over_stale_canonical_scope
-        ; test_case "POST annotation works without auth" `Quick
-            test_post_annotations_works_without_auth
-        ; test_case "DELETE annotation works without auth or owner" `Quick
-            test_delete_annotation_works_without_auth_or_owner
+        ; test_case "POST annotation binds token identity" `Quick
+            test_post_annotations_binds_token_identity
+        ; test_case "DELETE annotation rejects cross-owner" `Quick
+            test_delete_annotation_rejects_cross_owner
         ] )
     ]
 ;;

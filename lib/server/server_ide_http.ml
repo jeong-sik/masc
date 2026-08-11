@@ -157,11 +157,9 @@ let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
 
 (* ── Public IDE mutation helpers ───────────────────────────────────── *)
 
-(* The IDE observation plane is a local collaborative product surface, not a
-   permission-management API.  A browser must be able to leave a note, remove
-   it, or publish its cursor before credential/bootstrap state catches up.
-   Preserve an explicit author when supplied, otherwise give unconfigured
-   browser work a stable, readable identity. *)
+(* Cursor observations remain a public projection and use a stable identity
+   when no authenticated identity is available. Annotation writes do not use
+   this helper: their author must come from the token-bound identity. *)
 let default_public_mutation_keeper_id = "dashboard"
 
 let parse_json_body body_str =
@@ -184,17 +182,42 @@ let public_mutation_keeper_id json =
   | None -> default_public_mutation_keeper_id
 ;;
 
-(* Compatibility helper for the still-inline HTTP/1 adapters below. It no
-   longer authorizes or rejects a caller-selected identity: the public
-   projection accepts it when present and falls back to [dashboard]. *)
+let annotation_keeper_id_not_accepted_error =
+  "keeper_id is not accepted; identity is derived from the authentication token"
+;;
+
+let annotation_delete_rejected_error = "annotation delete rejected"
+let annotation_delete_rejected_code = "annotation_delete_rejected"
+
+let bind_annotation_keeper_id ~auth_identity ~requested =
+  match requested with
+  | None -> Ok auth_identity
+  | Some _ -> Error annotation_keeper_id_not_accepted_error
+;;
+
+(* Cursor writes still use the public projection's compatibility identity.
+   Annotation routes call [bind_annotation_keeper_id] instead. *)
 let bind_mutation_keeper_id ~auth_identity:_ ~requested =
   match requested with
   | Some keeper_id -> Ok keeper_id
   | None -> Ok default_public_mutation_keeper_id
 ;;
 
-let log_keeper_id_not_accepted ~operation:_ ~auth_identity:_ ~requested:_ = ()
-let log_annotation_delete_rejected ~auth_identity:_ ~id:_ ~reason:_ = ()
+let log_keeper_id_not_accepted ~operation ~auth_identity ~requested =
+  Log.Server.warn
+    "IDE annotation %s rejected client-supplied keeper_id: requested_keeper_id=%S auth_identity=%S"
+    operation
+    requested
+    auth_identity
+;;
+
+let log_annotation_delete_rejected ~auth_identity ~id ~reason =
+  Log.Server.warn
+    "IDE annotation delete rejected: id=%s auth_identity=%S reason=%s"
+    id
+    auth_identity
+    reason
+;;
 
 let json_int_field key = function
   | `Assoc fields ->
@@ -709,12 +732,11 @@ let public_read_response ~state request =
   | _ -> None
 ;;
 
-(* Keep write projection independent of HTTP/1 request bodies and auth state so
-   h2c can execute the exact same feature flow.  This is deliberately public:
-   a stale credential must not turn an otherwise valid IDE action into a
-   failed interaction. Payload shape and storage errors remain explicit. *)
+(* Keep the annotation write projection independent of HTTP/1 request
+   bodies while requiring the caller's token-bound identity.  The h2c
+   transport supplies that identity after the same permission check as H1. *)
 type public_mutation_response =
-  { status : [ `Created | `No_content | `Bad_request | `Internal_server_error ]
+  { status : [ `Created | `No_content | `Bad_request | `Forbidden | `Internal_server_error ]
   ; body : Yojson.Safe.t option
   }
 
@@ -724,7 +746,7 @@ let public_mutation_json ?(status = `Created) body =
 
 let public_mutation_empty = { status = `No_content; body = None }
 
-let public_annotation_create_response ~state ~request ~body =
+let public_annotation_create_response ~state ~auth_identity ~request ~body =
   let uri = Uri.of_string request.Httpun.Request.target in
   let base = base_path_of_state state in
   match parse_json_body body with
@@ -748,9 +770,26 @@ let public_annotation_create_response ~state ~request ~body =
          (match parse_annotation_kind (find_string "kind") with
           | Error msg -> public_mutation_json ~status:`Bad_request (json_error msg)
           | Ok kind ->
-            let keeper_id = public_mutation_keeper_id json in
-            let goal_id = find_string "goal_id" in
-            let task_id = find_string "task_id" in
+            let requested_keeper_id = find_string "keeper_id" in
+            (match
+               bind_annotation_keeper_id
+                 ~auth_identity
+                 ~requested:requested_keeper_id
+             with
+             | Error msg ->
+               Option.iter
+                 (fun requested ->
+                    log_keeper_id_not_accepted
+                      ~operation:"create"
+                      ~auth_identity
+                      ~requested)
+                 requested_keeper_id;
+               public_mutation_json
+                 ~status:`Forbidden
+                 (json_error msg)
+             | Ok keeper_id ->
+               let goal_id = find_string "goal_id" in
+               let task_id = find_string "task_id" in
             let references_json = Yojson.Safe.Util.member "references" json in
             (match Ide_annotation_types.annotation_references_of_json references_json with
              | Error msg ->
@@ -785,11 +824,11 @@ let public_annotation_create_response ~state ~request ~body =
                    | Error msg ->
                      public_mutation_json
                        ~status:`Bad_request
-                       (json_error ~code:"observation_write_failed" msg)))))
+                       (json_error ~code:"observation_write_failed" msg))))))
        | _ -> public_mutation_json ~status:`Bad_request (json_error "Missing required fields"))
 ;;
 
-let public_annotation_delete_response ~state ~request =
+let public_annotation_delete_response ~state ~auth_identity ~request =
   let uri = Uri.of_string request.Httpun.Request.target in
   let base = base_path_of_state state in
   let id =
@@ -804,12 +843,46 @@ let public_annotation_delete_response ~state ~request =
     | Error err ->
       public_mutation_json ~status:`Bad_request (json_error ~code:err.code err.message)
     | Ok partition ->
-      (match Ide_annotations.delete_any ~base_dir:base ~partition ~id () with
-       | Ok () -> public_mutation_empty
+      let requested_keeper_id =
+        match Uri.get_query_param uri "keeper_id" with
+        | Some keeper_id when String.trim keeper_id <> "" -> Some (String.trim keeper_id)
+        | _ -> None
+      in
+      (match
+         bind_annotation_keeper_id
+           ~auth_identity
+           ~requested:requested_keeper_id
+       with
        | Error msg ->
+         Option.iter
+           (fun requested ->
+              log_keeper_id_not_accepted
+                ~operation:"delete"
+                ~auth_identity
+                ~requested)
+           requested_keeper_id;
          public_mutation_json
-           ~status:`Bad_request
-           (json_error ~code:"annotation_delete_failed" msg))
+           ~status:`Forbidden
+           (json_error
+              ~code:"keeper_id_not_accepted"
+              msg)
+       | Ok keeper_id ->
+         (match
+            Ide_annotations.delete
+              ~base_dir:base
+              ~partition
+              ~id
+              ~keeper_id
+              ()
+          with
+          | Ok () -> public_mutation_empty
+          | Error msg ->
+            log_annotation_delete_rejected ~auth_identity ~id ~reason:msg;
+            public_mutation_json
+              ~status:`Forbidden
+              (json_error
+                 ~code:annotation_delete_rejected_code
+                 annotation_delete_rejected_error)))
 ;;
 
 let public_cursor_create_response ~state ~request ~body =
@@ -895,14 +968,14 @@ let respond_public_read_response ~request reqd response =
 let respond_public_mutation_response ~request reqd response =
   match response.status, response.body with
   | `No_content, _ -> Http.Response.empty ~status:`No_content reqd
-  | (`Created | `Bad_request | `Internal_server_error as status), Some body ->
+  | (`Created | `Bad_request | `Forbidden | `Internal_server_error as status), Some body ->
     Http.Response.json_value
       ~status
       ~request
       ~extra_headers:(public_read_cors_headers request)
       body
       reqd
-  | (`Created | `Bad_request | `Internal_server_error), None ->
+  | (`Created | `Bad_request | `Forbidden | `Internal_server_error), None ->
     Http.Response.empty ~status:`Internal_server_error reqd
 ;;
 
@@ -937,11 +1010,11 @@ let add_routes router =
   |> Http.Router.get "/api/v1/status" public_read_handler
   |> Http.Router.get "/api/v1/ide/annotations" public_read_handler
   |> Http.Router.post "/api/v1/ide/annotations" (fun request reqd ->
-    (* Public feature lane: browser annotation creation cannot depend on a
-       token, selected keeper, or selected repository. *)
-    with_public_read
-      (fun state _req reqd ->
-         let auth_identity = default_public_mutation_keeper_id in
+    (* Annotation authorship is token-bound; the request body may not
+       select another keeper. *)
+    with_token_permission_auth
+      ~permission:Masc_domain.CanBroadcast
+      (fun state auth_identity _req reqd ->
          let uri = Uri.of_string request.target in
          (* RFC-0128 §4.2 PR-8: partition storage lives under the
             *server* base_path (single .masc-ide/ tree), not the
@@ -977,11 +1050,11 @@ let add_routes router =
                   , find_string "content" )
                 with
                 | Some file_path, Some line_start, Some line_end, Some content ->
-               (* Preserve a caller-provided keeper id when available; a
-                  browser with no identity bootstrap uses [dashboard]. *)
+               (* A caller-provided keeper id is checked against the
+                  token-bound identity before durable creation. *)
                let requested_keeper_id = find_string "keeper_id" in
                (match
-                  bind_mutation_keeper_id ~auth_identity ~requested:requested_keeper_id
+                  bind_annotation_keeper_id ~auth_identity ~requested:requested_keeper_id
                 with
                 | Error msg ->
                   Option.iter
@@ -1063,11 +1136,10 @@ let add_routes router =
       request
       reqd)
   |> Http.Router.prefix_delete "/api/v1/ide/annotations/" (fun request reqd ->
-    (* Public feature lane: an annotation can be removed by id without
-       reconstructing a browser identity. *)
-    with_public_read
-      (fun state _req reqd ->
-         let auth_identity = default_public_mutation_keeper_id in
+    (* Annotation deletion is authorized against the token-bound owner. *)
+    with_token_permission_auth
+      ~permission:Masc_domain.CanBroadcast
+      (fun state auth_identity _req reqd ->
          let uri = Uri.of_string request.target in
          (* RFC-0128 §4.2 PR-8: partition storage lives under the
             *server* base_path (single .masc-ide/ tree), not the
@@ -1100,7 +1172,7 @@ let add_routes router =
              reqd
          else
            match
-             bind_mutation_keeper_id ~auth_identity ~requested:requested_keeper_id
+             bind_annotation_keeper_id ~auth_identity ~requested:requested_keeper_id
            with
            | Error msg ->
              Option.iter
@@ -1115,20 +1187,27 @@ let add_routes router =
                ~request
                (json_error msg)
                reqd
-           | Ok _keeper_id ->
+           | Ok keeper_id ->
              (match resolve_partition_for_mutation ~state ~uri with
               | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
               | Ok partition ->
                 (match
-                   Ide_annotations.delete_any ~base_dir:base ~partition ~id ()
+                   Ide_annotations.delete
+                     ~base_dir:base
+                     ~partition
+                     ~id
+                     ~keeper_id
+                     ()
                  with
                  | Ok () -> Http.Response.empty ~status:`No_content reqd
                  | Error msg ->
                    log_annotation_delete_rejected ~auth_identity ~id ~reason:msg;
                    Http.Response.json_value
-                     ~status:`Bad_request
+                     ~status:`Forbidden
                      ~request
-                     (json_error ~code:"annotation_delete_failed" msg)
+                     (json_error
+                        ~code:annotation_delete_rejected_code
+                        annotation_delete_rejected_error)
                      reqd)))
            request
            reqd)

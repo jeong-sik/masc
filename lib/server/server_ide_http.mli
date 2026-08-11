@@ -43,24 +43,26 @@ val observation_snapshot_public_read_response :
     state.  The H1 and h2c transports use it directly during startup. *)
 
 type public_mutation_response = private {
-  status : [ `Created | `No_content | `Bad_request | `Internal_server_error ];
+  status : [ `Created | `No_content | `Bad_request | `Forbidden | `Internal_server_error ];
   body : Yojson.Safe.t option;
 }
 (** Transport-neutral result for an IDE observation mutation.
 
-    Annotation and cursor writes deliberately share the public feature lane
-    with reads: callers need neither a selected repository nor a bearer token.
-    The h2c adapter consumes this value directly; the HTTP/1 router preserves
-    the same input/output contract while using its native async body reader. *)
+    Annotation writes require a token-bound identity; cursor writes remain in
+    the public feature lane.  The h2c adapter consumes this value directly;
+    the HTTP/1 router preserves the same input/output contract while using its
+    native async body reader. *)
 
 val public_annotation_create_response :
   state:Mcp_server.server_state
+  -> auth_identity:string
   -> request:Httpun.Request.t
   -> body:string
   -> public_mutation_response
 
 val public_annotation_delete_response :
   state:Mcp_server.server_state
+  -> auth_identity:string
   -> request:Httpun.Request.t
   -> public_mutation_response
 

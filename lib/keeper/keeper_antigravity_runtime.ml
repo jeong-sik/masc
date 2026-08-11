@@ -10,11 +10,8 @@ type attempt_outcome =
 
 let runtime_label = "Antigravity"
 
-let config_error ~field detail =
-  Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })
-;;
-
-let internal_error detail = Agent_core.Error.Internal detail
+let config_error = Keeper_official_client_host.config_error
+let internal_error = Keeper_official_client_host.internal_error
 
 let runtime_error_to_core_error = function
   | Runtime_antigravity.Invalid_config detail ->

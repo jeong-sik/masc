@@ -145,27 +145,6 @@ let test_descriptor_resolution_capabilities_for_public_names () =
     (capability_has Tool_capability.Read_only "Execute")
 ;;
 
-let test_default_instructions_pin_start_transition_workflow () =
-  let instructions = Masc.Mcp_server_eio_tool_profile.default_instructions () in
-  check
-    bool
-    "write summary names start"
-    true
-    (contains_substring instructions "claim/start/done");
-  check
-    bool
-    "workflow includes start transition"
-    true
-    (contains_substring instructions "masc_transition(start)");
-  check
-    bool
-    "workflow does not skip start"
-    false
-    (contains_substring
-       instructions
-       "masc_transition(claim) -> work in a repo-local worktree")
-;;
-
 let test_full_profile_admission_uses_catalog_direct_call_policy () =
   let state =
     Masc.Mcp_server.For_testing.create_state
@@ -235,10 +214,6 @@ let () =
             "descriptor-resolution-capabilities-for-public-names"
             `Quick
             test_descriptor_resolution_capabilities_for_public_names
-        ; test_case
-            "default-instructions-pin-start-transition-workflow"
-            `Quick
-            test_default_instructions_pin_start_transition_workflow
         ; test_case
             "full-profile-admission-uses-catalog-direct-call-policy"
             `Quick

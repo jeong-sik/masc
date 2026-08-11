@@ -1290,15 +1290,31 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
            ~model:"gpt-fixture"
            ()
        with
-       | Error
-           (Agent_core.Error.Provider
-              (Llm_provider.Error.ProviderReportedError
-                 { provider = "codex_app_server"
-                 ; error_type = Some "context_window_exceeded_after_tool_effect"
-                 ; _
-                 })) ->
-         ()
-       | Error error -> fail (Agent_core.Error.to_string error)
+       | Error error ->
+         (* Since #28178 the provider-attempt effect fence intercepts this
+            failure before the raw provider error reaches the caller: an
+            observed tool effect forbids same-turn retry. Decode the typed
+            envelope rather than matching its rendered prose — the fence is
+            what this test is about, and [effect_disposition] is the field
+            that carries it. *)
+         (match Keeper_internal_error.classify_masc_internal_error error with
+          | Some
+              (Keeper_internal_error.Provider_attempt_effect_fenced
+                 { effect_disposition; diagnostic; _ }) ->
+            check
+              bool
+              "the fence forbids same-turn retry"
+              false
+              (Keeper_provider_attempt_effect.allows_same_turn_retry
+                 effect_disposition);
+            check
+              bool
+              "the fenced envelope keeps the provider diagnostic"
+              true
+              (Astring.String.is_infix
+                 ~affix:"context_window_exceeded_after_tool_effect"
+                 diagnostic)
+          | _ -> fail (Agent_core.Error.to_string error))
        | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;
 

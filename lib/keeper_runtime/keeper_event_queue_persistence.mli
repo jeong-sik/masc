@@ -131,6 +131,7 @@ type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
+  | Incoherent_read
 
 type snapshot_read_error =
   { kind : snapshot_read_error_kind
@@ -164,11 +165,11 @@ val observe_snapshot_with_errors :
     rather than a healthy empty projection. *)
 
 module For_testing : sig
-  val observe_state_read_only_result_with_interleave :
+  val observe_snapshot_with_errors_with_interleave :
     between_samples:(unit -> unit) ->
     base_path:string ->
     keeper_name:string ->
-    (Keeper_event_queue_state.t, string) result
+    snapshot_with_errors
 end
 
 val load_state_result :

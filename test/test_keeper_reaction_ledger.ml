@@ -644,9 +644,9 @@ let test_lock_free_observation_rejects_generation_change () =
     ~base_path
     ~keeper_name
     first;
-  match
+  let observed =
     Keeper_event_queue_persistence.For_testing
-    .observe_state_read_only_result_with_interleave
+    .observe_snapshot_with_errors_with_interleave
       ~between_samples:(fun () ->
         Keeper_reaction_ledger.record_event_queue_stimulus
           ~base_path
@@ -654,18 +654,20 @@ let test_lock_free_observation_rejects_generation_change () =
           second)
       ~base_path
       ~keeper_name
-  with
-  | Error message ->
-    check bool
-      "concurrent generation change is typed unavailable"
-      true
-      (String_util.contains_substring
-         message
-         "event queue changed during lock-free observation")
-  | Ok state ->
-    failf
-      "concurrent generation change returned healthy revision %Ld"
-      (Keeper_event_queue_state.revision state)
+  in
+  check int
+    "incoherent observation returns exactly one typed error"
+    1
+    (List.length observed.read_errors);
+  let error = List.hd observed.read_errors in
+  check string
+    "concurrent generation change is typed unavailable"
+    "incoherent_read"
+    (Keeper_event_queue_persistence.snapshot_read_error_kind_to_string error.kind);
+  check int
+    "incoherent observation cannot return a healthy queue"
+    0
+    (Keeper_event_queue.length observed.pending)
 ;;
 
 let test_unknown_reaction_is_quarantined_without_clearing_pending () =

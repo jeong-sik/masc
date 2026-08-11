@@ -79,31 +79,35 @@ else `Bad_gateway
 
 ## 2. 원칙 (판정 기준)
 
-1. **Functional core / imperative shell** — env·FS·clock·예외 제어흐름은 경계 모듈에만. 판정 질문은 하나: *이 값이 무엇을 결정하는가, 그 결정이 경계 안에서 일어나는가.* 경계 모듈(파서/스토어/클라이언트) 내부의 이펙트는 그 모듈의 존재 이유이므로 위반이 아니다.
+아래 원칙은 식별자나 구문을 전역 grep 해 자동 금지하는 규칙이 아니다. 각 후보에서 생산자→소비자 데이터 흐름과 소유 경계를 확인한 뒤 판정한다. 같은 구문도 경계 어댑터, 자원 소유 orchestration, 테스트에서는 정당할 수 있다.
+
+1. **Functional core / imperative shell** — env·FS·clock·예외 제어흐름을 그 값을 소유하는 경계 또는 orchestration 에 둔다. 판정 질문은 하나: *이 값이 무엇을 결정하고, 어느 계층이 그 결정을 소유하는가.* 파서/스토어/클라이언트 내부의 이펙트와 명시적으로 clock·cancel·resource lifecycle 을 소유하는 실행 계층은 그 모듈의 존재 이유이므로 위반이 아니다.
 2. **Parse, don't validate** — 경계에서 1회 파싱해 typed 값으로 내부 전달. validate-then-discard 금지.
-3. **Option/Result 는 합성 후 경계에서 1회 해소** — 중간 계층의 `failwith`/`Option.get`/재match 금지. 헬퍼가 정보를 버리면(bool·이름만 반환) 호출부에 `assert false` 가 강제된다.
+3. **Option/Result 의 정보를 버린 뒤 추측으로 복원하지 않는다** — 중간 계층 해소 자체를 금지하지 않는다. `failwith`/`Option.get`/wildcard fallback 으로 실패 의미를 없앤 뒤 bool·문구·재match 로 복원하는 경로가 대상이다.
 4. **In-process 계약은 typed** — 같은 프로세스 안에서 자기 타입을 렌더해 되읽는 채널 금지. 에러 메시지·env·description·브로드캐스트 본문은 제어 흐름 채널이 아니다.
 5. **존재/권위 검증은 소유 계층에서 1회** — 동시성 권위(레지스트리)가 최종 확인을 소유하고, resolve 결과는 typed handle 로 운반한다.
 
-## 3. 금지 패턴 (PR 리뷰 reject 기준, 발견 인용)
+## 3. 금지 패턴 (PR 리뷰 후보 기준, 발견 인용)
+
+아래 항목은 텍스트가 매치됐다는 이유만으로 reject 하지 않는다. 해당 PR이 새 implicit control channel 을 만들거나, 이미 보유한 typed 정보를 버린 뒤 문자열·환경·파일을 통해 재구성한다는 데이터 흐름 증거가 있을 때만 blocker 다. 외부 wire/프로세스 경계의 직렬화, 설정 로더의 env 읽기, store의 FS 접근, 명시적 오류 표시를 위한 문자열은 대상이 아니다.
 
 1. **typed→string→재파싱**: tool_input_validation:835, channel_gate:298/:323, proactive_refresh:36 → server_routes_http_runtime:311(`label=` 필드를 문자열에 박고 되꺼냄), failure_envelope:59-64(string→string→string 3단).
-2. **요청 경로 env 읽기**: server_auth:563, keeper_tool_execute_runtime:388, tool_workspace:60. `<> Some "false"` 류 permissive 파싱 동반 금지.
-3. **결정 로직 내 FS 직접 접근·레이아웃 지식 이중화**: masc_grpc_service:246(생산자 0 필드 raw 프로브 — 이미 drift), :117 vs :365(.json 필터 불일치), mcp_server:342(writer 레이아웃 재구현).
-4. **Option/Result 중간 붕괴**: keeper_board_attention_candidate:1757, keeper_heartbeat_loop:1205, dashboard_verification:160(Result→failwith 로 실패 브랜치가 타입에서 소멸).
+2. **요청 경로에서 이미 주입된 값을 env 로 재조회**: server_auth:563, keeper_tool_execute_runtime:388, tool_workspace:60. 요청별 환경 정책을 명시적으로 소유하는 loader는 예외지만, `<> Some "false"` 같은 permissive 파싱으로 오타와 부재를 같은 값으로 합치는 경로는 허용하지 않는다.
+3. **결정 로직에서 owner API를 우회한 FS 접근·레이아웃 지식 이중화**: masc_grpc_service:246(생산자 0 필드 raw 프로브 — 이미 drift), :117 vs :365(.json 필터 불일치), mcp_server:342(writer 레이아웃 재구현). store/loader가 자기 레이아웃을 읽는 것은 대상이 아니다.
+4. **Option/Result 의미 붕괴 후 재추론**: keeper_board_attention_candidate:1757, keeper_heartbeat_loop:1205, dashboard_verification:160(Result→failwith 로 실패 브랜치가 타입에서 소멸). 경계에서 모든 분기를 명시적으로 처리하는 정상 해소는 대상이 아니다.
 5. **catch-all 의 Cancelled 삼킴**: otel_spans:107(Cancelled→false), keeper_compact_audit:232. 형제 6곳의 `Eio.Cancel.Cancelled _ as e -> raise e` 규율이 표준.
 6. **이름/prefix 관습 분류기**: tool_dispatch:107, tool_telemetry:39(주석이 스스로 탈출구를 인정), workspace_task_receipts:23(keeper↔agent 이름의 매직 오프셋 역파싱).
-7. **생산자 없는 가드**: keeper_error_classify:184, runtime_info 가드 2건, prompt_defaults:22, voice_runtime_overlay:168(then/else 동일 분기). 발견 즉시 삭제 — "방어적"이라는 사유는 인정하지 않는다. 미래의 upstream 형태 변화는 문자열 가드가 아니라 핀 갱신 시 컴파일 에러로 잡는다.
+7. **닫힌 세계에서 생산자 없는 가드**: keeper_error_classify:184, runtime_info 가드 2건, prompt_defaults:22, voice_runtime_overlay:168(then/else 동일 분기). 저장소 내부의 exhaustive typed producer만 입력한다는 증거와 회귀 테스트가 있을 때 삭제한다. 외부 입력·persisted data·version-skew가 도달 가능한 경로는 `rg` 0건만으로 dead라 판정하지 않는다. 미래 upstream 변화는 가능하면 typed variant와 exhaustive match로 잡고, 불가능한 wire 경계는 명시적 unknown/error 분기를 유지한다.
 
 ## 4. 배치 계획
 
-파일 중복 없는 원자 배치. 머지 순서 의존이 생기면 두 PR 로 나누지 않고 한 배치로 합친다(#27997/#28007 47초 역전 사고 근거).
+파일 중복 없는 검토 가능한 배치를 우선한다. 같은 불변식을 중간 상태 없이 바꿔야 할 때만 한 배치로 합치고, 독립적으로 검증 가능한 변경은 작은 PR로 나눈다. 머지 순서 의존은 stacked base 또는 명시적 dependency로 표현한다(#27997/#28007 47초 역전 사고 근거).
 
 ### Phase 1 — 기반 (저위험, 동작 불변이 구조적으로 증명됨)
 
 | 배치 | 내용 | 대상 |
 |---|---|---|
-| B1 | dead-guard 소거 + `*_opt` 기계 치환 | prompt_defaults, voice_runtime_overlay, keeper_multimodal_input, keeper_approval/audit, workspace_goal_index, dashboard_goals_types_accessor |
+| B1 | 닫힌 생산자 그래프로 증명된 dead-guard 소거 + 의미 보존이 확인된 `*_opt` 치환 | prompt_defaults, voice_runtime_overlay, keeper_multimodal_input, keeper_approval/audit, workspace_goal_index, dashboard_goals_types_accessor |
 | B2 | 예외 catch 폭 정합 — Cancelled 재던짐 + dead catch 제거 | keeper_compact_audit, otel_spans, prompt_registry, types_core, masc_error, keeper_chat_blocks |
 | B3 | 확정 substring 왕복 13건 소거 | keeper_error_classify, server_dashboard_http_runtime_info, failure_envelope, keeper_context_core_history, bin/masc_trace |
 
@@ -133,12 +137,12 @@ else `Bad_gateway
 
 ## 5. 검증 방법 (배치당 Done 기준)
 
-1. **동작 불변**: dune build + 기존 테스트 green. 제거하는 분기는 착수 시점에 생산자 0 을 rg 로 재확인(이동 경로≠죽은 경로 — 리터럴→흡수접두사→basename 3단 해석).
+1. **동작 불변**: exact-head CI build + 기존 테스트 green. 제거하는 분기는 착수 시점에 생산자 0 뿐 아니라 외부/저장 입력 가능성과 alias 변환을 함께 재확인한다(이동 경로≠죽은 경로 — 리터럴→흡수접두사→basename 3단 해석).
 2. **대체 경로 증명**: 신설 typed API/variant 에 단위 테스트 추가. 기대값은 리터럴로 작성(검사 대상 함수를 기대값 쪽에 재사용 금지).
 3. **계측 변화 명시**: B5 의 span 감소 등 텔레메트리 변화는 전후 실측 diff 를 PR 에 첨부.
-4. **drift-guard 테스트는 소거와 함께 삭제**: substring 가드를 잠그는 테스트는 RFC-0042 가 진단한 안티패턴이므로 잠그지 않고 없앤다.
+4. **제거한 implicit bridge를 고정하던 테스트는 typed 계약 테스트로 교체**: 단순 삭제하지 않는다. 외부 wire 문자열 자체가 공개 계약인 경우에는 해당 boundary codec 테스트를 유지한다.
 5. **요청 경로 배치(B4-B6)는 머지 후 라이브 재측정**: merged≠booted 3단 분리, /health + keeper 턴 스모크.
-6. **각 PR 은 본 RFC 인용 + pr-rfc-check.sh PASS**. workaround 시그니처(counter-as-fix, string 분류기 추가, N-of-M) 매칭 시 배치를 재설계한다 — 본 RFC 의 목적이 그 패턴의 소거이므로 배치 안에서의 재생산은 자기모순이다.
+6. **본 RFC 구현 PR 은 RFC 인용 + pr-rfc-check.sh PASS**. counter-as-fix, string 분류기, N-of-M 같은 텍스트 매치만으로 자동 reject 하지 않고, 새 silent fallback 또는 implicit control channel 이 생기는지 데이터 흐름을 리뷰한다. 확인되면 배치를 재설계한다.
 
 ## 6. 범위 밖 / 후속
 

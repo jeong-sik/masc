@@ -57,6 +57,14 @@ let env_value name env =
     else None)
 ;;
 
+let with_env name value run =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name (Option.value value ~default:"");
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv name (Option.value previous ~default:""))
+    run
+;;
+
 let test_pure_environment_contract () =
   let input =
     [| "PATH=/bin"
@@ -81,6 +89,40 @@ let test_pure_environment_contract () =
   Alcotest.(check (list string)) "projected token names are exact"
     [ "GH_TOKEN"; "GITHUB_TOKEN"; "GH_ENTERPRISE_TOKEN"; "GITHUB_ENTERPRISE_TOKEN" ]
     (Github.projected_token_env_names configured)
+;;
+
+let test_hostname_policy () =
+  Alcotest.(check (result string string)) "public GitHub is allowed"
+    (Ok "github.com") (Github.validate_hostname "GitHub.com");
+  Alcotest.(check (result string string)) "approved Enterprise host is normalized"
+    (Ok "ghe.example.com")
+    (Github.validate_hostname
+       ~enterprise_hosts:[ "ghe.example.com" ]
+       "GHE.EXAMPLE.COM");
+  (match Github.validate_hostname "attacker.example" with
+   | Error message ->
+     Alcotest.(check string) "unapproved host is rejected"
+       "GitHub hostname is not allowed; configure MASC_GITHUB_ENTERPRISE_HOSTS for approved Enterprise hosts"
+       message
+   | Ok _ -> Alcotest.fail "unapproved hostname was accepted");
+  List.iter
+    (fun hostname ->
+       match Github.validate_hostname hostname with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail ("malformed hostname was accepted: " ^ hostname))
+    [ "https://github.com"; "github.com:443"; "github.com/api" ];
+  with_temp_base @@ fun base_path ->
+  (match
+     Github.observe
+       ~base_path
+       ~keeper_name:"hostname-policy-keeper"
+       ~hostname:"attacker.example"
+   with
+   | Error message ->
+     Alcotest.(check string) "observation rejects before gh api"
+       "GitHub hostname is not allowed; configure MASC_GITHUB_ENTERPRISE_HOSTS for approved Enterprise hosts"
+       message
+   | Ok _ -> Alcotest.fail "observation accepted an unapproved hostname")
 ;;
 
 let fake_gh_script =
@@ -122,19 +164,21 @@ let test_fake_gh_login_and_effective_identity () =
   Unix.chmod fake_gh 0o700;
   let secret_root = Secret_projection.secret_root ~base_path ~keeper_name in
   write_file (Filename.concat (Filename.concat secret_root "env") "GH_TOKEN") "projected-token\n";
+  let enterprise_hostname = "ghe.example.com" in
   let previous_path = Sys.getenv "PATH" in
   Unix.putenv "PATH" (fake_bin ^ ":" ^ previous_path);
+  with_env "MASC_GITHUB_ENTERPRISE_HOSTS" (Some enterprise_hostname) @@ fun () ->
   Fun.protect
     ~finally:(fun () -> Unix.putenv "PATH" previous_path)
     (fun () ->
        Alcotest.(check int) "fake login exits successfully" 0
-         (Github.run_cli_login ~base_path ~keeper_name ~hostname:"github.com");
+         (Github.run_cli_login ~base_path ~keeper_name ~hostname:enterprise_hostname);
        let keeper_config = Github.config_dir ~base_path ~keeper_name in
        let login_args = read_file (Filename.concat keeper_config "login-args") in
        Alcotest.(check bool) "web login argv reached fake gh" true
          (String.contains login_args '\n'
           && String.ends_with ~suffix:"--insecure-storage\n" login_args);
-       match Github.observe ~base_path ~keeper_name ~hostname:"github.com" with
+       match Github.observe ~base_path ~keeper_name ~hostname:enterprise_hostname with
        | Error message -> Alcotest.fail message
        | Ok observation ->
          Alcotest.(check (option string)) "stored identity uses Keeper config"
@@ -297,6 +341,7 @@ let () =
     "keeper GitHub identity"
     [ ( "contract"
       , [ Alcotest.test_case "environment isolation" `Quick test_pure_environment_contract
+        ; Alcotest.test_case "hostname policy" `Quick test_hostname_policy
         ; Alcotest.test_case
             "fake gh login and effective identity"
             `Quick

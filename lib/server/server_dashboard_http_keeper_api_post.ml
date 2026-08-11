@@ -57,23 +57,26 @@ let handle_keeper_github_login_post state req reqd =
         | Some hostname -> hostname
         | None -> "github.com"
       in
-      (match
-         Keeper_github_identity.login_env
-           ~base_path:config.base_path
-           ~keeper_name:name
-       with
+      (match Keeper_github_identity.validate_hostname hostname with
        | Error message -> respond_error reqd message
-       | Ok env ->
-         let redaction =
-           Keeper_secret_redaction.snapshot
+       | Ok hostname ->
+         match
+           Keeper_github_identity.login_env
              ~base_path:config.base_path
              ~keeper_name:name
-         in
-         let stdout_redaction = Keeper_secret_redaction.create_stream_state redaction in
-         let stderr_redaction = Keeper_secret_redaction.create_stream_state redaction in
-         let response = Httpun.Response.create ~headers:github_login_stream_headers `OK in
-         let writer = Httpun.Reqd.respond_with_streaming reqd response in
-         Fun.protect
+         with
+         | Error message -> respond_error reqd message
+         | Ok env ->
+           let redaction =
+             Keeper_secret_redaction.snapshot
+               ~base_path:config.base_path
+               ~keeper_name:name
+           in
+           let stdout_redaction = Keeper_secret_redaction.create_stream_state redaction in
+           let stderr_redaction = Keeper_secret_redaction.create_stream_state redaction in
+           let response = Httpun.Response.create ~headers:github_login_stream_headers `OK in
+           let writer = Httpun.Reqd.respond_with_streaming reqd response in
+           Fun.protect
            ~finally:(fun () -> Httpun.Body.Writer.close writer)
            (fun () ->
               let send_redacted_output stream state chunk =
@@ -138,7 +141,7 @@ let handle_keeper_github_login_post state req reqd =
                         "error"
                         (`Assoc [ "message", `String message ])))
               | failed ->
-                let detail = String.trim (redact stderr) in
+                let detail = String.trim stderr in
                 let message =
                   if String.equal detail ""
                   then "gh auth login failed: " ^ github_login_process_status failed

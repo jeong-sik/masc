@@ -1522,18 +1522,23 @@ let handle_keeper_get_subroutes state req request reqd =
           | Some hostname -> hostname
           | None -> "github.com"
         in
-        (match
-           Keeper_github_identity.observe
-             ~base_path:config.base_path
-             ~keeper_name:name
-             ~hostname
-         with
+        (match Keeper_github_identity.validate_hostname hostname with
          | Error message ->
            Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
              (error_json message)
-         | Ok observation ->
-           Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-             (Keeper_github_identity.observation_to_yojson observation)))
+         | Ok hostname ->
+           (match
+              Keeper_github_identity.observe
+                ~base_path:config.base_path
+                ~keeper_name:name
+                ~hostname
+            with
+            | Error message ->
+              Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+                (error_json message)
+            | Ok observation ->
+              Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+                (Keeper_github_identity.observation_to_yojson observation))))
   else if ends_with "/digest" then (
     (* Keeper catch-up digest (since-last-seen). The enclosing keeper GET
        router leaves this route on its public-read policy; sensitive sibling

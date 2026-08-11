@@ -6,6 +6,63 @@ let github_token_env_names =
   ]
 ;;
 
+let github_hostname = "github.com"
+let enterprise_hosts_env = "MASC_GITHUB_ENTERPRISE_HOSTS"
+
+let is_hostname_char = function
+  | 'a' .. 'z' | '0' .. '9' | '-' -> true
+  | _ -> false
+;;
+
+let is_valid_hostname_shape hostname =
+  let labels = String.split_on_char '.' hostname in
+  let valid_label label =
+    let length = String.length label in
+    length > 0
+    && length <= 63
+    && label.[0] <> '-'
+    && label.[length - 1] <> '-'
+    && String.for_all is_hostname_char label
+  in
+  String.length hostname <= 253
+  && List.length labels >= 2
+  && List.for_all valid_label labels
+;;
+
+let normalized_hostname hostname = String.lowercase_ascii (String.trim hostname)
+
+let normalized_enterprise_hosts hosts =
+  hosts
+  |> List.map normalized_hostname
+  |> List.filter is_valid_hostname_shape
+  |> List.sort_uniq String.compare
+;;
+
+let configured_enterprise_hosts () =
+  match Sys.getenv_opt enterprise_hosts_env with
+  | None -> []
+  | Some value ->
+    value
+    |> String.split_on_char ','
+    |> normalized_enterprise_hosts
+;;
+
+let validate_hostname ?enterprise_hosts hostname =
+  let hostname = normalized_hostname hostname in
+  let enterprise_hosts =
+    match enterprise_hosts with
+    | Some hosts -> normalized_enterprise_hosts hosts
+    | None -> configured_enterprise_hosts ()
+  in
+  if not (is_valid_hostname_shape hostname) then
+    Error "GitHub hostname must be a DNS hostname"
+  else if String.equal hostname github_hostname || List.mem hostname enterprise_hosts then
+    Ok hostname
+  else
+    Error
+      "GitHub hostname is not allowed; configure MASC_GITHUB_ENTERPRISE_HOSTS for approved Enterprise hosts"
+;;
+
 type auth_result =
   { authenticated : bool
   ; login : string option
@@ -350,9 +407,9 @@ let auth_result_of_command ~redact ~env ~hostname =
 ;;
 
 let observe ~base_path ~keeper_name ~hostname =
-  let hostname = String.trim hostname in
-  if String.equal hostname "" then Error "GitHub hostname must not be empty"
-  else
+  match validate_hostname hostname with
+  | Error _ as error -> error
+  | Ok hostname ->
     match projected_env ~base_path ~keeper_name with
     | Error _ as error -> error
     | Ok effective_env ->
@@ -454,7 +511,12 @@ let run_inherited ~env = function
 ;;
 
 let run_cli_login ~base_path ~keeper_name ~hostname =
-  match login_env ~base_path ~keeper_name with
+  match validate_hostname hostname with
+  | Error message ->
+    prerr_endline message;
+    1
+  | Ok hostname ->
+    (match login_env ~base_path ~keeper_name with
   | Error message ->
     prerr_endline message;
     1
@@ -473,15 +535,25 @@ let run_cli_login ~base_path ~keeper_name ~hostname =
         false
     in
     let observed = print_observation ~base_path ~keeper_name ~hostname in
-    if secured && observed then 0 else 1
+    if secured && observed then 0 else 1)
 ;;
 
 let run_cli_status ~base_path ~keeper_name ~hostname =
-  if print_observation ~base_path ~keeper_name ~hostname then 0 else 1
+  match validate_hostname hostname with
+  | Error message ->
+    prerr_endline message;
+    1
+  | Ok hostname ->
+    if print_observation ~base_path ~keeper_name ~hostname then 0 else 1
 ;;
 
 let run_cli_logout ~base_path ~keeper_name ~hostname =
-  match login_env ~base_path ~keeper_name with
+  match validate_hostname hostname with
+  | Error message ->
+    prerr_endline message;
+    1
+  | Ok hostname ->
+    (match login_env ~base_path ~keeper_name with
   | Error message ->
     prerr_endline message;
     1
@@ -495,5 +567,5 @@ let run_cli_logout ~base_path ~keeper_name ~hostname =
         false
     in
     let observed = print_observation ~base_path ~keeper_name ~hostname in
-    if logged_out && observed then 0 else 1
+    if logged_out && observed then 0 else 1)
 ;;

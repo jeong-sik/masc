@@ -57,6 +57,13 @@ val docker_args_for_tool :
   container_masc_dir:string ->
   (string list * tool_identity_state, string) result
 
+(** Validate a GitHub hostname before invoking any token-bearing command.
+    [github.com] is always allowed; approved GitHub Enterprise hosts may be
+    supplied explicitly or through [MASC_GITHUB_ENTERPRISE_HOSTS] as a
+    comma-separated exact-host allowlist. *)
+val validate_hostname :
+  ?enterprise_hosts:string list -> string -> (string, string) result
+
 val login_argv : hostname:string -> string list
 val logout_argv : hostname:string -> string list
 val login_env : base_path:string -> keeper_name:string -> (string array, string) result

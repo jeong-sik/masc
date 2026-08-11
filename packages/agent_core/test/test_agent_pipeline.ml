@@ -28,20 +28,6 @@ let escape_json_string s =
   Buffer.contents buf
 ;;
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop idx =
-    if needle_len = 0
-    then true
-    else if idx + needle_len > haystack_len
-    then false
-    else if String.sub haystack idx needle_len = needle
-    then true
-    else loop (idx + 1)
-  in
-  loop 0
-;;
 
 let openai_tool_use_response tool_name input_json =
   Printf.sprintf

@@ -90,15 +90,6 @@ let restore_env name = function
   | Some value -> Unix.putenv name value
   | None -> Unix.putenv name ""
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop index =
-    index + needle_len <= haystack_len
-    && (String.sub haystack index needle_len = needle || loop (index + 1))
-  in
-  needle_len = 0 || loop 0
-
 let json_string_field key = function
   | `Assoc fields -> (
       match List.assoc_opt key fields with
@@ -619,7 +610,7 @@ let test_missing_sandbox_profile_fails_loud_for_profile_source () =
       Alcotest.(check bool)
         "error names missing sandbox_profile"
         true
-        (contains_substring ~needle:"sandbox_profile is required" err)
+        (String_util.string_contains_substring ~needle:"sandbox_profile is required" err)
 
 let test_keeper_up_rejects_profile_source_without_sandbox_profile () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -651,7 +642,7 @@ let test_keeper_up_rejects_profile_source_without_sandbox_profile () =
   Alcotest.(check bool)
     "keeper_up error names missing sandbox_profile"
     true
-    (contains_substring
+    (String_util.string_contains_substring
        ~needle:"sandbox_profile is required"
        (Profile.tool_result_body result))
 
@@ -858,7 +849,7 @@ let test_status_rejects_tail_order_outside_schema () =
   Alcotest.(check bool)
     "error names exact allowed values"
     true
-    (contains_substring
+    (String_util.string_contains_substring
        ~needle:"allowed: oldest_first, newest_first"
        (Profile.tool_result_body result))
 
@@ -881,7 +872,7 @@ let test_status_rejects_malformed_options () =
     Alcotest.(check bool)
       (label ^ " explains the rejected field")
       true
-      (contains_substring ~needle (Profile.tool_result_body result))
+      (String_util.string_contains_substring ~needle (Profile.tool_result_body result))
   in
   check_rejected
     "tail bytes below schema minimum"

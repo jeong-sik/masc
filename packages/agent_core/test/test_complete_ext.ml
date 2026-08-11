@@ -3,18 +3,6 @@
 open Alcotest
 open Llm_provider
 
-let contains_substring ~sub text =
-  let sub_len = String.length sub in
-  let text_len = String.length text in
-  let rec loop index =
-    if index + sub_len > text_len
-    then false
-    else if String.sub text index sub_len = sub
-    then true
-    else loop (index + 1)
-  in
-  sub_len = 0 || loop 0
-;;
 
 let make_config
       ?(kind = Provider_config.OpenAI_compat)
@@ -609,8 +597,8 @@ let test_custom_stream_wire_observer_and_telemetry_exceptions_are_nonfatal () =
          (List.exists
             (fun (ctx, message) ->
                String.equal ctx "wire_observer"
-               && contains_substring ~sub:"telemetry unavailable" message
-               && contains_substring ~sub:"observer unavailable" message)
+               && Agent_core_strings.contains_substring ~needle:"telemetry unavailable" ~haystack:message
+               && Agent_core_strings.contains_substring ~needle:"observer unavailable" ~haystack:message)
             !diagnostics))
 ;;
 

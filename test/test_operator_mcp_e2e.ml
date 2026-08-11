@@ -178,16 +178,6 @@ let run_curl_get ~port ~path () =
   let (status, _headers) = parse_headers header_raw in
   { status; body; curl_exit; stderr }
 
-let contains_substr needle haystack =
-  let n = String.length needle in
-  let h = String.length haystack in
-  let rec loop i =
-    if i + n > h then false
-    else if String.sub haystack i n = needle then true
-    else loop (i + 1)
-  in
-  n = 0 || loop 0
-
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -210,7 +200,8 @@ let wait_for_health ~port ~timeout_s =
     else
       let res = run_curl_get ~port ~path:"/health" () in
       match res.status with
-      | Some 200 when contains_substr "\"state_ready\":true" res.body -> true
+      | Some 200
+        when String_util.contains_substring res.body "\"state_ready\":true" -> true
       | _ ->
           Unix.sleepf 0.1;
           loop ()
@@ -453,7 +444,9 @@ let test_mcp_requires_auth_when_bound_non_loopback () =
     match (result.status, retries_left) with
     | Some 503, retries
       when retries > 0
-           && contains_substr "Server is starting up, not ready yet" result.body ->
+           && String_util.contains_substring
+                result.body
+                "Server is starting up, not ready yet" ->
         Unix.sleepf 0.5;
         call_until_ready (retries - 1)
     | _ -> result
@@ -461,8 +454,9 @@ let test_mcp_requires_auth_when_bound_non_loopback () =
   let result = call_until_ready 40 in
   Alcotest.(check (option int)) "returns unauthorized" (Some 401) result.status;
   check bool "strict auth message" true
-    (contains_substr "requires workspace auth enabled with require_token=true"
-       result.body)
+    (String_util.contains_substring
+       result.body
+       "requires workspace auth enabled with require_token=true")
 
 let test_agent_json_route_served_on_canonical_path () =
   with_server ~enable_auth:false

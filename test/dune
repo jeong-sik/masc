@@ -1245,7 +1245,7 @@
 (test
  (name test_voice_config)
  (modules test_voice_config)
- (libraries alcotest yojson masc.voice_config unix))
+ (libraries alcotest yojson masc.voice_config masc.string_util unix))
 
 ; MCP HTTP session persistence: save/forget/load round-trip through the
 ; fd-safe write path (close_out_noerr finally guard).
@@ -2277,7 +2277,7 @@
 (test
  (name test_eval_tool_selector_boundary)
  (modules test_eval_tool_selector_boundary)
- (libraries alcotest)
+ (libraries alcotest masc.string_util)
  (deps
   (source_tree ../lib/keeper)
   (source_tree ../lib/runtime)))

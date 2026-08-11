@@ -143,7 +143,6 @@ type prepared_turn =
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
-  ; seed_dropped_atoms : int
   }
 
 let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
@@ -168,7 +167,7 @@ let measure_message_bytes (message : Agent_core.Types.message) =
 
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     ~initial_messages ~model_input_projection ~hooks ~configured_reasoning_effort
-    ~max_prompt_bytes =
+    =
   let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
   let before_turn =
     invoke_turn_hook
@@ -250,56 +249,19 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
   let system_prompt =
     Option.value turn_params.system_prompt_override ~default:system_prompt
   in
-  (* An official-client turn 1 seeds the vendor conversation with the whole
-     projected history; from turn 2 the client owns the transcript and the
-     adapters send only the goal. So an unbounded seed does not fail once — it
-     fails on turn 1, never reaches turn 2, and re-renders a larger history on
-     the next cycle. Recovery closes the loop rather than breaking it: a fresh
-     session resets the counter, which makes the next turn a start turn again.
-     Measured on the live fleet with three keepers pinned at turn_count = 1,
-     one of them auto-superseding to a fresh session 293 times in a single log.
+  (* No preemptive cut of the seed. The provider owns its own window and says
+     so in a typed terminal — glm code 1261, Codex "Context overflow" — which
+     [Keeper_turn_driver_try_provider.context_overflow_shrink_sequence] already
+     consumes to shrink and retry, starting from
+     [unbounded_model_input_capacity_bytes]. Cutting here as well meant two
+     authorities over the same window, and the one that ran first measured in
+     wire bytes rather than tokens and discarded the oldest atoms outright.
 
-     The newest messages are kept, since the goal answers the most recent turn
-     and trimming the tail would drop exactly the context it refers to.
-     [dropped_atoms] is returned to the caller rather than logged here so the
-     loss lands on the keeper's own line; a silent window would read as "the
-     model saw everything".
-
-     Applied here rather than in each adapter because all three consume
-     [messages] for the same purpose and would otherwise carry three copies of
-     one rule. Resume paths ignore [messages] entirely, so windowing is a no-op
-     for them. *)
-  let* messages, seed_dropped_atoms =
-    match max_prompt_bytes with
-    | None -> Ok (messages, 0)
-    | Some capacity_bytes ->
-      let reserved_bytes = String.length system_prompt in
-      (match
-         Runtime_model_input_tail_window.project_with_drop
-           ~measure_message_bytes
-           ~capacity_bytes
-           ~reserved_bytes
-           messages
-       with
-       | Ok projection ->
-         let dropped = projection.Runtime_model_input_tail_window.dropped_atoms in
-         if dropped > 0
-         then
-           Log.Keeper.warn
-             "%s: %s start-turn seed dropped %d oldest message atom(s) to fit               the declared %d-byte prompt budget"
-             keeper_name
-             runtime_label
-             dropped
-             capacity_bytes;
-         Ok (projection.Runtime_model_input_tail_window.messages, dropped)
-       | Error error ->
-         Error
-           (config_error
-              ~field:"max_prompt_bytes"
-              (runtime_label
-               ^ " start-turn seed does not fit the declared prompt budget: "
-               ^ Runtime_model_input_tail_window.budget_error_to_string error)))
-  in
+     The discard was the part that could not be justified: it removed
+     conversation the keeper had already committed to, kept no copy, and its
+     [seed_dropped_atoms] receipt had no reader anywhere in the tree — the loss
+     was reported to nobody. Reactive shrink loses nothing the provider has not
+     already refused to accept. *)
   let unsupported_parameter field value =
     match value with
     | None -> Ok ()
@@ -337,7 +299,6 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     ; system_prompt
     ; tools
     ; reasoning_effort
-    ; seed_dropped_atoms
     }
 ;;
 

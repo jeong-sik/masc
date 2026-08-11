@@ -278,7 +278,7 @@ let msg role text : Agent_core.Types.message =
   ; tool_call_id = None; metadata = [] }
 ;;
 
-let prepare ?max_prompt_bytes messages =
+let prepare messages =
   Host.prepare_turn
     ~runtime_label:"Fixture"
     ~keeper_name:"seed-fixture"
@@ -289,7 +289,6 @@ let prepare ?max_prompt_bytes messages =
     ~model_input_projection:None
     ~hooks:None
     ~configured_reasoning_effort:None
-    ~max_prompt_bytes
 ;;
 
 let test_extra_system_context_keeps_typed_provenance () =
@@ -324,7 +323,6 @@ let test_extra_system_context_keeps_typed_provenance () =
               Ok messages))
       ~hooks:(Some hooks)
       ~configured_reasoning_effort:None
-      ~max_prompt_bytes:None
   in
   (match result with
    | Error error -> fail (Agent_core.Error.to_string error)
@@ -385,38 +383,33 @@ let seed_history () =
       (Printf.sprintf "history message %03d" i))
 ;;
 
-let test_seed_is_bounded_and_keeps_the_newest () =
+(* The seed reaches the provider whole. This is the assertion that fails if a
+   preemptive cut is reintroduced here: the provider owns its context window
+   and refuses an oversized conversation in a typed terminal that the shrink
+   sequence retries, so a second ceiling applied before that one could only
+   discard history the provider had not yet objected to. Byte count is checked
+   alongside the message count because a cut that replaced content while
+   keeping the list length would pass a count-only check. *)
+let test_seed_reaches_the_provider_whole () =
   let messages = seed_history () in
   let total = List.fold_left (fun acc m -> acc + Host.measure_message_bytes m) 0 messages in
-  (* Controls first. Without them a bound that dropped everything, or one that
-     refused every turn, would still look correct below. *)
-  (match prepare messages with
-   | Error _ -> fail "an undeclared ceiling must not fail the turn"
-   | Ok prepared ->
-     check int "keeps every message" 240 (List.length prepared.messages);
-     check int "reports no drop" 0 prepared.seed_dropped_atoms);
-  (match prepare ~max_prompt_bytes:(total * 2) messages with
-   | Error _ -> fail "a generous ceiling must not fail the turn"
-   | Ok prepared ->
-     check int "keeps every message" 240 (List.length prepared.messages);
-     check int "reports no drop" 0 prepared.seed_dropped_atoms);
-  (* Half the history's worth of budget has to cut, and what survives must be
-     the newest: the goal answers the most recent turn, so trimming the tail
-     would drop exactly the context it refers to. *)
-  match prepare ~max_prompt_bytes:(total / 2) messages with
+  match prepare messages with
   | Error e ->
-    fail ("a partial fit must window rather than fail: " ^ Agent_core.Error.to_string e)
+    fail ("a large seed must not fail the turn: " ^ Agent_core.Error.to_string e)
   | Ok prepared ->
-    check bool "drops something" true (prepared.seed_dropped_atoms > 0);
-    check bool "keeps fewer than all" true (List.length prepared.messages < 240);
+    check int "keeps every message" 240 (List.length prepared.messages);
     let kept =
       List.fold_left (fun acc m -> acc + Host.measure_message_bytes m) 0 prepared.messages
     in
-    check bool "fits the declared budget" true (kept <= total / 2);
+    check int "keeps every byte" total kept;
+    (match prepared.messages with
+     | first :: _ ->
+       check string "keeps the oldest" "history message 000" (text_of first)
+     | [] -> fail "the seed must not be emptied");
     (match List.rev prepared.messages with
      | last :: _ ->
        check string "keeps the newest" "history message 239" (text_of last)
-     | [] -> fail "the window must not empty the history")
+     | [] -> fail "the seed must not be emptied")
 ;;
 
 let () =
@@ -472,9 +465,9 @@ let () =
             `Quick
             test_extra_system_context_keeps_typed_provenance
         ; test_case
-            "bounds the seed and keeps the newest messages"
+            "seed reaches the provider whole"
             `Quick
-            test_seed_is_bounded_and_keeps_the_newest
+            test_seed_reaches_the_provider_whole
         ] )
     ]
 ;;

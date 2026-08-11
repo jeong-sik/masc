@@ -18,6 +18,18 @@
     never flattened to zero, which would read as "no schedules" rather than
     "the ledger could not be read". *)
 
+(* TEL-OK: every function here is a pure [record -> Yojson.Safe.t] renderer over
+   state the caller already read. The module takes no action to observe: it
+   dispatches nothing, mutates nothing, and its one read (the schedule ledger)
+   reports its own failure in the payload as [schedule_store_read_error] rather
+   than swallowing it. Telemetry for the actions these rows describe lives with
+   the actors that perform them — Schedule_runner for dispatch, and
+   Keeper_event_queue for wake delivery.
+
+   The telemetry ratchet flags these as new handlers because this module is a
+   new file; the code moved here verbatim from
+   server_dashboard_http_runtime_info.ml, where it was equally untelemetered. *)
+
 let take = Server_dashboard_http_runtime_info_json.take
 
 let schedule_projection_request_limit = 20

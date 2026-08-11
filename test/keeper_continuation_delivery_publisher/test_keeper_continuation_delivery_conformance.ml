@@ -70,7 +70,7 @@ let expect_publish = function
 let dashboard_channel family =
   Keeper_continuation_channel.dashboard
     ~thread_id:("conformance-" ^ family_label family)
-  |> Result.fold ~ok:Fun.id ~error:fail
+  |> Result.fold ~ok:Fun.id ~error:(fun error -> fail error)
 ;;
 
 let slack_channel family =
@@ -79,7 +79,7 @@ let slack_channel family =
     ~channel_id:("channel-" ^ family_label family)
     ~thread_ts:(Some ("thread-" ^ family_label family))
     ~user_id:"user-1"
-  |> Result.fold ~ok:Fun.id ~error:fail
+  |> Result.fold ~ok:Fun.id ~error:(fun error -> fail error)
 ;;
 
 let payload family channel : Keeper_event_queue.stimulus_payload =
@@ -130,7 +130,7 @@ let intent_for family channel =
       result
       (Option.to_result
          ~none:(family_label family ^ " lost its routable origin"))
-    |> Result.fold ~ok:Fun.id ~error:fail
+    |> Result.fold ~ok:Fun.id ~error:(fun error -> fail error)
   in
   Intent.create
     ~keeper_name:"keeper-conformance"

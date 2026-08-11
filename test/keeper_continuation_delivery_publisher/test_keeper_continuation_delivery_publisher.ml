@@ -51,7 +51,7 @@ let expect_publish = function
 let dashboard_intent () =
   let channel =
     Keeper_continuation_channel.dashboard ~thread_id:"dashboard-thread-1"
-    |> Result.fold ~ok:Fun.id ~error:fail
+    |> Result.fold ~ok:Fun.id ~error:(fun error -> fail error)
   in
   let origin = Intent.fusion_origin ~run_id:"fusion-dashboard-1" channel |> expect_intent in
   Intent.create
@@ -72,7 +72,7 @@ let discord_intent () =
       ~reply_to_message_id:"origin-message-1"
       ~user_id:"user-1"
       ()
-    |> Result.fold ~ok:Fun.id ~error:fail
+    |> Result.fold ~ok:Fun.id ~error:(fun error -> fail error)
   in
   let origin =
     Intent.connector_attention_origin ~event_id:"event-discord-1" channel

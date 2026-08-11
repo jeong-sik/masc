@@ -1,7 +1,8 @@
 open Alcotest
 
 module EO = Dashboard_execute_output
-module Router = Masc.Http_server_eio.Router
+module Http = Masc.Http_server_eio
+module Router = Http.Router
 
 let status_ok = `Assoc [ "kind", `String "exit"; "code", `Int 0 ]
 
@@ -284,6 +285,131 @@ let test_sse_frame () =
   check bool "data line" true (String.contains frame '{');
   check bool "terminator" true (String.ends_with ~suffix:"\n\n" frame)
 
+let rec dashboard_auth_rm_rf path =
+  if Sys.file_exists path
+  then if Sys.is_directory path
+       then (
+         Sys.readdir path
+         |> Array.iter (fun name -> dashboard_auth_rm_rf (Filename.concat path name));
+         Unix.rmdir path)
+       else Sys.remove path
+;;
+
+let dashboard_auth_status response =
+  match String.split_on_char ' ' response with
+  | _ :: status :: _ -> int_of_string status
+  | _ -> fail ("could not parse HTTP status: " ^ response)
+;;
+
+let dashboard_auth_request ~meth ~path =
+  Httpun.Request.create
+    ~headers:
+      (Httpun.Headers.of_list
+         [ "host", "localhost"
+         ; "content-length", "0"
+         ])
+    meth
+    path
+;;
+
+let dashboard_auth_dispatch router request =
+  let response_buf = Buffer.create 256 in
+  let conn =
+    Httpun.Server_connection.create (fun reqd ->
+      Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+  in
+  let input =
+    Printf.sprintf
+      "%s %s HTTP/1.1\r\n%s\r\n"
+      (Httpun.Method.to_string request.Httpun.Request.meth)
+      request.Httpun.Request.target
+      (Httpun.Headers.to_string request.Httpun.Request.headers)
+  in
+  let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length input) input in
+  let rec feed off =
+    let remaining = Bigstringaf.length bytes - off in
+    if remaining > 0
+    then (
+      let consumed =
+        Httpun.Server_connection.read conn bytes ~off ~len:remaining
+      in
+      if consumed <= 0 then fail "dashboard auth request made no progress";
+      feed (off + consumed))
+  in
+  feed 0;
+  let rec flush () =
+    match Httpun.Server_connection.next_write_operation conn with
+    | `Write iovecs ->
+      List.iter
+        (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+          Buffer.add_string
+            response_buf
+            (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+        iovecs;
+      let written =
+        List.fold_left
+          (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+          0
+          iovecs
+      in
+      Httpun.Server_connection.report_write_result conn (`Ok written);
+      flush ()
+    | `Yield | `Close _ -> ()
+  in
+  flush ();
+  Buffer.contents response_buf
+;;
+
+let with_dashboard_auth_router f =
+  let base_path = Filename.temp_file "masc-dashboard-auth-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  let saved_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state saved_state;
+      dashboard_auth_rm_rf base_path)
+    (fun () ->
+      Auth.save_auth_config
+        base_path
+        { Masc_domain.default_auth_config with enabled = true; require_token = true };
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+      Server_auth.For_testing.restore_server_state (Some state);
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          let router =
+            Server_routes_http_routes_dashboard.add_routes
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              (Router.create ())
+          in
+          f router)))
+;;
+
+let test_dashboard_mutation_rejects_missing_bearer () =
+  with_dashboard_auth_router (fun router ->
+    let response =
+      dashboard_auth_dispatch
+        router
+        (dashboard_auth_request
+           ~meth:`POST
+           ~path:"/api/v1/keepers/test-keeper/config")
+    in
+    check int "keeper mutation requires bearer" 401 (dashboard_auth_status response))
+;;
+
+let test_dashboard_public_read_allows_missing_bearer () =
+  with_dashboard_auth_router (fun router ->
+    let response =
+      dashboard_auth_dispatch
+        router
+        (dashboard_auth_request
+           ~meth:`GET
+           ~path:"/api/v1/dashboard/runtime-defaults")
+    in
+    check int "explicit public read stays public" 200 (dashboard_auth_status response))
+;;
+
 let test_dashboard_routes_match_keeper_path () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -331,6 +457,14 @@ let () =
             `Quick
             (with_fresh test_stream_completed_does_not_duplicate_events)
         ; test_case "sse frame" `Quick test_sse_frame
+        ; test_case
+            "dashboard mutation rejects missing bearer"
+            `Quick
+            test_dashboard_mutation_rejects_missing_bearer
+        ; test_case
+            "dashboard public read allows missing bearer"
+            `Quick
+            test_dashboard_public_read_allows_missing_bearer
         ; test_case "routes match keeper path" `Quick test_dashboard_routes_match_keeper_path
         ] )
     ]

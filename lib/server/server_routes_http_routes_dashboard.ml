@@ -17,26 +17,6 @@ module Keeper_event_queue_operator =
 module Official_client_session = Server_dashboard_official_client_session
 module Official_client_probe = Server_dashboard_official_client_probe
 
-(* Dashboard is running in feature-first mode: every route declared in this
-   module is available before a browser has obtained or refreshed a bearer.
-   Keep a stable actor for handlers that record who initiated a durable action;
-   it is an attribution default, not an authorization gate. *)
-let dashboard_feature_actor = "dashboard"
-
-let with_permission_auth ~permission:_ handler = with_public_read handler
-
-let with_tool_auth ~tool_name:_ handler = with_public_read handler
-
-let with_token_permission_auth ~permission:_ handler request reqd =
-  with_public_read
-    (fun state req reqd -> handler state dashboard_feature_actor req reqd)
-    request reqd
-
-let with_tool_actor_auth ~tool_name:_ handler request reqd =
-  with_public_read
-    (fun state req reqd -> handler state dashboard_feature_actor req reqd)
-    request reqd
-
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
@@ -849,15 +829,12 @@ let add_routes ~sw ~clock router =
                  reqd
            end) request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-probe" (fun request reqd ->
-       (* The Runtime panel reads this diagnostic before any browser identity
-          bootstrap.  It contains a redacted status projection only, so keep
-          it on the same public-read lane as runtime-defaults. *)
        let force = Server_utils.bool_query_param request "force" ~default:false in
        let handle _state req reqd =
          let json = dashboard_runtime_probe_http_json ~force () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        in
-       with_public_read handle request reqd)
+       with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-defaults" (fun request reqd ->
        (* Structured, already-resolved runtime defaults / model routing for the
           Settings surface. Read-only projection of the runtime.toml SSOT
@@ -1775,8 +1752,8 @@ let add_routes ~sw ~clock router =
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
        match Keeper_chat_operations.get_route (Http.Request.path request) with
        | Some route ->
-         with_public_read
-           (fun state req reqd ->
+         with_tool_actor_auth ~tool_name:"masc_keeper_delegate_status"
+           (fun state _caller req reqd ->
              Keeper_chat_operations.handle_get state req reqd route)
            request
            reqd
@@ -1786,8 +1763,9 @@ let add_routes ~sw ~clock router =
            (Http.Request.path request)
        with
        | Some keeper_name ->
-         with_public_read
-           (fun state _req reqd ->
+         with_token_permission_auth
+           ~permission:Keeper_event_queue_operator.operator_permission
+           (fun state _agent_name _req reqd ->
              Keeper_event_queue_operator.handle_get
                state
                request
@@ -1795,16 +1773,18 @@ let add_routes ~sw ~clock router =
                ~keeper_name)
            request reqd
        | None ->
-         (match Keeper_api.keeper_get_permission (Http.Request.path request) with
-          | Some permission ->
-           with_token_permission_auth ~permission
+         if
+           Keeper_api.is_keeper_checkpoints_get_path (Http.Request.path request)
+           || Keeper_api.is_keeper_paused_work_get_path (Http.Request.path request)
+         then
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state _agent_name req reqd ->
                Keeper_api.handle_keeper_get_subroutes state req request reqd
              ) request reqd
-          | None ->
+         else
            with_public_read (fun state req reqd ->
              Keeper_api.handle_keeper_get_subroutes state req request reqd
-           ) request reqd))
+           ) request reqd)
 
   |> Http.Router.post "/api/v1/keepers/turn/interrupt" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->

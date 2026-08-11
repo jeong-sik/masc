@@ -130,7 +130,8 @@ let agent_failed_error_summary = function
     | Agent_core.Error.Serialization _
     | Agent_core.Error.Io _
     | Agent_core.Error.Orchestration _
-    | Agent_core.Error.Internal _ ) as error ->
+    | Agent_core.Error.Internal _
+    | Agent_core.Error.Internal_carried _ ) as error ->
     Agent_core.Error.to_string error
 ;;
 
@@ -459,7 +460,7 @@ let core_error_detail_fields (error : Agent_core.Error.t) =
   | Agent_core.Error.Serialization error -> core_serialization_error_fields error
   | Agent_core.Error.Io error -> core_io_error_fields error
   | Agent_core.Error.Orchestration error -> core_orchestration_error_fields error
-  | Agent_core.Error.Internal message ->
+  | Agent_core.Error.Internal message | Agent_core.Error.Internal_carried { message = message; _ } ->
     [ "variant", `String "internal"; "message", `String message ]
 ;;
 

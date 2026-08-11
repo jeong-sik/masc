@@ -121,7 +121,7 @@ let core_termination_semantics = function
   | Agent_core.Error.Serialization _ -> Core_error_failure
   | Agent_core.Error.Io _ -> Core_error_failure
   | Agent_core.Error.Orchestration _ -> Core_error_failure
-  | Agent_core.Error.Internal _ -> Core_error_failure
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> Core_error_failure
 ;;
 
 let core_termination_semantics_to_string = function
@@ -261,8 +261,11 @@ let terminal_reason_code_of_core_error = function
   | Agent_core.Error.Serialization _ -> "serialization_error"
   | Agent_core.Error.Io _ -> "io_error"
   | Agent_core.Error.Orchestration _ -> "orchestration_error"
-  | Agent_core.Error.Internal msg -> (
-    match Keeper_internal_error.classify_masc_internal_error_of_string msg with
+  | (Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _) as err -> (
+    (* Typed carrier first; the string parse survives inside
+       classify_masc_internal_error for pre-carrier producers
+       (RFC-0371 B12). *)
+    match Keeper_internal_error.classify_masc_internal_error err with
     | Some err -> Keeper_internal_error.kind_of_masc_internal_error err
     | None -> "internal_error")
 ;;

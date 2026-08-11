@@ -120,6 +120,14 @@ type orchestration_error =
 
 (** {1 Top-level error} *)
 
+(** Open extension point for host-typed internal payloads (RFC-0371 B12).
+    agent-core never constructs or inspects extensions: a host extends
+    this type with its own constructor, carries its typed error through
+    {!Internal_carried}, and downcasts by matching its constructor back
+    out — instead of rendering the error into the {!Internal} message
+    string and re-parsing it in the same process. *)
+type carrier = ..
+
 type t =
   | Api of api_error
   | Provider of provider_error
@@ -130,6 +138,10 @@ type t =
   | Io of io_error
   | Orchestration of orchestration_error
   | Internal of string
+  | Internal_carried of
+      { message : string
+      ; carrier : carrier
+      }
 
 (** Non-identifying top-level category derived from a [t].
     This projection is for observation only; it does not define retry,

@@ -58,7 +58,7 @@ let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class optio
     Some Gate_replay_repair_required
   | None ->
     (match err with
-     | Agent_core.Error.Internal _ -> None
+     | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None
      | Agent_core.Error.Agent
          ( HookExecutionFailed _
          | TerminalToolEffectFailed _

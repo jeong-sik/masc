@@ -502,7 +502,7 @@ let capacity_transition_of_error
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Internal _ ->
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
     Not_capacity
 ;;
 

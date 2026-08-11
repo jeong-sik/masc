@@ -84,7 +84,7 @@ let is_transient_network_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Internal _ -> false
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 (** Detect typed server-side request body parse errors.  The LLM API never
     processed the request, so committed tool results are not at risk of
@@ -126,7 +126,7 @@ let is_provider_rejected_parse_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Serialization _ -> false
   | Agent_core.Error.Io _ -> false
   | Agent_core.Error.Orchestration _ -> false
-  | Agent_core.Error.Internal _ -> false
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 let is_provider_wire_error (err : Agent_core.Error.t) : bool =
   match err with
@@ -139,7 +139,7 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Internal _ -> false
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 (** 0-byte empty completion: the provider ended the turn with a modeled,
     non-overflow stop_reason but returned no thinking, text, or tool calls
@@ -191,7 +191,7 @@ let is_empty_completion_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Serialization _ -> false
   | Agent_core.Error.Io _ -> false
   | Agent_core.Error.Orchestration _ -> false
-  | Agent_core.Error.Internal _ -> false
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 let is_model_rejected_parse_error (err : Agent_core.Error.t) : bool =
   match err with
@@ -207,7 +207,7 @@ let is_model_rejected_parse_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Serialization _ -> false
   | Agent_core.Error.Io _ -> false
   | Agent_core.Error.Orchestration _ -> false
-  | Agent_core.Error.Internal _ -> false
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 let is_server_rejected_parse_error (err : Agent_core.Error.t) : bool =
   is_provider_rejected_parse_error err || is_model_rejected_parse_error err
@@ -522,7 +522,7 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
          | Agent_core.Error.Serialization _
          | Agent_core.Error.Io _
          | Agent_core.Error.Orchestration _
-         | Agent_core.Error.Internal _ -> None)
+         | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None)
 
 let normalized_runtime_id ~catalog_names name =
   let trimmed = String.trim name in
@@ -801,7 +801,7 @@ let is_input_required_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Internal _ -> false
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> false
 
 (** [true] when an error represents terminal runtime exhaustion. Accept
     rejection is an accept-contract result; no-progress accept rejection is

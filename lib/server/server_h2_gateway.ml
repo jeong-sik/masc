@@ -1053,7 +1053,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                       ~status:(response.status :> H2.Status.t) ~extra_headers:cors
                   | None ->
                     h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
-                      ~extra_headers:cors))
+                      ~extra_headers:cors)))
 
       | `GET, "/api/v1/dashboard/logs" ->
           with_h2_public_read h2_reqd (fun state ->
@@ -1109,7 +1109,9 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                     |> List.map String.trim
                     |> List.filter (fun value -> value <> "")
                   in
-                  (match categories with [] -> None | _ -> Some categories)
+                  (match categories with
+                   | [] -> None
+                   | _ :: _ -> Some categories)
               in
               let entries =
                 Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq

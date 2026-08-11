@@ -112,7 +112,7 @@ describe('AnnotationDeleteControl', () => {
   })
 
   it('disarms without closing when the server rejects the deletion', async () => {
-    onDelete.mockResolvedValue('forbidden')
+    onDelete.mockResolvedValue('error')
     const el = mount()
 
     button(el).click()

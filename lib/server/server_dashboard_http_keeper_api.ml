@@ -1514,7 +1514,9 @@ let keeper_tool_stats_json ~config ~name ~window_hours =
           (fun acc (entry : Trajectory.tool_call_entry) ->
             match acc with
             | Some ts when ts >= entry.ts -> acc
-            | _ -> Some entry.ts)
+            | _ ->
+              (* DET-OK: this pure fold retains the greatest observed timestamp. *)
+              Some entry.ts)
           None entries
       in
       let latest_age_s =
@@ -1707,7 +1709,9 @@ let keeper_turn_records_json ~config ~name ~limit =
       (fun acc (record : Turn_record.t) ->
         match acc with
         | Some existing when existing >= record.ts -> acc
-        | _ -> Some record.ts)
+        | _ ->
+          (* DET-OK: this pure fold retains the greatest observed timestamp. *)
+          Some record.ts)
       None records
   in
   let latest_age_s =

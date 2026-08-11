@@ -78,7 +78,7 @@ describe('getKeeperColor', () => {
   })
 
   it('loads the initial cursor snapshot over the typed API', async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
       ok: true,
       data: {
         runtime_id: 'masc-runtime',
@@ -113,7 +113,7 @@ describe('getKeeperColor', () => {
   })
 
   it('loads the default cursor lane before a repository is selected', async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
       ok: true,
       data: {
         runtime_id: 'masc-runtime',
@@ -128,8 +128,8 @@ describe('getKeeperColor', () => {
 
     await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/v1/ide/cursors')
-    const [, init] = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit]
-    expect(init.headers).toEqual({})
+    const init = fetchMock.mock.calls[0]?.[1]
+    expect(init?.headers).toEqual({})
 
     cleanup()
   })

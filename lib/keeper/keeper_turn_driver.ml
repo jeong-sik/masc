@@ -233,7 +233,10 @@ let attempt_runtime_candidates
           | Agent_core.Error.Provider
               (Llm_provider.Error.HardQuota { retry_after = Some retry_after_s; _ })
             ->
-            (match Runtime.provider_id_of_runtime_id attempt_runtime_id with
+            (* Quota is credential-account-owned, so the window is keyed by
+               the row's quota scope: siblings sharing the credential are
+               demoted together (PR #28202 review P2). *)
+            (match Runtime.quota_scope_of_runtime_id attempt_runtime_id with
              | Some provider_id ->
                Runtime_quota_window.note_exhausted
                  ~provider_id
@@ -518,9 +521,23 @@ let run_named
      operators can route through explicit failover groups.  Lane candidate
      order passes through the sticky last-good preference so a known-healthy
      failover candidate is tried before re-hitting a dead head candidate. *)
+  (* Quota-window demotion is ordering only — a demoted candidate is still
+     attempted when the lane has nothing else (RFC-0370 §3.3). It applies to
+     both candidate sources: the declared lane walk and a frozen deferred
+     suffix, whose next candidate may sit on an account whose window was
+     recorded after the freeze (PR #28202 review P2). *)
+  let demote_quota_exhausted candidates =
+    Runtime_quota_window.demote_order
+      (* NDT-OK: scheduling intentionally compares the stored expiry with
+         wall clock; [demote_order] stays pure via injected [now]. *)
+      ~now:(Unix.gettimeofday ())
+      ~quota_scope_of:Runtime.quota_scope_of_runtime_id
+      candidates
+  in
   let lane_id_opt, lane_candidate_ids =
     match deferred_runtime_lane with
-    | Some hint -> Some hint.assignment_id, deferred_runtime_ids hint
+    | Some hint ->
+      Some hint.assignment_id, demote_quota_exhausted (deferred_runtime_ids hint)
     | None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> None, []
@@ -528,18 +545,12 @@ let run_named
        | `Lane lane ->
          let lane_id = Runtime_lane.id lane in
          ( Some lane_id
-         , (* Quota-window demotion runs after sticky preference: a provider
-              that stated "exhausted until T" outranks a remembered last-good
-              candidate on that same provider. Ordering only — a demoted
-              candidate is still attempted when the lane has nothing else.
-              RFC-0370 §3.3. *)
+         , (* Demotion runs after sticky preference: a provider that stated
+              "exhausted until T" outranks a remembered last-good candidate
+              on that same account. *)
            Runtime_lane_preference.prefer_order ~lane_id
              (Runtime_lane.ordered_candidates lane)
-           |> Runtime_quota_window.demote_order
-                (* NDT-OK: scheduling intentionally compares the stored expiry
-                   with wall clock; [demote_order] stays pure via injected [now]. *)
-                ~now:(Unix.gettimeofday ())
-                ~provider_id_of:Runtime.provider_id_of_runtime_id ))
+           |> demote_quota_exhausted ))
   in
   if lane_candidate_ids = []
   then

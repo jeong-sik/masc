@@ -1342,6 +1342,16 @@ let provider_id_of_runtime_id (id : string) : string option =
   | None -> None
 ;;
 
+let quota_scope_of_runtime_id (id : string) : string option =
+  match get_runtime_by_id id with
+  | Some rt ->
+    Some
+      (Runtime_quota_window.scope_of_credential
+         ~provider_id:rt.provider.id
+         rt.provider.credentials)
+  | None -> None
+;;
+
 let max_prompt_bytes_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
   | Some rt -> rt.model.max_prompt_bytes

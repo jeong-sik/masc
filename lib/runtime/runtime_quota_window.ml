@@ -29,11 +29,11 @@ let active_until ~provider_id ~now =
         None
       end)
 
-let demote_order ~now ~provider_id_of candidates =
+let demote_order ~now ~quota_scope_of candidates =
   let demoted =
     List.filter
       (fun candidate ->
-        match provider_id_of candidate with
+        match quota_scope_of candidate with
         | None -> false
         | Some provider_id ->
           Option.is_some (active_until ~provider_id ~now))
@@ -49,6 +49,14 @@ let demote_order ~now ~provider_id_of candidates =
         candidates
     in
     kept @ demoted
+
+let scope_of_credential ~provider_id (credential : Runtime_schema.credential option) =
+  match credential with
+  | Some (Runtime_schema.Env key) -> "env:" ^ key
+  | Some (Runtime_schema.File path) -> "file:" ^ path
+  (* The inline carrier is the secret itself, so it cannot name a shared
+     account without leaking; the row id is the narrowest honest scope. *)
+  | Some (Runtime_schema.Inline _) | None -> provider_id
 
 let reset_for_testing () =
   Stdlib.Mutex.protect mu (fun () -> Hashtbl.reset windows)

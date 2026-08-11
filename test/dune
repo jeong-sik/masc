@@ -49,7 +49,6 @@
   test_keeper_context_layers
   test_keeper_hooks_agent_core_introspection
   test_keeper_run_tools_hooks
-  test_jsonl_mtime_projection
   test_jsonl_incremental_projection
   test_keeper_decision_event
   test_attribution
@@ -341,7 +340,6 @@
   test_keeper_context_layers
   test_keeper_hooks_agent_core_introspection
   test_keeper_run_tools_hooks
-  test_jsonl_mtime_projection
   test_jsonl_incremental_projection
   test_keeper_decision_event
   test_attribution

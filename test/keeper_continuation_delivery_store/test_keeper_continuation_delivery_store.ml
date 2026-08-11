@@ -39,7 +39,7 @@ let expect_ok = function
 
 let dashboard thread_id =
   Keeper_continuation_channel.dashboard ~thread_id
-  |> Result.fold ~ok:Fun.id ~error:fail
+  |> Result.fold ~ok:Fun.id ~error:(fun error -> fail error)
 ;;
 
 let intent

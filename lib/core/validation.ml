@@ -13,23 +13,33 @@
     for security monitoring and debugging.
 *)
 
-(** MAGI: Validation rejection counters for observability *)
-let rejection_count = Atomic.make 0
-let last_rejection_time = ref 0.0
+(** MAGI: Validation rejection counters for observability.
+
+    Keep the related values in one immutable snapshot.  A count Atomic beside a
+    plain timestamp ref allowed cross-domain readers to observe a count from one
+    rejection and a timestamp from another (and the ref itself was a data race). *)
+type rejection_stats =
+  { count : int
+  ; last_rejection_time : float
+  }
+
+let rejection_stats =
+  Atomic.make { count = 0; last_rejection_time = 0.0 }
 
 (** Get validation statistics *)
 let get_rejection_stats () =
-  (Atomic.get rejection_count, !last_rejection_time)
+  let snapshot = Atomic.get rejection_stats in
+  snapshot.count, snapshot.last_rejection_time
 
 (** Reset validation statistics *)
 let reset_rejection_stats () =
-  Atomic.set rejection_count 0;
-  last_rejection_time := 0.0
+  Atomic.set rejection_stats { count = 0; last_rejection_time = 0.0 }
 
 (** Internal: Log validation rejection at WARN level *)
 let log_rejection ~validator ~input ~reason =
-  Atomic.incr rejection_count;
-  last_rejection_time := Time_compat.now ();
+  let now = Time_compat.now () in
+  Atomic_util.update rejection_stats (fun snapshot ->
+    { count = snapshot.count + 1; last_rejection_time = now });
   let safe_input =
     String_util.utf8_safe ~max_bytes:35 ~suffix:"..." input
     |> String_util.to_string

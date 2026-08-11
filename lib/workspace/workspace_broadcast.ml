@@ -54,8 +54,13 @@ let emit_message_activity config ~from_agent ~content ~mention
 let broadcast_channel config =
   Printf.sprintf "broadcast:%s:default" (project_prefix config)
 
-let on_broadcast_mention : (string option -> unit) ref =
-  ref (fun _mention -> ())
+type mention_handler = string option -> unit
+
+let on_broadcast_mention : mention_handler Atomic.t =
+  Atomic.make (fun _mention -> ())
+
+let set_on_broadcast_mention handler =
+  Atomic.set on_broadcast_mention handler
 
 let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~content =
   let started_at = Time_compat.now () in
@@ -154,7 +159,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
        Log.Misc.error "broadcast publish failed: %s" (Backend_types.show_error e));
   emit_message_activity config ~from_agent:safe_agent ~content:safe_content
     ~mention ();
-  (try !on_broadcast_mention mention
+  (try (Atomic.get on_broadcast_mention) mention
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Misc.warn "on_broadcast_mention callback failed: %s"
        (Printexc.to_string exn));
@@ -165,3 +170,8 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
   ; mention
   ; msg_type = safe_msg_type
   }
+
+module For_testing = struct
+  let replace_on_broadcast_mention handler =
+    Atomic.exchange on_broadcast_mention handler
+end

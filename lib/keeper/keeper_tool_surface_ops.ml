@@ -207,7 +207,7 @@ let startup_not_ready_error_data elapsed =
     ; ("retry_after_ms", `Int 3000)
     ]
 let with_keeper_startup_gate f =
-  if not Server_startup_state.((!state).state_ready) then begin
+  if not (Server_startup_state.snapshot ()).state_ready then begin
     let elapsed = Server_startup_state.elapsed_since_start () in
     Log.Keeper.warn "keeper_up rejected: server not ready (%.1fs since start)" elapsed;
     tool_result_error_data (startup_not_ready_error_data elapsed)

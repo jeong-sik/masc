@@ -300,15 +300,15 @@ let annotation_count router path =
 let setup_state base_path =
   save_auth_config base_path;
   let state = Masc.Mcp_server.For_testing.create_state ~base_path in
-  Server_auth.server_state := Some state;
+  Server_auth.For_testing.restore_server_state @@ Some state;
   state
 ;;
 
 let with_ide_server f =
   with_temp_workspace (fun base_path ->
-    let saved_state = !Server_auth.server_state in
+    let saved_state = Server_auth.For_testing.snapshot_server_state () in
     Fun.protect
-      ~finally:(fun () -> Server_auth.server_state := saved_state)
+      ~finally:(fun () -> Server_auth.For_testing.restore_server_state @@ saved_state)
       (fun () ->
          let state = setup_state base_path in
          let router = Server_ide_http.add_routes (Http.Router.create ()) in

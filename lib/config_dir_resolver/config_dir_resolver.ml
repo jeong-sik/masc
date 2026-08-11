@@ -304,18 +304,19 @@ let resolve_with inputs =
     keepers;
   }
 
-let cached_resolution : resolution option ref = ref None
+let cached_resolution : resolution option Atomic.t = Atomic.make None
 
-let resolve () =
-  match !cached_resolution with
+let rec resolve () =
+  match Atomic.get cached_resolution with
   | Some r -> r
   | None ->
       let r = resolve_with (inputs_from_env ()) in
-      cached_resolution := Some r;
-      r
+      if Atomic.compare_and_set cached_resolution None (Some r)
+      then r
+      else resolve ()
 
 let reset () =
-  cached_resolution := None
+  Atomic.set cached_resolution None
 
 let prompts_dir () =
   (resolve ()).prompts.path
@@ -353,7 +354,15 @@ let keeper_toml_path_opt_for_base_path ~base_path name =
 let warnings () =
   (resolve ()).warnings
 
-let last_logged_signature : string option ref = ref None
+let last_logged_signature : string option Atomic.t = Atomic.make None
+
+let rec claim_new_signature cell signature =
+  let previous = Atomic.get cell in
+  if previous = Some signature
+  then false
+  else if Atomic.compare_and_set cell previous (Some signature)
+  then true
+  else claim_new_signature cell signature
 
 let log_warnings ?(context = "ConfigDir") () =
   let resolution = resolve () in
@@ -361,16 +370,17 @@ let log_warnings ?(context = "ConfigDir") () =
     String.concat "\n"
       ((status_to_string resolution.status) :: resolution.warnings)
   in
-  if resolution.warnings <> [] && !last_logged_signature <> Some signature then begin
+  if resolution.warnings <> []
+     && claim_new_signature last_logged_signature signature
+  then begin
     List.iter (fun warning ->
         Log.warn ~ctx:context "%s" warning)
-      resolution.warnings;
-    last_logged_signature := Some signature
+      resolution.warnings
   end
 
 (* Track the last resolution signature we info-logged so startup banner is
    idempotent across repeated [log_resolution] calls (bootstrap + per-query). *)
-let last_logged_resolution_signature : string option ref = ref None
+let last_logged_resolution_signature : string option Atomic.t = Atomic.make None
 
 (** Emit a single info-level line stating the resolved config root source and
     path. When [MASC_CONFIG_DIR] is set, also note whether a [<base_path>/.masc/config]
@@ -400,10 +410,8 @@ let log_resolution ?(context = "ConfigDir") () =
   let signature =
     Printf.sprintf "source=%s path=%s%s" source item.path shadow_note
   in
-  if !last_logged_resolution_signature <> Some signature then begin
-    Log.info ~ctx:context "resolved: %s" signature;
-    last_logged_resolution_signature := Some signature
-  end
+  if claim_new_signature last_logged_resolution_signature signature
+  then Log.info ~ctx:context "resolved: %s" signature
 
 (* RFC-0121 — .masc/<sub> sub-directory accessors.
 

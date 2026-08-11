@@ -13,8 +13,11 @@ type agent_core_tool_projector =
   (Yojson.Safe.t -> Tool_result.result) ->
   Agent_core.Tool.t
 
-let agent_core_tool_of_masc_hook : agent_core_tool_projector option ref = ref None
-let set_agent_core_tool_of_masc_hook f = agent_core_tool_of_masc_hook := Some f
+let agent_core_tool_of_masc_hook : agent_core_tool_projector option Atomic.t =
+  Atomic.make None
+
+let set_agent_core_tool_of_masc_hook f =
+  Atomic.set agent_core_tool_of_masc_hook (Some f)
 
 let agent_core_tool_hook_unset_error () =
   Agent_core.Error.Internal
@@ -800,12 +803,10 @@ let prefer_cooperative_probe_error probe_error advanced_result =
 
 module For_testing = struct
   let with_agent_core_tool_of_masc_hook_unset f =
-    let original = !agent_core_tool_of_masc_hook in
+    let original = Atomic.exchange agent_core_tool_of_masc_hook None in
     Fun.protect
-      ~finally:(fun () -> agent_core_tool_of_masc_hook := original)
-      (fun () ->
-         agent_core_tool_of_masc_hook := None;
-         f ())
+      ~finally:(fun () -> Atomic.set agent_core_tool_of_masc_hook original)
+      f
   ;;
 
   let runtime_observation_for_completed_config =
@@ -1331,7 +1332,7 @@ let run_with_masc_tools
   | [] ->
       run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
   | _ when provider_supports_inline_tools config.provider_cfg ->
-      (match !agent_core_tool_of_masc_hook with
+      (match Atomic.get agent_core_tool_of_masc_hook with
        | None -> Error (agent_core_tool_hook_unset_error ())
        | Some agent_core_tool_of_masc ->
          let agent_core_tools =

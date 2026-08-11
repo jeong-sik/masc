@@ -97,22 +97,28 @@ type calibration_example = {
 (* Store                                                             *)
 (* ================================================================ *)
 
-let store_ref : Dated_jsonl.t option ref = ref None
+let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 
 let base_path () =
   Filename.concat (Env_config_core.base_path ()) "data/verdicts"
 
 let get_store () =
-  match !store_ref with
+  match Atomic.get store_ref with
   | Some s -> s
   | None ->
     let s = Dated_jsonl.create ~base_dir:(base_path ()) () in
-    store_ref := Some s;
-    s
+    if Atomic.compare_and_set store_ref None (Some s)
+    then s
+    else
+      (* Another domain published the process-wide store while this domain
+         created its candidate.  All writers must use that single instance so
+         Dated_jsonl's per-store serialization remains authoritative. *)
+      Option.get (Atomic.get store_ref)
 
 module For_testing = struct
-  let reset_store () = store_ref := None
-  let set_store ~base_dir = store_ref := Some (Dated_jsonl.create ~base_dir ())
+  let reset_store () = Atomic.set store_ref None
+  let set_store ~base_dir =
+    Atomic.set store_ref (Some (Dated_jsonl.create ~base_dir ()))
 end
 
 (** Resolve where an offline eval tool's [--record-verdicts] verdicts are

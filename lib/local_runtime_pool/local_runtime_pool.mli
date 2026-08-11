@@ -21,12 +21,9 @@
     [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
     §7.1 for the verification matrix.
 
-    Ref-cell architecture: {!pool} is a global [pool_state ref]
-    guarded by an [Eio.Mutex].  The ref is exposed because
-    [test/test_local_runtime_pool.ml] needs to install a
-    custom seed state without rebuilding the discovery cache
-    on every test.  Production code paths reach {!pool}
-    only through the locked accessors below. *)
+    State architecture: the process-global value is an atomic reference to an
+    immutable [pool_state], with compound refreshes serialized by a standard
+    mutex. Production and test code reach it only through typed accessors. *)
 
 (** {1 Runtime + snapshot records} *)
 
@@ -85,22 +82,16 @@ val default_pool_label : string
 (** ["local64"] — the canonical label used when the caller
     does not specify a [preferred_pool]. *)
 
-val empty_pool : pool_state
-(** Zero-valued [pool_state] used as the reset target and
-    the test-seed scaffolding template. *)
-
-val pool : pool_state ref
-(** Global pool ref.  Production code reaches this only
-    through the locked accessors below; the ref is exposed
-    because [test/test_local_runtime_pool.ml] installs a
-    fixed runtime list ([Local_runtime_pool.pool := ...])
-    to drive deterministic acquire / release scenarios. *)
-
 (** {1 Lifecycle} *)
 
 val reset : unit -> unit
-(** Reinstalls {!empty_pool} under the pool lock.  Used by
+(** Reinstalls the empty state under the pool lock.  Used by
     tests to clear state between cases. *)
+
+module For_testing : sig
+  val install_pool : runtime list -> unit
+  (** Install a deterministic runtime snapshot under the pool lock. *)
+end
 
 val current_fingerprint : unit -> string
 (** Stable hash of the current discovery cache snapshot.

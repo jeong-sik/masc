@@ -77,7 +77,7 @@ let get_protocol_version_for_session =
 
 (** Prefer runtime capabilities captured in [server_state] and only fall back to
     the legacy global Eio context for compatibility with older test helpers. *)
-let current_server_state_opt () = !server_state
+let current_server_state_opt () = current_server_state ()
 
 let state_switch_opt = function
   | Some state -> (
@@ -141,7 +141,7 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
       (fun () ->
         match current_server_state_opt () with
         | None -> false
-        | Some _ -> Server_startup_state.(!state).state_ready);
+        | Some _ -> (Server_startup_state.snapshot ()).state_ready);
     get_runtime_result =
       (fun () ->
         match current_server_state_opt () with

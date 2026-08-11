@@ -41,11 +41,13 @@ type claim_snapshot = {
 }
 val store_cache : (string, Dated_jsonl.t) Hashtbl.t
 val store_cache_mu : Eio.Mutex.t
-val window_read_count_for_testing_ref : int option ref
 val task_commitment_expiry_sec : float
 val completion_claim_expiry_sec : float
 val dedupe_window_sec : float
 val summary_window_days : int
+val enable_window_read_count_for_testing : unit -> unit
+val disable_window_read_count_for_testing : unit -> unit
+val window_read_count_for_testing : unit -> int
 val claim_kind_to_string :
   Keeper_accountability_claim_types.claim_kind -> string
 val claim_kind_of_string :

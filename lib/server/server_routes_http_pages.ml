@@ -479,7 +479,7 @@ let keepers_summary_from_registry ~base_path
   }
 
 let bonsai_api_keepers_summary request reqd =
-  match !server_state with
+  match current_server_state () with
   | None ->
       respond_public_read_json_value
         ~status:`Internal_server_error
@@ -532,7 +532,7 @@ let http_status_of_graphql = function
 
 (** Shared by HTTP/2 gateway handlers that require initialized server state. *)
 let get_server_state_result () =
-  match !server_state with
+  match current_server_state () with
   | Some s -> Ok s
   | None -> Error "server state not initialized"
 

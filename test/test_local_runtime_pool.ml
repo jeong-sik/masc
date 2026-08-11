@@ -27,12 +27,7 @@ let make_runtime ?model ?(max_concurrency = 2) id base_url =
   }
 
 let install_pool runtimes =
-  Local_runtime_pool.pool :=
-    {
-      Local_runtime_pool.empty_pool with
-      runtimes;
-      fingerprint = Local_runtime_pool.current_fingerprint ();
-    }
+  Local_runtime_pool.For_testing.install_pool runtimes
 
 let test_parse_runtime_env () =
   Local_runtime_pool.reset ();

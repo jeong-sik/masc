@@ -160,13 +160,13 @@ let resolve_requested_base_path path =
       ignored unless it matches the requested path or the test explicitly opts
       in via [MASC_TEST_ALLOW_BASE_PATH_OVERRIDE]
     - otherwise resolve the requested path to its git root *)
-let resolved_base_path_cache : string option ref = ref None
+let resolved_base_path_cache = Atomic.make None
 
 let cache_resolved_base_path path =
-  resolved_base_path_cache := Some path
+  Atomic.set resolved_base_path_cache (Some path)
 
 let resolve_masc_base_path path =
-  match !resolved_base_path_cache with
+  match Atomic.get resolved_base_path_cache with
   | Some cached -> cached
   | None ->
     let requested = resolve_requested_base_path path in

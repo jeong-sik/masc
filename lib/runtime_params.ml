@@ -54,7 +54,7 @@ let registry_tbl : (string, erased) Hashtbl.t = Hashtbl.create 64
 
 (** Workspace base path used for automatic persistence and audit.
     Set via [initialize]; optional [?base_path] overrides it per call. *)
-let global_base_path : string option ref = ref None
+let global_base_path = Atomic.make None
 
 (** Eio.Mutex for all mutable state.
     Falls back to lock-free when Eio scheduler is absent (tests, init). *)
@@ -63,10 +63,10 @@ let mu = Eio.Mutex.create ()
 let with_rw f = Eio_guard.with_mutex mu f
 let with_ro f = Eio_guard.with_mutex_ro mu f
 
-let initialize ~base_path = global_base_path := Some base_path
+let initialize ~base_path = Atomic.set global_base_path (Some base_path)
 
 let effective_base_path ?base_path () =
-  match base_path with Some p -> Some p | None -> !global_base_path
+  match base_path with Some p -> Some p | None -> Atomic.get global_base_path
 
 (* ── registration ────────────────────────────────────────────── *)
 

@@ -71,10 +71,10 @@ let sink_path () =
    same store name it from here instead of spelling the literal. *)
 let store_dirname = "transition-audit"
 
-let default_store_ref : Dated_jsonl.t option ref = ref None
+let default_store = Atomic.make None
 
 let get_default_store () =
-  match !default_store_ref with
+  match Atomic.get default_store with
   | Some store -> Some store
   | None ->
     (try
@@ -84,8 +84,9 @@ let get_default_store () =
            store_dirname
        in
        let store = Dated_jsonl.create ~base_dir:dir () in
-       default_store_ref := Some store;
-       Some store
+       if Atomic.compare_and_set default_store None (Some store)
+       then Some store
+       else Atomic.get default_store
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
@@ -437,7 +438,7 @@ module For_testing = struct
     with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
     Atomic.set async_append_active false;
     Atomic.set append_queue_dropped 0;
-    default_store_ref := None
+    Atomic.set default_store None
   ;;
 
   let queued_count = queued_count_for_testing

@@ -48,20 +48,24 @@ let tool_type_of_name name =
 ;;
 
 let counter_name = "tool_dispatch_total"
-let counter_registered = ref false
+let counter_registered = Atomic.make false
+let counter_registration_mu = Stdlib.Mutex.create ()
 
 let register_metrics () =
-  if not !counter_registered
-  then begin
-    Otel_metric_store.register_counter
-      ~name:counter_name
-      ~help:
-        "Total tool dispatches by tool name, outcome, surface, and tool_type \
-         (RFC-0084 §2.1 4-tuple emission invariant)."
-      ~labels:[ "tool", ""; "outcome", ""; "surface", ""; "tool_type", "" ]
-      ();
-    counter_registered := true
-  end
+  if not (Atomic.get counter_registered)
+  then
+    Stdlib.Mutex.protect counter_registration_mu (fun () ->
+      if not (Atomic.get counter_registered)
+      then begin
+        Otel_metric_store.register_counter
+          ~name:counter_name
+          ~help:
+            "Total tool dispatches by tool name, outcome, surface, and tool_type \
+             (RFC-0084 §2.1 4-tuple emission invariant)."
+          ~labels:[ "tool", ""; "outcome", ""; "surface", ""; "tool_type", "" ]
+          ();
+        Atomic.set counter_registered true
+      end)
 ;;
 
 let with_span ?(force_new_trace_id = false) ?(surface = "unknown") ~tool_name f =

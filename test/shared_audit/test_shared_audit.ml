@@ -62,6 +62,23 @@ let test_envelope_make_basic () =
   check bool "id non-empty" true (String.length e.id > 0);
   check bool "ts > 0" true (e.ts > 0.0)
 
+let test_envelope_ids_unique_across_domains () =
+  let ids_per_domain = 256 in
+  let domains =
+    List.init 4 (fun _ ->
+      Domain.spawn (fun () ->
+        Array.init ids_per_domain (fun _ ->
+          (Env.make ~category:"Concurrent" ~payload:`Null ~prev_hash:None).id)))
+  in
+  let ids =
+    List.map Domain.join domains
+    |> List.map Array.to_list
+    |> List.concat
+  in
+  let unique = List.sort_uniq String.compare ids in
+  check int "all domain-local random ids are unique" (4 * ids_per_domain)
+    (List.length unique)
+
 let test_envelope_canonical_json_deterministic () =
   let e = Env.make
     ~category:"X"
@@ -307,6 +324,8 @@ let () =
   run "Shared_audit" [
     "Envelope", [
       test_case "make basic" `Quick test_envelope_make_basic;
+      test_case "ids unique across domains" `Quick
+        test_envelope_ids_unique_across_domains;
       test_case "canonical_json deterministic" `Quick test_envelope_canonical_json_deterministic;
       test_case "compute_hash deterministic" `Quick test_envelope_compute_hash_deterministic;
       test_case "hash changes with payload" `Quick test_envelope_hash_changes_with_payload;

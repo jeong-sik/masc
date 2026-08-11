@@ -167,7 +167,7 @@ val serve_dashboard_static :
 
 val get_server_state_result :
   unit -> (Mcp_server.server_state, string) result
-(** Returns [Ok state] when {!Server_auth.server_state}
+(** Returns [Ok state] when {!Server_auth.current_server_state}
     has been wired, [Error "server state not initialized"]
     otherwise.  Used by every handler that needs the
     runtime state to satisfy the request. *)

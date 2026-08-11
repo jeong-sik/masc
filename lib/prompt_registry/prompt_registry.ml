@@ -748,13 +748,13 @@ let clear_prompt_override_persisted ~base_path key =
 
 (** Restore overrides from JSON file, applying the same validation as
     [set_override] so that stale or manually-edited entries are rejected. *)
-let restore_failure_observer : (unit -> unit) ref = ref (fun () -> ())
+let restore_failure_observer = Atomic.make (fun () -> ())
 
 let set_restore_failure_observer observer =
-  restore_failure_observer := observer
+  Atomic.set restore_failure_observer observer
 
 let record_override_restore_failure () =
-  !restore_failure_observer ()
+  (Atomic.get restore_failure_observer) ()
 
 let restore_overrides base_path =
   let path =

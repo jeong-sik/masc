@@ -198,12 +198,11 @@ let startup_lines (diag : t) =
   in
   List.filter_map (fun line -> line) lines
 
-let logged_once : bool ref = ref false
+let logged_once = Atomic.make false
 
 let log_startup_warning (diag : t) =
   match diag.warning with
-  | Some message when not !logged_once ->
-      logged_once := true;
+  | Some message when Atomic.compare_and_set logged_once false true ->
       Log.Server.warn "%s%s" message
         (if diag.strict_mode_requested then " (strict mode enabled)" else "")
   | Some message ->

@@ -203,7 +203,7 @@ let attempt_runtime_candidates
       (match
          run_attempt ~idx ~runtime_id:attempt_runtime_id candidate
        with
-       | Ok value, _checkpoint_after ->
+       | Ok value, _checkpoint_after, _effect_disposition ->
          emit_runtime_manifest
            ~status:"completed"
            ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
@@ -216,13 +216,17 @@ let attempt_runtime_candidates
               ~candidate:attempt_runtime_id
           | None -> ());
          Ok value
-       | Error error, _checkpoint_after ->
+       | Error error, _checkpoint_after, effect_disposition ->
          emit_runtime_manifest
            ~status:"failed"
            ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
            Keeper_runtime_manifest.Runtime_failed;
          let retry_admitted =
            allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
+         in
+         let effect_retry_admitted =
+           Keeper_provider_attempt_effect.allows_same_turn_retry
+             effect_disposition
          in
          let allow_accept_no_progress_retry =
            if
@@ -235,7 +239,7 @@ let attempt_runtime_candidates
                error
            else true
          in
-         let retryable_with_input_authority =
+         let error_is_retryable =
            lane_should_retry
              ~is_last
              ~allow_retry:true
@@ -252,7 +256,7 @@ let attempt_runtime_candidates
              then Some error
              else None
          in
-         if retry_admitted && retryable_with_input_authority
+         if retry_admitted && effect_retry_admitted && error_is_retryable
          then loop ~observed_overflow (idx + 1) rest
          else if is_last
          then (
@@ -264,8 +268,8 @@ let attempt_runtime_candidates
            | Some overflow_error -> Error overflow_error
            | None -> Error error)
          else (
-           (match retryable_with_input_authority, rest with
-            | true, next :: later ->
+           (match error_is_retryable, effect_retry_admitted, rest with
+            | true, true, next :: later ->
               on_retry_deferred
                 { assignment_id = runtime_id
                 ; failed_runtime_id = attempt_runtime_id
@@ -273,7 +277,7 @@ let attempt_runtime_candidates
                 ; later_runtime_ids = List.map runtime_id_of later
                 ; failure = error
                 }
-            | false, _ | true, [] -> ());
+            | false, _, _ | true, false, _ | true, true, [] -> ());
            Error error))
   in
   loop ~observed_overflow:None 0 candidates
@@ -695,7 +699,9 @@ let run_named
       match candidate with
       | Missing_runtime runtime_id ->
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-        Error (runtime_candidate_missing_error runtime_id), None
+        ( Error (runtime_candidate_missing_error runtime_id)
+        , None
+        , Keeper_provider_attempt_effect.No_effect_observed )
       | Resolved_runtime runtime ->
       let error_runtime_id = attempt_runtime_id in
       let inference_policy =
@@ -725,17 +731,21 @@ let run_named
             ~on_event
             ~config
         in
-        let codex_result =
+        let codex_attempt =
           match provider_config_transform, agent_core_checkpoint with
           | Some _, _ ->
-            Error
-              (Agent_core.Error.Config
-                 (Agent_core.Error.InvalidConfig
-                    { field = "provider_config_transform"
-                    ; detail =
-                        "provider config transforms cannot target a \
-                         codex-app-server runtime"
-                    }))
+            { Keeper_codex_runtime.result =
+                Error
+                  (Agent_core.Error.Config
+                     (Agent_core.Error.InvalidConfig
+                        { field = "provider_config_transform"
+                        ; detail =
+                            "provider config transforms cannot target a \
+                             codex-app-server runtime"
+                        }))
+            ; effect_disposition =
+                Keeper_provider_attempt_effect.No_effect_observed
+            }
           | None, checkpoint ->
             (* The official-client session store is the start-or-resume
                authority ([Keeper_codex_runtime] reads the durable
@@ -764,7 +774,7 @@ let run_named
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let codex_result =
-          Result.bind codex_result (fun run_result ->
+          Result.bind codex_attempt.result (fun run_result ->
             Keeper_turn_driver_try_provider.apply_accept
               ~runtime_id:attempt_runtime_id
               ~accept
@@ -776,7 +786,9 @@ let run_named
              (fun observe -> Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        selected_runtime_result runtime codex_result, None
+        ( selected_runtime_result runtime codex_result
+        , None
+        , codex_attempt.effect_disposition )
       | Runtime_execution.Antigravity_cli config ->
         let run_antigravity ~initial_messages () =
           Keeper_antigravity_runtime.run
@@ -800,16 +812,17 @@ let run_named
         let run_antigravity_with_history () =
           run_antigravity ~initial_messages ()
         in
-        let antigravity_result =
+        let antigravity_result, effect_disposition =
           match provider_config_transform, agent_core_checkpoint with
           | Some _, _ ->
-            Error
-              (Agent_core.Error.Config
-                 (Agent_core.Error.InvalidConfig
-                    { field = "provider_config_transform"
-                    ; detail =
-                        "provider config transforms cannot target an antigravity-cli runtime"
-                    }))
+            ( Error
+                (Agent_core.Error.Config
+                   (Agent_core.Error.InvalidConfig
+                      { field = "provider_config_transform"
+                      ; detail =
+                          "provider config transforms cannot target an antigravity-cli runtime"
+                      }))
+            , Keeper_provider_attempt_effect.No_effect_observed )
           | None, Some _ ->
             Log.Keeper.info
               "%s: official-client runtime %s resolves start-or-resume from \
@@ -827,8 +840,11 @@ let run_named
                     , `String "official_client_session_store_owns_resume" )
                   ])
               Keeper_runtime_manifest.Runtime_routed;
-            run_antigravity_with_history ()
-          | None, None -> run_antigravity_with_history ()
+            ( run_antigravity_with_history ()
+            , Keeper_provider_attempt_effect.Observation_unavailable )
+          | None, None ->
+            ( run_antigravity_with_history ()
+            , Keeper_provider_attempt_effect.Observation_unavailable )
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let antigravity_result =
@@ -845,7 +861,12 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        selected_runtime_result runtime antigravity_result, None
+        ( selected_runtime_result runtime antigravity_result
+        , None
+        (* Antigravity executes dynamic tools but does not yet return a
+           complete attempt-local effect observation. Never infer safety from
+           an absent AGENT_CORE checkpoint after dispatch. *)
+        , effect_disposition )
       | Runtime_execution.Claude_code config ->
         let run_claude ~initial_messages () =
           let tools = if runtime.model.tools_support then tools else [] in
@@ -867,16 +888,17 @@ let run_named
             ~on_event
             ~config
         in
-        let claude_result =
+        let claude_result, effect_disposition =
           match provider_config_transform, agent_core_checkpoint with
           | Some _, _ ->
-            Error
-              (Agent_core.Error.Config
-                 (Agent_core.Error.InvalidConfig
-                    { field = "provider_config_transform"
-                    ; detail =
-                        "provider config transforms cannot target a claude-code runtime"
-                    }))
+            ( Error
+                (Agent_core.Error.Config
+                   (Agent_core.Error.InvalidConfig
+                      { field = "provider_config_transform"
+                      ; detail =
+                          "provider config transforms cannot target a claude-code runtime"
+                      }))
+            , Keeper_provider_attempt_effect.No_effect_observed )
           | None, Some _ ->
             (* The durable official-client session store owns start-or-resume
                (Keeper_claude_code_runtime reads [previous_settlement]), so a
@@ -899,8 +921,11 @@ let run_named
                     , `String "official_client_session_store_owns_resume" )
                   ])
               Keeper_runtime_manifest.Runtime_routed;
-            run_claude ~initial_messages ()
-          | None, None -> run_claude ~initial_messages ()
+            ( run_claude ~initial_messages ()
+            , Keeper_provider_attempt_effect.Observation_unavailable )
+          | None, None ->
+            ( run_claude ~initial_messages ()
+            , Keeper_provider_attempt_effect.Observation_unavailable )
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let claude_result =
@@ -917,7 +942,11 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        selected_runtime_result runtime claude_result, None
+        ( selected_runtime_result runtime claude_result
+        , None
+        (* Claude Code has the same post-dispatch observation gap. Until its
+           adapter carries the dynamic-tool fact, lane fallback is fail-closed. *)
+        , effect_disposition )
       | Runtime_execution.Agent_core runtime_provider_config ->
        (match
           match provider_config_transform with
@@ -926,7 +955,7 @@ let run_named
         with
       | Error err ->
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-        Error err, None
+        Error err, None, Keeper_provider_attempt_effect.No_effect_observed
       | Ok provider_config ->
         (match
            validate_provider_request_cap
@@ -935,7 +964,7 @@ let run_named
          with
          | Error err ->
            Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-           Error err, None
+           Error err, None, Keeper_provider_attempt_effect.No_effect_observed
          | Ok max_request_body_bytes ->
           let candidate = Runtime_candidate.of_provider_config provider_config in
           (* Cached provider health is observation only. Every eligible runtime
@@ -1009,7 +1038,9 @@ let run_named
               ~replay_prefix_projection
               provider_result
           in
-          selected_runtime_result runtime outcomes.turn_result, checkpoint_after))
+          ( selected_runtime_result runtime outcomes.turn_result
+          , checkpoint_after
+          , Keeper_provider_attempt_effect.No_effect_observed )))
        )
     attempt_candidates
 

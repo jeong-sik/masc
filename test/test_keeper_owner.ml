@@ -1001,6 +1001,68 @@ let test_operation_executor_exception_is_terminal_and_next_runs () =
   check int "child exception does not stop the actor" 2 !execution_count
 ;;
 
+let test_paused_owner_preserves_queue_until_resume () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let execution_count = ref 0 in
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    incr execution_count;
+    match claim () with
+    | Error error -> fail (Owner.error_to_string error)
+    | Ok None -> fail "resumed owner did not claim its queued operation"
+    | Ok (Some operation) ->
+      Owner.Operation_succeeded
+        { outcome_ref =
+            "turn:" ^ Chat_operation.Operation_id.to_string operation.operation_id
+        }
+  in
+  let owner =
+    owner_ok
+      (start_owner_with_executor
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_executor:(Some operation_executor)
+         ~keeper_name:"paused-operation"
+         ~initial_meta:(Some (make_meta "paused-operation")))
+  in
+  ignore
+    (owner_ok
+       (Owner.apply_meta
+          owner
+          (Pause
+             { reason =
+                 Keeper_latched_reason.Operator_paused
+                   { operator_actor = Keeper_latched_reason.Grpc_directive }
+             ; updated_at = "paused"
+             })));
+  let operation_id = operation_id "kmsg-paused-operation" in
+  let accepted =
+    owner_ok
+      (Owner.submit_operation
+         owner
+         ~operation_id
+         ~source:operation_source
+         ~input:(operation_input "wait for resume"))
+  in
+  (match accepted.operation.state with
+   | Chat_operation.Queued -> ()
+   | state ->
+     fail
+       ("paused owner did not preserve Queued: "
+        ^ Chat_operation.state_to_string state));
+  Eio.Fiber.yield ();
+  check int "paused owner starts no chat child" 0 !execution_count;
+  ignore (owner_ok (Owner.apply_meta owner (Resume { updated_at = "resumed" })));
+  let terminal = await_terminal owner operation_id 1_000 in
+  (match terminal.state with
+   | Chat_operation.Succeeded _ -> ()
+   | state ->
+     fail
+       ("resume did not drain queued operation: "
+        ^ Chat_operation.state_to_string state));
+  check int "resume starts exactly one chat child" 1 !execution_count
+;;
+
 let test_startup_interrupts_running_without_requeue () =
   Eio_main.run @@ fun _env ->
   let path = Filename.temp_file "keeper-owner-restart-" ".sqlite3" in
@@ -2103,6 +2165,10 @@ let () =
             "operation executor exception is terminal and next runs"
             `Quick
             test_operation_executor_exception_is_terminal_and_next_runs
+        ; test_case
+            "paused owner preserves queue until resume"
+            `Quick
+            test_paused_owner_preserves_queue_until_resume
         ; test_case
             "startup interrupts Running without requeue"
             `Quick

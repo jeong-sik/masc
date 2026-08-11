@@ -37,9 +37,11 @@ let attempted_candidates error =
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         if String.equal candidate first_candidate
-        then Error error, None
+        then
+          Error error, None, Masc.Keeper_provider_attempt_effect.No_effect_observed
         else if String.equal candidate second_candidate
-        then Ok runtime_id, None
+        then
+          Ok runtime_id, None, Masc.Keeper_provider_attempt_effect.No_effect_observed
         else Alcotest.failf "unexpected candidate %s" candidate)
       [ first_candidate; second_candidate ]
   in

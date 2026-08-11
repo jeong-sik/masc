@@ -473,6 +473,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             Runtime_antigravity.run_turn
               ~conversation_mode
               ~home_dir:(Runtime_antigravity_home.home_dir home)
+              ~on_spawned:(fun () ->
+                Atomic.set
+                  effect_disposition
+                  Keeper_provider_attempt_effect.Observation_unavailable)
               ~mgr:process_mgr
               ~clock
               ~cwd:process_cwd
@@ -497,16 +501,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
               client_config
               ~prompt
           in
-          Atomic.set
-            effect_disposition
-            (match client_result with
-             | Error (Runtime_antigravity.Spawn_failed _) ->
-               Keeper_provider_attempt_effect.No_effect_observed
-             | Ok _ | Error _ ->
-               (match tools with
-                | [] -> Keeper_provider_attempt_effect.No_effect_observed
-                | _ :: _ ->
-                  Keeper_provider_attempt_effect.Observation_unavailable));
           Result.map_error
             (fun error ->
                recovery_failure := recovery_failure_of_runtime_error error;

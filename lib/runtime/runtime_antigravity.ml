@@ -616,8 +616,8 @@ let status_to_string = function
   | `Signaled signal -> Printf.sprintf "signal %d" signal
 ;;
 
-let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
-    ~on_conversation_ready ~on_stream_event =
+let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
+    ~prompt ~on_conversation_ready ~on_stream_event =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -638,6 +638,7 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
     in
+    Option.iter (fun callback -> callback ()) on_spawned;
     Eio.Flow.close stdin_r;
     Eio.Flow.close stdout_w;
     Eio.Flow.close stderr_w;
@@ -705,7 +706,7 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
     status, !state, String.trim !stderr_tail)
 ;;
 
-let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
+let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ~mgr ~clock ~cwd
     ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) ?on_stream_event
     config ~prompt =
   let* () =
@@ -722,6 +723,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
       Ok
         (run_spawned
            ?home_dir
+           ?on_spawned
            ~mgr
            ~clock
            ~cwd

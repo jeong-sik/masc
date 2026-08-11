@@ -683,7 +683,7 @@ jobs:
     # Build consumes `changes` outputs, so a failed/skipped changes job should
     # not synthesize default build inputs even though `always()` keeps this
     # condition evaluable.
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.build == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.build == 'true' || needs.changes.outputs.keeper_realworld == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
     # Test execution policy (hard-required focused suites):
     #   - `continue-on-error` is intentionally absent: compile failures and
     #     every focused test suite are merge-blocking.

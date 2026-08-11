@@ -27,14 +27,13 @@ let read_file path =
 
 let rec remove_tree path =
   if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then begin
+  then (
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
       Sys.readdir path
       |> Array.iter (fun name -> remove_tree (Filename.concat path name));
       Unix.rmdir path
-    end
-    else Unix.unlink path
+    | _ -> Unix.unlink path)
 ;;
 
 let with_temp_base run =
@@ -44,6 +43,7 @@ let with_temp_base run =
       (Printf.sprintf "masc-keeper-github-%d-%.0f" (Unix.getpid ()) (Unix.gettimeofday () *. 1_000_000.))
   in
   mkdir_p base_path;
+  mkdir_p (Common.keepers_runtime_dir_of_base ~base_path);
   Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> run base_path)
 ;;
 
@@ -144,6 +144,47 @@ let test_fake_gh_login_and_effective_identity () =
            [ "GH_TOKEN" ] observation.projected_token_env_names)
 ;;
 
+let test_config_dir_does_not_chmod_ancestor () =
+  with_temp_base @@ fun base_path ->
+  Unix.chmod base_path 0o755;
+  (match Github.ensure_config_dir ~base_path ~keeper_name:"mode-test" with
+   | Error message -> Alcotest.fail message
+   | Ok _ -> ());
+  let mode = (Unix.stat base_path).Unix.st_perm land 0o777 in
+  Alcotest.(check int) "workspace mode is unchanged" 0o755 mode
+;;
+
+let test_config_dir_rejects_symlink () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "directory-symlink-test" in
+  let keeper_root =
+    Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
+  in
+  mkdir_p keeper_root;
+  let target = Filename.concat base_path "redirected-config" in
+  mkdir_p target;
+  Unix.symlink target (Github.config_dir ~base_path ~keeper_name);
+  match Github.ensure_config_dir ~base_path ~keeper_name with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "symbolic-link GitHub config directory was accepted"
+;;
+
+let test_config_dir_rejects_credential_symlink () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "credential-symlink-test" in
+  let config_dir =
+    match Github.ensure_config_dir ~base_path ~keeper_name with
+    | Error message -> Alcotest.fail message
+    | Ok path -> path
+  in
+  let target = Filename.concat base_path "redirected-hosts.yml" in
+  write_file target "oauth_token: do-not-touch\n";
+  Unix.symlink target (Filename.concat config_dir "hosts.yml");
+  match Github.ensure_config_dir ~base_path ~keeper_name with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "symbolic-link GitHub credential file was accepted"
+;;
+
 let () =
   Alcotest.run
     "keeper GitHub identity"
@@ -153,6 +194,18 @@ let () =
             "fake gh login and effective identity"
             `Quick
             test_fake_gh_login_and_effective_identity
+        ; Alcotest.test_case
+            "config directory keeps ancestor mode"
+            `Quick
+            test_config_dir_does_not_chmod_ancestor
+        ; Alcotest.test_case
+            "config directory rejects symlink"
+            `Quick
+            test_config_dir_rejects_symlink
+        ; Alcotest.test_case
+            "credential file rejects symlink"
+            `Quick
+            test_config_dir_rejects_credential_symlink
         ] )
     ]
 ;;

@@ -44,7 +44,8 @@ val observe :
 
 val auth_result_to_yojson : auth_result -> Yojson.Safe.t
 val observation_to_yojson : observation -> Yojson.Safe.t
-val secure_config_files : base_path:string -> keeper_name:string -> unit
+val secure_config_files :
+  base_path:string -> keeper_name:string -> (unit, string) result
 val run_cli_login : base_path:string -> keeper_name:string -> hostname:string -> int
 val run_cli_status : base_path:string -> keeper_name:string -> hostname:string -> int
 val run_cli_logout : base_path:string -> keeper_name:string -> hostname:string -> int

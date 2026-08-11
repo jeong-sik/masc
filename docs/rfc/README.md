@@ -233,7 +233,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0365 | handoff_context must survive the ownership boundary | Draft | - |
 | 0366 | 운영자가 다음 턴의 컨텍스트에 한 문장을 넣는다 | Draft | - |
 | 0368 | 판단 없는 recovery는 keeper의 다음 claim이 스스로 해제한다 | Draft | - |
-| per-keeper-github-cli-identity | Keeper-specific GitHub CLI identity | Draft | - |
+| 0370 | Provider profile SSOT, quota-as-state, rotation eligibility for Internal-carr... | Draft | - |
 | RFC-0034d-stale-agent-sync | d — release_stale_claims agent-side sync | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
@@ -244,6 +244,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-keeper-runtime-context-observation-phase0 | Keeper runtime context observation Phase 0 | Draft | - |
 | RFC-keeper-vision-delegation-tool | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | - |
 | RFC-memory-os-bounded-context-and-librarian-curator | Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |
+| RFC-per-keeper-github-cli-identity | Keeper-specific GitHub CLI identity | Draft | - |
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
 
 ### 신규 RFC

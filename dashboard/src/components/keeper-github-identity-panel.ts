@@ -103,15 +103,15 @@ export function KeeperGithubIdentityPanel({
       ${loadError && html`<p class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">${loadError}</p>`}
       ${observation && html`
         <div class="mt-4 grid gap-3 sm:grid-cols-2">
-          <div class="rounded-lg border border-slate-200 bg-white/80 p-3">
-            <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Keeper 저장소</span>
+          <div class="rounded-lg border border-slate-200 bg-[var(--white-80)] p-3">
+            <span class="text-3xs font-semibold uppercase tracking-wider text-slate-400">Keeper 저장소</span>
             <p class="mt-1 text-sm font-semibold text-slate-900">${authLabel(observation.stored.authenticated, observation.stored.login)}</p>
           </div>
-          <div class="rounded-lg border border-slate-200 bg-white/80 p-3">
-            <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">실제 실행 환경</span>
+          <div class="rounded-lg border border-slate-200 bg-[var(--white-80)] p-3">
+            <span class="text-3xs font-semibold uppercase tracking-wider text-slate-400">실제 실행 환경</span>
             <p class="mt-1 text-sm font-semibold text-slate-900">${authLabel(observation.effective.authenticated, observation.effective.login)}</p>
             ${observation.projected_token_env_names.length > 0 && html`
-              <p class="mt-1 text-[11px] text-amber-700">토큰 우선 적용: ${observation.projected_token_env_names.join(', ')}</p>
+              <p class="mt-1 text-3xs text-amber-700">토큰 우선 적용: ${observation.projected_token_env_names.join(', ')}</p>
             `}
           </div>
         </div>

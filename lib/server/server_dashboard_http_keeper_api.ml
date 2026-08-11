@@ -1518,8 +1518,9 @@ let handle_keeper_get_subroutes state req request reqd =
           (error_json (Printf.sprintf "keeper %S not found" name))
       | Ok (Some _) ->
         let hostname =
-          Server_utils.query_param req "hostname"
-          |> Option.value ~default:"github.com"
+          match Server_utils.query_param req "hostname" with
+          | Some hostname -> hostname
+          | None -> "github.com"
         in
         (match
            Keeper_github_identity.observe

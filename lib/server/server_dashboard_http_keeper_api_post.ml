@@ -53,8 +53,9 @@ let handle_keeper_github_login_post state req reqd =
       respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
     | Ok (Some _) ->
       let hostname =
-        Server_utils.query_param req "hostname"
-        |> Option.value ~default:"github.com"
+        match Server_utils.query_param req "hostname" with
+        | Some hostname -> hostname
+        | None -> "github.com"
       in
       (match
          Keeper_github_identity.login_env
@@ -92,28 +93,37 @@ let handle_keeper_github_login_post state req reqd =
               in
               match status with
               | Unix.WEXITED 0 ->
-                Keeper_github_identity.secure_config_files
-                  ~base_path:config.base_path
-                  ~keeper_name:name;
                 (match
-                   Keeper_github_identity.observe
+                   Keeper_github_identity.secure_config_files
                      ~base_path:config.base_path
                      ~keeper_name:name
-                     ~hostname
                  with
-                 | Ok observation ->
-                   github_login_stream_send
-                     writer
-                     "complete"
-                     (`Assoc
-                        [ ( "observation"
-                          , Keeper_github_identity.observation_to_yojson observation )
-                        ])
                  | Error message ->
                    github_login_stream_send
                      writer
                      "error"
-                     (`Assoc [ "message", `String message ]))
+                     (`Assoc [ "message", `String message ])
+                 | Ok () ->
+                   (match
+                      Keeper_github_identity.observe
+                        ~base_path:config.base_path
+                        ~keeper_name:name
+                        ~hostname
+                    with
+                    | Ok observation ->
+                      github_login_stream_send
+                        writer
+                        "complete"
+                        (`Assoc
+                           [ ( "observation"
+                             , Keeper_github_identity.observation_to_yojson
+                                 observation )
+                           ])
+                    | Error message ->
+                      github_login_stream_send
+                        writer
+                        "error"
+                        (`Assoc [ "message", `String message ])))
               | failed ->
                 let detail = String.trim (redact stderr) in
                 let message =

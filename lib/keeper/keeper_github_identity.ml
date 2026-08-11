@@ -34,28 +34,119 @@ let container_config_dir ~container_masc_dir ~keeper_name =
     "github-cli"
 ;;
 
-let rec mkdir_private path =
-  if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then Unix.chmod path 0o700
-    else failwith (Printf.sprintf "%s exists but is not a directory" path)
-  else begin
-    let parent = Filename.dirname path in
-    if not (String.equal parent path) then mkdir_private parent;
-    try Unix.mkdir path 0o700 with
-    | Unix.Unix_error (Unix.EEXIST, _, _) -> Unix.chmod path 0o700
-  end
+let file_kind_to_string = function
+  | Unix.S_REG -> "regular file"
+  | Unix.S_DIR -> "directory"
+  | Unix.S_CHR -> "character device"
+  | Unix.S_BLK -> "block device"
+  | Unix.S_LNK -> "symbolic link"
+  | Unix.S_FIFO -> "FIFO"
+  | Unix.S_SOCK -> "socket"
+;;
+
+let lstat_opt path =
+  try Ok (Some (Unix.lstat path)) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | Unix.Unix_error (error, operation, target) ->
+    Error
+      (Printf.sprintf
+         "cannot inspect GitHub CLI path %s: %s(%s): %s"
+         path
+         operation
+         target
+         (Unix.error_message error))
+;;
+
+let require_directory path =
+  match lstat_opt path with
+  | Error _ as error -> error
+  | Ok None -> Error (Printf.sprintf "required GitHub CLI parent is missing: %s" path)
+  | Ok (Some stats) when stats.Unix.st_kind = Unix.S_DIR -> Ok ()
+  | Ok (Some stats) ->
+    Error
+      (Printf.sprintf
+         "GitHub CLI path must be a directory, not a %s: %s"
+         (file_kind_to_string stats.Unix.st_kind)
+         path)
+;;
+
+let ensure_child_directory ~parent ~name ~private_mode =
+  match require_directory parent with
+  | Error _ as error -> error
+  | Ok () ->
+    let path = Filename.concat parent name in
+    (match lstat_opt path with
+     | Error _ as error -> error
+     | Ok None ->
+       (try Unix.mkdir path 0o700 with
+        | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+        | Unix.Unix_error (error, operation, target) ->
+          raise (Unix.Unix_error (error, operation, target)));
+       (match require_directory path with
+        | Error _ as error -> error
+        | Ok () ->
+          if private_mode then Unix.chmod path 0o700;
+          Ok path)
+     | Ok (Some stats) when stats.Unix.st_kind = Unix.S_DIR ->
+       if private_mode then Unix.chmod path 0o700;
+       Ok path
+     | Ok (Some stats) ->
+       Error
+         (Printf.sprintf
+            "GitHub CLI path must be a directory, not a %s: %s"
+            (file_kind_to_string stats.Unix.st_kind)
+            path))
+;;
+
+let secure_config_files_in config_path =
+  let rec secure = function
+    | [] -> Ok ()
+    | filename :: rest ->
+      let path = Filename.concat config_path filename in
+      (match lstat_opt path with
+       | Error _ as error -> error
+       | Ok None -> secure rest
+       | Ok (Some stats) when stats.Unix.st_kind = Unix.S_REG ->
+         Unix.chmod path 0o600;
+         secure rest
+       | Ok (Some stats) ->
+         Error
+           (Printf.sprintf
+              "GitHub CLI credential must be a regular file, not a %s: %s"
+              (file_kind_to_string stats.Unix.st_kind)
+              path))
+  in
+  secure [ "hosts.yml"; "config.yml" ]
 ;;
 
 let ensure_config_dir ~base_path ~keeper_name =
   if not (Keeper_config.validate_name keeper_name)
   then Error (Printf.sprintf "invalid keeper name: %s" keeper_name)
   else
-    let path = config_dir ~base_path ~keeper_name in
     try
-      mkdir_private path;
-      Ok path
+      let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
+      match require_directory keepers_root with
+      | Error _ as error -> error
+      | Ok () ->
+        (match
+           ensure_child_directory
+             ~parent:keepers_root
+             ~name:keeper_name
+             ~private_mode:false
+         with
+         | Error _ as error -> error
+         | Ok keeper_root ->
+           (match
+              ensure_child_directory
+                ~parent:keeper_root
+                ~name:"github-cli"
+                ~private_mode:true
+            with
+            | Error _ as error -> error
+            | Ok path ->
+              (match secure_config_files_in path with
+               | Error _ as error -> error
+               | Ok () -> Ok path)))
     with
     | Unix.Unix_error (error, operation, target) ->
       Error
@@ -65,7 +156,6 @@ let ensure_config_dir ~base_path ~keeper_name =
            operation
            target
            (Unix.error_message error))
-    | Failure message -> Error message
 ;;
 
 let env_key entry =
@@ -138,7 +228,9 @@ let projected_env ~base_path ~keeper_name =
       ()
   with
   | Error _ as error -> error
-  | Ok None -> runtime_env ~base_path ~keeper_name (Unix.environment ())
+  | Ok None ->
+    Error
+      "keeper secret projection returned no environment; refusing host-environment fallback"
   | Ok (Some env) -> runtime_env ~base_path ~keeper_name env
 ;;
 
@@ -165,21 +257,24 @@ let process_exit_text = function
   | Unix.WSTOPPED signal -> Printf.sprintf "stopped by signal %d" signal
 ;;
 
-let run_capture ~env argv =
-  let command = List.hd argv in
-  try
-    let stdout_channel, stdin_channel, stderr_channel =
-      Unix.open_process_args_full command (Array.of_list argv) env
-    in
-    let stdout = read_all stdout_channel in
-    let stderr = read_all stderr_channel in
-    let status = Unix.close_process_full (stdout_channel, stdin_channel, stderr_channel) in
-    status, stdout, stderr
-  with
-  | Unix.Unix_error (error, operation, target) ->
-    ( Unix.WEXITED 127
-    , ""
-    , Printf.sprintf "%s(%s): %s" operation target (Unix.error_message error) )
+let run_capture ~env = function
+  | [] -> Unix.WEXITED 127, "", "GitHub CLI argv must not be empty"
+  | command :: _ as argv ->
+    (try
+       let stdout_channel, stdin_channel, stderr_channel =
+         Unix.open_process_args_full command (Array.of_list argv) env
+       in
+       let stdout = read_all stdout_channel in
+       let stderr = read_all stderr_channel in
+       let status =
+         Unix.close_process_full (stdout_channel, stdin_channel, stderr_channel)
+       in
+       status, stdout, stderr
+     with
+     | Unix.Unix_error (error, operation, target) ->
+       ( Unix.WEXITED 127
+       , ""
+       , Printf.sprintf "%s(%s): %s" operation target (Unix.error_message error) ))
 ;;
 
 let auth_result_of_command ~redact ~env ~hostname =
@@ -246,12 +341,21 @@ let observation_to_yojson observation =
 
 let secure_config_files ~base_path ~keeper_name =
   let root = config_dir ~base_path ~keeper_name in
-  Unix.chmod root 0o700;
-  List.iter
-    (fun filename ->
-       let path = Filename.concat root filename in
-       if Sys.file_exists path && not (Sys.is_directory path) then Unix.chmod path 0o600)
-    [ "hosts.yml"; "config.yml" ]
+  try
+    match require_directory root with
+    | Error _ as error -> error
+    | Ok () ->
+      Unix.chmod root 0o700;
+      secure_config_files_in root
+  with
+  | Unix.Unix_error (error, operation, target) ->
+    Error
+      (Printf.sprintf
+         "cannot secure GitHub CLI path %s: %s(%s): %s"
+         root
+         operation
+         target
+         (Unix.error_message error))
 ;;
 
 let print_observation ~base_path ~keeper_name ~hostname =
@@ -264,18 +368,19 @@ let print_observation ~base_path ~keeper_name ~hostname =
     true
 ;;
 
-let run_inherited ~env argv =
-  let command = List.hd argv in
-  let process =
-    Unix.create_process_env
-      command
-      (Array.of_list argv)
-      env
-      Unix.stdin
-      Unix.stdout
-      Unix.stderr
-  in
-  snd (Unix.waitpid [] process)
+let run_inherited ~env = function
+  | [] -> Unix.WEXITED 127
+  | command :: _ as argv ->
+    let process =
+      Unix.create_process_env
+        command
+        (Array.of_list argv)
+        env
+        Unix.stdin
+        Unix.stdout
+        Unix.stderr
+    in
+    snd (Unix.waitpid [] process)
 ;;
 
 let run_cli_login ~base_path ~keeper_name ~hostname =
@@ -285,11 +390,20 @@ let run_cli_login ~base_path ~keeper_name ~hostname =
     1
   | Ok env ->
     let status = run_inherited ~env (login_argv ~hostname) in
-    (match status with
-     | Unix.WEXITED 0 -> secure_config_files ~base_path ~keeper_name
-     | _ -> prerr_endline ("gh auth login failed: " ^ process_exit_text status));
-    ignore (print_observation ~base_path ~keeper_name ~hostname : bool);
-    (match status with Unix.WEXITED 0 -> 0 | _ -> 1)
+    let secured =
+      match status with
+      | Unix.WEXITED 0 ->
+        (match secure_config_files ~base_path ~keeper_name with
+         | Ok () -> true
+         | Error message ->
+           prerr_endline message;
+           false)
+      | _ ->
+        prerr_endline ("gh auth login failed: " ^ process_exit_text status);
+        false
+    in
+    let observed = print_observation ~base_path ~keeper_name ~hostname in
+    if secured && observed then 0 else 1
 ;;
 
 let run_cli_status ~base_path ~keeper_name ~hostname =
@@ -303,9 +417,13 @@ let run_cli_logout ~base_path ~keeper_name ~hostname =
     1
   | Ok env ->
     let status = run_inherited ~env (logout_argv ~hostname) in
-    (match status with
-     | Unix.WEXITED 0 -> ()
-     | _ -> prerr_endline ("gh auth logout failed: " ^ process_exit_text status));
-    ignore (print_observation ~base_path ~keeper_name ~hostname : bool);
-    (match status with Unix.WEXITED 0 -> 0 | _ -> 1)
+    let logged_out =
+      match status with
+      | Unix.WEXITED 0 -> true
+      | _ ->
+        prerr_endline ("gh auth logout failed: " ^ process_exit_text status);
+        false
+    in
+    let observed = print_observation ~base_path ~keeper_name ~hostname in
+    if logged_out && observed then 0 else 1
 ;;

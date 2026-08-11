@@ -98,6 +98,15 @@ type operation_executor =
     body before [claim]: [claim] is the mailbox-linearized Queued-to-Running
     boundary and returns the latest edited input. *)
 
+type operation_runner =
+  { ready : keeper_name:string -> bool
+  ; execute : operation_executor
+  }
+(** Typed admission for the durable operation drain. [ready] must be a
+    non-yielding in-memory read. When it returns [false], the FIFO head remains
+    Queued and no child is started. The producer that makes the dependency
+    ready must call {!wake_operation_drain}; the Owner never polls. *)
+
 type t
 
 val start
@@ -105,7 +114,7 @@ val start
   -> store:store
   -> operation_store_path:string
   -> now:(unit -> float)
-  -> operation_executor:operation_executor option
+  -> operation_runner:operation_runner option
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result
@@ -115,6 +124,10 @@ val projection : t -> Keeper_owner_reducer.projection
 
 val operation_projection : t -> operation_projection
 (** Lock-free immutable operation inventory. *)
+
+val wake_operation_drain : t -> (unit, error) result
+(** Reconsider existing Queued rows after the operation runner's dependency
+    becomes ready. This command never changes sequence or state itself. *)
 
 val turn_in_flight : t -> turn_in_flight option
 (** Lock-free immutable projection of the single Owner-owned child turn. *)

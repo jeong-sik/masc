@@ -189,6 +189,7 @@ val run_turn
   -> ?history_assistant_source:string
   -> ?temperature:float
   -> ?on_event:(Agent_core.Types.sse_event -> unit)
+  -> ?on_tool_result_ready:(tool_call_id:string -> unit)
   -> ?trajectory_acc:Trajectory.accumulator
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_runtime:string

@@ -1900,14 +1900,22 @@ let test_runtime_config_validation_rejects_unbounded_official_client_seed () =
      fail "an official-client Keeper runtime with no max-prompt-bytes must be rejected"
    | Error detail ->
      check bool "the diagnostic names the key an operator must add" true
-       (String_util.contains_substring detail "max-prompt-bytes");
+     (String_util.contains_substring detail "max-prompt-bytes");
      check bool "the diagnostic names the runtime" true
        (String_util.contains_substring detail "subscription.seeded");
+     check bool
+       "the remediation points at the model table that owns the key"
+       true
+       (String_util.contains_substring
+          detail
+          "[models.seeded].max-prompt-bytes");
      (* The Agent_core key would send the operator to the wrong line. *)
      check bool "the diagnostic does not name the Agent_core key" false
        (String_util.contains_substring detail "max-request-body-bytes"));
-  (* Control: the same config with the bound declared must load. Without this a
-     check that rejected every official-client runtime would pass. *)
+  (* Control and remediation round-trip: the same table/key emitted above is
+     applied to the config and must make it load. Without this, a diagnostic
+     that pointed at a syntactically plausible but unconsumed table could pass
+     the substring assertions while startup remained stuck. *)
   match attempt (content "max-prompt-bytes = 131072\n") with
   | Ok () -> ()
   | Error detail -> failf "a declared seed bound must load: %s" detail

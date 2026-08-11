@@ -63,7 +63,7 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
          |> require_ok "read persisted Keeper metadata"
          |> require_some "persisted Keeper metadata"
        in
-       (match Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
+       (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok count -> Alcotest.(check int) "installed owner count" 1 count
         | Error error ->
           Alcotest.fail

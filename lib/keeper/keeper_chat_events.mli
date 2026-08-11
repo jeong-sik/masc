@@ -96,6 +96,9 @@ type keeper_chat_event =
   | Tool_call_args of { tool_call_id : string; delta : string }
   | Tool_call_args_snapshot of { tool_call_id : string; snapshot : string }
   | Tool_call_end of { tool_call_id : string }
+      (** Provider argument streaming ended. This is not execution completion. *)
+  | Tool_result_ready of { tool_call_id : string }
+      (** The exact tool result is durably readable from the tool-call store. *)
   | Link_block of
       { url : string
       ; title : string

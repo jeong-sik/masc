@@ -625,27 +625,36 @@ let validate_keeper_dispatch_request_caps
     | Runtime_execution.Agent_core provider_config ->
       (match validate_request_body_cap ~runtime_id:runtime.id provider_config with
        | Ok _ -> None
-       | Error _ -> Some (runtime, "max-request-body-bytes", "the exact serialized request"))
+       | Error _ ->
+         Some
+           ( runtime
+           , Otoml.string_of_path
+               [ runtime.binding.provider_id; runtime.binding.model_id ]
+           , "max-request-body-bytes"
+           , "the exact serialized request" ))
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
     | Runtime_execution.Antigravity_cli _ ->
       (match runtime.model.max_prompt_bytes with
        | Some n when n > 0 -> None
        | Some _ | None ->
-         Some (runtime, "max-prompt-bytes", "the start-turn conversation seed"))
+         Some
+           ( runtime
+           , Otoml.string_of_path [ "models"; runtime.binding.model_id ]
+           , "max-prompt-bytes"
+           , "the start-turn conversation seed" ))
   in
   match List.find_map (fun id -> Option.bind (runtime_by_id id) missing_ceiling) ids with
   | None -> Ok ()
-  | Some (runtime, key, what) ->
+  | Some (runtime, table_path, key, what) ->
     Error
       (Printf.sprintf
          "%s: Keeper-dispatch runtime %S has no positive %s; declare \
-          [%s.%s].%s before dispatch so %s has an explicit admission ceiling"
+          [%s].%s before dispatch so %s has an explicit admission ceiling"
          config_path
          runtime.id
          key
-         runtime.binding.provider_id
-         runtime.binding.model_id
+         table_path
          key
          what)
 ;;

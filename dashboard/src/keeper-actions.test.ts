@@ -523,6 +523,11 @@ describe('sendKeeperThreadMessage operation stream', () => {
       })
       opts.onEvent({ type: 'TOOL_CALL_START', toolCallId: 'tool-1', toolCallName: 'lookup' })
       opts.onEvent({ type: 'TOOL_CALL_END', toolCallId: 'tool-1' })
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_TOOL_RESULT_READY',
+        value: { tool_call_id: 'tool-1' },
+      })
       opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'done' })
       opts.onEvent({ type: 'RUN_FINISHED' })
       return { terminal: true }

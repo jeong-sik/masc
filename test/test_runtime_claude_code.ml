@@ -30,6 +30,7 @@ type fixture_step =
   | Emit_and_read of string
   | Emit_and_expect_request_id of string * string
   | Emit_after_closing_input of string
+  | Pause of float
 
 let fixture_script
       ?(auth_json = auth_subscription)
@@ -53,6 +54,8 @@ let fixture_script
     | Emit_after_closing_input line ->
       output_string output "exec 0<&-\n";
       output_string output ("emit " ^ shell_quote line ^ "\n")
+    | Pause seconds ->
+      output_string output (Printf.sprintf "sleep %.3f\n" seconds)
   in
   output_string output "#!/bin/sh\n";
   output_string output "set -eu\n";
@@ -115,12 +118,13 @@ let with_fixture ?auth_json ?before_initialize_response steps f =
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
-let run_fixture ?(dynamic_tools = []) ?session_mode path =
+let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
+    ?on_stream_event path =
   Eio_main.run (fun env ->
     let config =
       { (Runtime_claude_code.default_config ~cwd:"/tmp") with
         cli_path = path
-      ; timeout_s = 2.0
+      ; timeout_s
       }
     in
     Runtime_claude_code.run_turn
@@ -129,6 +133,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode path =
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
       ~dynamic_tools
       ?session_mode
+      ?on_stream_event
       config
       ~prompt:"Return the fixture marker")
 ;;
@@ -171,6 +176,25 @@ let test_subscription_turn_and_env_scrub () =
       check string "subscription" "team" turn.subscription.subscription_type;
       check bool "new session" false turn.resumed;
       check bool "no usage block yields none" true (Option.is_none turn.usage))
+;;
+
+let test_progress_resets_stream_idle_timeout () =
+  with_fixture
+    [ Emit assistant; Pause 0.4; Emit assistant; Pause 0.4; Emit result ]
+    (fun path ->
+       match run_fixture ~timeout_s:0.75 path with
+       | Ok turn ->
+         check string "progressing turn completes" "MASC_CLAUDE_OK" turn.text
+       | Error error -> fail (Runtime_claude_code.error_to_string error))
+;;
+
+let test_stream_idle_timeout_is_typed () =
+  with_fixture [ Pause 0.2; Emit assistant; Emit result ] (fun path ->
+    match run_fixture ~timeout_s:0.05 path with
+    | Error (Runtime_claude_code.Timeout seconds) ->
+      check (float 0.001) "exact idle timeout" 0.05 seconds
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "silent Claude stream ignored its idle timeout")
 ;;
 
 (* [dynamic_tool_bytes] measures what the tool declarations add to a request.
@@ -372,7 +396,7 @@ let test_post_effect_response_failure_requires_recovery () =
   let call_count = ref 0 in
   with_fixture
     [ Emit_and_read mcp_initialize
-    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_initialized_notification
     ; Emit_after_closing_input mcp_call
     ]
     (fun path ->
@@ -423,6 +447,52 @@ let test_dynamic_tool_callback () =
           "arguments"
           {|{"marker":"from-claude"}|}
           (Yojson.Safe.to_string !observed_input))
+;;
+
+let test_stream_events_preserve_text_and_tool_identity () =
+  let events = ref [] in
+  let tool : Runtime_claude_code.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "Return a fixture marker"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = true; content = "MASC_TOOL_RESULT" })
+    }
+  in
+  with_fixture
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit assistant
+    ; Emit_and_read mcp_call
+    ; Emit result
+    ]
+    (fun path ->
+      match
+        run_fixture
+          ~dynamic_tools:[ tool ]
+          ~on_stream_event:(fun event -> events := event :: !events)
+          path
+      with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ ->
+        match List.rev !events with
+        | [ Turn_started { turn_id = "assistant-fixture-1"; model = "claude-fixture" }
+          ; Text_delta "MASC_CLAUDE_OK"
+          ; Dynamic_tool_started
+              { call_id = "call-1"
+              ; tool_name = "masc_probe"
+              ; arguments
+              }
+          ; Dynamic_tool_finished { call_id = "call-1" }
+          ; Turn_finished { text = "MASC_CLAUDE_OK" }
+          ] ->
+          check string
+            "exact tool arguments"
+            {|{"marker":"from-claude"}|}
+            (Yojson.Safe.to_string arguments)
+        | _ -> fail "Claude stream events did not preserve wire order and identity")
 ;;
 
 (* This test used to assert the opposite: that an MCP notification draws no
@@ -876,6 +946,14 @@ let () =
             `Quick
             test_subscription_turn_and_env_scrub
         ; test_case
+            "progress resets stream idle timeout"
+            `Quick
+            test_progress_resets_stream_idle_timeout
+        ; test_case
+            "stream idle timeout is typed"
+            `Quick
+            test_stream_idle_timeout_is_typed
+        ; test_case
             "non-subscription rejected"
             `Quick
             test_non_subscription_auth_is_rejected
@@ -911,6 +989,10 @@ let () =
         ] )
     ; ( "mcp"
       , [ test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
+        ; test_case
+            "stream preserves text and tool identity"
+            `Quick
+            test_stream_events_preserve_text_and_tool_identity
         ; test_case
             "pre-admission tool call is rejected"
             `Quick

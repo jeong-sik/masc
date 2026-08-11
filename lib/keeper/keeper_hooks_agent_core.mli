@@ -167,11 +167,13 @@ val make_hooks :
                      success:bool ->
                      duration_ms:float -> provider:string ->
                      typed_outcome:Keeper_tool_outcome.t option -> unit) ->
+  ?on_tool_result_ready:(tool_call_id:string -> unit) ->
   ?trajectory_acc:Trajectory.accumulator ->
   unit -> Agent_core.Hooks.hooks
 (** Build the [Agent_core.Hooks.hooks] record used by the keeper turn loop:
     passive pre-tool timing, post-tool accounting, idle detection, and
-    trajectory hooks wired together. Cost remains part of post-turn
+    trajectory hooks wired together. [on_tool_result_ready] runs only after
+    the exact tool-call log row is synchronously committed. Cost remains part of post-turn
     observation. *)
 
 val hook_introspection_json : unit -> Yojson.Safe.t

@@ -541,7 +541,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
        (match
           Masc.Keeper_owner_registry.install_from_store
             ~sw
-            ~operation_executor:None
+            ~operation_runner:None
             config
         with
         | Ok _ -> ()
@@ -3045,7 +3045,7 @@ let prepare_config_sync_keeper ~sw config name =
   (match Masc.Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error error -> fail ("write meta: " ^ error));
-  match Masc.Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
+  match Masc.Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config with
   | Ok _ -> ()
   | Error error ->
     fail (Masc.Keeper_owner_registry.install_error_to_string error)

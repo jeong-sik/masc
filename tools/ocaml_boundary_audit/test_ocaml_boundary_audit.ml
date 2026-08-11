@@ -22,9 +22,9 @@ let test_semantic_calls_ignore_text () =
     {|
 let decode optional result =
   let _comment_like = "Option.get Result.get_ok" in
-  ignore (Option.get optional);
-  ignore (Result.get_ok result);
-  ignore (Result.to_option result);
+  let _ = Option.get optional in
+  let _ = Result.get_ok result in
+  let _ = Result.to_option result in
   Option.value optional ~default:0
 |}
   in

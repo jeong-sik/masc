@@ -181,6 +181,69 @@ let test_heavy_atoms_cut_below_the_count_threshold () =
   fits_budget ~capacity_bytes ~reserved_bytes projected
 ;;
 
+let test_next_shrink_capacity_clamps_to_lopsided_newest_atom () =
+  let pinned =
+    message
+      ~metadata:Types.Extra_system_context_provenance.metadata
+      ~role:Types.User
+      "pinned-context"
+  in
+  let oldest = padded ~role:Types.User ~tag:"oldest|" 400 in
+  let newest = padded ~role:Types.User ~tag:"newest|" 600 in
+  let history = [ pinned; oldest; newest ] in
+  let target_capacity_bytes = total_bytes history / 2 in
+  match
+    Window.next_shrink_capacity_bytes
+      ~measure_message_bytes
+      ~target_capacity_bytes
+      history
+  with
+  | None -> Alcotest.fail "two non-empty atoms must have a smaller boundary"
+  | Some capacity_bytes ->
+    Alcotest.(check bool)
+      "structural minimum clamps above the raw half target"
+      true
+      (capacity_bytes > target_capacity_bytes);
+    let projected =
+      ok_exn
+        ~what:"lopsided structural shrink"
+        (project ~capacity_bytes history)
+    in
+    Alcotest.(check int) "oldest atom was removed" 1 (count_atoms projected);
+    Alcotest.(check bool)
+      "pinned context survived"
+      true
+      (List.exists (fun message -> message == pinned) projected);
+    Alcotest.(check bool)
+      "newest atom survived"
+      true
+      (List.exists (fun message -> message == newest) projected);
+    Alcotest.(check bool)
+      "capacity includes the conservative preamble reserve"
+      true
+      (capacity_bytes > total_bytes projected);
+    fits_budget ~capacity_bytes ~reserved_bytes:0 projected
+;;
+
+let test_next_shrink_capacity_ignores_materialized_preamble () =
+  let preamble =
+    message
+      ~metadata:[ (Window.preamble_marker_key, `Bool true) ]
+      ~role:Types.User
+      "synthetic preamble"
+  in
+  let newest = padded ~role:Types.User ~tag:"newest|" 600 in
+  match
+    Window.next_shrink_capacity_bytes
+      ~measure_message_bytes
+      ~target_capacity_bytes:500
+      [ preamble; newest ]
+  with
+  | None -> ()
+  | Some _ ->
+    Alcotest.fail
+      "a materialized preamble must not create a retry boundary before the newest atom"
+;;
 let test_cut_is_quantized_when_a_quantized_cut_fits () =
   (* Cache stability (#26535): when some multiple of [k] fits, the drop count
      is that multiple, so the transmitted prefix only moves in whole
@@ -429,6 +492,14 @@ let () =
             test_cut_when_over_capacity
         ; Alcotest.test_case "heavy atoms cut below the count threshold" `Quick
             test_heavy_atoms_cut_below_the_count_threshold
+        ; Alcotest.test_case
+            "next shrink clamps to lopsided newest atom"
+            `Quick
+            test_next_shrink_capacity_clamps_to_lopsided_newest_atom
+        ; Alcotest.test_case
+            "next shrink ignores materialized preamble"
+            `Quick
+            test_next_shrink_capacity_ignores_materialized_preamble
         ; Alcotest.test_case "cut is quantized when a quantized cut fits" `Quick
             test_cut_is_quantized_when_a_quantized_cut_fits
         ; Alcotest.test_case "cut point is stable while the budget holds" `Quick

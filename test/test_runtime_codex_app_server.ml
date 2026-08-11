@@ -1160,7 +1160,7 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
     ?(initial_messages = []) ?base_path ?raw_trace_path
-    ?on_event
+    ?on_event ?(keeper_name = "codex-fixture")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model () =
   let owns_base_path = Option.is_none base_path in
@@ -1206,7 +1206,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                     in
                     Keeper_turn_driver.run_named
                       ~runtime_id:"codex.codex"
-                      ~keeper_name:"codex-fixture"
+                      ~keeper_name
                       ~base_path
                       ~goal
                       ~tools
@@ -1317,6 +1317,7 @@ let test_keeper_shrinks_history_after_typed_context_error () =
             match
               run_keeper_turn
                 ~initial_messages
+                ~keeper_name:"codex-fixture-same-size-shrink"
                 ~cli_path
                 ~model:"gpt-fixture"
                 ()
@@ -1355,6 +1356,102 @@ let test_keeper_shrinks_history_after_typed_context_error () =
          failf
            "expected two history injections, got counts=[%s]"
            (counts |> List.map string_of_int |> String.concat ","))
+;;
+
+let test_keeper_shrinks_lopsided_history_at_atom_boundary () =
+  let capture_path =
+    Filename.temp_file "masc-codex-lopsided-shrink-requests-" ".jsonl"
+  in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove capture_path)
+    (fun () ->
+       let injected = {|{"id":4,"result":{}}|} in
+       let turn_after_injection =
+         {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
+       in
+       let overflow =
+         {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
+       in
+       let oldest = String.make 400 'o' in
+       let newest = String.make 600 'n' in
+       let provider_capacity_bytes = 800 in
+       let initial_messages =
+         [ Agent_core.Types.user_msg oldest
+         ; Agent_core.Types.user_msg newest
+         ]
+       in
+       with_fixture_sequence
+         ~capture_path
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; injected
+         ; turn_after_injection
+         ; overflow
+         ]
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; injected
+         ; turn_after_injection
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~initial_messages
+                ~keeper_name:"codex-fixture-lopsided-shrink"
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok result ->
+              check
+                string
+                "Keeper response"
+                "MASC_SUBSCRIPTION_OK"
+                (keeper_response_text result));
+       let injected_item_texts =
+         In_channel.with_open_bin capture_path (fun input ->
+           In_channel.input_lines input
+           |> List.map Yojson.Safe.from_string
+           |> List.filter_map (fun request ->
+             if
+               Yojson.Safe.Util.member "method" request
+               = `String "thread/inject_items"
+             then
+               Some
+                 (request
+                  |> Yojson.Safe.Util.member "params"
+                  |> Yojson.Safe.Util.member "items"
+                  |> Yojson.Safe.Util.to_list
+                  |> List.map (fun item ->
+                    item
+                    |> Yojson.Safe.Util.member "content"
+                    |> Yojson.Safe.Util.to_list
+                    |> List.hd
+                    |> Yojson.Safe.Util.member "text"
+                    |> Yojson.Safe.Util.to_string))
+             else None))
+       in
+       match injected_item_texts with
+       | [ [ first_oldest; first_newest ]; [ retry_newest ] ] ->
+         check string "first attempt keeps oldest atom" oldest first_oldest;
+         check string "first attempt keeps newest atom" newest first_newest;
+         check string "retry keeps the indivisible newest atom" newest retry_newest;
+         check bool "rejected history exceeds the fixture provider cap" true
+           (String.length first_oldest + String.length first_newest
+            > provider_capacity_bytes);
+         check bool "atom-boundary retry fits the fixture provider cap" true
+           (String.length retry_newest <= provider_capacity_bytes)
+       | attempts ->
+         failf
+           "expected [400B+600B; 600B] history injections, got item counts=[%s]"
+           (attempts
+            |> List.map (fun items -> string_of_int (List.length items))
+            |> String.concat ","))
 ;;
 
 let test_keeper_dispatches_codex_turn_runtime () =
@@ -2886,6 +2983,10 @@ let () =
             "Keeper shrinks history after typed context error"
             `Quick
             test_keeper_shrinks_history_after_typed_context_error
+        ; test_case
+            "Keeper shrinks lopsided history at an atom boundary"
+            `Quick
+            test_keeper_shrinks_lopsided_history_at_atom_boundary
         ; test_case
             "Keeper projects Codex live stream"
             `Quick

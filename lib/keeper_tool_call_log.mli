@@ -160,6 +160,7 @@ val log_call :
   ?runtime_profile:string ->
   ?result_bytes:int ->
   ?truncated_to:int ->
+  ?on_committed:(unit -> unit) ->
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
@@ -170,7 +171,10 @@ val log_call :
     agent_core:tool_called/agent_core:tool_completed event rows also carry. Blank and
     repeated provider ids remain meaningful when scoped by [turn] and
     [planned_index], so they are persisted unchanged.
-    Output is truncated to 4000 bytes. [model] is a compatibility input only;
+    [on_committed], when supplied, forces this row through the synchronous
+    append boundary and runs only after that append succeeds. It is intended
+    for exact completion notifications whose readers must not race the
+    asynchronous log queue. Output is truncated to 4000 bytes. [model] is a compatibility input only;
     non-empty values are redacted to the neutral runtime lane. [runtime_profile]
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],
     [thinking_enabled], [thinking_budget]) capture the effective tool
@@ -227,4 +231,3 @@ val reset_for_testing : unit -> unit
 
 val queued_count_for_testing : unit -> int
 (** Number of queued asynchronous append records. For unit tests only. *)
-

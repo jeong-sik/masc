@@ -188,16 +188,93 @@ let test_final_message_blocks_merges_text_and_event_blocks () =
   check bool "event block preserved" true
     (contains second "https://event.example.com")
 
-let run_adapter ?set_activity_status events ~send_plain ~send_blocks =
+let run_adapter ?post_stream ?edit_stream ?edit_blocks ?delete_stream ?now ?sleep
+    ?set_activity_status events ~send_plain ~send_blocks =
   Eio_main.run @@ fun _env ->
   let stream = Masc.Keeper_chat_events.create () in
   List.iter (Masc.Keeper_chat_events.publish stream) events;
   let outcomes = ref [] in
   S.adapter_loop ~events:stream ~send_plain ~send_blocks
+    ?post_stream ?edit_stream ?edit_blocks ?delete_stream ?now ?sleep
     ?set_activity_status
     ~on_send_result:(fun result -> outcomes := result :: !outcomes)
     ();
   List.rev !outcomes
+
+let test_adapter_streams_one_edited_reply () =
+  let posts = ref [] in
+  let stream_edits = ref [] in
+  let final_edits = ref [] in
+  let clock = ref 0.0 in
+  let now () =
+    let current = !clock in
+    clock := current +. 4.0;
+    current
+  in
+  let outcomes =
+    run_adapter
+      ~now
+      ~post_stream:(fun ~content ->
+        posts := content :: !posts;
+        Ok "slack-message-1")
+      ~edit_stream:(fun ~message_id ~content ->
+        check string "stream message identity" "slack-message-1" message_id;
+        stream_edits := content :: !stream_edits;
+        Ok ())
+      ~edit_blocks:(fun ~message_id ~content ~blocks ->
+        check string "final message identity" "slack-message-1" message_id;
+        final_edits := (content, blocks) :: !final_edits;
+        Ok ())
+      ~delete_stream:(fun ~message_id:_ ->
+        fail "successful streaming reply must not be deleted")
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-stream"; thread_id = "thread-stream" }
+      ; Masc.Keeper_chat_events.Text_delta "hello "
+      ; Masc.Keeper_chat_events.Text_delta "world "
+      ; Masc.Keeper_chat_events.Text_message_end
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-stream" }
+      ]
+      ~send_plain:(fun ~content:_ -> fail "streaming success needs no side message")
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        fail "streaming success must finalize the accepted message")
+  in
+  check bool "terminal callback succeeds" true (outcomes = [ Ok () ]);
+  check (list string) "one initial Slack post" [ "hello " ] (List.rev !posts);
+  check (list string)
+    "rate-limited incremental edit"
+    [ "hello world " ]
+    (List.rev !stream_edits);
+  check int "unchanged terminal content skips duplicate edit" 0
+    (List.length !final_edits)
+;;
+
+let test_adapter_stream_error_edits_accepted_reply () =
+  let error_edits = ref [] in
+  let outcomes =
+    run_adapter
+      ~post_stream:(fun ~content:_ -> Ok "slack-message-error")
+      ~edit_stream:(fun ~message_id ~content ->
+        error_edits := (message_id, content) :: !error_edits;
+        Ok ())
+      ~edit_blocks:(fun ~message_id:_ ~content:_ ~blocks:_ ->
+        fail "failed run must not use the success finalizer")
+      ~delete_stream:(fun ~message_id:_ ->
+        fail "failed run must not delete its error reply")
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-error"; thread_id = "thread-error" }
+      ; Masc.Keeper_chat_events.Text_delta "partial "
+      ; Masc.Keeper_chat_events.Event_error { message = "tool failed" }
+      ]
+      ~send_plain:(fun ~content:_ ->
+        fail "streaming error must replace the accepted reply")
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        fail "streaming error must not create a second reply")
+  in
+  check bool "error callback succeeds" true (outcomes = [ Ok () ]);
+  check (list (pair string string)) "same reply becomes terminal error"
+    [ "slack-message-error", "Keeper error: tool failed" ]
+    (List.rev !error_edits)
+;;
 
 let test_adapter_terminal_success_once () =
   let sends = ref [] in
@@ -281,6 +358,62 @@ let test_completed_external_effect_settles_without_duplicate_send () =
   check int "completed effect makes no Slack call" 0 !sends;
   check bool "completed effect settles the receipt" true
     (outcomes = [ Ok () ])
+
+let test_completed_external_effect_deletes_streamed_draft () =
+  let deleted = ref [] in
+  let outcomes =
+    run_adapter
+      ~post_stream:(fun ~content:_ -> Ok "slack-draft")
+      ~edit_stream:(fun ~message_id:_ ~content:_ -> Ok ())
+      ~edit_blocks:(fun ~message_id:_ ~content:_ ~blocks:_ ->
+        fail "external effect must not finalize the streamed draft")
+      ~delete_stream:(fun ~message_id ->
+        deleted := message_id :: !deleted;
+        Ok ())
+      [ Masc.Keeper_chat_events.Text_delta "partial "
+      ; Masc.Keeper_chat_events.External_effect_completed
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-effect-draft" }
+      ]
+      ~send_plain:(fun ~content:_ -> fail "external effect needs no side message")
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        fail "external effect needs no final message")
+  in
+  check (list string) "streamed draft deleted once" [ "slack-draft" ]
+    (List.rev !deleted);
+  check bool "draft cleanup settles the receipt" true (outcomes = [ Ok () ])
+
+let test_terminal_edit_waits_for_slack_interval () =
+  let clock = ref 0.0 in
+  let sleeps = ref [] in
+  let edits = ref [] in
+  let outcomes =
+    run_adapter
+      ~now:(fun () -> !clock)
+      ~sleep:(fun seconds ->
+        sleeps := seconds :: !sleeps;
+        clock := !clock +. seconds)
+      ~post_stream:(fun ~content:_ -> Ok "slack-paced")
+      ~edit_stream:(fun ~message_id ~content ->
+        edits := (message_id, content) :: !edits;
+        Ok ())
+      ~edit_blocks:(fun ~message_id:_ ~content:_ ~blocks:_ ->
+        fail "unchanged terminal content must not be edited twice")
+      ~delete_stream:(fun ~message_id:_ ->
+        fail "successful streaming reply must not be deleted")
+      [ Masc.Keeper_chat_events.Text_delta "hello "
+      ; Masc.Keeper_chat_events.Text_delta "world"
+      ; Masc.Keeper_chat_events.Text_message_end
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-paced" }
+      ]
+      ~send_plain:(fun ~content:_ -> fail "streaming success needs no side message")
+      ~send_blocks:(fun ~content:_ ~blocks:_ ->
+        fail "streaming success must not create a second message")
+  in
+  check (list (float 0.0001)) "terminal edit sleeps for remaining interval"
+    [ 3.0 ] (List.rev !sleeps);
+  check (list (pair string string)) "terminal edit uses accepted message"
+    [ "slack-paced", "hello world" ] (List.rev !edits);
+  check bool "paced delivery settles successfully" true (outcomes = [ Ok () ])
 
 let test_adapter_external_effect_status_is_terminal_success () =
   let sends = ref [] in
@@ -417,12 +550,20 @@ let () =
     ; ( "terminal-receipt"
       , [ test_case "terminal success settles once" `Quick
             test_adapter_terminal_success_once
+        ; test_case "streams one edited reply" `Quick
+            test_adapter_streams_one_edited_reply
+        ; test_case "stream error edits accepted reply" `Quick
+            test_adapter_stream_error_edits_accepted_reply
         ; test_case "protocol diagnostic cannot mask final failure" `Quick
             test_protocol_diagnostic_cannot_mask_final_failure
         ; test_case "empty terminal is explicit failure" `Quick
             test_adapter_empty_terminal_is_error
         ; test_case "completed effect sends no duplicate reply" `Quick
             test_completed_external_effect_settles_without_duplicate_send
+        ; test_case "completed effect deletes streamed draft" `Quick
+            test_completed_external_effect_deletes_streamed_draft
+        ; test_case "terminal edit observes Slack interval" `Quick
+            test_terminal_edit_waits_for_slack_interval
         ; test_case "typed external-effect status settles successfully" `Quick
             test_adapter_external_effect_status_is_terminal_success
         ; test_case "native activity failure is isolated" `Quick

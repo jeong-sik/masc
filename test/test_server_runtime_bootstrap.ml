@@ -1524,7 +1524,7 @@ let test_health_json_observes_owner_turn () =
           (match
              Keeper_owner_registry.install_from_store
                ~sw
-               ~operation_executor:None
+               ~operation_runner:None
                config
            with
            | Ok _ -> ()
@@ -2895,7 +2895,7 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
           (match
              Keeper_owner_registry.install_from_store
                ~sw
-               ~operation_executor:None
+               ~operation_runner:None
                config
            with
            | Ok _ -> ()

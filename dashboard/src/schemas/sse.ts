@@ -344,6 +344,7 @@ function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseR
     KEEPER_STREAM_PROTOCOL_ERROR: ['kind', 'index', 'tool_call_id', 'event_type', 'reason', 'raw_bytes'],
     KEEPER_CONTINUATION_CHECKPOINT: ['message', 'request_id'],
     KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref'],
+    KEEPER_TOOL_RESULT_READY: ['tool_call_id'],
   }
   const object = exactCustomObject(payload, name, allowedFields[name] ?? [])
   if (!object.success) return object
@@ -372,6 +373,8 @@ function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseR
     }
     case 'KEEPER_CONTENT_BLOCK_STOP':
       return requiredInteger(value, 'index')
+    case 'KEEPER_TOOL_RESULT_READY':
+      return requiredString(value, 'tool_call_id')
     case 'KEEPER_THINKING_DELTA': {
       const index = requiredInteger(value, 'index')
       return index.success ? requiredString(value, 'delta') : index

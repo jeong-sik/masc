@@ -113,9 +113,78 @@ let provider_turn_identity ~conversation_id ~num_turns =
   Printf.sprintf "%s:ordinal:%d" conversation_id num_turns
 ;;
 
+type stream_projection =
+  { on_runtime_event : Runtime_antigravity.stream_event -> unit
+  ; on_tool_started :
+      call_id:string -> tool_name:string -> arguments:Yojson.Safe.t -> unit
+  ; on_tool_finished : call_id:string -> unit
+  }
+
+let stream_projection ~turn_count on_event =
+  match on_event with
+  | None ->
+    { on_runtime_event = ignore
+    ; on_tool_started = (fun ~call_id:_ ~tool_name:_ ~arguments:_ -> ())
+    ; on_tool_finished = (fun ~call_id:_ -> ())
+    }
+  | Some emit ->
+    let next_tool_index = ref 1 in
+    let tool_indexes = Hashtbl.create 8 in
+    let emit event =
+      try emit event with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Runtime_agent.warn
+          "Antigravity Keeper stream callback raised (error=%s)"
+          (Printexc.to_string exn)
+    in
+    { on_runtime_event =
+        (function
+          | Runtime_antigravity.Turn_started { conversation_id; model } ->
+            emit
+              (Agent_core.Types.MessageStart
+                 { id = provider_turn_identity ~conversation_id ~num_turns:turn_count
+                 ; model
+                 ; usage = None
+                 })
+          | Runtime_antigravity.Text_delta text ->
+            emit
+              (Agent_core.Types.ContentBlockDelta
+                 { index = 0; delta = Agent_core.Types.TextDelta text })
+          | Runtime_antigravity.Turn_finished { text = _ } ->
+            emit Agent_core.Types.MessageStop)
+    ; on_tool_started =
+        (fun ~call_id ~tool_name ~arguments ->
+          let index = !next_tool_index in
+          incr next_tool_index;
+          Hashtbl.replace tool_indexes call_id index;
+          emit
+            (Agent_core.Types.ContentBlockStart
+               { index
+               ; content_type = "tool_use"
+               ; tool_id = Some call_id
+               ; tool_name = Some tool_name
+               });
+          emit
+            (Agent_core.Types.ContentBlockDelta
+               { index
+               ; delta =
+                   Agent_core.Types.InputJsonSnapshot
+                     (Yojson.Safe.to_string arguments)
+               }))
+    ; on_tool_finished =
+        (fun ~call_id ->
+          Option.iter
+            (fun index ->
+               Hashtbl.remove tool_indexes call_id;
+               emit (Agent_core.Types.ContentBlockStop { index }))
+            (Hashtbl.find_opt tool_indexes call_id))
+    }
+;;
+
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
-    ~context_injector ~context ~event_bus ~raw_trace
+    ~context_injector ~context ~event_bus ~raw_trace ~on_event
     ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -240,7 +309,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       ; execution_mode = Plan
       ; sandbox = true
       ; disable_slash_commands = true
-      ; (* A per-model [turn-timeout-s] overrides the admission-time bound.
+      ; (* A per-model [turn-timeout-s] overrides the stream-idle bound.
            Absent, [config.timeout_s] stands, so a config that declares none
            behaves exactly as before. *)
         timeout_s =
@@ -345,6 +414,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     let process_mgr = Eio.Stdenv.process_mgr env in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let started_at = Time_compat.now () in
+    let stream = stream_projection ~turn_count on_event in
     let run_client () =
       let cleanup_error = ref None in
       let turn_result =
@@ -363,7 +433,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
               ~call_tool:(fun ~name ~call_id ~arguments ->
                 find_tool dynamic_tools name
                 |> Option.map (fun (tool : Host.dynamic_tool) ->
-                  tool.call ~call_id arguments |> tool_result))
+                  stream.on_tool_started ~call_id ~tool_name:name ~arguments;
+                  Fun.protect
+                    ~finally:(fun () -> stream.on_tool_finished ~call_id)
+                    (fun () -> tool.call ~call_id arguments |> tool_result)))
               ()
           in
           let* () =
@@ -397,6 +470,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                   ~expected
                   ~session_id:conversation_id
                   ~updated_at:(Time_compat.now ())))
+            ~on_stream_event:stream.on_runtime_event
             client_config
             ~prompt
           |> Result.map_error (fun error ->
@@ -589,7 +663,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~raw_trace ~config =
+    ~context ~event_bus ~raw_trace ~on_event ~config =
   Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
     run_without_lifecycle
       ~runtime_id
@@ -606,5 +680,6 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
       ~context
       ~event_bus
       ~raw_trace
+      ~on_event
       ~config)
 ;;

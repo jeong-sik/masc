@@ -607,7 +607,10 @@ function handleEvent(event: SSEEvent): void {
         operationId,
         event: event.ag_ui_event as unknown as KeeperChatStreamEvent,
       })
-      if (event.ag_ui_event.type === 'TOOL_CALL_END') {
+      if (
+        event.ag_ui_event.type === 'CUSTOM'
+        && event.ag_ui_event.name === 'KEEPER_TOOL_RESULT_READY'
+      ) {
         void import('./keeper-runtime')
           .then(mod => mod.hydrateKeeperToolOutputs(keeperName))
           .catch(err => {

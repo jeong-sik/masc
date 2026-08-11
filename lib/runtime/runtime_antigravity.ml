@@ -31,6 +31,15 @@ let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 8192
 let max_wire_line_bytes = 8 * 1024 * 1024
 
+(* [--print-timeout] is a wall-clock deadline owned by agy, not an idle
+   deadline. It ended a live turn after 9.45s despite an agent response, a
+   completed 4.25s tool, and a checkpoint inside a 10s window (agy 1.1.12,
+   2026-08-11). MASC owns liveness below by timing each JSONL read, so the CLI
+   deadline must be non-authoritative. This is Go's maximum time.Duration,
+   accepted by the installed CLI; it is finite and therefore keeps argv strict
+   without imposing a practical wall-clock ceiling. *)
+let cli_non_authoritative_timeout = "2562047h47m16.854775807s"
+
 let default_config ~cwd ~model =
   { cli_path = "agy"
   ; cwd
@@ -80,6 +89,26 @@ type turn_result =
   ; wall_duration_s : float
   }
 
+type stream_event =
+  | Turn_started of
+      { conversation_id : string
+      ; model : string
+      }
+  | Text_delta of string
+  | Turn_finished of { text : string }
+
+let emit_stream_event on_stream_event event =
+  match on_stream_event with
+  | None -> ()
+  | Some emit ->
+    (try emit event with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Runtime_agent.warn
+         "Antigravity stream callback raised (error=%s)"
+         (Printexc.to_string exn))
+;;
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -102,7 +131,7 @@ let error_to_string = function
   | State_callback_failed detail -> "Antigravity conversation state callback failed: " ^ detail
   | Turn_failed detail -> "Antigravity turn failed: " ^ detail
   | Process_exited detail -> "Antigravity CLI exited before completion: " ^ detail
-  | Timeout seconds -> Printf.sprintf "Antigravity turn timed out after %.3fs" seconds
+  | Timeout seconds -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
 ;;
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
@@ -443,10 +472,6 @@ let official_client_environment ?home_dir () =
   | Some home_dir -> Array.of_list (("HOME=" ^ home_dir) :: inherited)
 ;;
 
-let duration_argument seconds = Printf.sprintf "%.3fs" seconds
-
-let cli_timeout_s timeout_s = max 0.001 (timeout_s *. 0.95)
-
 let argv config ~conversation_mode =
   let base =
     [ config.cli_path
@@ -459,7 +484,7 @@ let argv config ~conversation_mode =
     ; "--add-dir"
     ; config.cwd
     ; "--print-timeout"
-    ; duration_argument (cli_timeout_s config.timeout_s)
+    ; cli_non_authoritative_timeout
     ]
   in
   let with_optional flag value values =
@@ -554,7 +579,8 @@ let verify_identity ~stage ~expected actual =
   | None | Some _ -> Ok ()
 ;;
 
-let apply_event (config : config) ~conversation_mode ~on_conversation_ready state = function
+let apply_event (config : config) ~conversation_mode ~on_conversation_ready
+    ~on_stream_event state = function
   | Init { conversation_id; model; cwd; permission_mode } ->
     let stage = "init event" in
     if Option.is_some state.init
@@ -587,6 +613,9 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready stat
         (match callback_result with
          | Error detail -> Error (State_callback_failed detail)
          | Ok () ->
+           emit_stream_event
+             on_stream_event
+             (Turn_started { conversation_id; model });
            Ok { state with init = Some (conversation_id, model, permission_mode) })
   | Step_update { conversation_id; state = step_state; step_type } ->
     let stage = "step_update event" in
@@ -615,7 +644,11 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready stat
        let* () = verify_identity ~stage ~expected:(Some expected) conversation_id in
        if Option.is_some state.result
        then protocol_error stage "received more than one result event"
-       else Ok { state with result = Some (status, response, error, num_turns, usage) })
+       else (
+         (match status with
+          | Success -> emit_stream_event on_stream_event (Text_delta response)
+          | Result_error -> ());
+         Ok { state with result = Some (status, response, error, num_turns, usage) }))
 ;;
 
 let status_to_string = function
@@ -624,7 +657,7 @@ let status_to_string = function
 ;;
 
 let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
-    ~on_conversation_ready =
+    ~on_conversation_ready ~on_stream_event =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -672,7 +705,10 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
     let state = ref initial_protocol_state in
     (try
        while true do
-         let line = Eio.Buf_read.line reader in
+         let line =
+           Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+             Eio.Buf_read.line reader)
+         in
          match parse_wire_line line with
          | Error error -> abort_with_runtime_error error
          | Ok event ->
@@ -681,6 +717,7 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
                 config
                 ~conversation_mode
                 ~on_conversation_ready
+                ~on_stream_event
                 !state
                 event
             with
@@ -693,6 +730,7 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
        signal_spawned_process proc stdin_w;
        process_settled := true;
        raise exn
+     | Eio.Time.Timeout -> abort_with_runtime_error (Timeout config.timeout_s)
      | Runtime_error _ as exn -> raise exn
      | exn ->
        abort_with_runtime_error
@@ -704,7 +742,8 @@ let run_spawned ?home_dir ~mgr ~clock ~cwd config ~conversation_mode ~prompt
 ;;
 
 let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
-    ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) config ~prompt =
+    ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) ?on_stream_event
+    config ~prompt =
   let* () =
     match home_dir with
     | None -> Ok ()
@@ -717,16 +756,16 @@ let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
   let run_result =
     try
       Ok
-        (Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
-           run_spawned
-             ?home_dir
-             ~mgr
-             ~clock
-             ~cwd
-             config
-             ~conversation_mode
-             ~prompt
-             ~on_conversation_ready))
+        (run_spawned
+           ?home_dir
+           ~mgr
+           ~clock
+           ~cwd
+           config
+           ~conversation_mode
+           ~prompt
+           ~on_conversation_ready
+           ~on_stream_event)
     with
     | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -744,6 +783,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ~mgr ~clock ~cwd
     Error (Turn_failed "successful result response has no deliverable content")
   | `Exited 0, Some (conversation_id, model, permission_mode),
     Some (Success, text, _, num_turns, usage) ->
+    emit_stream_event on_stream_event (Turn_finished { text });
     Ok
       { conversation_id
       ; model

@@ -722,6 +722,7 @@ let run_named
             ~context
             ~event_bus
             ~raw_trace
+            ~on_event
             ~config
         in
         let codex_result =
@@ -793,6 +794,7 @@ let run_named
             ~context
             ~event_bus
             ~raw_trace
+            ~on_event
             ~config
         in
         let run_antigravity_with_history () =
@@ -862,6 +864,7 @@ let run_named
             ~context
             ~event_bus
             ~raw_trace
+            ~on_event
             ~config
         in
         let claude_result =

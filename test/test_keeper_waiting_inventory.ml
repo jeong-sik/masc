@@ -51,7 +51,7 @@ let with_workspace f =
   Eio.Switch.on_release sw (fun () -> rm_rf dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
-  (match Keeper_owner_registry.install_from_store ~sw ~operation_executor:None config with
+  (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config with
    | Ok 0 -> ()
    | Ok count -> failf "expected empty owner inventory, got %d owners" count
    | Error error ->

@@ -997,6 +997,8 @@ export async function sendKeeperThreadMessage(
         persistTrackedOperationAssistantDraft(keeperName, requestId, assistantId)
         if (event.type === 'TOOL_CALL_END') {
           toolCallEnded = true
+        }
+        if (event.type === 'CUSTOM' && event.name === 'KEEPER_TOOL_RESULT_READY') {
           void hydrateKeeperToolOutputs(keeperName)
         }
       },

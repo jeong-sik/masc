@@ -426,7 +426,7 @@ let handle_tool_execute_typed
                   meta.name
                   (Printexc.to_string exn))
           in
-          let dispatch_result =
+          let dispatch () =
             Keeper_tooling.Execute_shell_ir.dispatch
               ~workdir:cwd
               ~sandbox:dispatch_sandbox
@@ -434,6 +434,14 @@ let handle_tool_execute_typed
               ?base_host_env
               ~on_output_chunk
               ir
+          in
+          let dispatch_result =
+            match dispatch_sandbox with
+            | Masc_exec.Sandbox_target.Host ->
+              Keeper_external_resource_lease.with_lease
+                (Keeper_external_resource_lease.Host_cwd cwd)
+                dispatch
+            | Docker _ -> dispatch ()
           in
           match dispatch_result with
           | Error (Keeper_tooling.Execute_shell_ir.Gate_reject diagnostic) ->

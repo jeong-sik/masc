@@ -409,6 +409,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | Tool_call_args _
     | Tool_call_args_snapshot _
     | Tool_call_end _
+    | Tool_result_ready _
     | Tool_context_block _ -> continue ()
     | Link_block { url; title; description; image } ->
         send_link_block ?clock ~token ~channel_id ~url ~title ~description ~image ();

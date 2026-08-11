@@ -278,6 +278,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       in
       let observed_trace_ref = ref None in
       let observed_initial_prompt = ref None in
+      let stream_events = ref [] in
       let cli_path = fixture_script ~base_path in
       let runtime_path = Filename.concat base_path "runtime.toml" in
       write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
@@ -352,6 +353,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~initial_messages:large_history
                       ~context:(Agent_core.Context.create ())
                       ~raw_trace
+                      ~on_event:(fun event -> stream_events := event :: !stream_events)
                       ~sw
                       ~net:(Eio.Stdenv.net env)
                       ()
@@ -365,6 +367,34 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       "MASC_ANTIGRAVITY_KEEPER_OK"
                       (keeper_response_text turn);
                     check int "turn count" 1 turn.turns;
+                    (match List.rev !stream_events with
+                     | [ Agent_core.Types.MessageStart
+                           { id = "conversation-antigravity-fixture:ordinal:1"
+                           ; model = "gemini-fixture"
+                           ; usage = None
+                           }
+                       ; ContentBlockStart
+                           { index = 1
+                           ; content_type = "tool_use"
+                           ; tool_id = Some "call-1"
+                           ; tool_name = Some "masc_probe"
+                           }
+                       ; ContentBlockDelta
+                           { index = 1
+                           ; delta = InputJsonSnapshot arguments
+                           }
+                       ; ContentBlockStop { index = 1 }
+                       ; ContentBlockDelta
+                           { index = 0
+                           ; delta = TextDelta "MASC_ANTIGRAVITY_KEEPER_OK"
+                           }
+                       ; MessageStop
+                       ] ->
+                       check string
+                         "streamed tool arguments"
+                         {|{"marker":"from-antigravity"}|}
+                         arguments
+                     | _ -> fail "Keeper did not project the exact Antigravity stream");
                     observed_initial_prompt :=
                       Some
                         (In_channel.with_open_bin

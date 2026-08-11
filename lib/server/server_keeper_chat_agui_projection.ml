@@ -19,6 +19,7 @@ type custom_event_name =
   | Continuation_checkpoint
   | External_effect_completed
   | Reply_details
+  | Tool_result_ready
 
 let initial =
   { thread_id = Ag_ui.default_thread_id
@@ -51,6 +52,7 @@ let custom_event_name_to_string = function
   | Continuation_checkpoint -> "KEEPER_CONTINUATION_CHECKPOINT"
   | External_effect_completed -> "KEEPER_EXTERNAL_EFFECT_COMPLETED"
   | Reply_details -> "KEEPER_REPLY_DETAILS"
+  | Tool_result_ready -> "KEEPER_TOOL_RESULT_READY"
 
 let custom ~timestamp ~redact_json state name value =
   Ag_ui.make_event ~timestamp ~thread_id:state.thread_id ~run_id:state.run_id
@@ -197,6 +199,11 @@ let project ~timestamp ~redact_text ~redact_json state event =
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
              ~run_id:state.run_id ~tool_call_id:(Some tool_call_id)
              Ag_ui.Tool_call_end) )
+  | Tool_result_ready { tool_call_id } ->
+      ( state
+      , Some
+          (custom ~timestamp ~redact_json state Tool_result_ready
+             (`Assoc [ "tool_call_id", `String tool_call_id ])) )
   | Link_block _
   | Image_block _
   | Status_block _

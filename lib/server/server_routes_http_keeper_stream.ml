@@ -596,6 +596,7 @@ let execute_keeper_stream_tool_streaming
       ~clock
       ?auth_token:_
       ?on_event
+      ?on_tool_result_ready
       ~admission_token
       state
       ~agent_name
@@ -625,6 +626,7 @@ let execute_keeper_stream_tool_streaming
           ~admission_token
           ~on_text_delta
           ?on_event
+          ?on_tool_result_ready
           keeper_ctx
           ~continuation_channel
           ~message
@@ -881,6 +883,7 @@ let keeper_request_terminal_status_is_routine = function
 
 type keeper_stream_worker_event =
   | Stream_event of Agent_core.Types.sse_event
+  | Stream_chat_event of Keeper_chat_events.keeper_chat_event
   | Stream_client_disconnected
   | Stream_terminal of
       { status : keeper_stream_terminal_status
@@ -1066,7 +1069,7 @@ let process_single_turn ~user_row_origin ~submission
       Atomic.set client_disconnected true;
       let (_ : bool) = Eio.Promise.try_resolve client_disconnect_resolver () in
       ()
-    | Stream_event stream_event ->
+    | (Stream_event _ | Stream_chat_event _) as event ->
         if !closed
         then observe_stream_event_cutoff "writer_closed"
         else if Atomic.get terminal_pushed
@@ -1082,7 +1085,7 @@ let process_single_turn ~user_row_origin ~submission
                 | `Terminal, _ | _, `Terminal -> `Terminal
                 | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
               (fun () ->
-                 Eio.Stream.add worker_events stream_event;
+                 Eio.Stream.add worker_events event;
                  `Added)
               await_projection_cutoff
           with
@@ -1217,6 +1220,10 @@ let process_single_turn ~user_row_origin ~submission
     Keeper_stream_tool_accum.on_event worker_tool_accum evt;
     push_worker_event (Stream_event evt)
   in
+  let on_tool_result_ready ~tool_call_id =
+    push_worker_event
+      (Stream_chat_event (Keeper_chat_events.Tool_result_ready { tool_call_id }))
+  in
   let accumulated_media_blocks () =
     match
       Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
@@ -1304,6 +1311,7 @@ let process_single_turn ~user_row_origin ~submission
                 ~clock
                 ?auth_token
                 state ~agent_name ~message:direct_message ~on_event
+                ~on_tool_result_ready
                 ~continuation_channel ~on_text_delta:(fun _ -> ())
                 ~admission_token
             in
@@ -1674,17 +1682,17 @@ let process_single_turn ~user_row_origin ~submission
     then `Client_disconnected
     else (
       match Eio.Stream.take_nonblocking worker_events with
-      | Some event -> `Stream_event event
+      | Some event -> `Worker_event event
       | None ->
         Eio.Fiber.first
           ~combine:(fun left right ->
             match left, right with
-            | `Stream_event _, _ -> left
-            | _, `Stream_event _ -> right
+            | `Worker_event _, _ -> left
+            | _, `Worker_event _ -> right
             | `Completion _, _ -> left
             | _, `Completion _ -> right
             | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
-          (fun () -> `Stream_event (Eio.Stream.take worker_events))
+          (fun () -> `Worker_event (Eio.Stream.take worker_events))
           (fun () ->
              let completion_or_disconnect =
                Eio.Fiber.first
@@ -1702,19 +1710,24 @@ let process_single_turn ~user_row_origin ~submission
              (completion_or_disconnect
               :> [ `Client_disconnected
                   | `Completion of keeper_stream_completion
-                  | `Stream_event of Agent_core.Types.sse_event
+                  | `Worker_event of keeper_stream_worker_event
                   ])))
   in
   let rec consume_worker_events bridge_state =
     match next_worker_projection () with
     | `Client_disconnected -> None
-    | `Stream_event evt ->
+    | `Worker_event (Stream_event evt) ->
         let translated =
           translate_agent_core_stream_event ~redact_text
             ~base_dir:base_path bridge_state evt
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
+    | `Worker_event (Stream_chat_event event) ->
+        Keeper_chat_events.publish events event;
+        consume_worker_events bridge_state
+    | `Worker_event (Stream_terminal _ | Stream_client_disconnected) ->
+        assert false
     | `Completion
         (Completion_terminal
         { status = Stream_cancelled
@@ -2026,6 +2039,18 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
     Keeper_turn_dispatch_authority.run execute_admitted
   with
   | execution -> execution
+;;
+
+let operation_runner ~state ~clock : Keeper_owner.operation_runner =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  { ready =
+      (fun ~keeper_name ->
+         match Keeper_registry.get_with_health ~base_path keeper_name with
+         | Some (_, Keeper_registry.Healthy) -> true
+         | Some (_, _)
+         | None -> false)
+  ; execute = operation_executor ~state ~clock
+  }
 ;;
 
 let keeper_chat_stream_headers origin =

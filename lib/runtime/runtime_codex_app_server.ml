@@ -67,6 +67,31 @@ type dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+type stream_event =
+  | Turn_started of
+      { turn_id : string
+      ; model : string
+      }
+  | Text_delta of string
+  | Dynamic_tool_started of
+      { call_id : string
+      ; tool_name : string
+      ; arguments : Yojson.Safe.t
+      }
+  | Dynamic_tool_finished of { call_id : string }
+  | Turn_finished of { text : string }
+
+let emit_stream_event on_stream_event event =
+  match on_stream_event with
+  | None -> ()
+  | Some callback ->
+    (try callback event with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Runtime_agent.warn
+         "Codex app-server stream callback raised: %s"
+         (Printexc.to_string exn))
+
 type history_role =
   | User
   | Assistant
@@ -135,7 +160,7 @@ let error_to_string = function
   | Turn_interrupted -> "Codex app-server turn was interrupted"
   | Process_exited detail -> "Codex app-server exited before completion: " ^ detail
   | Timeout seconds ->
-    Printf.sprintf "Codex app-server turn timed out after %.3fs" seconds
+    Printf.sprintf "Codex app-server stream was idle for %.3fs" seconds
 ;;
 
 let error_kind = function
@@ -351,7 +376,8 @@ let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
        ])
 ;;
 
-let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~id params =
+let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
+    ~on_stream_event ~id params =
   let stage = "item/tool/call" in
   let* fields = assoc_at stage params in
   let* request_thread_id = required_string stage "threadId" fields in
@@ -368,6 +394,9 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~id 
     match find_dynamic_tool tools tool_name with
     | None -> protocol_error stage (Printf.sprintf "unknown dynamic tool %S" tool_name)
     | Some tool ->
+      emit_stream_event
+        on_stream_event
+        (Dynamic_tool_started { call_id; tool_name; arguments });
       let result =
         try tool.call ~call_id arguments with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -379,6 +408,7 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~id 
           { success = false; content = "dynamic tool handler raised" }
       in
       incr tool_call_count;
+      emit_stream_event on_stream_event (Dynamic_tool_finished { call_id });
       send_dynamic_tool_response io ~id result;
       Ok ()
 ;;
@@ -582,31 +612,31 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
    awaiting. threadId, turnId and itemId are identifiers, so emptiness in one
    of them is malformed and stays rejected.
 
-   delta carries stream payload this function never reads, and an empty or
-   whitespace chunk is ordinary in a streaming protocol. Requiring it to be
+   delta carries stream payload forwarded to the turn's typed stream callback,
+   and an empty or whitespace chunk is ordinary in a streaming protocol. Requiring it to be
    non-empty turned such a chunk into a terminal protocol error, which put the
    official-client session into Recovery_required and made every later turn for
    that keeper fail closed on `official_client_session.claim` until an operator
    resolved it by hand. Three such chunks accounted for 3,236 rejected turns
    across sangsu, kidsnote and taskmaster in one retained log window (#27967). *)
-let validate_item_delta_notification ~method_ ~thread_id ~turn_id params =
+let item_delta_notification ~method_ ~thread_id ~turn_id params =
   let* fields = assoc_at method_ params in
   let* notification_thread_id = required_string method_ "threadId" fields in
   let* notification_turn_id = required_string method_ "turnId" fields in
   (* [delta] stays required: its presence is what makes this frame an item
      delta, and the identity check below is only meaningful on one. Its
-     *content* is not checked -- #27967 rejected empty chunks a provider
+     *content* is forwarded without non-empty validation -- #27967 rejected empty chunks a provider
      legitimately sends. [itemId] carries neither role. Nothing here reads it,
      so a frame that omits it or sends it empty changes nothing this function
      decides, while requiring it adds one more way to end a turn (#28010). *)
-  let* _delta = required_string_any method_ "delta" fields in
+  let* delta = required_string_any method_ "delta" fields in
   if notification_thread_id <> thread_id || notification_turn_id <> turn_id
   then protocol_error method_ "item delta identity does not match the active turn"
-  else Ok ()
+  else Ok delta
 ;;
 
 let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
-    ~seen_fallback =
+    ~seen_fallback ~on_stream_event =
   let* message = io.receive () in
   match message with
   | Response _ | Response_error _ ->
@@ -619,6 +649,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~thread_id
         ~turn_id
         ~tool_call_count
+        ~on_stream_event
         ~id
         params
     in
@@ -630,6 +661,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
+      ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
@@ -641,9 +673,10 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
            | "item/plan/delta" ) as method_)
       ; params
       } ->
-    let* () =
-      validate_item_delta_notification ~method_ ~thread_id ~turn_id params
+    let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params
     in
+    if String.equal method_ "item/agentMessage/delta"
+    then emit_stream_event on_stream_event (Text_delta delta);
     await_turn_terminal
       io
       ~tools
@@ -652,6 +685,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
+      ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
     let* fields = assoc_at stage params in
@@ -676,14 +710,15 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~turn_id
         ~seen_final
         ~seen_fallback
+        ~on_stream_event
   | Notification { method_ = "error"; params } ->
     (* willRetry:true is a progress signal — the app-server itself is retrying
        upstream, so the turn is alive. Counting these and failing the turn at a
        cap preempted the declared liveness boundary below and, under one
        upstream degradation window, drove three keepers into
-       Recovery_required twice in two hours. The enclosing turn timeout
-       remains the only liveness boundary; willRetry:false still carries the
-       provider's terminal error. *)
+       Recovery_required twice in two hours. The per-message stream idle
+       timeout remains the only liveness boundary; willRetry:false still
+       carries the provider's terminal error. *)
     let stage = "error notification" in
     let* fields = assoc_at stage params in
     let* will_retry = required_bool stage "willRetry" fields in
@@ -697,6 +732,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~turn_id
         ~seen_final
         ~seen_fallback
+        ~on_stream_event
     else
       let* error_json = required_member stage "error" fields in
       let* error_fields = assoc_at stage error_json in
@@ -715,8 +751,8 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~tool_effect_attempted:(!tool_call_count > 0)
       params
   (* App-server progress and account notifications are observational. Protocol
-     evolution must not turn them into a computation failure; the enclosing
-     turn timeout remains the liveness boundary. *)
+     evolution must not turn them into a computation failure; each valid wire
+     message resets the stream-idle liveness boundary. *)
   | Notification _ ->
     await_turn_terminal
       io
@@ -726,6 +762,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~turn_id
       ~seen_final
       ~seen_fallback
+      ~on_stream_event
 ;;
 
 let optional_field name = function
@@ -762,8 +799,9 @@ let invoke_state_callback ~stage callback =
   | exn -> protocol_error stage (Printexc.to_string exn)
 ;;
 
-let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_effort ~thread_mode
-    ~history ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_started =
+let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_effort
+    ~thread_mode ~history ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_started
+    ~on_stream_event =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
       (`Assoc
@@ -866,6 +904,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
     invoke_state_callback ~stage:"turn started callback" (fun () ->
       on_turn_started ~thread_id ~turn_id)
   in
+  emit_stream_event on_stream_event (Turn_started { turn_id; model });
   let tool_call_count = ref 0 in
   let* text =
     await_turn_terminal
@@ -876,7 +915,9 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       ~turn_id
       ~seen_final:None
       ~seen_fallback:None
+      ~on_stream_event
   in
+  emit_stream_event on_stream_event (Turn_finished { text });
   Ok
     { thread_id
     ; turn_id
@@ -995,14 +1036,20 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let send json =
-      Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
-      Eio.Flow.copy_string "\n" stdin_w
+      Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+        Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
+        Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
-      try parse_wire_line (Eio.Buf_read.line reader) with
+      try
+        Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+          Eio.Buf_read.line reader)
+        |> parse_wire_line
+      with
       | End_of_file ->
         let detail = String.trim !stderr_tail in
         Error (Process_exited (if detail = "" then "stdout closed" else detail))
+      | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
@@ -1012,14 +1059,12 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
        preserves cleanup across fiber cancellation. *)
     Fun.protect
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
-      (fun () ->
-        Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
-          run { send; receive })))
+      (fun () -> run { send; receive }))
 ;;
 
 let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
     ~reasoning_effort ~thread_mode ~history ~prompt ~on_thread_ready
-    ~on_turn_starting ~on_turn_started =
+    ~on_turn_starting ~on_turn_started ~on_stream_event =
   with_spawned_client ~mgr ~clock ~cwd config (fun io ->
     run_protocol
       io
@@ -1032,7 +1077,8 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
       ~prompt
       ~on_thread_ready
       ~on_turn_starting
-      ~on_turn_started)
+      ~on_turn_started
+      ~on_stream_event)
 ;;
 
 let native_cwd cwd =
@@ -1117,7 +1163,8 @@ let probe_subscription ~mgr ~clock ~cwd config =
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
     ?(history = []) ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
     ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
-    ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) config ~prompt =
+    ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event
+    config ~prompt =
   let result =
     match validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt with
     | Error _ as error -> error
@@ -1138,6 +1185,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
            ~on_thread_ready
            ~on_turn_starting
            ~on_turn_started
+           ~on_stream_event
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | Eio.Time.Timeout -> Error (Timeout config.timeout_s)

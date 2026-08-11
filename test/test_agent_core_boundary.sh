@@ -19,6 +19,11 @@ EOF
 
 AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null
 
+printf 'type event = Operator_requested | Operator_repair_required | Server_error\n' \
+  > "${fixture}/lib/allowed_constructors.ml"
+AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null
+rm "${fixture}/lib/allowed_constructors.ml"
+
 cp "${fixture}/lib/dune" "${fixture}/lib/dune.safe"
 printf '\n(rule (action (echo "documentation; still a string"))) (library (name bad) (libraries masc.keeper))\n' >> "${fixture}/lib/dune"
 if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then

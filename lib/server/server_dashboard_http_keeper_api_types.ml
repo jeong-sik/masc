@@ -143,6 +143,8 @@ let keeper_path_ends_with req_path suffix =
   && String.starts_with ~prefix:keeper_api_prefix req_path
   && String.ends_with ~suffix req_path
 
+let is_valid_keeper_name = Keeper_config.validate_name
+
 let extract_keeper_name_for_suffix req_path suffix =
   let plen = String.length keeper_api_prefix in
   let slen = String.length suffix in
@@ -150,17 +152,7 @@ let extract_keeper_name_for_suffix req_path suffix =
     String.trim
       (String.sub req_path plen (String.length req_path - plen - slen))
   in
-  let valid =
-    String.length raw > 0
-    && String.length raw <= 128
-    && String.to_seq raw
-       |> Seq.for_all (fun c ->
-            (c >= 'a' && c <= 'z')
-            || (c >= 'A' && c <= 'Z')
-            || (c >= '0' && c <= '9')
-            || c = '_' || c = '-')
-  in
-  if valid then raw else ""
+  if is_valid_keeper_name raw then raw else ""
 
 let is_keeper_checkpoints_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_checkpoints
@@ -200,16 +192,6 @@ let latest_preview_of_messages (messages : Agent_core.Types.message list) =
          Agent_core.Types.text_of_message message
          |> trim_to_opt
          |> Option.map (truncate_text ~max_chars:180))
-
-let is_valid_keeper_name name =
-  String.length name > 0
-  && String.length name <= 128
-  && String.to_seq name
-     |> Seq.for_all (fun c ->
-          (c >= 'a' && c <= 'z')
-          || (c >= 'A' && c <= 'Z')
-          || (c >= '0' && c <= '9')
-          || c = '_' || c = '-')
 
 let extract_keeper_name_for_post req_path suffix =
   let plen = String.length keeper_api_prefix in

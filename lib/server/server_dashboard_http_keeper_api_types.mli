@@ -116,7 +116,7 @@ val latest_preview_of_messages :
 (** {1 Keeper name validation} *)
 
 val is_valid_keeper_name : String.t -> bool
-(** [true] when [name] passes the shared keeper-name character class. *)
+(** [true] when [name] passes {!Keeper_config.validate_name}. *)
 
 val extract_keeper_name_for_post : string -> string -> string
 (** [extract_keeper_name_for_post path suffix]: variant used by the

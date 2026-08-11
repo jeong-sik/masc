@@ -124,6 +124,28 @@ let test_keeper_post_route_classifies_catchup_judge () =
     (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path
        Server_dashboard_http_keeper_api.keeper_suffix_catchup_judge)
 
+let test_keeper_name_extractors_use_shared_grammar () =
+  let keeper_name = "release.bot" in
+  check bool "dotted keeper name is valid" true
+    (Server_dashboard_http_keeper_api.is_valid_keeper_name keeper_name);
+  List.iter
+    (fun suffix ->
+       let path = "/api/v1/keepers/" ^ keeper_name ^ suffix in
+       check string (suffix ^ " suffix extraction") keeper_name
+         (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path suffix);
+       check string (suffix ^ " POST extraction") keeper_name
+         (Server_dashboard_http_keeper_api.extract_keeper_name_for_post path suffix))
+    [ Server_dashboard_http_keeper_api.keeper_suffix_github_identity
+    ; Server_dashboard_http_keeper_api.keeper_suffix_github_login
+    ];
+  List.iter
+    (fun reserved ->
+       let suffix = Server_dashboard_http_keeper_api.keeper_suffix_github_login in
+       let path = "/api/v1/keepers/" ^ reserved ^ suffix in
+       check string (reserved ^ " remains reserved") ""
+         (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path suffix))
+    [ "."; ".." ]
+
 let test_keeper_paused_work_route_is_admin_exact () =
   let path = "/api/v1/keepers/idealist/paused-work" in
   check bool
@@ -3466,6 +3488,8 @@ let () =
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
           test_case "keeper catch-up judge route is classified" `Quick
             test_keeper_post_route_classifies_catchup_judge;
+          test_case "keeper path extraction uses shared name grammar" `Quick
+            test_keeper_name_extractors_use_shared_grammar;
           test_case "keeper paused-work route is exact" `Quick
             test_keeper_paused_work_route_is_admin_exact;
           test_case "keeper sensitive GET permissions are exact" `Quick

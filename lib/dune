@@ -2,6 +2,9 @@
 (library
  (name masc)
  (flags :standard)
+ (modules
+  (:standard
+   keeper_github_identity))
  (public_name masc)
  (private_modules
   keeper_fs_durable_directory)

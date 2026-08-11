@@ -125,8 +125,8 @@ let execution_actor_for_request ~base_path request =
 
 (* Wire operator broadcast refs now that Sse is in scope. *)
 let () =
-  operator_snapshot_broadcast_ref
-  := (fun
+  set_operator_snapshot_broadcaster
+    (fun
        (publication :
          Server_dashboard_http_core_operator.operator_snapshot_publication)
      ->
@@ -157,11 +157,12 @@ let () =
            ~generation
        with
        | None -> ()
-       | Some publication -> !operator_snapshot_broadcast_ref publication)
+       | Some publication -> broadcast_operator_snapshot publication)
 ;;
 
 let () =
-  operator_digest_broadcast_ref := broadcast_cached_surface ~event_type:"operator_digest"
+  set_operator_digest_broadcaster
+    (broadcast_cached_surface ~event_type:"operator_digest")
 ;;
 
 let execution_cache : cached_surface =

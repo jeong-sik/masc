@@ -19,8 +19,17 @@ val emit_message_activity : Workspace_utils_backend_setup.config ->
            ?worker_run_id:string ->
            ?evidence_refs:string list -> unit -> unit
 val broadcast_channel : Workspace_utils_backend_setup.config -> string
-val on_broadcast_mention : (string option -> unit) ref
+
+(** Atomically replace the process-wide mention notification handler. *)
+val set_on_broadcast_mention : (string option -> unit) -> unit
+
 val broadcast : ?trace_context:string ->
            ?msg_type:string ->
            Workspace_utils_backend_setup.config ->
            from_agent:string -> content:string -> broadcast_delivery
+
+module For_testing : sig
+  (** Replace the handler and return the prior one. Test isolation only. *)
+  val replace_on_broadcast_mention :
+    (string option -> unit) -> string option -> unit
+end

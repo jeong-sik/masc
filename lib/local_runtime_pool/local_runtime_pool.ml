@@ -66,12 +66,12 @@ let empty_pool = {
   measured_ceiling = None;
 }
 
-let pool : pool_state ref = ref empty_pool
-let pool_mu = Eio.Mutex.create ()
+let pool : pool_state Atomic.t = Atomic.make empty_pool
+let pool_mu = Stdlib.Mutex.create ()
 
-let with_pool_lock f = Eio_guard.with_mutex pool_mu f
+let with_pool_lock f = Stdlib.Mutex.protect pool_mu f
 
-let reset () = with_pool_lock (fun () -> pool := empty_pool)
+let reset () = with_pool_lock (fun () -> Atomic.set pool empty_pool)
 
 let parse_int_opt raw =
   int_of_string_opt ((String.trim raw))
@@ -224,8 +224,8 @@ let load_runtimes_from_env () =
       if runtimes = [] then ([ default_runtime () ], []) else (runtimes, [])
 
 (* ensure_loaded: the only function that may yield (debug_log calls Log.LocalWorker.debug).
-   Yield happens AFTER the ref swap, so callers reading !pool after this
-   function returns see a consistent snapshot.
+   Yield happens AFTER the atomic swap, so later callers see a consistent
+   snapshot.
 
    The [load_runtimes_from_env] call and the fingerprint paired with it
    must be captured atomically: both functions read environment
@@ -240,7 +240,8 @@ let load_runtimes_from_env () =
 let ensure_loaded () =
   let fingerprint = current_fingerprint () in
   let needs_reload =
-    with_pool_lock (fun () -> not (String.equal fingerprint (!pool).fingerprint))
+    with_pool_lock (fun () ->
+      not (String.equal fingerprint (Atomic.get pool).fingerprint))
   in
   if needs_reload then begin
     let loaded, errors = load_runtimes_from_env () in
@@ -249,9 +250,10 @@ let ensure_loaded () =
       let refreshed = List.map refresh_runtime_metrics loaded in
       let reloaded =
         with_pool_lock (fun () ->
-          let state = !pool in
+          let state = Atomic.get pool in
           if not (String.equal fingerprint state.fingerprint) then begin
-            pool := { state with runtimes = refreshed; fingerprint; parse_errors = errors };
+            Atomic.set pool
+              { state with runtimes = refreshed; fingerprint; parse_errors = errors };
             true
           end else
             false)
@@ -267,18 +269,19 @@ let ensure_loaded () =
         fingerprint loaded_fingerprint
   end else begin
     with_pool_lock (fun () ->
-      let state = !pool in
+      let state = Atomic.get pool in
       let refreshed = List.map refresh_runtime_metrics state.runtimes in
-      pool := { state with runtimes = refreshed })
+      Atomic.set pool { state with runtimes = refreshed })
   end
 
 let parse_errors () =
   ensure_loaded ();
-  with_pool_lock (fun () -> (!pool).parse_errors)
+  with_pool_lock (fun () -> (Atomic.get pool).parse_errors)
 
 let snapshots () =
   ensure_loaded ();
-  with_pool_lock (fun () -> List.map runtime_to_snapshot (!pool).runtimes)
+  with_pool_lock (fun () ->
+    List.map runtime_to_snapshot (Atomic.get pool).runtimes)
 
 let configured_capacity () =
   snapshots ()
@@ -301,18 +304,26 @@ let allocated_slots () =
        (fun acc (runtime : runtime_snapshot) -> acc + runtime.active_slots)
        0
 
-let measured_ceiling () = with_pool_lock (fun () -> (!pool).measured_ceiling)
+let measured_ceiling () =
+  with_pool_lock (fun () -> (Atomic.get pool).measured_ceiling)
 
 let record_measured_ceiling value =
   with_pool_lock (fun () ->
-    let state = !pool in
+    let state = Atomic.get pool in
     let bounded = max 0 value in
     let new_ceiling =
       match state.measured_ceiling with
       | Some current -> Some (max current bounded)
       | None -> Some bounded
     in
-    pool := { state with measured_ceiling = new_ceiling })
+    Atomic.set pool { state with measured_ceiling = new_ceiling })
+
+module For_testing = struct
+  let install_pool runtimes =
+    let fingerprint = current_fingerprint () in
+    with_pool_lock (fun () ->
+      Atomic.set pool { empty_pool with runtimes; fingerprint })
+end
 
 (* [acquire] / [release] / [model_label_of_assignment] removed 2026-05-05 —
    zero production callers; see [docs/audit-responses/2026-05-05-dashboard-heuristic.md]

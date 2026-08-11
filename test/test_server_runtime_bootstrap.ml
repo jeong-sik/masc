@@ -1312,15 +1312,15 @@ let test_health_json_surfaces_durable_paused_keepers () =
         (write_config_root_keeper_toml config_root)
         [ "durable-paused" ];
       with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-      let previous_state = !Server_auth.server_state in
+      let previous_state = Server_auth.For_testing.snapshot_server_state () in
       Config_dir_resolver.reset ();
       Fun.protect
         ~finally:(fun () ->
-          Server_auth.server_state := previous_state;
+          Server_auth.For_testing.restore_server_state @@ previous_state;
           Config_dir_resolver.reset ())
         (fun () ->
           let state = Mcp_server.For_testing.create_state ~base_path:dir in
-          Server_auth.server_state := Some state;
+          Server_auth.For_testing.restore_server_state @@ Some state;
           let config = (Mcp_server.workspace_config state) in
           write_keeper_meta_exn config
             (make_keeper_meta ~name:"durable-paused" ~trace_id:"trace-paused"
@@ -1506,15 +1506,15 @@ let test_health_json_observes_owner_turn () =
   with_temp_dir "health-keeper-owner-work" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let keeper_name = "example" in
         let config = Mcp_server.workspace_config state in
         write_keeper_meta_exn
@@ -1588,17 +1588,17 @@ let test_health_json_surfaces_board_event_collection_failure () =
   with_temp_dir "health-board-event-collection-failure" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Keeper_heartbeat_loop_board_events.For_testing.reset ();
     Fun.protect
       ~finally:(fun () ->
         Keeper_heartbeat_loop_board_events.For_testing.reset ();
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let keeper_name = "example" in
         Keeper_heartbeat_loop_board_events.For_testing.record_collection_failure
           ~base_path:dir
@@ -1659,15 +1659,15 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
       (Filename.concat (Filename.concat config_root "keepers") "operator.toml")
       "[keeper]\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         write_keeper_meta_exn config
           (make_keeper_meta ~name:"masc-improver" ~trace_id:"trace-masc-improver" ());
@@ -1730,15 +1730,15 @@ let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
       "base"
       "default keeper\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         write_keeper_meta_exn config
           (make_keeper_meta ~name:"base" ~trace_id:"trace-base" ());
@@ -1764,15 +1764,15 @@ let test_health_json_reports_unclassified_timeout_pause_without_mutation () =
   with_temp_dir "health-timeout-paused-without-policy" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = (Mcp_server.workspace_config state) in
         let timeout_paused =
           { (make_keeper_meta
@@ -1816,15 +1816,15 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
       (Filename.concat (Filename.concat config_root "keepers") "executor.toml")
       "[keeper]\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let executor =
           make_keeper_meta ~name:"executor" ~trace_id:"trace-executor" ()
@@ -1892,15 +1892,15 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     List.iter (write_config_root_keeper_toml config_root) [ "executor"; "executor-stale" ];
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let executor =
           make_keeper_meta ~name:"executor" ~trace_id:"trace-executor" ()
@@ -2000,15 +2000,15 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
     let config_root = make_config_root dir in
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let assignee = "missing-keeper-agent" in
         let task =
@@ -2095,15 +2095,15 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
     let config_root = make_config_root dir in
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let task =
           make_task
@@ -2214,15 +2214,15 @@ let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
     let config_root = make_config_root dir in
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let assignee = "codex-mcp-client" in
         (match
@@ -2290,15 +2290,15 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_config_root_keeper_toml config_root "broken";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         write_file (Keeper_types_profile.keeper_meta_path config "broken")
           "{ invalid keeper meta";
@@ -2368,12 +2368,12 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
 
 let test_health_json_degrades_recovery_backed_owner_scan () =
   with_temp_dir "health-recovery-backed-owner-scan" (fun dir ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Fun.protect
-      ~finally:(fun () -> Server_auth.server_state := previous_state)
+      ~finally:(fun () -> Server_auth.For_testing.restore_server_state @@ previous_state)
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         Workspace.write_backlog config
           {
@@ -2429,15 +2429,15 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
   with_temp_dir "health-canonical-owner-execution-snapshot" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let cached_missing =
           make_keeper_meta
@@ -2543,11 +2543,11 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
 ;;
 
 let test_health_json_capacity_uses_execution_snapshot () =
-  let previous_state = !Server_auth.server_state in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect
-    ~finally:(fun () -> Server_auth.server_state := previous_state)
+    ~finally:(fun () -> Server_auth.For_testing.restore_server_state @@ previous_state)
     (fun () ->
-      Server_auth.server_state := None;
+      Server_auth.For_testing.restore_server_state @@ None;
       let running_names = [ "running-a"; "running-b"; "running-c" ] in
       let recovering_names =
         [ "recovering-a"; "recovering-b"; "recovering-c"; "recovering-d" ]
@@ -2616,15 +2616,15 @@ let test_health_json_degrades_when_only_one_running_phase_lane_is_live () =
         "capacity-missing";
       ];
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = (Mcp_server.workspace_config state) in
         let paused =
           make_keeper_meta ~name:"capacity-paused" ~trace_id:"trace-capacity-paused"
@@ -2783,15 +2783,15 @@ let test_health_json_exposes_closed_non_executable_causes () =
     let names = [ "fiber-dead"; "lane-exited"; "completion-settled" ] in
     List.iter (write_config_root_keeper_toml config_root) names;
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let metas =
           List.map
@@ -2868,15 +2868,15 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
     let keeper_name = "in-flight-running" in
     write_config_root_keeper_toml config_root keeper_name;
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let meta =
           make_keeper_meta
@@ -2946,15 +2946,15 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
       (write_config_root_keeper_toml config_root)
       [ "target-missing"; "target-running" ];
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let target_running =
           make_keeper_meta ~name:"target-running" ~trace_id:"trace-target-running" ()
@@ -2992,15 +2992,15 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
     let config_root = make_config_root dir in
     write_config_root_keeper_toml config_root "boot-disabled";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = (Mcp_server.workspace_config state) in
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
@@ -3065,15 +3065,15 @@ let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
   with_temp_dir "health-persisted-only-keeper-target" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = (Mcp_server.workspace_config state) in
         write_keeper_meta_exn config
           (make_keeper_meta ~name:"retired-keeper" ~trace_id:"trace-retired" ());
@@ -3105,15 +3105,15 @@ let test_health_json_explains_phase_paused_capacity_blocker () =
     let config_root = make_config_root dir in
     write_config_root_keeper_toml config_root "phase-paused";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = (Mcp_server.workspace_config state) in
         let phase_paused =
           make_keeper_meta ~name:"phase-paused" ~trace_id:"trace-phase-paused" ()
@@ -3150,15 +3150,15 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
     let config_root = make_config_root dir in
     write_config_root_keeper_toml config_root "phase-dead";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = (Mcp_server.workspace_config state) in
         let phase_dead =
           make_keeper_meta ~name:"phase-dead" ~trace_id:"trace-phase-dead" ()
@@ -3239,15 +3239,15 @@ let test_health_json_explains_terminal_capacity_blocker
     let config_root = make_config_root dir in
     write_config_root_keeper_toml config_root keeper_name;
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let terminal = make_keeper_meta ~name:keeper_name ~trace_id () in
         write_keeper_meta_exn config terminal;
@@ -3313,15 +3313,15 @@ let test_health_json_distinguishes_failing_executable_keepers () =
       (write_config_root_keeper_toml config_root)
       [ "capacity-paused"; "capacity-failing" ];
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = (Mcp_server.workspace_config state) in
         let paused =
           make_keeper_meta ~name:"capacity-paused" ~trace_id:"trace-capacity-paused"
@@ -3365,15 +3365,15 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
     let config_root = make_config_root dir in
     write_config_root_keeper_toml config_root "capacity-failing";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = (Mcp_server.workspace_config state) in
         let failing =
           make_keeper_meta ~name:"capacity-failing"
@@ -3433,15 +3433,15 @@ let test_health_json_redacts_registry_failure_reason () =
     let config_root = make_config_root dir in
     write_config_root_keeper_toml config_root "secret-failing";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let failing =
           make_keeper_meta ~name:"secret-failing" ~trace_id:"trace-secret" ()
@@ -3508,15 +3508,15 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
     let config_root = make_config_root dir in
     write_config_root_keeper_toml config_root "restored-crash-log";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
-    let previous_state = !Server_auth.server_state in
+    let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
       ~finally:(fun () ->
-        Server_auth.server_state := previous_state;
+        Server_auth.For_testing.restore_server_state @@ previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
         let state = Mcp_server.For_testing.create_state ~base_path:dir in
-        Server_auth.server_state := Some state;
+        Server_auth.For_testing.restore_server_state @@ Some state;
         let config = Mcp_server.workspace_config state in
         let restored =
           make_keeper_meta ~name:"restored-crash-log"
@@ -3567,11 +3567,11 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
               (row |> member "last_failure_reason" |> to_string))))
 
 let test_health_json_reaction_ledger_unavailable_shape () =
-  let previous_state = !Server_auth.server_state in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect
-    ~finally:(fun () -> Server_auth.server_state := previous_state)
+    ~finally:(fun () -> Server_auth.For_testing.restore_server_state @@ previous_state)
     (fun () ->
-       Server_auth.server_state := None;
+       Server_auth.For_testing.restore_server_state @@ None;
        let request = Httpun.Request.create `GET "/health" in
        let json = Server_routes_http_runtime.make_health_json request in
        let open Yojson.Safe.Util in
@@ -3605,11 +3605,11 @@ let test_health_json_reaction_ledger_unavailable_shape () =
           |> List.length))
 
 let test_health_json_owner_unavailable_shape () =
-  let previous_state = !Server_auth.server_state in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect
-    ~finally:(fun () -> Server_auth.server_state := previous_state)
+    ~finally:(fun () -> Server_auth.For_testing.restore_server_state @@ previous_state)
     (fun () ->
-       Server_auth.server_state := None;
+       Server_auth.For_testing.restore_server_state @@ None;
        let request = Httpun.Request.create `GET "/health" in
        let json = Server_routes_http_runtime.make_health_json request in
        let open Yojson.Safe.Util in
@@ -3762,16 +3762,16 @@ let test_health_response_full_query_uses_snapshot_cache () =
       let config_root = make_config_root dir in
       with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
       with_config_input "MASC_BASE_PATH" (Some dir) @@ fun () ->
-      let previous_state = !Server_auth.server_state in
+      let previous_state = Server_auth.For_testing.snapshot_server_state () in
       Config_dir_resolver.reset ();
       Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
       Fun.protect
         ~finally:(fun () ->
-          Server_auth.server_state := previous_state;
+          Server_auth.For_testing.restore_server_state @@ previous_state;
           Config_dir_resolver.reset ();
           Server_routes_http_runtime.For_testing.reset_full_health_snapshot ())
         (fun () ->
-          Server_auth.server_state := Some (Mcp_server.For_testing.create_state ~base_path:dir);
+          Server_auth.For_testing.restore_server_state @@ Some (Mcp_server.For_testing.create_state ~base_path:dir);
           let request = Httpun.Request.create `GET "/health?full=1" in
           let first =
             Server_routes_http_runtime.make_health_response_json request
@@ -4024,7 +4024,7 @@ let test_startup_state_catalog_degraded_survives_lazy_activation () =
   Server_startup_state.mark_degraded
     ~error:"startup catalog validation failed: synthetic";
   Server_startup_state.finish_lazy_task ~task:"restore_sessions";
-  let current = Server_startup_state.(!state) in
+  let current = Server_startup_state.snapshot () in
   Alcotest.(check string) "phase stays degraded after lazy task completes"
     "degraded"
     (Server_startup_state.phase_to_string current.phase);
@@ -4035,6 +4035,35 @@ let test_startup_state_catalog_degraded_survives_lazy_activation () =
     (Some "startup catalog validation failed: synthetic")
     current.last_error
 
+let test_startup_state_concurrent_lazy_completions_preserve_all_updates () =
+  let previous = Server_startup_state.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Server_startup_state.For_testing.restore previous)
+    (fun () ->
+      let tasks = List.init 4 (Printf.sprintf "lazy-%d") in
+      for _iteration = 1 to 32 do
+        Server_startup_state.reset ();
+        Server_startup_state.mark_state_ready () |> Result.get_ok;
+        Server_startup_state.prepare_lazy_tasks ~tasks |> Result.get_ok;
+        let ready = Atomic.make 0 in
+        let workers =
+          List.map
+            (fun task ->
+              Domain.spawn (fun () ->
+                ignore (Atomic.fetch_and_add ready 1 : int);
+                while Atomic.get ready < List.length tasks do
+                  Domain.cpu_relax ()
+                done;
+                Server_startup_state.finish_lazy_task ~task))
+            tasks
+        in
+        List.iter Domain.join workers;
+        Alcotest.(check (list string))
+          "all concurrent completions are retained"
+          []
+          (Server_startup_state.pending_lazy_tasks ())
+      done)
+
 let test_startup_state_liveness () =
   Server_startup_state.reset ();
   Alcotest.(check bool) "is_live returns true even during init" true
@@ -4044,7 +4073,7 @@ let test_startup_state_liveness () =
 
 let test_startup_state_readiness_before_init () =
   Server_startup_state.reset ();
-  let current = Server_startup_state.(!state) in
+  let current = Server_startup_state.snapshot () in
   Alcotest.(check bool) "not ready before init" false current.state_ready;
   Alcotest.(check string) "phase is blocking" "blocking"
     (Server_startup_state.phase_to_string current.phase)
@@ -4053,19 +4082,19 @@ let test_startup_state_readiness_after_init () =
   Server_startup_state.reset ();
   Server_startup_state.mark_state_ready ()
   |> Result.get_ok;
-  let current = Server_startup_state.(!state) in
+  let current = Server_startup_state.snapshot () in
   Alcotest.(check bool) "ready after init" true current.state_ready;
   Alcotest.(check string) "phase is ready" "ready"
     (Server_startup_state.phase_to_string current.phase)
 
 let test_mcp_transport_requires_explicit_readiness () =
-  let previous_state = !Server_auth.server_state in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect
-    ~finally:(fun () -> Server_auth.server_state := previous_state)
+    ~finally:(fun () -> Server_auth.For_testing.restore_server_state @@ previous_state)
     (fun () ->
        Server_startup_state.reset ();
        Server_startup_state.mark_blocking ();
-       Server_auth.server_state :=
+       Server_auth.For_testing.restore_server_state @@
          Some
            (Mcp_server.For_testing.create_state
               ~base_path:(Filename.get_temp_dir_name ()));
@@ -4092,7 +4121,7 @@ let test_startup_state_lazy_inventory_does_not_publish_readiness () =
    | Error error ->
      Alcotest.fail
        (Server_startup_state.lazy_prepare_error_to_string error));
-  let current = Server_startup_state.(!state) in
+  let current = Server_startup_state.snapshot () in
   Alcotest.(check bool) "lazy inventory remains not ready" false current.state_ready;
   Alcotest.(check string) "startup remains blocking" "blocking"
     (Server_startup_state.phase_to_string current.phase);
@@ -4102,7 +4131,7 @@ let test_startup_state_lazy_inventory_does_not_publish_readiness () =
     current.pending_lazy_tasks;
   Server_startup_state.mark_state_ready ()
   |> Result.get_ok;
-  let ready = Server_startup_state.(!state) in
+  let ready = Server_startup_state.snapshot () in
   Alcotest.(check bool) "consumer ACK may publish readiness" true ready.state_ready;
   Alcotest.(check string) "pending lazy work projects lazy phase" "lazy"
     (Server_startup_state.phase_to_string ready.phase)
@@ -5161,6 +5190,10 @@ let () =
             "startup catalog degradation survives lazy activation"
             `Quick
             test_startup_state_catalog_degraded_survives_lazy_activation;
+          Alcotest.test_case
+            "startup state retains concurrent lazy completions"
+            `Quick
+            test_startup_state_concurrent_lazy_completions_preserve_all_updates;
           Alcotest.test_case "liveness probe is always true" `Quick
             test_startup_state_liveness;
           Alcotest.test_case

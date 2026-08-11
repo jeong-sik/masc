@@ -252,6 +252,65 @@ let hook_tests = [
   "notify_message", `Quick, test_notify_message;
 ]
 
+let test_concurrent_notification_queue_preserves_every_event () =
+  let sub =
+    Subscriptions.SubscriptionStore.subscribe
+      ~subscriber:"concurrent-notification-test"
+      ~resource:(Subscriptions.Custom "concurrent")
+      ()
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Subscriptions.SubscriptionStore.unsubscribe sub.id : bool))
+    (fun () ->
+      let domain_count = 4 in
+      let events_per_domain = 64 in
+      let ready = Atomic.make 0 in
+      let workers =
+        List.init domain_count (fun domain_index ->
+          Domain.spawn (fun () ->
+            ignore (Atomic.fetch_and_add ready 1 : int);
+            while Atomic.get ready < domain_count do
+              Domain.cpu_relax ()
+            done;
+            for event_index = 1 to events_per_domain do
+              let resource_id =
+                Printf.sprintf "%d:%d" domain_index event_index
+              in
+              Subscriptions.SubscriptionStore.queue_notification
+                sub.id
+                { subscription_id = sub.id
+                ; resource = Subscriptions.Custom "concurrent"
+                ; change = Subscriptions.Updated
+                ; resource_id
+                ; data = `String resource_id
+                ; timestamp = 0.0
+                }
+            done))
+      in
+      List.iter Domain.join workers;
+      let notifications =
+        Subscriptions.SubscriptionStore.pop_notifications sub.id
+      in
+      check int "every concurrent event retained"
+        (domain_count * events_per_domain)
+        (List.length notifications);
+      let ids =
+        notifications
+        |> List.map (fun (notification : Subscriptions.notification) ->
+          notification.resource_id)
+        |> List.sort_uniq String.compare
+      in
+      check int "every concurrent event remains distinct"
+        (domain_count * events_per_domain)
+        (List.length ids))
+
+let concurrency_tests =
+  [ ( "concurrent queue retains every event"
+    , `Quick
+    , test_concurrent_notification_queue_preserves_every_event )
+  ]
+
 let () =
   run "Subscriptions" [
     "types", type_tests;
@@ -260,4 +319,5 @@ let () =
     "notification", notification_tests;
     "json", json_tests;
     "hooks", hook_tests;
+    "concurrency", concurrency_tests;
   ]

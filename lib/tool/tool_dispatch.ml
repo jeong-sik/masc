@@ -13,10 +13,15 @@ type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result
 let registry : (string, handler) Hashtbl.t = Hashtbl.create 256
 
 (** Mutex protecting all mutable state in this module.
-    Uses Eio_guard for dual-mode (pre/post Eio runtime) locking. *)
-let dispatch_mu = Eio.Mutex.create ()
-let with_dispatch_rw f = Eio_guard.with_mutex dispatch_mu f
-let with_dispatch_ro f = Eio_guard.with_mutex_ro dispatch_mu f
+
+    Registration and snapshot reads are short and never perform Eio effects,
+    so a system mutex is the correct cross-domain boundary.  [Eio_guard]
+    deliberately skips locking before the Eio runtime starts and rejects raw
+    Domain callers after startup; either behavior is unsound for this
+    process-global registry. *)
+let dispatch_mu = Stdlib.Mutex.create ()
+let with_dispatch_rw f = Stdlib.Mutex.protect dispatch_mu f
+let with_dispatch_ro f = Stdlib.Mutex.protect dispatch_mu f
 
 (** Register a single tool name → handler mapping. *)
 let register ~tool_name ~(handler : handler) =
@@ -123,6 +128,7 @@ let clear_hooks () =
     First [Reject] wins (short-circuit). [Proceed] replaces args for
     subsequent hooks and the final handler. *)
 let run_pre_hooks ~name ~args =
+  let hooks = with_dispatch_ro (fun () -> !pre_hooks) in
   let rec go current_args = function
     | [] -> (None, current_args)
     | hook :: rest ->
@@ -131,7 +137,7 @@ let run_pre_hooks ~name ~args =
        | Proceed new_args -> go new_args rest
        | Pass -> go current_args rest)
   in
-  go args !pre_hooks
+  go args hooks
 
 (** Run observers in order against the typed dispatch outcome.
     Each hook is invoked for its side-effects; mutation of the
@@ -142,7 +148,8 @@ let run_pre_hooks ~name ~args =
 let run_dispatch_observers
     (outcome : Dispatch_outcome.t)
     (result : Tool_result.result option) : unit =
-  List.iter (fun hook -> hook outcome result) !dispatch_observers
+  let observers = with_dispatch_ro (fun () -> !dispatch_observers) in
+  List.iter (fun hook -> hook outcome result) observers
 
 (** Single dispatch entry. The lifecycle is:
 
@@ -152,11 +159,12 @@ let run_dispatch_observers
       3. registry lookup + handler     (handler exception capture)
       4. observer fan-out              ([run_dispatch_observers]) *)
 let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result option =
+  let span_wrapper = with_dispatch_ro (fun () -> !span_wrapper_ref) in
   let result, _outcome =
     (* Injected telemetry span wrapper (default identity). The composition
        root registers [Tool_telemetry.with_span] so this lib stays free of
        the Otel/Otel_metric_store stack. *)
-    !span_wrapper_ref
+    span_wrapper
       ~tool_name:token.name
       ~surface:(surface_of_tool_name token.name)
       (fun _trace_id_thunk ->
@@ -165,7 +173,7 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
         match run_pre_hooks ~name ~args with
         | (Some _ as blocked, _) -> blocked
         | (None, coerced_args) ->
-          (match Hashtbl.find_opt registry name with
+          (match with_dispatch_ro (fun () -> Hashtbl.find_opt registry name) with
            | Some handler ->
              let start_time = Time_compat.now () in
              (try Some (handler ~name ~args:coerced_args)
@@ -185,10 +193,11 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
 ;;
 
 (** Number of registered tool names. *)
-let registered_count () = Hashtbl.length registry
+let registered_count () = with_dispatch_ro (fun () -> Hashtbl.length registry)
 
 (** Check whether a tool name is registered. *)
-let is_registered name = Hashtbl.mem registry name
+let is_registered name =
+  with_dispatch_ro (fun () -> Hashtbl.mem registry name)
 
 (** {2 Module Tag Dispatch}
 

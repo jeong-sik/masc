@@ -23,14 +23,30 @@ type operator_snapshot_compute =
    Default requests read the background-refreshed publication and synchronously
    replace it when stale. Parameterized requests compute directly. *)
 
-(* Late-bound broadcast refs — set by server_dashboard_http.ml after
-   Sse module is in scope.  Same pattern as _broadcast_workspace_truth_ref. *)
-let operator_snapshot_broadcast_ref : (operator_snapshot_publication -> unit) ref =
-  ref (fun (_publication : operator_snapshot_publication) -> ())
+(* Late-bound broadcasters — installed after [Sse] is in scope.  Atomic
+   replacement keeps refresh domains from racing initialization or tests. *)
+let operator_snapshot_broadcaster =
+  Atomic.make (fun (_publication : operator_snapshot_publication) -> ())
 ;;
 
-let operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
-  ref (fun (_json : Yojson.Safe.t) -> ())
+let operator_digest_broadcaster =
+  Atomic.make (fun (_json : Yojson.Safe.t) -> ())
+;;
+
+let set_operator_snapshot_broadcaster broadcaster =
+  Atomic.set operator_snapshot_broadcaster broadcaster
+;;
+
+let set_operator_digest_broadcaster broadcaster =
+  Atomic.set operator_digest_broadcaster broadcaster
+;;
+
+let broadcast_operator_snapshot publication =
+  (Atomic.get operator_snapshot_broadcaster) publication
+;;
+
+let broadcast_operator_digest json =
+  (Atomic.get operator_digest_broadcaster) json
 ;;
 
 let operator_snapshot_cache =
@@ -293,6 +309,10 @@ let operator_snapshot_extra () =
 ;;
 
 module For_testing = struct
+  let replace_operator_snapshot_broadcaster broadcaster =
+    Atomic.exchange operator_snapshot_broadcaster broadcaster
+  ;;
+
   let publish_operator_snapshot_success ?(fresh_for_s = operator_snapshot_freshness_ttl_s) json =
     let compute = begin_operator_snapshot_compute () in
     publish_operator_snapshot_if_current_with_freshness

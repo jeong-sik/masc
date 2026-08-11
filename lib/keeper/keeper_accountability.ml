@@ -750,19 +750,3 @@ let accountability_summary_json (config : Workspace_query.config) ~keeper_name ~
   accountability_summary_lookup config ~keeper_name ~agent_name
 ;;
 
-let enable_window_read_count_for_testing () =
-  (* tla-lint: allow-mutation: test hook — initialise opt-in counter from test setup *)
-  window_read_count_for_testing_ref := Some 0
-;;
-
-let disable_window_read_count_for_testing () =
-  (* tla-lint: allow-mutation: test hook — clear opt-in counter from test teardown *)
-  window_read_count_for_testing_ref := None
-;;
-
-let window_read_count_for_testing () =
-  match !window_read_count_for_testing_ref with
-  | Some count -> count
-  | None -> 0
-;;
-

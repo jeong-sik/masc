@@ -197,6 +197,37 @@ let () =
               check bool "contains error info" true
                 (String.length msg > 0 && Astring.String.is_infix ~affix:"boom" msg));
         ] );
+      ( "immutable_registry_snapshots",
+        [
+          test_case "concurrent registration and lookup stay coherent" `Quick
+            (fun () ->
+              let registrations_per_domain = 24 in
+              let domains =
+                List.init 4 (fun domain_index ->
+                  Domain.spawn (fun () ->
+                    for registration_index = 1 to registrations_per_domain do
+                      let tool_name =
+                        Printf.sprintf "__test_dispatch_concurrent_%d_%d"
+                          domain_index registration_index
+                      in
+                      Tool_dispatch.register ~tool_name ~handler:echo_handler;
+                      if not (Tool_dispatch.is_registered tool_name) then
+                        Alcotest.failf "registered handler %s was not visible"
+                          tool_name
+                    done))
+              in
+              List.iter Domain.join domains;
+              for domain_index = 0 to 3 do
+                for registration_index = 1 to registrations_per_domain do
+                  let tool_name =
+                    Printf.sprintf "__test_dispatch_concurrent_%d_%d"
+                      domain_index registration_index
+                  in
+                  check bool "registered snapshot contains handler" true
+                    (Tool_dispatch.is_registered tool_name)
+                done
+              done);
+        ] );
       (* PR-S3: the OTel/Otel_metric_store span wrapper is injected, not referenced
          inline. These tests assert the injection MECHANISM fires — they prove
          guarded_dispatch routes through [!span_wrapper_ref], so registering

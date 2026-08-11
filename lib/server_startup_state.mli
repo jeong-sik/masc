@@ -3,9 +3,9 @@
     and path/config
     resolution snapshots.
 
-    The state is a process-global mutable [ref]. All observers and
-    mutators go through this module so [to_yojson] can render a
-    consistent snapshot. *)
+    The state is a process-global atomic reference to an immutable record.
+    All observers and mutators go through this module so transitions cannot
+    lose concurrent updates and [to_yojson] renders one coherent snapshot. *)
 
 (** {1 Types} *)
 
@@ -18,10 +18,6 @@ type phase =
 (** Wire string: ["blocking" | "lazy" | "ready" | "degraded"]. *)
 val phase_to_string : phase -> string
 
-(** Singleton record. Exposed because a handful of callers use
-    [Server_startup_state.((!state).state_ready)] etc. instead of
-    going through a getter. Prefer {!is_live} / {!to_yojson} /
-    {!elapsed_since_start} for new code. *)
 type t = {
   phase : phase;
   state_ready : bool;
@@ -32,10 +28,8 @@ type t = {
   started_at : float;
 }
 
-(** Process-global state reference. Observers should prefer the
-    typed accessors above; [state] is exposed only to preserve the
-    existing [(!state)] call sites. *)
-val state : t ref
+(** Return the current immutable state snapshot. *)
+val snapshot : unit -> t
 
 (** {1 Observation} *)
 
@@ -74,6 +68,11 @@ val to_yojson : unit -> Yojson.Safe.t
 val reset : unit -> unit
 
 val mark_blocking : unit -> unit
+
+module For_testing : sig
+  val restore : t -> unit
+  (** Restore an exact prior snapshot. Test isolation only. *)
+end
 
 type state_ready_transition_stage =
   | Boot_completion

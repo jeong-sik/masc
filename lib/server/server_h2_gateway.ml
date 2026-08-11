@@ -299,7 +299,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
           h2_respond_json_value h2_reqd json ~extra_headers:cors
 
       | `GET, p when String.equal p Server_health_paths.readiness ->
-          let current = Server_startup_state.(!state) in
+          let current = Server_startup_state.snapshot () in
           let json, status =
             if current.state_ready then
               (`Assoc [
@@ -533,7 +533,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             else Server_mcp_transport_http.Full
           in
           (* HTTP-level auth check for MCP endpoints *)
-          let base_path = match !server_state with
+          let base_path = match current_server_state () with
             | Some s -> (Mcp_server.workspace_config s).base_path
             | None -> default_base_path ()
           in
@@ -703,7 +703,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             then Server_mcp_transport_http.Managed_agent
             else Server_mcp_transport_http.Full
           in
-          let base_path = match !server_state with
+          let base_path = match current_server_state () with
             | Some s -> (Mcp_server.workspace_config s).base_path
             | None -> default_base_path ()
           in
@@ -1126,7 +1126,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                ~config:
                  (Option.map
                     (fun state -> (Mcp_server.workspace_config state))
-                    !server_state)
+                    (current_server_state ()))
                httpun_meth ->
           ()
 

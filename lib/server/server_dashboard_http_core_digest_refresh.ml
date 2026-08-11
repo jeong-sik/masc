@@ -9,7 +9,7 @@
     ~target_type:"workspace"] under a fresh [Operator_control.context],
     decorates the result with [with_projection_diagnostics] /
     [with_operator_digest_metadata], and republishes via
-    [!operator_digest_broadcast_ref].
+    [broadcast_operator_digest].
 
     Pure helper move (no callback injection). All cross-module
     references reach existing siblings or top-level libraries — no
@@ -97,7 +97,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success Core_operator.operator_digest_cache json;
-      !Core_operator.operator_digest_broadcast_ref
+      Core_operator.broadcast_operator_digest
         (cached_surface_json Core_operator.operator_digest_cache
          |> Core_operator_query.with_operator_digest_metadata
               ~config

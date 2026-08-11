@@ -177,11 +177,11 @@ let test_artifact_route_enforces_admin_token () =
       | O.Stored { sha256; _ } -> sha256
       | O.Inline _ -> Alcotest.fail "expected stored artifact"
     in
-    let saved_state = !Server_auth.server_state in
+    let saved_state = Server_auth.For_testing.snapshot_server_state () in
     Fun.protect
-      ~finally:(fun () -> Server_auth.server_state := saved_state)
+      ~finally:(fun () -> Server_auth.For_testing.restore_server_state @@ saved_state)
       (fun () ->
-         Server_auth.server_state :=
+         Server_auth.For_testing.restore_server_state @@
            Some (Masc.Mcp_server.For_testing.create_state ~base_path);
          let router = A.add_routes (Http.Router.create ()) in
          let path = "/api/v1/artifacts/" ^ sha256 in

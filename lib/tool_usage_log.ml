@@ -15,7 +15,7 @@ let is_non_public name = not (Tool_catalog.is_public_mcp name)
 
 (* -- Store management -- *)
 
-let store_ref : Dated_jsonl.t option ref = ref None
+let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 let source_name = "tool_usage"
 let source_producer = "tool_usage_log"
 let dashboard_surface = "/api/v1/dashboard/tools"
@@ -165,9 +165,9 @@ let init ?cluster_name ~base_path () =
      Fs_compat.mkdir_p dir;
      let retention_days = retention_days () in
      let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
-     store_ref := Some store
+     Atomic.set store_ref (Some store)
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     store_ref := None;
+     Atomic.set store_ref None;
      Log.Misc.warn "tool_usage_log: init failed: %s" (Stdlib.Printexc.to_string exn);
      record_coverage_gap
        ~masc_root
@@ -200,7 +200,7 @@ let record_to_json ~tool_name ~disposition ~caller =
    the whole surface). Keeper-facing IO-failure handling is supplied at the
    install boundary (lib/server/server_bootstrap_maintenance.ml). *)
 let log_call ~on_io_failure ~tool_name ~disposition ~caller =
-  match !store_ref with
+  match Atomic.get store_ref with
   | None ->
       Log.Misc.debug "tool_usage_log: store not initialized, skipping %s" tool_name
   | Some store ->
@@ -250,7 +250,7 @@ let install ~on_io_failure =
 (* -- Read utilities (for analysis) -- *)
 
 let read_recent ?(n = 10_000) () : Yojson.Safe.t list =
-  match !store_ref with
+  match Atomic.get store_ref with
   | None -> []
   | Some store -> Dated_jsonl.read_recent store n
 

@@ -1190,7 +1190,7 @@ let mark_owner_state_ready () =
   match Server_startup_state.mark_state_ready () with
   | Error error -> Error (Readiness_transition_failed error)
   | Ok () ->
-    let observed = Server_startup_state.(!state) in
+    let observed = Server_startup_state.snapshot () in
     if observed.state_ready then Ok ()
     else
       Error
@@ -1368,7 +1368,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
   Transport_metrics.set_ws_same_origin_runtime_ready false;
-  server_state := None;
+  clear_server_state ();
   Server_startup_state.reset ();
 
   (* 2. Run owner initialization outside the accept loop. The state and
@@ -1380,7 +1380,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
     let handle_initialization_failure error =
       match
         startup_failure_disposition
-          ~state_ready:Server_startup_state.(!state).state_ready
+          ~state_ready:(Server_startup_state.snapshot ()).state_ready
       with
       | Fatal_pre_ready ->
         Log.Server.error
@@ -1412,7 +1412,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       (* Authentication wrappers treat [server_state = Some _] as the mutation
          capability boundary. Publish only after transport-neutral activation
          has restored Gate state and started the owner persistence lanes. *)
-      server_state := Some state;
+      publish_server_state state;
       (* Global readiness is the transport-neutral owner capability, not a
          quorum over optional transports. Mark it before starting fallible
          Discord/gRPC/WS/WebRTC/dashboard auxiliaries so one transport cannot
@@ -1703,7 +1703,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
     try
       let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
       Eio.Time.sleep clock timeout_sec;
-      let current = Server_startup_state.(!state) in
+      let current = Server_startup_state.snapshot () in
       if not current.state_ready then (
         let elapsed = Server_startup_state.elapsed_since_start () in
         Log.Server.error

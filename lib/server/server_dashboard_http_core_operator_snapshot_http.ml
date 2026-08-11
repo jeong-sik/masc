@@ -102,7 +102,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
         let publication =
           match Core_operator.mark_operator_snapshot_error_if_current ~compute exn with
           | Some publication ->
-            !Core_operator.operator_snapshot_broadcast_ref publication;
+            Core_operator.broadcast_operator_snapshot publication;
             publication
           | None -> Core_operator.operator_snapshot_publication ()
         in

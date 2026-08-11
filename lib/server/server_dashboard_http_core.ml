@@ -42,10 +42,17 @@ let initialized_json_opt = Server_dashboard_http_core_cache.initialized_json_opt
 type operator_snapshot_publication =
   Server_dashboard_http_core_operator.operator_snapshot_publication
 
-let operator_snapshot_broadcast_ref =
-  Server_dashboard_http_core_operator.operator_snapshot_broadcast_ref
+let set_operator_snapshot_broadcaster =
+  Server_dashboard_http_core_operator.set_operator_snapshot_broadcaster
 ;;
-let operator_digest_broadcast_ref = Server_dashboard_http_core_operator.operator_digest_broadcast_ref
+
+let set_operator_digest_broadcaster =
+  Server_dashboard_http_core_operator.set_operator_digest_broadcaster
+;;
+
+let broadcast_operator_snapshot =
+  Server_dashboard_http_core_operator.broadcast_operator_snapshot
+;;
 let operator_snapshot_cache_diagnostics_json =
   Server_dashboard_http_core_operator.operator_snapshot_cache_diagnostics_json
 ;;
@@ -699,7 +706,7 @@ let dashboard_shell_http_json
        @ shell_projection_trace_diagnostics cache_key)
   in
   let startup_shell_bootstrap_pending =
-    let current = Server_startup_state.(!state) in
+    let current = Server_startup_state.snapshot () in
     (not (Atomic.get shell_warmed))
     && current.state_ready
     && Server_startup_state.elapsed_since_start () < dashboard_shell_timeout_s +. startup_grace_period_s

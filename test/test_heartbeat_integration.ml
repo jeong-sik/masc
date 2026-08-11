@@ -1767,10 +1767,10 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir "cross-keeper-up-lifetime" in
   let target_name = "cross-keeper-target" in
-  let previous_startup_state = !(Masc.Server_startup_state.state) in
+  let previous_startup_state = Masc.Server_startup_state.snapshot () in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Server_startup_state.state := previous_startup_state;
+      Masc.Server_startup_state.For_testing.restore previous_startup_state;
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->

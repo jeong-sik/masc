@@ -67,11 +67,14 @@ let test_get_messages_raw_large_history_keeps_newest_window () =
 let test_repeated_mention_delivers_each_canonical_event () =
   with_test_env (fun config ->
     let previous_activity = Atomic.get Workspace_hooks.activity_emit_fn in
-    let previous_wake = !Workspace_broadcast.on_broadcast_mention in
+    let previous_wake =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention
+        (fun _mention -> ())
+    in
     Eio.Switch.run @@ fun sw ->
     Eio.Switch.on_release sw (fun () ->
       Atomic.set Workspace_hooks.activity_emit_fn previous_activity;
-      Workspace_broadcast.on_broadcast_mention := previous_wake);
+      Workspace_broadcast.set_on_broadcast_mention previous_wake);
     let publications = ref [] in
     let activities = ref [] in
     let wakes = ref [] in
@@ -91,7 +94,7 @@ let test_repeated_mention_delivers_each_canonical_event () =
             subject
         in
         activities := (kind, subject) :: !activities);
-    Workspace_broadcast.on_broadcast_mention :=
+    Workspace_broadcast.set_on_broadcast_mention
       (fun mention -> wakes := mention :: !wakes);
     let content = "@gemini review the canonical event" in
     ignore (Workspace.broadcast config ~from_agent:"claude" ~content);

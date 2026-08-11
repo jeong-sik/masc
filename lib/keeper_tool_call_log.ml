@@ -58,8 +58,12 @@ let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
     ~output_text
 ;;
 
-let store_ref : Dated_jsonl.t option ref = ref None
-let configured_store_ref : (string * string) option ref = ref None
+type store_state =
+  { store : Dated_jsonl.t option
+  ; configured : (string * string) option
+  }
+
+let store_state = Atomic.make { store = None; configured = None }
 
 type append_entry =
   { store : Dated_jsonl.t
@@ -114,15 +118,16 @@ let init ?cluster_name ~base_path () =
   in
   let masc_root = Workspace_utils.masc_root_dir_from ~base_path ~cluster_name in
   let dir = Filename.concat masc_root "tool_calls" in
-  configured_store_ref := Some (masc_root, dir);
+  Atomic.set store_state { store = None; configured = Some (masc_root, dir) };
   try
     let retention_days = retention_days () in
     let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
-    store_ref := Some store
+    Atomic.set store_state
+      { store = Some store; configured = Some (masc_root, dir) }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    store_ref := None;
+    Atomic_util.update store_state (fun state -> { state with store = None });
     Log.Misc.warn "keeper_tool_call_log: init failed: %s" (Printexc.to_string exn);
     (try
        Telemetry_coverage_gap.record
@@ -143,8 +148,7 @@ let init ?cluster_name ~base_path () =
 ;;
 
 let reset_for_testing () =
-  store_ref := None;
-  configured_store_ref := None;
+  Atomic.set store_state { store = None; configured = None };
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
@@ -152,7 +156,7 @@ let reset_for_testing () =
 ;;
 
 let store_dir () =
-  match !store_ref with
+  match (Atomic.get store_state).store with
   | Some store -> Some (Dated_jsonl.base_dir store)
   | None -> None
 ;;
@@ -169,7 +173,8 @@ let current_log_path () =
     Some (Filename.concat (Filename.concat dir month) day)
 ;;
 
-let configured_masc_root () = Option.map fst !configured_store_ref
+let configured_masc_root () =
+  Option.map fst (Atomic.get store_state).configured
 
 let record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn =
   let durable_store = Dated_jsonl.base_dir store in
@@ -198,7 +203,7 @@ let record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn =
 ;;
 
 let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
-  match !configured_store_ref with
+  match (Atomic.get store_state).configured with
   | None -> ()
   | Some (masc_root, durable_store) ->
     (try
@@ -390,7 +395,7 @@ let log_call
       ?truncated_to
       ()
   =
-  match !store_ref with
+  match (Atomic.get store_state).store with
     | None -> record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ()
     | Some store ->
       (* RFC-0225 §3.3: no ambient turn-context fallback. Both production
@@ -633,7 +638,7 @@ let read_recent_rows ~n () : Yojson.Safe.t list =
   if n <= 0
   then []
   else (
-    match !store_ref with
+    match (Atomic.get store_state).store with
     | None -> []
     | Some store -> Dated_jsonl.read_recent store n)
 ;;
@@ -671,7 +676,7 @@ let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =
   if window_hours <= 0.0
   then []
   else (
-    match !store_ref with
+    match (Atomic.get store_state).store with
     | None -> []
     | Some store ->
       let now = Time_compat.now () in
@@ -703,7 +708,7 @@ let read_latest ?keeper_name () : Yojson.Safe.t option =
     | Some k -> String.equal k name
     | None -> false
   in
-  match !store_ref with
+  match (Atomic.get store_state).store with
   | None -> None
   | Some store ->
     let scan_limit =

@@ -496,6 +496,18 @@ let test_base_path_or_cwd_falls_back_to_cwd () =
       (Config_dir_resolver.current_working_dir ())
       (Config_dir_resolver.base_path_or_cwd ()))
 
+let test_resolve_publishes_one_immutable_snapshot_across_domains () =
+  Config_dir_resolver.reset ();
+  let resolutions =
+    List.init 4 (fun _ -> Domain.spawn Config_dir_resolver.resolve)
+    |> List.map Domain.join
+  in
+  match resolutions with
+  | [] -> fail "expected concurrent resolver snapshots"
+  | first :: rest ->
+    check bool "all domains receive the published snapshot" true
+      (List.for_all (fun resolution -> resolution == first) rest)
+
 let () =
   run "config_dir_resolver"
     [
@@ -520,6 +532,8 @@ let () =
             test_external_config_is_not_a_fallback;
           test_case "does not fallback to legacy me_root repo path" `Quick
             test_no_legacy_me_root_fallback;
+          test_case "publishes one immutable snapshot across domains" `Quick
+            test_resolve_publishes_one_immutable_snapshot_across_domains;
         ] );
       ( "test_env_sanitization",
         [

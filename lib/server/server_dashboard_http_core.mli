@@ -43,8 +43,11 @@ val last_good_shell_light : Yojson.Safe.t Atomic.t
 type operator_snapshot_publication =
   Server_dashboard_http_core_operator.operator_snapshot_publication
 
-val operator_snapshot_broadcast_ref : (operator_snapshot_publication -> unit) ref
-val operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref
+val set_operator_snapshot_broadcaster :
+  (operator_snapshot_publication -> unit) -> unit
+
+val set_operator_digest_broadcaster : (Yojson.Safe.t -> unit) -> unit
+val broadcast_operator_snapshot : operator_snapshot_publication -> unit
 val mission_cache : cached_surface
 
 (** {1 Dashboard Timeout} *)

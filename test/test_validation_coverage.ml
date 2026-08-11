@@ -173,6 +173,24 @@ let test_rejection_stats_increment () =
   check int "exactly 2 rejections" 2 count;
   check bool "time > 0" true (time > 0.0)
 
+let test_rejection_stats_concurrent_snapshot () =
+  Validation.reset_rejection_stats ();
+  let writes_per_domain = 8 in
+  let domains =
+    List.init 4 (fun domain_index ->
+      Domain.spawn (fun () ->
+        for write_index = 1 to writes_per_domain do
+          ignore
+            (Validation.Agent_id.validate
+               (Printf.sprintf "invalid/%d/%d" domain_index write_index))
+        done))
+  in
+  List.iter Domain.join domains;
+  let count, last_rejection_time = Validation.get_rejection_stats () in
+  check int "no concurrent increments lost" (4 * writes_per_domain) count;
+  check bool "snapshot timestamp accompanies count" true
+    (last_rejection_time > 0.0)
+
 (* ============================================================
    Edge Cases
    ============================================================ *)
@@ -305,6 +323,8 @@ let () =
     "rejection_stats", [
       test_case "reset" `Quick test_reset_rejection_stats;
       test_case "increment" `Quick test_rejection_stats_increment;
+      test_case "concurrent immutable snapshot" `Quick
+        test_rejection_stats_concurrent_snapshot;
     ];
     "edge_cases", [
       test_case "agent max length" `Quick test_agent_id_max_length;

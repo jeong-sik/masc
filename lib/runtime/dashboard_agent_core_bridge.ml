@@ -1,7 +1,7 @@
 (** See [Dashboard_agent_core_bridge.mli]. *)
 
-let broadcast_hook = ref (fun _json -> ())
-let set_broadcast_hook f = broadcast_hook := f
+let broadcast_hook = Atomic.make (fun _json -> ())
+let set_broadcast_hook f = Atomic.set broadcast_hook f
 
 let per_provider_cap = 200
 let default_duration_ms = 0.0
@@ -129,7 +129,7 @@ let broadcast_sample_entry entry =
         ("ts_unix", `Float recorded_at);
       ]
   in
-  try !broadcast_hook json
+  try Atomic.get broadcast_hook json
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

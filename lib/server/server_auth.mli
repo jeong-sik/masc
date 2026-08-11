@@ -244,9 +244,14 @@ val http_status_of_auth_error :
     [H2.Status.t] at the use site — both protocols include this
     six-tag subset. *)
 
-val server_state : Mcp_server.server_state option ref
-(** Process-wide server state handle used by auth helpers when no
-    state is threaded through. *)
+val current_server_state : unit -> Mcp_server.server_state option
+(** Return the currently published process-wide server state snapshot. *)
+
+val publish_server_state : Mcp_server.server_state -> unit
+(** Atomically publish the initialized process-wide server state. *)
+
+val clear_server_state : unit -> unit
+(** Atomically remove the process-wide server state during shutdown/reset. *)
 
 val get_origin : Httpun.Request.t -> Httpun.Headers.value
 (** Return the one syntactically valid serialized [Origin], or ["*"] when the
@@ -449,4 +454,6 @@ val with_token_permission_auth :
 
 module For_testing : sig
   val admin_token_equal : string -> string -> bool
+  val snapshot_server_state : unit -> Mcp_server.server_state option
+  val restore_server_state : Mcp_server.server_state option -> unit
 end

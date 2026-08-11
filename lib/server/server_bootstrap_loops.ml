@@ -1229,7 +1229,7 @@ let start_keeper_loops_owned
       Log.Keeper.info
         "broadcast without mention -> keeper wakeup suppressed (passive fanout)"
   in
-  Workspace_broadcast.on_broadcast_mention := broadcast_mention_handler;
+  Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try
      let cancel_orchestrator =

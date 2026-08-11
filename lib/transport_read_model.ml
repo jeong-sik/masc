@@ -246,9 +246,6 @@ type webrtc_status =
   ; connected_channels : int
   }
 
-let grpc_service_name = ref "MascGrpcService"
-let grpc_health_service_name = ref "grpc.health.v1.Health"
-
 let default_webrtc_status () =
   { ice_server_urls = []
   ; pending_offers = 0
@@ -257,11 +254,30 @@ let default_webrtc_status () =
   ; connected_channels = 0
   }
 
-let webrtc_status_callback = ref default_webrtc_status
+type runtime_registrations =
+  { grpc_service_name : string
+  ; grpc_health_service_name : string
+  ; webrtc_status : unit -> webrtc_status
+  }
 
-let register_grpc_service_name name = grpc_service_name := name
-let register_grpc_health_service_name name = grpc_health_service_name := name
-let register_webrtc_status fn = webrtc_status_callback := fn
+let runtime_registrations =
+  Atomic.make
+    { grpc_service_name = "MascGrpcService"
+    ; grpc_health_service_name = "grpc.health.v1.Health"
+    ; webrtc_status = default_webrtc_status
+    }
+
+let register_grpc_service_name name =
+  Atomic_util.update runtime_registrations (fun current ->
+    { current with grpc_service_name = name })
+
+let register_grpc_health_service_name name =
+  Atomic_util.update runtime_registrations (fun current ->
+    { current with grpc_health_service_name = name })
+
+let register_webrtc_status fn =
+  Atomic_util.update runtime_registrations (fun current ->
+    { current with webrtc_status = fn })
 
 let enabled_protocols_json () =
   let protocols =
@@ -275,6 +291,7 @@ let enabled_protocols_json () =
 ;;
 
 let transport_status_json (ctx : http_context) =
+  let registrations = Atomic.get runtime_registrations in
   let grpc_enabled = Env_config.Transport.grpc_enabled () in
   let grpc_port = Env_config.Transport.grpc_port in
   let grpc_reachable =
@@ -284,7 +301,7 @@ let transport_status_json (ctx : http_context) =
     Env_config.Transport.http_auth_strict_env_enabled ()
   in
   let webrtc_enabled = Env_config.Transport.webrtc_enabled () in
-  let w_status = !webrtc_status_callback () in
+  let w_status = registrations.webrtc_status () in
   `Assoc
     [ "streamable_http_default", `Bool true
     ; "legacy_endpoints_deprecated", `Bool true
@@ -308,8 +325,8 @@ let transport_status_json (ctx : http_context) =
              ; "reachable", `Bool grpc_reachable
              ; "listen_status", `String (Atomic.get Transport_metrics.grpc_listen_status)
              ; "port", `Int grpc_port
-             ; "service", `String !grpc_service_name
-             ; "health_service", `String !grpc_health_service_name
+             ; "service", `String registrations.grpc_service_name
+             ; "health_service", `String registrations.grpc_health_service_name
              ]
            @
            if grpc_enabled

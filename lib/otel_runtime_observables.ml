@@ -88,11 +88,11 @@ let walk_dir_totals root =
   (!bytes, !files)
 ;;
 
-let store_cache : (float * Otel_metrics.sample list) ref = ref (neg_infinity, [])
+let store_cache = Atomic.make (neg_infinity, [])
 
-let store_samples ~masc_root () =
+let rec store_samples ~masc_root () =
   let now = Unix.gettimeofday () in
-  let last, cached = !store_cache in
+  let ((last, cached) as current) = Atomic.get store_cache in
   if now -. last < store_walk_min_interval_sec
   then cached
   else (
@@ -109,8 +109,10 @@ let store_samples ~masc_root () =
           else [])
         watched_store_dirs
     in
-    store_cache := now, samples;
-    samples)
+    let next = now, samples in
+    if Atomic.compare_and_set store_cache current next
+    then samples
+    else store_samples ~masc_root ())
 ;;
 
 let fd_samples () =
@@ -234,13 +236,19 @@ let samples ~masc_root () =
 ;;
 
 let registered = Atomic.make false
+let registration_mu = Stdlib.Mutex.create ()
 
 let register_once ~masc_root () =
-  if not (Atomic.exchange registered true)
-  then Otel_metrics.register_source (fun () -> samples ~masc_root ())
+  if not (Atomic.get registered)
+  then
+    Stdlib.Mutex.protect registration_mu (fun () ->
+      if not (Atomic.get registered)
+      then (
+        Otel_metrics.register_source (fun () -> samples ~masc_root ());
+        Atomic.set registered true))
 ;;
 
 module For_testing = struct
   let samples = samples
-  let reset_store_cache () = store_cache := neg_infinity, []
+  let reset_store_cache () = Atomic.set store_cache (neg_infinity, [])
 end

@@ -1056,15 +1056,17 @@ let test_operator_snapshot_publication_rejects_stale_races () =
   in
   let broadcasts = ref [] in
   let original_broadcast =
-    !(Server_dashboard_http_core_operator.operator_snapshot_broadcast_ref)
+    Server_dashboard_http_core_operator.For_testing
+    .replace_operator_snapshot_broadcaster
+      (fun _publication -> ())
   in
   Fun.protect
     ~finally:(fun () ->
-      Server_dashboard_http_core_operator.operator_snapshot_broadcast_ref
-      := original_broadcast)
+      Server_dashboard_http_core_operator.set_operator_snapshot_broadcaster
+        original_broadcast)
     (fun () ->
-      Server_dashboard_http_core_operator.operator_snapshot_broadcast_ref
-      := (fun publication -> broadcasts := publication :: !broadcasts);
+      Server_dashboard_http_core_operator.set_operator_snapshot_broadcaster
+        (fun publication -> broadcasts := publication :: !broadcasts);
       Dashboard_projection_cache.invalidate_snapshot_json ~config;
       check int "one invalidation publishes exactly once" 1
         (List.length !broadcasts);

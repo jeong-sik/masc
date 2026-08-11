@@ -50,7 +50,7 @@ type claim_snapshot =
 
 let store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 let store_cache_mu = Eio.Mutex.create ()
-let window_read_count_for_testing_ref : int option ref = ref None
+let window_read_count_for_testing_state : int option Atomic.t = Atomic.make None
 let task_commitment_expiry_sec = 72.0 *. Masc_time_constants.hour
 let completion_claim_expiry_sec = 24.0 *. Masc_time_constants.hour
 let dedupe_window_sec = Masc_time_constants.hour
@@ -272,12 +272,25 @@ let resolution_event_of_json json =
 ;;
 
 let read_window_entries (config : Workspace_query.config) =
-  (match !window_read_count_for_testing_ref with
-   (* tla-lint: allow-mutation: test hook — opt-in counter for window-read assertions *)
-   | Some count -> window_read_count_for_testing_ref := Some (count + 1)
-   | None -> ());
+  Atomic_util.update window_read_count_for_testing_state (function
+    | Some count -> Some (count + 1)
+    | None -> None);
   let now = Time_compat.now () in
   let since = event_date_string (now -. (float_of_int summary_window_days *. Masc_time_constants.day)) in
   let until = event_date_string now in
   Dated_jsonl.read_range (get_store config) ~since ~until
+;;
+
+let enable_window_read_count_for_testing () =
+  Atomic.set window_read_count_for_testing_state (Some 0)
+;;
+
+let disable_window_read_count_for_testing () =
+  Atomic.set window_read_count_for_testing_state None
+;;
+
+let window_read_count_for_testing () =
+  match Atomic.get window_read_count_for_testing_state with
+  | Some count -> count
+  | None -> 0
 ;;

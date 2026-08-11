@@ -785,8 +785,14 @@ let http_status_of_auth_error = function
   | Masc_domain.RateLimitExceeded _ -> `Too_many_requests
   | Masc_domain.CacheError _ -> `Internal_server_error
 
-(** Server state - initialized at startup *)
-let server_state : Mcp_server.server_state option ref = ref None
+(** Server state - initialized at startup.  The published handle is replaced
+    atomically so request domains never race a plain ref read with startup or
+    shutdown publication. *)
+let server_state : Mcp_server.server_state option Atomic.t = Atomic.make None
+
+let current_server_state () = Atomic.get server_state
+let publish_server_state state = Atomic.set server_state (Some state)
+let clear_server_state () = Atomic.set server_state None
 
 (** CORS origin *)
 exception Invalid_origin_header
@@ -939,7 +945,7 @@ let check_agent_rate_limit request reqd =
 let admin_token_equal = Eqaf.equal
 
 let with_admin_auth handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let admin_token = Env_config_core.admin_token_opt () in
@@ -1141,7 +1147,7 @@ let rec with_public_read handler request reqd =
   if strict && not (is_public_read_path path) then
     with_read_auth handler request reqd
   else
-    match !server_state with
+    match current_server_state () with
     | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
     | Some state -> handler state request reqd
 
@@ -1149,7 +1155,7 @@ and with_observer_sse_read_auth handler request reqd =
   let strict = http_auth_strict_enabled () in
   let path = Http_server_eio.Request.path request in
   if strict && not (is_public_read_path path) then
-    match !server_state with
+    match current_server_state () with
     | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
     | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
@@ -1168,7 +1174,7 @@ and with_observer_sse_read_auth handler request reqd =
     with_public_read handler request reqd
 
 and with_read_auth handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
@@ -1180,7 +1186,7 @@ and with_read_auth handler request reqd =
       | Error err -> respond_auth_error request reqd err)
 
 and with_permission_auth ~permission handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
@@ -1192,7 +1198,7 @@ and with_permission_auth ~permission handler request reqd =
       | Error err -> respond_auth_error request reqd err)
 
 and with_tool_auth ~tool_name handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
@@ -1211,7 +1217,7 @@ and with_tool_auth ~tool_name handler request reqd =
       | Error err -> respond_auth_error request reqd err)
 
 and with_tool_actor_auth ~tool_name handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -1230,7 +1236,7 @@ and with_tool_actor_auth ~tool_name handler request reqd =
      | Error err -> respond_auth_error request reqd err)
 
 and with_token_permission_auth ~permission handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
@@ -1243,4 +1249,6 @@ and with_token_permission_auth ~permission handler request reqd =
 
 module For_testing = struct
   let admin_token_equal = admin_token_equal
+  let snapshot_server_state = current_server_state
+  let restore_server_state state = Atomic.set server_state state
 end

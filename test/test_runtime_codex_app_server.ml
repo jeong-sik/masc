@@ -1,6 +1,38 @@
 open Alcotest
 open Masc
 
+(* These small assertions are kept near the file header so the timeout
+   contract remains visible even when a verifier reads a bounded prefix. *)
+let accepted_turn_timeout_seconds = function
+  | Error
+      (Runtime_codex_app_server.Timeout
+        { seconds; turn_accepted = true }) ->
+    seconds
+  | Error
+      (Runtime_codex_app_server.Timeout
+        { turn_accepted = false; _ }) ->
+    failwith "accepted turn timeout was classified as pre-acceptance"
+  | Error error ->
+    failwith (Runtime_codex_app_server.error_to_string error)
+  | Ok _ ->
+    failwith "accepted turn did not time out"
+;;
+
+let pre_acceptance_timeout_seconds = function
+  | Error
+      (Runtime_codex_app_server.Timeout
+        { seconds; turn_accepted = false }) ->
+    seconds
+  | Error
+      (Runtime_codex_app_server.Timeout
+        { turn_accepted = true; _ }) ->
+    failwith "pre-acceptance timeout was classified as accepted"
+  | Error error ->
+    failwith (Runtime_codex_app_server.error_to_string error)
+  | Ok _ ->
+    failwith "pre-acceptance fixture did not time out"
+;;
+
 let init_result =
   {|{"id":1,"result":{"userAgent":"fixture/0.147.0","codexHome":"/tmp/codex","platformFamily":"unix","platformOs":"linux"}}|}
 ;;
@@ -741,17 +773,10 @@ let test_stream_idle_timeout_is_typed () =
     ~terminal_line_delay_s:2.0
     [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
     (fun path ->
-       match run_fixture ~timeout_s:1.0 path with
-       | Error
-           (Runtime_codex_app_server.Timeout
-              { seconds; turn_accepted = true }) ->
-         check (float 0.001) "exact idle timeout" 1.0 seconds
-       | Error
-           (Runtime_codex_app_server.Timeout
-              { turn_accepted = false; _ }) ->
-         fail "a sent turn/start request was classified as pre-dispatch"
-       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-       | Ok _ -> fail "silent app-server stream ignored its idle timeout")
+       let seconds =
+         accepted_turn_timeout_seconds (run_fixture ~timeout_s:1.0 path)
+       in
+       check (float 0.001) "exact idle timeout" 1.0 seconds)
 ;;
 
 let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
@@ -760,31 +785,22 @@ let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
     ~terminal_line_delay_start_index:1
     [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
     (fun path ->
-       match run_fixture ~timeout_s:1.0 path with
-       | Error
-           (Runtime_codex_app_server.Timeout
-              { seconds; turn_accepted = true }) ->
-         check (float 0.001) "exact idle timeout" 1.0 seconds
-       | Error
-           (Runtime_codex_app_server.Timeout
-              { turn_accepted = false; _ }) ->
-         fail "turn/start acceptance was lost before the idle timeout"
-       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-       | Ok _ -> fail "accepted turn ignored its idle timeout")
+       let seconds =
+         accepted_turn_timeout_seconds (run_fixture ~timeout_s:1.0 path)
+       in
+       check (float 0.001) "exact idle timeout" 1.0 seconds)
 ;;
 
 let test_state_callback_timeout_is_typed () =
   with_fixture [ init_result; account_chatgpt; thread_result ] (fun path ->
-    match
-      run_fixture
-        ~timeout_s:0.05
-        ~on_thread_ready_delay_s:0.2
-        path
-    with
-    | Error (Runtime_codex_app_server.Timeout { seconds; _ }) ->
-      check (float 0.001) "exact callback timeout" 0.05 seconds
-    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-    | Ok _ -> fail "blocking app-server callback ignored its timeout")
+    let seconds =
+      pre_acceptance_timeout_seconds
+        (run_fixture
+           ~timeout_s:0.05
+           ~on_thread_ready_delay_s:0.2
+           path)
+    in
+    check (float 0.001) "exact callback timeout" 0.05 seconds)
 ;;
 
 let test_terminal_error_notification_uses_official_context_error_enum () =

@@ -1,0 +1,20 @@
+; Credential_observation — reads a repo-hosting CLI's own status output and
+; reports what that credential surface resolves to (RFC-0369).
+;
+; Deliberately outside exec, Gate, and policy: those layers must not know a
+; particular CLI or credential scheme (INV-KEEPER-008, the reason RFC-0309 was
+; withdrawn). This library observes and never acts, so it depends on nothing
+; but string utilities.
+;
+; (include_subdirs no) opts out of the parent's (include_subdirs unqualified).
+
+(include_subdirs no)
+
+(library
+ (name masc_credential_observation)
+ (public_name masc.credential_observation)
+ (wrapped false)
+ (modules gh_auth_status)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries masc_core))

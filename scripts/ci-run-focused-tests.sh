@@ -82,6 +82,7 @@ normal_targets=(
   @test/runtest-test_keeper_tool_call_log
   @test/runtest-test_keeper_wire_capture
   @test/runtest-test_runtime_provider_auth_headers
+  @test/runtest-test_gh_auth_status
   @test/runtest-test_keeper_official_client_host
   @test/runtest-test_runtime_codex_app_server
   @test/runtest-test_runtime_antigravity

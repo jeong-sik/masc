@@ -224,7 +224,9 @@ async function fetchActivityEvents(
 
 async function fetchActivityGraphEvents(): Promise<GraphFetchResult> {
   try {
-    const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
+    const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50', {
+      publicRead: true,
+    })
     const rawEvents = data.events
     if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
       return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, ok: true }
@@ -261,10 +263,9 @@ async function fetchIdeBridgeRunActivityEvents(
   if (lane) {
     sources.push(fetchIdeEvents({ limit: 50, scope: { kind: 'keeper_lane', keeperId: lane } }))
   }
-  // Neither scope is set: there is nothing to query, not a request that
-  // happened to find zero events. The caller derives the visible no-scope
-  // state from the current props, before any asynchronous response arrives.
-  if (sources.length === 0) return { events: EMPTY_ACTIVITY, ok: true }
+  // A missing selection is a readable default lane, not an error state.  It
+  // keeps the activity panel useful while workspace selection is catching up.
+  if (sources.length === 0) sources.push(fetchIdeEvents({ limit: 50 }))
   const settled = await Promise.allSettled(sources)
   const events: RunActivityEvent[] = []
   let ok = true
@@ -454,10 +455,6 @@ function activityScopeKey(repoId?: string | null, keeperLane?: string | null): s
   return JSON.stringify([repoId?.trim() || null, keeperLane?.trim() || null])
 }
 
-function hasActivityBridgeScope(repoId?: string | null, keeperLane?: string | null): boolean {
-  return Boolean(repoId?.trim()) || Boolean(keeperLane?.trim())
-}
-
 export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const {
     activeFile: rawActiveFile = '',
@@ -476,7 +473,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   }, [])
   const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
   const requestedScopeKey = activityScopeKey(repoId, keeperLane)
-  const bridgeScoped = hasActivityBridgeScope(repoId, keeperLane)
   const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null)
   const loadedScopeKeyRef = useRef<string | null>(null)
   const [compactInsightsOpen, setCompactInsightsOpen] = useState(false)
@@ -626,9 +622,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         class="ide-rail-list ide-activity-list"
       >
         ${events.length === 0
-          ? bridgeScoped
-            ? html`<li class="ide-rail-empty">no recent activity</li>`
-            : html`<li class="ide-rail-empty" data-testid="ide-activity-no-scope">관측 스코프(저장소/keeper)가 선택되지 않았습니다</li>`
+          ? html`<li class="ide-rail-empty">no recent activity</li>`
           : events.map(item => html`<${ActivityRow} item=${item} presence=${presence} overlay=${overlay} />`)}
       </ol>
     </div>

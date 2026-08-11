@@ -1,4 +1,4 @@
-(** Admin-only durable Keeper event-queue control boundary. *)
+(** Durable Keeper event-queue read and control boundary. *)
 
 module Http = Http_server_eio
 module Execute = Server_dashboard_http_keeper_event_queue_operator_execute
@@ -130,13 +130,16 @@ module For_testing = struct
   let pending_page = pending_page
 end
 
-let handle_get state request reqd ~keeper_name =
-  let respond ?(status = `OK) json =
-    Server_auth.respond_json_value_with_cors ~status request reqd json
-  in
+type pending_response =
+  { status : Httpun.Status.t
+  ; body : Yojson.Safe.t
+  }
+
+let pending_response status body = { status; body }
+
+let pending_response_for_request state request ~keeper_name =
   let error ~status detail =
-    respond
-      ~status
+    pending_response status
       (`Assoc
         [ "schema", `String pending_result_schema
         ; "ok", `Bool false
@@ -167,16 +170,22 @@ let handle_get state request reqd ~keeper_name =
            then `String (string_of_int consumed)
            else `Null
          in
-         respond
+         pending_response `OK
            (`Assoc
-             [ "schema", `String pending_result_schema
-             ; "ok", `Bool true
-             ; "keeper_name", `String keeper_name
-             ; "revision", `String (Int64.to_string revision)
-             ; "total_pending", `Int total_pending
-             ; "next_after", next_after
-             ; "pending", `List page
-             ]))
+              [ "schema", `String pending_result_schema
+              ; "ok", `Bool true
+              ; "keeper_name", `String keeper_name
+              ; "revision", `String (Int64.to_string revision)
+              ; "total_pending", `Int total_pending
+              ; "next_after", next_after
+              ; "pending", `List page
+              ]))
+;;
+
+let handle_get state request reqd ~keeper_name =
+  let response = pending_response_for_request state request ~keeper_name in
+  Server_auth.respond_json_value_with_cors
+    ~status:response.status request reqd response.body
 ;;
 
 type request = Execute.request =

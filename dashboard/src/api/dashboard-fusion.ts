@@ -65,6 +65,9 @@ export function parseFusionRunsResponse(raw: unknown): DashboardFusionRunsRespon
 export async function fetchFusionRuns(
   opts?: AbortableRequestOptions,
 ): Promise<DashboardFusionRunsResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/fusion-runs', { signal: opts?.signal })
+  const raw = await get<unknown>('/api/v1/dashboard/fusion-runs', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   return parseFusionRunsResponse(raw)
 }

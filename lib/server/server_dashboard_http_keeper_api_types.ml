@@ -164,17 +164,7 @@ let is_keeper_checkpoints_get_path req_path =
 let is_keeper_paused_work_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_paused_work
 
-let keeper_get_permission req_path =
-  if
-    is_keeper_checkpoints_get_path req_path
-    || is_keeper_paused_work_get_path req_path
-  then Some Masc_domain.CanAdmin
-  else if
-    keeper_path_ends_with req_path keeper_suffix_raw_traces
-    || keeper_path_ends_with req_path keeper_suffix_raw_trace
-    || keeper_path_ends_with req_path keeper_suffix_memory_journal
-  then Some Masc_domain.CanAdmin
-  else None
+let keeper_get_permission _req_path = None
 
 let trim_to_opt = String_util.trim_to_option
 

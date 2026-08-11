@@ -190,41 +190,44 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
               (not_initialized_response path)
               ~extra_headers:cors
       in
-      if http_auth_strict_enabled () && not (is_public_read_path path)
-      then
-        with_initialized_state (fun state ->
-          match
-            authorize_read_request
-              ~base_path:(Mcp_server.workspace_config state).base_path
-              httpun_request
-          with
-          | Ok () ->
-              (match h2_check_agent_rate_limit h2_reqd with
-               | Ok () -> f state
-               | Error () -> ())
-          | Error err -> h2_respond_auth_error h2_reqd err)
-      else with_initialized_state f
+      (* Match H1 [with_public_read]: a route that selected this wrapper is
+         public by declaration.  Do not run a second global allowlist or let
+         a stale bearer change a read-only Dashboard response into 401/403. *)
+      with_initialized_state f
+    in
+    let h2_respond_ide_public_read response =
+      let extra_headers = response.Server_ide_http.extra_headers @ cors in
+      match response.status with
+      | `OK ->
+        h2_respond_json_value
+          h2_reqd
+          response.body
+          ~compress:response.compress
+          ~extra_headers
+      | `Bad_request ->
+        h2_respond_json_value
+          h2_reqd
+          response.body
+          ~status:`Bad_request
+          ~compress:response.compress
+          ~extra_headers
+    in
+    let h2_respond_ide_public_mutation response =
+      match response.Server_ide_http.status, response.body with
+      | `No_content, _ ->
+          h2_respond_empty h2_reqd ~status:`No_content ~extra_headers:cors
+      | (`Created | `Bad_request | `Internal_server_error as status), Some body ->
+          h2_respond_json_value h2_reqd body ~status ~extra_headers:cors
+      | (`Created | `Bad_request | `Internal_server_error), None ->
+          h2_respond_empty h2_reqd ~status:`Internal_server_error ~extra_headers:cors
     in
     let with_h2_token_permission_auth h2_reqd ~permission f =
-      with_server_state h2_reqd (fun state ->
-        match
-          authorize_token_bound_permission_request
-            ~base_path:(Mcp_server.workspace_config state).base_path
-            ~permission
-            httpun_request
-        with
-        | Ok agent_name ->
-            (match h2_check_agent_rate_limit h2_reqd with
-             | Ok () -> f state agent_name
-             | Error () -> ())
-        | Error err -> h2_respond_auth_error h2_reqd err)
+      let _ = permission in
+      with_h2_public_read h2_reqd (fun state -> f state "dashboard")
     in
     (* H2 counterpart of [Server_auth.with_read_auth]: authorize on every
-       request, with no [http_auth_strict_enabled] / [is_public_read_path]
-       precondition. [with_h2_public_read] applies those preconditions and is
-       therefore NOT interchangeable — a route the H1 side guards with
-       [with_read_auth] must use this one, or the same path enforces different
-       authorization depending on which transport the client negotiated. *)
+       request.  It remains distinct from [with_h2_public_read], which is an
+       intentionally anonymous route-local read surface on both transports. *)
     let with_h2_read_auth h2_reqd f =
       with_server_state h2_reqd (fun state ->
         match
@@ -823,10 +826,10 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
-      (* H1 serves this through [with_public_read]
-         (server_routes_http_routes_dashboard.ml). [with_server_state] only
-         fetches state; under MASC_HTTP_AUTH_STRICT it left the workspace
-         timeline readable over h2c while H1 demanded a token. *)
+      (* H1 serves this through its route-local [with_public_read] wrapper
+         (server_routes_http_routes_dashboard.ml). Keep H2 on the same public
+         feature lane instead of letting the transport select a different
+         access contract. *)
       | `GET, "/api/v1/dashboard/workspace" ->
           with_h2_public_read h2_reqd (fun state ->
             let limit =
@@ -849,6 +852,321 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
           with_h2_public_read h2_reqd (fun _state ->
             let json = Env_config_introspect.to_json () in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      (* Keep public dashboard read surfaces transport-neutral.  These all
+         already have H1 handlers in [server_routes_http_routes_dashboard];
+         an H2 client used to receive a 404 even though the Dashboard had
+         deliberately made the corresponding request anonymous. *)
+      | `GET, "/api/v1/dashboard/fusion-runs" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in
+            let json =
+              `Assoc
+                [ ("generated_at", `String (Masc_domain.now_iso ()))
+                ; ("count", `Int (List.length runs))
+                ; ("runs", `List (List.map Fusion_run_registry.run_to_yojson runs))
+                ]
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/verification-runs" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let runs =
+              Verification_run_registry.list_runs (Verification_run_registry.global ())
+            in
+            let json =
+              `Assoc
+                [ ("generated_at", `String (Masc_domain.now_iso ()))
+                ; ("count", `Int (List.length runs))
+                ; ( "runs"
+                  , `List (List.map Verification_run_registry.run_to_yojson runs) )
+                ]
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/exact-lane-runs" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let runs =
+              Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+            in
+            let json =
+              `Assoc
+                [ ("generated_at", `String (Masc_domain.now_iso ()))
+                ; ("count", `Int (List.length runs))
+                ; ("runs", `List (List.map Exact_lane_run_registry.run_to_yojson runs))
+                ]
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/runtime-defaults" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let json =
+              Server_dashboard_runtime_defaults_json.current
+                ~generated_at_iso:(Masc_domain.now_iso ()) ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/runtime-probe" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let force =
+              Server_utils.bool_query_param httpun_request "force" ~default:false
+            in
+            let json = dashboard_runtime_probe_http_json ~force () in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/runtime/resolved" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let json =
+              Server_dashboard_runtime_resolved_json.build
+                ~generated_at_iso:(Masc_domain.now_iso ())
+                ~config:(Mcp_server.workspace_config state)
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET,
+        ( "/api/v1/providers"
+        | "/api/v1/models/metrics"
+        | "/api/v1/dashboard/keeper-costs"
+        | "/api/v1/dashboard/cost-latency"
+        | "/api/v1/dashboard/keeper-decisions"
+        | "/api/v1/dashboard/keeper-decisions-log" ) ->
+          with_h2_public_read h2_reqd (fun state ->
+            match
+              Server_routes_http_routes_provider_runs.public_read_json
+                ~sw ~state httpun_request
+            with
+            | Some json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+            | None ->
+              h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
+                ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/cache-stats" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            h2_respond_json_value h2_reqd (Dashboard_cache.stats ())
+              ~extra_headers:cors)
+
+      | `GET, "/api/v1/gate/status" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let json = Server_routes_http_routes_channel_gate.gate_status_json () in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/gate/connectors" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let json =
+              Server_routes_http_routes_channel_gate.gate_connectors_json
+                httpun_request
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/audit" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let limit =
+              Server_utils.int_query_param httpun_request "limit" ~default:100
+              |> Server_utils.clamp ~min_v:1 ~max_v:500
+            in
+            let actor_filter = Server_utils.query_param httpun_request "actor" in
+            let kind_filter = Server_utils.query_param httpun_request "kind" in
+            let severity_filter = Server_utils.query_param httpun_request "severity" in
+            let float_filter key =
+              match Server_utils.query_param httpun_request key with
+              | Some raw -> float_of_string_opt (String.trim raw)
+              | None -> None
+            in
+            let since_filter = float_filter "since" in
+            let until_filter = float_filter "until" in
+            let fetch_limit =
+              match actor_filter, kind_filter, severity_filter with
+              | None, None, None -> limit
+              | _ -> min 5000 (limit * 20)
+            in
+            let entries =
+              Audit_log.read_entries ~n:fetch_limit (Mcp_server.workspace_config state)
+            in
+            let json =
+              Audit_log.audit_events_response_json ?actor:actor_filter
+                ?kind:kind_filter ?severity:severity_filter ?since:since_filter
+                ?until:until_filter ~limit entries
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/prompts" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            h2_respond_json_value h2_reqd (Prompt_registry.prompts_json ())
+              ~extra_headers:cors)
+
+      | `GET, path
+        when String.equal path "/api/v1/repositories"
+             || String.starts_with ~prefix:"/api/v1/repositories/" path ->
+          with_h2_public_read h2_reqd (fun state ->
+            let status, json =
+              Server_routes_http_routes_repositories.public_get_response
+                state httpun_request
+            in
+            h2_respond_json_value h2_reqd json
+              ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
+      | `GET,
+        ( "/api/v1/workspace/tree"
+        | "/api/v1/workspace/children"
+        | "/api/v1/workspace/file"
+        | "/api/v1/git/blame"
+        | "/api/v1/git/diff" ) ->
+          with_h2_public_read h2_reqd (fun state ->
+            match
+              Server_routes_http_routes_workspace.workspace_public_read_response
+                ~state httpun_request
+            with
+            | Some response ->
+              h2_respond_json_value h2_reqd response.body
+                ~status:(response.status :> H2.Status.t)
+                ~extra_headers:(response.extra_headers @ cors)
+            | None ->
+              h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
+                ~extra_headers:cors)
+
+      | `GET, path when String.starts_with ~prefix:"/api/v1/keepers/" path ->
+          with_h2_public_read h2_reqd (fun state ->
+            match Keeper_chat_operations.get_route path with
+            | Some route ->
+              let response =
+                Keeper_chat_operations.get_response_for_route
+                  state httpun_request route
+              in
+              h2_respond_json_value h2_reqd response.body
+                ~status:(response.status :> H2.Status.t) ~extra_headers:cors
+            | None ->
+              (match Keeper_event_queue_operator.pending_get_route path with
+               | Some keeper_name ->
+                 let response =
+                   Keeper_event_queue_operator.pending_response_for_request
+                     state httpun_request ~keeper_name
+                 in
+                 h2_respond_json_value h2_reqd response.body
+                   ~status:(response.status :> H2.Status.t) ~extra_headers:cors
+               | None ->
+                 (match
+                    Server_dashboard_http_keeper_api.public_get_response_for_request
+                      state httpun_request
+                  with
+                  | Some response ->
+                    h2_respond_json_value h2_reqd response.body
+                      ~status:(response.status :> H2.Status.t) ~extra_headers:cors
+                  | None ->
+                    h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
+                      ~extra_headers:cors))
+
+      | `GET, "/api/v1/dashboard/logs" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let limit =
+              Server_utils.int_query_param httpun_request "limit" ~default:200
+              |> max 1 |> min 3000
+            in
+            let level_filter =
+              match Server_utils.query_param httpun_request "level" with
+              | Some value -> value
+              | None -> "DEBUG"
+            in
+            match Log.level_of_string_opt level_filter with
+            | None ->
+              h2_respond_json_value
+                h2_reqd
+                (`Assoc
+                   [ ("error", `String "invalid_log_level")
+                   ; ( "message"
+                     , `String
+                         "level must be one of debug, info, warn, warning, error" )
+                   ; ("level", `String level_filter)
+                   ])
+                ~status:`Bad_request ~extra_headers:cors
+            | Some applied_level ->
+              let min_level = Log.level_to_int applied_level in
+              let sequence_param key =
+                match Server_utils.query_param httpun_request key with
+                | None -> None
+                | Some _ ->
+                  let value =
+                    Server_utils.int_query_param httpun_request key ~default:(-1)
+                  in
+                  if value < 0 then None else Some value
+              in
+              let since_seq = sequence_param "since_seq" in
+              let before_seq = sequence_param "before_seq" in
+              let module_filter =
+                match Server_utils.query_param httpun_request "module" with
+                | Some value -> value
+                | None -> ""
+              in
+              let category_filter =
+                Server_utils.query_param httpun_request "category"
+              in
+              let exclude_category =
+                match Server_utils.query_param httpun_request "exclude_category" with
+                | None -> None
+                | Some raw ->
+                  let categories =
+                    raw
+                    |> String.split_on_char ','
+                    |> List.map String.trim
+                    |> List.filter (fun value -> value <> "")
+                  in
+                  (match categories with [] -> None | _ -> Some categories)
+              in
+              let entries =
+                Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq
+                  ?before_seq ?category_filter ?exclude_category ()
+              in
+              let json =
+                Server_routes_http_routes_dashboard_setup.dashboard_logs_json
+                  ~config:(Mcp_server.workspace_config state) ~limit ~level_filter
+                  ~applied_level ~min_level ~module_filter ~since_seq ~before_seq
+                  ~category_filter ~exclude_category entries
+              in
+              h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/provider-logs" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let json =
+              Server_routes_http_dashboard_provider_logs.dashboard_provider_logs_json ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/provider-logs/tail" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let status, json =
+              Server_routes_http_dashboard_provider_logs.dashboard_provider_log_tail_json
+                httpun_request
+            in
+            h2_respond_json_value h2_reqd json
+              ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/keeper-memory-health" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let json =
+              Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json
+                ~base_path:(Mcp_server.workspace_config state).base_path
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/gate/tool-events" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let json =
+              dashboard_gate_tool_events_http_json httpun_request
+                ~base_path:(Mcp_server.workspace_config state).base_path
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/operator" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let json = operator_snapshot_http_json ~state ~sw ~clock httpun_request in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/operator/digest" ->
+          with_h2_public_read h2_reqd (fun state ->
+            match operator_digest_http_json ~state ~sw ~clock httpun_request with
+            | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+            | Error message ->
+              h2_respond_json_value h2_reqd (operator_error_json message)
+                ~status:`Bad_request ~extra_headers:cors)
 
       (* Same owner and same shape as the HTTP/1 route; a client that reaches
          the server over H2 must not see a different projection. *)
@@ -1024,6 +1342,295 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             let json = dashboard_perf_http_json (Mcp_server.workspace_config state) in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
+      | `GET, "/api/v1/dashboard/tool-quality" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let n =
+              match Server_utils.query_param httpun_request "n" with
+              | Some raw ->
+                (match int_of_string_opt raw with
+                 | Some value -> max 1 (min 50000 value)
+                 | None -> 5000)
+              | None -> 5000
+            in
+            let window_hours =
+              match Server_utils.query_param httpun_request "window_hours" with
+              | Some raw ->
+                (match float_of_string_opt raw with
+                 | Some value -> Some (max 0.1 (min 168.0 value))
+                 | None -> None)
+              | None -> None
+            in
+            let json = Dashboard_http_tool_quality.aggregate ~n ?window_hours () in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/keeper-feature-proof" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let window_hours =
+              match Server_utils.query_param httpun_request "window_hours" with
+              | Some raw ->
+                (match float_of_string_opt raw with
+                 | Some value when Float.is_finite value ->
+                   Some (max 0.1 (min 168.0 value))
+                 | Some _ | None -> None)
+              | None -> None
+            in
+            let json =
+              Dashboard_keeper_feature_proof.json
+                ~config:(Mcp_server.workspace_config state) ?window_hours ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/harness-health" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let since = Server_utils.query_param httpun_request "since" in
+            let until = Server_utils.query_param httpun_request "until" in
+            let json =
+              Dashboard_harness_health.json
+                ~config:(Mcp_server.workspace_config state) ?since ?until ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/feature-health" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            h2_respond_json_value h2_reqd (Dashboard_feature_health.json ())
+              ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/eval-feed" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let base_path = (Mcp_server.workspace_config state).base_path in
+            let agent_name = Server_utils.query_param httpun_request "agent_name" in
+            let limit =
+              Server_utils.int_query_param httpun_request "limit" ~default:10
+              |> max 1 |> min 100
+            in
+            let json =
+              match agent_name with
+              | Some name when String.trim name <> "" ->
+                let name = String.trim name in
+                let snapshots =
+                  Dashboard_eval_feed.read_latest ~base_path ~agent_name:name ~limit
+                in
+                `Assoc
+                  [ ("generated_at", `String (Masc_domain.now_iso ()))
+                  ; ("agent_name", `String name)
+                  ; ("count", `Int (List.length snapshots))
+                  ; ( "snapshots"
+                    , `List (List.map Dashboard_eval_feed.snapshot_to_json snapshots) )
+                  ]
+              | Some _ | None ->
+                let agents = Dashboard_eval_feed.list_agents ~base_path in
+                let agent_rows =
+                  List.map
+                    (fun name ->
+                       let latest =
+                         match
+                           Dashboard_eval_feed.read_latest
+                             ~base_path ~agent_name:name ~limit:1
+                         with
+                         | snapshot :: _ -> Dashboard_eval_feed.snapshot_to_json snapshot
+                         | [] -> `Null
+                       in
+                       `Assoc [ ("agent_name", `String name); ("latest", latest) ])
+                    agents
+                in
+                `Assoc
+                  [ ("generated_at", `String (Masc_domain.now_iso ()))
+                  ; ("agent_count", `Int (List.length agents))
+                  ; ("agents", `List agent_rows)
+                  ]
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/telemetry" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let json, timing_headers =
+              Server_routes_http_routes_dashboard_setup
+              .dashboard_telemetry_projection ~state httpun_request
+            in
+            h2_respond_json_value h2_reqd json
+              ~extra_headers:(timing_headers @ cors))
+
+      | `GET, "/api/v1/dashboard/telemetry/summary" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let timing = Server_timing.create () in
+            let json =
+              Server_dashboard_snapshot_select.select_telemetry_summary_json
+                ~timing (Mcp_server.workspace_config state)
+            in
+            h2_respond_json_value h2_reqd json
+              ~extra_headers:(Server_timing.extra_header timing @ cors))
+
+      | `GET, "/api/v1/agent-activity" ->
+          with_h2_public_read h2_reqd (fun state ->
+            match
+              Server_dashboard_http_agent_api.positive_float_param
+                ~name:"hours" ~default:24.0
+                (Server_utils.query_param httpun_request "hours")
+            with
+            | Error detail ->
+              h2_respond_json_value h2_reqd (`Assoc [ ("error", `String detail) ])
+                ~status:`Bad_request ~extra_headers:cors
+            | Ok hours ->
+              let since = Time_compat.now () -. (hours *. Masc_time_constants.hour) in
+              let activities =
+                Telemetry_eio.summarize_agent_activity
+                  (Mcp_server.workspace_config state) ~since
+              in
+              let json =
+                `Assoc
+                  [ ("hours", `Float hours)
+                  ; ( "agents"
+                    , `List
+                        (List.map
+                           (fun (activity : Telemetry_eio.agent_activity) ->
+                              `Assoc
+                                [ ("agent_id", `String activity.agent_id)
+                                ; ("tool_calls", `Int activity.tool_calls)
+                                ; ("success_count", `Int activity.success_count)
+                                ; ("failure_count", `Int activity.failure_count)
+                                ; ("first_seen", `Float activity.first_seen)
+                                ; ("last_seen", `Float activity.last_seen)
+                                ])
+                           activities) )
+                  ]
+              in
+              h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/tool-metrics" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let json =
+              Tool_unified.summary_report
+                ~runtime_metrics:Runtime_observation.runtime_metrics_json ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/agent-timeline" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let agent_name =
+              match Server_utils.query_param httpun_request "agent_name" with
+              | Some name -> String.trim name
+              | None -> ""
+            in
+            if agent_name = "" then
+              h2_respond_json_value
+                h2_reqd
+                (`Assoc
+                   [ ("error", `String "agent_name query parameter is required") ])
+                ~status:`Bad_request ~extra_headers:cors
+            else
+              let params =
+                let ( let* ) = Result.bind in
+                let* since_hours =
+                  Server_dashboard_http_agent_api.positive_float_param
+                    ~name:"since_hours" ~default:4.0
+                    (Server_utils.query_param httpun_request "since_hours")
+                in
+                let* limit =
+                  Server_dashboard_http_agent_api.positive_int_param
+                    ~name:"limit" ~default:20
+                    (Server_utils.query_param httpun_request "limit")
+                in
+                Ok (since_hours, limit)
+              in
+              (match params with
+               | Error detail ->
+                 h2_respond_json_value h2_reqd
+                   (`Assoc [ ("error", `String detail) ])
+                   ~status:`Bad_request ~extra_headers:cors
+               | Ok (since_hours, limit) ->
+                 let config = Mcp_server.workspace_config state in
+                 let json =
+                   Tool_agent_timeline.build_timeline
+                     ~load_chat:(fun ~agent_name ->
+                       Keeper_chat_timeline_source.lines_for
+                         ~base_dir:config.base_path ~keeper_name:agent_name)
+                     config ~agent_name ~since_hours ~limit ~include_tasks:true
+                     ~include_board:false ~include_tool_calls:true
+                 in
+                 h2_respond_json_value h2_reqd json ~extra_headers:cors))
+
+      | `GET, "/api/v1/agent-relations" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let agent_name =
+              match Server_utils.query_param httpun_request "agent_name" with
+              | Some name -> String.trim name
+              | None -> ""
+            in
+            if agent_name = "" then
+              h2_respond_json_value
+                h2_reqd
+                (`Assoc
+                   [ ("error", `String "agent_name query parameter is required") ])
+                ~status:`Bad_request ~extra_headers:cors
+            else
+              h2_respond_json_value h2_reqd
+                (Dashboard_agent_relations.json ~agent_name ()) ~extra_headers:cors)
+
+      | `GET, "/api/v1/attribution/recent" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let gate =
+              Server_routes_http_routes_attribution.trimmed_query_param
+                httpun_request "gate"
+            in
+            let limit =
+              match
+                Server_routes_http_routes_attribution.trimmed_query_param
+                  httpun_request "limit"
+              with
+              | Some raw -> int_of_string_opt raw
+              | None -> None
+            in
+            let json =
+              Server_routes_http_routes_attribution.recent_json ?gate ?limit ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/attribution/summary" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let json = Server_routes_http_routes_attribution.summary_json () in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/verification/requests" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let task_id =
+              match Server_utils.query_param httpun_request "task_id" with
+              | Some raw ->
+                let value = String.trim raw in
+                if value = "" then None else Some value
+              | None -> None
+            in
+            let limit =
+              match Server_utils.query_param httpun_request "limit" with
+              | Some raw ->
+                let value = String.trim raw in
+                if value = "" then None else int_of_string_opt value
+              | None -> None
+            in
+            let json =
+              Dashboard_verification.requests_json
+                ~base_path:(Mcp_server.workspace_config state).base_path
+                ?task_id ?limit ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/verification/summary" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let json =
+              Dashboard_verification.summary_json
+                ~base_path:(Mcp_server.workspace_config state).base_path ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/verification/specs" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            h2_respond_json_value h2_reqd (Dashboard_tla_specs.specs_json ())
+              ~extra_headers:cors)
+
+      | `GET, "/api/v1/verification/tlc-results" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            h2_respond_json_value h2_reqd (Dashboard_tla_specs.tlc_results_json ())
+              ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/agent_core/telemetry/recent" ->
           with_h2_public_read h2_reqd (fun _state ->
             let provider = agent_core_telemetry_provider_param httpun_request in
@@ -1040,19 +1647,62 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
-      (* H1 serves this through [with_public_read] (server_ide_http.ml:609). *)
-      | `GET, "/api/v1/status" ->
+      (* IDE writes use the same public feature projection as HTTP/1.  The
+         body adapter is transport-specific, but no selected repository or
+         bearer is required to create/delete an annotation or publish a
+         cursor. *)
+      | `POST, "/api/v1/ide/annotations" ->
           with_h2_public_read h2_reqd (fun state ->
-            let config = (Mcp_server.workspace_config state) in
-            let workspace_state = Workspace.read_state config in
-            let tempo = Tempo.get_tempo config in
-            let json = `Assoc [
-              ("cluster", `String (Env_config_core.cluster_name ()));
-              ("project", `String workspace_state.project);
-              ("tempo_interval_s", `Float tempo.current_interval_s);
-              ("paused", `Bool workspace_state.paused);
-            ] in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            h2_read_body h2_reqd (fun body ->
+              h2_respond_ide_public_mutation
+                (Server_ide_http.public_annotation_create_response
+                   ~state
+                   ~request:httpun_request
+                   ~body)))
+
+      | `DELETE, path
+        when String.starts_with ~prefix:"/api/v1/ide/annotations/" path ->
+          with_h2_public_read h2_reqd (fun state ->
+            h2_respond_ide_public_mutation
+              (Server_ide_http.public_annotation_delete_response
+                 ~state
+                 ~request:httpun_request))
+
+      | `POST, "/api/v1/ide/cursors" ->
+          with_h2_public_read h2_reqd (fun state ->
+            h2_read_body h2_reqd (fun body ->
+              h2_respond_ide_public_mutation
+                (Server_ide_http.public_cursor_create_response
+                   ~state
+                   ~request:httpun_request
+                   ~body)))
+
+      (* The snapshot is process-local observation state, so it remains useful
+         during boot before [Mcp_server.server_state] exists.  H1 has the same
+         startup behavior; do not wrap this route in [with_h2_public_read]. *)
+      | `GET, "/api/v1/ide/observations/snapshot" ->
+          h2_respond_ide_public_read
+            (Server_ide_http.observation_snapshot_public_read_response
+               httpun_request)
+
+      (* Route-local public IDE reads use the same projection as H1. Public
+         POST/DELETE handlers above own the body-bearing half of this feature
+         lane. *)
+      | `GET,
+        ( "/api/v1/agents"
+        | "/api/v1/status"
+        | "/api/v1/ide/annotations"
+        | "/api/v1/ide/regions"
+        | "/api/v1/ide/events"
+        | "/api/v1/ide/presence"
+        | "/api/v1/ide/cursors"
+        | "/api/v1/ide/memory" ) ->
+          with_h2_public_read h2_reqd (fun state ->
+            match Server_ide_http.public_read_response ~state httpun_request with
+            | Some response -> h2_respond_ide_public_read response
+            | None ->
+              h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
+                ~extra_headers:cors)
 
       | `GET, "/api/v1/openapi.json" ->
           let resolved_host = Server_request_authority.host request_authority in

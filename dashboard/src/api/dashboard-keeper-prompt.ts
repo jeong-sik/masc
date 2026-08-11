@@ -11,7 +11,6 @@
 // can trust what they are looking at.
 
 import { get, post, type AbortableRequestOptions } from './core'
-import { ensureDevToken } from './dev-token'
 import { isRecord, asNumber, asString } from '../components/common/normalize'
 import { type TurnPromptBlockId } from './dashboard-turn-records'
 
@@ -82,10 +81,9 @@ export async function fetchKeeperLastPrompt(
   name: string,
   opts?: AbortableRequestOptions,
 ): Promise<PromptCapture> {
-  await ensureDevToken()
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/last-prompt`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   ).then((raw) => {
     const decoded = decodeCapture(raw)
     if (!decoded) throw new Error('유효하지 않은 prompt capture payload')
@@ -125,11 +123,10 @@ export async function fetchKeeperRawTraces(
   limit?: number,
   opts?: AbortableRequestOptions,
 ): Promise<readonly RawTraceTurn[]> {
-  await ensureDevToken()
   const params = limit == null ? '' : `?limit=${encodeURIComponent(String(limit))}`
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/raw-traces${params}`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   ).then((raw) => {
     if (!isRecord(raw) || !Array.isArray(raw.turns)) {
       throw new Error('유효하지 않은 raw trace 목록 payload')
@@ -176,13 +173,12 @@ export async function fetchKeeperRawTrace(
   file: string,
   opts?: AbortableRequestOptions & { offset?: number; limit?: number },
 ): Promise<RawTracePage> {
-  await ensureDevToken()
   const query = new URLSearchParams({ file })
   if (opts?.offset != null) query.set('offset', String(opts.offset))
   if (opts?.limit != null) query.set('limit', String(opts.limit))
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/raw-trace?${query.toString()}`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   ).then((raw) => {
     if (!isRecord(raw)) throw new Error('유효하지 않은 raw trace payload')
     const fileName = asString(raw.file)
@@ -219,7 +215,6 @@ export async function putKeeperOperatorNote(
   name: string,
   text: string,
 ): Promise<OperatorNote> {
-  await ensureDevToken()
   const raw = await post<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/operator-note`,
     { text },
@@ -259,10 +254,9 @@ export async function fetchKeeperOperatorNote(
   name: string,
   opts?: AbortableRequestOptions,
 ): Promise<OperatorNote> {
-  await ensureDevToken()
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/operator-note`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   ).then((raw) => {
     if (!isRecord(raw)) throw new Error('유효하지 않은 operator note payload')
     return decodeNoteResponse(raw)

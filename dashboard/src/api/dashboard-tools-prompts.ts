@@ -3,7 +3,6 @@
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get, post, type AbortableRequestOptions } from './core'
-import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
 
@@ -666,7 +665,7 @@ export interface DashboardRuntimeProbeResponse {
 }
 
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
-  return get('/api/v1/tool-metrics')
+  return get('/api/v1/tool-metrics', { publicRead: true })
 }
 
 export async function fetchDashboardRuntimeProbe(
@@ -674,14 +673,19 @@ export async function fetchDashboardRuntimeProbe(
   opts?: AbortableRequestOptions,
 ): Promise<DashboardRuntimeProbeResponse> {
   const query = force ? '?force=1' : ''
-  await ensureDevToken()
-  return get(`/api/v1/dashboard/runtime-probe${query}`, { signal: opts?.signal })
+  return get(`/api/v1/dashboard/runtime-probe${query}`, {
+    signal: opts?.signal,
+    publicRead: true,
+  })
 }
 
 export async function fetchDashboardFullHealth(
   opts?: AbortableRequestOptions,
 ): Promise<DashboardFullHealthResponse> {
-  const raw = await get<DashboardFullHealthResponse>('/health?full=1', { signal: opts?.signal })
+  const raw = await get<DashboardFullHealthResponse>('/health?full=1', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   return normalizeFullHealthResponse(raw)
 }
 
@@ -776,8 +780,10 @@ export function normalizeFullHealthResponse(
 }
 
 export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promise<DashboardToolsResponse> {
-  await ensureDevToken()
-  const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools', { signal: opts?.signal })
+  const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   const normalizedTools = raw.tool_inventory?.tools?.map(t => ({
     ...t,
     category: t.category ?? 'uncategorized',
@@ -807,10 +813,9 @@ export async function fetchKeeperWaitingInventory(
   keeperName: string,
   opts?: AbortableRequestOptions,
 ): Promise<DashboardKeeperWaitingInventory> {
-  await ensureDevToken()
   const raw = await get<DashboardKeeperWaitingInventory>(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/waiting-inventory`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   )
   return normalizeKeeperWaitingInventory(raw)
 }
@@ -851,7 +856,7 @@ interface PromptMutationResponse {
 }
 
 export function fetchDashboardPrompts(): Promise<DashboardPromptsResponse> {
-  return get('/api/v1/prompts')
+  return get('/api/v1/prompts', { publicRead: true })
 }
 
 export function savePromptOverride(key: string, value: string): Promise<PromptMutationResponse> {

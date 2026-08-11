@@ -29,7 +29,7 @@ export function fetchTaskEvents(taskId: string, limit = 50): Promise<unknown[]> 
     task_id: taskId,
     limit: String(limit),
   })
-  return get<unknown[]>(`/api/v1/dashboard/tasks/history?${params.toString()}`)
+  return get<unknown[]>(`/api/v1/dashboard/tasks/history?${params.toString()}`, { publicRead: true })
 }
 
 // --- Dashboard delete actions ---

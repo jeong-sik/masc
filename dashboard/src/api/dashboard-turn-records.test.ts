@@ -8,7 +8,10 @@ vi.mock('./core', () => ({
 }))
 vi.mock('./dev-token', () => ({ ensureDevToken }))
 
-import { fetchKeeperTurnRecords } from './dashboard-turn-records'
+import {
+  fetchKeeperCompactionSnapshots,
+  fetchKeeperTurnRecords,
+} from './dashboard-turn-records'
 
 function entry(overrides: Record<string, unknown> = {}) {
   return {
@@ -69,8 +72,56 @@ function payload(...entries: ReturnType<typeof entry>[]) {
   }
 }
 
+function compactionSnapshotsPayload() {
+  return {
+    schema: 'keeper.compaction_snapshots.v1',
+    keeper: 'sangsu',
+    source: 'runtime_manifest|keeper_meta',
+    producer: 'keeper_runtime_manifest|keeper_meta_store',
+    limit: 25,
+    count: 0,
+    read_error_count: 0,
+    read_errors: [],
+    scan_truncated: false,
+    hydration_status: 'ready',
+    items: [],
+  }
+}
+
 afterEach(() => {
   getMock.mockReset()
+  ensureDevToken.mockClear()
+})
+
+describe('public keeper inspectors', () => {
+  it('loads turn records and compaction snapshots without a dev-token bootstrap', async () => {
+    getMock
+      .mockResolvedValueOnce(payload(entry()))
+      .mockResolvedValueOnce(compactionSnapshotsPayload())
+
+    const [turnRecords, snapshots] = await Promise.all([
+      fetchKeeperTurnRecords('sangsu'),
+      fetchKeeperCompactionSnapshots('sangsu'),
+    ])
+
+    expect(turnRecords.keeper).toBe('sangsu')
+    expect(snapshots).toMatchObject({
+      keeper: 'sangsu',
+      hydration_status: 'ready',
+      items: [],
+    })
+    expect(ensureDevToken).not.toHaveBeenCalled()
+    expect(getMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/keepers/sangsu/turn-records',
+      { signal: undefined, publicRead: true },
+    )
+    expect(getMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/keepers/sangsu/compaction-snapshots',
+      { signal: undefined, publicRead: true },
+    )
+  })
 })
 
 // #25779 made the provider cache token counts durable on the turn record, but

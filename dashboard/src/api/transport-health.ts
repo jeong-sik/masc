@@ -18,6 +18,7 @@ export async function fetchTransportHealth(
 ): Promise<TransportHealthSnapshot> {
   const raw = await get<unknown>('/api/v1/dashboard/transport-health', {
     signal: opts?.signal,
+    publicRead: true,
   })
   return parseTransportHealthData(raw)
 }

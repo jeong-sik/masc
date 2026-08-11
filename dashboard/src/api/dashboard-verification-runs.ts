@@ -255,6 +255,9 @@ export function parseVerificationRunsResponse(raw: unknown): DashboardVerificati
 export async function fetchVerificationRuns(
   opts?: AbortableRequestOptions,
 ): Promise<DashboardVerificationRunsResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/verification-runs', { signal: opts?.signal })
+  const raw = await get<unknown>('/api/v1/dashboard/verification-runs', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   return parseVerificationRunsResponse(raw)
 }

@@ -391,3 +391,24 @@ let delete ~base_dir ?(partition = Ide_paths.Legacy_default) ~id ~keeper_id ?exp
          (tombstone_json id keeper_id ts);
        Ok ())
 ;;
+
+let delete_any ~base_dir ?(partition = Ide_paths.Legacy_default) ~id ?expected_version () =
+  ensure_store ~base_dir ~partition ();
+  let all = load_all_partition ~base_dir partition in
+  match List.find_opt (fun (annotation : annotation) -> String.equal annotation.id id) all with
+  | None -> Error "annotation not found"
+  | Some found ->
+    (match expected_version with
+     | Some version when not (Int64.equal found.updated_at_ms version) ->
+       Error
+         (Printf.sprintf
+            "version mismatch: expected %Ld, found %Ld"
+            version
+            found.updated_at_ms)
+     | None | Some _ ->
+       let ts = now_ms () in
+       Fs_compat.append_jsonl
+         (annotations_file_for ~base_dir partition)
+         (tombstone_json id found.keeper_id ts);
+       Ok ())
+;;

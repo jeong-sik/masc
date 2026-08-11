@@ -90,7 +90,10 @@ export async function fetchKeeperCostMetrics(
   windowMinutes = DEFAULT_WINDOW_MINUTES_24H,
   opts?: AbortableRequestOptions,
 ): Promise<KeeperCostMetricsResponse> {
-  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-costs?window=${windowMinutes}`, { signal: opts?.signal })
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-costs?window=${windowMinutes}`, {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   const decoded = decodeKeeperCostMetricsResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 keeper cost metrics payload')
   return decoded
@@ -206,7 +209,10 @@ export async function fetchKeeperDecisions(
   limit = 200,
   opts?: AbortableRequestOptions,
 ): Promise<KeeperDecisionsResponse> {
-  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-decisions?limit=${limit}`, { signal: opts?.signal })
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-decisions?limit=${limit}`, {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   const decoded = decodeKeeperDecisionsResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 keeper decisions payload')
   return decoded
@@ -326,7 +332,7 @@ export async function fetchCostLatency(
 ): Promise<CostLatencyResponse> {
   const raw = await get<Record<string, unknown>>(
     `/api/v1/dashboard/cost-latency?window=${windowMinutes}`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   )
   const decoded = decodeCostLatencyResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 cost-latency payload')

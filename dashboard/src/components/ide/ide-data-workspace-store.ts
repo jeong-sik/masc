@@ -461,9 +461,9 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
     const keeperParam = keeper || undefined
     const opts = { keeper: keeperParam, repoId, signal, includeDiff: true }
-    // IDE observation routes require one explicit scope. Repository scope is
-    // authoritative when configured; otherwise a selected keeper can read its
-    // own orphan observation lane without fabricating a repository identity.
+    // Repository scope is authoritative when configured; otherwise a selected
+    // keeper intentionally narrows the readable default lane to its own
+    // observations. With neither value, the API now uses its default lane.
     const ideOpts = repoId
       ? { keeper: keeperParam, repoId, signal }
       : {

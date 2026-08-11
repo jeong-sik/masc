@@ -125,7 +125,7 @@ export async function interruptKeeperTurn(
     path,
     {
       method: 'POST',
-      headers: jsonHeaders(),
+      headers: jsonHeaders({ publicRead: true }),
       body: JSON.stringify({ name: keeperName.trim() }),
       signal: opts.signal,
     },
@@ -323,7 +323,7 @@ export async function streamKeeperMessage(
   const postStream = () => fetch(streamPath, {
     method: 'POST',
     headers: {
-      ...jsonHeaders(),
+      ...jsonHeaders({ publicRead: true }),
       Accept: 'text/event-stream',
     },
     body: requestBody,
@@ -503,7 +503,7 @@ export async function fetchKeeperChatOperation(
   const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations/${encodeURIComponent(operationId)}`
   const response = await fetchWithTimeout(
     path,
-    { headers: jsonHeaders(), signal: opts.signal },
+    { headers: jsonHeaders({ publicRead: true }), signal: opts.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
@@ -522,7 +522,7 @@ export async function cancelKeeperChatOperation(
   const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations/${encodeURIComponent(operationId)}/cancel`
   const response = await fetchControlPlane(path, {
     method: 'POST',
-    headers: jsonHeaders(),
+    headers: jsonHeaders({ publicRead: true }),
     body: '{}',
     signal: opts.signal,
   })
@@ -541,7 +541,11 @@ export async function listQueuedKeeperChatOperations(
   const query = new URLSearchParams({ state: 'queued' })
   if (afterSequence !== undefined) query.set('after_sequence', afterSequence)
   const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations?${query.toString()}`
-  const response = await fetchWithTimeout(path, { headers: jsonHeaders() }, DEFAULT_GET_TIMEOUT_MS)
+  const response = await fetchWithTimeout(
+    path,
+    { headers: jsonHeaders({ publicRead: true }) },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
   if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
   const value: unknown = await response.json()
   if (
@@ -568,7 +572,7 @@ async function mutateQueuedKeeperChatOperation(
   const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations/${encodeURIComponent(operationId)}/${action}`
   const response = await fetchControlPlane(path, {
     method: 'POST',
-    headers: jsonHeaders(),
+    headers: jsonHeaders({ publicRead: true }),
     body: JSON.stringify(body),
   })
   if (!response.ok) throw await apiRequestErrorFromResponse('POST', path, response)
@@ -744,7 +748,7 @@ async function fetchKeeperEventQueuePendingPage(
   const url = `${baseUrl}?limit=100${after === null ? '' : `&after=${encodeURIComponent(after)}`}`
   const { response, data } = await fetchJsonWithTimeout(
     url,
-    { headers: jsonHeaders() },
+    { headers: jsonHeaders({ publicRead: true }) },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!response.ok) {
@@ -951,7 +955,7 @@ export async function fetchKeeperChatHistory(
   // tolerant — only network / HTTP / shape errors throw.
   const { response: resp, data } = await fetchJsonWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/chat/history`,
-    { headers: jsonHeaders() },
+    { headers: jsonHeaders({ publicRead: true }) },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) {
@@ -969,7 +973,7 @@ export async function fetchKeeperChatHistory(
 // Since-last-seen catch-up digest for one keeper. `sinceUnix` is the operator's
 // per-keeper last-seen cursor (unix seconds). The whole payload is decoded and
 // thrown on drift (unlike chat history's tolerant per-row drop) so a malformed
-// digest can never render a wrong count. Same raw-fetch + jsonHeaders()
+// digest can never render a wrong count. Same raw-fetch + public-read headers
 // convention as fetchKeeperChatHistory; the valibot schema is imported lazily
 // to keep it out of the initial bundle.
 export async function fetchKeeperCatchupDigest(
@@ -978,7 +982,7 @@ export async function fetchKeeperCatchupDigest(
 ): Promise<KeeperCatchupDigest> {
   const resp = await fetch(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/digest?since_unix=${encodeURIComponent(String(sinceUnix))}`,
-    { headers: jsonHeaders() },
+    { headers: jsonHeaders({ publicRead: true }) },
   )
   if (!resp.ok) {
     throw new Error(`fetchKeeperCatchupDigest: HTTP ${resp.status} ${resp.statusText}`)
@@ -1056,7 +1060,7 @@ export async function fetchKeeperTransitions(
 ): Promise<KeeperTransitionsResponse> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/transitions?limit=${limit}`,
-    { headers: jsonHeaders(), signal: opts?.signal },
+    { headers: jsonHeaders({ publicRead: true }), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`transitions fetch failed: ${resp.status}`)
@@ -1110,7 +1114,7 @@ export async function fetchKeeperLifecycle(
 ): Promise<KeeperLifecycleTimelineResponse> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/lifecycle?limit=${limit}`,
-    { headers: jsonHeaders(), signal: opts?.signal },
+    { headers: jsonHeaders({ publicRead: true }), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`lifecycle fetch failed: ${resp.status}`)
@@ -1123,7 +1127,7 @@ export async function fetchKeeperStateDiagram(
 ): Promise<KeeperStateDiagramResponse> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/state-diagram`,
-    { headers: jsonHeaders(), signal: opts?.signal },
+    { headers: jsonHeaders({ publicRead: true }), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`state-diagram fetch failed: ${resp.status}`)
@@ -1136,7 +1140,7 @@ export async function fetchKeeperComposite(
 ): Promise<KeeperCompositeSnapshot> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/composite`,
-    { headers: jsonHeaders(), signal: opts?.signal },
+    { headers: jsonHeaders({ publicRead: true }), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`composite fetch failed: ${resp.status}`)
@@ -1155,7 +1159,7 @@ export async function fetchKeepersComposite(
 ): Promise<FleetCompositeSnapshot> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/composite`,
-    { headers: jsonHeaders(), signal: opts?.signal },
+    { headers: jsonHeaders({ publicRead: true }), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`fleet composite fetch failed: ${resp.status}`)
@@ -1200,7 +1204,7 @@ export interface KeeperEvalResponse {
 export async function fetchKeeperEval(name: string, limit = 10): Promise<KeeperEvalResponse> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/eval?limit=${limit}`,
-    { headers: jsonHeaders() },
+    { headers: jsonHeaders({ publicRead: true }) },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`eval fetch failed: ${resp.status}`)

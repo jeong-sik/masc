@@ -311,6 +311,48 @@ let handle_get_repository_path state req reqd =
           json_response ~status:`Not_found req reqd
             (json_error "unknown repository endpoint"))
 
+(** Read-only repository projection shared with the HTTP/2 gateway. *)
+let public_get_response state request =
+  let base_path = base_path_of_state state in
+  match Http.Request.path request with
+  | "/api/v1/repositories" ->
+    (match Repo_store.load_all ~base_path with
+     | Error message -> `Internal_server_error, json_error message
+     | Ok repositories ->
+       ( `OK
+       , `Assoc
+           [ ( "repositories"
+             , `List (List.map (repository_json ~base_path) repositories) )
+           ; ("total", `Int (List.length repositories))
+           ] ))
+  | path ->
+    (match extract_repo_id path with
+     | None | Some "" ->
+       `Bad_request, json_error "repository id path parameter required"
+     | Some rest ->
+       match path_parts rest with
+       | [ id ] ->
+         (match Repo_store.find ~base_path id with
+          | Error message -> `Not_found, json_error message
+          | Ok repository -> `OK, repository_json ~base_path repository)
+       | [ id; "branches" ] ->
+         (match Repo_store.find ~base_path id with
+          | Error message -> `Not_found, json_error message
+          | Ok repository ->
+            (match Repo_store.list_branches ~base_path id with
+             | Error message -> `Internal_server_error, json_error message
+             | Ok branches ->
+               ( `OK
+               , `Assoc
+                   [ ("repository_id", `String id)
+                   ; ( "branches"
+                     , `List
+                         (List.map
+                            (branch_json ~default_branch:repository.default_branch)
+                            branches) )
+                   ] )))
+       | _ -> `Not_found, json_error "unknown repository endpoint")
+
 let handle_add_repository state _agent_name req reqd =
   let base_path = base_path_of_state state in
   Http.Request.read_body_async reqd (fun body_str ->

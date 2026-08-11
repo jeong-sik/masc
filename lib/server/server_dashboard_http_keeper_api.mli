@@ -221,6 +221,22 @@ val handle_keeper_get_subroutes :
 (** Dispatch [GET /api/v1/keepers/<name>/<sub>] sub-routes
     (status / tools / checkpoints listing / etc.). *)
 
+(** Transport-neutral responses for the public keeper detail reads that the
+    dashboard hydrates without an operator token. Paused-work remains on its
+    operator-control route. *)
+type public_get_status =
+  [ `OK | `Bad_request | `Not_found | `Internal_server_error ]
+
+type public_get_response =
+  { status : public_get_status
+  ; body : Yojson.Safe.t
+  }
+
+val public_get_response_for_request :
+  Mcp_server.server_state ->
+  Httpun.Request.t ->
+  public_get_response option
+
 (** {1 Memory-OS dashboard JSON} *)
 
 val memory_os_fact_json :

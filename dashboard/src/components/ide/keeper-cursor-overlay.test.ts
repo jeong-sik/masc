@@ -112,6 +112,28 @@ describe('getKeeperColor', () => {
     expect(onStatus).toHaveBeenLastCalledWith({ status: 'closed', failedCount: 0 })
   })
 
+  it('loads the default cursor lane before a repository is selected', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({
+      ok: true,
+      data: {
+        runtime_id: 'masc-runtime',
+        connected: true,
+        cursors: [],
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onUpdate = vi.fn()
+
+    const cleanup = connectKeeperCursorPush(onUpdate)
+
+    await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1))
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/v1/ide/cursors')
+    const [, init] = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit]
+    expect(init.headers).toEqual({})
+
+    cleanup()
+  })
+
   it('reports typed snapshot refresh failures without a fallback transport', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal('fetch', vi.fn(async () => new Response('unavailable', { status: 503 })))

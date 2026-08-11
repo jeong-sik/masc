@@ -801,6 +801,214 @@ let parse_unified_diff lines =
   in
   go 1 1 [] lines
 
+(* --- Shared public read projection --- *)
+
+type public_read_status =
+  [ `OK | `Bad_request | `Not_found | `Payload_too_large | `Internal_server_error ]
+
+type public_read_response =
+  { status : public_read_status
+  ; body : Yojson.Safe.t
+  ; extra_headers : (string * string) list
+  }
+
+let public_read_response ?(extra_headers = []) status body =
+  { status; body; extra_headers }
+
+let source_and_base_headers ~source ~base_path =
+  ("X-Workspace-Base-Path", sanitize_header_value base_path) :: source_header source
+
+(** The JSON/header producing half of the public workspace tree, child, and
+    file endpoints.  H2 uses this projection to mirror the established H1
+    read surface with its own response writer. *)
+let workspace_public_read_response ~state request =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  match Http.Request.path request with
+  | "/api/v1/workspace/tree" ->
+    let depth =
+      match Uri.get_query_param uri "depth" with
+      | Some raw ->
+        (match int_of_string_opt raw with
+         | Some value -> max 1 (min 5 value)
+         | None -> 3)
+      | None -> 3
+    in
+    let max_nodes = tree_node_limit_of_query (Uri.get_query_param uri "limit") in
+    let include_diff = bool_query_param request "diff" ~default:false in
+    let effective_depth, effective_max_nodes =
+      match source with
+      | `Project
+      | `RepositoryMissing _
+      | `RepositoryUnknown _
+      | `PlaygroundMissing _
+      | `KeeperUnknown _ -> 0, min max_nodes 200
+      | `Repository _ | `Playground _ -> depth, max_nodes
+    in
+    let cache_key =
+      Printf.sprintf "workspace:tree:%s:%s:%d:%d:%b"
+        base (source_to_string source) effective_depth effective_max_nodes include_diff
+    in
+    let body =
+      Dashboard_cache.get_or_compute cache_key
+        ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+        (fun () ->
+           Domain_pool_ref.submit_io_or_inline (fun () ->
+             let nodes =
+               if not (Sys.file_exists base) then []
+               else
+                 let diff_by_path =
+                   if include_diff then Some (git_diff_badges ~base) else None
+                 in
+                 scan_dir ?diff_by_path ~base ~depth:0
+                   ~max_depth:effective_depth ~max_nodes:effective_max_nodes [] base
+             in
+             `List (List.rev nodes)))
+    in
+    Some
+      (public_read_response
+         ~extra_headers:(source_and_base_headers ~source ~base_path:base)
+         `OK body)
+  | "/api/v1/workspace/children" ->
+    (match Uri.get_query_param uri "path" with
+     | None -> Some (public_read_response `Bad_request (json_error "Missing path parameter"))
+     | Some requested ->
+       (match resolve_workspace_file base requested with
+        | Error _ -> Some (public_read_response `Bad_request (json_error "Invalid path"))
+        | Ok file ->
+          let max_nodes = tree_node_limit_of_query (Uri.get_query_param uri "limit") in
+          let child_depth =
+            rel_under base file.lexical_path
+            |> String.split_on_char '/'
+            |> List.filter (fun value -> not (String.equal value ""))
+            |> List.length
+          in
+          let cache_key =
+            Printf.sprintf "workspace:children:%s:%s:%d:%d"
+              base file.lexical_path child_depth max_nodes
+          in
+          let body =
+            Dashboard_cache.get_or_compute cache_key
+              ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+              (fun () ->
+                 Domain_pool_ref.submit_io_or_inline (fun () ->
+                   let is_dir =
+                     workspace_or_default ~warn_on_failure:false
+                       ~site:"children_is_directory" ~path:file.lexical_path
+                       ~default:false (fun () -> Sys.is_directory file.lexical_path)
+                   in
+                   if not is_dir then `List []
+                   else
+                     let nodes =
+                       scan_dir ~base ~depth:child_depth ~max_depth:child_depth
+                         ~max_nodes [] file.lexical_path
+                     in
+                     `List (List.rev nodes)))
+          in
+          Some
+            (public_read_response
+               ~extra_headers:(source_and_base_headers ~source ~base_path:base)
+               `OK body)))
+  | "/api/v1/workspace/file" ->
+    (match Uri.get_query_param uri "path" with
+     | None -> Some (public_read_response `Bad_request (json_error "Missing path parameter"))
+     | Some path ->
+       (match resolve_workspace_file base path with
+        | Error _ -> Some (public_read_response `Bad_request (json_error "Invalid path"))
+        | Ok file ->
+          (match load_workspace_file_content file with
+           | Ok content ->
+             Some
+               (public_read_response ~extra_headers:(source_header source) `OK
+                  (`Assoc [ ("ok", `Bool true); ("content", `String content) ]))
+           | Error File_not_found | Error File_not_regular ->
+             Some (public_read_response `Not_found (json_error "File not found"))
+           | Error File_changed_during_open ->
+             Some (public_read_response `Bad_request (json_error "Invalid path"))
+           | Error (File_too_large _) ->
+             Some (public_read_response `Payload_too_large (json_error "File too large"))
+           | Error (File_read_failed message) ->
+             observe_workspace_route_failure ~site:"file_read" ~path:file.lexical_path
+               (Failure message);
+             Some
+               (public_read_response `Internal_server_error
+                  (json_error "Failed to read file")))))
+  | "/api/v1/git/blame" ->
+    (match Uri.get_query_param uri "path" with
+     | None | Some "" ->
+       Some (public_read_response `Bad_request (json_error "Missing path parameter"))
+     | Some file_path ->
+       (match resolve_workspace_file base file_path with
+        | Error _ -> Some (public_read_response `Bad_request (json_error "Invalid path"))
+        | Ok safe ->
+          if not (Sys.file_exists safe.resolved_path) then
+            Some (public_read_response `Not_found (json_error "File not found"))
+          else
+            let rel = rel_under base safe.lexical_path in
+            let cache_key =
+              Printf.sprintf "git:blame:%s:%s:%s"
+                base (source_to_string source) rel
+            in
+            let body =
+              Dashboard_cache.get_or_compute cache_key
+                ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                (fun () ->
+                   Domain_pool_ref.submit_io_or_inline (fun () ->
+                     match git_run_lines ~cwd:base [ "blame"; "--porcelain"; "--"; rel ] with
+                     | [] -> `List []
+                     | lines ->
+                       let entries = parse_blame_porcelain lines in
+                       `List (group_blame_entries rel entries)))
+            in
+            Some
+              (public_read_response ~extra_headers:(source_header source) `OK body)))
+  | "/api/v1/git/diff" ->
+    (match Uri.get_query_param uri "path" with
+     | None | Some "" ->
+       Some (public_read_response `Bad_request (json_error "Missing path parameter"))
+     | Some file_path ->
+       let base_ref =
+         match Uri.get_query_param uri "base_ref" with
+         | Some value -> value
+         | None -> "HEAD"
+       in
+       if not (valid_git_ref base_ref) then
+         Some (public_read_response `Bad_request (json_error "Invalid base_ref"))
+       else
+         (match resolve_workspace_file base file_path with
+          | Error _ -> Some (public_read_response `Bad_request (json_error "Invalid path"))
+          | Ok safe ->
+            let rel = rel_under base safe.lexical_path in
+            let cache_key =
+              Printf.sprintf "git:diff:%s:%s:%s:%s"
+                base (source_to_string source) base_ref rel
+            in
+            let result =
+              Dashboard_cache.get_or_compute cache_key
+                ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                (fun () ->
+                   Domain_pool_ref.submit_io_or_inline (fun () ->
+                     match git_run_lines_or_error ~cwd:base [ "diff"; base_ref; "--"; rel ] with
+                     | Error _ ->
+                       observe_workspace_route_failure ~site:"git_run" ~path:rel
+                         (Failure "git diff failed");
+                       `Null
+                     | Ok [] ->
+                       `Assoc [ "unified", `List []; "has_changes", `Bool false ]
+                     | Ok diff_lines ->
+                       `Assoc
+                         [ "unified", `List (parse_unified_diff diff_lines)
+                         ; "has_changes", `Bool true
+                         ]))
+            in
+            (match result with
+             | `Null ->
+               Some (public_read_response `Bad_request (json_error "git diff failed"))
+             | body ->
+               Some
+                 (public_read_response ~extra_headers:(source_header source) `OK body))))
+  | _ -> None
+
 (* --- Routes --- *)
 
 let add_routes router =

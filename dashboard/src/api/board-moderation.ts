@@ -167,6 +167,7 @@ export async function fetchBoardModerationQueue(
     const qs = params.toString()
     const raw = await get<unknown>(`${MODERATION_QUEUE_PATH}${qs ? `?${qs}` : ''}`, {
       signal: options.signal,
+      publicRead: true,
     })
     if (!isRecord(raw)) return { entries: [], count: 0 }
     const entries = Array.isArray(raw.entries)

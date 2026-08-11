@@ -1488,6 +1488,826 @@ let cached_keeper_composite_json config name =
   | other -> `OK, other
 ;;
 
+(* JSON-producing halves of the three high-volume keeper panes.  They are
+   deliberately transport-neutral so the H2 public dashboard gets the same
+   cached, bounded read behavior as the established H1 surface.  H1 still owns
+   its response delivery below. *)
+let keeper_tool_stats_json ~config ~name ~window_hours =
+  let masc_root = Workspace.masc_root_dir config in
+  let cache_key =
+    Printf.sprintf "keeper:tool-stats:%s:%s:%d" masc_root name window_hours
+  in
+  Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      let since =
+        Time_compat.now ()
+        -. (float_of_int window_hours *. Masc_time_constants.hour)
+      in
+      let read_result =
+        Trajectory.read_entries_since_result ~masc_root ~keeper_name:name ~since
+      in
+      let entries = read_result.Trajectory.entries in
+      let tools = Trajectory.aggregate_tool_stats entries in
+      let timeline = Trajectory.hourly_timeline entries in
+      let latest_ts =
+        List.fold_left
+          (fun acc (entry : Trajectory.tool_call_entry) ->
+            match acc with
+            | Some ts when ts >= entry.ts -> acc
+            | _ -> Some entry.ts)
+          None entries
+      in
+      let latest_age_s =
+        match latest_ts with
+        | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
+        | None -> None
+      in
+      let dashboard_surface = "/api/v1/keepers/:name/tool-stats" in
+      let coverage_gaps =
+        Telemetry_coverage_gap.read_recent ~masc_root ~n:32
+        |> List.filter (fun gap ->
+             String.equal
+               (Safe_ops.json_string ~default:"" "dashboard_surface" gap)
+               dashboard_surface
+             &&
+             match Safe_ops.json_string_opt "keeper_name" gap with
+             | Some keeper_name -> String.equal keeper_name name
+             | None -> true)
+      in
+      let latest_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
+      let health, stale_reason =
+        match latest_gap with
+        | Some gap ->
+          ( "coverage_gap"
+          , Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
+        | None -> (
+            match latest_age_s with
+            | None -> "empty", "no_entries"
+            | Some age when age > freshness_slo_s ->
+              "stale", "freshness_slo_exceeded"
+            | Some _ -> "ok", "")
+      in
+      `Assoc
+        [ "keeper", `String name
+        ; "window_hours", `Int window_hours
+        ; "total_entries", `Int (List.length entries)
+        ; "source", `String "trajectory_tool_call"
+        ; ( "producer"
+          , `String
+              "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" )
+        ; "durable_store", `String (Trajectory.trajectories_dir masc_root name)
+        ; "dashboard_surface", `String dashboard_surface
+        ; "freshness_slo_s", `Float freshness_slo_s
+        ; "latest_ts_unix", Json_util.float_opt_to_json latest_ts
+        ; ( "latest_ts_iso"
+          , match latest_ts with
+            | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
+            | None -> `Null )
+        ; "latest_age_s", Json_util.float_opt_to_json latest_age_s
+        ; "health", `String health
+        ; "stale_reason", (if stale_reason = "" then `Null else `String stale_reason)
+        ; ( "gate_decode"
+          , `Assoc
+              [ ( "parsed_gate_count"
+                , `Int read_result.Trajectory.gate_decode.parsed_gate_count )
+              ; ( "legacy_default_count"
+                , `Int read_result.Trajectory.gate_decode.legacy_default_count )
+              ] )
+        ; "coverage_gaps", `List coverage_gaps
+        ; "tools", `List (List.map Trajectory.tool_stat_to_json tools)
+        ; "timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline)
+        ]))
+;;
+
+let keeper_tool_calls_json ~config ~name ~limit =
+  let masc_root = Workspace.masc_root_dir config in
+  let fleet_rows =
+    match
+      Dashboard_cache.get_or_compute
+        (Printf.sprintf "keeper:tool-calls:fleet-rows:%s" masc_root)
+        ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
+          Domain_pool_ref.submit_cpu_or_inline (fun () ->
+            `List
+              (Keeper_tool_call_log.read_recent_rows
+                 ~n:
+                   (tool_calls_limit_max
+                    * Keeper_tool_call_log.read_over_scan_factor)
+                 ())))
+    with
+    | `List rows -> rows
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
+  in
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    let entries =
+      Keeper_tool_call_log.filter_rows_for_keeper ~keeper_name:name ~n:limit fleet_rows
+    in
+    let latest_ts =
+      List.fold_left
+        (fun acc json ->
+          match Safe_ops.json_float_opt "ts" json with
+          | Some ts -> (
+              match acc with
+              | Some existing when existing >= ts -> acc
+              | Some _ | None -> Some ts)
+          | None -> acc)
+        None entries
+    in
+    let dashboard_surface = "/api/v1/keepers/:name/tool-calls" in
+    let latest_age_s =
+      match latest_ts with
+      | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
+      | None -> None
+    in
+    let coverage_gaps =
+      Telemetry_coverage_gap.read_recent ~masc_root ~n:32
+      |> List.filter (fun gap ->
+           String.equal "tool_call_io"
+             (Safe_ops.json_string ~default:"" "source" gap)
+           &&
+           match Safe_ops.json_string_opt "keeper_name" gap with
+           | Some keeper_name -> String.equal keeper_name name
+           | None -> true)
+    in
+    let latest_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
+    let health, stale_reason =
+      match latest_gap with
+      | Some gap ->
+        ( "coverage_gap"
+        , Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
+      | None -> (
+          match latest_age_s with
+          | None -> "empty", "no_entries"
+          | Some age when age > freshness_slo_s -> "stale", "freshness_slo_exceeded"
+          | Some _ -> "ok", "")
+    in
+    `Assoc
+      [ "keeper", `String name
+      ; "count", `Int (List.length entries)
+      ; "source", `String "tool_call_io"
+      ; ( "producer"
+        , `String
+            "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" )
+      ; "durable_store", `String (Filename.concat masc_root "tool_calls")
+      ; "dashboard_surface", `String dashboard_surface
+      ; "freshness_slo_s", `Float freshness_slo_s
+      ; "latest_ts_unix", Json_util.float_opt_to_json latest_ts
+      ; ( "latest_ts_iso"
+        , match latest_ts with
+          | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
+          | None -> `Null )
+      ; "latest_age_s", Json_util.float_opt_to_json latest_age_s
+      ; "health", `String health
+      ; "stale_reason", (if stale_reason = "" then `Null else `String stale_reason)
+      ; "coverage_gaps", `List coverage_gaps
+      ; "entries", `List entries
+      ])
+;;
+
+let keeper_turn_records_json ~config ~name ~limit =
+  let store = Keeper_types_support.keeper_turn_record_store config name in
+  let raw_rows = Dated_jsonl.read_recent store limit in
+  let records_rev, skipped_rows =
+    List.fold_left
+      (fun (acc, skipped) json ->
+        match Turn_record.of_json json with
+        | Ok record -> record :: acc, skipped
+        | Error _ -> acc, skipped + 1)
+      ([], 0) raw_rows
+  in
+  let records = List.rev records_rev in
+  let block_json = Turn_record.prompt_block_to_json in
+  let entries =
+    Turn_record.entries_with_diffs records
+    |> List.map (fun ((record : Turn_record.t), diff) ->
+         let diff_vs_prev =
+           match diff with
+           | Some (d : Turn_record.block_diff) ->
+             `Assoc
+               [ "added", `List (List.map block_json d.added)
+               ; "removed", `List (List.map block_json d.removed)
+               ; ( "changed"
+                 , `List
+                     (List.map
+                        (fun (prev_b, next_b) ->
+                          `Assoc
+                            [ "prev", block_json prev_b
+                            ; "next", block_json next_b
+                            ])
+                        d.changed) )
+               ]
+           | None -> `Null
+         in
+         `Assoc
+           [ "record", Turn_record.to_json record
+           ; "diff_vs_prev", diff_vs_prev
+           ])
+  in
+  let latest_ts =
+    List.fold_left
+      (fun acc (record : Turn_record.t) ->
+        match acc with
+        | Some existing when existing >= record.ts -> acc
+        | _ -> Some record.ts)
+      None records
+  in
+  let latest_age_s =
+    match latest_ts with
+    | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
+    | None -> None
+  in
+  let health, stale_reason =
+    match latest_age_s with
+    | None when skipped_rows > 0 -> "incompatible", "incompatible_rows"
+    | None -> "empty", "no_entries"
+    | Some age when age > freshness_slo_s -> "stale", "freshness_slo_exceeded"
+    | Some _ -> "ok", ""
+  in
+  `Assoc
+    [ "keeper", `String name
+    ; "count", `Int (List.length records)
+    ; "skipped_rows", `Int skipped_rows
+    ; "source", `String "turn_record"
+    ; "producer", `String "keeper_agent_run.run_turn|keeper_turn_record_writer"
+    ; ( "durable_store"
+      , `String
+          (Filename.concat
+             (Workspace.masc_root_dir config)
+             (Printf.sprintf "keepers/%s/turn-records" name)) )
+    ; "dashboard_surface", `String "/api/v1/keepers/:name/turn-records"
+    ; "freshness_slo_s", `Float freshness_slo_s
+    ; "latest_ts_unix", Json_util.float_opt_to_json latest_ts
+    ; ( "latest_ts_iso"
+      , match latest_ts with
+        | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
+        | None -> `Null )
+    ; "latest_age_s", Json_util.float_opt_to_json latest_age_s
+    ; "health", `String health
+    ; "stale_reason", (if stale_reason = "" then `Null else `String stale_reason)
+    ; "memory_os", memory_os_dashboard_json ~config ~keeper_id:name
+    ; "entries", `List entries
+    ]
+;;
+
+(** Transport-neutral subset of the public keeper GET surface.  H1 keeps its
+    native streaming-capable dispatcher below; H2 uses this response builder
+    for the dashboard reads that do not need an authenticated operator lane. *)
+type public_get_status =
+  [ `OK | `Bad_request | `Not_found | `Internal_server_error ]
+
+type public_get_response =
+  { status : public_get_status
+  ; body : Yojson.Safe.t
+  }
+
+let public_get_response status body = { status; body }
+
+let public_get_response_for_request state req =
+  let req_path = Http.Request.path req in
+  let prefix = keeper_api_prefix in
+  let plen = String.length prefix in
+  let tlen = String.length req_path in
+  let ends_with suffix =
+    let suffix_length = String.length suffix in
+    tlen > plen + suffix_length
+    && String.starts_with ~prefix req_path
+    && String.sub req_path (tlen - suffix_length) suffix_length = suffix
+  in
+  let extract_name suffix =
+    let suffix_length = String.length suffix in
+    String.trim (String.sub req_path plen (tlen - plen - suffix_length))
+  in
+  let config = Mcp_server.workspace_config state in
+  let invalid_name name =
+    public_get_response `Bad_request
+      (error_json (Printf.sprintf "invalid keeper name: %s" name))
+  in
+  if ends_with "/digest" then
+    let name = extract_name "/digest" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "missing keeper name"))
+    else if not (Keeper_config.validate_name name) then Some (invalid_name name)
+    else
+      (match Server_utils.query_param req "since_unix" with
+       | None ->
+         Some
+           (public_get_response `Bad_request
+              (error_json "missing required query param: since_unix"))
+       | Some raw ->
+         (match float_of_string_opt (String.trim raw) with
+          | None ->
+            Some
+              (public_get_response `Bad_request
+                 (error_json "since_unix must be a unix-seconds float"))
+          | Some since_unix ->
+            let digest =
+              Keeper_catchup_digest.build ~base_path:config.base_path
+                ~keeper_name:name ~since_unix ~now_unix:(Time_compat.now ())
+            in
+            Some (public_get_response `OK (Keeper_catchup_digest.to_json digest))))
+  else if ends_with "/chat/history" then
+    let name = extract_name "/chat/history" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "missing keeper name"))
+    else if not (Keeper_config.validate_name name) then Some (invalid_name name)
+    else Some (public_get_response `OK (cached_keeper_chat_history_json config name))
+  else if ends_with "/person-notes" then
+    let name = extract_name "/person-notes" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "missing keeper name"))
+    else
+      let notes = Keeper_person_notes.notes ~base_dir:config.base_path ~keeper_name:name in
+      Some
+        (public_get_response `OK
+           (`List
+              (List.map
+                 (fun (speaker_id, note) ->
+                    `Assoc
+                      [ ("speaker_id", `String speaker_id)
+                      ; ("note", `String note)
+                      ])
+                 notes)))
+  else if ends_with keeper_suffix_checkpoints then
+    let name = extract_name keeper_suffix_checkpoints in
+    if String.length name = 0 then
+      Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else
+      let status, body = keeper_checkpoint_inventory_json config name in
+      let status = match status with `OK -> `OK | `Not_found -> `Not_found in
+      Some (public_get_response status body)
+  else if ends_with "/memory-journal" then
+    let name = extract_name "/memory-journal" in
+    if not (Keeper_config.validate_name name) then Some (invalid_name name)
+    else
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:50 |> max 1 |> min 500
+      in
+      let lines =
+        Keeper_memory_os_current.read_journal_tail
+          ~keepers_dir:(memory_os_keepers_dir config)
+          ~keeper_id:name ~limit
+      in
+      let undecodable =
+        List.length (List.filter (function Error _ -> true | Ok _ -> false) lines)
+      in
+      Some
+        (public_get_response `OK
+           (`Assoc
+              [ "keeper", `String name
+              ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-journal"
+              ; "returned", `Int (List.length lines)
+              ; "undecodable_lines", `Int undecodable
+              ; ( "entries"
+                , `List (List.map Keeper_memory_os_current.journal_line_to_json lines) )
+              ]))
+  else if ends_with "/raw-traces" then
+    let name = extract_name "/raw-traces" in
+    let limit =
+      Server_utils.int_query_param req "limit" ~default:25 |> max 1 |> min 200
+    in
+    (match Keeper_raw_trace_reader.list_turns ~config ~keeper:name ~limit with
+     | Error error ->
+       Some
+         (public_get_response `Bad_request
+            (error_json (Keeper_raw_trace_reader.read_error_to_string error)))
+     | Ok turns ->
+       Some
+         (public_get_response `OK
+            (`Assoc
+               [ "keeper", `String name
+               ; "count", `Int (List.length turns)
+               ; ( "turns"
+                 , `List (List.map Keeper_raw_trace_reader.turn_summary_to_json turns) )
+               ; "dashboard_surface", `String "/api/v1/keepers/:name/raw-traces"
+               ])))
+  else if ends_with "/raw-trace" then
+    let name = extract_name "/raw-trace" in
+    let offset = Server_utils.int_query_param req "offset" ~default:0 |> max 0 in
+    let limit =
+      Server_utils.int_query_param req "limit" ~default:200 |> max 1 |> min 2000
+    in
+    (match Server_utils.query_param req "file" with
+     | None ->
+       Some
+         (public_get_response `Bad_request
+            (error_json "file is required; list turns at /raw-traces"))
+     | Some file ->
+       (match Keeper_raw_trace_reader.read_turn ~config ~keeper:name ~file ~offset ~limit with
+        | Error (Keeper_raw_trace_reader.No_such_turn _ as error) ->
+          Some
+            (public_get_response `Not_found
+               (error_json (Keeper_raw_trace_reader.read_error_to_string error)))
+        | Error error ->
+          Some
+            (public_get_response `Bad_request
+               (error_json (Keeper_raw_trace_reader.read_error_to_string error)))
+        | Ok records ->
+          let body =
+            match Keeper_raw_trace_reader.turn_records_to_json records with
+            | `Assoc fields ->
+              `Assoc
+                (("keeper", `String name)
+                 :: ("dashboard_surface", `String "/api/v1/keepers/:name/raw-trace")
+                 :: fields)
+            | json -> json
+          in
+          Some (public_get_response `OK body)))
+  else if ends_with keeper_suffix_runtime_trace then
+    let name = extract_name keeper_suffix_runtime_trace in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else
+      let trace_id = Server_utils.query_param req "trace_id" in
+      let turn_id =
+        match Server_utils.query_param req "turn_id" with
+        | Some raw -> int_of_string_opt (String.trim raw)
+        | None -> None
+      in
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:200
+        |> max 1 |> min trajectory_max_limit
+      in
+      let status, body =
+        cached_keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit ()
+      in
+      let status = match status with `OK -> `OK | `Not_found -> `Not_found in
+      Some (public_get_response status body)
+  else if ends_with "/config" then
+    let name = extract_name "/config" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else
+      let status, body = cached_keeper_config_json config name in
+      let status = match status with `OK -> `OK | `Not_found -> `Not_found in
+      Some (public_get_response status body)
+  else if ends_with "/tool-stats" then
+    let name = extract_name "/tool-stats" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else if not (Keeper_config.validate_name name) then Some (invalid_name name)
+    else
+      let window_hours =
+        Server_utils.int_query_param req "window_hours" ~default:24
+        |> max 1 |> min 168
+      in
+      Some
+        (public_get_response `OK
+           (keeper_tool_stats_json ~config ~name ~window_hours))
+  else if ends_with "/tool-calls" then
+    let name = extract_name "/tool-calls" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else if not (Keeper_config.validate_name name) then Some (invalid_name name)
+    else
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:50
+        |> max 1 |> min tool_calls_limit_max
+      in
+      Some
+        (public_get_response `OK
+           (keeper_tool_calls_json ~config ~name ~limit))
+  else if ends_with "/waiting-inventory" then
+    let name = extract_name "/waiting-inventory" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else if not (Keeper_config.validate_name name) then Some (invalid_name name)
+    else
+      let body =
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          Server_keeper_waiting_inventory.dashboard_json_for_keeper config
+            ~keeper_name:name)
+      in
+      Some (public_get_response `OK body)
+  else if ends_with "/feedback" then
+    let name = extract_name "/feedback" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else if not (Keeper_config.validate_name name) then Some (invalid_name name)
+    else
+      (match Keeper_response_feedback.read_tally ~config ~keeper_id:name with
+       | Ok tally ->
+         Some
+           (public_get_response `OK (Keeper_response_feedback.tally_to_json tally))
+       | Error (`Io message) ->
+         Some
+           (public_get_response `Internal_server_error
+              (`Assoc [ ("error", `String message) ])))
+  else if ends_with "/compaction-snapshots" then
+    let name = extract_name "/compaction-snapshots" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else if not (Keeper_config.validate_name name) then Some (invalid_name name)
+    else
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:compaction_snapshot_default_limit
+        |> max 1 |> min compaction_snapshot_max_limit
+      in
+      let force_refresh = Server_utils.bool_query_param req "refresh" ~default:false in
+      let body =
+        cached_compaction_snapshots_json ~config ~keeper_id:name ~limit ~force_refresh
+      in
+      Some (public_get_response `OK body)
+  else if ends_with "/turn-records" then
+    let name = extract_name "/turn-records" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else if not (Keeper_config.validate_name name) then Some (invalid_name name)
+    else
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:50
+        |> max 1 |> min trajectory_max_limit
+      in
+      Some
+        (public_get_response `OK
+           (keeper_turn_records_json ~config ~name ~limit))
+  else if ends_with "/turn-transcript" then
+    let name = extract_name "/turn-transcript" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else if not (Keeper_config.validate_name name) then Some (invalid_name name)
+    else
+      (match Server_utils.query_param req "turn_ref" with
+       | None ->
+         Some
+           (public_get_response `Bad_request
+              (error_json "turn_ref query parameter is required"))
+       | Some raw ->
+         (match Ids.Turn_ref.of_string raw with
+          | None ->
+            Some
+              (public_get_response `Bad_request
+                 (error_json (Printf.sprintf "invalid turn_ref: %s" raw)))
+          | Some turn_ref ->
+            let messages =
+              Keeper_chat_store.load ~base_dir:config.base_path ~keeper_name:name
+            in
+            let transcript =
+              Keeper_chat_store.transcript_of_messages messages ~turn_ref
+            in
+            Some
+              (public_get_response `OK
+                 (Keeper_chat_store.turn_transcript_to_json ~keeper:name ~turn_ref
+                    transcript))))
+  else if ends_with "/operator-note" then
+    let name = extract_name "/operator-note" in
+    (match Keeper_operator_note.read ~config ~keeper:name with
+     | Ok note ->
+       Some
+         (public_get_response `OK
+            (`Assoc
+               [ ("keeper", `String name)
+               ; ("dashboard_surface", `String "/api/v1/keepers/:name/operator-note")
+               ; ("pending", `Bool (Option.is_none note.consumed_at))
+               ; ("note", Keeper_operator_note.to_json note)
+               ]))
+     | Error (Keeper_operator_note.No_note as error) ->
+       Some
+         (public_get_response `Not_found
+            (`Assoc
+               [ ("error", `String (Keeper_operator_note.read_error_to_string error))
+               ]))
+     | Error error ->
+       Some
+         (public_get_response `Bad_request
+            (`Assoc
+               [ ("error", `String (Keeper_operator_note.read_error_to_string error))
+               ])))
+  else if ends_with "/last-prompt" then
+    let name = extract_name "/last-prompt" in
+    (match Keeper_prompt_capture.read ~config ~keeper:name with
+     | Ok capture ->
+       let body =
+         match Keeper_prompt_capture.to_json capture with
+         | `Assoc fields ->
+           `Assoc
+             (("keeper", `String name)
+              :: ("dashboard_surface", `String "/api/v1/keepers/:name/last-prompt")
+              :: fields)
+         | json -> json
+       in
+       Some (public_get_response `OK body)
+     | Error (Keeper_prompt_capture.Not_captured as error) ->
+       Some
+         (public_get_response `Not_found
+            (`Assoc
+               [ ("error", `String (Keeper_prompt_capture.read_error_to_string error))
+               ]))
+     | Error error ->
+       Some
+         (public_get_response `Bad_request
+            (`Assoc
+               [ ("error", `String (Keeper_prompt_capture.read_error_to_string error))
+               ])))
+  else if ends_with "/trajectory" then
+    let name = extract_name "/trajectory" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else if not (Keeper_config.validate_name name) then Some (invalid_name name)
+    else
+      (match Keeper_meta_store.read_meta config name with
+       | Error message -> Some (public_get_response `Internal_server_error (error_json message))
+       | Ok None ->
+         Some
+           (public_get_response `Not_found
+              (error_json (Printf.sprintf "keeper %S not found" name)))
+       | Ok (Some meta) ->
+         let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+         let limit =
+           Server_utils.int_query_param req "limit" ~default:50
+           |> max 1 |> min trajectory_max_limit
+         in
+         let result_max_len =
+           Server_utils.int_query_param req "result_max_len" ~default:2000
+           |> max 0 |> min 10000
+         in
+         let content_max_len =
+           Server_utils.int_query_param req "content_max_len"
+             ~default:Trajectory.default_thinking_truncation
+           |> max 0 |> min 50000
+         in
+         let include_thinking =
+           Server_utils.bool_query_param req "include_thinking" ~default:false
+         in
+         let tail_scan_lines =
+           let multiplier = if include_thinking then 3 else 8 in
+           max 500 (min 5000 (limit * multiplier))
+         in
+         let cache_key =
+           Printf.sprintf "keeper:trajectory:%s:%s:%s:%d:%d:%d:%b:%d"
+             (Workspace.masc_root_dir config) name trace_id limit result_max_len
+             content_max_len include_thinking tail_scan_lines
+         in
+         let body =
+           Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s
+             (fun () ->
+                Domain_pool_ref.submit_io_or_inline (fun () ->
+                  let trajectory_lines =
+                    Trajectory.read_recent_lines
+                      ~masc_root:(Workspace.masc_root_dir config) ~keeper_name:meta.name
+                      ~trace_id ~max_lines:tail_scan_lines
+                  in
+                  let lines =
+                    if include_thinking then
+                      merge_keeper_trace_lines ~config ~trace_id trajectory_lines
+                    else trajectory_lines
+                  in
+                  let lines =
+                    if include_thinking then lines
+                    else
+                      List.filter
+                        (function
+                         | Trajectory.Tool_call _ -> true
+                         | Trajectory.Thinking _ -> false)
+                        lines
+                  in
+                  let total = List.length lines in
+                  let recent =
+                    if total <= limit then lines
+                    else
+                      let drop = total - limit in
+                      List.filteri (fun index _ -> index >= drop) lines
+                  in
+                  `Assoc
+                    [ ("keeper", `String name)
+                    ; ("trace_id", `String trace_id)
+                    ; ("generation", `Int meta.runtime.nonce)
+                    ; ("total_entries", `Int total)
+                    ; ("showing", `Int (List.length recent))
+                    ; ( "entries"
+                      , `List
+                          (List.map
+                             (Trajectory.trajectory_line_to_json ~result_max_len
+                                ~content_max_len)
+                             recent) )
+                    ]))
+         in
+         Some (public_get_response `OK body))
+  else if ends_with "/transitions" then
+    let name = extract_name "/transitions" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:20 |> max 1 |> min 50
+      in
+      let phase = Keeper_registry.get_phase ~base_path:config.base_path name in
+      let current_phase =
+        match phase with
+        | Some phase -> `String (Keeper_state_machine.phase_to_string phase)
+        | None -> `Null
+      in
+      let transitions =
+        Keeper_transition_audit.recent_transitions_json ~keeper_name:name ~limit
+      in
+      Some
+        (public_get_response `OK
+           (`Assoc
+              [ ("keeper", `String name)
+              ; ("current_phase", current_phase)
+              ; ("count", `Int (json_list_length transitions))
+              ; ("transitions", transitions)
+              ]))
+  else if ends_with "/lifecycle" then
+    let name = extract_name "/lifecycle" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:50 |> max 1 |> min 200
+      in
+      let events = Keeper_lifecycle_audit.recent_json ~keeper_name:name ~limit in
+      Some
+        (public_get_response `OK
+           (`Assoc
+              [ ("keeper", `String name)
+              ; ("count", `Int (json_list_length events))
+              ; ("events", events)
+              ]))
+  else if ends_with "/eval" then
+    let name = extract_name "/eval" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:10 |> max 1 |> min 100
+      in
+      let agent_name =
+        match Keeper_meta_store.read_meta config name with
+        | Ok (Some meta) when meta.agent_name <> name -> Some meta.agent_name
+        | Ok None | Ok (Some _) | Error _ -> None
+      in
+      let by_keeper =
+        Dashboard_eval_feed.read_latest ~base_path:config.base_path ~agent_name:name ~limit
+      in
+      let snapshots =
+        match agent_name, by_keeper with
+        | Some name, [] ->
+          Dashboard_eval_feed.read_latest ~base_path:config.base_path ~agent_name:name
+            ~limit
+        | (Some _ | None), _ -> by_keeper
+      in
+      let latest_verdict =
+        match snapshots with
+        | snapshot :: _ -> Some snapshot.Dashboard_eval_feed.verdict
+        | [] -> None
+      in
+      Some
+        (public_get_response `OK
+           (`Assoc
+              [ ("keeper", `String name)
+              ; ("count", `Int (List.length snapshots))
+              ; ( "latest_coverage"
+                , match latest_verdict with
+                  | Some verdict -> `Float verdict.Dashboard_eval_feed.coverage
+                  | None -> `Null )
+              ; ( "latest_all_passed"
+                , match latest_verdict with
+                  | Some verdict -> `Bool verdict.Dashboard_eval_feed.all_passed
+                  | None -> `Null )
+              ; ( "snapshots"
+                , `List (List.map Dashboard_eval_feed.snapshot_to_json snapshots) )
+              ]))
+  else if ends_with "/state-diagram" then
+    let name = extract_name "/state-diagram" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else
+      let current =
+        match Keeper_registry.get_phase ~base_path:config.base_path name with
+        | Some phase -> phase
+        | None -> Keeper_state_machine.Offline
+      in
+      let runtime_projection =
+        state_diagram_runtime_projection
+          (match Keeper_meta_store.read_meta config name with
+           | Ok meta -> meta
+           | Error _ -> None)
+      in
+      let compaction_submachine_mermaid =
+        match current with
+        | Keeper_state_machine.Compacting ->
+          `String
+            "stateDiagram-v2\n    [*] --> Accumulating\n    Accumulating --> Compacting: Compaction_started\n    Compacting --> Done: Compaction_completed\n    Compacting --> Accumulating: Compaction_failed\n    Done --> [*]\n    classDef active fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n    class Compacting active\n"
+        | _ -> `Null
+      in
+      let runtime_fields =
+        match state_diagram_runtime_projection_json runtime_projection with
+        | `Assoc fields -> fields
+        | _ -> []
+      in
+      Some
+        (public_get_response `OK
+           (`Assoc
+              ([ ("keeper", `String name)
+               ; ( "current_phase"
+                 , `String (Keeper_state_machine.phase_to_string current) )
+               ; ( "mermaid"
+                 , `String (Keeper_state_machine_mermaid.phase_to_mermaid ~current) )
+               ; ( "runtime_fsm_mermaid"
+                 , `String (state_diagram_runtime_fsm_mermaid runtime_projection) )
+               ; ("compaction_submachine_mermaid", compaction_submachine_mermaid)
+               ]
+               @ runtime_fields)))
+  else if req_path = prefix ^ "composite" then
+    Some
+      (public_get_response `OK
+         (Server_dashboard_http.dashboard_fleet_composite_json ~config ()))
+  else if ends_with "/composite" then
+    let name = extract_name "/composite" in
+    if name = "" then Some (public_get_response `Bad_request (error_json "keeper name is required"))
+    else
+      let status, body = cached_keeper_composite_json config name in
+      let status =
+        match status with
+        | `OK -> `OK
+        | `Not_found -> `Not_found
+        | `Internal_server_error -> `Internal_server_error
+      in
+      Some (public_get_response status body)
+  else None
+
 let handle_keeper_get_subroutes state req request reqd =
   let req_path = Http.Request.path req in
   let prefix = keeper_api_prefix in

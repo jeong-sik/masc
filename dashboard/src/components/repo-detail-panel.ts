@@ -67,7 +67,10 @@ export function branchRows(raw: unknown): unknown[] {
 export async function loadRepoDetail(id: string): Promise<void> {
   if (repoDetailState.value.status === 'loading') return
   await repoDetailResource.load(async () => {
-    const raw = await get<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}`)
+    const raw = await get<unknown>(
+      `/api/v1/repositories/${encodeURIComponent(id)}`,
+      { publicRead: true },
+    )
     const r = unwrapRepository(raw)
     return {
       id: typeof r.id === 'string' ? r.id : id,
@@ -86,7 +89,10 @@ export async function loadRepoDetail(id: string): Promise<void> {
 
 export async function loadRepoBranches(id: string): Promise<void> {
   await branchesResource.load(async () => {
-    const raw = await get<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}/branches`)
+    const raw = await get<unknown>(
+      `/api/v1/repositories/${encodeURIComponent(id)}/branches`,
+      { publicRead: true },
+    )
     return branchRows(raw).map(normalizeBranch).filter((b): b is BranchInfo => b !== null)
   })
 }

@@ -41,7 +41,7 @@ export interface AttributionSummaryResponse {
 export async function fetchAttributionSummary(
   opts: GetOptions = {},
 ): Promise<AttributionSummaryResponse> {
-  return get<AttributionSummaryResponse>('/api/v1/attribution/summary', opts)
+  return get<AttributionSummaryResponse>('/api/v1/attribution/summary', { ...opts, publicRead: true })
 }
 
 export async function fetchAttributionRecent(
@@ -55,5 +55,5 @@ export async function fetchAttributionRecent(
   const path = query
     ? `/api/v1/attribution/recent?${query}`
     : '/api/v1/attribution/recent'
-  return get<AttributionRecentResponse>(path, opts)
+  return get<AttributionRecentResponse>(path, { ...opts, publicRead: true })
 }

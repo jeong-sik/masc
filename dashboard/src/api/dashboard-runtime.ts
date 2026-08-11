@@ -4,7 +4,6 @@
 
 import { get, post, type AbortableRequestOptions } from './core'
 import { isRecord, asBoolean, asNumber, asNullableString, asRecordArray, asString, asStringArray } from '../components/common/normalize'
-import { ensureDevToken } from './dev-token'
 import type { RuntimeDefaultsResponse } from './schemas/runtime-defaults'
 import type { RuntimeResolvedResponse } from './schemas/runtime-resolved'
 
@@ -1006,7 +1005,10 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
 }
 
 export async function fetchRuntimeProviders(opts?: AbortableRequestOptions): Promise<DashboardRuntimeProvidersResponse> {
-  const raw = await get<Record<string, unknown>>('/api/v1/providers', { signal: opts?.signal })
+  const raw = await get<Record<string, unknown>>('/api/v1/providers', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   const decoded = decodeRuntimeProvidersResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 runtime lanes payload')
   return decoded
@@ -1018,7 +1020,10 @@ export async function fetchRuntimeModelMetrics(
   opts?: AbortableRequestOptions,
 ): Promise<DashboardRuntimeModelMetricsResponse> {
   const bParam = bucketMinutes > 0 ? `&bucket_min=${bucketMinutes}` : ''
-  const raw = await get<Record<string, unknown>>(`/api/v1/models/metrics?window=${windowMinutes}${bParam}`, { signal: opts?.signal })
+  const raw = await get<Record<string, unknown>>(`/api/v1/models/metrics?window=${windowMinutes}${bParam}`, {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   const decoded = decodeRuntimeModelMetricsResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 runtime model metrics payload')
   return decoded
@@ -1642,17 +1647,19 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
 }
 
 export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
-  await ensureDevToken()
-  return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
+  return get<unknown>('/api/v1/runtime/config/raw', { publicRead: true })
+    .then(normalizeRuntimeTomlConfig)
 }
 
 export async function fetchOfficialClientSession(
   keeperName: string,
   opts?: AbortableRequestOptions,
 ): Promise<DashboardOfficialClientSessionResponse> {
-  await ensureDevToken()
   const query = new URLSearchParams({ keeper_name: keeperName })
-  const raw = await get<unknown>(`/api/v1/runtime/sessions/official-client?${query}`, { signal: opts?.signal })
+  const raw = await get<unknown>(`/api/v1/runtime/sessions/official-client?${query}`, {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   const decoded = decodeOfficialClientSessionResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 official-client session payload')
   return decoded
@@ -1663,7 +1670,6 @@ export async function resolveOfficialClientSession(
   recoveryId: string,
   decision: DashboardOfficialClientRecoveryDecision,
 ): Promise<DashboardOfficialClientRecoveryResponse> {
-  await ensureDevToken()
   const raw = await post<unknown>('/api/v1/runtime/sessions/official-client/resolve', {
     keeper_name: keeperName,
     recovery_id: recoveryId,
@@ -1677,7 +1683,6 @@ export async function resolveOfficialClientSession(
 export async function probeOfficialClientLogin(
   runtimeId: string,
 ): Promise<DashboardOfficialClientProbeResponse> {
-  await ensureDevToken()
   const raw = await post<unknown>('/api/v1/runtime/official-client/probe', {
     runtime_id: runtimeId,
   })
@@ -1692,7 +1697,10 @@ export async function probeOfficialClientLogin(
 export async function fetchRuntimeDefaults(
   opts?: AbortableRequestOptions,
 ): Promise<RuntimeDefaultsResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/runtime-defaults', { signal: opts?.signal })
+  const raw = await get<unknown>('/api/v1/dashboard/runtime-defaults', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   const { parseRuntimeDefaultsResponse } = await import('./schemas/runtime-defaults')
   return parseRuntimeDefaultsResponse(raw)
 }
@@ -1704,13 +1712,15 @@ export async function fetchRuntimeDefaults(
 export async function fetchRuntimeResolved(
   opts?: AbortableRequestOptions,
 ): Promise<RuntimeResolvedResponse> {
-  const raw = await get<unknown>('/api/v1/runtime/resolved', { signal: opts?.signal })
+  const raw = await get<unknown>('/api/v1/runtime/resolved', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   const { parseRuntimeResolvedResponse } = await import('./schemas/runtime-resolved')
   return parseRuntimeResolvedResponse(raw)
 }
 
 export async function saveRuntimeTomlConfig(sourceText: string): Promise<RuntimeTomlConfig> {
-  await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/raw', {
     source_text: sourceText,
   }).then(normalizeRuntimeTomlConfig)
@@ -1724,7 +1734,6 @@ export async function patchRuntimeRouting(
   lane: RuntimeRoutingLane,
   runtimeId: string | null,
 ): Promise<RuntimeTomlConfig> {
-  await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane,
     runtime_id: runtimeId,
@@ -1734,7 +1743,6 @@ export async function patchRuntimeRouting(
 export async function patchRuntimeMediaFailover(
   runtimeIds: readonly string[],
 ): Promise<RuntimeTomlConfig> {
-  await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane: 'media_failover',
     runtime_ids: [...runtimeIds],
@@ -1745,7 +1753,6 @@ export async function patchRuntimeAssignment(
   keeperName: string,
   runtimeId: string | null,
 ): Promise<RuntimeTomlConfig> {
-  await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/assignment', {
     keeper_name: keeperName,
     runtime_id: runtimeId,

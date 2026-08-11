@@ -59,8 +59,8 @@ let blob_response ~base_path ~sha256 =
 let add_routes router =
   router
   |> Http.Router.prefix_get "/api/v1/artifacts/" (fun request reqd ->
-       with_token_permission_auth ~permission:artifact_read_permission
-         (fun state _agent_name _req reqd ->
+       with_public_read
+         (fun state _req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let path = Http.Request.path request in
            match extract_path_param ~prefix:"/api/v1/artifacts/" path with

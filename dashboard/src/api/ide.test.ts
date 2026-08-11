@@ -56,6 +56,7 @@ const region = {
 
 describe('ide API', () => {
   it('fetchIdeAnnotations appends keeper and repo_id params', async () => {
+    setStoredToken('stale-dashboard-token', { source: 'manual' })
     stubFetch({ ok: true, data: [annotation] })
 
     await fetchIdeAnnotations(
@@ -68,6 +69,7 @@ describe('ide API', () => {
     expect(url).toContain('file_path=lib%2Fa.ml')
     expect(url).toContain('keeper=sangsu')
     expect(url).toContain('repo_id=masc')
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).headers).toEqual({})
   })
 
   it('fetchIdeAnnotations appends canonical_url scope without repo_id', async () => {
@@ -90,14 +92,17 @@ describe('ide API', () => {
     expect(url).not.toContain('repo_id=')
   })
 
-  it('rejects conflicting IDE scope params before issuing a request', async () => {
+  it('uses the repo scope when stale canonical scope is also present', async () => {
     stubFetch({ ok: true, data: [annotation] })
 
-    await expect(fetchIdeAnnotations({}, {
+    await fetchIdeAnnotations({}, {
       scope: { kind: 'repo_id', repoId: 'masc' },
       canonicalUrl: 'https://github.com/jeong-sik/masc.git',
-    })).rejects.toThrow('IDE scope must resolve to exactly one')
-    expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    const url = String(mockFetch.mock.calls[0]![0])
+    expect(url).toContain('repo_id=masc')
+    expect(url).not.toContain('canonical_url=')
   })
 
   it('fetchIdeAnnotations rejects failed envelopes instead of returning empty', async () => {
@@ -153,7 +158,7 @@ describe('ide API', () => {
     )
   })
 
-  it('createIdeAnnotation relies on token identity and forwards opaque references', async () => {
+  it('createIdeAnnotation omits session auth and forwards opaque references', async () => {
     const references = [{ relation: 'evidence', reference: 'urn:example:42' }]
     stubFetch({ ok: true, data: { ...annotation, references } })
 
@@ -172,6 +177,7 @@ describe('ide API', () => {
     expect(url).toContain('/api/v1/ide/annotations?')
     expect(url).toContain('keeper=sangsu')
     expect(url).toContain('repo_id=masc')
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' })
     expect(body).not.toHaveProperty('keeper_id')
     expect(body.references).toEqual(references)
   })
@@ -227,7 +233,7 @@ describe('ide API', () => {
     )
   })
 
-  it('deleteIdeAnnotation sends the bearer token and appends repo_id param without keeper_id', async () => {
+  it('deleteIdeAnnotation omits session auth and appends repo_id param without keeper_id', async () => {
     setStoredToken('delete-test-token', { source: 'manual' })
     stubFetch({}, true)
 
@@ -237,10 +243,8 @@ describe('ide API', () => {
     expect(url).toContain('/api/v1/ide/annotations/ann-1?')
     expect(url).toContain('repo_id=masc')
     expect(url).not.toContain('keeper_id=')
-    // The DELETE route is token-bound (CanBroadcast) — a header-less
-    // request is rejected 401 in every server configuration.
     const init = mockFetch.mock.calls[0]![1] as RequestInit
-    expect(init.headers).toMatchObject({ Authorization: 'Bearer delete-test-token' })
+    expect(init.headers).toEqual({})
   })
 
   it('deleteIdeAnnotation maps success to deleted', async () => {
@@ -249,29 +253,7 @@ describe('ide API', () => {
     await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('deleted')
   })
 
-  it('deleteIdeAnnotation maps the coded 403 (ownership/not-found) to rejected', async () => {
-    stubFetch(
-      { ok: false, error: 'annotation delete rejected', code: 'annotation_delete_rejected' },
-      false,
-      403,
-    )
-
-    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('rejected')
-  })
-
-  it('deleteIdeAnnotation maps an uncoded 403 (auth tier) to forbidden', async () => {
-    stubFetch({ ok: false, error: 'permission denied' }, false, 403)
-
-    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('forbidden')
-  })
-
-  it('deleteIdeAnnotation maps 401 to unauthorized', async () => {
-    stubFetch({ ok: false, error: 'missing token' }, false, 401)
-
-    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('unauthorized')
-  })
-
-  it('deleteIdeAnnotation maps non-auth failures to error', async () => {
+  it('deleteIdeAnnotation maps failed public deletion to error', async () => {
     stubFetch({}, false)
 
     await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('error')
@@ -340,14 +322,17 @@ describe('ide API', () => {
     expect(url).not.toContain('canonical_url=')
   })
 
-  it('rejects keeper_lane scope combined with repo_id before issuing a request', async () => {
+  it('uses repo_id when a stale keeper_lane scope is also present', async () => {
     stubFetch({ ok: true, data: { events: [] } })
 
-    await expect(fetchIdeEvents({
+    await fetchIdeEvents({
       scope: { kind: 'keeper_lane', keeperId: 'sangsu' },
       repoId: 'masc',
-    })).rejects.toThrow('IDE scope must resolve to exactly one')
-    expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    const url = String(mockFetch.mock.calls[0]![0])
+    expect(url).toContain('repo_id=masc')
+    expect(url).not.toContain('keeper_lane=')
   })
 
   it('fetchIdeEvents rejects malformed event rows instead of dropping them', async () => {

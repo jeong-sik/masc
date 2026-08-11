@@ -295,7 +295,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
 }
 
 export function fetchKeeperMemoryHealth(): Promise<KeeperMemoryHealthResponse> {
-  return get<unknown>('/api/v1/dashboard/keeper-memory-health').then((raw) => {
+  return get<unknown>('/api/v1/dashboard/keeper-memory-health', { publicRead: true }).then((raw) => {
     const decoded = decodeKeeperMemoryHealth(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper memory health payload')
     return decoded
@@ -348,7 +348,10 @@ export function fetchVerificationRequests(
   const path = qs.length > 0
     ? `/api/v1/verification/requests?${qs}`
     : '/api/v1/verification/requests'
-  return get<VerificationRequestsResponse>(path, { signal: opts?.signal })
+  return get<VerificationRequestsResponse>(path, {
+    signal: opts?.signal,
+    publicRead: true,
+  })
 }
 
 export type TlaSpecCategory = 'boundary' | 'bug-models' | 'other'
@@ -374,6 +377,7 @@ export function fetchTlaSpecs(
 ): Promise<TlaSpecsResponse> {
   return get<TlaSpecsResponse>('/api/v1/verification/specs', {
     signal: opts?.signal,
+    publicRead: true,
   })
 }
 
@@ -410,6 +414,7 @@ export function fetchTlcResults(
 ): Promise<TlcResultsResponse> {
   return get<TlcResultsResponse>('/api/v1/verification/tlc-results', {
     signal: opts?.signal,
+    publicRead: true,
   })
 }
 
@@ -452,5 +457,6 @@ export function fetchAuditLedger(
   if (until != null) qs.set('until', String(until))
   return get<AuditLedgerResponse>(`/api/v1/audit?${qs.toString()}`, {
     signal: opts?.signal,
+    publicRead: true,
   })
 }

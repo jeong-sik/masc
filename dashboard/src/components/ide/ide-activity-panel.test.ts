@@ -63,15 +63,15 @@ describe('IdeActivityPanel', () => {
     expect(container.textContent).toContain('no keeper activity')
   })
 
-  it('shows a no-scope message instead of "no recent activity" when neither repoId nor keeperLane is set', async () => {
+  it('uses the default lane when neither repoId nor keeperLane is set', async () => {
     const container = document.createElement('div')
     render(h(IdeActivityPanel, {}), container)
 
     await waitFor(() => {
-      const notice = container.querySelector('[data-testid="ide-activity-no-scope"]')
-      expect(notice?.textContent).toBe('관측 스코프(저장소/keeper)가 선택되지 않았습니다')
+      expect(container.textContent).toContain('no recent activity')
     })
-    expect(container.textContent).not.toContain('no recent activity')
+    const requests = vi.mocked(globalThis.fetch).mock.calls.map(call => String(call[0]))
+    expect(requests.some(url => url.includes('/api/v1/ide/events?limit=50'))).toBe(true)
   })
 
   it('shows "no recent activity" (not the no-scope message) when a scoped fetch genuinely finds nothing', async () => {
@@ -135,7 +135,7 @@ describe('IdeActivityPanel', () => {
 
     render(h(IdeActivityPanel, {}), container)
     expect(container.textContent).not.toContain('turn-repo-a')
-    expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).not.toBeNull()
+    expect(container.textContent).toContain('no recent activity')
 
     await waitFor(() => expect(resolveUnscopedGraph).not.toBeNull())
     resolveUnscopedGraph!(new Response(JSON.stringify({ events: [] }), {
@@ -437,8 +437,7 @@ describe('IdeActivityPanel', () => {
     }))
 
     const container = document.createElement('div')
-    // Bridge events are fetched only under an explicit scope: without a
-    // repo or keeper lane the server rejects unscoped /api/v1/ide/events.
+    // A repository selection narrows the otherwise readable bridge feed.
     render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', repoId: 'masc' }), container)
 
     await waitFor(() => {
@@ -661,16 +660,15 @@ describe('IdeActivityPanel', () => {
     await vi.waitFor(() => {
       expect(container.textContent).toContain('turn-1')
     })
-    // Without a repo or keeper-lane scope there is no bridge fetch: the
-    // server rejects unscoped /api/v1/ide/events, so only the activity
-    // graph is polled (one call per load).
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // Without a selection the bridge reads the default lane alongside the
+    // activity graph, so each refresh makes two reads.
+    expect(fetchMock).toHaveBeenCalledTimes(2)
 
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => {
       expect(container.textContent).toContain('goal goal-refresh')
     })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
     expect(container.textContent).toContain('turn-2')
     expect(container.textContent).not.toContain('turn-1')
 
@@ -724,7 +722,7 @@ describe('IdeActivityPanel', () => {
     vi.setSystemTime(new Date('2026-05-05T10:00:10Z'))
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(fetchMock).toHaveBeenCalledTimes(4)
     })
 
     expect(container.textContent).toContain('turn-stable')
@@ -743,10 +741,7 @@ describe('IdeActivityPanel', () => {
     await waitFor(() => {
       expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('offline 1 failed')
     })
-    // No repoId/keeperLane was passed: the empty list explains the missing
-    // scope rather than claiming "no recent activity" (which would imply
-    // a real, merely-empty fetch happened).
-    expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).not.toBeNull()
+    expect(container.textContent).toContain('no recent activity')
   })
 
   it('degrades the refresh tone when the keeper lane fetch fails', async () => {

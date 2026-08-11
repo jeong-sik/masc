@@ -229,7 +229,10 @@ export function fetchTelemetry(opts?: {
   if (typeof opts?.n === 'number') params.set('n', String(opts.n))
   if (typeof opts?.offset === 'number') params.set('offset', String(opts.offset))
   const qs = params.toString()
-  return get<Record<string, unknown>>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })
+  return get<Record<string, unknown>>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, {
+    signal: opts?.signal,
+    publicRead: true,
+  })
     .then((raw) => {
       const decoded = decodeTelemetryResponse(raw)
       if (!decoded) throw new Error('유효하지 않은 telemetry payload')
@@ -238,7 +241,10 @@ export function fetchTelemetry(opts?: {
 }
 
 export function fetchTelemetrySummary(opts?: AbortableRequestOptions): Promise<TelemetrySummaryResponse> {
-  return get<Record<string, unknown>>('/api/v1/dashboard/telemetry/summary', { signal: opts?.signal })
+  return get<Record<string, unknown>>('/api/v1/dashboard/telemetry/summary', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
     .then((raw) => {
       const decoded = decodeTelemetrySummaryResponse(raw)
       if (!decoded) throw new Error('유효하지 않은 telemetry summary payload')
@@ -247,7 +253,10 @@ export function fetchTelemetrySummary(opts?: AbortableRequestOptions): Promise<T
 }
 
 export function fetchDashboardCacheStats(opts?: AbortableRequestOptions): Promise<DashboardCacheStatsResponse> {
-  return get<Record<string, unknown>>('/api/v1/dashboard/cache-stats', { signal: opts?.signal })
+  return get<Record<string, unknown>>('/api/v1/dashboard/cache-stats', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
     .then((raw) => {
       const decoded = decodeDashboardCacheStatsResponse(raw)
       if (!decoded) throw new Error('유효하지 않은 dashboard cache stats payload')

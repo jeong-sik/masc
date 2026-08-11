@@ -124,7 +124,7 @@ export function fetchKeeperToolCalls(
   const params = limit != null ? `?limit=${limit}` : ''
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/tool-calls${params}`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   ).then((raw) => {
     const decoded = decodeToolCallsResponse(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper tool call payload')

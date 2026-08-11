@@ -67,6 +67,20 @@ val delete
     with a ["version mismatch"] error when the stored value differs.
     Omitting it keeps the legacy delete-by-id contract. *)
 
+val delete_any
+  :  base_dir:string
+  -> ?partition:Ide_paths.partition
+  -> id:string
+  -> ?expected_version:int64
+  -> unit
+  -> (unit, string) result
+(** Soft-delete an annotation by id without requiring its original
+    [keeper_id]. This is the product-facing counterpart of [delete] for the
+    public IDE observation lane: annotation editing must keep working when a
+    browser has no credential or selected keeper. The tombstone still records
+    the original keeper id, so log replay and compaction retain one canonical
+    record shape. *)
+
 val compact : base_dir:string -> ?partition:Ide_paths.partition -> unit -> unit
 (** Append a compaction snapshot marker that lets readers ignore earlier
     tombstoned state while replaying records written during the compaction

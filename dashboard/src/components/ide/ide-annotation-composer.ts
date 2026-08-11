@@ -4,11 +4,11 @@
 // could not leave a comment/decision from the IDE at all.
 //
 // Contract notes (server-enforced, mirrored here instead of re-invented):
-// - Mutations require a repo scope; `keeper_lane` is read-only
-//   (`keeper_lane_read_only`), so the composer submits with the explorer's
-//   active repository and disables itself when none is selected.
-// - Identity comes from the auth token; the composer never sends a
-//   keeper_id.
+// - Mutations work without a selected repository or dashboard credential;
+//   the server stores that write in its readable default lane.
+// - The server accepts an explicit keeper_id when a caller has one and uses a
+//   stable dashboard identity otherwise, so this composer need not block on
+//   identity bootstrap.
 // - After a successful create the workspace fetches re-run, so the new
 //   record surfaces through the exact read path keeper annotations use.
 
@@ -114,10 +114,7 @@ export function IdeAnnotationComposer({
           type="button"
           class="v2-ide-action"
           data-testid="ide-annotation-open"
-          disabled=${repoId === null}
-          title=${repoId === null
-            ? '주석 생성에는 repo 선택이 필요합니다 (keeper_lane scope는 read-only)'
-            : '현재 선택 라인에 주석을 남깁니다'}
+          title="현재 선택 라인에 주석을 남깁니다"
           onClick=${() => setDraft(draftFromSelection(filePath))}
         >
           주석 추가
@@ -132,7 +129,7 @@ export function IdeAnnotationComposer({
   }
 
   const submit = async () => {
-    if (problem !== null || repoId === null || submitting) return
+    if (problem !== null || submitting) return
     const lineStart = parseLine(draft.lineStart)
     const lineEnd = parseLine(draft.lineEnd)
     if (lineStart === null || lineEnd === null) return
@@ -146,7 +143,7 @@ export function IdeAnnotationComposer({
           kind: draft.kind,
           content: draft.content.trim(),
         },
-        { repoId },
+        repoId ? { repoId } : {},
       )
       if (created === null) {
         showToast('주석 응답 파싱 실패 — 서버 응답을 확인하세요', 'error')
@@ -216,7 +213,7 @@ export function IdeAnnotationComposer({
           type="button"
           class="v2-ide-action"
           data-testid="ide-annotation-submit"
-          disabled=${problem !== null || submitting || repoId === null}
+          disabled=${problem !== null || submitting}
           title=${problem ?? ''}
           onClick=${() => void submit()}
         >

@@ -839,7 +839,7 @@ export async function fetchKeeperRuntimeTrace(
   const qs = params.toString()
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/runtime-trace${qs ? `?${qs}` : ''}`,
-    { headers: jsonHeaders(), signal: opts?.signal },
+    { headers: jsonHeaders({ publicRead: true }), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`runtime trace fetch failed: ${resp.status}`)

@@ -83,7 +83,7 @@ export function fetchKeeperToolStats(
   const params = windowHours != null ? `?window_hours=${windowHours}` : ''
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/tool-stats${params}`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   ).then((raw) => {
     const decoded = decodeToolStatsResponse(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper tool stats payload')

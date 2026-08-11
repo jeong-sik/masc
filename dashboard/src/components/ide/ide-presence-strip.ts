@@ -95,8 +95,8 @@ export function unwrapEnvelope<T>(raw: unknown): T | undefined {
 async function fetchPresence(): Promise<KeeperPresenceSnapshot> {
   const [idePresence, agentsResponse, statusResponse] = await Promise.allSettled([
     fetchIdePresence(),
-    get<unknown>('/api/v1/agents?limit=20'),
-    get<unknown>('/api/v1/status'),
+    get<unknown>('/api/v1/agents?limit=20', { publicRead: true }),
+    get<unknown>('/api/v1/status', { publicRead: true }),
   ])
 
   // The IDE endpoint is the only source that has the runtime/branch and

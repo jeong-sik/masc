@@ -137,7 +137,7 @@ export function normalizeRepository(raw: unknown): Repository | null {
 }
 
 export async function fetchRepositoriesList(opts: GetOptions = {}): Promise<Repository[]> {
-  const raw = await get<unknown>('/api/v1/repositories', opts)
+  const raw = await get<unknown>('/api/v1/repositories', { ...opts, publicRead: true })
   return repositoryRows(raw).map(normalizeRepository).filter((r): r is Repository => r !== null)
 }
 

@@ -14,5 +14,11 @@
 val repository_json :
   base_path:string -> Repo_manager_types.repository -> Yojson.Safe.t
 
+(** Response projection for the public list/detail/branches GET family. *)
+val public_get_response :
+  Mcp_server.server_state ->
+  Httpun.Request.t ->
+  [ `OK | `Bad_request | `Not_found | `Internal_server_error ] * Yojson.Safe.t
+
 val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t

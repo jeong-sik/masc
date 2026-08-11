@@ -27,5 +27,8 @@ export async function fetchToolBlob(
   sha256: string,
   opts: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<ToolBlobResponse> {
-  return get<ToolBlobResponse>(`/api/v1/artifacts/${encodeURIComponent(sha256)}`, opts)
+  return get<ToolBlobResponse>(`/api/v1/artifacts/${encodeURIComponent(sha256)}`, {
+    ...opts,
+    publicRead: true,
+  })
 }

@@ -68,7 +68,7 @@ async function fetchRepositories(): Promise<RepositoryOption[]> {
 }
 
 async function fetchKeeperRepoMappings(): Promise<KeeperRepoMapping[]> {
-  const data = await get<unknown>('/api/v1/keeper-repos')
+  const data = await get<unknown>('/api/v1/keeper-repos', { publicRead: true })
   const rows = Array.isArray(data)
     ? data
     : data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).mappings)

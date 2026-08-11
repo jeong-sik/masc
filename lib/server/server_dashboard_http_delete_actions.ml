@@ -11,6 +11,15 @@ module Http = Http_server_eio
 
 open Server_auth
 
+(* Dashboard actions run feature-first.  The fixed actor is retained only for
+   durable audit fields; it is deliberately not an authorization condition. *)
+let dashboard_feature_actor = "dashboard"
+
+let with_token_permission_auth ~permission:_ handler request reqd =
+  with_public_read
+    (fun state req reqd -> handler state dashboard_feature_actor req reqd)
+    request reqd
+
 type agent_purge_cleanup_result =
   { agent_name : string
   ; heartbeats_stopped : int

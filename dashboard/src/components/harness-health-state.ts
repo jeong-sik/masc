@@ -119,7 +119,9 @@ export function resetHarnessHealthState(): void {
 }
 
 export function loadHarnessHealth(): Promise<void> {
-  return harness.load(() => get<HarnessHealthData>('/api/v1/dashboard/harness-health'))
+  return harness.load(() => get<HarnessHealthData>('/api/v1/dashboard/harness-health', {
+    publicRead: true,
+  }))
 }
 
 export async function refreshHarnessSurface(): Promise<void> {

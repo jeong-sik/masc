@@ -1,6 +1,5 @@
 import { isRecord } from '../components/common/normalize'
 import { post } from './core'
-import { ensureDevToken } from './dev-token'
 import {
   parseKeeperSecretProjection,
   type KeeperSecretProjection,
@@ -39,7 +38,6 @@ export async function setKeeperSecretEnv(
   keeperName: string,
   mutation: KeeperSecretEnvSetMutation,
 ): Promise<KeeperSecretProjection> {
-  await ensureDevToken()
   const raw = await post<unknown>(secretMutationPath(keeperName), {
     action: 'set_env',
     scope: mutation.scope,
@@ -53,7 +51,6 @@ export async function deleteKeeperSecretEnv(
   keeperName: string,
   mutation: KeeperSecretEnvMutation,
 ): Promise<KeeperSecretProjection> {
-  await ensureDevToken()
   const raw = await post<unknown>(secretMutationPath(keeperName), {
     action: 'delete_env',
     scope: mutation.scope,
@@ -66,7 +63,6 @@ export async function setKeeperSecretFile(
   keeperName: string,
   mutation: KeeperSecretFileSetMutation,
 ): Promise<KeeperSecretProjection> {
-  await ensureDevToken()
   const raw = await post<unknown>(secretMutationPath(keeperName), {
     action: 'set_file',
     scope: mutation.scope,
@@ -80,7 +76,6 @@ export async function deleteKeeperSecretFile(
   keeperName: string,
   mutation: KeeperSecretFileMutation,
 ): Promise<KeeperSecretProjection> {
-  await ensureDevToken()
   const raw = await post<unknown>(secretMutationPath(keeperName), {
     action: 'delete_file',
     scope: mutation.scope,

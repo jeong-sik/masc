@@ -8,8 +8,7 @@ import {
 } from './dashboard-keeper-prompt'
 import { clearStoredToken, setStoredToken } from './core'
 
-// A Response body can only be read once and ensureDevToken consumes the first,
-// so each call needs a fresh instance rather than one shared mock value.
+// Keep each response fresh so every request observes an independent body.
 function stubFetch(payload: unknown, status = 200) {
   const fetchMock = vi.fn().mockImplementation(
     async () =>
@@ -42,11 +41,13 @@ const capture = {
 
 describe('last prompt', () => {
   it('keeps block text byte-for-byte, newlines included', async () => {
-    stubFetch(capture)
+    const fetchMock = stubFetch(capture)
     const decoded = await fetchKeeperLastPrompt('kidsnote')
     expect(decoded.absoluteTurn).toBe(17534)
     expect(decoded.blocks[0]?.text).toBe('--- Memory OS Recall ---\nrevision 223\n')
     expect(decoded.assembled).toBe('--- Memory OS Recall ---\nrevision 223\n')
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).toEqual({})
   })
 
   it('accepts the operator_note block this build knows', async () => {
@@ -81,7 +82,7 @@ describe('last prompt', () => {
 
 describe('raw traces', () => {
   it('decodes the turn listing', async () => {
-    stubFetch({
+    const fetchMock = stubFetch({
       keeper: 'kidsnote',
       turns: [{ file: 'turn-1.jsonl', trace_id: 'trace-kidsnote-1', bytes: 2048, records: 218, modified_at: 1786000000 }],
     })
@@ -89,6 +90,9 @@ describe('raw traces', () => {
     expect(turns).toHaveLength(1)
     expect(turns[0]?.records).toBe(218)
     expect(turns[0]?.traceId).toBe('trace-kidsnote-1')
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/keepers/kidsnote/raw-traces?limit=25')
+    expect(init.headers).toEqual({})
   })
 
   // A torn line occupies its own position. Dropping it would make a damaged

@@ -972,7 +972,7 @@ export async function fetchBoard(
     if (options?.blindVotes) params.set('blind_votes', 'true')
     params.set('limit', options?.excludeSystem || options?.excludeAutomation || options?.author || options?.hearth ? '150' : '100')
     const qs = params.toString()
-    const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
+    const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`, { publicRead: true })
     const posts = Array.isArray(raw.posts)
       ? raw.posts.map(normalizeBoardPost).filter((row): row is BoardPost => row !== null)
       : []
@@ -989,7 +989,7 @@ export async function fetchBoardHearths(options: {
     if (options.excludeSystem) params.set('exclude_system', 'true')
     if (options.excludeAutomation) params.set('exclude_automation', 'true')
     const qs = params.toString()
-    const raw = await get<{ hearths?: unknown[] }>(`/api/v1/board/hearths${qs ? `?${qs}` : ''}`)
+    const raw = await get<{ hearths?: unknown[] }>(`/api/v1/board/hearths${qs ? `?${qs}` : ''}`, { publicRead: true })
     return Array.isArray(raw.hearths)
       ? raw.hearths.map(normalizeBoardHearth).filter((row): row is BoardHearth => row !== null)
       : []
@@ -998,7 +998,7 @@ export async function fetchBoardHearths(options: {
 
 export async function fetchBoardFlairs(): Promise<BoardFlair[]> {
   return withRetries('fetchBoardFlairs', async () => {
-    const raw = await get<{ flairs?: unknown[] }>('/api/v1/board/flairs')
+    const raw = await get<{ flairs?: unknown[] }>('/api/v1/board/flairs', { publicRead: true })
     return Array.isArray(raw.flairs)
       ? raw.flairs.map(normalizeBoardFlair).filter((row): row is BoardFlair => row !== null)
       : []
@@ -1007,7 +1007,7 @@ export async function fetchBoardFlairs(): Promise<BoardFlair[]> {
 
 export async function fetchBoardCuration(): Promise<BoardCurationSnapshot | null> {
   return withRetries('fetchBoardCuration', async () => {
-    const raw = await get<{ snapshot?: unknown }>('/api/v1/board/curation')
+    const raw = await get<{ snapshot?: unknown }>('/api/v1/board/curation', { publicRead: true })
     return raw.snapshot != null ? normalizeBoardCurationSnapshot(raw.snapshot) : null
   })
 }
@@ -1021,7 +1021,7 @@ export async function fetchBoardKarmaLedger(options: { agent?: string; limit?: n
       params.set('limit', String(Math.trunc(options.limit)))
     }
     const qs = params.toString()
-    const raw = await get<unknown>(`/api/v1/board/karma/ledger${qs ? `?${qs}` : ''}`)
+    const raw = await get<unknown>(`/api/v1/board/karma/ledger${qs ? `?${qs}` : ''}`, { publicRead: true })
     return normalizeBoardKarmaLedger(raw)
   })
 }
@@ -1035,7 +1035,7 @@ export async function fetchBoardReactionState(
       target_type: targetType,
       target_id: targetId,
     })
-    const raw = await get<unknown>(`/api/v1/board/reactions?${params}`)
+    const raw = await get<unknown>(`/api/v1/board/reactions?${params}`, { publicRead: true })
     if (!isRecord(raw) || !Array.isArray(raw.reactions)) {
       throw new Error('Malformed board reaction state: reactions must be an array')
     }
@@ -1061,7 +1061,7 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
       voter: currentDashboardActor(),
       blind_votes: 'true',
     })
-    const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?${params}`)
+    const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?${params}`, { publicRead: true })
     const postRaw = isRecord(raw.post) ? raw.post : raw
     const post = normalizeBoardPost(postRaw) ?? {
       id: postId,
@@ -1200,7 +1200,7 @@ export function normalizeSubBoard(raw: unknown): SubBoard | null {
 }
 
 export async function fetchSubBoards(): Promise<SubBoard[]> {
-  const data = await withRetries('fetchSubBoards', () => get('/api/v1/board/sub-boards'))
+  const data = await withRetries('fetchSubBoards', () => get('/api/v1/board/sub-boards', { publicRead: true }))
   if (!isRecord(data)) return []
   const raw = Array.isArray(data.sub_boards) ? data.sub_boards : []
   return raw.flatMap((r: unknown) => {
@@ -1210,7 +1210,10 @@ export async function fetchSubBoards(): Promise<SubBoard[]> {
 }
 
 export async function fetchSubBoard(subBoardId: string): Promise<SubBoard | null> {
-  const data = await withRetries('fetchSubBoard', () => get(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`))
+  const data = await withRetries(
+    'fetchSubBoard',
+    () => get(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`, { publicRead: true }),
+  )
   return normalizeSubBoard(data)
 }
 

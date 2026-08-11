@@ -37,12 +37,13 @@ val blob_response :
     [`Service_unavailable]. Cancellation propagates. *)
 
 val artifact_read_permission : Masc_domain.permission
-(** Operator-only authority required to dereference exact tool-output bytes. *)
+(** Legacy permission descriptor retained for callers that expose this route
+    outside the dashboard feature-first surface. *)
 
 val add_routes :
   Http_server_eio.Router.t ->
   Http_server_eio.Router.t
 (** Register the [GET /api/v1/artifacts/<sha256>] route on
-    [router]. Exact bytes require a token-bound operator credential even when
-    general HTTP auth is non-strict; a content digest is not an authorization
-    capability. Returns the augmented router. *)
+    [router]. Dashboard feature-first mode keeps this click-through path public
+    so the UI can render a complete tool result without a credential bootstrap.
+    Returns the augmented router. *)

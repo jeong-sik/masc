@@ -786,6 +786,17 @@ let test_delete_allows_owner () =
     | Error msg -> failf "owner delete failed: %s" msg)
 ;;
 
+let test_delete_any_removes_foreign_annotation_for_public_lane () =
+  with_temp_dir (fun base_dir ->
+    let created = make_alice_annotation base_dir in
+    (match Store.delete_any ~base_dir ~id:created.id () with
+     | Ok () -> ()
+     | Error msg -> failf "public delete failed: %s" msg);
+    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check bool "public delete tombstones the annotation" false
+      (List.exists (fun (annotation : Types.annotation) -> annotation.id = created.id) listed))
+;;
+
 (* task-1744: tombstoned annotations must be excluded from load/list.
 
    Before the fix, [load_all_partition] only skipped the tombstone marker
@@ -1093,6 +1104,12 @@ let () =
             `Quick
             test_delete_rejects_other_keeper
         ; test_case "owner can delete own annotation" `Quick test_delete_allows_owner
+        ] )
+    ; ( "public mutation projection"
+      , [ test_case
+            "delete_any removes a foreign annotation"
+            `Quick
+            test_delete_any_removes_foreign_annotation_for_public_lane
         ] )
     ; ( "tombstone read (task-1744)"
       , [ test_case

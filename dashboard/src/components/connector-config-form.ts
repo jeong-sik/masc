@@ -214,7 +214,10 @@ async function fetchCurrentValues(id: string): Promise<Record<string, string>> {
 async function fetchSchema(id: string) {
   setEntry(id, { loading: true, error: null })
   try {
-    const data = await get<SchemaResponse>(`/api/v1/sidecar/schema?name=${encodeURIComponent(id)}`)
+    const data = await get<SchemaResponse>(
+      `/api/v1/sidecar/schema?name=${encodeURIComponent(id)}`,
+      { publicRead: true },
+    )
     if (!data.ok) throw new Error('schema response missing ok=true')
     const fields = parseSchema(data)
     const current = await fetchCurrentValues(id)

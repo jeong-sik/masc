@@ -6,7 +6,6 @@
 // state pulled the whole tool inventory with it.
 
 import { get, type AbortableRequestOptions } from './core'
-import { ensureDevToken } from './dev-token'
 import type {
   DashboardScheduledAutomation,
   DashboardScheduledAutomationFsm,
@@ -205,9 +204,9 @@ export function normalizeScheduledAutomation(
 export async function fetchDashboardScheduledAutomation(
   opts?: AbortableRequestOptions,
 ): Promise<DashboardScheduledAutomationProjection> {
-  await ensureDevToken()
   const raw = await get<unknown>('/api/v1/dashboard/scheduled-automation', {
     signal: opts?.signal,
+    publicRead: true,
   })
   return normalizeScheduledAutomation(raw)
 }

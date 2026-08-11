@@ -51,7 +51,10 @@ import {
   ideContextFocus,
   synchronizeIdeWorkspaceIdentity,
 } from './ide-state'
-import { resetIdeDataWorkspaceStoreForTest } from './ide-workspace-singleton'
+import {
+  getIdeDataWorkspaceStore,
+  resetIdeDataWorkspaceStoreForTest,
+} from './ide-workspace-singleton'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import { EMPTY_LSP_STATUS_SNAPSHOT, lspStatusSnapshot } from './ide-lsp-client'
 import { DEFAULT_MOBILE_BREAKPOINT } from '../../hooks/use-is-mobile'
@@ -1157,6 +1160,28 @@ describe('IdeShell', () => {
       label: 'str_replace',
       keeper_id: 'sangsu',
     })
+  })
+
+  it('keeps the cursor stream on the default lane after repository selection clears', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+    const fetchMock = vi.fn(dashboardFetchMock)
+    vi.stubGlobal('fetch', fetchMock)
+    render(h(IdeShell, {}), container)
+
+    await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('live'))
+    fetchMock.mockClear()
+    getIdeDataWorkspaceStore().setActiveRepositoryId(null)
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(call => String(call[0]) === '/api/v1/ide/cursors'),
+      ).toBe(true),
+    )
+    expect(cursorOverlaySignal.value.stream?.status).toBe('live')
   })
 
   it('hydrates collapsed IDE rails from the route', () => {

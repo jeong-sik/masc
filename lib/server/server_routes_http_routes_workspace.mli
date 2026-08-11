@@ -2,6 +2,22 @@ module Http = Http_server_eio
 
 val add_routes : Http.Router.t -> Http.Router.t
 
+(** Transport-neutral projection for the public tree, children, file, Git
+    blame, and Git diff workspace routes. *)
+type public_read_status =
+  [ `OK | `Bad_request | `Not_found | `Payload_too_large | `Internal_server_error ]
+
+type public_read_response =
+  { status : public_read_status
+  ; body : Yojson.Safe.t
+  ; extra_headers : (string * string) list
+  }
+
+val workspace_public_read_response :
+  state:Mcp_server.server_state ->
+  Httpun.Request.t ->
+  public_read_response option
+
 (** Pure dispatch logic for the [?keeper=<name>] query param. Exposed
     for unit testing — production code goes through {!add_routes}. *)
 val classify_keeper_query :

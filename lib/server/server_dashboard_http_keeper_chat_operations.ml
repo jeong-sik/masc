@@ -133,33 +133,39 @@ let parse_after_sequence request =
      | Some _ | None -> Error (invalid_input "after_sequence must be a non-negative int64"))
 ;;
 
-let handle_get state request reqd = function
+type get_response =
+  { status : Httpun.Status.t
+  ; body : Yojson.Safe.t
+  }
+
+let get_response status body = { status; body }
+
+let get_response_for_route state request = function
   | Operation_exact { keeper_name; raw_operation_id } ->
     (match operation_id raw_operation_id with
-     | Error error -> respond_error request reqd error
+     | Error error -> get_response error.status (error_json error)
      | Ok operation_id ->
        (match Registry.exact_operation ~base_path:(base_path state) ~keeper_name operation_id with
-        | Error error -> respond_error request reqd (api_error_of_command_error error)
+        | Error error ->
+          let error = api_error_of_command_error error in
+          get_response error.status (error_json error)
         | Ok None ->
-          respond_error
-            request
-            reqd
-            (unknown_operation
-               ("unknown Keeper chat operation: " ^ Operation_id.to_string operation_id))
+          let error =
+            unknown_operation
+              ("unknown Keeper chat operation: " ^ Operation_id.to_string operation_id)
+          in
+          get_response error.status (error_json error)
         | Ok (Some operation) ->
           Log.Dashboard.debug
             "keeper_chat_operation_get keeper=%s operation_id=%s state=%s"
             keeper_name
             (Operation_id.to_string operation.operation_id)
             (Operation.state_to_string operation.state);
-          Server_auth.respond_json_value_with_cors
-            request
-            reqd
-            (Operation.to_json operation)))
+          get_response `OK (Operation.to_json operation)))
   | Operation_list { keeper_name } ->
     let state_filter = Server_utils.query_param request "state" in
     (match parse_after_sequence request with
-     | Error error -> respond_error request reqd error
+     | Error error -> get_response error.status (error_json error)
      | Ok after_sequence ->
        (match state_filter with
         | Some "queued" ->
@@ -170,22 +176,29 @@ let handle_get state request reqd = function
             ~after_sequence
             ~limit:100
         with
-        | Error error -> respond_error request reqd (api_error_of_command_error error)
+        | Error error ->
+          let error = api_error_of_command_error error in
+          get_response error.status (error_json error)
         | Ok operations ->
           Log.Dashboard.debug
             "keeper_chat_operation_list keeper=%s state=queued count=%d"
             keeper_name
             (List.length operations);
-          Server_auth.respond_json_value_with_cors
-            request
-            reqd
+          get_response `OK
             (`Assoc
                [ "schema", `String "masc.keeper_chat_operations.list.v1"
                ; "state", `String "Queued"
                ; "operations", `List (List.map Operation.to_json operations)
                ]))
         | Some _ | None ->
-          respond_error request reqd (invalid_input "state=queued is required")))
+          let error = invalid_input "state=queued is required" in
+          get_response error.status (error_json error)))
+;;
+
+let handle_get state request reqd route =
+  let response = get_response_for_route state request route in
+  Server_auth.respond_json_value_with_cors
+    ~status:response.status request reqd response.body
 ;;
 
 let strict_object body =

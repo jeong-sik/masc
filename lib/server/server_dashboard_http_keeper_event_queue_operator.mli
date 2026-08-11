@@ -1,4 +1,4 @@
-(** Admin-only durable Keeper event-queue control boundary. *)
+(** Durable Keeper event-queue read and control boundary. *)
 
 module Http = Http_server_eio
 
@@ -6,6 +6,17 @@ val operator_permission : Masc_domain.permission
 
 val route : string -> string option
 val pending_get_route : string -> string option
+
+type pending_response =
+  { status : Httpun.Status.t
+  ; body : Yojson.Safe.t
+  }
+
+val pending_response_for_request :
+  Mcp_server.server_state ->
+  Httpun.Request.t ->
+  keeper_name:string ->
+  pending_response
 
 module For_testing : sig
   val pending_page :

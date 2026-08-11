@@ -40,16 +40,19 @@ export type {
 export { GateConnectorsSchemaDriftError } from './schemas/gate-connectors'
 
 export async function fetchGateStatus(signal?: AbortSignal): Promise<GateStatusData> {
-  const raw = await get<unknown>('/api/v1/gate/status', { signal })
+  const raw = await get<unknown>('/api/v1/gate/status', { signal, publicRead: true })
   return parseGateStatusData(raw)
 }
 
 export async function fetchGateConnectors(signal?: AbortSignal): Promise<GateConnectorsData> {
-  const raw = await get<unknown>('/api/v1/gate/connectors', { signal })
+  const raw = await get<unknown>('/api/v1/gate/connectors', { signal, publicRead: true })
   return parseGateConnectorsData(raw)
 }
 
 export async function fetchGateKeepers(signal?: AbortSignal): Promise<GateKeepersData> {
-  const raw = await get<unknown>('/api/v1/gate/keepers?limit=50&detailed=true', { signal })
+  const raw = await get<unknown>('/api/v1/gate/keepers?limit=50&detailed=true', {
+    signal,
+    publicRead: true,
+  })
   return parseGateKeepersData(raw)
 }

@@ -966,7 +966,10 @@ let with_admin_auth handler request reqd =
             Http_server_eio.Response.json ~status:`Forbidden
               {|{"error":"Invalid admin token"}|} reqd
 
-(** Public read access - no auth required (dashboard, health) *)
+(** Legacy path allowlist for transports which cannot use the route-local
+    [with_public_read] wrapper.  It is intentionally not the authority for
+    normal HTTP Dashboard/IDE reads: the route declaring [with_public_read]
+    is that authority. *)
 let is_public_read_path path =
   String.equal path "/health"
   (* Issue #8403: derive probe whitelist from Server_health_paths SSOT
@@ -989,10 +992,9 @@ let is_public_read_path path =
   (* Tier F2 dashboard reads — multimodal artifact gallery + detail
      panel. The Bonsai dashboard issues these via [Brr_io.Fetch.url]
      with no credentials, mirroring the rest of the dashboard's
-     read-only surface. Routes themselves are wrapped in
-     [with_public_read] in [server_routes_http_routes_multimodal];
-     this whitelist entry is what makes that wrapper actually
-     public when [http_auth_strict_enabled] is on. *)
+     read-only surface. Their route-local [with_public_read] wrapper is
+     the H1 authority; retain these entries for transports that still
+     consult this legacy allowlist. *)
   || String.starts_with ~prefix:"/api/v1/multimodal/list" path
   || String.starts_with ~prefix:"/api/v1/multimodal/get/" path
   || String.starts_with ~prefix:"/api/v1/multimodal/provenance/" path
@@ -1142,14 +1144,15 @@ let not_initialized_response path =
     {|{"error":"not initialized"}|}
 
 let rec with_public_read handler request reqd =
-  let strict = http_auth_strict_enabled () in
   let path = Http_server_eio.Request.path request in
-  if strict && not (is_public_read_path path) then
-    with_read_auth handler request reqd
-  else
-    match current_server_state () with
-    | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
-    | Some state -> handler state request reqd
+  (* A route reaches this wrapper only after opting into the public-read
+     surface.  Reapplying the global strict-path allowlist here made the
+     route's declared contract depend on a second, incomplete list and turned
+     ordinary Dashboard reads into bearer/actor failures.  In particular, a
+     stale dashboard token must not make an otherwise public inspector fail. *)
+  match current_server_state () with
+  | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
+  | Some state -> handler state request reqd
 
 and with_observer_sse_read_auth handler request reqd =
   let strict = http_auth_strict_enabled () in

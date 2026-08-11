@@ -86,14 +86,18 @@ describe('IdeMemoryPanel', () => {
     expect(String(url)).not.toContain('repo_id=')
   })
 
-  it('renders an explicit no-repo-selected state and never calls the API without a scope', async () => {
+  it('uses the default scope when no repository is selected', async () => {
     render(h(IdeMemoryPanel, { keeperName: 'sangsu' }), container)
 
     await waitFor(() => {
-      const notice = container.querySelector('[data-testid="ide-memory-panel-no-scope"]')
-      expect(notice?.textContent).toBe('저장소를 선택하면 메모리를 조회합니다')
+      expect(globalThis.fetch).toHaveBeenCalled()
     })
-    expect(globalThis.fetch).not.toHaveBeenCalled()
+    const [url] = vi.mocked(globalThis.fetch).mock.calls[0]!
+    expect(String(url)).toContain('/api/v1/ide/memory?')
+    expect(String(url)).toContain('keeper_id=sangsu')
+    expect(String(url)).toContain('limit=50')
+    expect(String(url)).not.toContain('repo_id=')
+    expect(String(url)).not.toContain('canonical_url=')
     expect(container.querySelector('.ide-memory-panel__error')).toBeNull()
   })
 

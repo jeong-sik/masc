@@ -375,6 +375,7 @@ export function fetchDashboardGate(
     const query = opts?.force ? '?force=1' : ''
     const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/gate${query}`, {
       signal: opts?.signal,
+      publicRead: true,
     })
     const approvalQueueState = normalizeApprovalQueueState(raw.approval_queue_state)
     let approvalQueue: KeeperApprovalQueueItem[] | null

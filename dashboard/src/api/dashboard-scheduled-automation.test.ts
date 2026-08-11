@@ -120,8 +120,6 @@ describe('normalizeScheduledAutomation', () => {
 
 describe('fetchDashboardScheduledAutomation', () => {
   it('requests the dedicated endpoint, not the tool inventory', async () => {
-    // A fresh Response per call: a body can only be read once, and the
-    // dev-token preflight consumes the first one.
     const fetchMock = vi.fn().mockImplementation(() =>
       Promise.resolve(
         new Response(JSON.stringify({ status: 'idle', request_count: 0, counts: {} }), {
@@ -137,5 +135,7 @@ describe('fetchDashboardScheduledAutomation', () => {
     const requested = fetchMock.mock.calls.map(call => String(call[0]))
     expect(requested.some(url => url.includes('/api/v1/dashboard/scheduled-automation'))).toBe(true)
     expect(requested.some(url => url.includes('/api/v1/dashboard/tools'))).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.headers).toEqual({})
   })
 })

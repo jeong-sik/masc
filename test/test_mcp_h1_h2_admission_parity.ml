@@ -603,18 +603,18 @@ let test_ws_upgrade_allows_authenticated_cross_origin () =
       failf "expected authenticated cross-origin upgrade to pass, got %s"
         (Masc_domain.masc_error_to_string err))
 
-(* The routes below are guarded on H1 and must stay outside the public-read
-   allowlist. This is the invariant the H2 fix rests on: adding any of these
-   paths to [is_public_read_path] would open them on BOTH transports, and the
-   wrapper parity asserted in the next test would then prove nothing. *)
-let test_transport_guarded_paths_are_not_public_read () =
+(* [is_public_read_path] is still used by observer-stream admission.  A route
+   with the unconditional read gate must remain outside that allowlist; route
+   handlers that deliberately call [with_public_read] are public by their
+   wrapper, not by this legacy list. *)
+let test_unconditionally_guarded_paths_are_not_public_read () =
   List.iter
     (fun path ->
       check bool
         (Printf.sprintf "%s is not public-read" path)
         false
         (Server_auth.is_public_read_path path))
-    [ "/graphql"; "/api/v1/dashboard/workspace"; "/api/v1/status" ]
+    [ "/graphql" ]
 
 (* serve_auto hands h2c connections to Server_h2_gateway and everything else to
    the HTTP/1 router, so a route's authorization is decided independently on
@@ -622,13 +622,16 @@ let test_transport_guarded_paths_are_not_public_read () =
    answered 401, because the H2 arm used [with_server_state] — which fetches
    server state and authorizes nothing.
 
-   [with_h2_public_read] is not a substitute for [with_h2_read_auth]: it first
-   requires [http_auth_strict_enabled] and a non-public path, whereas H1's
-   [with_read_auth] authorizes unconditionally. Each H2 arm must name the
-   counterpart of the wrapper its H1 route uses. *)
+   [with_h2_public_read] is the H2 counterpart of H1's route-local public
+   read surface.  [with_h2_read_auth] remains the unconditional authenticated
+   gate for routes such as GraphQL. *)
 let test_h1_h2_read_gate_wiring_parity () =
+  let auth = source_file "lib/server/server_auth.ml" in
   let h1_frontend = source_file "lib/server/server_routes_http_routes_frontend.ml" in
   let h2 = source_file "lib/server/server_h2_gateway.ml" in
+  assert_contains "H1 public-read wrapper does not reapply strict auth"
+    ~needle:"let rec with_public_read handler request reqd =\n  let path = Http_server_eio.Request.path request in\n  (* A route reaches this wrapper only after opting into the public-read"
+    auth;
   assert_contains "H1 guards /graphql with the unconditional read gate"
     ~needle:{|~path:"/graphql" ~methods:[`GET; `POST]|}
     h1_frontend;
@@ -644,12 +647,128 @@ let test_h1_h2_read_gate_wiring_parity () =
   assert_contains "H2 dashboard workspace mirrors H1 with_public_read"
     ~needle:"| `GET, \"/api/v1/dashboard/workspace\" ->\n          with_h2_public_read h2_reqd"
     h2;
-  assert_contains "H2 status mirrors H1 with_public_read"
-    ~needle:"| `GET, \"/api/v1/status\" ->\n          with_h2_public_read h2_reqd" h2;
+  assert_contains "H2 status is in the shared IDE public-read route group"
+    ~needle:"| \"/api/v1/status\"\n        | \"/api/v1/ide/annotations\"" h2;
+  assert_contains "H2 observation snapshot remains available before state init"
+    ~needle:"| `GET, \"/api/v1/ide/observations/snapshot\" ->\n          h2_respond_ide_public_read"
+    h2;
+  assert_contains "H2 shared IDE public-read route group uses the public wrapper"
+    ~needle:"| \"/api/v1/ide/memory\" ) ->\n          with_h2_public_read h2_reqd" h2;
+  assert_contains "H2 public-read wrapper does not reapply strict auth"
+    ~needle:"      with_initialized_state f\n    in\n    let h2_respond_ide_public_read response ="
+    h2;
   (* [with_server_state] performs no authorization; no read route may reach it
      directly. The arms that still call it (webrtc, MCP) authorize inside. *)
   assert_not_contains "H2 /graphql no longer reads state without authorizing"
     ~needle:"with_h2_read_auth h2_reqd (fun _state ->\n            with_server_state" h2
+
+let test_h1_h2_ide_public_feature_projection_wiring () =
+  let h1 = source_file "lib/server/server_ide_http.ml" in
+  let h2 = source_file "lib/server/server_h2_gateway.ml" in
+  assert_contains "H1 IDE public reads use the route-local public wrapper"
+    ~needle:"let public_read_handler request reqd =\n  with_public_read" h1;
+  assert_contains "H2 delegates IDE reads to the H1 projection"
+    ~needle:"Server_ide_http.public_read_response ~state httpun_request" h2;
+  List.iter
+    (fun path ->
+       assert_contains ("H1 exposes " ^ path) ~needle:(Printf.sprintf "%S" path) h1;
+       assert_contains ("H2 exposes " ^ path) ~needle:(Printf.sprintf "%S" path) h2)
+    [ "/api/v1/ide/observations/snapshot"
+    ; "/api/v1/agents"
+    ; "/api/v1/status"
+    ; "/api/v1/ide/annotations"
+    ; "/api/v1/ide/regions"
+    ; "/api/v1/ide/events"
+    ; "/api/v1/ide/presence"
+    ; "/api/v1/ide/cursors"
+    ; "/api/v1/ide/memory"
+    ];
+  assert_contains "H1 annotation creation uses the public feature wrapper"
+    ~needle:"|> Http.Router.post \"/api/v1/ide/annotations\" (fun request reqd ->\n    (* Public feature lane: browser annotation creation cannot depend on a\n       token, selected keeper, or selected repository. *)\n    with_public_read"
+    h1;
+  assert_contains "H1 annotation deletion uses the public feature wrapper"
+    ~needle:"|> Http.Router.prefix_delete \"/api/v1/ide/annotations/\" (fun request reqd ->\n    (* Public feature lane: an annotation can be removed by id without\n       reconstructing a browser identity. *)\n    with_public_read"
+    h1;
+  assert_contains "H1 cursor creation uses the public feature wrapper"
+    ~needle:"|> Http.Router.post \"/api/v1/ide/cursors\" (fun request reqd ->\n    (* Public feature lane: a cursor is live observation data, so publish it\n       even when browser identity/bootstrap has not completed. *)\n    with_public_read"
+    h1;
+  assert_contains "H2 annotation creation uses the shared public projection"
+    ~needle:"| `POST, \"/api/v1/ide/annotations\" ->\n          with_h2_public_read h2_reqd"
+    h2;
+  assert_contains "H2 annotation deletion uses the shared public projection"
+    ~needle:"when String.starts_with ~prefix:\"/api/v1/ide/annotations/\" path ->\n          with_h2_public_read h2_reqd"
+    h2;
+  assert_contains "H2 cursor creation uses the shared public projection"
+    ~needle:"| `POST, \"/api/v1/ide/cursors\" ->\n          with_h2_public_read h2_reqd"
+    h2
+
+let test_h1_h2_dashboard_public_read_route_wiring () =
+  let h1 =
+    String.concat "\n"
+      [ source_file "lib/server/server_routes_http_routes_dashboard.ml"
+      ; source_file "lib/server/server_routes_http_routes_provider_runs.ml"
+      ; source_file "lib/server/server_dashboard_http_agent_api.ml"
+      ; source_file "lib/server/server_routes_http_routes_attribution.ml"
+      ; source_file "lib/server/server_routes_http_routes_verification.ml"
+      ]
+  in
+  let h2 = source_file "lib/server/server_h2_gateway.ml" in
+  let keeper_api = source_file "lib/server/server_dashboard_http_keeper_api.ml" in
+  let keeper_api_types = source_file "lib/server/server_dashboard_http_keeper_api_types.ml" in
+  List.iter
+    (fun path ->
+       assert_contains ("H1 exposes " ^ path) ~needle:(Printf.sprintf "%S" path) h1;
+       assert_contains ("H2 exposes " ^ path) ~needle:(Printf.sprintf "%S" path) h2)
+    [ "/api/v1/dashboard/fusion-runs"
+    ; "/api/v1/dashboard/runtime-defaults"
+    ; "/api/v1/dashboard/logs"
+    ; "/api/v1/dashboard/tool-quality"
+    ; "/api/v1/dashboard/telemetry"
+    ; "/api/v1/operator"
+    ; "/api/v1/agent-timeline"
+    ; "/api/v1/attribution/recent"
+    ; "/api/v1/verification/requests"
+    ];
+  assert_contains "H2 dashboard telemetry shares the H1 projection"
+    ~needle:"dashboard_telemetry_projection ~state httpun_request" h2;
+  assert_contains "H2 public dashboard reads stay on the route-local wrapper"
+    ~needle:"| `GET, \"/api/v1/dashboard/fusion-runs\" ->\n          with_h2_public_read h2_reqd"
+    h2;
+  assert_contains "H2 keeper detail reads delegate to the public projection"
+    ~needle:"Server_dashboard_http_keeper_api.public_get_response_for_request"
+    h2;
+  assert_contains "H1 dashboard controls use the feature-first actor"
+    ~needle:"let dashboard_feature_actor = \"dashboard\""
+    h1;
+  assert_contains "H2 token-bound dashboard controls use the feature-first actor"
+    ~needle:"with_h2_public_read h2_reqd (fun state -> f state \"dashboard\")"
+    h2;
+  List.iter
+    (fun path ->
+       assert_contains ("H2 workspace projection includes " ^ path)
+         ~needle:(Printf.sprintf "%S" path) h2)
+    [ "/api/v1/git/blame"; "/api/v1/git/diff" ];
+  List.iter
+    (fun suffix ->
+       assert_contains ("keeper public projection includes " ^ suffix)
+         ~needle:(Printf.sprintf "%S" suffix) keeper_api)
+    [ "/checkpoints"
+    ; "/raw-traces"
+    ; "/raw-trace"
+    ; "/memory-journal"
+    ; "/tool-stats"
+    ; "/tool-calls"
+    ; "/turn-records"
+    ];
+  assert_contains "keeper GETs stay on the feature-first public lane"
+    ~needle:"let keeper_get_permission _req_path = None"
+    keeper_api_types;
+  assert_contains "keeper public projection shares bounded tool stats JSON"
+    ~needle:"keeper_tool_stats_json ~config ~name ~window_hours" keeper_api;
+  assert_contains "keeper public projection shares bounded tool call JSON"
+    ~needle:"keeper_tool_calls_json ~config ~name ~limit" keeper_api;
+  assert_contains "keeper public projection shares turn record JSON"
+    ~needle:"keeper_turn_records_json ~config ~name ~limit" keeper_api
 
 let () =
   Eio_main.run @@ fun env ->
@@ -686,10 +805,14 @@ let () =
             test_h1_h2_delete_route_wiring_parity;
           test_case "H2 OAuth routes preserve admitted authority" `Quick
             test_h2_oauth_route_and_authority_lifetime;
-          test_case "transport-guarded paths are not public-read" `Quick
-            test_transport_guarded_paths_are_not_public_read;
+          test_case "unconditionally guarded paths are not public-read" `Quick
+            test_unconditionally_guarded_paths_are_not_public_read;
           test_case "H1/H2 read gate wiring parity" `Quick
             test_h1_h2_read_gate_wiring_parity;
+          test_case "H1/H2 IDE public feature projection wiring" `Quick
+            test_h1_h2_ide_public_feature_projection_wiring;
+          test_case "H1/H2 dashboard public-read route wiring" `Quick
+            test_h1_h2_dashboard_public_read_route_wiring;
         ] );
       ( "ws-upgrade-admission",
         [

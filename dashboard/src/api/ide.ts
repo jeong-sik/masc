@@ -1,4 +1,4 @@
-import { get, post, fetchWithTimeout, authHeaders, type GetOptions } from './core'
+import { get, postPublic, fetchWithTimeout, authHeaders, type GetOptions } from './core'
 import {
   type IdeAnnotation,
   type IdeAnnotationReference,
@@ -26,11 +26,10 @@ export type IdeScope =
   | { readonly kind: 'repo_id'; readonly repoId: string }
   | { readonly kind: 'canonical_url'; readonly canonicalUrl: string }
   /**
-   * Read-only scope over the repo-unattributed observation lane. Keeper
+   * Scope over the repo-unattributed observation lane. Keeper
    * turn/coordination events carry no file, so the server stores them
-   * outside any repo partition; this scope is the only address for that
-   * data. Mutations sent with it are refused server-side
-   * (keeper_lane_read_only).
+   * outside any repo partition; this scope selects the matching keeper on
+   * reads and maps writes to the same default lane.
    */
   | { readonly kind: 'keeper_lane'; readonly keeperId: string }
 
@@ -151,18 +150,28 @@ export function ideScopeFromKeeperLane(keeperId: string | null | undefined): Ide
 }
 
 function resolveIdeScope(opts: IdeScopeOptions): IdeScope | null {
-  const candidates: IdeScope[] = []
-  if (opts.scope) candidates.push(opts.scope)
-  const repoScope = ideScopeFromRepoId(opts.repoId)
-  if (repoScope) candidates.push(repoScope)
-  const canonicalScope = ideScopeFromCanonicalUrl(opts.canonicalUrl)
-  if (canonicalScope) candidates.push(canonicalScope)
-  if (candidates.length > 1) {
-    throw new Error(
-      'IDE scope must resolve to exactly one of repo_id, canonical_url, or keeper_lane',
-    )
+  // Readers can receive a stale route scope alongside a newly selected repo.
+  // Mirror the server's deterministic order instead of refusing the request:
+  // repo_id, then canonical_url, then the keeper lane.  This makes a transient
+  // UI state a harmless fallback choice rather than a full inspector outage.
+  const explicitScope = opts.scope
+  const scopedRepo = explicitScope?.kind === 'repo_id' ? explicitScope : null
+  const scopedCanonical =
+    explicitScope?.kind === 'canonical_url' ? explicitScope : null
+  const scopedLane = explicitScope?.kind === 'keeper_lane' ? explicitScope : null
+  return ideScopeFromRepoId(opts.repoId)
+    ?? scopedRepo
+    ?? ideScopeFromCanonicalUrl(opts.canonicalUrl)
+    ?? scopedCanonical
+    ?? scopedLane
+}
+
+function publicIdeReadOptions(opts: IdeApiOptions): GetOptions {
+  return {
+    signal: opts.signal,
+    timeoutMs: opts.timeoutMs,
+    publicRead: true,
   }
-  return candidates[0] ?? null
 }
 
 export function appendIdeScopeParams(params: URLSearchParams, opts: IdeScopeOptions): void {
@@ -298,7 +307,10 @@ export async function fetchIdeAnnotations(
   appendFilterParams(params, filter)
   appendWorkspaceParams(params, opts)
   const query = params.size > 0 ? `?${params.toString()}` : ''
-  const raw = await get<unknown>(`/api/v1/ide/annotations${query}`, opts)
+  const raw = await get<unknown>(
+    `/api/v1/ide/annotations${query}`,
+    publicIdeReadOptions(opts),
+  )
   return parseStrictRows('fetchIdeAnnotations', ideEnvelopeData(raw, 'fetchIdeAnnotations'), parseStrictIdeAnnotation)
 }
 
@@ -309,37 +321,11 @@ export async function createIdeAnnotation(
   const params = new URLSearchParams()
   appendWorkspaceParams(params, opts)
   const query = params.size > 0 ? `?${params.toString()}` : ''
-  const raw = await post<unknown>(`/api/v1/ide/annotations${query}`, input)
+  const raw = await postPublic<unknown>(`/api/v1/ide/annotations${query}`, input)
   return parseStrictRow('createIdeAnnotation', ideEnvelopeData(raw, 'createIdeAnnotation'), parseStrictIdeAnnotation)
 }
 
-// Typed outcome of a DELETE (task-1736 B3 route, token-bound):
-// - 'rejected'     403 with the server's annotation_delete_rejected code —
-//                  the stored annotation is not owned by the token identity,
-//                  or it no longer exists (the server flattens the two).
-// - 'forbidden'    403 from the auth layer — the token's tier lacks the
-//                  write permission; ownership was never evaluated.
-// - 'unauthorized' 401 — missing/expired bearer token.
-// - 'error'        transport failure or any other server error.
-export type IdeAnnotationDeleteOutcome =
-  | 'deleted'
-  | 'rejected'
-  | 'forbidden'
-  | 'unauthorized'
-  | 'error'
-
-// Wire constant mirrored from server_ide_http.ml annotation_delete_rejected_code.
-const ANNOTATION_DELETE_REJECTED_CODE = 'annotation_delete_rejected'
-
-async function responseErrorCode(res: Response): Promise<string | null> {
-  try {
-    const body: unknown = await res.json()
-    if (isRecord(body) && typeof body.code === 'string') return body.code
-    return null
-  } catch {
-    return null
-  }
-}
+export type IdeAnnotationDeleteOutcome = 'deleted' | 'error'
 
 export async function deleteIdeAnnotation(
   id: string,
@@ -352,15 +338,10 @@ export async function deleteIdeAnnotation(
   try {
     const res = await fetchWithTimeout(
       path,
-      { method: 'DELETE', headers: authHeaders() },
+      { method: 'DELETE', headers: authHeaders({ publicRead: true }) },
       15_000,
     )
     if (res.ok) return 'deleted'
-    if (res.status === 401) return 'unauthorized'
-    if (res.status === 403) {
-      const code = await responseErrorCode(res)
-      return code === ANNOTATION_DELETE_REJECTED_CODE ? 'rejected' : 'forbidden'
-    }
     return 'error'
   } catch {
     return 'error'
@@ -374,7 +355,10 @@ export async function fetchIdeRegions(
   const params = new URLSearchParams()
   params.set('file_path', filePath)
   appendWorkspaceParams(params, opts)
-  const raw = await get<unknown>(`/api/v1/ide/regions?${params.toString()}`, opts)
+  const raw = await get<unknown>(
+    `/api/v1/ide/regions?${params.toString()}`,
+    publicIdeReadOptions(opts),
+  )
   return parseStrictRows('fetchIdeRegions', ideEnvelopeData(raw, 'fetchIdeRegions'), parseStrictIdeCodeRegion)
 }
 
@@ -383,7 +367,10 @@ export async function fetchIdePresence(
 ): Promise<unknown> {
   const params = new URLSearchParams()
   appendWorkspaceParams(params, opts)
-  const raw = await get<unknown>(`/api/v1/ide/presence?${params.toString()}`, opts)
+  const raw = await get<unknown>(
+    `/api/v1/ide/presence?${params.toString()}`,
+    publicIdeReadOptions(opts),
+  )
   if (!isRecord(raw) || raw.ok !== true) return null
   return raw.data
 }
@@ -398,7 +385,10 @@ export async function fetchIdeCursors(
   if (opts.limit !== undefined) params.set('limit', String(opts.limit))
   if (opts.offset !== undefined) params.set('offset', String(opts.offset))
   const query = params.size > 0 ? `?${params.toString()}` : ''
-  const raw = await get<unknown>(`/api/v1/ide/cursors${query}`, opts)
+  const raw = await get<unknown>(
+    `/api/v1/ide/cursors${query}`,
+    publicIdeReadOptions(opts),
+  )
   const data = ideEnvelopeRecord(raw, 'fetchIdeCursors')
   const snapshot = parseIdeCursorSnapshot(data)
   if (snapshot === null) throw new Error('fetchIdeCursors returned malformed data')
@@ -420,7 +410,10 @@ export async function fetchIdeEvents(
   if (opts.limit !== undefined) params.set('limit', String(opts.limit))
   if (opts.offset !== undefined) params.set('offset', String(opts.offset))
   const query = params.size > 0 ? `?${params.toString()}` : ''
-  const raw = await get<unknown>(`/api/v1/ide/events${query}`, opts)
+  const raw = await get<unknown>(
+    `/api/v1/ide/events${query}`,
+    publicIdeReadOptions(opts),
+  )
   const data = ideEnvelopeRecord(raw, 'fetchIdeEvents')
   const events = data.events
   if (!Array.isArray(events)) throw new Error('fetchIdeEvents returned malformed events')

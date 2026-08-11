@@ -21,6 +21,14 @@ type mutation_route =
 val get_route : string -> get_route option
 val mutation_route : string -> mutation_route option
 
+type get_response =
+  { status : Httpun.Status.t
+  ; body : Yojson.Safe.t
+  }
+
+val get_response_for_route :
+  Mcp_server.server_state -> Httpun.Request.t -> get_route -> get_response
+
 val handle_get
   :  Mcp_server.server_state
   -> Httpun.Request.t

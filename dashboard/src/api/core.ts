@@ -185,9 +185,16 @@ export function currentDashboardActor(): string {
 type HeaderOptions = {
   includeActor?: boolean
   actorName?: string | null
+  /**
+   * Keep route-local public reads independent of the dashboard session.
+   * In particular, never let a stored token for a different dashboard actor
+   * turn an inspector request into an authorization failure.
+   */
+  publicRead?: boolean
 }
 
 export function authHeaders(options: HeaderOptions = {}): Record<string, string> {
+  if (options.publicRead) return {}
   const headers: Record<string, string> = {}
   const token = dashboardBearerToken()
   const tokenMeta = getStoredTokenMeta()
@@ -204,9 +211,9 @@ export function authHeaders(options: HeaderOptions = {}): Record<string, string>
   return headers
 }
 
-export function jsonHeaders(): Record<string, string> {
+export function jsonHeaders(options: HeaderOptions = {}): Record<string, string> {
   return {
-    ...authHeaders(),
+    ...authHeaders(options),
     'Content-Type': 'application/json',
   }
 }
@@ -643,13 +650,23 @@ export type AbortableRequestOptions = {
 export type GetOptions = AbortableRequestOptions & {
   timeoutMs?: number
   includeActorHeader?: boolean
+  /**
+   * A route the server explicitly exposes through its public-read policy.
+   * Do not attach a stored bearer or actor header: a stale token for a
+   * different dashboard identity must not turn an otherwise readable
+   * inspector into an authorization failure.
+   */
+  publicRead?: boolean
 }
 
 export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
   const res = await fetchWithTimeout(
     path,
     {
-      headers: authHeaders({ includeActor: opts.includeActorHeader }),
+      headers: authHeaders({
+        includeActor: opts.includeActorHeader,
+        publicRead: opts.publicRead,
+      }),
       signal: opts.signal,
     },
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
@@ -684,7 +701,10 @@ export async function getWithResponse<T>(
   const res = await fetchWithTimeout(
     path,
     {
-      headers: authHeaders({ includeActor: opts.includeActorHeader }),
+      headers: authHeaders({
+        includeActor: opts.includeActorHeader,
+        publicRead: opts.publicRead,
+      }),
       signal: opts.signal,
     },
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
@@ -770,6 +790,26 @@ export async function post<T>(
       ...jsonHeaders(),
       ...(extraHeaders ?? {}),
     },
+    body: JSON.stringify(body),
+  }, timeoutMs)
+  if (!res.ok) {
+    throw await apiRequestErrorFromResponse('POST', path, res)
+  }
+  return parseJsonResponse<T>('POST', path, res)
+}
+
+/**
+ * Public feature mutation. Use only for routes whose server handler declares
+ * itself public; it deliberately omits a stale dashboard token and actor.
+ */
+export async function postPublic<T>(
+  path: string,
+  body: unknown,
+  timeoutMs = DEFAULT_POST_TIMEOUT_MS,
+): Promise<T> {
+  const res = await fetchWithTimeout(path, {
+    method: 'POST',
+    headers: jsonHeaders({ publicRead: true }),
     body: JSON.stringify(body),
   }, timeoutMs)
   if (!res.ok) {
@@ -895,7 +935,7 @@ export async function confirmOperatorAction(
 }
 
 export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
-  return get('/api/v1/operator', { includeActorHeader: false })
+  return get('/api/v1/operator', { publicRead: true })
 }
 
 export function fetchOperatorDigest(options: {
@@ -909,6 +949,6 @@ export function fetchOperatorDigest(options: {
   if (options.includeWorkers != null) params.set('include_workers', options.includeWorkers ? 'true' : 'false')
   const query = params.toString()
   return get(`/api/v1/operator/digest${query ? `?${query}` : ''}`, {
-    includeActorHeader: false,
+    publicRead: true,
   })
 }

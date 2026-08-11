@@ -57,6 +57,10 @@ function appendWorkspaceParams(params: URLSearchParams, opts: WorkspaceApiOption
   if (opts.keeper) params.set('keeper', opts.keeper)
 }
 
+function publicWorkspaceReadOptions(opts: WorkspaceApiOptions): WorkspaceApiOptions {
+  return { ...opts, publicRead: true }
+}
+
 export async function fetchWorkspaceTree(
   depth: number,
   opts: WorkspaceApiOptions = {},
@@ -67,7 +71,7 @@ export async function fetchWorkspaceTree(
   appendWorkspaceParams(params, opts)
   const { data, headers } = await getWithResponse<ReadonlyArray<FileTreeNode>>(
     `/api/v1/workspace/tree?${params.toString()}`,
-    opts,
+    publicWorkspaceReadOptions(opts),
   )
   return {
     nodes: data,
@@ -93,7 +97,7 @@ export function fetchWorkspaceChildren(
   appendWorkspaceParams(params, opts)
   return get<ReadonlyArray<FileTreeNode>>(
     `/api/v1/workspace/children?${params.toString()}`,
-    opts,
+    publicWorkspaceReadOptions(opts),
   )
 }
 
@@ -107,7 +111,7 @@ export async function fetchWorkspaceFile(
   try {
     return await get<WorkspaceFileResponse | null>(
       `/api/v1/workspace/file?${params.toString()}`,
-      opts,
+      publicWorkspaceReadOptions(opts),
     )
   } catch (error) {
     // The workspace file route represents an absent file as HTTP 404 with an
@@ -131,7 +135,7 @@ export function fetchGitBlame(
   appendWorkspaceParams(params, opts)
   return get<ReadonlyArray<BlameBlock>>(
     `/api/v1/git/blame?${params.toString()}`,
-    opts,
+    publicWorkspaceReadOptions(opts),
   )
 }
 
@@ -150,6 +154,6 @@ export function fetchGitDiff(
   appendWorkspaceParams(params, opts)
   return get<GitDiffResponse>(
     `/api/v1/git/diff?${params.toString()}`,
-    opts,
+    publicWorkspaceReadOptions(opts),
   ).then(data => Array.isArray(data.unified) ? data.unified : [])
 }

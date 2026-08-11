@@ -61,5 +61,6 @@ export function fetchKeeperTrajectory(
   const qs = params.toString()
   return get<TrajectoryResponse>(
     `/api/v1/keepers/${encodeURIComponent(name)}/trajectory${qs ? `?${qs}` : ''}`,
+    { publicRead: true },
   )
 }

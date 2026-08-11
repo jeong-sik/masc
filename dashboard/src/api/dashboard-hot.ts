@@ -11,11 +11,17 @@ type DashboardShellRequestOptions = AbortableRequestOptions & {
 
 export function fetchDashboardShell(opts?: DashboardShellRequestOptions): Promise<DashboardShellResponse> {
   const qs = opts?.light ? '?light=true' : ''
-  return get(`/api/v1/dashboard/shell${qs}`, { signal: opts?.signal })
+  return get(`/api/v1/dashboard/shell${qs}`, {
+    signal: opts?.signal,
+    publicRead: true,
+  })
 }
 
 export function fetchDashboardBootstrap(opts?: AbortableRequestOptions): Promise<DashboardBootstrapResponse> {
-  return get('/api/v1/dashboard/bootstrap', { signal: opts?.signal })
+  return get('/api/v1/dashboard/bootstrap', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
 }
 
 export function fetchDashboardNamespaceTruth(
@@ -24,5 +30,6 @@ export function fetchDashboardNamespaceTruth(
   return get('/api/v1/dashboard/project-snapshot', {
     timeoutMs: NAMESPACE_TRUTH_GET_TIMEOUT_MS,
     signal: opts?.signal,
+    publicRead: true,
   })
 }

@@ -172,126 +172,104 @@ let empty_cost_latency_json ~window =
 let dashboard_feed_limit req =
   int_query_param req "limit" ~default:200 |> clamp ~min_v:1 ~max_v:200
 
+let keeper_metas config =
+  Keeper_meta_store.keeper_names config
+  |> List.filter_map (fun name ->
+       match Keeper_meta_store.read_meta config name with
+       | Ok (Some keeper) -> Some keeper
+       | Ok None | Error _ -> None)
+
+(** The response-producing half of the public provider/cost dashboard
+    surface.  Both HTTP adapters call this so H2 does not silently lose the
+    stale-while-revalidate behavior used by H1. *)
+let public_read_json ~sw ~state request =
+  let config = Mcp_server.workspace_config state in
+  let base_path = config.base_path in
+  match Http.Request.path request with
+  | "/api/v1/providers" ->
+    Some (Server_dashboard_http_runtime_info.runtime_inventory_json ())
+  | "/api/v1/models/metrics" ->
+    let window = int_query_param request "window" ~default:30 in
+    let bucket_min = int_query_param request "bucket_min" ~default:0 in
+    let key = cache_key [ base_path; string_of_int window; string_of_int bucket_min ] in
+    Some
+      (cached_dashboard_json ~sw ~sync_first:false
+         ~cache:dashboard_model_metrics_cache ~key
+         ~placeholder:(empty_model_metrics_json ~window ~bucket_min)
+         ~compute:(fun () ->
+           let aggregate =
+             if bucket_min > 0 then
+               Model_inference_metrics.compute_with_buckets
+                 ~base_path ~window_minutes:window ~bucket_minutes:bucket_min
+             else
+               Model_inference_metrics.compute ~base_path ~window_minutes:window
+           in
+           Model_inference_metrics.to_json aggregate))
+  | "/api/v1/dashboard/keeper-costs" ->
+    let window = int_query_param request "window" ~default:1440 in
+    let key = cache_key [ base_path; string_of_int window ] in
+    Some
+      (cached_dashboard_json ~sw ~sync_first:false
+         ~cache:dashboard_keeper_costs_cache ~key
+         ~placeholder:
+           (Dashboard_http_keeper.keeper_cost_aggregates_json ~config
+              ~keepers:[] ~window_minutes:window)
+         ~compute:(fun () ->
+           Dashboard_http_keeper.keeper_cost_aggregates_json ~config
+             ~keepers:(keeper_metas config) ~window_minutes:window))
+  | "/api/v1/dashboard/cost-latency" ->
+    let window = int_query_param request "window" ~default:1440 in
+    Some
+      (cached_dashboard_json ~sw ~sync_first:false
+         ~cache:dashboard_cost_latency_cache
+         ~key:(cache_key [ base_path; string_of_int window ])
+         ~placeholder:(empty_cost_latency_json ~window)
+         ~compute:(fun () ->
+           Model_inference_metrics.compute_cost_latency_json
+             ~base_path ~window_minutes:window))
+  | "/api/v1/dashboard/keeper-decisions" ->
+    let limit = dashboard_feed_limit request in
+    let key = cache_key [ base_path; string_of_int limit ] in
+    Some
+      (cached_dashboard_json ~sw ~sync_first:true
+         ~cache:dashboard_keeper_decisions_cache ~key
+         ~placeholder:
+           (Dashboard_http_keeper.keeper_decisions_json ~config ~keepers:[] ~limit ())
+         ~compute:(fun () ->
+           Dashboard_http_keeper.keeper_decisions_json ~config
+             ~keepers:(keeper_metas config) ~limit ()))
+  | "/api/v1/dashboard/keeper-decisions-log" ->
+    let limit = dashboard_feed_limit request in
+    let key = cache_key [ base_path; string_of_int limit ] in
+    Some
+      (cached_dashboard_json ~sw ~sync_first:false
+         ~cache:dashboard_keeper_decisions_log_cache ~key
+         ~placeholder:
+           (Dashboard_http_keeper.keeper_decisions_log_json ~config ~keepers:[]
+              ~limit ())
+         ~compute:(fun () ->
+           Dashboard_http_keeper.keeper_decisions_log_json ~config
+             ~keepers:(keeper_metas config) ~limit ()))
+  | _ -> None
+
+let handle_public_read ~sw state request reqd =
+  match public_read_json ~sw ~state request with
+  | Some json -> Http.Response.json_value ~compress:true ~request json reqd
+  | None ->
+    Http.Response.json_value ~status:`Not_found ~request
+      (`Assoc [ ("error", `String "unknown provider dashboard endpoint") ]) reqd
+
 let add_routes ~sw router =
   router
   |> Http.Router.get "/api/v1/providers" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       with_public_read (handle_public_read ~sw) request reqd)
   |> Http.Router.get "/api/v1/models/metrics" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let window = int_query_param req "window" ~default:30 in
-         let bucket_min = int_query_param req "bucket_min" ~default:0 in
-         let base_path = (Mcp_server.workspace_config state).base_path in
-         let key =
-           cache_key
-             [ base_path; string_of_int window; string_of_int bucket_min ]
-         in
-         let json =
-           cached_dashboard_json ~sw ~sync_first:false
-             ~cache:dashboard_model_metrics_cache ~key
-             ~placeholder:(empty_model_metrics_json ~window ~bucket_min)
-             ~compute:(fun () ->
-               let agg =
-                 if bucket_min > 0 then
-                   Model_inference_metrics.compute_with_buckets
-                     ~base_path ~window_minutes:window ~bucket_minutes:bucket_min
-                 else
-                   Model_inference_metrics.compute
-                     ~base_path ~window_minutes:window
-               in
-               Model_inference_metrics.to_json agg)
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       with_public_read (handle_public_read ~sw) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-costs" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let window = int_query_param req "window" ~default:1440 in
-         let config = (Mcp_server.workspace_config state) in
-         let key = cache_key [ config.base_path; string_of_int window ] in
-         let json =
-           cached_dashboard_json ~sw ~sync_first:false
-             ~cache:dashboard_keeper_costs_cache ~key
-             ~placeholder:
-               (Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                  ~keepers:[] ~window_minutes:window)
-             ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                 ~keepers ~window_minutes:window)
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       with_public_read (handle_public_read ~sw) request reqd)
   |> Http.Router.get "/api/v1/dashboard/cost-latency" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let window = int_query_param req "window" ~default:1440 in
-         let base_path = (Mcp_server.workspace_config state).base_path in
-         let json =
-           cached_dashboard_json ~sw ~sync_first:false
-             ~cache:dashboard_cost_latency_cache
-             ~key:(cache_key [ base_path; string_of_int window ])
-             ~placeholder:(empty_cost_latency_json ~window)
-             ~compute:(fun () ->
-               Model_inference_metrics.compute_cost_latency_json
-                 ~base_path ~window_minutes:window)
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       with_public_read (handle_public_read ~sw) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-decisions" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let limit = dashboard_feed_limit req in
-         let config = (Mcp_server.workspace_config state) in
-         let key = cache_key [ config.base_path; string_of_int limit ] in
-         let json =
-           cached_dashboard_json ~sw ~sync_first:true
-             ~cache:dashboard_keeper_decisions_cache ~key
-             ~placeholder:
-               (Dashboard_http_keeper.keeper_decisions_json ~config
-                  ~keepers:[] ~limit ())
-             ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_decisions_json ~config ~keepers
-                 ~limit ())
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       with_public_read (handle_public_read ~sw) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-decisions-log" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let limit = dashboard_feed_limit req in
-         let config = (Mcp_server.workspace_config state) in
-         let key = cache_key [ config.base_path; string_of_int limit ] in
-         let json =
-           cached_dashboard_json ~sw ~sync_first:false
-             ~cache:dashboard_keeper_decisions_log_cache ~key
-             ~placeholder:
-               (Dashboard_http_keeper.keeper_decisions_log_json ~config
-                  ~keepers:[] ~limit ())
-             ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_decisions_log_json ~config
-                 ~keepers ~limit ())
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+       with_public_read (handle_public_read ~sw) request reqd)

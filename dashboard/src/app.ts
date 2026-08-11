@@ -6,7 +6,7 @@
 // existing `DashboardMain` surface dispatcher, so every surface keeps
 // rendering while it is migrated to the prototype DOM in stacked follow-ups.
 //
-// All lifecycle wiring (router, WS push reaction, periodic refresh, dev-token,
+// All lifecycle wiring (router, WS push reaction, periodic refresh,
 // config thresholds, cleanup, volt/theme sync) is preserved verbatim from the
 // previous shell — only the rendered DOM changed.
 
@@ -21,7 +21,6 @@ import { cancelPendingServerPushRefreshes, registerGateRefresh, registerMissionR
 import { initNotificationDelivery } from './notifications'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
-import { ensureDevToken } from './api/dev-token'
 import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard-logs'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
 import { setContextThresholds } from './config/context-thresholds'
@@ -163,32 +162,27 @@ export function App() {
     // Initialize hash router and compatible deep links
     initRouter()
 
-    const ensureLoopbackAuth = () => ensureDevToken()
-      .catch(err => {
-        console.warn('[app] dashboard dev-token bootstrap failed', err instanceof Error ? err.message : err)
-      })
+    // Feature-first boot: shell and live projections start immediately. MCP
+    // retains its own credential path only when a caller actually uses MCP.
+    if (!cancelled) {
+      void refreshShell({ light: true })
+      requestNamespaceTruthNow()
 
-    void ensureLoopbackAuth()
-      .finally(() => {
-        if (cancelled) return
-        void refreshShell({ light: true })
-        requestNamespaceTruthNow()
-
-        void fetchDashboardConfig()
-          .then(data => {
-            const thresholds = parseContextThresholds(data, {
-              critical: CONTEXT_RATIO_CRITICAL,
-              warn: CONTEXT_RATIO_WARN,
-              compacting: CONTEXT_RATIO_COMPACTING,
-            })
-            setContextThresholds(thresholds)
+      void fetchDashboardConfig()
+        .then(data => {
+          const thresholds = parseContextThresholds(data, {
+            critical: CONTEXT_RATIO_CRITICAL,
+            warn: CONTEXT_RATIO_WARN,
+            compacting: CONTEXT_RATIO_COMPACTING,
           })
-          .catch(err => {
-            console.warn('[app] dashboard config fetch failed', err instanceof Error ? err.message : err)
-          })
+          setContextThresholds(thresholds)
+        })
+        .catch(err => {
+          console.warn('[app] dashboard config fetch failed', err instanceof Error ? err.message : err)
+        })
 
-        void connectDashboardWS(route.value)
-      })
+      void connectDashboardWS(route.value)
+    }
 
     registerMissionRefresh(() => {
       void import('./mission-actions')

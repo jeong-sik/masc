@@ -13,13 +13,17 @@ export async function fetchAgentTimeline(
 ): Promise<AgentTimelineResponse> {
   const raw = await get<unknown>(
     `/api/v1/agent-timeline?agent_name=${encodeURIComponent(agentName)}&since_hours=${sinceHours}&limit=${limit}`,
+    { publicRead: true },
   )
   const { parseAgentTimelineResponse } = await import('./schemas/agent-timeline')
   return parseAgentTimelineResponse(raw)
 }
 
 export async function fetchAgentRelations(agentName: string): Promise<AgentRelationsResponse> {
-  const raw = await get<unknown>(`/api/v1/agent-relations?agent_name=${encodeURIComponent(agentName)}`)
+  const raw = await get<unknown>(
+    `/api/v1/agent-relations?agent_name=${encodeURIComponent(agentName)}`,
+    { publicRead: true },
+  )
   const { parseAgentRelationsResponse } = await import('./schemas/agent-relations')
   return parseAgentRelationsResponse(raw)
 }

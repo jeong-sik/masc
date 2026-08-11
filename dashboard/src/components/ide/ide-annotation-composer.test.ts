@@ -114,11 +114,12 @@ describe('IdeAnnotationComposer', () => {
     expect(el.querySelector('[data-testid="ide-annotation-composer-open"]')).toBeNull()
   })
 
-  it('disables the entry button without a repo scope (keeper_lane is read-only)', () => {
+  it('opens the composer without a repo scope', async () => {
     const el = mount(composer({ repoId: null }))
     const button = el.querySelector<HTMLButtonElement>('[data-testid="ide-annotation-open"]')
-    expect(button?.disabled).toBe(true)
-    expect(button?.title ?? '').toContain('repo 선택')
+    expect(button?.disabled).toBe(false)
+    await open(el)
+    expect(el.querySelector('[data-testid="ide-annotation-composer-open"]')).not.toBeNull()
   })
 
   it('opens the form with the editor selection as the default line range', async () => {
@@ -246,5 +247,34 @@ describe('IdeAnnotationComposer', () => {
     )
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(el.querySelector('[data-testid="ide-annotation-composer-open"]')).toBeNull()
+  })
+
+  it('submits to the default lane without a repo selection', async () => {
+    createIdeAnnotationMock.mockResolvedValue({
+      id: 'a-default',
+      file_path: 'lib/foo.ml',
+      line_start: 1,
+      line_end: 1,
+    } as Awaited<ReturnType<typeof createIdeAnnotation>>)
+    const el = mount(composer({ repoId: null }))
+    await open(el)
+
+    const content = el.querySelector<HTMLTextAreaElement>('[data-testid="ide-annotation-content"]')
+    if (content) {
+      content.value = 'default lane note'
+      content.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    await tick()
+    el.querySelector<HTMLButtonElement>('[data-testid="ide-annotation-submit"]')?.click()
+    await tick()
+    await tick()
+
+    expect(createIdeAnnotationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        file_path: 'lib/foo.ml',
+        content: 'default lane note',
+      }),
+      {},
+    )
   })
 })

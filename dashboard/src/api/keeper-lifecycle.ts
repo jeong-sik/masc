@@ -94,7 +94,7 @@ async function safeKeeperLifecycle(
   try {
     const resp = await fetchControlPlane(url, {
       method: 'POST',
-      headers: jsonHeaders(),
+      headers: jsonHeaders({ publicRead: true }),
       ...init,
     })
     const payload = await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
@@ -127,7 +127,7 @@ async function safeKeeperPostWithBody(
   try {
     const resp = await fetchControlPlane(url, {
       method: 'POST',
-      headers: jsonHeaders(),
+      headers: jsonHeaders({ publicRead: true }),
       body: JSON.stringify(body),
       signal: opts.signal,
     })
@@ -293,7 +293,7 @@ export async function fetchKeeperCheckpoints(
     `/api/v1/keepers/${encodeURIComponent(name)}/checkpoints`,
     {
       method: 'GET',
-      headers: jsonHeaders(),
+      headers: jsonHeaders({ publicRead: true }),
     },
     DEFAULT_GET_TIMEOUT_MS,
   )
@@ -312,7 +312,7 @@ export async function deleteKeeperHistorySnapshots(
     `/api/v1/keepers/${encodeURIComponent(name)}/checkpoints`,
     {
       method: 'POST',
-      headers: jsonHeaders(),
+      headers: jsonHeaders({ publicRead: true }),
       body: JSON.stringify({
         action: 'delete_history',
         snapshot_ids: snapshotIds,
@@ -333,7 +333,7 @@ async function requestKeeperCheckpointPurge(
   const path = `/api/v1/keepers/${encodeURIComponent(name)}/checkpoints`
   const resp = await fetchControlPlane(path, {
     method: 'POST',
-    headers: jsonHeaders(),
+    headers: jsonHeaders({ publicRead: true }),
     body: JSON.stringify({ action }),
   })
   if (!resp.ok) {
@@ -505,7 +505,7 @@ export async function bulkKeeperDirective(
       '/api/v1/keepers_bulk/directive',
       {
         method: 'POST',
-        headers: jsonHeaders(),
+        headers: jsonHeaders({ publicRead: true }),
         body: JSON.stringify(body),
         signal: opts.signal,
       },

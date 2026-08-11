@@ -2,20 +2,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fetchKeeperMemoryJournal } from './dashboard-memory-journal'
 import { clearStoredToken, setStoredToken } from './core'
 
-// A Response body reads once and ensureDevToken consumes the first, so each
-// call needs a fresh instance rather than one shared mock value.
+// Keep each response fresh so every request observes an independent body.
 function stubFetch(payload: unknown) {
+  const fetchMock = vi.fn().mockImplementation(
+    async () =>
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+  )
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockImplementation(
-      async () =>
-        new Response(JSON.stringify(payload), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-    ),
+    fetchMock,
   )
   setStoredToken('journal-test-token', { source: 'manual' })
+  return fetchMock
 }
 
 afterEach(() => {
@@ -54,7 +55,7 @@ function payload(entries: unknown[], undecodable = 0) {
 
 describe('memory journal', () => {
   it('keeps a commit and a failure as different members', async () => {
-    stubFetch(payload([committed, failed]))
+    const fetchMock = stubFetch(payload([committed, failed]))
     const journal = await fetchKeeperMemoryJournal('kidsnote')
     const [first, second] = journal.entries
     expect(first?.ok).toBe(true)
@@ -66,6 +67,9 @@ describe('memory journal', () => {
       expect(second.detail).toBe('Eio net/clock context unavailable')
       expect(second.kind).toBe('runtime_context_unavailable')
     }
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/keepers/kidsnote/memory-journal')
+    expect(init.headers).toEqual({})
   })
 
   // Drop reasons ride this line and nothing else stores them.

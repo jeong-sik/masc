@@ -9,7 +9,7 @@ import type {
 } from '../types'
 
 export function fetchDashboardBriefing(): Promise<DashboardMissionResponse> {
-  return get('/api/v1/dashboard/briefing')
+  return get('/api/v1/dashboard/briefing', { publicRead: true })
 }
 
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
@@ -21,9 +21,12 @@ export function fetchDashboardMissionBriefing(
   opts?: { signal?: AbortSignal },
 ): Promise<DashboardMissionBriefingResponse> {
   const query = force ? '?force=1' : ''
-  return get(`/api/v1/dashboard/briefing/sections${query}`, { signal: opts?.signal })
+  return get(`/api/v1/dashboard/briefing/sections${query}`, {
+    signal: opts?.signal,
+    publicRead: true,
+  })
 }
 
 export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
-  return get('/api/v1/dashboard/planning')
+  return get('/api/v1/dashboard/planning', { publicRead: true })
 }

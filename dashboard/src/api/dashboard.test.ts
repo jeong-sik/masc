@@ -1,13 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const devTokenMock = vi.hoisted(() => ({
-  ensureDevToken: vi.fn(() => Promise.resolve()),
-}))
-
-vi.mock('./dev-token', () => ({
-  ensureDevToken: devTokenMock.ensureDevToken,
-}))
-
 import {
   fetchDashboardShell,
   fetchDashboardExecution,
@@ -61,8 +53,6 @@ import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
 
 afterEach(() => {
   vi.unstubAllGlobals()
-  devTokenMock.ensureDevToken.mockClear()
-  devTokenMock.ensureDevToken.mockResolvedValue(undefined)
 })
 
 function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
@@ -1026,7 +1016,7 @@ describe('fetchDashboardTools', () => {
     expect(parseDashboardKeeperWaitingSource(null)).toBeNull()
   })
 
-  it('reads the keeper-scoped waiting inventory after auth bootstrap', async () => {
+  it('reads the keeper-scoped waiting inventory without auth bootstrap', async () => {
     const rawResponse = {
       keeper_count: 1,
       waiting_keeper_count: 1,
@@ -1053,8 +1043,8 @@ describe('fetchDashboardTools', () => {
 
     const result = await fetchKeeperWaitingInventory('kidsnote')
 
-    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/kidsnote/waiting-inventory')
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.headers).toEqual({})
     expect(result.keepers[0]?.waiting_on[0]?.source).toBe('event_queue_pending')
   })
 
@@ -1080,10 +1070,7 @@ describe('fetchDashboardTools', () => {
 
     const result = await fetchDashboardTools()
 
-    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
-    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
-      fetchMock.mock.invocationCallOrder[0]!,
-    )
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.headers).toEqual({})
     const tools = result.tool_inventory.tools
     expect(tools[0]).toMatchObject({ name: 'tool_a', category: 'uncategorized', tier: '(unknown tier)' })
     expect(tools[1]).toMatchObject({ name: 'tool_b', category: 'keeper', tier: '(unknown tier)' })
@@ -3034,7 +3021,7 @@ describe('fetchKeeperConfig', () => {
 })
 
 describe('keeper config mutation API', () => {
-  it('ensures dashboard auth before posting runtime_id changes', async () => {
+  it('posts runtime_id changes without dashboard-token bootstrap', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
@@ -3057,10 +3044,6 @@ describe('keeper config mutation API', () => {
 
     const result = await patchKeeperConfig('keeper-sangsu', { runtime_id: 'b.two' })
 
-    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
-    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
-      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    )
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/keepers/keeper-sangsu/config')
@@ -3071,7 +3054,7 @@ describe('keeper config mutation API', () => {
 })
 
 describe('dashboard runtime probe API', () => {
-  it('ensures dashboard auth before fetching runtime probe status', async () => {
+  it('fetches the public runtime probe without a dashboard-token bootstrap', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         generated_at: '2026-06-10T12:00:00Z',
@@ -3090,12 +3073,10 @@ describe('dashboard runtime probe API', () => {
 
     const result = await fetchDashboardRuntimeProbe(true)
 
-    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
-    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
-      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    )
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/runtime-probe?force=1')
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/dashboard/runtime-probe?force=1')
+    expect(init.headers).toEqual({})
     expect(result.probe?.probe_ok).toBe(true)
   })
 })
@@ -3136,10 +3117,6 @@ describe('runtime.toml raw config API', () => {
 
     const result = await fetchRuntimeTomlConfig()
 
-    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
-    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
-      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    )
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/runtime/config/raw')
     expect(result.path).toBe('/tmp/.masc/config/runtime.toml')
     expect(result.file_name).toBe('runtime.toml')
@@ -3196,10 +3173,6 @@ describe('runtime.toml raw config API', () => {
 
     const result = await saveRuntimeTomlConfig(sourceText)
 
-    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
-    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
-      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    )
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/runtime/config/raw')
@@ -3228,7 +3201,6 @@ describe('runtime.toml raw config API', () => {
 
     const result = await patchRuntimeRouting('cross_verifier', 'openai.gpt')
 
-    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/runtime/config/routing')
     expect(init.method).toBe('POST')
@@ -3258,7 +3230,6 @@ describe('runtime.toml raw config API', () => {
 
     const result = await patchRuntimeMediaFailover(['rt-a', 'rt-b'])
 
-    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/runtime/config/routing')
     expect(init.method).toBe('POST')
@@ -3288,7 +3259,6 @@ describe('runtime.toml raw config API', () => {
 
     const result = await patchRuntimeAssignment('sangsu', null)
 
-    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/runtime/config/assignment')
     expect(init.method).toBe('POST')

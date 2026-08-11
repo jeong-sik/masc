@@ -3,10 +3,9 @@
     Provides [/api/v1/gate/*] endpoints for external channel consumers
     (Discord bots, Telegram bots, etc.) to interact with keepers.
 
-    Mutation endpoints use Bearer token auth via [with_tool_auth]. Public
-    monitoring surfaces stay on [with_public_read], but their JSON responses
-    only emit CORS headers for same-origin or explicitly allowlisted local
-    dev origins.
+    Feature-first dashboard and monitoring surfaces use [with_public_read],
+    including keeper inspection. Their JSON responses only emit CORS headers
+    for same-origin or explicitly allowlisted local dev origins.
 
     @since 2.217.0 *)
 
@@ -214,8 +213,10 @@ let handle_gate_health _state request reqd =
 
     Per-channel connector metrics: message counts, last activity,
     average latency, error counts.  Public read. *)
+let gate_status_json () = Channel_gate_metrics.snapshot_json ()
+
 let handle_gate_status _state request reqd =
-  let json = Channel_gate_metrics.snapshot_json () in
+  let json = gate_status_json () in
   respond_public_read_json_value ~status:`OK request reqd json
 
 (** GET /api/v1/gate/connectors
@@ -224,16 +225,17 @@ let handle_gate_status _state request reqd =
     The gate advertises which connectors exist and their current runtime
     snapshots without requiring the caller to hardcode vendor-specific
     knowledge.  Delegates to {!Channel_gate_connector.connectors_json}. *)
-let handle_gate_connectors _state request reqd =
+let gate_connectors_json request =
   let audit_limit =
     int_query_param request "audit_limit" ~default:10
     |> fun value -> max 1 (min 50 value)
   in
-  let gate_status = Channel_gate_metrics.snapshot_json () in
-  let json =
-    Channel_gate_connector.connectors_json ~gate_status_json:gate_status
-      ~audit_limit ()
-  in
+  let gate_status = gate_status_json () in
+  Channel_gate_connector.connectors_json ~gate_status_json:gate_status
+    ~audit_limit ()
+
+let handle_gate_connectors _state request reqd =
+  let json = gate_connectors_json request in
   respond_public_read_json_value ~status:`OK request reqd json
 
 (** GET /api/v1/gate/connector/status?name=<connector>&audit_limit=<n>
@@ -527,12 +529,12 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/keepers" (fun request reqd ->
-        with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+        with_public_read (fun state _req reqd ->
          handle_gate_keepers ~sw ~clock state request reqd
        ) request reqd)
 
   |> Http.Router.get "/api/v1/gate/keeper-status" (fun request reqd ->
-       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+       with_public_read (fun state _req reqd ->
          handle_gate_keeper_status_by_name ~sw ~clock state request reqd
        ) request reqd)
 

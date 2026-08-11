@@ -3,7 +3,6 @@
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get } from './core'
-import { ensureDevToken } from './dev-token'
 import type { DashboardConfigResponse } from './schemas/dashboard-config'
 import type { LogsResponse } from './schemas/logs'
 import type {
@@ -33,13 +32,13 @@ export async function fetchLogs(opts?: {
   if (opts?.category) params.set('category', opts.category)
   if (opts?.exclude_category) params.set('exclude_category', opts.exclude_category)
   const qs = params.toString()
-  const raw = await get<unknown>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
+  const raw = await get<unknown>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`, { publicRead: true })
   const { parseLogsResponse } = await import('./schemas/logs')
   return parseLogsResponse(raw)
 }
 
 export async function fetchProviderLogsCatalog(): Promise<ProviderLogsCatalogResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/provider-logs')
+  const raw = await get<unknown>('/api/v1/dashboard/provider-logs', { publicRead: true })
   const { parseProviderLogsCatalogResponse } = await import('./schemas/provider-logs')
   return parseProviderLogsCatalogResponse(raw)
 }
@@ -51,14 +50,13 @@ export async function fetchProviderLogTail(
   const params = new URLSearchParams()
   params.set('provider', provider)
   if (opts?.lines) params.set('lines', String(opts.lines))
-  const raw = await get<unknown>(`/api/v1/dashboard/provider-logs/tail?${params.toString()}`)
+  const raw = await get<unknown>(`/api/v1/dashboard/provider-logs/tail?${params.toString()}`, { publicRead: true })
   const { parseProviderLogTailResponse } = await import('./schemas/provider-logs')
   return parseProviderLogTailResponse(raw)
 }
 
 export async function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
-  await ensureDevToken()
-  const raw = await get<unknown>('/api/v1/dashboard/config')
+  const raw = await get<unknown>('/api/v1/dashboard/config', { publicRead: true })
   const { parseDashboardConfigResponse } = await import('./schemas/dashboard-config')
   return parseDashboardConfigResponse(raw)
 }

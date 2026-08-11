@@ -12,7 +12,10 @@ type DashboardExecutionRequestOptions = AbortableRequestOptions & {
 
 export function fetchDashboardExecution(opts?: DashboardExecutionRequestOptions): Promise<DashboardExecutionResponse> {
   const query = opts?.force ? '?force=1' : ''
-  return get(`/api/v1/dashboard/execution${query}`, { signal: opts?.signal })
+  return get(`/api/v1/dashboard/execution${query}`, {
+    signal: opts?.signal,
+    publicRead: true,
+  })
 }
 
 export type DashboardExecutionTrustKeeper = Record<string, unknown> & {
@@ -33,7 +36,10 @@ export type DashboardExecutionTrustResponse = TelemetryFreshnessMetadata & {
 }
 
 export function fetchDashboardExecutionTrust(opts?: AbortableRequestOptions): Promise<DashboardExecutionTrustResponse> {
-  return get<DashboardExecutionTrustResponse>('/api/v1/dashboard/execution-trust', { signal: opts?.signal })
+  return get<DashboardExecutionTrustResponse>('/api/v1/dashboard/execution-trust', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
 }
 
 type ToolQualityToolStat = {
@@ -84,7 +90,10 @@ export function fetchToolQuality(opts?: { n?: number; windowHours?: number; sign
   if (opts?.n != null) params.set('n', String(opts.n))
   if (opts?.windowHours != null) params.set('window_hours', String(opts.windowHours))
   const qs = params.toString()
-  return get<ToolQualityResponse>(`/api/v1/dashboard/tool-quality${qs ? `?${qs}` : ''}`, { signal: opts?.signal })
+  return get<ToolQualityResponse>(`/api/v1/dashboard/tool-quality${qs ? `?${qs}` : ''}`, {
+    signal: opts?.signal,
+    publicRead: true,
+  })
 }
 
 export interface DashboardPerfRow {
@@ -147,7 +156,7 @@ export interface DashboardPerfResponse {
 }
 
 export function fetchDashboardPerf(): Promise<DashboardPerfResponse> {
-  return get('/api/v1/dashboard/perf')
+  return get('/api/v1/dashboard/perf', { publicRead: true })
 }
 
 interface FetchDashboardMemoryOptions {
@@ -179,5 +188,5 @@ export function fetchDashboardMemory(
   if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
   if (opts?.author) params.set('author', opts.author)
   if (opts?.hearth) params.set('hearth', opts.hearth)
-  return get(`/api/v1/dashboard/board${params.toString() ? `?${params}` : ''}`)
+  return get(`/api/v1/dashboard/board${params.toString() ? `?${params}` : ''}`, { publicRead: true })
 }

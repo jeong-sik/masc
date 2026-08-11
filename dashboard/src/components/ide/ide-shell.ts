@@ -931,17 +931,13 @@ export function IdeShell() {
 
   useEffect(() => {
     const repoId = activeRepositoryId?.trim()
-    if (!repoId) {
-      cursorOverlaySignal.value = {
-        ...cursorOverlaySignal.value,
-        stream: { status: 'closed', failedCount: 0 },
-      }
-      return
-    }
+    // The cursor API has a readable default lane.  Keep the stream alive while
+    // repository selection is loading or temporarily stale instead of closing
+    // the entire observation surface until a picker value arrives.
     return connectKeeperCursorPush((overlay) => {
       cursorOverlaySignal.value = { ...overlay, stream: cursorOverlaySignal.value.stream }
     }, {
-      repoId,
+      repoId: repoId || undefined,
       onStatus: stream => {
         cursorOverlaySignal.value = { ...cursorOverlaySignal.value, stream }
       },
@@ -1127,33 +1123,16 @@ export function IdeShell() {
     navigate('code', nextParams)
   }
 
-  // Annotation deletion (#23471 FE follow-up). Mirrors the composer's
-  // contract: mutations need a repo scope (keeper_lane is read-only) and
-  // ownership is decided server-side from the token identity, so the
-  // handler translates each outcome into a toast instead of pre-judging
-  // deletability in the FE.
+  // Annotation deletion follows the same public/default-lane flow as creation.
   const handleAnnotationDelete = async (
     annotation: SelectedAnnotation,
   ): Promise<IdeAnnotationDeleteOutcome> => {
     const repoId = workspaceStore.activeRepositoryId()
-    if (repoId === null) {
-      showToast('주석 삭제에는 repo 선택이 필요합니다 (keeper_lane scope는 read-only)', 'error')
-      return 'error'
-    }
-    const outcome = await deleteIdeAnnotation(annotation.id, { repoId })
+    const outcome = await deleteIdeAnnotation(annotation.id, repoId ? { repoId } : {})
     switch (outcome) {
       case 'deleted':
         showToast(`주석 삭제됨: ${annotation.file_path}:${annotation.line_start}`, 'success')
         workspaceStore.refresh()
-        break
-      case 'rejected':
-        showToast('주석 삭제 거부 — 본인이 작성한 주석이 아니거나 이미 삭제된 주석입니다', 'error')
-        break
-      case 'forbidden':
-        showToast('주석 삭제 권한 없음 — 토큰에 쓰기 권한(CanBroadcast tier)이 필요합니다', 'error')
-        break
-      case 'unauthorized':
-        showToast('인증 실패 — 대시보드 토큰이 없거나 만료되었습니다', 'error')
         break
       case 'error':
         showToast('주석 삭제 실패 — 서버/네트워크 오류', 'error')

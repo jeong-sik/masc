@@ -4,7 +4,6 @@
 
 import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
-import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
 
@@ -242,7 +241,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
 // --- Keeper config (structured read-only view) ---
 
 export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
-  return get<unknown>(`/api/v1/keepers/${encodeURIComponent(name)}/config`)
+  return get<unknown>(`/api/v1/keepers/${encodeURIComponent(name)}/config`, { publicRead: true })
     .then(raw => normalizeKeeperConfig(raw, name))
 }
 
@@ -269,7 +268,6 @@ export async function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
 ): Promise<KeeperConfig> {
-  await ensureDevToken()
   return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,

@@ -1,10 +1,8 @@
 (** Black-box HTTP/router tests for [Server_ide_http].
 
-    These tests exercise the public route table and actual response
-    statuses rather than relying on [Server_ide_http.For_testing]
-    helpers. They guard the security contract from task-1736 B3:
-    mutation routes require a bearer token, reject a client-supplied
-    [keeper_id], and return the expected status codes. *)
+    These tests exercise the public route table and actual response statuses
+    rather than relying on private helpers. The IDE observation feature must
+    work before token, keeper, or repository selection has converged. *)
 
 open Alcotest
 
@@ -41,10 +39,19 @@ let test_post_cursors_route_is_registered () =
 
 let test_read_routes_stay_public () =
   let router = Server_ide_http.add_routes (Http.Router.create ()) in
-  check bool "GET /api/v1/ide/annotations" true
-    (has_route `GET "/api/v1/ide/annotations" router);
-  check bool "GET /api/v1/ide/cursors" true
-    (has_route `GET "/api/v1/ide/cursors" router)
+  List.iter
+    (fun path ->
+       check bool ("GET " ^ path) true (has_route `GET path router))
+    [ "/api/v1/ide/observations/snapshot"
+    ; "/api/v1/agents"
+    ; "/api/v1/status"
+    ; "/api/v1/ide/annotations"
+    ; "/api/v1/ide/regions"
+    ; "/api/v1/ide/events"
+    ; "/api/v1/ide/presence"
+    ; "/api/v1/ide/cursors"
+    ; "/api/v1/ide/memory"
+    ]
 ;;
 
 (* ── End-to-end request/response harness ─────────────────────────────── *)
@@ -421,15 +428,18 @@ let test_presence_last_seen_ms_shared_projection () =
     (Server_presence.last_seen_ms ~context:"test presence" invalid)
 ;;
 
-let test_post_annotations_rejects_client_keeper_id () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
+let test_post_annotations_accepts_client_keeper_id_without_auth () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let body =
       {|{"file_path":"lib/a.ml","line_start":1,"line_end":2,"content":"note","keeper_id":"bob"}|}
     in
-    let request = http_request ~meth:`POST ~path:"/api/v1/ide/annotations" ~body ~token:(Some token) () in
+    let request = http_request ~meth:`POST ~path:"/api/v1/ide/annotations" ~body () in
     let response = dispatch router request in
-    check_status "POST with keeper_id returns 403" 403 response)
+    check_status "POST with keeper_id returns 201" 201 response;
+    let json = response |> response_body |> Yojson.Safe.from_string in
+    let annotation = Json.member "data" json in
+    check string "client keeper id is retained" "bob"
+      (json_string_member "created annotation" "keeper_id" annotation))
 ;;
 
 let test_post_annotations_rejects_unknown_route_fields () =
@@ -459,13 +469,12 @@ let test_post_annotations_rejects_unknown_route_fields () =
       (error_code_of_response response))
 ;;
 
-let test_post_cursors_rejects_client_keeper_id () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
+let test_post_cursors_accepts_client_keeper_id_without_auth () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let body = {|{"file_path":"lib/a.ml","line":1,"keeper_id":"bob"}|} in
-    let request = http_request ~meth:`POST ~path:"/api/v1/ide/cursors" ~body ~token:(Some token) () in
+    let request = http_request ~meth:`POST ~path:"/api/v1/ide/cursors" ~body () in
     let response = dispatch router request in
-    check_status "POST cursor with keeper_id returns 403" 403 response)
+    check_status "POST cursor with keeper_id returns 201" 201 response)
 ;;
 
 let test_post_cursors_rejects_invalid_focus_mode () =
@@ -626,16 +635,7 @@ let test_post_cursors_honors_canonical_url_scope () =
     check_status "POST cursor with canonical_url scope returns 201" 201 post_response;
     let unscoped_request = http_request ~meth:`GET ~path:"/api/v1/ide/cursors" () in
     let unscoped_response = dispatch router unscoped_request in
-    check
-      int
-      "GET unscoped cursors rejects missing scope"
-      400
-      (status_of_response unscoped_response);
-    check
-      string
-      "GET unscoped cursors error code"
-      "missing_ide_scope"
-      (error_code_of_response unscoped_response);
+    check_status "GET unscoped cursors uses the default scope" 200 unscoped_response;
     let scoped_request = http_request ~meth:`GET ~path:scoped_path () in
     let scoped_response = dispatch router scoped_request in
     check_status "GET scoped cursors succeeds" 200 scoped_response;
@@ -679,13 +679,12 @@ let test_post_cursors_resolves_partition_from_file_path () =
     | [] -> fail "expected file_path-resolved cursor")
 ;;
 
-let test_post_cursors_rejects_file_path_scope_mismatch () =
+let test_post_cursors_uses_file_path_partition_over_stale_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
-    (* POST cursor with a file_path that belongs to a different repo than the
-       requested canonical_url scope: the server must reject it (task-1733)
-       instead of silently writing to the wrong partition. *)
+    (* The file path is current evidence; a stale picker must not prevent a
+       cursor event from reaching the repository it actually belongs to. *)
     let file_path = Filename.concat agent_core_path "lib/a.ml" in
     let body =
       Yojson.Safe.to_string
@@ -698,17 +697,19 @@ let test_post_cursors_rejects_file_path_scope_mismatch () =
       http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
     in
     let post_response = dispatch router post_request in
-    check_status "POST cursor with mismatched file_path returns 400" 400 post_response;
-    check
-      string
-      "file_path scope mismatch error"
-      "file_path does not belong to requested canonical_url"
-      (error_message_of_response post_response);
-    check
-      string
-      "file_path scope mismatch code"
-      "canonical_url_mismatch"
-      (error_code_of_response post_response))
+    check_status "POST cursor with stale scope returns 201" 201 post_response;
+    let actual_repo_request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/cursors?repo_id=agent_core" ()
+    in
+    let actual_repo_response = dispatch router actual_repo_request in
+    check_status "GET actual cursor partition succeeds" 200 actual_repo_response;
+    let json = actual_repo_response |> response_body |> Yojson.Safe.from_string in
+    let data = Json.member "data" json in
+    match json_list_member "actual cursor snapshot" "cursors" data with
+    | cursor :: _ ->
+      check string "cursor follows file path" "lib/a.ml"
+        (json_string_member "cursor" "file_path" cursor)
+    | [] -> fail "expected cursor in actual repository partition")
 ;;
 
 let test_post_annotations_accepts_matching_repo_scope () =
@@ -738,7 +739,7 @@ let test_post_annotations_accepts_matching_repo_scope () =
       (annotation_count router "/api/v1/ide/annotations?repo_id=agent_core"))
 ;;
 
-let test_post_annotations_rejects_repo_scope_mismatch () =
+let test_post_annotations_uses_file_path_partition_over_stale_repo_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
@@ -752,30 +753,20 @@ let test_post_annotations_rejects_repo_scope_mismatch () =
         ()
     in
     let response = dispatch router request in
-    check_status "POST annotation with mismatched repo_id returns 400" 400 response;
-    check
-      string
-      "repo scope mismatch error"
-      "file_path does not belong to requested repo_id"
-      (error_message_of_response response);
-    check
-      string
-      "repo scope mismatch code"
-      "repo_mismatch"
-      (error_code_of_response response);
+    check_status "POST annotation with stale repo_id returns 201" 201 response;
     check
       int
-      "mismatched annotation is not written to requested partition"
+      "stale repo partition remains empty"
       0
       (annotation_count router "/api/v1/ide/annotations?repo_id=masc");
     check
       int
-      "mismatched annotation is not written to actual partition"
-      0
+      "annotation follows file path to actual partition"
+      1
       (annotation_count router "/api/v1/ide/annotations?repo_id=agent_core"))
 ;;
 
-let test_post_annotations_rejects_canonical_scope_mismatch () =
+let test_post_annotations_uses_file_path_partition_over_stale_canonical_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
@@ -793,80 +784,104 @@ let test_post_annotations_rejects_canonical_scope_mismatch () =
         ()
     in
     let response = dispatch router request in
-    check_status "POST annotation with mismatched canonical_url returns 400" 400 response;
+    check_status "POST annotation with stale canonical_url returns 201" 201 response;
     check
-      string
-      "canonical scope mismatch error"
-      "file_path does not belong to requested canonical_url"
-      (error_message_of_response response);
+      int
+      "stale canonical partition remains empty"
+      0
+      (annotation_count router "/api/v1/ide/annotations?repo_id=masc");
     check
-      string
-      "canonical scope mismatch code"
-      "canonical_url_mismatch"
-      (error_code_of_response response))
+      int
+      "annotation follows file path despite stale canonical scope"
+      1
+      (annotation_count router "/api/v1/ide/annotations?repo_id=agent_core"))
 ;;
 
-let test_post_annotations_requires_auth () =
+let test_post_annotations_works_without_auth () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let body = {|{"file_path":"lib/a.ml","line_start":1,"line_end":2,"content":"note"}|} in
     let request = http_request ~meth:`POST ~path:"/api/v1/ide/annotations" ~body () in
     let response = dispatch router request in
-    check int "POST without token returns 401/403" 401 (status_of_response response))
+    check_status "POST without token returns 201" 201 response;
+    let json = response |> response_body |> Yojson.Safe.from_string in
+    let annotation = Json.member "data" json in
+    check string "unauthenticated annotation uses dashboard identity" "dashboard"
+      (json_string_member "public annotation" "keeper_id" annotation))
 ;;
 
-let test_delete_annotation_requires_auth () =
-  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
-    let request = http_request ~meth:`DELETE ~path:"/api/v1/ide/annotations/ann-1" () in
+let test_delete_annotation_works_without_auth_or_owner () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let annotation =
+      match
+        Ide_annotations.create
+          ~base_dir:base_path
+          ~keeper_id:"alice"
+          ~file_path:"lib/a.ml"
+          ~line_start:1
+          ~line_end:1
+          ~kind:Ide_annotation_types.Comment
+          ~content:"delete me"
+          ()
+      with
+      | Ok annotation -> annotation
+      | Error msg -> failf "seed annotation for public delete failed: %s" msg
+    in
+    let request =
+      http_request
+        ~meth:`DELETE
+        ~path:("/api/v1/ide/annotations/" ^ annotation.id)
+        ()
+    in
     let response = dispatch router request in
-    check int "DELETE without token returns 401/403" 401 (status_of_response response))
+    check_status "DELETE without token returns 204" 204 response)
 ;;
 
-let test_read_annotations_rejects_missing_scope () =
-  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+let test_read_annotations_uses_default_scope () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    (match
+       Ide_annotations.create
+         ~base_dir:base_path
+         ~partition:Ide_paths.Legacy_default
+         ~keeper_id:"alice"
+         ~file_path:"lib/default.ml"
+         ~line_start:1
+         ~line_end:1
+         ~kind:Ide_annotation_types.Comment
+         ~content:"default scope annotation"
+         ()
+     with
+     | Ok _ -> ()
+     | Error msg -> failf "create default annotation failed: %s" msg);
     let request = http_request ~meth:`GET ~path:"/api/v1/ide/annotations" () in
     let response = dispatch router request in
-    check_status "GET annotations without scope returns 400" 400 response;
-    check
-      string
-      "missing scope error"
-      "IDE scope is required; pass repo_id, canonical_url, or keeper_lane"
-      (error_message_of_response response);
-    check
-      string
-      "missing scope code"
-      "missing_ide_scope"
-      (error_code_of_response response))
+    check_status "GET annotations without scope uses default scope" 200 response;
+    let json = response |> response_body |> Yojson.Safe.from_string in
+    match json_list_member "default annotations" "data" json with
+    | annotation :: _ ->
+      check string "default annotation content" "default scope annotation"
+        (json_string_member "default annotation" "content" annotation)
+    | [] -> fail "expected default-scope annotation")
 ;;
 
-let test_read_cursors_rejects_unmatched_repo_scope () =
+let test_read_cursors_falls_back_from_unmatched_repo_scope () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let request =
       http_request ~meth:`GET ~path:"/api/v1/ide/cursors?repo_id=missing-repo" ()
     in
     let response = dispatch router request in
-    check_status "GET cursors with unmatched repo_id returns 400" 400 response;
-    check
-      string
-      "unmatched repo error code"
-      "unmatched_repo_id"
-      (error_code_of_response response))
+    check_status "GET cursors with unmatched repo_id falls back" 200 response)
 ;;
 
-let test_get_events_rejects_invalid_canonical_scope () =
+let test_get_events_falls_back_from_invalid_canonical_scope () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let request =
       http_request ~meth:`GET ~path:"/api/v1/ide/events?canonical_url=not-a-url" ()
     in
     let response = dispatch router request in
-    check_status "GET events with invalid canonical_url returns 400" 400 response;
-    check
-      string
-      "invalid canonical_url code"
-      "invalid_canonical_url"
-      (error_code_of_response response))
+    check_status "GET events with invalid canonical_url falls back" 200 response)
 ;;
 
-let test_post_annotations_rejects_missing_scope () =
+let test_post_annotations_uses_default_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "alice" in
     let body = annotation_body ~file_path:"lib/a.ml" in
@@ -879,12 +894,9 @@ let test_post_annotations_rejects_missing_scope () =
         ()
     in
     let response = dispatch router request in
-    check_status "POST annotation without scope returns 400" 400 response;
-    check
-      string
-      "POST annotation missing scope code"
-      "missing_ide_scope"
-      (error_code_of_response response))
+    check_status "POST annotation without scope uses default scope" 201 response;
+    check int "default scope stores annotation" 1
+      (annotation_count router "/api/v1/ide/annotations"))
 ;;
 
 let test_memory_response_declares_annotation_source_contract () =
@@ -965,16 +977,10 @@ let test_memory_response_honors_canonical_url_scope () =
       http_request ~meth:`GET ~path:"/api/v1/ide/memory?keeper_id=alice" ()
     in
     let unscoped_response = dispatch router unscoped_request in
-    check
-      int
-      "GET unscoped memory rejects missing scope"
-      400
-      (status_of_response unscoped_response);
-    check
-      string
-      "GET unscoped memory error code"
-      "missing_ide_scope"
-      (error_code_of_response unscoped_response);
+    check_status "GET unscoped memory uses the default scope" 200 unscoped_response;
+    let unscoped_json = unscoped_response |> response_body |> Yojson.Safe.from_string in
+    check int "default memory does not leak canonical scope" 0
+      (List.length (json_list_member "default memory" "entries" unscoped_json));
     let scoped_path = scoped_ide_path "/api/v1/ide/memory?keeper_id=alice" in
     let scoped_request = http_request ~meth:`GET ~path:scoped_path () in
     let scoped_response = dispatch router scoped_request in
@@ -992,10 +998,9 @@ let test_memory_response_honors_canonical_url_scope () =
 
 (* ── keeper-lane scope ───────────────────────────────────────────────
    Turn/coordination events carry no file, so keepers write them to the
-   repo-unattributed lane bucket ([Ide_paths.Legacy_default]). These tests
-   pin the read contract: [?keeper_lane=<id>] reads that bucket filtered
-   to the lane keeper, conflicts with repo scopes, and never authorizes
-   mutations. *)
+   repo-unattributed lane bucket ([Ide_paths.Legacy_default]). Reads use it
+   as a useful fallback. Writes prefer their actual file partition and use the
+   same default lane when no repository selection is available. *)
 
 let seed_lane_turn_event ~base_path ~keeper_id ~turn_id ~timestamp_ms =
   Ide_bridge.ingest_turn_event
@@ -1036,7 +1041,7 @@ let test_events_keeper_lane_returns_only_lane_events () =
     | events -> failf "expected exactly alice's event, got %d" (List.length events))
 ;;
 
-let test_events_keeper_lane_conflicts_with_repo_scope () =
+let test_events_keeper_lane_falls_back_when_repo_scope_is_unusable () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let request =
       http_request
@@ -1045,12 +1050,15 @@ let test_events_keeper_lane_conflicts_with_repo_scope () =
         ()
     in
     let response = dispatch router request in
-    check_status "keeper_lane + repo_id returns 400" 400 response;
-    check string "conflict code" "conflicting_ide_scope" (error_code_of_response response))
+    check_status "keeper_lane + unusable repo_id falls back" 200 response)
 ;;
 
-let test_events_keeper_lane_rejects_mismatched_keeper_filter () =
-  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+let test_events_keeper_lane_allows_explicit_keeper_filter_override () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    seed_lane_turn_event ~base_path ~keeper_id:"alice" ~turn_id:"turn-alice-1"
+      ~timestamp_ms:1700000000000L;
+    seed_lane_turn_event ~base_path ~keeper_id:"bob" ~turn_id:"turn-bob-1"
+      ~timestamp_ms:1700000001000L;
     let request =
       http_request
         ~meth:`GET
@@ -1058,15 +1066,17 @@ let test_events_keeper_lane_rejects_mismatched_keeper_filter () =
         ()
     in
     let response = dispatch router request in
-    check_status "mismatched keeper filter returns 400" 400 response;
-    check
-      string
-      "filter conflict code"
-      "keeper_lane_filter_conflict"
-      (error_code_of_response response))
+    check_status "explicit keeper filter overrides keeper_lane" 200 response;
+    let json = response |> response_body |> Yojson.Safe.from_string in
+    let data = Json.member "data" json in
+    match json_list_member "overridden lane events" "events" data with
+    | [ event ] ->
+      check string "explicit keeper filter wins" "bob"
+        (json_string_member "overridden lane event" "keeper_id" event)
+    | events -> failf "expected exactly bob's event, got %d" (List.length events))
 ;;
 
-let test_events_keeper_lane_rejects_other_keeper_token () =
+let test_events_keeper_lane_does_not_require_matching_token () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "bob" in
     seed_lane_turn_event ~base_path ~keeper_id:"alice" ~turn_id:"turn-alice-1"
@@ -1079,17 +1089,11 @@ let test_events_keeper_lane_rejects_other_keeper_token () =
         ()
     in
     let response = dispatch router request in
-    check_status "other keeper token returns 403" 403 response;
-    check
-      string
-      "keeper lane forbidden code"
-      "keeper_lane_forbidden"
-      (error_code_of_response response))
+    check_status "other keeper token can read lane events" 200 response)
 ;;
 
 let test_cursors_keeper_lane_filters_to_lane_keeper () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
     (let seed keeper_id line =
        match
          Ide_bridge.ingest_cursor_event
@@ -1110,7 +1114,6 @@ let test_cursors_keeper_lane_filters_to_lane_keeper () =
       http_request
         ~meth:`GET
         ~path:"/api/v1/ide/cursors?keeper_lane=alice"
-        ~token:(Some token)
         ()
     in
     let response = dispatch router request in
@@ -1124,7 +1127,7 @@ let test_cursors_keeper_lane_filters_to_lane_keeper () =
     | cursors -> failf "expected exactly alice's cursor, got %d" (List.length cursors))
 ;;
 
-let test_post_cursors_rejects_keeper_lane_scope () =
+let test_post_cursors_uses_default_lane_for_keeper_lane_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "alice" in
     let body = {|{"file_path":"lib/a.ml","line":3}|} in
@@ -1137,12 +1140,7 @@ let test_post_cursors_rejects_keeper_lane_scope () =
         ()
     in
     let response = dispatch router request in
-    check_status "POST cursor with keeper_lane returns 400" 400 response;
-    check
-      string
-      "read-only scope code"
-      "keeper_lane_read_only"
-      (error_code_of_response response))
+    check_status "POST cursor with keeper_lane uses default lane" 201 response)
 ;;
 
 let test_get_events_rejects_invalid_limit () =
@@ -1201,21 +1199,21 @@ let () =
         ] )
     ; ( "scope_contract"
       , [ test_case
-            "GET annotations rejects missing scope"
+            "GET annotations uses default scope"
             `Quick
-            test_read_annotations_rejects_missing_scope
+            test_read_annotations_uses_default_scope
         ; test_case
-            "GET cursors rejects unmatched repo scope"
+            "GET cursors falls back from unmatched repo scope"
             `Quick
-            test_read_cursors_rejects_unmatched_repo_scope
+            test_read_cursors_falls_back_from_unmatched_repo_scope
         ; test_case
-            "GET events rejects invalid canonical_url scope"
+            "GET events falls back from invalid canonical_url scope"
             `Quick
-            test_get_events_rejects_invalid_canonical_scope
+            test_get_events_falls_back_from_invalid_canonical_scope
         ; test_case
-            "POST annotation rejects missing scope"
+            "POST annotation uses default scope"
             `Quick
-            test_post_annotations_rejects_missing_scope
+            test_post_annotations_uses_default_scope
         ; test_case
             "GET memory declares annotation source contract"
             `Quick
@@ -1228,16 +1226,16 @@ let () =
     ; ( "keeper_lane_scope"
       , [ test_case "GET events keeper_lane returns only lane events" `Quick
             test_events_keeper_lane_returns_only_lane_events
-        ; test_case "keeper_lane conflicts with repo scope" `Quick
-            test_events_keeper_lane_conflicts_with_repo_scope
-        ; test_case "keeper_lane rejects mismatched keeper filter" `Quick
-            test_events_keeper_lane_rejects_mismatched_keeper_filter
-        ; test_case "keeper_lane rejects other keeper token" `Quick
-            test_events_keeper_lane_rejects_other_keeper_token
+        ; test_case "keeper_lane falls back from unusable repo scope" `Quick
+            test_events_keeper_lane_falls_back_when_repo_scope_is_unusable
+        ; test_case "keeper_lane permits explicit keeper override" `Quick
+            test_events_keeper_lane_allows_explicit_keeper_filter_override
+        ; test_case "keeper_lane does not require matching token" `Quick
+            test_events_keeper_lane_does_not_require_matching_token
         ; test_case "GET cursors keeper_lane filters to lane keeper" `Quick
             test_cursors_keeper_lane_filters_to_lane_keeper
-        ; test_case "POST cursor rejects keeper_lane scope" `Quick
-            test_post_cursors_rejects_keeper_lane_scope
+        ; test_case "POST cursor uses default lane for keeper_lane scope" `Quick
+            test_post_cursors_uses_default_lane_for_keeper_lane_scope
         ] )
     ; ( "query_parsing"
       , [ test_case "GET events rejects invalid limit" `Quick
@@ -1247,13 +1245,13 @@ let () =
         ; test_case "GET memory rejects non-positive limit" `Quick
             test_get_memory_rejects_non_positive_limit
         ] )
-    ; ( "mutation_auth"
-      , [ test_case "POST annotation rejects client keeper_id" `Quick
-            test_post_annotations_rejects_client_keeper_id
+    ; ( "public_mutation_flow"
+      , [ test_case "POST annotation accepts client keeper_id without auth" `Quick
+            test_post_annotations_accepts_client_keeper_id_without_auth
         ; test_case "POST annotation rejects unknown route fields" `Quick
             test_post_annotations_rejects_unknown_route_fields
-        ; test_case "POST cursor rejects client keeper_id" `Quick
-            test_post_cursors_rejects_client_keeper_id
+        ; test_case "POST cursor accepts client keeper_id without auth" `Quick
+            test_post_cursors_accepts_client_keeper_id_without_auth
         ; test_case "POST cursor rejects invalid focus_mode" `Quick
             test_post_cursors_rejects_invalid_focus_mode
         ; test_case "POST cursor rejects negative column" `Quick
@@ -1266,16 +1264,18 @@ let () =
             test_hook_cursors_broadcast_ws_invalidation
         ; test_case "POST cursor honors canonical_url scope" `Quick
             test_post_cursors_honors_canonical_url_scope
+        ; test_case "POST cursor follows file path over stale scope" `Quick
+            test_post_cursors_uses_file_path_partition_over_stale_scope
         ; test_case "POST annotation accepts matching repo scope" `Quick
             test_post_annotations_accepts_matching_repo_scope
-        ; test_case "POST annotation rejects repo scope mismatch" `Quick
-            test_post_annotations_rejects_repo_scope_mismatch
-        ; test_case "POST annotation rejects canonical scope mismatch" `Quick
-            test_post_annotations_rejects_canonical_scope_mismatch
-        ; test_case "POST annotation requires auth" `Quick
-            test_post_annotations_requires_auth
-        ; test_case "DELETE annotation requires auth" `Quick
-            test_delete_annotation_requires_auth
+        ; test_case "POST annotation follows file path over stale repo scope" `Quick
+            test_post_annotations_uses_file_path_partition_over_stale_repo_scope
+        ; test_case "POST annotation follows file path over stale canonical scope" `Quick
+            test_post_annotations_uses_file_path_partition_over_stale_canonical_scope
+        ; test_case "POST annotation works without auth" `Quick
+            test_post_annotations_works_without_auth
+        ; test_case "DELETE annotation works without auth or owner" `Quick
+            test_delete_annotation_works_without_auth_or_owner
         ] )
     ]
 ;;

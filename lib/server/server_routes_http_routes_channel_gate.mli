@@ -11,6 +11,10 @@ val add_routes :
   Http_server_eio.Router.t ->
   Http_server_eio.Router.t
 
+(** Shared JSON producers for the public dashboard read endpoints. *)
+val gate_status_json : unit -> Yojson.Safe.t
+val gate_connectors_json : Httpun.Request.t -> Yojson.Safe.t
+
 val record_validation_error_metric :
   duration_ms:int -> string -> string -> unit
 (** Record a [Validation_error] attempt against [Channel_gate_metrics]

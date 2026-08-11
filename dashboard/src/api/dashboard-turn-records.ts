@@ -3,7 +3,6 @@
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get, type AbortableRequestOptions } from './core'
-import { ensureDevToken } from './dev-token'
 import { isRecord, asBoolean, asNumber, asNullableString, asString, asRecordArray } from '../components/common/normalize'
 import { type TelemetryFreshnessMetadata } from './dashboard-shared'
 
@@ -1153,10 +1152,9 @@ export async function fetchKeeperTurnRecords(
   opts?: AbortableRequestOptions,
 ): Promise<TurnRecordsResponse> {
   const params = limitQueryString(limit)
-  await ensureDevToken()
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/turn-records${params}`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   ).then((raw) => {
     const decoded = decodeTurnRecordsResponse(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper turn record payload')
@@ -1174,10 +1172,9 @@ export async function fetchKeeperCompactionSnapshots(
   if (opts?.refresh === true) query.set('refresh', 'true')
   const encoded = query.toString()
   const params = encoded ? `?${encoded}` : ''
-  await ensureDevToken()
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/compaction-snapshots${params}`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   ).then((raw) => {
     const decoded = decodeKeeperCompactionSnapshotsResponse(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper compaction snapshot payload')
@@ -1251,7 +1248,7 @@ export function fetchKeeperTurnTranscript(
 ): Promise<TurnTranscript> {
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/turn-transcript?turn_ref=${encodeURIComponent(turnRef)}`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   ).then((raw) => {
     const decoded = decodeTurnTranscript(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper turn transcript payload')

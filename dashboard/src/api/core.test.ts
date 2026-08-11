@@ -13,7 +13,9 @@ import {
   get,
   getStoredToken,
   getStoredTokenMeta,
+  jsonHeaders,
   post,
+  postPublic,
   runOperatorAction,
   setStoredToken,
   subscribeStoredTokenChanges,
@@ -155,6 +157,23 @@ describe('post', () => {
     expect(actorHeader).not.toContain('%')
   })
 
+  it('omits a stale bearer and actor for an explicitly public mutation', async () => {
+    setStoredToken('stale-dashboard-token', { source: 'manual' })
+    setCanonicalDashboardActor('dashboard-admin-deft-cobra')
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"ok":true}', {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await postPublic('/api/v1/ide/annotations', { content: 'note' })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' })
+  })
+
   it('bypasses browser HTTP cache for dashboard API reads', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"keepers":[]}', {
@@ -168,6 +187,26 @@ describe('post', () => {
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(init.cache).toBe('no-store')
+  })
+
+  it('omits a stale bearer and actor for an explicitly public read', async () => {
+    setStoredToken('stale-dashboard-token', { source: 'manual' })
+    setCanonicalDashboardActor('dashboard-admin-deft-cobra')
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"keeper":"rondo"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await get('/api/v1/keepers/rondo/compaction-snapshots', { publicRead: true })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).toEqual({})
+    expect(jsonHeaders({ publicRead: true })).toEqual({
+      'Content-Type': 'application/json',
+    })
   })
 
   it('keeps board voter resolution scoped to query params', () => {

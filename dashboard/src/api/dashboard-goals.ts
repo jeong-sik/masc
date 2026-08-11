@@ -431,14 +431,17 @@ function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailRes
 }
 
 export async function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/goals')
+  const raw = await get<unknown>('/api/v1/dashboard/goals', { publicRead: true })
   const decoded = decodeDashboardGoalsTreeResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 dashboard goals payload')
   return decoded
 }
 
 export async function fetchDashboardGoalDetail(goalId: string): Promise<DashboardGoalDetailResponse> {
-  const raw = await get<unknown>(`/api/v1/dashboard/goals/detail?goal_id=${encodeURIComponent(goalId)}`)
+  const raw = await get<unknown>(
+    `/api/v1/dashboard/goals/detail?goal_id=${encodeURIComponent(goalId)}`,
+    { publicRead: true },
+  )
   const decoded = decodeDashboardGoalDetailResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 dashboard goal detail payload')
   return decoded

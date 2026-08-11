@@ -86,7 +86,7 @@ async function fetchGateToolEvents(
 ): Promise<GateToolEvents> {
   const raw = await get<Record<string, unknown>>(
     `/api/v1/dashboard/gate/tool-events?window=${windowMinutes}`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   )
   if (!isRecord(raw)) throw new Error('invalid Gate tool-events payload')
   const approvalQueueState = decodeKeeperApprovalQueueState(raw.approval_queue_state)

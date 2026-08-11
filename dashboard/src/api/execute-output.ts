@@ -67,7 +67,7 @@ export async function streamExecuteOutput(
   if (!keeper) throw new Error('keeper name is required')
   const res = await fetch(`/api/dashboard/execute-output/${encodeURIComponent(keeper)}`, {
     headers: {
-      ...authHeaders(),
+      ...authHeaders({ publicRead: true }),
       Accept: 'text/event-stream',
     },
     signal,

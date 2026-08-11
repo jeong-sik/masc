@@ -95,7 +95,9 @@ function filterFeatures<
 }
 
 function loadFeatureHealth(): Promise<void> {
-  return featureHealth.load(() => get<FeatureHealthData>('/api/v1/dashboard/feature-health'))
+  return featureHealth.load(() => get<FeatureHealthData>('/api/v1/dashboard/feature-health', {
+    publicRead: true,
+  }))
 }
 
 export async function refreshFeatureHealth(): Promise<void> {

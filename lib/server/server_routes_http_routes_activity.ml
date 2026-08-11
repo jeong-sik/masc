@@ -26,28 +26,15 @@ let respond_board_reaction_result request reqd = function
       (Server_board_reaction_http.error_json error)
 ;;
 
-let include_moderation_projection ~base_path request =
-  match auth_token_from_request request with
-  | None -> false
-  | Some _ -> (
-      match
-        authorize_token_bound_permission_request
-          ~base_path
-          ~permission:Masc_domain.CanReadState
-          request
-      with
-      | Ok _ -> true
-      | Error _ -> false)
+(* The board is a feature-first dashboard surface.  Keep its complete
+   projection and a stable reaction identity available before any credential
+   bootstrap; the actor is only persisted attribution. *)
+let include_moderation_projection ~base_path:_ _request = true
 
-let with_optional_board_reaction_actor ~base_path request reqd f =
-  match
-    authorize_optional_token_bound_permission_request
-      ~base_path
-      ~permission:Masc_domain.CanReadState
-      request
-  with
-  | Ok actor -> f (Option.map board_actor_author_for_write actor)
-  | Error err -> respond_auth_error request reqd err
+let with_optional_board_reaction_actor ~base_path:_ _request _reqd f =
+  f (Some (board_actor_author_for_write "dashboard"))
+
+let with_tool_auth ~tool_name:_ handler = with_public_read handler
 
 let activity_http_deps ~sw ~clock : Server_activity_http.deps =
   {
@@ -653,10 +640,9 @@ let add_routes ~sw ~clock router =
          reqd)
 
   |> Http.Router.get "/api/v1/board/reactions" (fun request reqd ->
-       with_token_permission_auth
-         ~permission:Masc_domain.CanReadState
-         (fun _state actor req reqd ->
-            let actor = board_actor_author_for_write actor in
+       with_public_read
+         (fun _state req reqd ->
+            let actor = board_actor_author_for_write "dashboard" in
             let result =
               Result.bind
                 (Server_board_reaction_http.target_of_strings
@@ -669,10 +655,9 @@ let add_routes ~sw ~clock router =
          reqd)
 
   |> Http.Router.post "/api/v1/board/reactions" (fun request reqd ->
-       with_token_permission_auth
-         ~permission:Masc_domain.CanVote
-         (fun _state actor _req reqd ->
-            let actor = board_actor_author_for_write actor in
+       with_public_read
+         (fun _state _req reqd ->
+            let actor = board_actor_author_for_write "dashboard" in
             Http.Request.read_body_async reqd (fun body ->
               let parsed =
                 match Yojson.Safe.from_string body with

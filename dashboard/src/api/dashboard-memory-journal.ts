@@ -7,7 +7,6 @@
 // for the case an operator actually opens — why it produced nothing.
 
 import { get, type AbortableRequestOptions } from './core'
-import { ensureDevToken } from './dev-token'
 import { isRecord, asNumber, asString } from '../components/common/normalize'
 
 export type MemoryJournalDrop = {
@@ -172,11 +171,10 @@ export async function fetchKeeperMemoryJournal(
   limit?: number,
   opts?: AbortableRequestOptions,
 ): Promise<MemoryJournal> {
-  await ensureDevToken()
   const params = limit == null ? '' : `?limit=${encodeURIComponent(String(limit))}`
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/memory-journal${params}`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, publicRead: true },
   ).then((raw) => {
     if (!isRecord(raw) || !Array.isArray(raw.entries)) {
       throw new Error('유효하지 않은 memory journal payload')

@@ -186,6 +186,9 @@ export function parseExactLaneRunsResponse(raw: unknown): DashboardExactLaneRuns
 export async function fetchExactLaneRuns(
   opts?: AbortableRequestOptions,
 ): Promise<DashboardExactLaneRunsResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/exact-lane-runs', { signal: opts?.signal })
+  const raw = await get<unknown>('/api/v1/dashboard/exact-lane-runs', {
+    signal: opts?.signal,
+    publicRead: true,
+  })
   return parseExactLaneRunsResponse(raw)
 }

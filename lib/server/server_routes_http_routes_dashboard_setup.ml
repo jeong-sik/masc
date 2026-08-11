@@ -70,10 +70,9 @@ let resolve_telemetry_n ~has_time_window ~(n_param : string option) =
   | Some raw -> Option.value ~default:default_n (int_of_string_opt raw) |> max 0
   | None -> default_n
 
-(* Telemetry unified view handler — extracted from add_routes pipeline
-   as part of godfile near-threshold split. *)
-let handle_telemetry request reqd =
-  with_public_read (fun state req reqd ->
+(* Shared telemetry projection for H1 and H2.  The adapters own response
+   delivery, while filtering, caching, and the JSON shape remain single-source. *)
+let dashboard_telemetry_projection ~state req =
     let config = (Mcp_server.workspace_config state) in
     let base_path = config.base_path in
     let masc_root = Workspace.masc_root_dir config in
@@ -100,7 +99,9 @@ let handle_telemetry request reqd =
     let offset =
       match Server_utils.query_param req "offset" with
       | Some raw ->
-        Option.value ~default:0 (int_of_string_opt raw)
+        (match int_of_string_opt raw with
+         | Some value -> value
+         | None -> 0)
         |> max 0 |> min 5000
       | None -> 0
     in
@@ -202,6 +203,14 @@ let handle_telemetry request reqd =
         Dashboard_cache.get_or_compute cache_key
           ~ttl:dashboard_telemetry_cache_ttl_sec compute)
     in
+    json, Server_timing.extra_header timing
+;;
+
+(* Telemetry unified view handler — extracted from add_routes pipeline
+   as part of godfile near-threshold split. *)
+let handle_telemetry request reqd =
+  with_public_read (fun state req reqd ->
+    let json, extra_headers = dashboard_telemetry_projection ~state req in
     Http.Response.json_value ~compress:true ~request:req
-      ~extra_headers:(Server_timing.extra_header timing) json reqd
+      ~extra_headers json reqd
   ) request reqd

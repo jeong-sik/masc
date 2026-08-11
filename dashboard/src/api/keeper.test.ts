@@ -145,12 +145,12 @@ describe('Keeper Event Queue API', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       '/api/v1/keepers/sangsu/events/pending?limit=100',
-      expect.objectContaining({ headers: expect.any(Object) }),
+      expect.objectContaining({ headers: { 'Content-Type': 'application/json' } }),
     )
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       '/api/v1/keepers/sangsu/events/pending?limit=100&after=1',
-      expect.objectContaining({ headers: expect.any(Object) }),
+      expect.objectContaining({ headers: { 'Content-Type': 'application/json' } }),
     )
   })
 
@@ -631,7 +631,7 @@ describe('fetchKeeperChatOperation', () => {
     })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/keepers/sangsu/chat/operations/kmsg-restart-1',
-      expect.any(Object),
+      expect.objectContaining({ headers: { 'Content-Type': 'application/json' } }),
     )
   })
 })
@@ -1022,7 +1022,7 @@ describe('keeper lifecycle', () => {
     })
   })
 
-  it('fetches keeper checkpoint inventory from the admin route', async () => {
+  it('fetches keeper checkpoint inventory without a dashboard bearer', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         keeper: 'keeper-test',
@@ -1047,6 +1047,7 @@ describe('keeper lifecycle', () => {
       '/api/v1/keepers/keeper-test/checkpoints',
       expect.objectContaining({
         method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
       }),
     )
     expect(result.trace_id).toBe('trace-keeper-test')

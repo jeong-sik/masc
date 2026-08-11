@@ -73,7 +73,8 @@ outside exec/Gate:
   unknown, account?, token_source?, scopes?, probed_at, next_action}` — never
   a token value, and the store stays write-only as today.
   `token_source?` is the label gh itself prints — `keyring`, or the shadowing
-  variable's own name (`GH_TOKEN`, `GITHUB_TOKEN`, …) so `next_action` can
+  variable's own documented name (`GH_TOKEN`, `GITHUB_TOKEN`,
+  `GH_ENTERPRISE_TOKEN`, or `GITHUB_ENTERPRISE_TOKEN`) so `next_action` can
   name exactly what to unset. Parsed as
   `Keyring | Environment of string | Config_file of string`, never collapsed
   to a bare `env`.

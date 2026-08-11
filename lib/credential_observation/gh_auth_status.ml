@@ -41,7 +41,20 @@ let verdict_to_string = function
 ;;
 
 let command_argv ~hostname =
-  [| "gh"; "auth"; "status"; "--hostname"; hostname; "--json"; "hosts" |]
+  let hostname = String.trim hostname in
+  if String.equal hostname ""
+  then invalid_arg "Gh_auth_status.command_argv: hostname is empty"
+  else [| "gh"; "auth"; "status"; "--hostname"; hostname; "--json"; "hosts" |]
+;;
+
+let json_kind = function
+  | `Null -> "null"
+  | `Bool _ -> "boolean"
+  | `Int _ | `Intlit _ | `Float _ -> "number"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ | `Tuple _ -> "array"
+  | `Variant _ -> "variant"
 ;;
 
 let object_fields context = function
@@ -51,7 +64,7 @@ let object_fields context = function
       (Printf.sprintf
          "%s must be an object, got %s"
          context
-         (Yojson.Safe.to_string json))
+         (json_kind json))
 ;;
 
 let list_items context = function
@@ -61,7 +74,7 @@ let list_items context = function
       (Printf.sprintf
          "%s must be an array, got %s"
          context
-         (Yojson.Safe.to_string json))
+         (json_kind json))
 ;;
 
 let exact_fields ~context ~required ~optional fields =
@@ -99,7 +112,7 @@ let string_field context name fields =
          "%s.%s must be a string, got %s"
          context
          name
-         (Yojson.Safe.to_string json))
+         (json_kind json))
 ;;
 
 let bool_field context name fields =
@@ -112,7 +125,7 @@ let bool_field context name fields =
          "%s.%s must be a boolean, got %s"
          context
          name
-         (Yojson.Safe.to_string json))
+         (json_kind json))
 ;;
 
 let optional_string_field context name fields =
@@ -125,7 +138,7 @@ let optional_string_field context name fields =
          "%s.%s must be a string when present, got %s"
          context
          name
-         (Yojson.Safe.to_string json))
+         (json_kind json))
 ;;
 
 let account_of_login login =
@@ -146,26 +159,30 @@ let scopes_of_header = function
 let source_of_label label =
   if String.equal label "keyring"
   then Ok Keyring
-  else if String.ends_with ~suffix:"_TOKEN" label
+  else if
+    List.mem
+      label
+      [ "GH_TOKEN"; "GITHUB_TOKEN"; "GH_ENTERPRISE_TOKEN"; "GITHUB_ENTERPRISE_TOKEN" ]
   then Ok (Environment label)
   else if
-    String.ends_with ~suffix:"/hosts.yml" label
+    String.equal label "hosts.yml"
+    || String.ends_with ~suffix:"/hosts.yml" label
     || String.ends_with ~suffix:"\\hosts.yml" label
   then Ok (Config_file label)
-  else Error (Printf.sprintf "unknown gh tokenSource %S" label)
+  else Error "unknown gh tokenSource"
 ;;
 
 let outcome_of_state = function
   | "success" -> Ok Logged_in
   | "error" -> Ok Login_failed
   | "timeout" -> Ok Timed_out
-  | state -> Error (Printf.sprintf "unknown gh auth state %S" state)
+  | _ -> Error "unknown gh auth state"
 ;;
 
 let git_protocol_of_string = function
   | "https" -> Ok `Https
   | "ssh" -> Ok `Ssh
-  | protocol -> Error (Printf.sprintf "unknown gh gitProtocol %S" protocol)
+  | _ -> Error "unknown gh gitProtocol"
 ;;
 
 let parse_entry ~map_host ~index json =
@@ -187,11 +204,7 @@ let parse_entry ~map_host ~index json =
     then Ok ()
     else
       Error
-        (Printf.sprintf
-           "%s.host %S does not match map key %S"
-           context
-           host
-           map_host)
+        (Printf.sprintf "%s.host does not match map key" context)
   in
   let* login = string_field context "login" fields in
   let* source_label = string_field context "tokenSource" fields in
@@ -252,7 +265,7 @@ let parse_json json =
 let parse output =
   match
     try Ok (Yojson.Safe.from_string output) with
-    | Yojson.Json_error detail -> Error ("invalid gh auth JSON: " ^ detail)
+    | Yojson.Json_error _ -> Error "invalid gh auth JSON"
   with
   | Error detail -> { entries = []; schema_error = Some detail }
   | Ok json ->

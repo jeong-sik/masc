@@ -78,6 +78,45 @@ let test_command_targets_one_host_without_token () =
     (Gh_auth_status.command_argv ~hostname:"ghe.example.com")
 ;;
 
+let test_command_rejects_empty_hostname () =
+  check_raises
+    "empty hostname"
+    (Invalid_argument "Gh_auth_status.command_argv: hostname is empty")
+    (fun () -> ignore (Gh_auth_status.command_argv ~hostname:"  "))
+;;
+
+let test_bare_hosts_file_source_decodes () =
+  let json =
+    document
+      [ ( "github.com"
+        , `List
+            [ entry
+                ~active:true
+                ~git_protocol:"https"
+                ~host:"github.com"
+                ~login:"octo"
+                ~state:"success"
+                ~token_source:"hosts.yml"
+                ()
+            ] )
+      ]
+  in
+  let parsed = Gh_auth_status.parse json in
+  check (option string) "schema" None parsed.schema_error;
+  match parsed.entries with
+  | [ { source = Gh_auth_status.Config_file "hosts.yml"; _ } ] -> ()
+  | _ -> fail "bare hosts.yml source was not decoded as a config file"
+;;
+
+let test_schema_errors_redact_values () =
+  let parsed = Gh_auth_status.parse {|{"hosts":"ghp_secret"}|} in
+  check
+    (option string)
+    "token-free schema error"
+    (Some "hosts must be an object, got string")
+    parsed.schema_error
+;;
+
 let test_actual_cli_json_decodes () =
   let parsed = Gh_auth_status.parse actual_cli_json in
   check (option string) "schema" None parsed.schema_error;
@@ -221,6 +260,13 @@ let test_schema_drift_is_unknown () =
              then name, `String "secure_enclave"
              else name, value)
           valid_fields )
+    ; ( "undocumented token-like source"
+      , List.map
+          (fun (name, value) ->
+             if String.equal name "tokenSource"
+             then name, `String "VAULT_TOKEN"
+             else name, value)
+          valid_fields )
     ; "token exposure", ("token", `String "must-not-be-ingested") :: valid_fields
     ]
 ;;
@@ -246,6 +292,14 @@ let () =
             test_command_targets_one_host_without_token
         ; test_case "actual CLI JSON decodes" `Quick test_actual_cli_json_decodes
         ; test_case
+            "command rejects empty hostname"
+            `Quick
+            test_command_rejects_empty_hostname
+        ; test_case
+            "bare hosts file source decodes"
+            `Quick
+            test_bare_hosts_file_source_decodes
+        ; test_case
             "same-host environment shadows stored account"
             `Quick
             test_environment_shadows_stored_account_on_same_host
@@ -260,6 +314,10 @@ let () =
             `Quick
             test_empty_hosts_is_target_unauthenticated
         ; test_case "schema drift is unknown" `Quick test_schema_drift_is_unknown
+        ; test_case
+            "schema errors redact values"
+            `Quick
+            test_schema_errors_redact_values
         ; test_case
             "host identity mismatch is unknown"
             `Quick

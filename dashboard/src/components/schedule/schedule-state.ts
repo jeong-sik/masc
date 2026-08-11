@@ -43,9 +43,23 @@ export const scheduledAutomationLoading = computed(
 )
 
 let loadInFlight: Promise<void> | null = null
+let freshLoadQueued: Promise<void> | null = null
 
-export function loadScheduledAutomation(): Promise<void> {
-  if (loadInFlight) return loadInFlight
+export function loadScheduledAutomation(
+  { fresh = false }: { fresh?: boolean } = {},
+): Promise<void> {
+  if (loadInFlight) {
+    if (!fresh) return loadInFlight
+    if (freshLoadQueued) return freshLoadQueued
+
+    freshLoadQueued = loadInFlight
+      .catch(() => undefined)
+      .then(() => loadScheduledAutomation())
+      .finally(() => {
+        freshLoadQueued = null
+      })
+    return freshLoadQueued
+  }
 
   let request: Promise<void>
   request = scheduledAutomationResource
@@ -68,7 +82,11 @@ let stopRefresh: (() => void) | null = null
 export function subscribeScheduledAutomationRefresh(): () => void {
   subscriberCount += 1
   if (subscriberCount === 1) {
-    if (!scheduledAutomationProjection.value && !scheduledAutomationLoading.value) {
+    const projection = scheduledAutomationProjection.value
+    if (
+      (!projection || projection.state === 'unavailable')
+      && !scheduledAutomationLoading.value
+    ) {
       void loadScheduledAutomation()
     }
     stopRefresh = setupVisibleAutoRefresh(() => {

@@ -142,7 +142,7 @@ export function ScheduleSurface() {
     try {
       const result = await pruneSchedules()
       showToast(`완료된 예약 ${result.pruned_count.toLocaleString()}개를 정리했습니다.`, 'success')
-      await refresh()
+      await loadScheduledAutomation({ fresh: true })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error('[ScheduleSurface] prune failed:', error)

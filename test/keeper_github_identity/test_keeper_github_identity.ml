@@ -60,14 +60,6 @@ let env_value name env =
     else None)
 ;;
 
-let docker_mount_source = function
-  | [ "--env"; _; "-v"; mount ] ->
-    (match String.index_opt mount ':' with
-     | None -> Alcotest.fail "Docker identity mount is missing a destination"
-     | Some separator -> String.sub mount 0 separator)
-  | _ -> Alcotest.fail "unexpected Docker identity projection argv"
-;;
-
 let test_pure_environment_contract () =
   let input =
     [| "PATH=/bin"
@@ -261,7 +253,7 @@ let test_tool_projection_is_nonblocking_without_identity () =
   cleanup ();
   Alcotest.(check bool) "empty local projection is cleaned" false
     (Sys.file_exists projected_dir);
-  let docker_args, docker_state, docker_cleanup =
+  let docker_projection =
     match
       Github.docker_args_for_tool
         ~config
@@ -271,11 +263,11 @@ let test_tool_projection_is_nonblocking_without_identity () =
     | Error message -> Alcotest.fail message
     | Ok projection -> projection
   in
-  (match docker_state with
+  (match docker_projection.identity_state with
    | Github.Unconfigured -> ()
    | Configured _ -> Alcotest.fail "missing Docker identity reported configured");
   let host_dir = Github.config_dir ~config ~keeper_name in
-  let first_snapshot = docker_mount_source docker_args in
+  let first_snapshot = docker_projection.host_snapshot_dir in
   Alcotest.(check bool) "read-only empty snapshot exists" true
     (Sys.file_exists first_snapshot && Sys.is_directory first_snapshot);
   Alcotest.(check bool) "missing host identity remains unprovisioned" false
@@ -287,18 +279,18 @@ let test_tool_projection_is_nonblocking_without_identity () =
     ; first_snapshot
       ^ ":/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli:ro"
     ]
-    docker_args;
+    docker_projection.args;
   let host_dir =
     match Github.ensure_config_dir ~config ~keeper_name with
     | Error message -> Alcotest.fail message
     | Ok path -> path
   in
   let hosts = Filename.concat host_dir "hosts.yml" in
-  write_file hosts "github.com:\n  user: first-login\n";
+  write_file hosts "github.com:\n  user: first-login\n  oauth_token: first-token\n";
   Unix.chmod hosts 0o600;
   Alcotest.(check bool) "running snapshot cannot see later login" false
     (Sys.file_exists (Filename.concat first_snapshot "hosts.yml"));
-  let after_login_args, after_login_state, after_login_cleanup =
+  let after_login_projection =
     match
       Github.docker_args_for_tool
         ~config
@@ -308,18 +300,18 @@ let test_tool_projection_is_nonblocking_without_identity () =
     | Error message -> Alcotest.fail message
     | Ok projection -> projection
   in
-  (match after_login_state with
+  (match after_login_projection.identity_state with
    | Github.Configured path ->
      Alcotest.(check string) "next dispatch observes the host identity" host_dir path
    | Unconfigured -> Alcotest.fail "first login remained unconfigured");
-  let after_login_snapshot = docker_mount_source after_login_args in
+  let after_login_snapshot = after_login_projection.host_snapshot_dir in
   Alcotest.(check bool) "next dispatch gets a distinct snapshot" true
     (not (String.equal first_snapshot after_login_snapshot));
   Alcotest.(check string) "next snapshot contains the login state"
-    "github.com:\n  user: first-login\n"
+    "github.com:\n  user: first-login\n  oauth_token: first-token\n"
     (read_file (Filename.concat after_login_snapshot "hosts.yml"));
-  docker_cleanup ();
-  after_login_cleanup ();
+  docker_projection.cleanup ();
+  after_login_projection.cleanup ();
   Alcotest.(check bool) "empty Docker snapshot is cleaned" false
     (Sys.file_exists first_snapshot);
   Alcotest.(check bool) "configured Docker snapshot is cleaned" false
@@ -334,28 +326,28 @@ let test_empty_existing_identity_remains_unconfigured () =
     | Error message -> Alcotest.fail message
     | Ok path -> path
   in
-  let env, state, cleanup =
-    match Github.runtime_env_for_tool ~config ~keeper_name [||] with
-    | Error message -> Alcotest.fail message
-    | Ok projection -> projection
-  in
-  Fun.protect ~finally:cleanup @@ fun () ->
-  ignore env;
-  (match state with
-   | Github.Unconfigured -> ()
-   | Configured _ -> Alcotest.fail "empty GitHub CLI store reported configured");
   let hosts = Filename.concat host_dir "hosts.yml" in
-  write_file hosts "";
-  Unix.chmod hosts 0o600;
-  let _env, state, cleanup =
-    match Github.runtime_env_for_tool ~config ~keeper_name [||] with
-    | Error message -> Alcotest.fail message
-    | Ok projection -> projection
+  let assert_unconfigured label content =
+    write_file hosts content;
+    Unix.chmod hosts 0o600;
+    let _env, state, cleanup =
+      match Github.runtime_env_for_tool ~config ~keeper_name [||] with
+      | Error message -> Alcotest.fail message
+      | Ok projection -> projection
+    in
+    Fun.protect ~finally:cleanup @@ fun () ->
+    match state with
+    | Github.Unconfigured -> ()
+    | Configured _ -> Alcotest.fail (label ^ " reported configured")
   in
-  Fun.protect ~finally:cleanup @@ fun () ->
-  match state with
-  | Github.Unconfigured -> ()
-  | Configured _ -> Alcotest.fail "zero-byte hosts.yml reported configured"
+  assert_unconfigured "zero-byte hosts.yml" "";
+  assert_unconfigured "post-logout empty mapping" "{}\n";
+  assert_unconfigured
+    "host metadata without a credential"
+    "github.com:\n  user: logged-out-user\n  git_protocol: https\n";
+  assert_unconfigured
+    "empty account credential"
+    "github.com:\n  users:\n    logged-out-user:\n      oauth_token: \"\"\n"
 ;;
 
 let test_local_tool_env_rejects_identity_override () =
@@ -373,6 +365,24 @@ let test_local_tool_env_rejects_identity_override () =
     ; "GH_ENTERPRISE_TOKEN"
     ; "GITHUB_ENTERPRISE_TOKEN"
     ]
+;;
+
+let test_malformed_hosts_yaml_is_rejected () =
+  with_temp_base @@ fun _base_path config ->
+  let keeper_name = "malformed-hosts-yaml" in
+  let host_dir =
+    match Github.ensure_config_dir ~config ~keeper_name with
+    | Error message -> Alcotest.fail message
+    | Ok path -> path
+  in
+  let hosts = Filename.concat host_dir "hosts.yml" in
+  write_file hosts "github.com\n";
+  Unix.chmod hosts 0o600;
+  match Github.runtime_env_for_tool ~config ~keeper_name [||] with
+  | Error _ -> ()
+  | Ok (_, _, cleanup) ->
+    cleanup ();
+    Alcotest.fail "malformed hosts.yml was collapsed into unconfigured state"
 ;;
 
 let test_observe_does_not_provision_missing_identity () =
@@ -400,7 +410,9 @@ let test_tool_projection_uses_safe_existing_identity () =
     | Ok path -> path
   in
   let hosts = Filename.concat host_dir "hosts.yml" in
-  write_file hosts "github.com:\n  user: stored-user\n";
+  write_file
+    hosts
+    "github.com:\n  user: stored-user\n  users:\n    stored-user:\n      oauth_token: stored-token\n";
   Unix.chmod hosts 0o600;
   let env, state, cleanup =
     match Github.runtime_env_for_tool ~config ~keeper_name [| "KEEP=value" |] with
@@ -417,19 +429,20 @@ let test_tool_projection_uses_safe_existing_identity () =
   Unix.chmod projected_hosts 0o600;
   write_file projected_hosts "locally mutated\n";
   Alcotest.(check string) "local mutation cannot rewrite operator identity"
-    "github.com:\n  user: stored-user\n" (read_file hosts);
+    "github.com:\n  user: stored-user\n  users:\n    stored-user:\n      oauth_token: stored-token\n"
+    (read_file hosts);
   cleanup ();
   let container_masc_dir = "/tmp/masc-runtime/.masc" in
   let container_dir = Github.container_config_dir ~container_masc_dir ~keeper_name in
-  let docker_args, docker_state, docker_cleanup =
+  let docker_projection =
     match Github.docker_args_for_tool ~config ~keeper_name ~container_masc_dir with
     | Error message -> Alcotest.fail message
     | Ok projection -> projection
   in
-  (match docker_state with
+  (match docker_projection.identity_state with
    | Github.Configured path -> Alcotest.(check string) "mounted path" host_dir path
    | Unconfigured -> Alcotest.fail "existing Docker identity reported unconfigured");
-  let docker_snapshot = docker_mount_source docker_args in
+  let docker_snapshot = docker_projection.host_snapshot_dir in
   Alcotest.(check bool) "Docker never receives the operator-owned path" true
     (not (String.equal docker_snapshot host_dir));
   Alcotest.(check (list string)) "safe identity snapshot is mounted read-only"
@@ -438,12 +451,14 @@ let test_tool_projection_uses_safe_existing_identity () =
     ; "-v"
     ; docker_snapshot ^ ":" ^ container_dir ^ ":ro"
     ]
-    docker_args;
-  write_file hosts "github.com:\n  user: changed-after-dispatch\n";
+    docker_projection.args;
+  write_file
+    hosts
+    "github.com:\n  user: changed-after-dispatch\n  users:\n    changed-after-dispatch:\n      oauth_token: changed-token\n";
   Alcotest.(check string) "Docker snapshot is immutable across host login changes"
-    "github.com:\n  user: stored-user\n"
+    "github.com:\n  user: stored-user\n  users:\n    stored-user:\n      oauth_token: stored-token\n"
     (read_file (Filename.concat docker_snapshot "hosts.yml"));
-  docker_cleanup ();
+  docker_projection.cleanup ();
   Alcotest.(check bool) "Docker snapshot is cleaned" false
     (Sys.file_exists docker_snapshot)
 ;;
@@ -539,6 +554,10 @@ let () =
             "local tool env rejects identity override"
             `Quick
             test_local_tool_env_rejects_identity_override
+        ; Alcotest.test_case
+            "malformed hosts yaml is rejected"
+            `Quick
+            test_malformed_hosts_yaml_is_rejected
         ; Alcotest.test_case
             "observation does not provision missing identity"
             `Quick

@@ -39,8 +39,15 @@ type tool_identity_state =
   | Unconfigured
   | Configured of string
 
+type docker_tool_projection =
+  { args : string list
+  ; identity_state : tool_identity_state
+  ; host_snapshot_dir : string
+  ; cleanup : unit -> unit
+  }
+
 (** Projects the deterministic Keeper path without provisioning it. Missing
-    state and a safe directory without a non-empty [hosts.yml] are
+    state and a safe directory without a stored token in [hosts.yml] are
     [Unconfigured]; malformed or unsafe state is a typed error rather than
     being collapsed into absence. *)
 val runtime_env_for_tool :
@@ -66,7 +73,7 @@ val docker_args_for_tool :
   config:Workspace.config ->
   keeper_name:string ->
   container_masc_dir:string ->
-  (string list * tool_identity_state * (unit -> unit), string) result
+  (docker_tool_projection, string) result
 
 val login_argv : hostname:string -> string list
 val logout_argv : hostname:string -> string list

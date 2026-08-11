@@ -286,6 +286,99 @@ type tool_identity_state =
   | Unconfigured
   | Configured of string
 
+type docker_tool_projection =
+  { args : string list
+  ; identity_state : tool_identity_state
+  ; host_snapshot_dir : string
+  ; cleanup : unit -> unit
+  }
+
+let yaml_scalar_has_value value =
+  let value = String.trim value in
+  not
+    (String.equal value ""
+     || String.equal value "''"
+     || String.equal value "\"\""
+     || String.equal value "null"
+     || String.equal value "~")
+;;
+
+(* [gh auth login --insecure-storage] writes a deterministic mapping whose
+   credential authority is an [oauth_token] scalar, either directly below a
+   host or below that host's [users] mapping.  Decode that closed shape instead
+   of treating arbitrary non-empty bytes (notably the post-logout [{}]) as an
+   identity.  Unsupported YAML constructs fail closed rather than being
+   guessed into configured state. *)
+let hosts_yaml_has_stored_token content =
+  let lines = String.split_on_char '\n' content in
+  let meaningful =
+    List.filter_map
+      (fun raw_line ->
+         let line = String.trim raw_line in
+         if String.equal line "" || String.starts_with ~prefix:"#" line
+         then None
+         else Some raw_line)
+      lines
+  in
+  match meaningful with
+  | [] -> Ok false
+  | [ line ] when String.equal (String.trim line) "{}" -> Ok false
+  | _ ->
+    let rec scan active_host has_token = function
+      | [] -> Ok has_token
+      | raw_line :: rest ->
+        if String.contains raw_line '\t'
+        then Error "GitHub CLI hosts.yml must not contain tab indentation"
+        else
+          let indentation =
+            let rec count index =
+              if index < String.length raw_line && raw_line.[index] = ' '
+              then count (index + 1)
+              else index
+            in
+            count 0
+          in
+          let line = String.sub raw_line indentation (String.length raw_line - indentation) in
+          if String.equal line "" || String.starts_with ~prefix:"#" line
+          then scan active_host has_token rest
+          else
+            (match String.index_opt line ':' with
+             | None -> Error "GitHub CLI hosts.yml contains a non-mapping entry"
+             | Some separator ->
+               let key = String.sub line 0 separator |> String.trim in
+               let value =
+                 String.sub
+                   line
+                   (separator + 1)
+                   (String.length line - separator - 1)
+                 |> String.trim
+               in
+               if String.equal key ""
+               then Error "GitHub CLI hosts.yml contains an empty mapping key"
+               else if indentation = 0
+               then
+                 if not (String.equal value "")
+                 then Error "GitHub CLI host entry must be a mapping"
+                 else scan true has_token rest
+               else if not active_host
+               then Error "GitHub CLI hosts.yml contains data outside a host mapping"
+               else
+                 scan
+                   active_host
+                   (has_token
+                    || (String.equal key "oauth_token" && yaml_scalar_has_value value))
+                   rest)
+    in
+    scan false false meaningful
+;;
+
+let hosts_file_has_stored_token ~config_dir hosts_path =
+  match Fs_compat.load_owned_regular_file ~ownership_root:config_dir hosts_path with
+  | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
+  | Ok None -> Ok false
+  | Ok (Some content) -> hosts_yaml_has_stored_token content
+;;
+
 let inspect_optional_directory path =
   match lstat_opt path with
   | Error _ as error -> error
@@ -326,9 +419,14 @@ let existing_config_dir ~config ~keeper_name =
                 | Error _ as error -> error
                 | Ok None -> Ok None
                 | Ok (Some stats) when stats.Unix.st_kind = Unix.S_REG ->
-                  if stats.Unix.st_size > 0
-                  then Ok (Some keeper_config_dir)
-                  else Ok None
+                  (match
+                     hosts_file_has_stored_token
+                       ~config_dir:keeper_config_dir
+                       hosts_path
+                   with
+                   | Error _ as error -> error
+                   | Ok true -> Ok (Some keeper_config_dir)
+                   | Ok false -> Ok None)
                 | Ok (Some stats) ->
                   Error
                     (Printf.sprintf
@@ -415,26 +513,32 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
     let snapshot, cleanup = empty_local_tool_config_snapshot () in
     let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
     Ok
-      ( [ "--env"
-        ; "GH_CONFIG_DIR=" ^ container_dir
-        ; "-v"
-        ; snapshot ^ ":" ^ container_dir ^ ":ro"
-        ]
-      , Unconfigured
-      , cleanup )
+      { args =
+          [ "--env"
+          ; "GH_CONFIG_DIR=" ^ container_dir
+          ; "-v"
+          ; snapshot ^ ":" ^ container_dir ^ ":ro"
+          ]
+      ; identity_state = Unconfigured
+      ; host_snapshot_dir = snapshot
+      ; cleanup
+      }
   | Ok (Some host_dir) ->
     (match copy_local_tool_config_snapshot host_dir with
      | Error _ as error -> error
      | Ok (snapshot, cleanup) ->
        let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
        Ok
-         ( [ "--env"
-           ; "GH_CONFIG_DIR=" ^ container_dir
-           ; "-v"
-           ; snapshot ^ ":" ^ container_dir ^ ":ro"
-           ]
-         , Configured host_dir
-         , cleanup ))
+         { args =
+             [ "--env"
+             ; "GH_CONFIG_DIR=" ^ container_dir
+             ; "-v"
+             ; snapshot ^ ":" ^ container_dir ^ ":ro"
+             ]
+         ; identity_state = Configured host_dir
+         ; host_snapshot_dir = snapshot
+         ; cleanup
+         })
 ;;
 
 let login_argv ~hostname =

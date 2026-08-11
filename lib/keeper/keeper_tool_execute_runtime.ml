@@ -161,6 +161,14 @@ let docker_sandbox_target = Keeper_sandbox_shell_ir_target.docker_target
 let docker_local_fallback_target =
   Keeper_sandbox_shell_ir_target.docker_local_fallback_target
 
+type dispatch_bundle =
+  { sandbox : Masc_exec.Sandbox_target.t
+  ; fields : (string * Yojson.Safe.t) list
+  ; base_host_env : string array option
+  ; github_config_dir : unit -> (string, string) result
+  ; cleanup : unit -> unit
+  }
+
 let input_with_cwd cwd = function
   | Keeper_tool_execute_typed_input.Exec
       { argv; cwd = _; env; timeout_sec; stdin; stdout; stderr } ->
@@ -286,11 +294,22 @@ let handle_tool_execute_typed
                        | Keeper_github_identity.Unconfigured -> "unconfigured"
                        | Configured _ -> "configured"
                      in
-                     Ok
-                       ( Masc_exec.Sandbox_target.host ()
-                       , ("github_identity", `String identity_field) :: extra_fields
-                       , Some env
-                       , cleanup ))))
+                     (match Keeper_github_identity.projected_config_dir env with
+                      | None ->
+                        cleanup ();
+                        Error
+                          (Keeper_sandbox_shell_ir_target.target_error
+                             ~fields:extra_fields
+                             "local GitHub identity projection has no GH_CONFIG_DIR")
+                      | Some github_config_dir ->
+                        Ok
+                          { sandbox = Masc_exec.Sandbox_target.host ()
+                          ; fields =
+                              ("github_identity", `String identity_field) :: extra_fields
+                          ; base_host_env = Some env
+                          ; github_config_dir = (fun () -> Ok github_config_dir)
+                          ; cleanup
+                          }))))
         in
         let dispatch_sandbox =
           match sandbox_profile with
@@ -307,7 +326,10 @@ let handle_tool_execute_typed
                 (match target with
                  | Masc_exec.Sandbox_target.Host ->
                    local_dispatch_sandbox ~extra_fields:fields ()
-                 | Docker _ -> Ok (target, fields, None, Fun.id))
+                 | Docker _ ->
+                   Error
+                     (Keeper_sandbox_shell_ir_target.target_error
+                        "Docker preflight fallback returned a Docker target"))
               | Some _ | None ->
                 docker_sandbox_target
                   ~turn_sandbox_factory
@@ -315,14 +337,24 @@ let handle_tool_execute_typed
                   ~cwd
                   ?timeout_sec
                   ()
-                |> Result.map (fun target ->
-                  ( target
-                  , [ "requested_sandbox", `String "docker"
-                    ; "via", `String "docker"
-                    ; "sandbox_profile", `String "docker"
-                    ]
-                  , None
-                  , Fun.id )))
+                |> Result.map
+                     (fun
+                       (dispatch : Keeper_sandbox_shell_ir_target.docker_dispatch)
+                     ->
+                  { sandbox = dispatch.target
+                  ; fields =
+                      [ "requested_sandbox", `String "docker"
+                      ; "via", `String "docker"
+                      ; "sandbox_profile", `String "docker"
+                      ]
+                  ; base_host_env = None
+                  ; github_config_dir =
+                      (fun () ->
+                         Keeper_turn_sandbox_runtime.prepare_github_identity_snapshot
+                           ?timeout_sec
+                           dispatch.runtime)
+                  ; cleanup = Fun.id
+                  }))
         in
         (match dispatch_sandbox with
          | Error ({ message; fields } : Keeper_sandbox_shell_ir_target.target_error) ->
@@ -333,24 +365,11 @@ let handle_tool_execute_typed
                    @ model_location_fields
                    @ fields)
                 message)
-         | Ok (dispatch_sandbox, sandbox_extra_fields, base_host_env, cleanup) ->
-        Fun.protect ~finally:cleanup (fun () ->
-        let github_config_dir =
-          match base_host_env with
-          | Some env ->
-            (match Keeper_github_identity.projected_config_dir env with
-             | Some path -> path
-             | None ->
-               Keeper_github_identity.config_dir ~config ~keeper_name:meta.name)
-          | None -> Keeper_github_identity.config_dir ~config ~keeper_name:meta.name
-        in
-        let output_redaction =
-          execute_secret_redaction
-            ~additional_secret_files:
-              [ Filename.concat github_config_dir "hosts.yml" ]
-            ~base_path:config.base_path
-            ~keeper_name:meta.name
-        in
+         | Ok dispatch_bundle ->
+        Fun.protect ~finally:dispatch_bundle.cleanup (fun () ->
+        let dispatch_sandbox = dispatch_bundle.sandbox in
+        let sandbox_extra_fields = dispatch_bundle.fields in
+        let base_host_env = dispatch_bundle.base_host_env in
         let dispatched_model_location_fields =
           match dispatch_sandbox with
           | Masc_exec.Sandbox_target.Host ->
@@ -460,6 +479,20 @@ let handle_tool_execute_typed
             (Keeper_gate.authorization_source_to_string authorization.source);
           let authorized result =
             Keeper_tool_execution.with_gate_authorization authorization result
+          in
+          (match dispatch_bundle.github_config_dir () with
+           | Error err ->
+             authorized
+               (typed_error_json
+                  ~extra_fields:[ "error", `String "github_identity_snapshot_unavailable" ]
+                  ("GitHub identity snapshot unavailable: " ^ err))
+           | Ok github_config_dir ->
+          let output_redaction =
+            execute_secret_redaction
+              ~additional_secret_files:
+                [ Filename.concat github_config_dir "hosts.yml" ]
+              ~base_path:config.base_path
+              ~keeper_name:meta.name
           in
           (* NDT-OK: wall clock is used only for elapsed telemetry, never for
              dispatch branching or policy decisions. *)
@@ -641,7 +674,7 @@ let handle_tool_execute_typed
               (if succeeded
                then Keeper_tool_execution.success payload
                else Keeper_tool_execution.failure payload)
-        ))))
+        )))))
 
 let handle_tool_execute_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

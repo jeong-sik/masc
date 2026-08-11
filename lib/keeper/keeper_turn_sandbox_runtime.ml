@@ -6,6 +6,12 @@ type state =
   | Not_started
   | Running of { container_name : string }
 
+type github_identity_snapshot =
+  { args : string list
+  ; host_dir : string
+  ; cleanup : unit -> unit
+  }
+
 type t =
   { config : Workspace.config
   ; meta : keeper_meta
@@ -17,16 +23,20 @@ type t =
   ; gid : int
   ; network_mode : network_mode
   ; state : state Atomic.t
-  ; github_identity_cleanup : (unit -> unit) option Atomic.t
+  ; github_identity_snapshot : github_identity_snapshot option Atomic.t
   }
 
 let get_state t = Atomic.get t.state
 let set_state t state = Atomic.set t.state state
 
 let release_github_identity_snapshot t =
-  match Atomic.exchange t.github_identity_cleanup None with
+  match Atomic.exchange t.github_identity_snapshot None with
   | None -> ()
-  | Some cleanup -> cleanup ()
+  | Some snapshot -> snapshot.cleanup ()
+;;
+
+let github_identity_snapshot_dir t =
+  Option.map (fun snapshot -> snapshot.host_dir) (Atomic.get t.github_identity_snapshot)
 ;;
 
 module For_testing = struct
@@ -41,7 +51,7 @@ module For_testing = struct
     ; gid = 0
     ; network_mode = Network_none
     ; state = Atomic.make state
-    ; github_identity_cleanup = Atomic.make None
+    ; github_identity_snapshot = Atomic.make None
     }
   ;;
 
@@ -76,7 +86,7 @@ let create
   ; gid = Unix.getgid ()
   ; network_mode
   ; state = Atomic.make Not_started
-  ; github_identity_cleanup = Atomic.make None
+  ; github_identity_snapshot = Atomic.make None
   }
 ;;
 
@@ -380,14 +390,28 @@ let start_container ?timeout_sec (t : t) =
         with
         | Error err -> Error ("docker_container_start_failed: secret_projection: " ^ err)
         | Ok secret_projection ->
-         (match
-            Keeper_github_identity.docker_args_for_tool
-              ~config:t.config
-              ~keeper_name:t.meta.name
-              ~container_masc_dir:
-                (Keeper_sandbox_runtime_setup.container_masc_dir
-                   ~container_root:t.container_root)
-          with
+         let github_identity_result =
+           match Atomic.get t.github_identity_snapshot with
+          | Some snapshot -> Ok (snapshot, false)
+          | None ->
+            (match
+               Keeper_github_identity.docker_args_for_tool
+                 ~config:t.config
+                 ~keeper_name:t.meta.name
+                 ~container_masc_dir:
+                   (Keeper_sandbox_runtime_setup.container_masc_dir
+                      ~container_root:t.container_root)
+             with
+             | Error _ as error -> error
+             | Ok projection ->
+               Ok
+                 ( { args = projection.args
+                   ; host_dir = projection.host_snapshot_dir
+                   ; cleanup = projection.cleanup
+                   }
+                 , true ))
+         in
+         (match github_identity_result with
           | Error err ->
             Eio_guard.protect
               ~finally:secret_projection.cleanup
@@ -395,15 +419,15 @@ let start_container ?timeout_sec (t : t) =
                  Error
                    ("docker_container_start_failed: github_identity_invalid: "
                     ^ err))
-          | Ok (github_identity_args, _identity_state, github_identity_cleanup) ->
+          | Ok (github_identity, github_identity_is_new) ->
          let keep_github_identity_snapshot = ref false in
          Eio_guard.protect
            ~finally:(fun () ->
              Fun.protect
                ~finally:secret_projection.cleanup
                (fun () ->
-                 if not !keep_github_identity_snapshot
-                 then github_identity_cleanup ()))
+                 if github_identity_is_new && not !keep_github_identity_snapshot
+                 then github_identity.cleanup ()))
            (fun () ->
          let argv =
            Keeper_sandbox_runtime.docker_command_argv ()
@@ -445,7 +469,7 @@ let start_container ?timeout_sec (t : t) =
                ~base_path:t.config.base_path
                ~container_root:t.container_root
            @ secret_projection.docker_args
-           @ github_identity_args
+           @ github_identity.args
            @ identity_mounts
            @ network_args
            @ [ image; "tail"; "-f"; "/dev/null" ]
@@ -459,7 +483,8 @@ let start_container ?timeout_sec (t : t) =
                  container_name
              with
              | Ok () ->
-               Atomic.set t.github_identity_cleanup (Some github_identity_cleanup);
+               if github_identity_is_new
+               then Atomic.set t.github_identity_snapshot (Some github_identity);
                keep_github_identity_snapshot := true;
                set_state t (Running { container_name });
                Ok container_name
@@ -519,9 +544,17 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
       | Ok () -> Ok container_name
       | Error _ ->
         set_state t Not_started;
-        release_github_identity_snapshot t;
         start_container ?timeout_sec t)
   | Not_started -> start_container ?timeout_sec t
+;;
+
+let prepare_github_identity_snapshot ?timeout_sec t =
+  match ensure_started ?timeout_sec t with
+  | Error _ as error -> error
+  | Ok _container_name ->
+    (match github_identity_snapshot_dir t with
+     | Some path -> Ok path
+     | None -> Error "running container has no GitHub identity snapshot")
 ;;
 
 let run_exec_with_status_split_once
@@ -624,7 +657,6 @@ let run_exec_with_status_split
      | Preserve_failed_exec -> failed
      | Restart_failed_exec ->
        set_state t Not_started;
-       release_github_identity_snapshot t;
        (match
           run_exec_with_status_split_once
             ?stdin_content
@@ -756,7 +788,6 @@ let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
      | Preserve_failed_exec -> failed
      | Restart_failed_exec ->
        set_state t Not_started;
-       release_github_identity_snapshot t;
        (match
           run_exec_pipeline_with_status_once
             ?timeout_sec
@@ -849,7 +880,6 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
         | Preserve_failed_exec -> Ok (st, out)
         | Restart_failed_exec ->
         set_state t Not_started;
-        release_github_identity_snapshot t;
         (match ensure_started t ~timeout_sec with
          | Error _ as err -> err
          | Ok container_name ->

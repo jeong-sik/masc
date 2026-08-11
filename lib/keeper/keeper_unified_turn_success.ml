@@ -520,25 +520,17 @@ module For_testing = struct
   let post_action_of_channel = post_action_of_channel
 end
 
-let emit_terminal_fsm
-      ~config
-      ~meta
-      ~keeper_turn_id
-      ~updated_meta
-      result
-  =
+let emit_terminal_fsm ~meta ~keeper_turn_id =
   Keeper_turn_fsm.emit_transition
     ~keeper_name:meta.Keeper_meta_contract.name
     ~turn_id:keeper_turn_id
     ~prev:Keeper_turn_fsm.Streaming
     Keeper_turn_fsm.Completing;
-  reset_turn_failures_for_stop_reason ~config ~updated_meta result;
   Keeper_turn_fsm.emit_transition
     ~keeper_name:meta.name
     ~turn_id:keeper_turn_id
     ~prev:Keeper_turn_fsm.Completing
-    Keeper_turn_fsm.Done;
-  Completed updated_meta
+    Keeper_turn_fsm.Done
 ;;
 
 let handle
@@ -667,14 +659,11 @@ let handle
      Completion-contract observations never rewrite a successful runtime turn
      into a failed Keeper lifecycle transition. *)
   run_projection KTP.Terminal_fsm_projection (fun () ->
-    match
-      emit_terminal_fsm
-        ~config
-        ~meta
-        ~keeper_turn_id
-        ~updated_meta
-        result
-    with
-    | Completed _ -> ());
+    emit_terminal_fsm ~meta ~keeper_turn_id);
+  (* Turn success is product state, not a best-effort FSM projection. Keep the
+     failure counter and health reset outside [run_projection] so an exception
+     from either transition emitter cannot leave a completed turn marked as
+     failed on the next heartbeat. *)
+  reset_turn_failures_for_stop_reason ~config ~updated_meta result;
   Completed updated_meta
 ;;

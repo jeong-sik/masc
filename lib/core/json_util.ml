@@ -162,14 +162,19 @@ let string_assoc_to_json fields =
 
 let string_assoc_of_json = function
   | `Assoc fields ->
-    Ok
-      (List.filter_map
-         (fun (key, value) ->
-           match value with
-           | `String s -> Some (key, s)
-           | _ -> None)
-         fields)
-  | _ -> Error "expected string object"
+    let rec collect acc = function
+      | [] -> Ok (List.rev acc)
+      | (key, `String value) :: rest -> collect ((key, value) :: acc) rest
+      | (key, value) :: _ ->
+        Error
+          (Printf.sprintf
+             "string object field %S must be a string, got %s"
+             key
+             (kind_name value))
+    in
+    collect [] fields
+  | value ->
+    Error (Printf.sprintf "expected string object, got %s" (kind_name value))
 
 let string_field_if_present key = function
   | None -> []

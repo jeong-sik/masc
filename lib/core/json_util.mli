@@ -51,8 +51,9 @@ val string_assoc_to_json : (string * string) list -> Yojson.Safe.t
 val string_assoc_of_json :
   Yojson.Safe.t -> ((string * string) list, string) result
 (** [string_assoc_of_json json] reads an object back into string pairs,
-    dropping members whose value is not a string.  Errors when [json] is
-    not an object. *)
+    preserving field order.  Returns an explicit error when [json] is not an
+    object or any member is not a string; malformed metadata is never silently
+    dropped. *)
 
 val string_field_if_present :
   string -> string option -> (string * Yojson.Safe.t) list

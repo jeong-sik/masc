@@ -181,6 +181,22 @@ let test_json_string_list_empty () =
   check string "builds empty list" "[]"
     (Yojson.Safe.to_string result)
 
+let test_string_assoc_of_json () =
+  check
+    (result (list (pair string string)) string)
+    "preserves string fields"
+    (Ok [ "first", "1"; "second", "2" ])
+    (Json_util.string_assoc_of_json
+       (`Assoc [ "first", `String "1"; "second", `String "2" ]))
+
+let test_string_assoc_of_json_rejects_non_string () =
+  check
+    (result (list (pair string string)) string)
+    "does not silently drop an invalid field"
+    (Error "string object field \"count\" must be a string, got int")
+    (Json_util.string_assoc_of_json
+       (`Assoc [ "name", `String "ok"; "count", `Int 1 ]))
+
 (* ================================================================
    dedupe_keep_order
    ================================================================ *)
@@ -274,6 +290,13 @@ let () =
     "json_string_list", [
       test_case "construction" `Quick test_json_string_list_construction;
       test_case "empty" `Quick test_json_string_list_empty;
+    ];
+    "string_assoc", [
+      test_case "decode strings" `Quick test_string_assoc_of_json;
+      test_case
+        "reject non-string"
+        `Quick
+        test_string_assoc_of_json_rejects_non_string;
     ];
     "dedupe_keep_order", [
     ];

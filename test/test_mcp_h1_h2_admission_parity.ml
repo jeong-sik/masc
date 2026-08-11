@@ -603,6 +603,54 @@ let test_ws_upgrade_allows_authenticated_cross_origin () =
       failf "expected authenticated cross-origin upgrade to pass, got %s"
         (Masc_domain.masc_error_to_string err))
 
+(* The routes below are guarded on H1 and must stay outside the public-read
+   allowlist. This is the invariant the H2 fix rests on: adding any of these
+   paths to [is_public_read_path] would open them on BOTH transports, and the
+   wrapper parity asserted in the next test would then prove nothing. *)
+let test_transport_guarded_paths_are_not_public_read () =
+  List.iter
+    (fun path ->
+      check bool
+        (Printf.sprintf "%s is not public-read" path)
+        false
+        (Server_auth.is_public_read_path path))
+    [ "/graphql"; "/api/v1/dashboard/workspace"; "/api/v1/status" ]
+
+(* serve_auto hands h2c connections to Server_h2_gateway and everything else to
+   the HTTP/1 router, so a route's authorization is decided independently on
+   each side. POST /graphql executed unauthenticated over h2c while HTTP/1
+   answered 401, because the H2 arm used [with_server_state] — which fetches
+   server state and authorizes nothing.
+
+   [with_h2_public_read] is not a substitute for [with_h2_read_auth]: it first
+   requires [http_auth_strict_enabled] and a non-public path, whereas H1's
+   [with_read_auth] authorizes unconditionally. Each H2 arm must name the
+   counterpart of the wrapper its H1 route uses. *)
+let test_h1_h2_read_gate_wiring_parity () =
+  let h1_frontend = source_file "lib/server/server_routes_http_routes_frontend.ml" in
+  let h2 = source_file "lib/server/server_h2_gateway.ml" in
+  assert_contains "H1 guards /graphql with the unconditional read gate"
+    ~needle:{|~path:"/graphql" ~methods:[`GET; `POST]|}
+    h1_frontend;
+  assert_contains "H2 defines the counterpart of Server_auth.with_read_auth"
+    ~needle:"let with_h2_read_auth h2_reqd f =" h2;
+  assert_contains "H2 read gate authorizes without a strict-mode precondition"
+    ~needle:"authorize_read_request" h2;
+  assert_contains "H2 GET /graphql passes through the read gate"
+    ~needle:"| `GET, \"/graphql\" ->\n          with_h2_read_auth h2_reqd" h2;
+  assert_contains "H2 POST /graphql passes through the read gate"
+    ~needle:"with_h2_read_auth h2_reqd (fun state ->\n              let response = Graphql_api.handle_request"
+    h2;
+  assert_contains "H2 dashboard workspace mirrors H1 with_public_read"
+    ~needle:"| `GET, \"/api/v1/dashboard/workspace\" ->\n          with_h2_public_read h2_reqd"
+    h2;
+  assert_contains "H2 status mirrors H1 with_public_read"
+    ~needle:"| `GET, \"/api/v1/status\" ->\n          with_h2_public_read h2_reqd" h2;
+  (* [with_server_state] performs no authorization; no read route may reach it
+     directly. The arms that still call it (webrtc, MCP) authorize inside. *)
+  assert_not_contains "H2 /graphql no longer reads state without authorizing"
+    ~needle:"with_h2_read_auth h2_reqd (fun _state ->\n            with_server_state" h2
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -638,6 +686,10 @@ let () =
             test_h1_h2_delete_route_wiring_parity;
           test_case "H2 OAuth routes preserve admitted authority" `Quick
             test_h2_oauth_route_and_authority_lifetime;
+          test_case "transport-guarded paths are not public-read" `Quick
+            test_transport_guarded_paths_are_not_public_read;
+          test_case "H1/H2 read gate wiring parity" `Quick
+            test_h1_h2_read_gate_wiring_parity;
         ] );
       ( "ws-upgrade-admission",
         [

@@ -219,25 +219,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
              | Error () -> ())
         | Error err -> h2_respond_auth_error h2_reqd err)
     in
-    (* H2 counterpart of [Server_auth.with_read_auth]: authorize on every
-       request, with no [http_auth_strict_enabled] / [is_public_read_path]
-       precondition. [with_h2_public_read] applies those preconditions and is
-       therefore NOT interchangeable — a route the H1 side guards with
-       [with_read_auth] must use this one, or the same path enforces different
-       authorization depending on which transport the client negotiated. *)
-    let with_h2_read_auth h2_reqd f =
-      with_server_state h2_reqd (fun state ->
-        match
-          authorize_read_request
-            ~base_path:(Mcp_server.workspace_config state).base_path
-            httpun_request
-        with
-        | Ok () ->
-            (match h2_check_agent_rate_limit h2_reqd with
-             | Ok () -> f state
-             | Error () -> ())
-        | Error err -> h2_respond_auth_error h2_reqd err)
-    in
     let h2_respond_board_reaction_result h2_reqd = function
       | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
       | Error error ->
@@ -779,23 +760,18 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       (* ─────────────────────────────────────────────────────────────────────
          GraphQL
          ───────────────────────────────────────────────────────────────────── *)
-      (* Both arms carry the same read gate the H1 route applies
-         (server_routes_http_routes_frontend.ml wraps GET and POST /graphql in
-         [with_read_auth]). /graphql is not in [is_public_read_path], so an
-         unauthenticated caller must be rejected on either transport. *)
       | `GET, "/graphql" ->
-          with_h2_read_auth h2_reqd (fun _state ->
-            let nonce =
-              let rng = Random.State.make_self_init () in
-              let bytes = Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256)) in
-              Base64.encode_string (Bytes.to_string bytes)
-            in
-            let csp_header = ("content-security-policy", graphql_csp_header nonce) in
-            h2_respond_html h2_reqd (graphql_playground_html ~nonce) ~extra_headers:(csp_header :: cors))
+          let nonce =
+            let rng = Random.State.make_self_init () in
+            let bytes = Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256)) in
+            Base64.encode_string (Bytes.to_string bytes)
+          in
+          let csp_header = ("content-security-policy", graphql_csp_header nonce) in
+          h2_respond_html h2_reqd (graphql_playground_html ~nonce) ~extra_headers:(csp_header :: cors)
 
       | `POST, "/graphql" ->
           h2_read_body h2_reqd (fun body_str ->
-            with_h2_read_auth h2_reqd (fun state ->
+            with_server_state h2_reqd (fun state ->
               let response = Graphql_api.handle_request ~config:(Mcp_server.workspace_config state) body_str in
               let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
               h2_respond_json h2_reqd response.body ~status ~extra_headers:cors))
@@ -827,12 +803,8 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
-      (* H1 serves this through [with_public_read]
-         (server_routes_http_routes_dashboard.ml). [with_server_state] only
-         fetches state; under MASC_HTTP_AUTH_STRICT it left the workspace
-         timeline readable over h2c while H1 demanded a token. *)
       | `GET, "/api/v1/dashboard/workspace" ->
-          with_h2_public_read h2_reqd (fun state ->
+          with_server_state h2_reqd (fun state ->
             let limit =
               Server_utils.int_query_param httpun_request "limit" ~default:50
               |> Server_utils.clamp ~min_v:1 ~max_v:200
@@ -1017,9 +989,8 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
-      (* H1 serves this through [with_public_read] (server_ide_http.ml:609). *)
       | `GET, "/api/v1/status" ->
-          with_h2_public_read h2_reqd (fun state ->
+          with_server_state h2_reqd (fun state ->
             let config = (Mcp_server.workspace_config state) in
             let workspace_state = Workspace.read_state config in
             let tempo = Tempo.get_tempo config in

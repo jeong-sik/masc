@@ -98,17 +98,17 @@ let ensure_child_directory ~parent ~name ~private_mode =
             path))
 ;;
 
-let secure_config_files_in config_path =
-  let rec secure = function
+let inspect_config_files_in ~on_regular config_path =
+  let rec inspect = function
     | [] -> Ok ()
     | filename :: rest ->
       let path = Filename.concat config_path filename in
       (match lstat_opt path with
        | Error _ as error -> error
-       | Ok None -> secure rest
+       | Ok None -> inspect rest
        | Ok (Some stats) when stats.Unix.st_kind = Unix.S_REG ->
-         Unix.chmod path 0o600;
-         secure rest
+         on_regular path;
+         inspect rest
        | Ok (Some stats) ->
          Error
            (Printf.sprintf
@@ -116,7 +116,15 @@ let secure_config_files_in config_path =
               (file_kind_to_string stats.Unix.st_kind)
               path))
   in
-  secure [ "hosts.yml"; "config.yml" ]
+  inspect [ "hosts.yml"; "config.yml" ]
+;;
+
+let secure_config_files_in config_path =
+  inspect_config_files_in ~on_regular:(fun path -> Unix.chmod path 0o600) config_path
+;;
+
+let validate_config_files_in config_path =
+  inspect_config_files_in ~on_regular:(fun _path -> ()) config_path
 ;;
 
 let ensure_config_dir ~base_path ~keeper_name =
@@ -191,6 +199,39 @@ let runtime_env ~base_path ~keeper_name env =
   | Ok keeper_config_dir -> Ok (overlay_config_env ~config_dir:keeper_config_dir env)
 ;;
 
+let existing_config_dir ~base_path ~keeper_name =
+  if not (Keeper_config.validate_name keeper_name)
+  then None
+  else begin
+    let keepers_root = Common.keepers_runtime_dir_of_base ~base_path in
+    let keeper_root = Filename.concat keepers_root keeper_name in
+    let keeper_config_dir = Filename.concat keeper_root "github-cli" in
+    match require_directory keepers_root with
+    | Error _ -> None
+    | Ok () ->
+      (match require_directory keeper_root with
+       | Error _ -> None
+       | Ok () ->
+         (match require_directory keeper_config_dir with
+          | Error _ -> None
+          | Ok () ->
+            (match validate_config_files_in keeper_config_dir with
+             | Error _ -> None
+             | Ok () -> Some keeper_config_dir)))
+  end
+;;
+
+let unavailable_config_dir = "/dev/null"
+
+let runtime_env_for_tool ~base_path ~keeper_name env =
+  let config_dir =
+    match existing_config_dir ~base_path ~keeper_name with
+    | Some path -> path
+    | None -> unavailable_config_dir
+  in
+  overlay_config_env ~config_dir env
+;;
+
 let docker_args ~base_path ~keeper_name ~container_masc_dir =
   match ensure_config_dir ~base_path ~keeper_name with
   | Error _ as error -> error
@@ -202,6 +243,18 @@ let docker_args ~base_path ~keeper_name ~container_masc_dir =
       ; "-v"
       ; host_dir ^ ":" ^ container_dir ^ ":ro"
       ]
+;;
+
+let docker_args_for_tool ~base_path ~keeper_name ~container_masc_dir =
+  match existing_config_dir ~base_path ~keeper_name with
+  | None -> [ "--env"; "GH_CONFIG_DIR=" ^ unavailable_config_dir ]
+  | Some host_dir ->
+    let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
+    [ "--env"
+    ; "GH_CONFIG_DIR=" ^ container_dir
+    ; "-v"
+    ; host_dir ^ ":" ^ container_dir ^ ":ro"
+    ]
 ;;
 
 let login_argv ~hostname =

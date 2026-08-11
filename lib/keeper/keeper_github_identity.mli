@@ -29,11 +29,22 @@ val projected_token_env_names : string array -> string list
 val runtime_env :
   base_path:string -> keeper_name:string -> string array -> (string array, string) result
 
+(** Projects Keeper GitHub identity into a general tool environment without
+    making identity availability an execution gate. Missing or unsafe state is
+    isolated from the host account through an unusable GitHub CLI config path. *)
+val runtime_env_for_tool :
+  base_path:string -> keeper_name:string -> string array -> string array
+
 val docker_args :
   base_path:string ->
   keeper_name:string ->
   container_masc_dir:string ->
   (string list, string) result
+
+(** Docker counterpart of [runtime_env_for_tool]. A safe existing identity is
+    mounted read-only; otherwise only an unusable config path is projected. *)
+val docker_args_for_tool :
+  base_path:string -> keeper_name:string -> container_masc_dir:string -> string list
 
 val login_argv : hostname:string -> string list
 val logout_argv : hostname:string -> string list

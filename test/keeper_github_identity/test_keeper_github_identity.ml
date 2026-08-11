@@ -26,14 +26,15 @@ let read_file path =
 ;;
 
 let rec remove_tree path =
-  if Sys.file_exists path
-  then (
-    match (Unix.lstat path).Unix.st_kind with
-    | Unix.S_DIR ->
-      Sys.readdir path
-      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
-      Unix.rmdir path
-    | _ -> Unix.unlink path)
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  | stats ->
+    (match stats.Unix.st_kind with
+     | Unix.S_DIR ->
+       Sys.readdir path
+       |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+       Unix.rmdir path
+     | _ -> Unix.unlink path)
 ;;
 
 let with_temp_base run =
@@ -185,6 +186,48 @@ let test_config_dir_rejects_credential_symlink () =
   | Ok _ -> Alcotest.fail "symbolic-link GitHub credential file was accepted"
 ;;
 
+let test_tool_projection_is_nonblocking_without_identity () =
+  with_temp_base @@ fun base_path ->
+  let env =
+    Github.runtime_env_for_tool
+      ~base_path
+      ~keeper_name:"missing-identity"
+      [| "KEEP=value"; "GH_CONFIG_DIR=/host/account" |]
+  in
+  Alcotest.(check (option string)) "host account is not reused" (Some "/dev/null")
+    (env_value "GH_CONFIG_DIR" env);
+  Alcotest.(check (option string)) "unrelated env survives" (Some "value")
+    (env_value "KEEP" env);
+  Alcotest.(check (list string)) "docker remains runnable without a mount"
+    [ "--env"; "GH_CONFIG_DIR=/dev/null" ]
+    (Github.docker_args_for_tool
+       ~base_path
+       ~keeper_name:"missing-identity"
+       ~container_masc_dir:"/tmp/masc-runtime/.masc")
+;;
+
+let test_tool_projection_uses_safe_existing_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "configured-identity" in
+  let host_dir =
+    match Github.ensure_config_dir ~base_path ~keeper_name with
+    | Error message -> Alcotest.fail message
+    | Ok path -> path
+  in
+  let env = Github.runtime_env_for_tool ~base_path ~keeper_name [| "KEEP=value" |] in
+  Alcotest.(check (option string)) "keeper account is projected" (Some host_dir)
+    (env_value "GH_CONFIG_DIR" env);
+  let container_masc_dir = "/tmp/masc-runtime/.masc" in
+  let container_dir = Github.container_config_dir ~container_masc_dir ~keeper_name in
+  Alcotest.(check (list string)) "safe identity is mounted read-only"
+    [ "--env"
+    ; "GH_CONFIG_DIR=" ^ container_dir
+    ; "-v"
+    ; host_dir ^ ":" ^ container_dir ^ ":ro"
+    ]
+    (Github.docker_args_for_tool ~base_path ~keeper_name ~container_masc_dir)
+;;
+
 let () =
   Alcotest.run
     "keeper GitHub identity"
@@ -206,6 +249,14 @@ let () =
             "credential file rejects symlink"
             `Quick
             test_config_dir_rejects_credential_symlink
+        ; Alcotest.test_case
+            "tool projection is nonblocking without identity"
+            `Quick
+            test_tool_projection_is_nonblocking_without_identity
+        ; Alcotest.test_case
+            "tool projection uses safe existing identity"
+            `Quick
+            test_tool_projection_uses_safe_existing_identity
         ] )
     ]
 ;;

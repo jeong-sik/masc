@@ -233,19 +233,13 @@ let handle_tool_execute_typed
                     ~fields:extra_fields
                     "local_secret_projection_failed: projection returned no environment")
              | Some env ->
-               (match
-                  Keeper_github_identity.runtime_env
-                    ~base_path:config.base_path
-                    ~keeper_name:meta.name
-                    env
-                with
-                | Error err ->
-                  Error
-                    (Keeper_sandbox_shell_ir_target.target_error
-                       ~fields:extra_fields
-                       ("local_github_identity_failed: " ^ err))
-                | Ok env ->
-                  Ok (Masc_exec.Sandbox_target.host (), extra_fields, Some env)))
+               let env =
+                 Keeper_github_identity.runtime_env_for_tool
+                   ~base_path:config.base_path
+                   ~keeper_name:meta.name
+                   env
+               in
+               Ok (Masc_exec.Sandbox_target.host (), extra_fields, Some env))
         in
         let dispatch_sandbox =
           match sandbox_profile with

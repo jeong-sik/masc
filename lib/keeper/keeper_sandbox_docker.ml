@@ -517,16 +517,12 @@ let run_docker_shell_command_with_status_internal
                           sandbox_error ("docker_shell_failed: secret_projection: " ^ err)
                         | Ok secret_projection ->
                           let github_identity_args =
-                            match
-                              Keeper_github_identity.docker_args
-                                ~base_path:config.base_path
-                                ~keeper_name:meta.name
-                                ~container_masc_dir:
-                                  (Keeper_sandbox_runtime_setup.container_masc_dir
-                                     ~container_root)
-                            with
-                            | Ok args -> args
-                            | Error err -> failwith ("github_identity: " ^ err)
+                            Keeper_github_identity.docker_args_for_tool
+                              ~base_path:config.base_path
+                              ~keeper_name:meta.name
+                              ~container_masc_dir:
+                                (Keeper_sandbox_runtime_setup.container_masc_dir
+                                   ~container_root)
                           in
                           let argv =
                             docker_run_argv

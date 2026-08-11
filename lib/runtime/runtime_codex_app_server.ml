@@ -128,7 +128,10 @@ type error =
   | Turn_failed of string
   | Turn_interrupted
   | Process_exited of string
-  | Timeout of float
+  | Timeout of
+      { seconds : float
+      ; turn_accepted : bool
+      }
 
 let error_to_string = function
   | Invalid_config detail -> "invalid Codex app-server config: " ^ detail
@@ -150,8 +153,13 @@ let error_to_string = function
   | Turn_failed detail -> "Codex app-server turn failed: " ^ detail
   | Turn_interrupted -> "Codex app-server turn was interrupted"
   | Process_exited detail -> "Codex app-server exited before completion: " ^ detail
-  | Timeout seconds ->
-    Printf.sprintf "Codex app-server stream was idle for %.3fs" seconds
+  | Timeout { seconds; turn_accepted } ->
+    if turn_accepted
+    then
+      Printf.sprintf
+        "Codex app-server stream was idle for %.3fs after turn/start was accepted"
+        seconds
+    else Printf.sprintf "Codex app-server stream was idle for %.3fs" seconds
 ;;
 
 let error_kind = function
@@ -825,7 +833,15 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
           @ optional_field
               "effort"
               (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)));
-  let* turn = await_response io ~id:turn_request_id ~method_:"turn/start" in
+  let* turn =
+    match await_response io ~id:turn_request_id ~method_:"turn/start" with
+    | Error (Timeout { seconds; turn_accepted = _ }) ->
+      (* The request has been written. A missing response cannot prove that
+         the app-server rejected it, so rotating here could duplicate a turn
+         that is already executing upstream. *)
+      Error (Timeout { seconds; turn_accepted = true })
+    | response -> response
+  in
   let* turn_id = parse_turn_start turn in
   let* () =
     invoke_state_callback ~stage:"turn started callback" (fun () ->
@@ -970,7 +986,10 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
       | End_of_file ->
         let detail = String.trim !stderr_tail in
         Error (Process_exited (if detail = "" then "stdout closed" else detail))
-      | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+      | Eio.Time.Timeout ->
+        (* The transport cannot know whether turn/start was already accepted;
+           the entry points rewrap with the observed turn state. *)
+        Error (Timeout { seconds = config.timeout_s; turn_accepted = false })
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
@@ -1075,7 +1094,9 @@ let probe_subscription ~mgr ~clock ~cwd config =
     let* _ = native_cwd cwd in
     try with_spawned_client ~mgr ~clock ~cwd config probe_protocol with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+    | Eio.Time.Timeout ->
+      (* The probe never starts a turn. *)
+      Error (Timeout { seconds = config.timeout_s; turn_accepted = false })
     | exn -> Error (Spawn_failed (Printexc.to_string exn))
   in
   (match result with
@@ -1092,31 +1113,55 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
     ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
     ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event
     config ~prompt =
+  (* [turn/start] acceptance is the fact that decides whether a later idle
+     timeout is ambiguous (the upstream turn may still commit effects). The
+     transport constructs [Timeout] with [turn_accepted = false] because it
+     cannot know; this entry point observes acceptance through the
+     [on_turn_started] callback and rewraps timeout results with the truth. *)
+  let turn_accepted = ref false in
+  let on_turn_started ~thread_id ~turn_id =
+    turn_accepted := true;
+    on_turn_started ~thread_id ~turn_id
+  in
   let result =
     match validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt with
     | Error _ as error -> error
     | Ok protocol_cwd ->
       Log.Runtime_agent.info "Codex app-server subscription turn starting";
-      (try
-         run_spawned
-           ~mgr
-           ~clock
-           ~cwd
-           ~protocol_cwd
-           config
-           ~dynamic_tools
-           ~reasoning_effort
-           ~thread_mode
-           ~history
-           ~prompt
-           ~on_thread_ready
-           ~on_turn_starting
-           ~on_turn_started
-           ~on_stream_event
+      (match
+         (try
+            run_spawned
+              ~mgr
+              ~clock
+              ~cwd
+              ~protocol_cwd
+              config
+              ~dynamic_tools
+              ~reasoning_effort
+              ~thread_mode
+              ~history
+              ~prompt
+              ~on_thread_ready
+              ~on_turn_starting
+              ~on_turn_started
+              ~on_stream_event
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | Eio.Time.Timeout ->
+            Error
+              (Timeout
+                 { seconds = config.timeout_s
+                 ; turn_accepted = !turn_accepted
+                 })
+          | exn -> Error (Spawn_failed (Printexc.to_string exn)))
        with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
-       | exn -> Error (Spawn_failed (Printexc.to_string exn)))
+       | Error (Timeout { seconds; turn_accepted = dispatch_ambiguous }) ->
+         Error
+           (Timeout
+              { seconds
+              ; turn_accepted = dispatch_ambiguous || !turn_accepted
+              })
+       | other -> other)
   in
   (match result with
    | Ok turn ->

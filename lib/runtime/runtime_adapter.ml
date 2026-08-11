@@ -140,12 +140,37 @@ let credential_env_candidates = function
   | key -> [ key ]
 ;;
 
-let api_key_from_env key =
+let selected_credential_env key =
   credential_env_candidates key
-  |> List.find_map (fun env ->
-         match Sys.getenv_opt env with
-         | Some value when String.trim value <> "" -> Some value
-         | _ -> None)
+  |> List.find_opt (fun env ->
+    match Sys.getenv_opt env with
+    | Some value -> String.trim value <> ""
+    | None -> false)
+;;
+
+let effective_credential_reference
+    ~(provider_id : string)
+    (credential : Runtime_schema.credential option) =
+  let select_env key =
+    match selected_credential_env key with
+    | Some selected -> Runtime_schema.Env selected
+    | None -> Runtime_schema.Env key
+  in
+  match credential with
+  | Some (Runtime_schema.Env key) -> Some (select_env key)
+  | Some (Runtime_schema.File _ | Runtime_schema.Inline _) as explicit -> explicit
+  | None ->
+    (match find_registry_entry provider_id with
+     | Some entry ->
+       let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
+       if String.trim env = "" then None else Some (select_env env)
+     | None -> None)
+;;
+
+let api_key_from_env key =
+  (match selected_credential_env key with
+   | Some env -> Sys.getenv_opt env
+   | None -> None)
   |> Option.value ~default:""
 ;;
 

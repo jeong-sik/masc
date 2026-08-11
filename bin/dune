@@ -192,16 +192,14 @@
   yojson))
 
 ;; Per-turn timeline tool: masc-trace <base-path> <keeper> <turn_id>
-;; Reads execution-receipts JSONL and prints rows matching the turn_id.
-;; Foundation for the Step 10 turn-tracing CLI; widens to tool_calls
-;; and system_log in follow-up stacks.
+;; Reads typed runtime evidence and prints rows matching the turn identity.
 
 (executable
  (name masc_trace)
  (modules masc_trace)
  (public_name masc-trace)
  (package masc)
- (libraries yojson masc.config_dir_resolver masc.string_util))
+ (libraries yojson masc.config_dir_resolver masc.keeper_contract))
 
 ;; TUI Dashboard - Terminal interface for multi-agent workspace
 

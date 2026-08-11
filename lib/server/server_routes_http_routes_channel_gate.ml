@@ -286,20 +286,16 @@ let gate_keeper_ctx ~sw ~clock state =
       Mcp_server.publication_recovery_availability_provider state;
   }
 
-let keeper_exists ~sw ~clock state keeper_name =
-  let args = `Assoc [ ("name", `String keeper_name) ] in
-  match
-    Keeper_tool_surface.dispatch (gate_keeper_ctx ~sw ~clock state)
-      ~name:"masc_keeper_status" ~args
-  with
-  | Some result when Tool_result.is_success result -> Ok true
-  | Some result ->
-      let err = Tool_result.message result in
-      if String_util.contains_substring
-           (String.lowercase_ascii err) "keeper not found"
-      then Ok false
-      else Error err
-  | None -> Error "keeper dispatch unavailable"
+(* Typed existence from the meta layer. The previous version ran the whole
+   masc_keeper_status dispatch and re-derived the store's [Ok None] by
+   substring-matching "keeper not found" in the rendered error — a phrase
+   its producers spell two ways, so a wording change silently turned 404
+   into 502 (RFC-0371 B4). Invalid names now read as [Ok false] (404)
+   instead of surfacing a resolver error. *)
+let keeper_exists state keeper_name =
+  Keeper_status_detail.keeper_exists_config
+    ~config:(Mcp_server.workspace_config state)
+    keeper_name
 
 let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
   match
@@ -317,13 +313,14 @@ let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
           respond_json_value_with_cors ~status:`Internal_server_error request reqd
             (Channel_gate.error_json "internal error") )
   | Some result ->
+      (* Not-found is decided by the typed existence precheck at the route
+         (see [handle_gate_keeper_status_by_name]); an error out of the tool
+         dispatch itself is a backend failure, not a 404. The substring
+         classifier that used to pick the status here matched one of the two
+         producer spellings of "keeper not found" by accident
+         (RFC-0371 B4). *)
       let err = Tool_result.message result in
-      let lower = String.lowercase_ascii err in
-      let status =
-        if String_util.contains_substring lower "keeper not found" then `Not_found
-        else `Bad_gateway
-      in
-      respond_json_value_with_cors ~status request reqd
+      respond_json_value_with_cors ~status:`Bad_gateway request reqd
         (Channel_gate.error_json err)
   | None ->
       respond_json_value_with_cors ~status:`Service_unavailable request reqd
@@ -354,10 +351,22 @@ let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
       if name = "" then
         respond_json_value_with_cors ~status:`Bad_request request reqd
           (Channel_gate.error_json "name is required")
-      else
-        let args = `Assoc [ ("name", `String name) ] in
-        respond_keeper_tool_json ~sw ~clock state request reqd
-          ~tool_name:"masc_keeper_status" ~args
+      else (
+        (* Typed 404: existence is answered by the meta layer before the
+           status dispatch runs, so the proxy below never has to guess
+           not-found back out of a rendered error. *)
+        match keeper_exists state name with
+        | Error err ->
+            respond_json_value_with_cors ~status:`Service_unavailable request
+              reqd
+              (Channel_gate.error_json err)
+        | Ok false ->
+            respond_json_value_with_cors ~status:`Not_found request reqd
+              (Channel_gate.error_json ("unknown keeper: " ^ name))
+        | Ok true ->
+            let args = `Assoc [ ("name", `String name) ] in
+            respond_keeper_tool_json ~sw ~clock state request reqd
+              ~tool_name:"masc_keeper_status" ~args)
   | None ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (Channel_gate.error_json "name is required")
@@ -389,7 +398,7 @@ let handle_bind_for_connector ~sw ~clock state request reqd
         respond_json_value_with_cors ~status:`Bad_request request reqd
           (Channel_gate.error_json "keeper_name is required")
       else
-        match keeper_exists ~sw ~clock state keeper_name with
+        match keeper_exists state keeper_name with
         | Error err ->
             respond_json_value_with_cors ~status:`Service_unavailable request reqd
               (Channel_gate.error_json err)

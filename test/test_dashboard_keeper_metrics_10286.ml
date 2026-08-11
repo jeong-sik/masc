@@ -256,6 +256,52 @@ let test_history_summary_decodes_content_blocks () =
             content
       | _ -> fail "expected non-empty conversation list")
 
+let test_history_summary_routes_by_source_not_content () =
+  let row ~role ~source ~content ~ts_unix =
+    `Assoc
+      [
+        ("role", `String role);
+        ("source", `String source);
+        ( "content_blocks",
+          `List
+            [
+              `Assoc
+                [ ("type", `String "text"); ("text", `String content) ];
+            ] );
+        ("ts_unix", `Float ts_unix);
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let user_content =
+    "## Current World State\n### Namespace State\nthis is user-authored text"
+  in
+  let rows =
+    String.concat
+      "\n"
+      [
+        row ~role:"user" ~source:"direct_user" ~content:user_content
+          ~ts_unix:1.0;
+        row ~role:"user" ~source:"world_state_prompt"
+          ~content:"ordinary internal prompt text" ~ts_unix:2.0;
+      ]
+    ^ "\n"
+  in
+  with_temp_history rows (fun path ->
+      let conversation, _k2k_recent, _k2k_mentions, raw_count, _frag, _filtered =
+        Metrics.keeper_history_summary_json
+          ~all_keeper_names:[ "albini" ]
+          ~keeper_name:"albini"
+          ~history_path:path
+          ~filter_fragments:false
+      in
+      check int "only the explicit internal source is excluded" 1 raw_count;
+      match conversation with
+      | `List [ item ] ->
+          check string "message prose does not control routing" user_content
+            Yojson.Safe.Util.(item |> member "content" |> to_string)
+      | other ->
+          failf "expected one user-authored history item, got %s"
+            (Yojson.Safe.to_string other))
 
 (* [generation_stats] rows are values held in a table: each turn rebinds the
    entry rather than writing through a shared record. Two turns in the same
@@ -335,5 +381,7 @@ let () =
         [
           test_case "decodes content_blocks rows" `Quick
             test_history_summary_decodes_content_blocks;
+          test_case "routes by source, not content" `Quick
+            test_history_summary_routes_by_source_not_content;
         ] );
     ]

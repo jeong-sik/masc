@@ -37,17 +37,11 @@ let command_for_lang lang_id =
   | _ -> None
 ;;
 
-(** Detect language from file extension. *)
+(** Detect language from file extension. [Filename.extension] and
+    [String.lowercase_ascii] are total (no extension yields [""]), so no
+    guard is needed around them. *)
 let lang_of_path file_path =
-  let ext =
-    try Filename.extension file_path |> String.lowercase_ascii with
-    | exn ->
-      Log.Server.warn
-        "lsp_process_manager: Filename.extension failed for %s: %s"
-        file_path
-        (Printexc.to_string exn);
-      ""
-  in
+  let ext = Filename.extension file_path |> String.lowercase_ascii in
   match ext with
   | ".ml" | ".mli" -> "ocaml"
   | ".ts" | ".tsx" -> "typescript"

@@ -1,4 +1,3 @@
-val clamp_int : 'a -> min_v:'a -> max_v:'a -> 'a
 val int_of_env_default :
   string -> default:int -> min_v:int -> max_v:int -> int
 val float_of_env_default :

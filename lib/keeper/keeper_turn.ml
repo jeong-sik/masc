@@ -276,10 +276,12 @@ let preflight_keeper_invocation ctx request =
     |> Result.map (fun _ -> request)
 ;;
 
-let preflight_keeper_msg ctx message =
-  let request = Keeper_invocation_contract.direct_message_request message in
-  preflight_keeper_invocation ctx request
-  |> Result.map (fun _ -> message)
+(* The message path resolves the keeper one call earlier and carries the
+   effective meta here, so this preflight validates without a second disk
+   read (RFC-0371 B6). The delegate path below still reads: it has no
+   resolution step of its own. *)
+let preflight_keeper_msg_resolved ~(meta : keeper_meta) message =
+  resolve_turn_runtime_id meta |> Result.map (fun _ -> message)
 ;;
 
 let preflight_keeper_delegate ctx request =

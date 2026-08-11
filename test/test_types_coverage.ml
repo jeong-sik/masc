@@ -1326,6 +1326,22 @@ let test_rate_limit_config_of_yojson_defaults () =
     check int "default per_minute" 10 c.per_minute
   | Error e -> fail ("expected Ok with defaults: " ^ e)
 
+let test_rate_limit_config_of_yojson_rejects_wrong_field_type () =
+  let json = `Assoc [ "per_minute", `String "120" ] in
+  match Masc_domain.rate_limit_config_of_yojson json with
+  | Error message ->
+    check bool "field is named" true
+      (String_util.contains_substring message "rate_limit.per_minute")
+  | Ok _ -> fail "wrongly typed rate-limit field silently used the default"
+
+let test_rate_limit_config_of_yojson_rejects_mixed_agent_array () =
+  let json = `Assoc [ "priority_agents", `List [ `String "admin"; `Int 7 ] ] in
+  match Masc_domain.rate_limit_config_of_yojson json with
+  | Error message ->
+    check bool "element index is named" true
+      (String_util.contains_substring message "priority_agents[1]")
+  | Ok _ -> fail "wrongly typed priority-agent element was silently dropped"
+
 (* ============================================================
    tool_result_to_yojson Tests
    ============================================================ *)
@@ -1803,6 +1819,10 @@ let () =
       test_case "to_yojson" `Quick test_rate_limit_config_to_yojson;
       test_case "of_yojson ok" `Quick test_rate_limit_config_of_yojson_ok;
       test_case "of_yojson defaults" `Quick test_rate_limit_config_of_yojson_defaults;
+      test_case "of_yojson rejects wrong type" `Quick
+        test_rate_limit_config_of_yojson_rejects_wrong_field_type;
+      test_case "of_yojson rejects mixed array" `Quick
+        test_rate_limit_config_of_yojson_rejects_mixed_agent_array;
     ];
     "tool_result", [
       test_case "to_yojson success" `Quick test_tool_result_to_yojson_success;

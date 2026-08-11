@@ -88,6 +88,10 @@ let retryable_network_error message =
     (Agent_core.Retry.NetworkError
        { message; kind = Llm_provider.Http_client.Unknown })
 
+let attempt_without_effect result checkpoint =
+  result, checkpoint, Masc.Keeper_provider_attempt_effect.No_effect_observed
+;;
+
 let accept_empty_no_progress_error scope =
   Driver.core_error_of_masc_internal_error
     (Driver.Accept_rejected
@@ -974,8 +978,10 @@ let test_attempt_loop_stops_on_nonretryable_failure () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Error (Agent_core.Error.Internal "primary terminal failure"), None
-        | "fallback.test_model" -> Ok runtime_id, None
+          attempt_without_effect
+            (Error (Agent_core.Error.Internal "primary terminal failure"))
+            None
+        | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -1018,8 +1024,10 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Error (retryable_network_error "primary network failed"), None
-        | "fallback.test_model" -> Ok runtime_id, None
+          attempt_without_effect
+            (Error (retryable_network_error "primary network failed"))
+            None
+        | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -1066,12 +1074,16 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~run_attempt:(fun ~idx:_ ~runtime_id runtime ->
           if String.equal runtime_id primary.id
-          then Error (retryable_network_error "primary failed"), None
+          then
+            attempt_without_effect
+              (Error (retryable_network_error "primary failed"))
+              None
           else
-            ( Driver.For_testing.selected_runtime_result
-                runtime
-                (Ok (completed_run_result ()))
-            , None ))
+            attempt_without_effect
+              (Driver.For_testing.selected_runtime_result
+                 runtime
+                 (Ok (completed_run_result ())))
+              None)
         [ primary; fallback ]
     in
     match result with
@@ -1115,8 +1127,9 @@ let test_attempt_loop_retries_provider_wire_failure_same_turn () =
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
-        | "primary.test_model" -> Error provider_wire_error, None
-        | "fallback.test_model" -> Ok runtime_id, None
+        | "primary.test_model" ->
+          attempt_without_effect (Error provider_wire_error) None
+        | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -1141,6 +1154,50 @@ let test_attempt_loop_retries_provider_wire_failure_same_turn () =
   let events = List.rev !events in
   Alcotest.(check int) "both candidate attempts remain observable" 4 (List.length events)
 
+let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
+  let attempts = ref [] in
+  let deferred = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> true)
+      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~runtime_id:"primary.test_model"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "primary.test_model" ->
+          ( Error (retryable_network_error "primary failed after possible effect")
+          , None
+          , effect_disposition )
+        | "fallback.test_model" ->
+          Alcotest.failf "%s allowed duplicate-capable fallback" label
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "primary.test_model"; "fallback.test_model" ]
+  in
+  (match result with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label);
+  Alcotest.(check (list string))
+    (label ^ " attempts only the effect owner")
+    [ "primary.test_model" ]
+    !attempts;
+  Alcotest.(check int)
+    (label ^ " does not defer the same unsafe suffix")
+    0
+    (List.length !deferred)
+
+let test_attempt_loop_stops_after_effect_attempt () =
+  check_effect_disposition_blocks_same_turn_retry
+    "effect attempted"
+    Masc.Keeper_provider_attempt_effect.Effect_attempted
+
+let test_attempt_loop_fails_closed_without_effect_observation () =
+  check_effect_disposition_blocks_same_turn_retry
+    "effect observation unavailable"
+    Masc.Keeper_provider_attempt_effect.Observation_unavailable
+
 let test_attempt_loop_blocks_no_progress_when_gate_denies () =
   let attempts = ref [] in
   let gate_calls = ref [] in
@@ -1163,7 +1220,9 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Error primary_error, Some checkpoint_after_primary
+          attempt_without_effect
+            (Error primary_error)
+            (Some checkpoint_after_primary)
         | "fallback.test_model" ->
           Alcotest.fail "no-progress retry gate should block fallback candidate"
         | other -> Alcotest.failf "unexpected candidate %s" other)
@@ -1218,8 +1277,10 @@ let test_attempt_loop_does_not_gate_network_retry () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Error (retryable_network_error "primary network failed"), None
-        | "fallback.test_model" -> Ok runtime_id, None
+          attempt_without_effect
+            (Error (retryable_network_error "primary network failed"))
+            None
+        | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -1267,7 +1328,8 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
            ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
              attempts := !attempts @ [ runtime_id ];
              match candidate with
-             | "primary.test_model" -> Error primary_error, None
+             | "primary.test_model" ->
+               attempt_without_effect (Error primary_error) None
              | "fallback.test_model" ->
                Alcotest.fail "checkpoint stage must block same-run fallback"
              | other -> Alcotest.failf "unexpected candidate %s" other)
@@ -1299,7 +1361,9 @@ let test_attempt_loop_preserves_last_core_error () =
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-        Error (retryable_network_error (runtime_id ^ " failed")), None)
+        attempt_without_effect
+          (Error (retryable_network_error (runtime_id ^ " failed")))
+          None)
       [ "primary.test_model"; "fallback.test_model" ]
   in
   (match result with
@@ -1359,11 +1423,12 @@ let test_attempt_loop_input_capacity_does_not_advance_masc_lane () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "unmeasurable.test_model" ->
-          Error
-            (input_capacity_error
-               (Agent_core.Retry.Token_measurement_unavailable
-                  Llm_provider.Input_token_count.Anthropic_messages_count_tokens)),
-          None
+          attempt_without_effect
+            (Error
+               (input_capacity_error
+                  (Agent_core.Retry.Token_measurement_unavailable
+                     Llm_provider.Input_token_count.Anthropic_messages_count_tokens)))
+            None
         | other ->
           Alcotest.failf
             "MASC advanced to candidate %s without an AGENT_CORE flow receipt"
@@ -1397,8 +1462,10 @@ let test_attempt_loop_overflow_tries_next_candidate () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "small.test_model" ->
-          Error (context_overflow_error "prompt exceeds context window"), None
-        | "large.test_model" -> Ok runtime_id, None
+          attempt_without_effect
+            (Error (context_overflow_error "prompt exceeds context window"))
+            None
+        | "large.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "small.test_model"; "large.test_model" ]
   in
@@ -1431,7 +1498,9 @@ let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
       ~emit_runtime_manifest:(emit_manifest_collector events)
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         attempts := !attempts @ [ runtime_id ];
-        Error (context_overflow_error (runtime_id ^ " overflow")), None)
+        attempt_without_effect
+          (Error (context_overflow_error (runtime_id ^ " overflow")))
+          None)
       [ "small.test_model"; "smaller.test_model" ]
   in
   (match result with
@@ -1462,13 +1531,16 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "small.test_model" ->
-          Error (context_overflow_error "prompt exceeds context window"), None
+          attempt_without_effect
+            (Error (context_overflow_error "prompt exceeds context window"))
+            None
         | "fallback.test_model" ->
-          ( Error
-              (Agent_core.Error.Api
-                 (Agent_core.Retry.RateLimited
-                    { retry_after = None; message = "weekly usage limit" }))
-          , None )
+          attempt_without_effect
+            (Error
+               (Agent_core.Error.Api
+                  (Agent_core.Retry.RateLimited
+                     { retry_after = None; message = "weekly usage limit" })))
+            None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "small.test_model"; "fallback.test_model" ]
   in
@@ -1498,9 +1570,13 @@ let test_attempt_loop_midwalk_terminal_outranks_observed_overflow () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "small.test_model" ->
-          Error (context_overflow_error "prompt exceeds context window"), None
+          attempt_without_effect
+            (Error (context_overflow_error "prompt exceeds context window"))
+            None
         | "broken.test_model" ->
-          Error (Agent_core.Error.Internal "hard mid-lane failure"), None
+          attempt_without_effect
+            (Error (Agent_core.Error.Internal "hard mid-lane failure"))
+            None
         | other ->
           Alcotest.failf "walk must stop before candidate %s" other)
       [ "small.test_model"; "broken.test_model"; "fallback.test_model" ]
@@ -1538,7 +1614,7 @@ let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         attempts := runtime_id :: !attempts;
-        Error err, None)
+        attempt_without_effect (Error err) None)
       [ "runtime.a"; "runtime.b"; "runtime.c"; "runtime.d" ]
   in
   (match result with
@@ -1571,8 +1647,9 @@ let test_deferred_cycle_starts_at_supplied_successor_and_keeps_tail () =
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         attempts := runtime_id :: !attempts;
         match runtime_id with
-        | "runtime.b" -> Error (retryable_network_error "b failed"), None
-        | "runtime.c" -> Ok runtime_id, None
+        | "runtime.b" ->
+          attempt_without_effect (Error (retryable_network_error "b failed")) None
+        | "runtime.c" -> attempt_without_effect (Ok runtime_id) None
         | "runtime.a" ->
           Alcotest.fail "failed lane prefix must not replay on the next cycle"
         | other -> Alcotest.failf "unexpected runtime %s" other)
@@ -1599,7 +1676,9 @@ let test_deferred_cycle_post_checkpoint_replaces_hint_with_tail () =
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         Alcotest.(check string) "only B attempted" "runtime.b" runtime_id;
-        Error (retryable_network_error "b checkpoint failure"), None)
+        attempt_without_effect
+          (Error (retryable_network_error "b checkpoint failure"))
+          None)
       [ "runtime.b"; "runtime.c"; "runtime.d" ]
   in
   (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected B failure");
@@ -1622,7 +1701,9 @@ let test_single_candidate_checkpoint_failure_has_no_hint () =
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id:_ _candidate ->
-        Error (retryable_network_error "only failed"), None)
+        attempt_without_effect
+          (Error (retryable_network_error "only failed"))
+          None)
       [ "runtime.only" ]
   in
   (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected failure");
@@ -1783,6 +1864,14 @@ let () =
             "provider-wire failure rotates in the same turn"
             `Quick
             test_attempt_loop_retries_provider_wire_failure_same_turn;
+          Alcotest.test_case
+            "effect attempt blocks same-turn fallback"
+            `Quick
+            test_attempt_loop_stops_after_effect_attempt;
+          Alcotest.test_case
+            "missing effect observation fails closed"
+            `Quick
+            test_attempt_loop_fails_closed_without_effect_observation;
           Alcotest.test_case
             "attempt loop blocks no-progress when gate denies"
             `Quick

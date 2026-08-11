@@ -277,8 +277,27 @@ let terminal_reason_code_of_core_error = function
    and uses these typed accessors at every emit site. RFC §5.2 defers the
    sub-sum split (per-variant constructors for Agent errors) to
    a follow-up RFC. *)
+(* The typed timeout observation is derived here — the one site that still
+   holds the original error — and rides the terminal code next to the
+   verbatim wire (RFC-0371 §6.1(3)). Consumers stop re-parsing
+   "provider_error_timeout:*" out of the wire for live values; the string
+   classifier remains only for wire rehydrated from persistence. *)
+let agent_core_timeout_observation :
+      Agent_core.Error.t -> Keeper_turn_terminal_code.agent_core_timeout option
+  = function
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout { timeout_phase; _ }) ->
+    Some { Keeper_turn_terminal_code.phase = timeout_phase }
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError
+         { kind = Llm_provider.Http_client.Timeout; timeout_phase; _ }) ->
+    Some { Keeper_turn_terminal_code.phase = timeout_phase }
+  | _ -> None
+;;
+
 let terminal_reason_code_of_core_error_typed err =
-  Keeper_turn_terminal_code.of_core_error_wire (terminal_reason_code_of_core_error err)
+  Keeper_turn_terminal_code.of_core_error
+    ~wire:(terminal_reason_code_of_core_error err)
+    ~timeout:(agent_core_timeout_observation err)
 ;;
 
 let api_error_terminal_reason_code_typed err =

@@ -51,8 +51,8 @@ let canonical_app_codes : (string * D.t) list =
    documented in the RFC; only [severity] (rendered as string) is
    asserted against legacy here. *)
 let runtime_wire_codes : (string * D.t) list =
-  [ "api_error_overloaded", D.Provider_error (Code.Agent_core_error "api_error_overloaded")
-  ; "api_error_server:502", D.Provider_error (Code.Agent_core_error "api_error_server:502")
+  [ "api_error_overloaded", D.Provider_error (Code.of_core_error_wire "api_error_overloaded")
+  ; "api_error_server:502", D.Provider_error (Code.of_core_error_wire "api_error_server:502")
   ]
 ;;
 
@@ -170,7 +170,7 @@ let test_round_trip_lossy_payloads () =
       , D.Provider_error (Code.Provider_runtime_error "p_500")
       , "p_500" )
     ; ( "Provider_error/Sdk payload"
-      , D.Provider_error (Code.Agent_core_error "api_error_overloaded")
+      , D.Provider_error (Code.of_core_error_wire "api_error_overloaded")
       , "api_error_overloaded" )
     ]
   in
@@ -204,8 +204,8 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Exception_unhandled "x"
     , D.Provider_error (Code.Exception_unhandled "x") )
   ; ( "Sdk"
-    , Code.Agent_core_error "api_error_server:502"
-    , D.Provider_error (Code.Agent_core_error "api_error_server:502") )
+    , Code.of_core_error_wire "api_error_server:502"
+    , D.Provider_error (Code.of_core_error_wire "api_error_server:502") )
   ]
 ;;
 

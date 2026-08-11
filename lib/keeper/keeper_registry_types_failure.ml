@@ -39,6 +39,12 @@ type failure_reason =
       ; provider_id : string option
       ; http_status : int option
       ; runtime_id : string option
+      ; agent_core_timeout : Keeper_turn_terminal_code.agent_core_timeout option
+          (** Typed timeout observation carried from the terminal code
+              (RFC-0371 §6.1(3)); [Some] only on the Provider_error
+              construction path where the original agent-core error was in
+              hand. Lets consumers classify timeouts without re-parsing
+              [code]. [None] on rehydrated or non-agent-core paths. *)
       ; reason : Keeper_meta_contract.runtime_exhaustion_reason option
           (** Typed runtime-exhaustion reason, [Some] only on the
               runtime-exhausted construction path

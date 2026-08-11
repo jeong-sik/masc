@@ -192,18 +192,29 @@ let provider_runtime_error_looks_like_timeout ~code =
   || String.starts_with ~prefix:"provider_error_network:timeout:" code
 ;;
 
-let classify_provider_runtime_error_record ~code ~detail =
+let classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () =
   ignore detail;
-  if provider_runtime_error_looks_like_timeout ~code
-  then
+  (* Typed observation first (RFC-0371 §6.1(3)): records built while the
+     original agent-core error was in hand carry it, and no string is
+     consulted. The prefix parse below survives only for records rehydrated
+     from persisted wire, where the string is all that remains. *)
+  match agent_core_timeout with
+  | Some { Keeper_turn_terminal_code.phase } ->
     Provider_timeout
       { source = Agent_core_provider
-      ; phase =
-        (Option.bind
-           (provider_runtime_error_timeout_phase_label ~code)
-           timeout_phase_of_label)
+      ; phase = Option.bind phase timeout_phase_of_agent_core_phase
       }
-  else Not_provider_runtime_failure
+  | None ->
+    if provider_runtime_error_looks_like_timeout ~code
+    then
+      Provider_timeout
+        { source = Agent_core_provider
+        ; phase =
+          (Option.bind
+             (provider_runtime_error_timeout_phase_label ~code)
+             timeout_phase_of_label)
+        }
+    else Not_provider_runtime_failure
 ;;
 
 let provider_timeout ~source ~phase =

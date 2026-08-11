@@ -179,11 +179,13 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
              investigation is required before restart."
             count
       }
-  | Keeper_registry.Provider_runtime_error { code; detail; _ } ->
+  | Keeper_registry.Provider_runtime_error { code; detail; agent_core_timeout; _ } ->
     (match
        Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
+         ?agent_core_timeout
          ~code
          ~detail
+         ()
      with
      | Keeper_provider_runtime_boundary.Provider_timeout _ ->
        Some

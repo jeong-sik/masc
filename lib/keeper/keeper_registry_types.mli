@@ -36,6 +36,7 @@ type failure_reason =
       ; provider_id : string option
       ; http_status : int option
       ; runtime_id : string option
+      ; agent_core_timeout : Keeper_turn_terminal_code.agent_core_timeout option
       ; reason : Keeper_meta_contract.runtime_exhaustion_reason option
       }
       (** Latched from the keeper turn terminal reason when the provider,

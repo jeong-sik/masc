@@ -707,13 +707,14 @@ let observe_flow_attempt_receipt
   }
 ;;
 
-let terminal_of_observation cause (observation : attempt_observation) =
+let terminal_of_observation ?detail cause (observation : attempt_observation) =
   Keeper_compaction_outcome.
     { cause
     ; slot_id = observation.slot_id
     ; call_id = observation.call_id
     ; plan_fingerprint = observation.receipt_plan_fingerprint
     ; request_body_sha256 = observation.receipt_request_body_sha256
+    ; detail
     }
 ;;
 
@@ -1071,13 +1072,22 @@ let execute_prepared_lane_current
         (Exact_output.Flow_execution_terminal
           { cause =
               Exact_output.Flow_exact_execution_failed
-                { candidate; _ }
+                { candidate; cause; evidence }
           ; _
           })) ->
     let observation = observe_flow_attempt_receipt candidate in
+    (* The sibling consumer of this same branch (hitl_summary_worker) already
+       renders [cause] through Keeper_exact_flow_detail; compaction discarded
+       it in the pattern, so its terminal named the call and never the reason.
+       Measured on a live compaction that spent 470 s on glm-coding.glm-5-turbo
+       — a slot completing 97% of its work elsewhere — and left four
+       identifiers with no way to ask why. *)
     Error
       (Exact_execution_terminal
          (terminal_of_observation
+            ~detail:
+              (Keeper_exact_flow_detail.execution_failure_detail
+                 ~candidate ~cause ~evidence)
             Keeper_compaction_outcome.Exact_execution_failed
             observation))
   | `Flow
@@ -1265,6 +1275,7 @@ let exact_execution_terminal ~cause (evidence : exact_execution_evidence) =
     ; call_id = evidence.call_id
     ; plan_fingerprint = evidence.plan_fingerprint
     ; request_body_sha256 = evidence.receipt_request_body_sha256
+    ; detail = None
     }
 ;;
 

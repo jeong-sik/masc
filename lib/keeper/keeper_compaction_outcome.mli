@@ -22,6 +22,13 @@ type exact_execution_terminal =
   ; call_id : string
   ; plan_fingerprint : string
   ; request_body_sha256 : string
+  ; detail : string option
+        (** The provider's own account of the failure, when the terminal came
+            from a flow that carries one. The four identifiers above say which
+            call failed; they cannot say why, so a compaction that lost 470
+            seconds on a slot healthy everywhere else left no answer anywhere.
+            [None] where the terminal has no such account — the rendering then
+            is exactly what it was before this field existed. *)
   }
 
 type no_compaction_reason =

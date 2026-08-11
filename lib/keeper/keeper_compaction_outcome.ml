@@ -17,6 +17,7 @@ type exact_execution_terminal =
   ; call_id : string
   ; plan_fingerprint : string
   ; request_body_sha256 : string
+  ; detail : string option
   }
 
 type no_compaction_reason =
@@ -48,12 +49,15 @@ let exact_execution_terminal_cause_label = function
 
 let exact_execution_terminal_to_string terminal =
   Printf.sprintf
-    "%s:slot_id=%s:call_id=%s:plan_fingerprint=%s:request_body_sha256=%s"
+    "%s:slot_id=%s:call_id=%s:plan_fingerprint=%s:request_body_sha256=%s%s"
     (exact_execution_terminal_cause_label terminal.cause)
     terminal.slot_id
     terminal.call_id
     terminal.plan_fingerprint
     terminal.request_body_sha256
+    (match terminal.detail with
+     | Some detail when String.trim detail <> "" -> ":detail=" ^ String.trim detail
+     | Some _ | None -> "")
 ;;
 
 let no_compaction_reason_label = function

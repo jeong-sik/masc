@@ -43,6 +43,18 @@ let get_exn store operation_id =
 
 let state operation = Operation.state_to_string operation.Operation.state
 
+let finalize_statement stmt =
+  let rc = Sqlite3.finalize stmt in
+  ignore (Sys.opaque_identity stmt);
+  rc
+;;
+
+let close_database db =
+  let closed = Sqlite3.db_close db in
+  ignore (Sys.opaque_identity db);
+  closed
+;;
+
 let test_schema_identity_and_budget () =
   with_store "schema" @@ fun path store ->
   check string "database file" "chat-operations.sqlite3" (Filename.basename path);
@@ -54,12 +66,12 @@ let test_schema_identity_and_budget () =
   store_ok (Store.close store);
   let db = Sqlite3.db_open ~mode:`READONLY path in
   Fun.protect
-    ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
+    ~finally:(fun () -> ignore (close_database db : bool))
     (fun () ->
        let text sql =
          let stmt = Sqlite3.prepare db sql in
          Fun.protect
-           ~finally:(fun () -> ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t))
+           ~finally:(fun () -> ignore (finalize_statement stmt : Sqlite3.Rc.t))
            (fun () ->
               check bool "schema row" true (Sqlite3.step stmt = Sqlite3.Rc.ROW);
               Sqlite3.column_text stmt 0)
@@ -310,7 +322,7 @@ let test_terminal_row_is_sql_immutable () =
   store_ok (Store.close store);
   let db = Sqlite3.db_open path in
   Fun.protect
-    ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
+    ~finally:(fun () -> ignore (close_database db : bool))
     (fun () ->
        let rc =
          Sqlite3.exec
@@ -345,6 +357,18 @@ let test_close_is_idempotent_and_refuses_later_operations () =
   | Error _ -> fail "a repeated close must stay successful"
 ;;
 
+let test_statement_finalize_survives_gc_pressure () =
+  with_store "finalize-gc-pressure" @@ fun _path store ->
+  let churn = ref [] in
+  for i = 1 to 2_000 do
+    ignore (store_ok (Store.inventory store));
+    churn := String.make 256 'x' :: (if i mod 16 = 0 then [] else !churn);
+    if i mod 64 = 0 then Gc.minor ()
+  done;
+  ignore (Sys.opaque_identity !churn);
+  check bool "all inventory statements finalized under GC pressure" true
+;;
+
 let () =
   run
     "keeper-chat-operation-store"
@@ -361,5 +385,7 @@ let () =
         ; test_case "commit failure and uncertain read-back" `Quick
             test_commit_failure_and_uncertain_readback
         ; test_case "terminal SQL immutability" `Quick test_terminal_row_is_sql_immutable
+        ; test_case "statement finalize survives GC pressure" `Quick
+            test_statement_finalize_survives_gc_pressure
         ] )
     ]

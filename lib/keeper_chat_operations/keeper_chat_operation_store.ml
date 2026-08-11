@@ -118,6 +118,14 @@ let exec db ~operation sql =
   else Error (Store_unavailable (sqlite_error db operation rc))
 ;;
 
+let close_db db =
+  let closed = Sqlite3.db_close db in
+  (* [caml_sqlite3_close] has the same runtime-release/null-after-return
+     lifetime window as statement finalization. *)
+  ignore (Sys.opaque_identity db);
+  closed
+;;
+
 let prepare db ~operation sql =
   try Ok (Sqlite3.prepare db sql) with
   | Sqlite3.Error detail -> Error (Store_unavailable (operation ^ ": " ^ detail))
@@ -134,6 +142,13 @@ let finalize db stmt result =
     | Sqlite3.Error detail ->
       Error (Store_unavailable ("finalize statement: " ^ detail))
   in
+  (* sqlite3-ocaml 5.4.1 releases the OCaml runtime while
+     [sqlite3_finalize] runs, then clears the statement pointer only after it
+     reacquires the runtime.  Without a use after [Sqlite3.finalize], another
+     domain can collect the wrapper in that window and its GC finalizer calls
+     [sqlite3_finalize] on the same pointer.  Keep the wrapper reachable until
+     the explicit finalize has fully returned. *)
+  ignore (Sys.opaque_identity stmt);
   match result, cleanup with
   | Ok value, Ok () -> Ok value
   | Error _ as error, Ok () -> error
@@ -543,7 +558,7 @@ let open_or_create ~path =
   let db = Sqlite3.db_open path in
   let fail error =
     (* See open failure contract: preserve the typed store error; close is best-effort. *)
-    ignore (Sqlite3.db_close db : bool);
+    ignore (close_db db : bool);
     Error error
   in
   match configure db with
@@ -575,7 +590,7 @@ let open_or_create ~path =
 let close store =
   if Atomic.compare_and_set store.closed false true
   then
-    if Sqlite3.db_close store.db
+    if close_db store.db
     then Ok ()
     else Error (Store_unavailable "failed to close SQLite database")
   else Ok ()

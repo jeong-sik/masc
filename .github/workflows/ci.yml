@@ -312,7 +312,7 @@ jobs:
             tla=true
           fi
 
-          if has_match '^(packages/agent_core/|lib/keeper/keeper_event_bridge\.ml$|test/test_keeper_execution_join\.ml$|test/test_keeper_hooks_agent_core_introspection\.ml$|dune-project$|.*\.opam$|masc\.opam\.locked$)'; then
+          if has_match '^(packages/agent_core/|lib/keeper/keeper_event_bridge\.ml$|scripts/check-agent-core-boundary\.sh$|test/test_agent_core_boundary\.sh$|test/test_keeper_execution_join\.ml$|test/test_keeper_hooks_agent_core_introspection\.ml$|dune-project$|.*\.opam$|masc\.opam\.locked$)'; then
             agent_core=true
           fi
 
@@ -660,7 +660,9 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Focused group deadlines total 73 minutes when agent-core is selected;
+    # leave setup/build and timeout-diagnostic headroom outside those budgets.
+    timeout-minutes: 90
     needs: [pr-live-gate, changes]
     # Main-push safety-net (mirrors `dashboard` job below). Non-PR events
     # (branch push to main/develop, workflow_dispatch) always run Build and Test

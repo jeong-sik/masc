@@ -101,6 +101,17 @@ let get_float ~default name =
     [true] so it would already fall through, but using
     {!Float.is_finite} as the single guard captures all three
     pathological values uniformly. *)
+(* Canonical clamped read (RFC-0371 B7): before this, four modules each
+   carried their own [int_of_env_default] with a raw getenv + parse +
+   clamp body — the same helper, re-derived, drifting. *)
+let get_int_clamped ~default ~min_v ~max_v name =
+  let v = get_int ~default name in
+  max min_v (min max_v v)
+
+let get_float_clamped ~default ~min_v ~max_v name =
+  let v = get_float ~default name in
+  Float.max min_v (Float.min max_v v)
+
 let get_int_nonneg ~default name =
   let parsed = get_int ~default name in
   if parsed < 0 then default else parsed

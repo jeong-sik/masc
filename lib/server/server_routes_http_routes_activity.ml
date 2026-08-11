@@ -1271,7 +1271,6 @@ let add_routes ~sw ~clock router =
               Http.Response.json_value json reqd)
        ) request reqd)
 
-  (* Agent Reputation API *)
   (* Prompt Registry API *)
   |> Http.Router.get "/api/v1/prompts" (fun request reqd ->
        with_public_read (fun _state _req reqd ->

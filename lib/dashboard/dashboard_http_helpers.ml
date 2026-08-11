@@ -3,30 +3,15 @@
     Extracted from server_dashboard_http.ml for sub-module reuse. *)
 
 
-let bool_default_true_of_env name =
-  match Sys.getenv_opt name with
-  | None -> true
-  | Some v ->
-      let v = v |> String.trim |> String.lowercase_ascii in
-      not (v = "0" || v = "false" || v = "no" || v = "n")
+(* Delegations to the canonical Env_config_core readers (RFC-0371 B7):
+   this module used to carry raw getenv + parse + clamp copies of them. *)
+let bool_default_true_of_env name = Env_config_core.get_bool ~default:true name
 
 let int_of_env_default name ~default ~min_v ~max_v =
-  let v =
-    match Sys.getenv_opt name with
-    | None -> default
-    | Some s ->
-        (Option.value ~default:default (int_of_string_opt (String.trim s)))
-  in
-  max min_v (min max_v v)
+  Env_config_core.get_int_clamped ~default ~min_v ~max_v name
 
 let float_of_env_default name ~default ~min_v ~max_v =
-  let v =
-    match Sys.getenv_opt name with
-    | None -> default
-    | Some s ->
-        Option.value ~default (float_of_string_opt (String.trim s))
-  in
-  max min_v (min max_v v)
+  Env_config_core.get_float_clamped ~default ~min_v ~max_v name
 
 let operator_snapshot_recent_completed_limit () =
   int_of_env_default "MASC_OPERATOR_SNAPSHOT_RECENT_COMPLETED_LIMIT"

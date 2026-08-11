@@ -41,12 +41,12 @@ type turn_result =
   ; resumed : bool
   }
 
-type dynamic_tool_result =
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
   }
 
-type dynamic_tool =
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
@@ -107,7 +107,15 @@ type error =
   | Turn_failed of string
   | Turn_interrupted
   | Process_exited of string
-  | Timeout of float
+  | Timeout of
+      { seconds : float
+      ; turn_accepted : bool
+        (** [true] when [turn/start] was accepted before the protocol went
+            silent: the upstream turn may still be executing (and committing
+            effects) server-side, so the outcome is ambiguous and must not
+            trigger lane rotation. [false] means nothing was started upstream
+            and retrying elsewhere is safe. *)
+      }
 
 val error_to_string : error -> string
 

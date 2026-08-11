@@ -353,6 +353,23 @@ let test_redacted_http_url_opt_reports_drop_reason () =
     [ B.Missing_scheme ]
     !drops
 
+(* RFC-0371 B2 regression: the try/with wrappers around the Uri helpers were
+   removed because Uri.of_string is total. These pin that garbage input still
+   flows through the option-based checks as ordinary values — no exception
+   escapes, nothing is silently classified as valid. *)
+let test_url_helpers_are_total_on_garbage () =
+  let garbage = "\x00 not a uri \xff%%%" in
+  let drops = ref [] in
+  let on_drop reason = drops := reason :: !drops in
+  Alcotest.(check (option string))
+    "garbage url is dropped, not raised"
+    None
+    (B.redacted_http_url_opt ~on_drop garbage);
+  Alcotest.(check (list dropped_reason_testable))
+    "garbage drops as missing scheme"
+    [ B.Missing_scheme ]
+    !drops
+
 let test_blocks_of_yojson_rejects_malformed () =
   Alcotest.(check bool) "not a list" true (B.blocks_of_yojson (`String "x") = None);
   Alcotest.(check bool) "empty list" true (B.blocks_of_yojson (`List []) = None);
@@ -632,6 +649,8 @@ let () =
             test_query_string_stripped_for_extension_check;
           Alcotest.test_case "redacted_http_url_opt reports drop reason" `Quick
             test_redacted_http_url_opt_reports_drop_reason;
+          Alcotest.test_case "url helpers are total on garbage input" `Quick
+            test_url_helpers_are_total_on_garbage;
         ] );
       ( "serialization",
         [

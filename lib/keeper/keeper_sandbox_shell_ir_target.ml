@@ -9,6 +9,11 @@ type target_error =
   ; fields : (string * Yojson.Safe.t) list
   }
 
+type docker_dispatch =
+  { target : Masc_exec.Sandbox_target.t
+  ; runtime : Keeper_turn_sandbox_runtime.t
+  }
+
 let target_error ?(fields = []) message = { message; fields }
 
 let docker_image (meta : keeper_meta) =
@@ -118,7 +123,10 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
            | Ok result -> result
            | Error err -> Unix.WEXITED 1, "", err
        in
-       Ok (Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()))
+       Ok
+         { target = Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()
+         ; runtime
+         })
 ;;
 
 let docker_local_fallback_target ~meta ?timeout_sec () =

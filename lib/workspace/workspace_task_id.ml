@@ -26,7 +26,7 @@ let archive_entries_of_json = function
   | _ -> []
 
 let read_archive_entries config =
-  if not (Sys.file_exists (archive_path config)) then []
+  if not (path_exists config (archive_path config)) then []
   else archive_entries_of_json (read_json config (archive_path config))
 
 let read_archive_task_ids config =

@@ -203,7 +203,6 @@ type chat_block =
 type dropped_http_url_reason =
   | Missing_scheme
   | Unsupported_scheme of string
-  | Invalid_url
 
 val dropped_http_url_reason_to_string : dropped_http_url_reason -> string
 

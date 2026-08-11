@@ -91,6 +91,32 @@ type deferred_runtime_lane =
 let deferred_runtime_ids hint =
   hint.next_runtime_id :: hint.later_runtime_ids
 
+(* Quota demotion must never promote a candidate the runtime table cannot
+   resolve (for example one removed by a runtime.toml reload while a deferred
+   suffix was frozen): a missing id at the head fails the attempt with a
+   non-rotating error before resolvable alternatives are tried. Order is
+   therefore resolvable-active, then resolvable-exhausted, then unresolvable —
+   declared relative order preserved within each class (PR #28219 review). *)
+let quota_ordered_runtime_ids ~now runtime_ids =
+  let resolvable, unresolvable =
+    List.partition
+      (fun id -> Option.is_some (Runtime.get_runtime_by_id id))
+      runtime_ids
+  in
+  Runtime_quota_window.demote_order
+    ~now
+    ~quota_scope_of:Runtime.quota_scope_of_runtime_id
+    resolvable
+  @ unresolvable
+;;
+
+let quota_ordered_deferred_runtime_lane ~now hint =
+  match quota_ordered_runtime_ids ~now (deferred_runtime_ids hint) with
+  | next_runtime_id :: later_runtime_ids ->
+    { hint with next_runtime_id; later_runtime_ids }
+  | [] -> hint
+;;
+
 let equal_deferred_runtime_lane left right =
   String.equal left.assignment_id right.assignment_id
   && String.equal left.failed_runtime_id right.failed_runtime_id
@@ -166,6 +192,8 @@ let attempt_runtime_candidates
       true)
     ?lane_id
     ?(on_retry_deferred = fun _ -> ())
+    ?quota_scope_of
+    ?candidate_dispatchable
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
        ?status:string ->
@@ -183,6 +211,41 @@ let attempt_runtime_candidates
      stops on a non-recoverable error keeps that error: it is the immediate
      operator signal, and the overflow will be observed again on the next
      cycle. *)
+  let quota_scope_of =
+    match quota_scope_of with
+    | Some quota_scope_of -> quota_scope_of
+    | None ->
+      fun candidate ->
+        Runtime.quota_scope_of_runtime_id (runtime_id_of candidate)
+  in
+  (* Mid-walk demotion shares the pre-walk rule: never move an
+     exhausted-but-dispatchable candidate behind one that cannot dispatch, or
+     the walk fails on the dead head with a non-rotating error before real
+     alternatives are tried (PR #28219 review). Dispatchability is judged on
+     the candidate value itself — production candidates are materialized
+     snapshots that stay dispatchable across a runtime.toml reload, so a
+     global-registry re-read here would wrongly sink a frozen [Resolved_runtime]
+     and promote a known-exhausted sibling ahead of it (PR #28219 review,
+     frozen-candidates thread). Callers with richer candidate types inject the
+     judgment; the id-table default serves plain-id callers, and a fixture-less
+     table judges everything undispatchable, which leaves order unchanged. *)
+  let candidate_dispatchable =
+    match candidate_dispatchable with
+    | Some candidate_dispatchable -> candidate_dispatchable
+    | None ->
+      fun candidate ->
+        Option.is_some (Runtime.get_runtime_by_id (runtime_id_of candidate))
+  in
+  let demote_rest rest =
+    let dispatchable, undispatchable =
+      List.partition candidate_dispatchable rest
+    in
+    Runtime_quota_window.demote_order
+      ~now:(Unix.gettimeofday ())
+      ~quota_scope_of
+      dispatchable
+    @ undispatchable
+  in
   let rec loop ~observed_overflow idx = function
     | [] ->
       (match observed_overflow with
@@ -196,6 +259,11 @@ let attempt_runtime_candidates
     | candidate :: rest ->
       let is_last = rest = [] in
       let attempt_runtime_id = runtime_id_of candidate in
+      (* Bind quota ownership to the exact candidate that will be dispatched.
+         [run_attempt] may span a runtime.toml reload; resolving the id after
+         the provider returns could then attribute the old credential's
+         response to the replacement catalog row. *)
+      let attempt_quota_scope = quota_scope_of candidate in
       emit_runtime_manifest
         ~status:"attempt"
         ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
@@ -233,15 +301,25 @@ let attempt_runtime_candidates
           | Agent_core.Error.Provider
               (Llm_provider.Error.HardQuota { retry_after = Some retry_after_s; _ })
             ->
-            (match Runtime.provider_id_of_runtime_id attempt_runtime_id with
-             | Some provider_id ->
+            (* Quota is credential-account-owned, so the window is keyed by
+               the row's quota scope: siblings sharing the credential are
+               demoted together (PR #28202 review P2). *)
+            (match attempt_quota_scope with
+             | Some scope ->
                Runtime_quota_window.note_exhausted
-                 ~provider_id
+                 ~scope
                  (* NDT-OK: [retry_after] is relative to the provider response;
                     convert it to the wall-clock expiry at this ingress. *)
                  ~resets_at:(Unix.gettimeofday () +. retry_after_s)
              | None -> ())
           | _ -> ());
+         (* The window just learned above must affect this same lane walk.
+            Otherwise a sibling on the same credential is retried before an
+            unrelated candidate even though the provider has already stated
+            that the shared account is exhausted.  This remains ordering,
+            not admission: if every remaining candidate is demoted they are
+            all still attempted in their prior relative order. *)
+         let rest = demote_rest rest in
          let retry_admitted =
            allow_retry ~runtime_id:attempt_runtime_id ~attempt:idx error
          in
@@ -518,9 +596,22 @@ let run_named
      operators can route through explicit failover groups.  Lane candidate
      order passes through the sticky last-good preference so a known-healthy
      failover candidate is tried before re-hitting a dead head candidate. *)
+  (* Quota-window demotion is ordering only — a demoted candidate is still
+     attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
+     selecting a fresh lane walk. A deferred suffix was already frozen before
+     pre-dispatch shaping, so re-reading wall-clock quota state here could make
+     the actual provider differ from the runtime used to shape the request. *)
+  let demote_quota_exhausted candidates =
+    quota_ordered_runtime_ids
+      (* NDT-OK: scheduling intentionally compares the stored expiry with
+         wall clock; [demote_order] stays pure via injected [now]. *)
+      ~now:(Unix.gettimeofday ())
+      candidates
+  in
   let lane_id_opt, lane_candidate_ids =
     match deferred_runtime_lane with
-    | Some hint -> Some hint.assignment_id, deferred_runtime_ids hint
+    | Some hint ->
+      Some hint.assignment_id, deferred_runtime_ids hint
     | None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> None, []
@@ -528,18 +619,12 @@ let run_named
        | `Lane lane ->
          let lane_id = Runtime_lane.id lane in
          ( Some lane_id
-         , (* Quota-window demotion runs after sticky preference: a provider
-              that stated "exhausted until T" outranks a remembered last-good
-              candidate on that same provider. Ordering only — a demoted
-              candidate is still attempted when the lane has nothing else.
-              RFC-0370 §3.3. *)
+         , (* Demotion runs after sticky preference: a provider that stated
+              "exhausted until T" outranks a remembered last-good candidate
+              on that same account. *)
            Runtime_lane_preference.prefer_order ~lane_id
              (Runtime_lane.ordered_candidates lane)
-           |> Runtime_quota_window.demote_order
-                (* NDT-OK: scheduling intentionally compares the stored expiry
-                   with wall clock; [demote_order] stays pure via injected [now]. *)
-                ~now:(Unix.gettimeofday ())
-                ~provider_id_of:Runtime.provider_id_of_runtime_id ))
+           |> demote_quota_exhausted ))
   in
   if lane_candidate_ids = []
   then
@@ -612,7 +697,7 @@ let run_named
            match Runtime.get_runtime_by_id runtime_id with
            | Some runtime -> Resolved_runtime runtime
            | None -> Missing_runtime runtime_id)
-        (deferred_runtime_ids hint)
+        lane_candidate_ids
   in
   let assigned_runtime_context_window =
     Runtime.max_context_of_runtime first_candidate
@@ -739,6 +824,15 @@ let run_named
     ~runtime_id_of:(function
       | Resolved_runtime runtime -> runtime.Runtime.id
       | Missing_runtime runtime_id -> runtime_id)
+    ~quota_scope_of:(function
+      | Resolved_runtime runtime -> Some (Runtime.quota_scope_of_runtime runtime)
+      | Missing_runtime _ -> None)
+    ~candidate_dispatchable:(function
+      (* A materialized snapshot stays dispatchable even if a runtime.toml
+         reload removed its id from the current table; only a candidate that
+         never resolved is a dead head. *)
+      | Resolved_runtime _ -> true
+      | Missing_runtime _ -> false)
     ~emit_runtime_manifest
     ~run_attempt:(fun ~idx:_ ~runtime_id:attempt_runtime_id candidate ->
       match candidate with

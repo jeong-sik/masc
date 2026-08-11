@@ -558,20 +558,32 @@ type request_origin_admission =
   | Multiple_origins
   | Malformed_origin
 
-(* Re-reads the env var on each call so MASC_ALLOW_ANONYMOUS_MUTATIONS
-   can be toggled without restarting the server process. *)
-let allow_anonymous_mutations () =
-  match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
-  | Some ("1" | "true") -> true
-  | _ -> false
+(* Boot-time snapshots (RFC-0371 B11). The previous spelling re-read both
+   env vars on every request "so they can be toggled without restarting" —
+   a toggle nothing performs: no setter exists in the repository, shell
+   config, deploy scripts, or the live server's process environment
+   (verified 2026-08-12, #28221). An authorization input read from ambient
+   env per request is a mutable channel into the auth gate; live policy
+   changes belong to the operator control plane, not putenv. *)
+let allow_anonymous_mutations_snapshot =
+  lazy
+    (match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
+     | Some ("1" | "true") -> true
+     | _ -> false)
+
+let allow_anonymous_mutations () = Lazy.force allow_anonymous_mutations_snapshot
 
 let default_loopback_dev_mutation_origins =
   Masc_network_defaults.vite_dev_default_origins
 
+let loopback_dev_mutation_origins_snapshot =
+  lazy
+    (match Sys.getenv_opt "MASC_HTTP_DEV_MUTATION_ORIGINS" with
+     | Some raw -> split_csv_nonempty raw
+     | None -> default_loopback_dev_mutation_origins)
+
 let configured_loopback_dev_mutation_origins () =
-  match Sys.getenv_opt "MASC_HTTP_DEV_MUTATION_ORIGINS" with
-  | Some raw -> split_csv_nonempty raw
-  | None -> default_loopback_dev_mutation_origins
+  Lazy.force loopback_dev_mutation_origins_snapshot
 
 let parse_configured_dev_origins () =
   let rec parse_all parsed = function

@@ -427,17 +427,26 @@ let keeper_name_lookup_candidates raw_name =
     in
     trimmed :: aliases
 
-let resolve_keeper_name_string_config ~(config : Workspace.config) name =
+(* Resolution carries the meta it read (RFC-0371 B6). The name-only shape
+   below discarded it, which forced the preflight one call later to read the
+   same keeper again from disk — two reads per submitted message for one
+   question. Effective meta (TOML overlay) is read here because the only
+   downstream consumer of the carried meta is the runtime-id preflight,
+   which must see overlay-owned fields. *)
+let resolve_keeper_config ~(config : Workspace.config) name =
   let name = String.trim name in
   let rec loop = function
     | [] -> Error (Printf.sprintf "keeper not found: %s" name)
     | candidate :: rest ->
-        let* resolved = read_meta_resolved config candidate in
+        let* resolved = read_effective_meta_resolved config candidate in
         (match resolved with
-         | Some (resolved_name, _meta) -> Ok resolved_name
+         | Some (resolved_name, meta) -> Ok (resolved_name, meta)
          | None -> loop rest)
   in
   loop (keeper_name_lookup_candidates name)
+
+let resolve_keeper_name_string_config ~(config : Workspace.config) name =
+  Result.map fst (resolve_keeper_config ~config name)
 
 let resolve_keeper_name_config ~(config : Workspace.config) args =
   resolve_keeper_name_string_config
@@ -445,8 +454,8 @@ let resolve_keeper_name_config ~(config : Workspace.config) args =
     (get_string args "name" "")
 
 
-let resolve_keeper_name ctx message =
-  resolve_keeper_name_string_config
+let resolve_keeper ctx message =
+  resolve_keeper_config
     ~config:ctx.config
     (Keeper_invocation_contract.direct_message_target_name message)
 
@@ -606,13 +615,13 @@ let submit_agent_operation
 
 let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_result =
   match
-    let* name = message_error (resolve_keeper_name ctx message) in
+    let* name, meta = message_error (resolve_keeper ctx message) in
     let* message =
       Keeper_invocation_contract.direct_message_with_keeper_name message name
       |> Result.map_error Keeper_invocation_contract.request_error_to_string
       |> message_error
     in
-    let* message = message_error (Turn.preflight_keeper_msg ctx message) in
+    let* message = message_error (Turn.preflight_keeper_msg_resolved ~meta message) in
     submit_agent_operation
       ?continuation_channel
       ~submitted_by

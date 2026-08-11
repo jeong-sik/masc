@@ -138,6 +138,56 @@ max-concurrent = 1
 max-request-body-bytes = 65536
 |}
 
+let runtime_toml_quota_lane =
+  {|
+[runtime]
+default = "shared_a.test_model"
+
+[runtime.lanes.quota_lane]
+strategy = "ordered"
+candidates = [ "shared_a.test_model", "shared_b.test_model", "other.test_model" ]
+
+[providers.shared_a]
+display-name = "Shared account A"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.shared_a.credentials]
+type = "env"
+key = "SHARED_QUOTA_TEST_KEY"
+
+[providers.shared_b]
+display-name = "Shared account B"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[providers.shared_b.credentials]
+type = "env"
+key = "SHARED_QUOTA_TEST_KEY"
+
+[providers.other]
+display-name = "Other account"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:3"
+
+[providers.other.credentials]
+type = "env"
+key = "OTHER_QUOTA_TEST_KEY"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[shared_a.test_model]
+is-default = true
+
+[shared_b.test_model]
+
+[other.test_model]
+|}
+
 let runtime_toml_checkpoint_lane =
   {|
 [runtime]
@@ -1365,6 +1415,53 @@ let test_attempt_loop_does_not_gate_network_retry () =
     4
     (List.length !events)
 
+let test_attempt_loop_reorders_shared_quota_sibling_same_turn () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let attempts = ref [] in
+         let result =
+           Driver.For_testing.attempt_runtime_candidates
+             ~runtime_id:"quota_lane"
+             ~runtime_id_of:Fun.id
+             ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+             ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+               attempts := !attempts @ [ runtime_id ];
+               match runtime_id with
+               | "shared_a.test_model" ->
+                 attempt_without_effect
+                   (Error
+                      (Agent_core.Error.Provider
+                         (Llm_provider.Error.HardQuota
+                            { provider = "shared_a"
+                            ; retry_after = Some 300.0
+                            ; detail = "account quota exhausted"
+                            })))
+                   None
+               | "other.test_model" -> attempt_without_effect (Ok runtime_id) None
+               | "shared_b.test_model" ->
+                 Alcotest.fail
+                   "same-credential sibling must move behind the unrelated account"
+               | other -> Alcotest.failf "unexpected candidate %s" other)
+             [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
+         in
+         (match result with
+          | Ok runtime_id ->
+            Alcotest.(check string)
+              "unrelated account serves the turn"
+              "other.test_model"
+              runtime_id
+          | Error error ->
+            Alcotest.failf
+              "expected unrelated fallback success: %s"
+              (Agent_core.Error.to_string error));
+         Alcotest.(check (list string))
+           "new quota window reorders the remaining walk immediately"
+           [ "shared_a.test_model"; "other.test_model" ]
+           !attempts))
+
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_core.Agent.After_assistant_collected
@@ -1945,6 +2042,10 @@ let () =
             "attempt loop does not gate network retry"
             `Quick
             test_attempt_loop_does_not_gate_network_retry;
+          Alcotest.test_case
+            "hard quota reorders shared sibling in same turn"
+            `Quick
+            test_attempt_loop_reorders_shared_quota_sibling_same_turn;
           Alcotest.test_case
             "typed checkpoint is same-run retry authority"
             `Quick

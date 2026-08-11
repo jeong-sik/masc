@@ -15,6 +15,16 @@
     Matching is case-insensitive on the trimmed key. *)
 val is_auth_header_key : string -> bool
 
+val effective_credential_reference :
+  provider_id:string ->
+  Runtime_schema.credential option ->
+  Runtime_schema.credential option
+(** Return the explicit credential reference, or the provider registry's
+    declared default environment reference when the runtime row omits one.
+    The fallback path is metadata only: it never reads the process environment
+    or credential files.  Explicit credentials are preserved unchanged.
+    An unregistered provider with no explicit credential remains [None]. *)
+
 val binding_to_provider_config
   :  Runtime_schema.config
   -> Runtime_schema.binding

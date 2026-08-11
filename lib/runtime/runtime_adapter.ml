@@ -133,6 +133,19 @@ let find_registry_entry (provider_id : string)
      | None -> None)
 ;;
 
+let effective_credential_reference
+    ~(provider_id : string)
+    (credential : Runtime_schema.credential option) =
+  match credential with
+  | Some _ as explicit -> explicit
+  | None ->
+    (match find_registry_entry provider_id with
+     | Some entry ->
+       let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
+       if String.trim env = "" then None else Some (Runtime_schema.Env env)
+     | None -> None)
+;;
+
 (* --- Credential materialization --- *)
 
 let credential_env_candidates = function

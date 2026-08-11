@@ -201,7 +201,7 @@ let codex_stream_callback on_event =
                          (String.sub text (String.length streamed) suffix_length)
                    })
           end;
-          emit Agent_core.Types.MessageStop
+          emit Agent_core.Types.MessageStop)
 ;;
 
 let codex_error_to_core_error = function

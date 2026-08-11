@@ -111,33 +111,40 @@ let model_input_projection_for_capacity
             (Runtime_model_input_tail_window.budget_error_to_string error))
   in
   let* windowed = windowed in
+  (* Compute the next structural retry boundary from the current bounded
+     history before source projections append synthetic evidence (for example
+     Gate replay). Using the current window also means the oracle reaches
+     [None] at the newest-atom floor instead of authorizing an identical
+     provider retry from the original unwindowed history. *)
+  let () =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      let full_bytes =
+        List.fold_left
+          (fun total message ->
+             total + measure_model_input_message_bytes message)
+          0
+          windowed
+      in
+      let target_capacity_bytes =
+        if capacity_bytes = unbounded_model_input_capacity_bytes
+        then
+          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+            ~capacity_bytes:full_bytes
+        else
+          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+            ~capacity_bytes
+      in
+      observed_next_shrink_capacity_bytes :=
+        Runtime_model_input_tail_window.next_shrink_capacity_bytes
+          ~measure_message_bytes:measure_model_input_message_bytes
+          ~target_capacity_bytes
+          windowed)
+  in
   let* projected =
     match source_projection with
     | None -> Ok windowed
     | Some project -> project windowed
   in
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    let full_bytes =
-      List.fold_left
-        (fun total message ->
-           total + measure_model_input_message_bytes message)
-        0
-        projected
-    in
-    let target_capacity_bytes =
-      if capacity_bytes = unbounded_model_input_capacity_bytes
-      then
-        Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-          ~capacity_bytes:full_bytes
-      else
-        Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-          ~capacity_bytes
-    in
-    observed_next_shrink_capacity_bytes :=
-      Runtime_model_input_tail_window.next_shrink_capacity_bytes
-        ~measure_message_bytes:measure_model_input_message_bytes
-        ~target_capacity_bytes
-        projected);
   Ok projected
 ;;
 

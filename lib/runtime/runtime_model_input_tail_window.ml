@@ -18,6 +18,12 @@ let preamble_message : Agent_core.Types.message =
   }
 ;;
 
+let is_synthetic_preamble (message : Agent_core.Types.message) =
+  match List.assoc_opt preamble_marker_key message.metadata with
+  | Some (`Bool true) -> true
+  | Some _ | None -> false
+;;
+
 type budget_error =
   | Reservation_exceeds_capacity of
       { capacity_bytes : int
@@ -122,7 +128,13 @@ let next_shrink_capacity_bytes
     ~measure_message_bytes
     ~target_capacity_bytes
     messages =
-  let labelled, atom_count = annotate messages in
+  (* A provider-bound list may already contain the preamble materialized by a
+     previous cut. It is generated framing, not a durable conversation atom;
+     never let it become the oldest removable atom of the next retry. *)
+  let shrinkable_messages =
+    List.filter (fun message -> not (is_synthetic_preamble message)) messages
+  in
+  let labelled, atom_count = annotate shrinkable_messages in
   if atom_count <= 1
   then None
   else (

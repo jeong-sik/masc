@@ -225,6 +225,26 @@ let test_next_shrink_capacity_clamps_to_lopsided_newest_atom () =
     fits_budget ~capacity_bytes ~reserved_bytes:0 projected
 ;;
 
+let test_next_shrink_capacity_ignores_materialized_preamble () =
+  let preamble =
+    message
+      ~metadata:[ (Window.preamble_marker_key, `Bool true) ]
+      ~role:Types.User
+      "synthetic preamble"
+  in
+  let newest = padded ~role:Types.User ~tag:"newest|" 600 in
+  match
+    Window.next_shrink_capacity_bytes
+      ~measure_message_bytes
+      ~target_capacity_bytes:500
+      [ preamble; newest ]
+  with
+  | None -> ()
+  | Some _ ->
+    Alcotest.fail
+      "a materialized preamble must not create a retry boundary before the newest atom"
+;;
+
 let test_cut_is_quantized_when_a_quantized_cut_fits () =
   (* Cache stability (#26535): when some multiple of [k] fits, the drop count
      is that multiple, so the transmitted prefix only moves in whole
@@ -477,6 +497,10 @@ let () =
             "next shrink clamps to lopsided newest atom"
             `Quick
             test_next_shrink_capacity_clamps_to_lopsided_newest_atom
+        ; Alcotest.test_case
+            "next shrink ignores materialized preamble"
+            `Quick
+            test_next_shrink_capacity_ignores_materialized_preamble
         ; Alcotest.test_case "cut is quantized when a quantized cut fits" `Quick
             test_cut_is_quantized_when_a_quantized_cut_fits
         ; Alcotest.test_case "cut point is stable while the budget holds" `Quick

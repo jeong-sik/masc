@@ -996,10 +996,86 @@ let test_cas_absent_version_is_legacy () =
     | Error msg -> failf "legacy delete without version must succeed: %s" msg)
 ;;
 
+(* ---- Legacy route-context fields (#15398 schema, rejected since #24332) ----
+
+   Live-store shape: every record written between #15398 and #24332 carries
+   eight flat route-context fields. The reader's unknown-field rejection made
+   all of them unparseable — the by-url/masc partition's four real records
+   returned [] through the scoped API while sitting on disk. *)
+
+let legacy_disk_record ~extra =
+  Printf.sprintf
+    {|{"id":"30d1bcc0-60f9-458d-a7b1-2070ae187638","file_path":".masc/board.json","line_start":3,"line_end":3,"keeper_id":"taskmaster","kind":"Comment","content":"gate note","goal_id":null,"task_id":null,"board_post_id":null,"comment_id":null,"git_ref":null,"log_id":null,"operation_id":null,"pr_id":null,"session_id":null,"worker_run_id":null,"created_at_ms":531679440,"updated_at_ms":531679440%s}|}
+    extra
+
+let test_legacy_fields_parse_with_all_null () =
+  match Types.annotation_of_json (Yojson.Safe.from_string (legacy_disk_record ~extra:"")) with
+  | Error msg -> failf "all-null legacy fields must parse: %s" msg
+  | Ok a ->
+    check string "id survives" "30d1bcc0-60f9-458d-a7b1-2070ae187638" a.Types.id;
+    check int "null legacy fields add no references" 0 (List.length a.Types.references)
+;;
+
+let test_legacy_fields_promote_to_references () =
+  let json =
+    Yojson.Safe.from_string (legacy_disk_record ~extra:"")
+    |> function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "pr_id", _ -> ("pr_id", `String "27446")
+             | "session_id", _ -> ("session_id", `String "sess-a1")
+             | other -> other)
+           fields)
+    | other -> other
+  in
+  match Types.annotation_of_json json with
+  | Error msg -> failf "valued legacy fields must parse: %s" msg
+  | Ok a ->
+    let refs =
+      List.map (fun r -> (r.Types.relation, r.Types.reference)) a.Types.references
+    in
+    check
+      (list (pair string string))
+      "non-null legacy fields promote losslessly, in closed-list order"
+      [ ("pr_id", "27446"); ("session_id", "sess-a1") ]
+      refs
+;;
+
+let test_truly_unknown_field_still_rejected () =
+  match
+    Types.annotation_of_json
+      (Yojson.Safe.from_string
+         (legacy_disk_record ~extra:{|,"totally_new_field":"x"|}))
+  with
+  | Error msg ->
+    check
+      bool
+      "error names the unknown field"
+      true
+      (Astring.String.is_infix ~affix:"totally_new_field" msg)
+  | Ok _ -> fail "fields outside allowed+legacy closed lists must stay rejected"
+;;
+
 let () =
   run
     "ide_annotations"
-    [ ( "compact"
+    [ ( "legacy_fields"
+      , [ test_case
+            "all-null legacy route-context record parses"
+            `Quick
+            test_legacy_fields_parse_with_all_null
+        ; test_case
+            "valued legacy fields promote to references"
+            `Quick
+            test_legacy_fields_promote_to_references
+        ; test_case
+            "truly unknown field still rejected"
+            `Quick
+            test_truly_unknown_field_still_rejected
+        ] )
+    ; ( "compact"
       , [ test_case
             "compact preserves annotations"
             `Quick

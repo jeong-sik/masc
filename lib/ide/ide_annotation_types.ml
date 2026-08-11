@@ -142,6 +142,25 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
       ; "updated_at_ms"
       ]
     in
+    (* Closed list of fields the #15398 route-context schema wrote flat on
+       every record until #24332 removed them from the writer while this
+       reader started rejecting unknown fields — which made every record
+       written in between unreadable (the live store's by-url/_orphan files
+       are full of them). They are known-legacy, not unknown: each non-empty
+       value is preserved as an opaque {relation; reference} pair, so the
+       read stays lossless without a disk migration. Fields outside
+       [allowed_fields @ legacy_reference_fields] are still rejected. *)
+    let legacy_reference_fields =
+      [ "board_post_id"
+      ; "comment_id"
+      ; "git_ref"
+      ; "log_id"
+      ; "operation_id"
+      ; "pr_id"
+      ; "session_id"
+      ; "worker_run_id"
+      ]
+    in
     let find_string key default =
       match List.assoc_opt key fields with
       | Some (`String s) -> s
@@ -177,7 +196,14 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
       | Some k -> k
       | None -> Comment
     in
-    (match List.find_opt (fun (key, _) -> not (List.mem key allowed_fields)) fields with
+    (match
+       List.find_opt
+         (fun (key, _) ->
+           not
+             (List.mem key allowed_fields
+              || List.mem key legacy_reference_fields))
+         fields
+     with
      | Some (key, _) -> Error (Printf.sprintf "Unknown annotation field: %s" key)
      | None ->
        let references_json =
@@ -186,6 +212,14 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
        (match annotation_references_of_json references_json with
         | Error msg -> Error msg
         | Ok references ->
+          let legacy_references =
+            List.filter_map
+              (fun key ->
+                match find_opt_string key with
+                | Some value -> Some { relation = key; reference = value }
+                | None -> None)
+              legacy_reference_fields
+          in
           Ok
             { id = find_string "id" ""
             ; file_path = find_string "file_path" ""
@@ -196,7 +230,7 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
             ; content = find_string "content" ""
             ; goal_id = find_opt_string "goal_id"
             ; task_id = find_opt_string "task_id"
-            ; references
+            ; references = references @ legacy_references
             ; created_at_ms = find_int64 "created_at_ms" 0L
             ; updated_at_ms = find_int64 "updated_at_ms" 0L
             }))

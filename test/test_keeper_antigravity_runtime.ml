@@ -593,9 +593,11 @@ let test_blank_success_requires_fresh_conversation () =
                              ; diagnostic
                              }) ->
                         check bool
-                          "effect fence retains provider diagnostic"
+                          "effect fence retains the blank-success provider diagnostic"
                           true
-                          (String.trim diagnostic <> "")
+                          (String_util.contains_substring
+                             diagnostic
+                             "successful result response has no deliverable content")
                       | Some other ->
                         fail
                           (Keeper_turn_driver.kind_of_masc_internal_error other)

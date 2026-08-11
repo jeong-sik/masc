@@ -63,7 +63,6 @@ let runtime_status_json ?(include_models = true) () =
   let configured_capacity = Local_runtime_pool.configured_capacity () in
   let allocated_slots = Local_runtime_pool.allocated_slots () in
   let healthy_runtime_count = Local_runtime_pool.healthy_runtime_count () in
-  let measured_ceiling = Local_runtime_pool.measured_ceiling () in
   let parse_errors = Local_runtime_pool.parse_errors () in
   let observations =
     []
@@ -110,7 +109,6 @@ let runtime_status_json ?(include_models = true) () =
       ("healthy_runtime_count", `Int healthy_runtime_count);
       ("configured_capacity", `Int configured_capacity);
       ("allocated_slots", `Int allocated_slots);
-      ("measured_ceiling", Json_util.int_opt_to_json measured_ceiling);
       ("process_count", `Int (List.length processes));
       ("matching_process_count", `Int (List.length matching_processes));
       ("runtime_config_errors", `List (List.map (fun item -> `String item) parse_errors));

@@ -230,7 +230,57 @@ let codex_error_to_core_error = function
          ; error_type = Some "context_window_exceeded_after_tool_effect"
          ; detail = Runtime_codex_app_server.error_to_string error
          })
-  | error -> Agent_core.Error.Internal (Runtime_codex_app_server.error_to_string error)
+  (* Provider- and transport-side failures carry typed constructors so the
+     lane rotation chain ([core_error_to_runtime_outcome] returns [None] for
+     [Internal _], which short-circuits [lane_should_retry]) can judge them.
+     Mirrors [claude_error_to_core_error] / [runtime_error_to_core_error]
+     (antigravity); RFC-0370 §3.1. No catch-all: a new client error variant
+     must decide its rotation class at compile time. *)
+  | Runtime_codex_app_server.Spawn_failed detail
+  | Runtime_codex_app_server.Process_exited detail ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "codex_app_server"; detail })
+  | Runtime_codex_app_server.Protocol_error { stage; detail } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ParseError
+         { detail = Printf.sprintf "%s: %s" stage detail })
+  | Runtime_codex_app_server.Rpc_error { method_; code; message } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "codex_app_server"
+         ; error_type = Some "rpc_error"
+         ; detail =
+             Printf.sprintf
+               "%s%s: %s"
+               method_
+               (Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code)
+               message
+         })
+  | Runtime_codex_app_server.Unsupported_server_request method_ ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.UnknownVariant
+         { type_name = "codex_app_server.server_request"; value = method_ })
+  | Runtime_codex_app_server.Turn_failed detail ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "codex_app_server"
+         ; error_type = Some "turn_failed"
+         ; detail
+         })
+  | Runtime_codex_app_server.Timeout seconds ->
+    Agent_core.Error.Api
+      (Agent_core.Retry.Timeout
+         { message =
+             Printf.sprintf "Codex app-server turn timed out after %.3fs" seconds
+         ; phase = None
+         })
+  (* Server-reported "interrupted" turn status (deliberate host-side stop, for
+     example shutdown): not a provider fault, so rotation to another runtime
+     would re-run a turn that was intentionally stopped. Stays [Internal]. *)
+  | Runtime_codex_app_server.Turn_interrupted ->
+    Agent_core.Error.Internal
+      (Runtime_codex_app_server.error_to_string Runtime_codex_app_server.Turn_interrupted)
 ;;
 
 let recovery_failure_of_client_error = function
@@ -827,3 +877,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
   in
   { result; effect_disposition = Atomic.get effect_disposition }
 ;;
+
+module For_testing = struct
+  let codex_error_to_core_error = codex_error_to_core_error
+end

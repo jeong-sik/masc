@@ -835,6 +835,70 @@ let test_spawn_failure_releases_claim () =
          | _ -> fail "transient release evidence was not persisted"))
 ;;
 
+let test_subscription_spawn_failure_is_pre_dispatch () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let missing_cli = Filename.concat base_path "missing-claude" in
+       let runtime_snapshot = Runtime.For_testing.snapshot () in
+       Fun.protect
+         ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+         (fun () ->
+            with_runtime_config missing_cli (fun runtime_path ->
+              Eio_main.run (fun env ->
+                Eio.Switch.run (fun sw ->
+                  Eio_context.set_env env;
+                  Eio_context.with_test_env
+                    ~net:(Eio.Stdenv.net env)
+                    ~clock:(Eio.Stdenv.clock env)
+                    ~mono_clock:(Eio.Stdenv.mono_clock env)
+                    ~sw
+                    (fun () ->
+                       Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                       let config =
+                         match Runtime.get_runtime_by_id "claude.claude" with
+                         | Some
+                             { Runtime.execution =
+                                 Runtime_execution.Claude_code config
+                             ; _
+                             } ->
+                           config
+                         | Some _ | None -> fail "Claude runtime fixture did not resolve"
+                       in
+                       let attempt =
+                         Keeper_claude_code_runtime.run
+                           ~runtime_id:"claude.claude"
+                           ~keeper_name:"claude-pre-dispatch"
+                           ~base_path
+                           ~goal:"subscription probe should fail"
+                           ~goal_blocks:None
+                           ~system_prompt:""
+                           ~tools:[]
+                           ~initial_messages:[]
+                           ~model_input_projection:None
+                           ~hooks:None
+                           ~context_injector:None
+                           ~context:None
+                           ~event_bus:None
+                           ~raw_trace:None
+                           ~on_event:None
+                           ~config
+                       in
+                       (match attempt.result with
+                        | Error
+                            (Agent_core.Error.Provider
+                               (Llm_provider.Error.ProviderUnavailable _)) ->
+                          ()
+                        | Error error -> fail (Agent_core.Error.to_string error)
+                        | Ok _ -> fail "missing subscription CLI unexpectedly ran");
+                       check string
+                         "subscription spawn is proven pre-dispatch"
+                         "no_effect_observed"
+                         (Keeper_provider_attempt_effect.to_string
+                            attempt.effect_disposition))))))
+;;
+
 let () =
   run
     "keeper_claude_code_runtime"
@@ -866,6 +930,10 @@ let () =
             "spawn failure releases claim"
             `Quick
             test_spawn_failure_releases_claim
+        ; test_case
+            "subscription spawn failure is pre-dispatch"
+            `Quick
+            test_subscription_spawn_failure_is_pre_dispatch
         ] )
     ]
 ;;

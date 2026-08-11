@@ -26,3 +26,11 @@ val run :
   on_event:(Agent_core.Types.sse_event -> unit) option ->
   config:Runtime_execution.codex_app_server ->
   attempt_outcome
+
+module For_testing : sig
+  (** Typed carriage of Codex app-server client errors into agent-core
+      errors; rotation class per constructor is pinned by
+      [test_keeper_codex_error_carriage]. RFC-0370 §3.1. *)
+  val codex_error_to_core_error :
+    Runtime_codex_app_server.error -> Agent_core.Error.t
+end

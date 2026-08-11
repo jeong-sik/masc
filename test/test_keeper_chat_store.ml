@@ -48,9 +48,6 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
-let contains_substring haystack needle =
-  String_util.contains_substring haystack needle
-
 let with_eio_fs f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -327,13 +324,13 @@ let test_recent_direct_context_renders_prior_reply_and_tool_evidence () =
         (recent_roles lines);
       let rendered = MS.render_recent_direct_conversation_context lines in
       Alcotest.(check bool) "previous assistant utterance is visible" true
-        (contains_substring rendered "I was reading the board.");
+        (String_util.contains_substring rendered "I was reading the board.");
       Alcotest.(check bool) "tool evidence keeps only call name" true
-        (contains_substring rendered "tool_call: masc_board_list");
+        (String_util.contains_substring rendered "tool_call: masc_board_list");
       Alcotest.(check bool) "tool args are not prompt evidence" false
-        (contains_substring rendered {|{"limit":20}|});
+        (String_util.contains_substring rendered {|{"limit":20}|});
       Alcotest.(check bool) "grounding guard present" true
-        (contains_substring rendered "without tool evidence"))
+        (String_util.contains_substring rendered "without tool evidence"))
 
 let test_recent_direct_context_omits_transport_failure_as_self_reply () =
   let base_dir = temp_base_path "keeper-chat-recent-failure" in
@@ -356,7 +353,7 @@ let test_recent_direct_context_omits_transport_failure_as_self_reply () =
         [ "user" ] (recent_roles lines);
       let rendered = MS.render_recent_direct_conversation_context lines in
       Alcotest.(check bool) "failure text is not a self utterance" false
-        (contains_substring rendered "Keeper request failed"))
+        (String_util.contains_substring rendered "Keeper request failed"))
 
 let test_recent_direct_context_omits_voice_audio_self_echo () =
   let base_dir = temp_base_path "keeper-chat-recent-voice" in
@@ -385,7 +382,7 @@ let test_recent_direct_context_omits_voice_audio_self_echo () =
         [] (recent_roles lines);
       let rendered = MS.render_recent_direct_conversation_context lines in
       Alcotest.(check bool) "spoken text is not re-injected" false
-        (contains_substring rendered "I will say this out loud now."))
+        (String_util.contains_substring rendered "I will say this out loud now."))
 
 let test_direct_owner_context_excludes_connector_turns () =
   with_eio_fs (fun () ->
@@ -408,7 +405,7 @@ let test_direct_owner_context_excludes_connector_turns () =
         in
         let owner_context = context ~direct_reply:true ~channel:"" () in
         Alcotest.(check bool) "owner direct receives recent transcript" true
-          (contains_substring
+          (String_util.contains_substring
              owner_context
              "I just answered from direct chat.");
         Alcotest.(check string) "connector channel suppresses transcript" ""
@@ -451,15 +448,15 @@ let test_append_turn_redacts_projected_secrets () =
         ();
       let raw = read_file (chat_path ~base_dir ~keeper_name) in
       Alcotest.(check bool) "env secret not persisted" false
-        (contains_substring raw env_secret);
+        (String_util.contains_substring raw env_secret);
       Alcotest.(check bool) "file secret not persisted" false
-        (contains_substring raw file_secret);
+        (String_util.contains_substring raw file_secret);
       let messages = K.load ~base_dir ~keeper_name in
       let rendered = Yojson.Safe.to_string (K.to_json_array messages) in
       Alcotest.(check bool) "loaded view stays redacted" false
-        (contains_substring rendered env_secret);
+        (String_util.contains_substring rendered env_secret);
       Alcotest.(check bool) "redaction marker present" true
-        (contains_substring rendered "[REDACTED]"))
+        (String_util.contains_substring rendered "[REDACTED]"))
 
 let test_load_redacts_raw_persisted_secret_rows () =
   let base_dir = temp_base_path "keeper-chat-store-read-redact" in
@@ -483,9 +480,9 @@ let test_load_redacts_raw_persisted_secret_rows () =
       match K.load ~base_dir ~keeper_name with
       | [ msg ] ->
           Alcotest.(check bool) "raw persisted value hidden on read" false
-            (contains_substring msg.K.content secret);
+            (String_util.contains_substring msg.K.content secret);
           Alcotest.(check bool) "marker present on read" true
-            (contains_substring msg.K.content "[REDACTED]")
+            (String_util.contains_substring msg.K.content "[REDACTED]")
       | messages ->
           Alcotest.failf "expected 1 message, got %d" (List.length messages))
 
@@ -970,7 +967,7 @@ let test_failure_turn_kind_roundtrip () =
             (K.Row_kind.equal asst.kind K.Row_kind.Transport_failure);
           let raw = read_file (chat_path ~base_dir ~keeper_name) in
           Alcotest.(check bool) "failure row persists the kind field" true
-            (contains_substring raw {|"kind":"transport_failure"|})
+            (String_util.contains_substring raw {|"kind":"transport_failure"|})
       | messages ->
           Alcotest.failf "expected 2 rows, got %d" (List.length messages))
 
@@ -988,7 +985,7 @@ let test_kind_absent_reads_utterance () =
         ~assistant_content:"world" ();
       let raw = read_file (chat_path ~base_dir ~keeper_name) in
       Alcotest.(check bool) "utterance rows carry no kind field" false
-        (contains_substring raw {|"kind"|});
+        (String_util.contains_substring raw {|"kind"|});
       match K.load ~base_dir ~keeper_name with
       | [ user; asst ] ->
           Alcotest.(check bool) "user reads as utterance" true
@@ -1112,10 +1109,10 @@ let test_audio_url_and_device_id_persist () =
       let raw = read_file (chat_path ~base_dir ~keeper_name) in
       Alcotest.(check bool) "audio_url persisted"
         true
-        (contains_substring raw "\"audio_url\":\"https://example.com/audio.mp3\"");
+        (String_util.contains_substring raw "\"audio_url\":\"https://example.com/audio.mp3\"");
       Alcotest.(check bool) "device_id persisted"
         true
-        (contains_substring raw "\"device_id\":\"device-42\"");
+        (String_util.contains_substring raw "\"device_id\":\"device-42\"");
       let messages = K.load ~base_dir ~keeper_name in
       match K.to_json_array messages with
       | `List [ `Assoc fields ] -> (
@@ -1254,9 +1251,9 @@ let test_append_turn_redacts_supplied_thinking_blocks () =
         ();
       let raw = read_file (chat_path ~base_dir ~keeper_name) in
       Alcotest.(check bool) "thinking secret not persisted" false
-        (contains_substring raw secret);
+        (String_util.contains_substring raw secret);
       Alcotest.(check bool) "redaction marker persisted" true
-        (contains_substring raw "[REDACTED]");
+        (String_util.contains_substring raw "[REDACTED]");
       let messages = K.load ~base_dir ~keeper_name in
       let assistant =
         List.find
@@ -1266,9 +1263,9 @@ let test_append_turn_redacts_supplied_thinking_blocks () =
       match assistant.K.blocks with
       | Some [ B.Thinking thinking ] ->
         Alcotest.(check bool) "thinking content redacted on load" false
-          (contains_substring thinking.content secret);
+          (String_util.contains_substring thinking.content secret);
         Alcotest.(check bool) "thinking redaction marker visible" true
-          (contains_substring thinking.content "[REDACTED]")
+          (String_util.contains_substring thinking.content "[REDACTED]")
       | Some _ -> Alcotest.fail "expected exactly one thinking block"
       | None -> Alcotest.fail "assistant thinking block missing")
 
@@ -1339,13 +1336,13 @@ let test_append_turn_redacts_all_supplied_block_strings () =
         ();
       let raw = read_file (chat_path ~base_dir ~keeper_name) in
       Alcotest.(check bool) "rich block secret not persisted" false
-        (contains_substring raw secret);
+        (String_util.contains_substring raw secret);
       Alcotest.(check bool) "sensitive keyed value not persisted" false
-        (contains_substring raw "plain-non-pattern-value");
+        (String_util.contains_substring raw "plain-non-pattern-value");
       Alcotest.(check bool) "sensitive password value not persisted" false
-        (contains_substring raw "ordinary-value");
+        (String_util.contains_substring raw "ordinary-value");
       Alcotest.(check bool) "rich block redaction marker persisted" true
-        (contains_substring raw "[REDACTED]");
+        (String_util.contains_substring raw "[REDACTED]");
       let messages = K.load ~base_dir ~keeper_name in
       let assistant =
         List.find
@@ -1356,13 +1353,13 @@ let test_append_turn_redacts_all_supplied_block_strings () =
       | Some blocks ->
         let json = Yojson.Safe.to_string (B.blocks_to_yojson blocks) in
         Alcotest.(check bool) "loaded blocks hide secret" false
-          (contains_substring json secret);
+          (String_util.contains_substring json secret);
         Alcotest.(check bool) "loaded blocks hide sensitive keyed value" false
-          (contains_substring json "plain-non-pattern-value");
+          (String_util.contains_substring json "plain-non-pattern-value");
         Alcotest.(check bool) "loaded blocks hide sensitive password value" false
-          (contains_substring json "ordinary-value");
+          (String_util.contains_substring json "ordinary-value");
         Alcotest.(check bool) "loaded blocks keep redaction marker" true
-          (contains_substring json "[REDACTED]")
+          (String_util.contains_substring json "[REDACTED]")
       | None -> Alcotest.fail "assistant rich blocks missing")
 
 (* Fusion board_post_id/run_id are opaque lookup keys the dashboard uses to
@@ -1401,7 +1398,7 @@ let test_append_turn_preserves_fusion_lookup_ids () =
           messages
       in
       Alcotest.(check bool) "free-form assistant content still redacted" false
-        (contains_substring assistant.K.content secret);
+        (String_util.contains_substring assistant.K.content secret);
       match assistant.K.blocks with
       | Some [ B.Fusion fusion ] ->
         Alcotest.(check string) "board_post_id preserved verbatim"
@@ -1453,14 +1450,14 @@ let test_load_redacts_raw_persisted_blocks_and_audio () =
       match messages with
       | [ msg ] ->
         Alcotest.(check bool) "raw content redacted on load" false
-          (contains_substring msg.K.content secret);
+          (String_util.contains_substring msg.K.content secret);
         (match msg.K.audio with
          | Some audio ->
            Alcotest.(check bool) "raw audio message_text redacted on load" false
-             (contains_substring audio.message_text secret);
+             (String_util.contains_substring audio.message_text secret);
            let audio_url_contains_secret =
              match audio.audio_url with
-             | Some url -> contains_substring url secret
+             | Some url -> String_util.contains_substring url secret
              | None -> false
            in
            Alcotest.(check bool) "raw audio audio_url redacted on load" false
@@ -1469,14 +1466,14 @@ let test_load_redacts_raw_persisted_blocks_and_audio () =
         Alcotest.(check bool) "raw blocks redacted on load" false
           (match msg.K.blocks with
            | Some blocks ->
-             contains_substring (Yojson.Safe.to_string (B.blocks_to_yojson blocks)) secret
+             String_util.contains_substring (Yojson.Safe.to_string (B.blocks_to_yojson blocks)) secret
            | None -> true);
         let json = K.to_json_array messages in
         let s = Yojson.Safe.to_string json in
         Alcotest.(check bool) "to_json_array hides raw persisted secret" false
-          (contains_substring s secret);
+          (String_util.contains_substring s secret);
         Alcotest.(check bool) "redaction marker present in served payload" true
-          (contains_substring s "[REDACTED]")
+          (String_util.contains_substring s "[REDACTED]")
       | messages ->
         Alcotest.failf "expected 1 message, got %d" (List.length messages))
 
@@ -1507,25 +1504,25 @@ let test_append_assistant_message_redacts_audio () =
         ();
       let raw = read_file (chat_path ~base_dir ~keeper_name) in
       Alcotest.(check bool) "assistant content secret not persisted" false
-        (contains_substring raw secret);
+        (String_util.contains_substring raw secret);
       Alcotest.(check bool) "assistant audio_url secret not persisted" false
-        (contains_substring raw ("https://cdn.example.com/audio?sig=" ^ secret));
+        (String_util.contains_substring raw ("https://cdn.example.com/audio?sig=" ^ secret));
       Alcotest.(check bool) "assistant audio message_text secret not persisted" false
-        (contains_substring raw ("caption " ^ secret));
+        (String_util.contains_substring raw ("caption " ^ secret));
       Alcotest.(check bool) "redaction marker persisted" true
-        (contains_substring raw "[REDACTED]");
+        (String_util.contains_substring raw "[REDACTED]");
       let messages = K.load ~base_dir ~keeper_name in
       match messages with
       | [ msg ] ->
         Alcotest.(check bool) "loaded assistant content redacted" false
-          (contains_substring msg.K.content secret);
+          (String_util.contains_substring msg.K.content secret);
         (match msg.K.audio with
          | Some audio ->
            Alcotest.(check bool) "loaded audio message_text redacted" false
-             (contains_substring audio.message_text secret);
+             (String_util.contains_substring audio.message_text secret);
            let audio_url_contains_secret =
              match audio.audio_url with
-             | Some url -> contains_substring url secret
+             | Some url -> String_util.contains_substring url secret
              | None -> false
            in
            Alcotest.(check bool) "loaded audio audio_url redacted" false
@@ -1561,7 +1558,7 @@ let test_turn_ref_persisted_on_turn_rows () =
         messages;
       let s = Yojson.Safe.to_string (K.to_json_array messages) in
       Alcotest.(check bool) "turn_ref present in to_json_array" true
-        (contains_substring s "trace-abc#7"))
+        (String_util.contains_substring s "trace-abc#7"))
 
 let test_to_json_array_appends_trace_block_to_assistant_turn () =
   let base_dir = temp_base_path "keeper-chat-store-turn-trace" in
@@ -1665,7 +1662,7 @@ let test_to_json_array_stream_contract_without_turn_ref () =
           Alcotest.(check string) "delivery receipt absent" "no_delivery_receipt"
             (contract |> member "delivery_receipt" |> to_string);
           Alcotest.(check bool) "reason says no turn_ref" true
-            (contains_substring
+            (String_util.contains_substring
                (contract |> member "reason" |> to_string)
                "no persisted turn_ref")
       | other ->
@@ -1745,7 +1742,7 @@ let test_to_json_array_stream_contract_trace_unavailable () =
         "no_delivery_receipt"
         (contract |> member "delivery_receipt" |> to_string);
       Alcotest.(check bool) "reason says no retained trace" true
-        (contains_substring
+        (String_util.contains_substring
            (contract |> member "reason" |> to_string)
            "no retained trajectory/internal-history events"))
 
@@ -2083,16 +2080,16 @@ let test_transcript_of_messages_joins_turn_ref () =
         (fun (m : K.chat_message) ->
           Alcotest.(check bool)
             "no turn-B content in turn-A transcript" false
-            (contains_substring m.content "B"))
+            (String_util.contains_substring m.content "B"))
         (t.user @ t.assistant);
       let json =
         K.turn_transcript_to_json ~keeper:keeper_name ~turn_ref:tref_a t
       in
       let s = Yojson.Safe.to_string json in
       Alcotest.(check bool) "found=true when rows present" true
-        (contains_substring s "\"found\":true");
+        (String_util.contains_substring s "\"found\":true");
       Alcotest.(check bool) "turn_ref echoed" true
-        (contains_substring s "trace-xyz#3"))
+        (String_util.contains_substring s "trace-xyz#3"))
 
 (* An unmatched turn_ref yields empty lists and found=false — explicit
    absence, never a fabricated transcript. *)
@@ -2116,7 +2113,7 @@ let test_transcript_absent_returns_empty () =
         K.turn_transcript_to_json ~keeper:keeper_name ~turn_ref:missing t
       in
       Alcotest.(check bool) "found=false when no rows match" true
-        (contains_substring (Yojson.Safe.to_string json) "\"found\":false"))
+        (String_util.contains_substring (Yojson.Safe.to_string json) "\"found\":false"))
 
 let () =
   Alcotest.run "keeper_chat_store"

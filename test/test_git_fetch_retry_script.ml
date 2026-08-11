@@ -8,15 +8,6 @@ let source_root () =
 let script_path () =
   Filename.concat (source_root ()) "scripts/ci/git-fetch-retry.sh"
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -153,12 +144,12 @@ let test_retries_until_fetch_succeeds () =
         failf "git-fetch-retry failed (%d)\nstdout:\n%s\nstderr:\n%s" code
           stdout stderr;
       check bool "reports eventual success" true
-        (contains_substring stdout "fetch ok on attempt 3");
+        (String_util.contains_substring stdout "fetch ok on attempt 3");
       check bool "first retry warning emitted" true
-        (contains_substring stderr
+        (String_util.contains_substring stderr
            "::warning::git fetch attempt 1/3 failed with exit 128; retrying in 0s");
       check bool "second retry warning emitted" true
-        (contains_substring stderr
+        (String_util.contains_substring stderr
            "::warning::git fetch attempt 2/3 failed with exit 128; retrying in 0s");
       let git_calls = nonempty_lines (read_file fake_git_log) in
       check (list string) "fetch retried three times"
@@ -192,7 +183,7 @@ let test_reports_failure_after_last_attempt () =
       in
       check bool "command fails after attempts exhausted" true (code <> 0);
       check bool "final failure message emitted" true
-        (contains_substring stderr "git fetch failed after 3 attempt(s)");
+        (String_util.contains_substring stderr "git fetch failed after 3 attempt(s)");
       let git_calls = nonempty_lines (read_file fake_git_log) in
       check (list string) "fetch attempted exactly three times"
         [ "fetch origin main --depth=1"; "fetch origin main --depth=1";

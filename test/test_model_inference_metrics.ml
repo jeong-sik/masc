@@ -98,18 +98,6 @@ let recent_hour_bucket_timestamp () =
 let runtime_lane_label_for_test model_key =
   "runtime_lane_" ^ String.sub (Digest.to_hex (Digest.string model_key)) 0 12
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else
-    let rec loop i =
-      if i + needle_len > haystack_len then false
-      else if String.sub haystack i needle_len = needle then true
-      else loop (i + 1)
-    in
-    loop 0
-
 let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ?(cache_read_tokens=0) ?(cache_creation_tokens=0)
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
@@ -1063,7 +1051,7 @@ let test_cost_read_failure_is_not_empty_success () =
       Yojson.Safe.Util.(diagnostics |> member "state" |> to_string);
     let detail = Yojson.Safe.Util.(diagnostics |> member "detail" |> to_string) in
     check bool "typed read detail is surfaced" true
-      (contains_substring detail costs_dir))
+      (String_util.contains_substring detail costs_dir))
 ;;
 
 let test_cost_latency_json_composes_axes_and_percentiles () =
@@ -1521,11 +1509,11 @@ let test_prompt_feedback_redacts_provider_model_identity () =
     }
   in
   let text = M.render_keeper_prompt_feedback agg in
-  check bool "contains redacted lane label" true (contains_substring text lane);
-  check bool "contains total turns" true (contains_substring text "total_turns=10");
-  check bool "contains error rate" true (contains_substring text "error_rate=30.0%");
-  check bool "does not expose provider" false (contains_substring text "openrouter");
-  check bool "does not expose raw model" false (contains_substring text "secret-model")
+  check bool "contains redacted lane label" true (String_util.contains_substring text lane);
+  check bool "contains total turns" true (String_util.contains_substring text "total_turns=10");
+  check bool "contains error rate" true (String_util.contains_substring text "error_rate=30.0%");
+  check bool "does not expose provider" false (String_util.contains_substring text "openrouter");
+  check bool "does not expose raw model" false (String_util.contains_substring text "secret-model")
 
 let test_prompt_feedback_is_cost_independent () =
   let render total_cost_usd =
@@ -1553,7 +1541,7 @@ let test_prompt_feedback_is_cost_independent () =
   List.iter
     (fun forbidden ->
        check bool ("planning feedback excludes " ^ forbidden) false
-         (contains_substring baseline forbidden))
+         (String_util.contains_substring baseline forbidden))
     [ "cost="; "cost_usd"; "$" ]
 
 let test_usage_signal_uses_tokens_not_cost () =

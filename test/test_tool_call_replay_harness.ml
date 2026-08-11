@@ -81,17 +81,6 @@ let load_single_fixture file_name =
 let load_fixture () =
   load_single_fixture "openai_tool_call.jsonl"
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    if needle_len = 0 then true
-    else if idx + needle_len > haystack_len then false
-    else if String.sub haystack idx needle_len = needle then true
-    else loop (idx + 1)
-  in
-  loop 0
-
 let read_nonempty_lines path =
   let input = open_in path in
   Fun.protect
@@ -166,9 +155,9 @@ let test_validate_rejects_undeclared_tool () =
   | Error errors ->
       let joined = String.concat " | " errors in
       check bool "expected tool error" true
-        (contains_substring joined "expected tool 'masc_add_task' is not declared");
+        (String_util.contains_substring joined "expected tool 'masc_add_task' is not declared");
       check bool "response tool error" true
-        (contains_substring joined "response tool 'masc_add_task' is not declared")
+        (String_util.contains_substring joined "response tool 'masc_add_task' is not declared")
 
 let test_validate_rejects_argument_mismatch () =
   let snapshot = load_fixture () in
@@ -194,7 +183,7 @@ let test_validate_rejects_argument_mismatch () =
   | Error errors ->
       let joined = String.concat " | " errors in
       check bool "argument mismatch surfaced" true
-        (contains_substring joined "arguments mismatch for tool 'masc_add_task'")
+        (String_util.contains_substring joined "arguments mismatch for tool 'masc_add_task'")
 
 let test_fixture_catalog_rejects_empty_provider () =
   let snapshot = load_single_fixture "empty_provider.jsonl" in
@@ -203,7 +192,7 @@ let test_fixture_catalog_rejects_empty_provider () =
   | Error errors ->
       let joined = String.concat " | " errors in
       check bool "empty provider surfaced" true
-        (contains_substring joined "snapshot provider must be non-empty")
+        (String_util.contains_substring joined "snapshot provider must be non-empty")
 
 let test_fixture_catalog_rejects_missing_fields () =
   let rows = read_nonempty_lines (fixture_path "missing_fields.jsonl") in
@@ -223,7 +212,7 @@ let test_fixture_catalog_rejects_missing_fields () =
         | Ok _ -> Alcotest.failf "expected row to fail: %s" expected_error
         | Error msg ->
             check bool ("missing field surfaced: " ^ expected_error) true
-              (contains_substring msg expected_error)))
+              (String_util.contains_substring msg expected_error)))
     rows expected_errors
 
 let test_load_rejects_malformed_jsonl () =
@@ -234,7 +223,7 @@ let test_load_rejects_malformed_jsonl () =
   | Ok _ -> Alcotest.fail "expected malformed JSONL fixture to fail"
   | Error msg ->
       check bool "malformed line surfaced" true
-        (contains_substring msg "malformed JSONL line")
+        (String_util.contains_substring msg "malformed JSONL line")
 
 let () =
   Alcotest.run "tool_call_replay_harness"

@@ -356,15 +356,30 @@ let parse_json_safe ~context str : (Yojson.Safe.t, string) result =
 (** Read file contents with error handling.
     Uses Eio-native I/O via Fs_compat when available (after set_fs),
     falls back to blocking I/O in non-Eio contexts. *)
-let read_file_safe path : (string, string) result =
-  if not (Sys.file_exists path) then
-    Error (Printf.sprintf "File not found: %s" path)
+type read_file_error =
+  | File_not_found of string
+  | Read_failed of
+      { path : string
+      ; detail : string
+      }
+
+let read_file_error_to_string = function
+  | File_not_found path -> Printf.sprintf "File not found: %s" path
+  | Read_failed { path; detail } -> Printf.sprintf "Failed to read %s: %s" path detail
+
+(* Typed variant so consumers that branch on "was the file missing" match a
+   constructor instead of re-deriving the condition from the rendered
+   message's prefix (RFC-0371 B10). *)
+let read_file_result path : (string, read_file_error) result =
+  if not (Sys.file_exists path) then Error (File_not_found path)
   else
     try Ok (Fs_compat.load_file path)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-      Error (Printf.sprintf "Failed to read %s: %s" path (Printexc.to_string e))
+    | e -> Error (Read_failed { path; detail = Printexc.to_string e })
+
+let read_file_safe path : (string, string) result =
+  read_file_result path |> Result.map_error read_file_error_to_string
 
 (** Safe integer parsing *)
 let int_of_string_safe str = int_of_string_opt str

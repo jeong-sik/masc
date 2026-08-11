@@ -52,9 +52,6 @@ val int_of_env_default : string -> default:int -> min_v:int -> max_v:int -> int
 (** Parse a float env var with default and clamping. *)
 val float_of_env_default : string -> default:float -> min_v:float -> max_v:float -> float
 
-(** Clamp an integer to [min_v, max_v]. *)
-val clamp_int : int -> min_v:int -> max_v:int -> int
-
 (** {1 Name Validation} *)
 
 (** Validate a keeper name with the shared portable-name grammar. *)

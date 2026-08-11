@@ -137,12 +137,7 @@ let bool_member json key =
 let bool_option_member json key =
   Json_util.get_bool json key
 
-let bot_token_opt () =
-  match Sys.getenv_opt "DISCORD_BOT_TOKEN" with
-  | None -> None
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if String.equal trimmed "" then None else Some trimmed
+let bot_token_opt () = Env_config_discord.bot_token_opt ()
 
 let gateway_state_label = function
   | Discord_gateway_state.Disconnected -> "disconnected"

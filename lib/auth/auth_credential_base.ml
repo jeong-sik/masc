@@ -46,6 +46,15 @@ let internal_keeper_token_hash_file config =
 ;;
 
 let internal_keeper_token_env_key = "MASC_INTERNAL_MCP_TOKEN"
+
+(* In-process holder for the internal keeper token (RFC-0371 B11). The env
+   var stays as the cross-process surface (startup import, diagnostics),
+   but in-process consumers read this typed value: before it existed, boot
+   wrote the token with putenv and the tool-workspace credential check read
+   it back with getenv on every call — the process using its own
+   environment as a mutable in-memory channel. *)
+let internal_keeper_token_holder : string option Atomic.t = Atomic.make None
+let internal_keeper_token () = Atomic.get internal_keeper_token_holder
 let run_blocking_io f = Eio_guard.run_in_systhread f
 let file_exists path = run_blocking_io (fun () -> Sys.file_exists path)
 let read_text_file path = Fs_compat.load_file path
@@ -112,11 +121,13 @@ let ensure_internal_keeper_token config =
   match existing_env with
   | Some raw_token ->
     save_internal_keeper_token_hash config ~raw_token;
+    Atomic.set internal_keeper_token_holder (Some raw_token);
     raw_token
   | None ->
     let raw_token = generate_token () in
     save_internal_keeper_token_hash config ~raw_token;
     Unix.putenv internal_keeper_token_env_key raw_token;
+    Atomic.set internal_keeper_token_holder (Some raw_token);
     raw_token
 ;;
 

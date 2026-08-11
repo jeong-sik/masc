@@ -25,7 +25,7 @@ let trimmed_env name =
     let t = String.trim raw in
     if String.equal t "" then None else Some t
 
-let bot_token_opt () = trimmed_env "DISCORD_BOT_TOKEN"
+let bot_token_opt () = Env_config_discord.bot_token_opt ()
 
 (* Default trigger policy when none is configured (empty/unset). The
    "quiet, mention-triggered bot" baseline per RFC-0203. *)

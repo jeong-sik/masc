@@ -21,6 +21,10 @@ type t =
     (** Turn owner materialized at load time. HTTP bindings become
         [Agent_core]; official client runtimes remain distinct and can never
         be dispatched as a fake LLM provider config. *)
+  ; quota_scope : Runtime_quota_window.scope
+    (** Quota ownership key frozen at materialization, from the same
+        credential-alias selection that resolved the dispatched API key
+        (PR #28219 review). *)
   }
 
 (* id 파생의 단일 출처는 {!Runtime_schema.binding_key} — runtime 을 id 로
@@ -33,6 +37,30 @@ let id_of_binding (b : binding) : string = binding_key b
     제외)이되 왜 제외되는지 이유를 잃지 않는다. 이 이유는 assignment / default /
     task-route / lane 검증이 "not found" 대신 근본 원인을 표면화하는 데 쓰인다
     (Unknown→silent-drop 안티패턴 차단). *)
+(* Quota scope is frozen here, at materialization, from the same
+   credential-alias selection that resolves the dispatched API key. Deriving
+   it later would re-run alias selection against a possibly changed process
+   environment and charge the window to an account the dispatch never used
+   (PR #28219 review). *)
+let quota_scope_of_materialized
+    ~(provider : provider)
+    ~(execution : Runtime_execution.t) =
+  let credential =
+    match execution with
+    | Runtime_execution.Agent_core _ ->
+      Runtime_adapter.effective_credential_reference
+        ~provider_id:provider.id
+        provider.credentials
+    | Runtime_execution.Antigravity_cli _ -> provider.credentials
+    | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Claude_code _ ->
+      (* Official clients own subscription login. A registry API-key default
+         with the same provider label is a different account authority. *)
+      None
+  in
+  Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential
+;;
+
 let of_binding_result (cfg : config) (b : binding) : (t, string) result =
   if not b.enabled
   then Error "binding is disabled by runtime.toml"
@@ -43,7 +71,14 @@ let of_binding_result (cfg : config) (b : binding) : (t, string) result =
     else
       (match Runtime_adapter.binding_to_execution cfg b with
        | Ok execution ->
-         Ok { id = id_of_binding b; provider; model; binding = b; execution }
+         Ok
+           { id = id_of_binding b
+           ; provider
+           ; model
+           ; binding = b
+           ; execution
+           ; quota_scope = quota_scope_of_materialized ~provider ~execution
+           }
        | Error reason -> Error reason)
   | None, _ -> Error (Printf.sprintf "provider not found: %s" b.provider_id)
   | Some _, None -> Error (Printf.sprintf "model not found: %s" b.model_id)
@@ -1339,6 +1374,19 @@ let turn_timeout_s_of_runtime_id (id : string) : float option =
 let provider_id_of_runtime_id (id : string) : string option =
   match get_runtime_by_id id with
   | Some rt -> Some rt.provider.id
+  | None -> None
+;;
+
+(* Reads the scope frozen at materialization ({!of_binding_result}); no
+   environment access here, so a post-load env change cannot re-select the
+   credential alias out from under the recorded window. *)
+let quota_scope_of_runtime (rt : t) : Runtime_quota_window.scope =
+  rt.quota_scope
+;;
+
+let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option =
+  match get_runtime_by_id id with
+  | Some rt -> Some (quota_scope_of_runtime rt)
   | None -> None
 ;;
 

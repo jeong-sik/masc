@@ -78,6 +78,29 @@ let with_discord_paths dir f =
       with_env "MASC_DISCORD_BINDING_AUDIT_PATH" (Some audit_path) (fun () ->
         with_env "MASC_DISCORD_NAMES_PATH" (Some names_path) f)))
 
+let test_bot_token_accessor_unset_and_whitespace () =
+  (* The supported OCaml 5.4 test runtime has no [Unix.unsetenv]; the
+     existing [with_env ... None] helper represents an unset variable with
+     an empty value, which the accessor must treat as absent. *)
+  with_env "DISCORD_BOT_TOKEN" None (fun () ->
+    check (option string) "unset token -> None" None
+      (Env_config_discord.bot_token_opt ()));
+  with_env "DISCORD_BOT_TOKEN" (Some " \t \n ") (fun () ->
+    check (option string) "whitespace-only token -> None" None
+      (Env_config_discord.bot_token_opt ()))
+
+let test_bot_token_accessor_trims_and_feeds_status_consumer () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+  with_env "DISCORD_BOT_TOKEN" (Some "  token-42 \t ") (fun () ->
+    check (option string) "surrounding whitespace is trimmed" (Some "token-42")
+      (Env_config_discord.bot_token_opt ());
+    let json = Discord_state.status_json () in
+    check bool "trimmed token enables disconnected transport" true
+      (json |> U.member "available" |> U.to_bool);
+    check string "trimmed token has no missing-token error" ""
+      (json |> U.member "error" |> U.to_string)))
+
 let test_status_json_reports_in_process_gateway_status () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
@@ -484,6 +507,10 @@ let () =
     [
       ( "status",
         [
+          test_case "bot token accessor handles unset and whitespace" `Quick
+            test_bot_token_accessor_unset_and_whitespace;
+          test_case "bot token accessor trims for status consumer" `Quick
+            test_bot_token_accessor_trims_and_feeds_status_consumer;
           test_case "in-process gateway status" `Quick
             test_status_json_reports_in_process_gateway_status;
           test_case "ignores legacy sidecar status file" `Quick

@@ -111,15 +111,6 @@ let default_metadata ~required_permission =
     required_permission;
   }
 
-(* Runtime-readable so tests and local admin flows can toggle placeholder
-   exposure without restarting the server. Keep the legacy exact-match
-   semantics for "false"/"0" so existing deployments do not change behavior
-   when they use other spellings. *)
-let placeholder_tools_enabled () =
-  match Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" with
-  | Some "false" | Some "0" -> false
-  | _ -> true
-
 let hidden_active ?(allow_direct_call_when_hidden = true)
     ?(implementation_status = Real) ~required_permission reason =
   {
@@ -505,7 +496,10 @@ let is_visible ?(include_hidden = false) name =
   let meta = metadata name in
   match meta.visibility with
   | Hidden when include_hidden -> true
-  | Hidden when placeholder_tools_enabled () && is_placeholder name -> true
+  (* MASC_PLACEHOLDER_TOOLS_ENABLED left the tree (RFC-0371 B7): it was
+     read on every visibility check, nothing anywhere set it, and its
+     default made this arm unconditional in every deployment. *)
+  | Hidden when is_placeholder name -> true
   | Hidden -> false
   | Default -> implementation_allows_public_visibility meta.implementation_status
 

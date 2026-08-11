@@ -41,6 +41,14 @@ val get_bool_strict : default:bool -> string -> bool
     {!Config_error}. Missing and empty values still use [default]. Use at
     security-sensitive boundaries where warn-and-default would fail open. *)
 
+val get_int_clamped : default:int -> min_v:int -> max_v:int -> string -> int
+(** {!get_int} clamped into [[min_v, max_v]]. The canonical spelling of the
+    parse-with-default-then-clamp read that several modules used to carry
+    as local copies. *)
+
+val get_float_clamped : default:float -> min_v:float -> max_v:float -> string -> float
+(** {!get_float} clamped into [[min_v, max_v]]. *)
+
 val get_int_nonneg : default:int -> string -> int
 (** Like {!get_int} but floors negative parses at [default].  Use
     for env vars whose call sites treat negatives as nonsensical

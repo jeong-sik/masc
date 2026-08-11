@@ -84,6 +84,45 @@ let test_cancelled_holder_releases _sw =
   check bool "cancelled holder released lease" true !reacquired
 ;;
 
+let test_cancelled_holder_unblocks_waiter sw =
+  let holder_entered, resolve_holder_entered = Eio.Promise.create () in
+  let never, _resolve_never = Eio.Promise.create () in
+  let waiter_attempting, resolve_waiter_attempting = Eio.Promise.create () in
+  let waiter_result, resolve_waiter_result = Eio.Promise.create () in
+  (match
+     Eio.Switch.run (fun holder_sw ->
+       Eio.Fiber.fork ~sw:holder_sw (fun () ->
+         Lease.with_lease (Lease.File_path "/tmp/cancelled-with-waiter") (fun () ->
+           Eio.Promise.resolve resolve_holder_entered ();
+           Eio.Promise.await never));
+       Eio.Promise.await holder_entered;
+       Eio.Fiber.fork ~sw (fun () ->
+         Eio.Promise.resolve resolve_waiter_attempting ();
+         let result =
+           try
+             Lease.with_lease
+               (Lease.File_path "/tmp/cancelled-with-waiter")
+               (fun () -> Ok ())
+           with
+           | exn -> Error exn
+         in
+         Eio.Promise.resolve resolve_waiter_result result);
+       Eio.Promise.await waiter_attempting;
+       Eio.Fiber.yield ();
+       check bool
+         "waiter is blocked before cancellation"
+         true
+         (Option.is_none (Eio.Promise.peek waiter_result));
+       Eio.Switch.fail holder_sw Exit)
+   with
+   | () -> fail "holder switch unexpectedly completed"
+   | exception Exit -> ());
+  match Eio.Promise.await waiter_result with
+  | Ok () -> ()
+  | Error exn ->
+    failf "waiting holder failed after cancellation: %s" (Printexc.to_string exn)
+;;
+
 let () =
   run
     "keeper_external_resource_lease"
@@ -92,6 +131,9 @@ let () =
         ; eio_test "different resources overlap" test_distinct_resources_overlap
         ; eio_test "resource kinds do not alias" test_resource_kinds_do_not_alias
         ; eio_test "cancellation releases resource" test_cancelled_holder_releases
+        ; eio_test
+            "cancellation unblocks an existing waiter"
+            test_cancelled_holder_unblocks_waiter
         ] )
     ]
 ;;

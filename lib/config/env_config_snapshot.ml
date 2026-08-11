@@ -402,8 +402,6 @@ let tool_entries =
   [
     entry ~default:"512" "MASC_LIST_PAGE_SIZE"
       "Tool list page size (clamped 10-1024)";
-    entry ~default:"(none)" "MASC_PLACEHOLDER_TOOLS_ENABLED"
-      "Enable placeholder tool exposure";
   ]
 
 let worker_entries =

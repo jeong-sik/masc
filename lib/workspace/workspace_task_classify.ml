@@ -57,8 +57,8 @@ let working_agents config =
 
     This helper centralises the pattern, takes [with_file_lock] on the
     agent file, and silently skips the write when the file is missing
-    (matching the pre-existing [if Sys.file_exists agent_file]
-    guards).  It never blocks the caller on a missing/corrupt agent
+    (the guard is backend-aware [path_exists config], so a Memory-backend
+    workspace sees its own agent records).  It never blocks the caller on a missing/corrupt agent
     record — the backlog transition is the source of truth and the
     agent mirror is best-effort telemetry.  On JSON parse failure the
     error is logged with the agent name for diagnostic context. *)
@@ -66,7 +66,7 @@ let update_local_agent_state config ~agent_name f =
   let agent_file =
     Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
   in
-  if Sys.file_exists agent_file
+  if path_exists config agent_file
   then
     with_file_lock config agent_file (fun () ->
       let json = read_json config agent_file in

@@ -82,10 +82,23 @@ val parse_json_safe : context:string -> string -> (Yojson.Safe.t, string) result
 
 (** {1 File I/O} *)
 
+type read_file_error =
+  | File_not_found of string
+  | Read_failed of
+      { path : string
+      ; detail : string
+      }
+
+val read_file_error_to_string : read_file_error -> string
+
+val read_file_result : string -> (string, read_file_error) result
+(** Read file contents with a typed error, so callers that branch on the
+    missing-file case match a constructor rather than the rendered
+    message's prefix. Uses Eio-native I/O via Fs_compat when available
+    (after set_fs), falls back to blocking I/O in non-Eio contexts. *)
+
 val read_file_safe : string -> (string, string) result
-(** Read file contents with error handling.
-    Uses Eio-native I/O via Fs_compat when available (after set_fs),
-    falls back to blocking I/O in non-Eio contexts. *)
+(** [read_file_result] with the error rendered for display. *)
 
 val read_json_file_safe : string -> (Yojson.Safe.t, string) result
 (** Read JSON file safely. *)

@@ -108,6 +108,7 @@ let dec_latest_pending ~keeper_name () =
 
 let protect_cleanup ~keeper_name label f =
   try f () with
+  | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     record_counter ~keeper_name MemoryLaneUnitFailures;
     Log.Keeper.warn ~keeper_name

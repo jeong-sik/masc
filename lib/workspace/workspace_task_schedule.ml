@@ -143,11 +143,13 @@ let reconcile_all_agent_current_tasks_with_backlog
   =
   let agents_path = agents_dir config in
   try
-    if Sys.file_exists agents_path
+    (* Backend-aware sweep: the bare [Sys.file_exists] + [Sys.readdir] pair
+       saw only the local mirror, so a Memory-backend workspace skipped
+       reconciliation for every agent (RFC-0371 B9). [list_dir] is total. *)
+    if path_exists config agents_path
     then (
       let active_task_assignees = active_task_assignees_by_task_id backlog in
-      Sys.readdir agents_path
-      |> Array.to_list
+      list_dir config agents_path
       |> List.filter (fun name -> Filename.check_suffix name ".json")
       |> List.iter (fun name ->
         Workspace_query.safe_yield ();

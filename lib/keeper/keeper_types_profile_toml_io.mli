@@ -9,7 +9,6 @@ val int_of_env_default :
   string -> default:int -> min_v:int -> max_v:int -> int
 val float_of_env_default :
   string -> default:float -> min_v:float -> max_v:float -> float
-val clamp_int : int -> min_v:int -> max_v:int -> int
 val validate_name : string -> bool
 val utf8_repair_string : string -> string
 val normalize_prompt_text : max_bytes:int -> string -> string

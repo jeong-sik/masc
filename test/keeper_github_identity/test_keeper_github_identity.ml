@@ -166,8 +166,7 @@ let test_config_dir_is_cluster_scoped () =
   with_temp_base @@ fun base_path default_config ->
   let config =
     { default_config with
-      backend_config =
-        { default_config.backend_config with cluster_name = "identity-cluster" }
+      backend_config = { Workspace.cluster_name = "identity-cluster" }
     }
   in
   mkdir_p (Workspace.keepers_runtime_dir config);
@@ -253,13 +252,38 @@ let test_tool_projection_is_nonblocking_without_identity () =
   (match docker_state with
    | Github.Unconfigured -> ()
    | Configured _ -> Alcotest.fail "missing Docker identity reported configured");
-  Alcotest.(check (list string)) "docker config path is shadowed read-only"
+  let host_dir = Github.config_dir ~config ~keeper_name in
+  Alcotest.(check bool) "empty Keeper config directory is provisioned" true
+    (Sys.file_exists host_dir && Sys.is_directory host_dir);
+  Alcotest.(check (list string)) "docker config path is mounted read-only"
     [ "--env"
     ; "GH_CONFIG_DIR=/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli"
-    ; "--tmpfs"
-    ; "/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli:ro,mode=0555"
+    ; "-v"
+    ; host_dir
+      ^ ":/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli:ro"
     ]
+    docker_args;
+  let hosts = Filename.concat host_dir "hosts.yml" in
+  write_file hosts "github.com:\n  user: first-login\n";
+  Unix.chmod hosts 0o600;
+  let after_login_args, after_login_state =
+    match
+      Github.docker_args_for_tool
+        ~config
+        ~keeper_name
+        ~container_masc_dir:"/tmp/masc-runtime/.masc"
+    with
+    | Error message -> Alcotest.fail message
+    | Ok projection -> projection
+  in
+  (match after_login_state with
+   | Github.Configured path ->
+     Alcotest.(check string) "first login uses the existing mount source" host_dir path
+   | Unconfigured -> Alcotest.fail "first login remained unconfigured");
+  Alcotest.(check (list string))
+    "first login does not require a different container mount"
     docker_args
+    after_login_args
 ;;
 
 let test_observe_does_not_provision_missing_identity () =

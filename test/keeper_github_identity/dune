@@ -5,6 +5,7 @@
  (name test_keeper_github_identity)
  (modules
   common
+  workspace
   keeper_config
   keeper_secret_projection
   keeper_secret_redaction
@@ -12,4 +13,4 @@
   time_compat
   keeper_github_identity
   test_keeper_github_identity)
- (libraries alcotest eio masc.fs_compat yojson unix))
+ (libraries alcotest eio masc.fs_compat masc.masc_eio_context yojson unix))

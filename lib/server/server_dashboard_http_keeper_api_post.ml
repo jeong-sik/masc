@@ -20,13 +20,14 @@ let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
 let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
   Http.Response.json_value ?request ~status (error_json ?ok message) reqd
 
-let github_login_stream_headers =
+let github_login_stream_headers origin =
   Httpun.Headers.of_list
-    [ "content-type", "text/event-stream"
-    ; "cache-control", "no-cache"
-    ; "connection", "close"
-    ; "x-accel-buffering", "no"
-    ]
+    ([ "content-type", "text/event-stream"
+     ; "cache-control", "no-cache"
+     ; "connection", "close"
+     ; "x-accel-buffering", "no"
+     ]
+     @ Server_auth.cors_headers origin)
 ;;
 
 let github_login_stream_send writer event json =
@@ -60,7 +61,10 @@ let handle_keeper_github_login_post state req reqd =
        with
        | Error message -> respond_error reqd message
        | Ok env ->
-         let response = Httpun.Response.create ~headers:github_login_stream_headers `OK in
+         let headers =
+           github_login_stream_headers (Server_auth.get_origin req)
+         in
+         let response = Httpun.Response.create ~headers `OK in
          let writer = Httpun.Reqd.respond_with_streaming reqd response in
          Fun.protect
            ~finally:(fun () -> Httpun.Body.Writer.close writer)
@@ -1179,6 +1183,8 @@ let parse_bulk_directive_json json =
   | None -> Error "missing \"action\" field"
 
 module For_testing = struct
+  let github_login_stream_headers = github_login_stream_headers
+
   let parse_resume_request json =
     match parse_keeper_directive_json json with
     | Ok (Resume_owner request) ->

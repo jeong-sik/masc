@@ -22,3 +22,16 @@ let run_argv_with_status_split ?timeout_sec:_ ~env = function
     in
     status, stdout, stderr
 ;;
+
+let run_argv_with_status_split_streaming
+    ?timeout_sec
+    ~env
+    ~on_stdout_chunk
+    ~on_stderr_chunk
+    argv
+  =
+  let status, stdout, stderr = run_argv_with_status_split ?timeout_sec ~env argv in
+  if not (String.equal stdout "") then on_stdout_chunk stdout;
+  if not (String.equal stderr "") then on_stderr_chunk stderr;
+  status, stdout, stderr
+;;

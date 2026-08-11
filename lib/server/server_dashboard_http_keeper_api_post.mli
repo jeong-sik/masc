@@ -142,6 +142,8 @@ val handle_keeper_bulk_directive_post :
     entries carry [name], [owner_nonce], and [operator_operation_id]. *)
 
 module For_testing : sig
+  val github_login_stream_headers : string -> Httpun.Headers.t
+
   val parse_resume_request :
     Yojson.Safe.t -> (int * string, string) result
 

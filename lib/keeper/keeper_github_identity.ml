@@ -372,14 +372,17 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
   match existing_config_dir ~config ~keeper_name with
   | Error _ as error -> error
   | Ok None ->
-    let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
-    Ok
-      ( [ "--env"
-        ; "GH_CONFIG_DIR=" ^ container_dir
-        ; "--tmpfs"
-        ; container_dir ^ ":ro,mode=0555"
-        ]
-      , Unconfigured )
+    (match ensure_config_dir ~config ~keeper_name with
+     | Error _ as error -> error
+     | Ok host_dir ->
+       let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
+       Ok
+         ( [ "--env"
+           ; "GH_CONFIG_DIR=" ^ container_dir
+           ; "-v"
+           ; host_dir ^ ":" ^ container_dir ^ ":ro"
+           ]
+         , Unconfigured ))
   | Ok (Some host_dir) ->
     let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
     Ok

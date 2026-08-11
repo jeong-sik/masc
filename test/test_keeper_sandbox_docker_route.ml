@@ -237,6 +237,7 @@ let setup ~sandbox f =
   in
   ensure_dir config_dir;
   let config = Workspace.default_config base in
+  ensure_dir (Workspace.keepers_runtime_dir config);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:"minjae" ~sandbox () in
@@ -269,6 +270,7 @@ let setup_with_sandbox ~sandbox f =
   in
   ensure_dir config_dir;
   let config = Workspace.default_config base in
+  ensure_dir (Workspace.keepers_runtime_dir config);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:"minjae" ~sandbox () in
@@ -1683,6 +1685,20 @@ let test_docker_shell_projects_keeper_secret_dir () =
   in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   let line = run_docker_shell_command ~config ~meta ~playground ~log_path in
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let container_masc_dir =
+    Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+    |> Filename.dirname
+  in
+  let github_container_dir =
+    Keeper_github_identity.container_config_dir
+      ~container_masc_dir
+      ~keeper_name:meta.name
+  in
+  Alcotest.(check bool) "Keeper GitHub config mounted read-only" true
+    (contains_substring
+       line
+       (github_config_dir ^ ":" ^ github_container_dir ^ ":ro"));
   Alcotest.(check bool) "projected raw token not in docker argv" false
     (contains_substring line "projected-token");
   Alcotest.(check bool) "projected env uses env-file" true

@@ -51,9 +51,10 @@ val docker_args :
   container_masc_dir:string ->
   (string list, string) result
 
-(** Docker counterpart of [runtime_env_for_tool]. A safe existing identity is
-    mounted read-only; an absent identity shadows its deterministic container
-    path with an empty read-only tmpfs. Malformed state remains a typed error. *)
+(** Docker counterpart of [runtime_env_for_tool]. The Keeper-owned config
+    directory is mounted read-only even while unconfigured, so an operator
+    login becomes visible to an already-running turn container without
+    restarting it. Malformed state remains a typed error. *)
 val docker_args_for_tool :
   config:Workspace.config ->
   keeper_name:string ->

@@ -2979,6 +2979,17 @@ let test_composite_blocked_uses_terminal_contract_not_observational_metadata () 
    live context and triggering a reactive Provider_overflow on the next turn. *)
 module Keeper_config_post = Server_dashboard_http_keeper_api_post
 
+let test_keeper_github_login_stream_headers_include_cors () =
+  let origin = "http://localhost:5173" in
+  let headers =
+    Keeper_config_post.For_testing.github_login_stream_headers origin
+  in
+  Alcotest.(check (option string)) "CORS origin is reflected" (Some origin)
+    (Httpun.Headers.get headers "access-control-allow-origin");
+  Alcotest.(check (option string)) "credentials are allowed" (Some "true")
+    (Httpun.Headers.get headers "access-control-allow-credentials")
+;;
+
 let shrink_base_meta () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -3473,7 +3484,9 @@ let () =
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );
       ( "dashboard behavior contracts",
-        [ test_case "operator snapshot rejects stale publication races" `Quick
+        [ test_case "GitHub login stream includes CORS" `Quick
+            test_keeper_github_login_stream_headers_include_cors;
+          test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
           test_case "operator snapshot error clears previous success" `Quick
             test_operator_snapshot_error_clears_previous_success;

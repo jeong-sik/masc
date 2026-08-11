@@ -205,10 +205,6 @@ let int_option_to_json = function
   | Some value -> `Int value
 ;;
 
-let float_option_to_json = function
-  | None -> `Null
-  | Some value -> `Float value
-;;
 
 let active_turn_to_json turn =
   `Assoc
@@ -216,9 +212,9 @@ let active_turn_to_json turn =
       , match turn.lane with
         | None -> `Null
         | Some lane -> `String (admission_lane_to_string lane) )
-    ; "admitted_at", float_option_to_json turn.admitted_at
+    ; "admitted_at", Json_util.float_opt_to_json turn.admitted_at
     ; "observed_turn_id", int_option_to_json turn.observed_turn_id
-    ; "observation_started_at", float_option_to_json turn.observation_started_at
+    ; "observation_started_at", Json_util.float_opt_to_json turn.observation_started_at
     ]
 ;;
 

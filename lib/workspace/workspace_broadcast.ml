@@ -86,7 +86,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
       let agent_file =
         Filename.concat (agents_dir config) (safe_filename from_agent ^ ".json")
       in
-      if Sys.file_exists agent_file then
+      if path_exists config agent_file then
         match agent_of_yojson (read_json config agent_file) with
         | Ok agent -> (
             match agent.current_task with

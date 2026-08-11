@@ -30,22 +30,19 @@ let metric_tool_assignment_telemetry_failures =
 let metric_telemetry_observe_failures = Otel_metric_store_core.declare_counter "masc_telemetry_observe_failures_total"
 
 (* #10358 (c1): observability for the silent [Effect.Unhandled] catch-all
-   in [lib/workspace.ml] [observe_agent_lifecycle] / [observe_task_transition_event] /
-   [Keeper_accountability.record_task_transition].  Those three try/with
-   sites swallow the exception that fires when the lifecycle hook is
-   dispatched from a non-Eio context (test path, bootstrap, certain HTTP
-   handlers).  Before this counter, the entire Audit_log + Telemetry pair
-   silently disappeared, exactly matching the 5-tag → 2-tag attrition
-   ledger pattern (only [tool_called] survives because it is wired on a
-   different fiber-bearing path).  Labels: [event_family] (one of
-   [agent_lifecycle] / [task_transition] / [accountability]) and
-   [event_kind] (the lifecycle/transition variant). [event_kind] for
-   [agent_lifecycle] is one of [join] / [rejoin] / [leave] (3 values).
-   [event_kind] for both [task_transition] and [accountability] uses the
-   8 [Masc_domain.task_action_to_string] values: [claim] / [start] /
-   [done] / [cancel] / [release] / [submit_for_verification] / [approve]
-   / [reject]. Both vocabularies are bounded so series cardinality is at
-   most 19 (3 + 8 + 8). *)
+   in [lib/workspace.ml] [observe_agent_lifecycle] /
+   [observe_task_transition_event].  Those try/with sites swallow the
+   exception that fires when the lifecycle hook is dispatched from a
+   non-Eio context (test path, bootstrap, certain HTTP handlers).  Before
+   this counter, the entire Audit_log + Telemetry pair silently
+   disappeared.  Labels: [event_family] (one of [agent_lifecycle] /
+   [task_transition]) and [event_kind] (the lifecycle/transition
+   variant). [event_kind] for [agent_lifecycle] is one of [join] /
+   [rejoin] / [leave] (3 values). [event_kind] for [task_transition]
+   uses the 8 [Masc_domain.task_action_to_string] values: [claim] /
+   [start] / [done] / [cancel] / [release] / [submit_for_verification]
+   / [approve] / [reject]. Both vocabularies are bounded so series
+   cardinality is at most 11 (3 + 8). *)
 let metric_workspace_telemetry_drop = Otel_metric_store_core.declare_counter "masc_workspace_telemetry_drop_total"
 
 (* Per-caller observation of genuine inner AGENT_CORE timeout exceptions. *)

@@ -78,17 +78,7 @@ let test_wire_mapping_stable () =
     "task_transition / claim kind"
     "claim"
     (Workspace_telemetry_drop_event.kind_to_wire
-       (Task_transition Masc_domain.Claim));
-  Alcotest.(check string)
-    "accountability family"
-    "accountability"
-    (Workspace_telemetry_drop_event.family_to_wire
-       (Accountability Masc_domain.Done_action));
-  Alcotest.(check string)
-    "accountability / done kind"
-    "done"
-    (Workspace_telemetry_drop_event.kind_to_wire
-       (Accountability Masc_domain.Done_action))
+       (Task_transition Masc_domain.Claim))
 
 let () =
   Alcotest.run "workspace_telemetry_drop_non_eio"

@@ -640,18 +640,26 @@ let test_lock_free_observation_rejects_generation_change () =
   let keeper_name = "observation-generation-change" in
   let first = schedule_due_stimulus ~schedule_id:"before-observation" () in
   let second = schedule_due_stimulus ~schedule_id:"during-observation" () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    first;
+  (match
+     Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+       ~base_path
+       ~keeper_name
+       first
+   with
+   | Ok _ -> ()
+   | Error error -> failf "failed to seed durable event queue: %s" error);
   let observed =
     Keeper_event_queue_persistence.For_testing
     .observe_snapshot_with_errors_with_interleave
       ~between_samples:(fun () ->
-        Keeper_reaction_ledger.record_event_queue_stimulus
-          ~base_path
-          ~keeper_name
-          second)
+        match
+          Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+            ~base_path
+            ~keeper_name
+            second
+        with
+        | Ok _ -> ()
+        | Error error -> failf "failed to mutate durable event queue: %s" error)
       ~base_path
       ~keeper_name
   in

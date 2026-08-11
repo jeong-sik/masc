@@ -728,6 +728,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         status: normalizeKeeperAgentStatus(statusRaw),
         keepalive_running:
           typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,
+        keeper_keepalive_interval_s:
+          asNumber(row.keeper_keepalive_interval_s) ?? null,
+        heartbeat_stale_after_s:
+          asNumber(row.heartbeat_stale_after_s) ?? null,
         proactive_enabled:
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
         pause_state: asKeeperPauseState(row.pause_state),

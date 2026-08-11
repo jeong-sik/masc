@@ -2,7 +2,7 @@ import { refreshKeeperRuntimeStatus } from '../store'
 import { showToast } from './common/toast'
 import { keeperRuntimeBlockerHint, normalizeKeeperBlockerText } from '../lib/keeper-runtime-display'
 import type { Keeper } from '../types'
-import { HEARTBEAT_STALE_MS } from '../config/constants'
+import { keeperHeartbeatStaleMs } from '../config/constants'
 
 export async function refreshAfterRuntimeAction(): Promise<void> {
   // Keeper runtime actions (boot/shutdown/resume/wakeup/pause from the rail,
@@ -27,7 +27,8 @@ export function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
   const blocker = normalizeKeeperBlockerText(keeper.last_blocker)
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
-  const hbStale = hbAgeMs != null && hbAgeMs > HEARTBEAT_STALE_MS
+  const hbStale = hbAgeMs != null
+    && hbAgeMs > keeperHeartbeatStaleMs(keeper.heartbeat_stale_after_s)
   return keeper.paused
     || Boolean(runtimeBlocker)
     || Boolean(blocker)

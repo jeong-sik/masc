@@ -12,6 +12,10 @@ open Keeper_types_profile
    and zombie/stale assessment. *)
 let agent_staleness_threshold_s = 120.0
 
+let keeper_heartbeat_stale_after_s ~keepalive_interval_s =
+  Float.max agent_staleness_threshold_s (keepalive_interval_s +. 60.0)
+;;
+
 let unknown_model_label =
   Boundary_redaction.to_string Boundary_redaction.unknown_model_label
 
@@ -285,7 +289,9 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     | None -> None
 
 let keeper_health_state ?(fiber_health = Fiber_unknown)
-    ?(keepalive_interval_s = 300.0)
+    ?(keepalive_interval_s =
+      float_of_int
+        (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec))
     ~meta ~keepalive_running ~agent_status ~quiet_reason () : keeper_health =
   (* Supervisor-level health takes priority *)
   match fiber_health with
@@ -305,7 +311,10 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     || agent_runtime_status = Some Masc_domain.Inactive)
   then KH_offline
   else if keepalive_running then
-    if agent_registry_status_present && last_seen_ago_s > 2.0 *. keepalive_interval_s
+    if
+      agent_registry_status_present
+      && last_seen_ago_s
+         > keeper_heartbeat_stale_after_s ~keepalive_interval_s
     then KH_stale
     else
       (match quiet_reason with

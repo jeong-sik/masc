@@ -582,15 +582,20 @@ let test_blank_success_requires_fresh_conversation () =
                       ()
                   in
                   (match run () with
-                   | Error
-                       (Agent_core.Error.Provider
-                          (Llm_provider.Error.ProviderReportedError
-                             { provider = "antigravity_cli"
-                             ; error_type = Some "turn_failed"
-                             ; detail =
-                                 "successful result response has no deliverable content"
-                             })) ->
-                     ()
+                   | Error (Agent_core.Error.Internal message) ->
+                     check bool
+                       "fenced by the provider-attempt effect discipline"
+                       true
+                       (Astring.String.is_infix
+                          ~affix:"provider_attempt_effect_fenced"
+                          message);
+                     check bool
+                       "fenced envelope keeps the provider diagnostic"
+                       true
+                       (Astring.String.is_infix
+                          ~affix:
+                            "successful result response has no deliverable content"
+                          message)
                    | Error error -> fail (Agent_core.Error.to_string error)
                    | Ok _ -> fail "blank Antigravity result settled as success");
                   let failed_session =
@@ -699,7 +704,7 @@ let test_spawn_failure_is_pre_dispatch () =
                     "spawn is proven pre-dispatch"
                     "no_effect_observed"
                     (Keeper_provider_attempt_effect.to_string
-                       attempt.effect_disposition)))))
+                       attempt.effect_disposition))))))
 ;;
 
 let () =

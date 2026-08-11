@@ -5,10 +5,7 @@ import { isKeeperPaused } from './keeper-predicates'
 // `fleet-tone` is leaf-level (it imports only `format-string`), so this
 // direction introduces no cycle.
 import { toKeeperPhaseToken, type KeeperPhaseToken } from './fleet-tone'
-import { HEARTBEAT_STALE_MS } from '../config/constants'
-
-/** Max seconds since last heartbeat to consider the keeper process alive. */
-const HEARTBEAT_ALIVE_THRESHOLD_S = HEARTBEAT_STALE_MS / 1000
+import { keeperHeartbeatStaleMs } from '../config/constants'
 
 export type KeeperActivitySource =
   | 'autonomous_action'
@@ -405,7 +402,7 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToke
   // (audit: `keeper_state_machine.ml:21-34` `phase_to_string` emits
   // only the 13 PascalCase phases, none of which lowercase to
   // `'inactive'`), so the guard was dead defensive.
-  if (keeper.last_heartbeat && isHeartbeatAlive(keeper.last_heartbeat)) {
+  if (keeper.last_heartbeat && isHeartbeatAlive(keeper, keeper.last_heartbeat)) {
     // Route through `keeperLifecycleStatus`, not `.toLowerCase()`. The
     // PascalCase phase names are not their own tokens: `'HandingOff'`
     // lowercases to `'handingoff'`, but the token is `'handoff'`. It was
@@ -436,10 +433,10 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToke
   return 'offline'
 }
 
-function isHeartbeatAlive(heartbeat: string): boolean {
+function isHeartbeatAlive(keeper: Keeper, heartbeat: string): boolean {
   const ts = new Date(heartbeat).getTime()
   if (Number.isNaN(ts)) return false
-  return (Date.now() - ts) / 1000 < HEARTBEAT_ALIVE_THRESHOLD_S
+  return Date.now() - ts < keeperHeartbeatStaleMs(keeper.heartbeat_stale_after_s)
 }
 
 const runtimeBlockerLabels = {

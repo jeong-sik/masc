@@ -40,6 +40,15 @@ let test_keepalive_interval_positive () =
   let v = Cfg.KeeperKeepalive.interval_sec in
   check bool "interval is positive" true (v > 0)
 
+let test_keeper_heartbeat_stale_window_tracks_cadence () =
+  check (float 0.1) "30s cadence keeps the 120s agent floor" 120.0
+    (Masc.Keeper_status_runtime.keeper_heartbeat_stale_after_s
+       ~keepalive_interval_s:30.0);
+  check (float 0.1) "300s cadence receives 60s slack" 360.0
+    (Masc.Keeper_status_runtime.keeper_heartbeat_stale_after_s
+       ~keepalive_interval_s:300.0)
+;;
+
 let test_keepalive_interval_has_one_resolved_ssot () =
   Runtime_settings.ensure_init ();
   check
@@ -195,6 +204,8 @@ let () =
     "keepalive_config", [
       test_case "interval default" `Quick test_keepalive_interval_default;
       test_case "interval positive" `Quick test_keepalive_interval_positive;
+      test_case "stale window tracks cadence" `Quick
+        test_keeper_heartbeat_stale_window_tracks_cadence;
       test_case "interval has one resolved SSOT" `Quick
         test_keepalive_interval_has_one_resolved_ssot;
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;

@@ -85,6 +85,19 @@ let supervise_keepalive
       reason
       ()
   in
+  let wake_queued_owner_operations () =
+    match
+      Keeper_owner_registry.wake_operation_drain
+        ~base_path
+        ~keeper_name:meta.name
+    with
+    | Ok () -> ()
+    | Error error ->
+      Log.Keeper.warn
+        "supervisor: owner operation drain wake rejected keeper=%s error=%s"
+        meta.name
+        (Keeper_owner_registry.command_error_to_string error)
+  in
   let launch_registered reg =
     (try
        if not (Workspace_utils.is_initialized ctx.config)
@@ -102,6 +115,7 @@ let supervise_keepalive
     match launch_supervised_fiber ~proactive_warmup_sec ctx meta reg with
     | Error _ -> ()
     | Ok () ->
+      wake_queued_owner_operations ();
       publish_lifecycle
         ~event:
           (Keeper_lifecycle_events.Custom_event

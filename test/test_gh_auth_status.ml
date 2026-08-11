@@ -124,7 +124,11 @@ let test_actual_cli_json_decodes () =
 
 let test_relative_config_and_documented_environment_sources () =
   let config_sources =
-    [ "hosts.yml"; Filename.concat (Filename.get_temp_dir_name ()) "hosts.yml" ]
+    [ "hosts.yml"
+    ; Filename.concat "config" "hosts.yml"
+    ; Filename.concat (Filename.get_temp_dir_name ()) "hosts.yml"
+    ; "config\\hosts.yml"
+    ]
   in
   List.iter
     (fun config_source ->
@@ -287,26 +291,33 @@ let test_schema_drift_is_unknown () =
              then name, `String "NOT_DOCUMENTED_TOKEN"
              else name, value)
           valid_fields )
-    ; ( "relative path with hosts.yml suffix"
+    ; ( "successful entry without an account"
       , List.map
           (fun (name, value) ->
-             if String.equal name "tokenSource"
-             then name, `String "VAULT_TOKEN/hosts.yml"
-             else name, value)
+             if String.equal name "login" then name, `String "" else name, value)
           valid_fields )
     ; "token exposure", ("token", `String "must-not-be-ingested") :: valid_fields
     ]
 ;;
 
 let test_schema_errors_redact_json_values () =
-  let parsed = Gh_auth_status.parse {|{"hosts":"ghp_secret_should_not_leak"}|} in
-  match parsed.schema_error with
-  | None -> fail "malformed hosts value was accepted"
-  | Some detail ->
-    check bool "schema error does not expose JSON value" false
-      (String_util.contains_substring detail "ghp_secret_should_not_leak");
-    check bool "schema error reports the JSON kind" true
-      (String_util.contains_substring detail "string")
+  List.iter
+    (fun (label, secret, json) ->
+       let parsed = Gh_auth_status.parse json in
+       match parsed.schema_error with
+       | None -> failf "%s was accepted" label
+       | Some detail ->
+         check bool (label ^ " does not expose the secret") false
+           (String_util.contains_substring detail secret);
+         check bool (label ^ " reports the JSON kind") true
+           (String_util.contains_substring detail "string"))
+    [ ( "malformed hosts value"
+      , "ghp_secret_value"
+      , {|{"hosts":"ghp_secret_value"}|} )
+    ; ( "malformed host-map value"
+      , "ghp_secret_key"
+      , {|{"hosts":{"ghp_secret_key":"bad"}}|} )
+    ]
 ;;
 
 let test_host_identity_mismatch_is_unknown () =
@@ -320,6 +331,14 @@ let test_case_insensitive_duplicate_hosts_are_unknown () =
     ; "GITHUB.COM", `List [ keyring_entry ~host:"GITHUB.COM" ~active:false () ]
     ]
   |> check_schema_declines "case-insensitive duplicate host key"
+;;
+
+let test_empty_entry_arrays_still_validate_host_keys () =
+  List.iter
+    (fun host ->
+       document [ host, `List [] ]
+       |> check_schema_declines "invalid empty-array host key")
+    [ ""; " github.com " ]
 ;;
 
 let test_invalid_json_is_unknown () =
@@ -368,6 +387,10 @@ let () =
             "case-insensitive duplicate hosts are unknown"
             `Quick
             test_case_insensitive_duplicate_hosts_are_unknown
+        ; test_case
+            "empty entry arrays still validate host keys"
+            `Quick
+            test_empty_entry_arrays_still_validate_host_keys
         ; test_case
             "schema errors redact JSON values"
             `Quick

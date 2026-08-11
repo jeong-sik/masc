@@ -174,8 +174,8 @@ let source_of_label label =
   then Ok (Environment label)
   else if
     String.equal label "hosts.yml"
-    || ((not (Filename.is_relative label))
-        && String.equal (Filename.basename label) "hosts.yml")
+    || String.ends_with ~suffix:"/hosts.yml" label
+    || String.ends_with ~suffix:"\\hosts.yml" label
   then
     Ok (Config_file label)
   else Error "unknown gh token source label"
@@ -201,8 +201,8 @@ let git_protocol_of_string = function
   | _ -> Error "unknown gh gitProtocol"
 ;;
 
-let parse_entry ~map_host ~index json =
-  let context = Printf.sprintf "hosts.%s[%d]" map_host index in
+let parse_entry ~map_host ~host_index ~entry_index json =
+  let context = Printf.sprintf "hosts[%d][%d]" host_index entry_index in
   let* fields = object_fields context json in
   let* () =
     exact_fields
@@ -216,7 +216,6 @@ let parse_entry ~map_host ~index json =
   let* active = bool_field context "active" fields in
   let* host_raw = string_field context "host" fields in
   let* host = observed_hostname (context ^ ".host") host_raw in
-  let* map_host = observed_hostname (context ^ " map key") map_host in
   let* () =
     if String.equal host map_host
     then Ok ()
@@ -224,6 +223,12 @@ let parse_entry ~map_host ~index json =
       Error (context ^ ".host does not match its map key")
   in
   let* login = string_field context "login" fields in
+  let account = account_of_login login in
+  let* () =
+    match outcome, account with
+    | Logged_in, None -> Error (context ^ " success is missing a non-empty login")
+    | Logged_in, Some _ | (Login_failed | Timed_out), _ -> Ok ()
+  in
   let* source_label = string_field context "tokenSource" fields in
   let* source = source_of_label source_label in
   let* git_protocol_raw = string_field context "gitProtocol" fields in
@@ -240,7 +245,7 @@ let parse_entry ~map_host ~index json =
   Ok
     { outcome
     ; host
-    ; account = account_of_login login
+    ; account
     ; source
     ; active
     ; scopes = scopes_of_header scopes
@@ -249,13 +254,13 @@ let parse_entry ~map_host ~index json =
     }
 ;;
 
-let parse_host_entries (map_host, json) =
-  let* items = list_items ("hosts." ^ map_host) json in
-  let rec loop index acc = function
+let parse_host_entries ~host_index (map_host, json) =
+  let* items = list_items (Printf.sprintf "hosts[%d]" host_index) json in
+  let rec loop entry_index acc = function
     | [] -> Ok (List.rev acc)
     | item :: rest ->
-      let* entry = parse_entry ~map_host ~index item in
-      loop (index + 1) (entry :: acc) rest
+      let* entry = parse_entry ~map_host ~host_index ~entry_index item in
+      loop (entry_index + 1) (entry :: acc) rest
   in
   loop 0 [] items
 ;;
@@ -276,13 +281,13 @@ let parse_json json =
   if List.length host_names <> List.length (List.sort_uniq String.compare host_names)
   then Error "hosts contains a duplicate hostname"
   else
-    let rec loop acc = function
+    let rec loop host_index acc = function
       | [] -> Ok (List.rev acc |> List.concat)
       | host :: rest ->
-        let* entries = parse_host_entries host in
-        loop (entries :: acc) rest
+        let* entries = parse_host_entries ~host_index host in
+        loop (host_index + 1) (entries :: acc) rest
     in
-    loop [] hosts
+    loop 0 [] hosts
 ;;
 
 let parse output =

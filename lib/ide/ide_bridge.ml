@@ -341,13 +341,6 @@ let now_ms () =
   Int64.of_float (Unix.gettimeofday () *. 1000.0)
 ;;
 
-let annotation_kind_to_ide = function
-  | Agent_observation.Comment -> Ide_annotation_types.Comment
-  | Agent_observation.Decision -> Ide_annotation_types.Decision
-  | Agent_observation.Question -> Ide_annotation_types.Question
-  | Agent_observation.Bookmark -> Ide_annotation_types.Bookmark
-;;
-
 (* Tail-read at most [scan_budget] newest rows for one kind, then filter.
    Replaces the previous whole-file [fold_jsonl_lines] fold (O(file size))
    with a segment tail-read (O(scan_budget)). Order of the result is not
@@ -835,7 +828,7 @@ let install_agent_observation_sinks () =
           ~file_path
           ~line_start
           ~line_end
-          ~kind:(annotation_kind_to_ide kind)
+          ~kind
           ~content
           ?goal_id
           ?task_id

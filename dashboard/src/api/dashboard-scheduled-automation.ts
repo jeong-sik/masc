@@ -12,6 +12,56 @@ import type {
   DashboardScheduledAutomationFsm,
 } from './dashboard-tools-prompts'
 
+export interface DashboardScheduledAutomationPage {
+  /** Rows materialized in this response. */
+  visibleCount: number
+  /** Total rows in the schedule ledger. */
+  totalCount: number
+  /** Maximum rows this projection may materialize. */
+  limit: number
+  /** Whether the server omitted rows beyond [limit]. */
+  truncated: boolean
+}
+
+export type DashboardScheduledAutomationAvailableData =
+  Omit<
+    DashboardScheduledAutomation,
+    | 'status'
+    | 'schedule_store_known'
+    | 'schedule_store_read_error'
+    | 'request_count'
+    | 'request_limit'
+    | 'counts'
+    | 'fsm'
+  > & {
+    status: 'ok'
+    schedule_store_known: true
+    schedule_store_read_error: null
+    request_count: number
+    request_limit: number
+    counts: Record<string, number>
+    fsm: DashboardScheduledAutomationFsm & {
+      active_count: number
+      terminal_count: number
+    }
+  }
+
+/** A ledger-backed projection is either completely countable or unavailable.
+ *
+ * Keeping the failure as a discriminant prevents downstream components from
+ * turning the server's null counts and empty placeholder row list into a
+ * healthy-looking zero. */
+export type DashboardScheduledAutomationProjection =
+  | {
+    state: 'available'
+    data: DashboardScheduledAutomationAvailableData
+    page: DashboardScheduledAutomationPage
+  }
+  | {
+    state: 'unavailable'
+    reason: string
+  }
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -25,7 +75,12 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  *  to 0 would render an unreadable ledger as "no schedules", which is the one
  *  substitution this projection must never make. */
 function countOrNull(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+  return typeof value === 'number'
+    && Number.isFinite(value)
+    && Number.isInteger(value)
+    && value >= 0
+    ? value
+    : null
 }
 
 function normalizeFsm(raw: unknown): DashboardScheduledAutomationFsm {
@@ -54,7 +109,7 @@ function normalizeCounts(raw: unknown): Record<string, number> | null {
   return counts
 }
 
-export function normalizeScheduledAutomation(raw: unknown): DashboardScheduledAutomation {
+function normalizeScheduledAutomationPayload(raw: unknown): DashboardScheduledAutomation {
   const record = asRecord(raw) ?? {}
   const requests = Array.isArray(record.requests) ? record.requests : []
   const signals = Array.isArray(record.signals) ? record.signals : []
@@ -77,9 +132,79 @@ export function normalizeScheduledAutomation(raw: unknown): DashboardScheduledAu
   } as DashboardScheduledAutomation
 }
 
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+}
+
+export function normalizeScheduledAutomation(
+  raw: unknown,
+): DashboardScheduledAutomationProjection {
+  const record = asRecord(raw) ?? {}
+  const data = normalizeScheduledAutomationPayload(record)
+  const status = nonEmptyString(record.status)
+  const readError = nonEmptyString(record.schedule_store_read_error)
+
+  if (readError) {
+    return { state: 'unavailable', reason: readError }
+  }
+  if (record.schedule_store_known === false || status === 'unknown') {
+    return {
+      state: 'unavailable',
+      reason: 'schedule ledger status is unknown',
+    }
+  }
+
+  const requestCount = data.request_count
+  const requestLimit = data.request_limit
+  const counts = data.counts
+  const activeCount = data.fsm.active_count
+  const terminalCount = data.fsm.terminal_count
+  if (
+    status !== 'ok'
+    || record.schedule_store_known !== true
+    || record.schedule_store_read_error !== null
+    || requestCount === null
+    || requestLimit === null
+    || counts === null
+    || activeCount === null
+    || terminalCount === null
+    || typeof record.truncated !== 'boolean'
+  ) {
+    return {
+      state: 'unavailable',
+      reason: 'schedule ledger projection is incomplete',
+    }
+  }
+
+  const availableData: DashboardScheduledAutomationAvailableData = {
+    ...data,
+    status: 'ok',
+    schedule_store_known: true,
+    schedule_store_read_error: null,
+    request_count: requestCount,
+    request_limit: requestLimit,
+    counts,
+    fsm: {
+      ...data.fsm,
+      active_count: activeCount,
+      terminal_count: terminalCount,
+    },
+  }
+  return {
+    state: 'available',
+    data: availableData,
+    page: {
+      visibleCount: data.requests.length,
+      totalCount: requestCount,
+      limit: requestLimit,
+      truncated: data.truncated,
+    },
+  }
+}
+
 export async function fetchDashboardScheduledAutomation(
   opts?: AbortableRequestOptions,
-): Promise<DashboardScheduledAutomation> {
+): Promise<DashboardScheduledAutomationProjection> {
   await ensureDevToken()
   const raw = await get<unknown>('/api/v1/dashboard/scheduled-automation', {
     signal: opts?.signal,

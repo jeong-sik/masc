@@ -89,7 +89,9 @@ val context_overflow_shrink_sequence :
 (** Provider-oracle retry policy shared by AGENT_CORE and official-client
     runtimes. [default_capacity_bytes] is the policy's ordinary halved value;
     a custom [shrink_capacity] can replace only exceptional starting values
-    without copying the shared divisor. *)
+    without copying the shared divisor. A custom value that does not strictly
+    decrease [capacity_bytes] terminates the sequence without another provider
+    attempt. *)
 
 val run_try_provider :
   try_provider_ctx ->

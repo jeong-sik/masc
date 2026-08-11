@@ -47,12 +47,6 @@ type t =
       (** Task transition observer ([observe_task_transition_event])
           caught [Effect.Unhandled] from [Audit_log.log_action] or
           [Telemetry_eio.track_task_*]. *)
-  | Accountability of Masc_domain.task_action
-      (** Keeper accountability hook ([Keeper_accountability.record_task_transition])
-          caught [Effect.Unhandled]. Carries the originating
-          [task_action] so dashboards can correlate dropped
-          accountability records with the transition that produced
-          them. *)
 
 (** Wire label for the [event_family] Otel_metric_store label. Stable: matches
     the byte-for-byte strings emitted before the typed swap-over
@@ -65,7 +59,7 @@ val family_to_wire : t -> string
     [Agent_lifecycle] this is one of ["session_bound" / "session_rebound" /
     "session_ended"]
     (matching {!Workspace_hooks.agent_lifecycle_event_to_string}). For
-    [Task_transition] / [Accountability] it is
+    [Task_transition] it is
     {!Masc_domain.task_action_to_string} of the carried action
     (["claim" / "start" / "done" / ...]).
 

@@ -19,9 +19,10 @@ let preamble_message : Agent_core.Types.message =
 ;;
 
 let is_synthetic_preamble (message : Agent_core.Types.message) =
-  List.mem_assoc preamble_marker_key message.metadata
+  match List.assoc_opt preamble_marker_key message.metadata with
+  | Some (`Bool true) -> true
+  | Some _ | None -> false
 ;;
-
 type budget_error =
   | Reservation_exceeds_capacity of
       { capacity_bytes : int

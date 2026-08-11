@@ -125,10 +125,6 @@ let unix_iso_json = function
   | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
 ;;
 
-let float_json = function
-  | None -> `Null
-  | Some value -> `Float value
-;;
 
 let waiting_row_json (row : waiting_row) =
   `Assoc
@@ -136,9 +132,9 @@ let waiting_row_json (row : waiting_row) =
     ; "source", `String (source_to_string row.source)
     ; "waiting_on", `String row.waiting_on
     ; "wake_producer", `String (wake_producer_to_string row.wake_producer)
-    ; "since", float_json row.since
+    ; "since", Json_util.float_opt_to_json row.since
     ; "since_iso", unix_iso_json row.since
-    ; "due_at", float_json row.due_at
+    ; "due_at", Json_util.float_opt_to_json row.due_at
     ; "due_at_iso", unix_iso_json row.due_at
     ; "next_action", `String row.next_action
     ; "detail", row.detail
@@ -774,9 +770,9 @@ let keeper_json ~base_path keeper_name ~busy ~external_attention_truncated rows 
            then [ "external_attention", `Bool true ]
            else []) )
     ; "sources", `Assoc (source_counts rows)
-    ; "since", float_json since
+    ; "since", Json_util.float_opt_to_json since
     ; "since_iso", unix_iso_json since
-    ; "due_at", float_json due_at
+    ; "due_at", Json_util.float_opt_to_json due_at
     ; "due_at_iso", unix_iso_json due_at
     ; "source_next_actions", `Assoc (source_next_actions rows)
     ; "current_execution", current_execution_json ~base_path keeper_name

@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DashboardKeeperBackground,
   DashboardKeeperWaitingInventory,
-  DashboardScheduledAutomation,
+  DashboardScheduledAutomationAvailableData,
+  DashboardScheduledAutomationProjection,
 } from '../../api'
 
 type MockToolsResponse = {
@@ -20,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   toolsData: { value: null as null | MockToolsResponse },
   toolsLoading: { value: false },
   loadScheduledAutomation: vi.fn(),
-  scheduledAutomation: { value: null as null | DashboardScheduledAutomation },
+  scheduledAutomationProjection: { value: null as null | DashboardScheduledAutomationProjection },
   scheduledAutomationLoading: { value: false },
   scheduledAutomationError: { value: null as string | null },
   subscribeScheduledAutomationRefresh: vi.fn(() => () => {}),
@@ -35,7 +36,7 @@ vi.mock('../tools/tool-state', () => ({
 
 vi.mock('./schedule-state', () => ({
   loadScheduledAutomation: mocks.loadScheduledAutomation,
-  scheduledAutomation: mocks.scheduledAutomation,
+  scheduledAutomationProjection: mocks.scheduledAutomationProjection,
   scheduledAutomationError: mocks.scheduledAutomationError,
   scheduledAutomationLoading: mocks.scheduledAutomationLoading,
   subscribeScheduledAutomationRefresh: mocks.subscribeScheduledAutomationRefresh,
@@ -47,11 +48,14 @@ vi.mock('../../api/dashboard-schedule', () => ({
 
 import { ScheduleSurface } from './schedule-surface'
 
-function sampleAutomation(): DashboardScheduledAutomation {
+function sampleAutomation(): DashboardScheduledAutomationAvailableData {
   return {
     schema: 'masc.dashboard.scheduled_automation.v1',
     source: 'schedule_runner_signals',
     generated_at: '2026-06-21T00:00:00Z',
+    status: 'ok',
+    schedule_store_known: true,
+    schedule_store_read_error: null,
     request_count: 1,
     request_limit: 20,
     truncated: false,
@@ -85,6 +89,19 @@ function sampleAutomation(): DashboardScheduledAutomation {
         due_at_iso: '2026-06-21T01:00:00Z',
       },
     ],
+  }
+}
+
+function setAutomation(data: DashboardScheduledAutomationAvailableData): void {
+  mocks.scheduledAutomationProjection.value = {
+    state: 'available',
+    data,
+    page: {
+      visibleCount: data.requests.length,
+      totalCount: data.request_count,
+      limit: data.request_limit,
+      truncated: data.truncated,
+    },
   }
 }
 
@@ -178,7 +195,7 @@ describe('ScheduleSurface', () => {
     mocks.toolsLoading.value = false
     mocks.loadScheduledAutomation.mockClear()
     mocks.subscribeScheduledAutomationRefresh.mockClear()
-    mocks.scheduledAutomation.value = null
+    mocks.scheduledAutomationProjection.value = null
     mocks.scheduledAutomationLoading.value = false
     mocks.scheduledAutomationError.value = null
   })
@@ -206,7 +223,7 @@ describe('ScheduleSurface', () => {
   })
 
   it('renders backed schedule summary and reuses read-only schedule cards', async () => {
-    mocks.scheduledAutomation.value = sampleAutomation()
+    setAutomation(sampleAutomation())
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
@@ -261,7 +278,7 @@ describe('ScheduleSurface', () => {
   })
 
   it('renders the read-only operations aside in a two-column shell', async () => {
-    mocks.scheduledAutomation.value = sampleAutomation()
+    setAutomation(sampleAutomation())
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
@@ -294,7 +311,7 @@ describe('ScheduleSurface', () => {
         status: 'scheduled',
       },
     ]
-    mocks.scheduledAutomation.value = automation
+    setAutomation(automation)
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
@@ -327,7 +344,7 @@ describe('ScheduleSurface', () => {
         keeper_reaction_evidence: { projection_status: 'not_found' },
       },
     ]
-    mocks.scheduledAutomation.value = automation
+    setAutomation(automation)
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
@@ -345,7 +362,7 @@ describe('ScheduleSurface', () => {
 
   it('surfaces projection load errors without hiding stale schedule data', async () => {
     mocks.scheduledAutomationError.value = 'schedule projection unavailable'
-    mocks.scheduledAutomation.value = sampleAutomation()
+    setAutomation(sampleAutomation())
     mocks.toolsData.value = {
       tool_inventory: { tools: [] },
       tool_usage: {},
@@ -358,8 +375,51 @@ describe('ScheduleSurface', () => {
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
   })
 
+  it('renders an unreadable ledger as unavailable and keeps every KPI unknown', async () => {
+    mocks.scheduledAutomationProjection.value = {
+      state: 'unavailable',
+      reason: 'schedule store read failed: corrupt ledger',
+    }
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    expect(container.querySelector('[data-testid="schedule-projection-unavailable"]')?.textContent)
+      .toContain('schedule store read failed: corrupt ledger')
+    expect(Array.from(container.querySelectorAll('.ov-kpi-v')).map(node => node.textContent))
+      .toEqual(['—', '—', '—', '—'])
+    expect(container.querySelector('[data-testid="schedule-viewbar"]')).toBeNull()
+    expect(container.textContent).not.toContain('다가오는 7일에 예정된 예약이 없습니다')
+  })
+
+  it('distinguishes visible rows from the total when the projection is truncated', async () => {
+    const automation = sampleAutomation()
+    automation.request_count = 42
+    automation.request_limit = 20
+    automation.truncated = true
+    setAutomation(automation)
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    const summary = container.querySelector('[aria-label="예약 요약"]')
+    const totalKpi = Array.from(summary?.querySelectorAll('.ov-kpi') ?? [])
+      .find(element => element.textContent?.includes('총 예약'))
+    expect(totalKpi?.textContent).toContain('42')
+    expect(container.querySelector('[data-testid="schedule-page-metadata"]')?.textContent)
+      .toContain('표시 1 / 전체 42 · 최대 20 · 일부만 표시')
+  })
+
   it('prunes completed schedules through the live dashboard API and refreshes projection', async () => {
-    mocks.scheduledAutomation.value = sampleAutomation()
+    setAutomation(sampleAutomation())
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
@@ -410,7 +470,7 @@ describe('ScheduleSurface', () => {
   })
 
   it('toggles to the list view revealing the diagnostic wake-signal feed', async () => {
-    mocks.scheduledAutomation.value = sampleAutomation()
+    setAutomation(sampleAutomation())
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },
@@ -436,7 +496,7 @@ describe('ScheduleSurface', () => {
       { ...automation.requests[0]!, schedule_id: 'sched-oneshot', recurrence: { kind: 'one_shot' }, recurrence_kind: 'one_shot' },
       { ...automation.requests[0]!, schedule_id: 'sched-interval', recurrence: { kind: 'interval', interval_sec: 3600 }, recurrence_kind: 'interval' },
     ]
-    mocks.scheduledAutomation.value = automation
+    setAutomation(automation)
     mocks.toolsData.value = {
       generated_at: '2026-06-21T00:00:00Z',
       tool_inventory: { tools: [] },

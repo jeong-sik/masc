@@ -21,7 +21,7 @@ import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
 import {
-  scheduledAutomation,
+  scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh,
 } from '../schedule/schedule-state'
 
@@ -78,7 +78,17 @@ export function Tools() {
       <//>
 
       <${SectionCard} label="예약 자동화 FSM" class="section v2-lab-panel mb-4">
-        <${ScheduledAutomationPanel} automation=${scheduledAutomation.value ?? null} />
+        ${scheduledAutomationProjection.value?.state === 'unavailable'
+          ? html`
+              <div class="text-xs text-[var(--color-status-bad)]" data-testid="tools-schedule-unavailable">
+                schedule ledger 읽기 실패: ${scheduledAutomationProjection.value.reason}
+              </div>
+            `
+          : html`<${ScheduledAutomationPanel}
+              automation=${scheduledAutomationProjection.value?.state === 'available'
+                ? scheduledAutomationProjection.value.data
+                : null}
+            />`}
       <//>
 
       <${SectionCard} label="Keeper Waiting Inventory" class="section v2-lab-panel mb-4">

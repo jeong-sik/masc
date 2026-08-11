@@ -49,7 +49,6 @@
   test_keeper_context_layers
   test_keeper_hooks_agent_core_introspection
   test_keeper_run_tools_hooks
-  test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection
   test_keeper_decision_event
@@ -110,6 +109,8 @@
   test_runtime_lane_preference
   test_keeper_turn_driver_accept
   test_keeper_turn_driver_failover
+  test_keeper_rotation_eligibility_census
+  test_keeper_codex_error_carriage
   test_domain_pool
   test_sse
   test_graphql_api
@@ -192,11 +193,6 @@
   test_goal_scope_terminal_phase
   test_claimable_task_summaries
   test_schema_surface_index
-  test_keeper_accountability
-  test_reputation_ledger_v2
-  test_reputation_multi_dim
-  test_reputation_identity_undercount
-  test_accountability_emit_skip_10314
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
   test_keeper_registry_provenance
@@ -345,7 +341,6 @@
   test_keeper_context_layers
   test_keeper_hooks_agent_core_introspection
   test_keeper_run_tools_hooks
-  test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection
   test_keeper_decision_event
@@ -408,6 +403,8 @@
   test_runtime_lane_preference
   test_keeper_turn_driver_accept
   test_keeper_turn_driver_failover
+  test_keeper_rotation_eligibility_census
+  test_keeper_codex_error_carriage
   test_domain_pool
   test_sse
   test_graphql_api
@@ -490,11 +487,6 @@
   test_goal_scope_terminal_phase
   test_claimable_task_summaries
   test_schema_surface_index
-  test_keeper_accountability
-  test_reputation_ledger_v2
-  test_reputation_multi_dim
-  test_reputation_identity_undercount
-  test_accountability_emit_skip_10314
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
   test_keeper_registry_provenance

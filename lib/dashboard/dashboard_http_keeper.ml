@@ -348,14 +348,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
     |> List.sort_uniq String.compare
   in
   let now_ts = Time_compat.now () in
-  let accountability_summary =
-    if compact then
-      (fun ~keeper_name ~agent_name ->
-        Keeper_status_metrics.accountability_summary_json config
-          ~keeper_name ~agent_name)
-    else
-      Keeper_status_metrics.accountability_summary_lookup config
-  in
   (* #10710: fiber-batched keeper I/O. Each keeper's metadata + metrics reads
      run concurrently across a bounded fiber pool ([dashboard_keeper_max_fibers])
      instead of an unbounded [Eio.Fiber.all] fan-out. The enrich body has no
@@ -687,32 +679,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 	                     ~keepalive_started_at:(runtime_keepalive_started_at config m)
                      ~now_ts
               in
-              (* Trust Observatory — raw signals side-by-side, no synthesis.
-                 Reputation (accountability + v2 dimensions). *)
-              let trust_observatory =
-                if compact
-                then `Null
-                else
-                  let reputation =
-                    (try
-                       let rep = Reputation.compute_reputation config ~agent_name:m.agent_name in
-                       Reputation.agent_reputation_to_yojson rep
-                     with
-                     | Eio.Cancel.Cancelled _ as e -> raise e
-                     | exn ->
-                       Log.Keeper.warn "trust_observatory reputation failed for %s: %s"
-                         m.name (Printexc.to_string exn);
-                       `Null)
-                  in
-                  let accountability =
-                    accountability_summary ~keeper_name:m.name
-                      ~agent_name:m.agent_name
-                  in
-                  `Assoc [
-                    ("reputation", reputation);
-                    ("accountability", accountability);
-                  ]
-              in
               let runtime_trust =
                 if compact
                 then Keeper_runtime_trust_snapshot.summary_json ~config ~meta:m
@@ -727,7 +693,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   ("metrics_series", metrics_series);
                   ("conversation_tail", conversation_tail);
                   ("k2k_recent", k2k_recent);
-                  ("trust_observatory", trust_observatory);
                 ]
               in
 	              let profile = Dashboard_execution_helpers.get_agent_profile m.name in

@@ -33,6 +33,7 @@
   exact_output_validated_flow_evidence
   exact_output_plan)
  (libraries
+  agent_core_strings
   yojson
   otoml
   ppx_deriving_yojson.runtime

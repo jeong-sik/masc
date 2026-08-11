@@ -786,13 +786,16 @@ let context_overflow_shrink_sequence
         let shrunk_capacity_bytes =
           shrink_capacity ~capacity_bytes ~default_capacity_bytes
         in
-        on_shrink_retry
-          ~shrink_attempt:(shrink_attempt + 1)
-          ~previous_capacity_bytes:capacity_bytes
-          ~capacity_bytes:shrunk_capacity_bytes;
-        go
-          ~capacity_bytes:shrunk_capacity_bytes
-          ~shrink_attempt:(shrink_attempt + 1))
+        if shrunk_capacity_bytes >= capacity_bytes
+        then failed
+        else (
+          on_shrink_retry
+            ~shrink_attempt:(shrink_attempt + 1)
+            ~previous_capacity_bytes:capacity_bytes
+            ~capacity_bytes:shrunk_capacity_bytes;
+          go
+            ~capacity_bytes:shrunk_capacity_bytes
+            ~shrink_attempt:(shrink_attempt + 1)))
       else failed
   in
   go ~capacity_bytes:starting_capacity_bytes ~shrink_attempt:0

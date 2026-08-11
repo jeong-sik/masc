@@ -141,15 +141,6 @@ export type BoardAttachmentDecode =
 export type BoardVoteDirection = 'up' | 'down'
 export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
 
-export interface BoardContributorQuality {
-  source?: string
-  completion_rate?: number
-  response_rate?: number
-  board_posts?: number
-  board_comments?: number
-  evidence_state?: 'default' | 'measured'
-}
-
 export interface BoardActorIdentity {
   kind: 'keeper' | 'agent'
   id: string
@@ -202,7 +193,6 @@ export interface BoardPost {
   hearth_count?: number
   report_count?: number
   moderation_status?: BoardModerationStatus
-  contributor_quality?: BoardContributorQuality | null
   reactions?: BoardReactionSummary[]
   supported_reaction_emojis?: string[]
   origin?: BoardPostOrigin | null

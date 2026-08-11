@@ -111,11 +111,11 @@ let model_input_projection_for_capacity
             (Runtime_model_input_tail_window.budget_error_to_string error))
   in
   let* windowed = windowed in
-  (* Compute the next structural retry boundary from the same durable
-     messages that the bounded window consumed. Source projections may append
-     synthetic evidence (for example Gate replay); those provider-only atoms
-     must not become the newest boundary or make a retry capacity smaller than
-     the durable newest atom can actually satisfy. *)
+  (* Compute the next structural retry boundary from the current bounded
+     history before source projections append synthetic evidence (for example
+     Gate replay). Using the current window also means the oracle reaches
+     [None] at the newest-atom floor instead of authorizing an identical
+     provider retry from the original unwindowed history. *)
   let () =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
       let full_bytes =
@@ -123,7 +123,7 @@ let model_input_projection_for_capacity
           (fun total message ->
              total + measure_model_input_message_bytes message)
           0
-          messages
+          windowed
       in
       let target_capacity_bytes =
         if capacity_bytes = unbounded_model_input_capacity_bytes
@@ -138,7 +138,7 @@ let model_input_projection_for_capacity
         Runtime_model_input_tail_window.next_shrink_capacity_bytes
           ~measure_message_bytes:measure_model_input_message_bytes
           ~target_capacity_bytes
-          messages)
+          windowed)
   in
   let* projected =
     match source_projection with
@@ -218,7 +218,7 @@ let codex_stream_callback on_event =
                          (String.sub text (String.length streamed) suffix_length)
                    })
           end;
-          emit Agent_core.Types.MessageStop
+          emit Agent_core.Types.MessageStop)
 ;;
 
 let codex_error_to_core_error = function
@@ -237,7 +237,57 @@ let codex_error_to_core_error = function
          ; error_type = Some "context_window_exceeded_after_tool_effect"
          ; detail = Runtime_codex_app_server.error_to_string error
          })
-  | error -> Agent_core.Error.Internal (Runtime_codex_app_server.error_to_string error)
+  (* Provider- and transport-side failures carry typed constructors so the
+     lane rotation chain ([core_error_to_runtime_outcome] returns [None] for
+     [Internal _], which short-circuits [lane_should_retry]) can judge them.
+     Mirrors [claude_error_to_core_error] / [runtime_error_to_core_error]
+     (antigravity); RFC-0370 §3.1. No catch-all: a new client error variant
+     must decide its rotation class at compile time. *)
+  | Runtime_codex_app_server.Spawn_failed detail
+  | Runtime_codex_app_server.Process_exited detail ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "codex_app_server"; detail })
+  | Runtime_codex_app_server.Protocol_error { stage; detail } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ParseError
+         { detail = Printf.sprintf "%s: %s" stage detail })
+  | Runtime_codex_app_server.Rpc_error { method_; code; message } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "codex_app_server"
+         ; error_type = Some "rpc_error"
+         ; detail =
+             Printf.sprintf
+               "%s%s: %s"
+               method_
+               (Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code)
+               message
+         })
+  | Runtime_codex_app_server.Unsupported_server_request method_ ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.UnknownVariant
+         { type_name = "codex_app_server.server_request"; value = method_ })
+  | Runtime_codex_app_server.Turn_failed detail ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "codex_app_server"
+         ; error_type = Some "turn_failed"
+         ; detail
+         })
+  | Runtime_codex_app_server.Timeout seconds ->
+    Agent_core.Error.Api
+      (Agent_core.Retry.Timeout
+         { message =
+             Printf.sprintf "Codex app-server turn timed out after %.3fs" seconds
+         ; phase = None
+         })
+  (* Server-reported "interrupted" turn status (deliberate host-side stop, for
+     example shutdown): not a provider fault, so rotation to another runtime
+     would re-run a turn that was intentionally stopped. Stays [Internal]. *)
+  | Runtime_codex_app_server.Turn_interrupted ->
+    Agent_core.Error.Internal
+      (Runtime_codex_app_server.error_to_string Runtime_codex_app_server.Turn_interrupted)
 ;;
 
 let recovery_failure_of_client_error = function
@@ -808,3 +858,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           ~config)
       ())
 ;;
+
+module For_testing = struct
+  let codex_error_to_core_error = codex_error_to_core_error
+end

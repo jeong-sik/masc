@@ -66,10 +66,10 @@ let regex_match re str =
   | Not_found -> false
 ;;
 
-(** Case-insensitive substring search. *)
-let contains_substring_ci ~haystack ~needle =
-  needle = "" || regex_match (Str.regexp_string_case_fold needle) haystack
-;;
+(** Case-insensitive substring search. Delegates to the dependency-free leaf:
+    [Str] keeps its match state in globals, which is unsound under fibers, and
+    recompiles the pattern on every call. *)
+let contains_substring_ci = Agent_core_strings.contains_substring_ci
 
 let filter_non_empty = List.filter (fun s -> s <> "")
 

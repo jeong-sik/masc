@@ -244,7 +244,6 @@ let test_next_shrink_capacity_ignores_materialized_preamble () =
     Alcotest.fail
       "a materialized preamble must not create a retry boundary before the newest atom"
 ;;
-
 let test_cut_is_quantized_when_a_quantized_cut_fits () =
   (* Cache stability (#26535): when some multiple of [k] fits, the drop count
      is that multiple, so the transmitted prefix only moves in whole

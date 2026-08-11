@@ -15,9 +15,9 @@
     if leasing semantics are needed in the future, the design
     should land at the AGENT_CORE runtime layer per RFC-0026 (the
     same architectural rollback as [admission_queue]).
-    The read-only accessors below are currently unconsumed: the
-    local-runtime status tool that surfaced them was removed. They
-    are retained as the pool's query API. See
+    [parse_errors] below is currently unconsumed — the local-runtime
+    status tool that surfaced it was removed — but is retained because
+    it captures runtime.toml load-time parse errors. See
     [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
     §7.1 for the verification matrix.
 
@@ -117,19 +117,6 @@ val snapshots : unit -> runtime_snapshot list
     {!runtime_snapshot} (adds derived [port]).  Caller may
     keep the list across yields — values are immutable. *)
 
-val configured_capacity : unit -> int
-(** Sum of [max_concurrency] over every runtime in the
-    pool.  Hard ceiling on simultaneous acquires across the
-    pool. *)
-
-val healthy_runtime_count : unit -> int
-(** Number of runtimes whose [cooldown_until] is unset or
-    in the past — the count of slots currently considered
-    eligible for new work. *)
-
-val allocated_slots : unit -> int
-(** Sum of [active_slots] across the pool.  Equals the
-    number of outstanding leases. *)
 
 
 (** {1 Snapshot serialization} *)

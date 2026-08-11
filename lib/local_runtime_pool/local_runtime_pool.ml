@@ -281,27 +281,6 @@ let snapshots () =
   with_pool_lock (fun () ->
     List.map runtime_to_snapshot (Atomic.get pool).runtimes)
 
-let configured_capacity () =
-  snapshots ()
-  |> List.fold_left
-       (fun acc (runtime : runtime_snapshot) -> acc + runtime.max_concurrency)
-       0
-
-let healthy_runtime_count () =
-  snapshots ()
-  |> List.fold_left
-       (fun acc (runtime : runtime_snapshot) ->
-         match runtime.cooldown_until with
-         | Some until_ts when until_ts > Time_compat.now () -> acc
-         | _ -> acc + 1)
-       0
-
-let allocated_slots () =
-  snapshots ()
-  |> List.fold_left
-       (fun acc (runtime : runtime_snapshot) -> acc + runtime.active_slots)
-       0
-
 module For_testing = struct
   let install_pool runtimes =
     let fingerprint = current_fingerprint () in

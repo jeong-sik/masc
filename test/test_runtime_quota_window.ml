@@ -6,84 +6,88 @@ module Q = Runtime_quota_window
 
 let reset () = Q.reset_for_testing ()
 
-(* provider mapping used by demote tests: "prov.model" ids, unknown for
+let provider_scope provider_id = Q.scope_of_credential ~provider_id None
+
+(* scope mapping used by demote tests: "prov.model" ids, unknown for
    ids without a dot — mirrors candidates the driver cannot resolve. *)
-let provider_id_of candidate =
+let quota_scope_of candidate =
   match String.index_opt candidate '.' with
-  | Some i -> Some (String.sub candidate 0 i)
+  | Some i -> Some (provider_scope (String.sub candidate 0 i))
   | None -> None
 
 let test_window_lifecycle () =
   reset ();
+  let scope = provider_scope "claude_code" in
   Alcotest.(check (option (float 0.0)))
     "no window recorded"
     None
-    (Q.active_until ~provider_id:"claude_code" ~now:100.0);
-  Q.note_exhausted ~provider_id:"claude_code" ~resets_at:500.0;
+    (Q.active_until ~scope ~now:100.0);
+  Q.note_exhausted ~scope ~resets_at:500.0;
   Alcotest.(check (option (float 0.0)))
     "active before reset"
     (Some 500.0)
-    (Q.active_until ~provider_id:"claude_code" ~now:499.9);
+    (Q.active_until ~scope ~now:499.9);
   Alcotest.(check (option (float 0.0)))
     "expired at reset"
     None
-    (Q.active_until ~provider_id:"claude_code" ~now:500.0);
+    (Q.active_until ~scope ~now:500.0);
   Alcotest.(check (option (float 0.0)))
     "expiry pruned the entry (no resurrection at an earlier now)"
     None
-    (Q.active_until ~provider_id:"claude_code" ~now:0.0)
+    (Q.active_until ~scope ~now:0.0)
 
 let test_later_reset_extends_earlier_is_ignored () =
   reset ();
-  Q.note_exhausted ~provider_id:"codex_subscription" ~resets_at:500.0;
-  Q.note_exhausted ~provider_id:"codex_subscription" ~resets_at:900.0;
+  let scope = provider_scope "codex_subscription" in
+  Q.note_exhausted ~scope ~resets_at:500.0;
+  Q.note_exhausted ~scope ~resets_at:900.0;
   Alcotest.(check (option (float 0.0)))
     "later reset extends"
     (Some 900.0)
-    (Q.active_until ~provider_id:"codex_subscription" ~now:100.0);
-  Q.note_exhausted ~provider_id:"codex_subscription" ~resets_at:600.0;
+    (Q.active_until ~scope ~now:100.0);
+  Q.note_exhausted ~scope ~resets_at:600.0;
   Alcotest.(check (option (float 0.0)))
     "earlier reset cannot shorten"
     (Some 900.0)
-    (Q.active_until ~provider_id:"codex_subscription" ~now:100.0)
+    (Q.active_until ~scope ~now:100.0)
 
 let candidates =
   [ "claude_code.sonnet"; "ollama.qwen"; "claude_code.opus"; "codex.spark" ]
 
 let test_demote_moves_exhausted_provider_to_tail () =
   reset ();
-  Q.note_exhausted ~provider_id:"claude_code" ~resets_at:500.0;
+  Q.note_exhausted ~scope:(provider_scope "claude_code") ~resets_at:500.0;
   Alcotest.(check (list string))
     "exhausted provider's candidates keep order at the tail"
     [ "ollama.qwen"; "codex.spark"; "claude_code.sonnet"; "claude_code.opus" ]
-    (Q.demote_order ~now:100.0 ~provider_id_of candidates)
+    (Q.demote_order ~now:100.0 ~quota_scope_of candidates)
 
 let test_demote_noop_paths () =
   reset ();
   Alcotest.(check (list string))
     "no windows: unchanged"
     candidates
-    (Q.demote_order ~now:100.0 ~provider_id_of candidates);
-  Q.note_exhausted ~provider_id:"claude_code" ~resets_at:500.0;
+    (Q.demote_order ~now:100.0 ~quota_scope_of candidates);
+  Q.note_exhausted ~scope:(provider_scope "claude_code") ~resets_at:500.0;
   Alcotest.(check (list string))
     "window passed: unchanged"
     candidates
-    (Q.demote_order ~now:501.0 ~provider_id_of candidates);
-  Q.note_exhausted ~provider_id:"unrelated_provider" ~resets_at:900.0;
+    (Q.demote_order ~now:501.0 ~quota_scope_of candidates);
+  Q.note_exhausted ~scope:(provider_scope "unrelated_provider") ~resets_at:900.0;
   Alcotest.(check (list string))
     "window on a provider with no candidate: unchanged"
     candidates
-    (Q.demote_order ~now:100.0 ~provider_id_of candidates)
+    (Q.demote_order ~now:100.0 ~quota_scope_of candidates)
 
 let test_unknown_provider_stays_in_place () =
   reset ();
-  Q.note_exhausted ~provider_id:"claude_code" ~resets_at:500.0;
+  Q.note_exhausted ~scope:(provider_scope "claude_code") ~resets_at:500.0;
   Alcotest.(check (list string))
     "unresolvable id is not demoted"
     [ "no-dot-id"; "ollama.qwen"; "claude_code.sonnet" ]
     (Q.demote_order
        ~now:100.0
-       ~provider_id_of
+       ~quota_scope_of
        [ "no-dot-id"; "claude_code.sonnet"; "ollama.qwen" ]
      |> fun reordered ->
      (* stable partition keeps no-dot-id and ollama.qwen in declared order,
@@ -92,14 +96,117 @@ let test_unknown_provider_stays_in_place () =
 
 let test_all_demoted_keeps_declared_order () =
   reset ();
-  Q.note_exhausted ~provider_id:"claude_code" ~resets_at:500.0;
+  Q.note_exhausted ~scope:(provider_scope "claude_code") ~resets_at:500.0;
   Alcotest.(check (list string))
     "every candidate demoted: declared order preserved, still attemptable"
     [ "claude_code.sonnet"; "claude_code.opus" ]
     (Q.demote_order
        ~now:100.0
-       ~provider_id_of
+       ~quota_scope_of
        [ "claude_code.sonnet"; "claude_code.opus" ])
+
+(* Quota is credential-account-owned: two provider rows sharing one
+   credential share one scope, so exhausting either demotes both
+   (PR #28202 review P2). *)
+let test_shared_credential_scope_demotes_siblings () =
+  reset ();
+  let scope_of = function
+    (* two rows, one account *)
+    | "ollama_cloud.qwen" | "ollama_cloud_native.qwen" ->
+      Some
+        (Q.scope_of_credential
+           ~provider_id:"ignored"
+           (Some (Runtime_schema.Env "OLLAMA_CLOUD_API_KEY")))
+    | "claude_code.sonnet" ->
+      Some
+        (Q.scope_of_credential
+           ~provider_id:"ignored"
+           (Some (Runtime_schema.Env "ANTHROPIC_KEY")))
+    | _ -> None
+  in
+  Q.note_exhausted
+    ~scope:
+      (Q.scope_of_credential
+         ~provider_id:"ollama_cloud"
+         (Some (Runtime_schema.Env "OLLAMA_CLOUD_API_KEY")))
+    ~resets_at:500.0;
+  Alcotest.(check (list string))
+    "both rows on the exhausted account move to the tail"
+    [ "claude_code.sonnet"; "ollama_cloud.qwen"; "ollama_cloud_native.qwen" ]
+    (Q.demote_order
+       ~now:100.0
+       ~quota_scope_of:scope_of
+       [ "ollama_cloud.qwen"; "claude_code.sonnet"; "ollama_cloud_native.qwen" ])
+
+let test_scope_kinds_do_not_collide () =
+  reset ();
+  let env_scope =
+    Q.scope_of_credential
+      ~provider_id:"ignored"
+      (Some (Runtime_schema.Env "TOKEN"))
+  in
+  let provider_row_scope = provider_scope "env:TOKEN" in
+  Q.note_exhausted ~scope:env_scope ~resets_at:500.0;
+  Alcotest.(check (option (float 0.0)))
+    "an env reference cannot collide with a provider row that resembles it"
+    None
+    (Q.active_until ~scope:provider_row_scope ~now:100.0)
+
+let test_registry_default_credential_is_shared_scope () =
+  let credential provider_id =
+    Runtime_adapter.effective_credential_reference ~provider_id None
+  in
+  let glm_scope =
+    Q.scope_of_credential ~provider_id:"glm" (credential "glm")
+  in
+  let image_scope =
+    Q.scope_of_credential ~provider_id:"zai-image" (credential "zai-image")
+  in
+  reset ();
+  Q.note_exhausted ~scope:glm_scope ~resets_at:500.0;
+  Alcotest.(check bool)
+    "registry rows sharing ZAI_API_KEY share a quota window"
+    true
+    (Option.is_some (Q.active_until ~scope:image_scope ~now:100.0))
+
+let with_env_values bindings f =
+  let previous =
+    List.map (fun (key, _) -> key, Sys.getenv_opt key) bindings
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (key, value) ->
+           Unix.putenv key (Option.value ~default:"" value))
+        previous)
+    (fun () ->
+       List.iter (fun (key, value) -> Unix.putenv key value) bindings;
+       f ())
+;;
+
+let test_selected_environment_alias_owns_scope () =
+  with_env_values
+    [ "OLLAMA_CLOUD_API_KEY", ""; "OLLAMA_API_KEY", "legacy-test-key" ]
+    (fun () ->
+       let selected =
+         Runtime_adapter.effective_credential_reference
+           ~provider_id:"ollama_cloud"
+           (Some (Runtime_schema.Env "OLLAMA_CLOUD_API_KEY"))
+       in
+       let selected_scope =
+         Q.scope_of_credential ~provider_id:"ollama_cloud" selected
+       in
+       let legacy_scope =
+         Q.scope_of_credential
+           ~provider_id:"ollama_cloud"
+           (Some (Runtime_schema.Env "OLLAMA_API_KEY"))
+       in
+       reset ();
+       Q.note_exhausted ~scope:selected_scope ~resets_at:500.0;
+       Alcotest.(check bool)
+         "the environment alias that supplied the key shares the window"
+         true
+         (Option.is_some (Q.active_until ~scope:legacy_scope ~now:100.0)))
 
 let () =
   Alcotest.run
@@ -125,5 +232,23 @@ let () =
             "all demoted keeps order"
             `Quick
             test_all_demoted_keeps_declared_order
+        ; Alcotest.test_case
+            "shared credential demotes siblings"
+            `Quick
+            test_shared_credential_scope_demotes_siblings
+        ] )
+    ; ( "scope"
+      , [ Alcotest.test_case
+            "scope kinds do not collide"
+            `Quick
+            test_scope_kinds_do_not_collide
+        ; Alcotest.test_case
+            "registry default credential shares scope"
+            `Quick
+            test_registry_default_credential_is_shared_scope
+        ; Alcotest.test_case
+            "selected environment alias owns scope"
+            `Quick
+            test_selected_environment_alias_owns_scope
         ] )
     ]

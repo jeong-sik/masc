@@ -77,6 +77,12 @@ type deferred_runtime_lane = private
   }
 
 val deferred_runtime_ids : deferred_runtime_lane -> string list
+val quota_ordered_deferred_runtime_lane :
+  now:float -> deferred_runtime_lane -> deferred_runtime_lane
+(** Apply active quota-window ordering to a frozen deferred suffix while
+    preserving its assignment and failure evidence. Call once before building
+    pre-dispatch execution so prompt shaping and dispatch consume the same
+    selected runtime. *)
 val equal_deferred_runtime_lane :
   deferred_runtime_lane -> deferred_runtime_lane -> bool
 
@@ -233,6 +239,8 @@ module For_testing : sig
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->
     ?lane_id:string ->
     ?on_retry_deferred:(deferred_runtime_lane -> unit) ->
+    ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
+    ?candidate_dispatchable:('candidate -> bool) ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
     emit_runtime_manifest:

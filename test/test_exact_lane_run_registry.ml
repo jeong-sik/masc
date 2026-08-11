@@ -171,11 +171,13 @@ let test_failed_durable_completion_is_explicitly_visible () =
      check bool "serialized persistence state" true
        (List.mem_assoc "persistence_state" fields);
      check (option string) "serialized intended failure code" (Some "model_error")
-       (List.assoc_opt "intended_code" fields
-        |> Option.bind (function `String value -> Some value | _ -> None));
+       (match List.assoc_opt "intended_code" fields with
+        | Some (`String value) -> Some value
+        | Some _ | None -> None);
      check (option string) "serialized intended failure detail" (Some "typed failure detail")
-       (List.assoc_opt "intended_detail" fields
-        |> Option.bind (function `String value -> Some value | _ -> None))
+       (match List.assoc_opt "intended_detail" fields with
+        | Some (`String value) -> Some value
+        | Some _ | None -> None)
    | _ -> fail "run serializer must emit an object");
   Unix.rmdir path
 ;;
@@ -203,7 +205,15 @@ let test_observation_reads_do_not_wait_for_durable_writer () =
     Unix.close ready_read;
     Fun.protect
       ~finally:(fun () ->
-        (match Unix.waitpid [] child with
+        (* [waitpid] is interruptible: a signal delivered while this test is
+           blocked raises EINTR, which Fun.protect then re-raises from the
+           finally clause and reports as a failure of the case rather than of
+           the wait. The child is still there, so the answer is to ask again. *)
+        let rec wait_for_child () =
+          try Unix.waitpid [] child with
+          | Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_child ()
+        in
+        (match wait_for_child () with
          | _, Unix.WEXITED 0 -> ()
          | _, status ->
            failf

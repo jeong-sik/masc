@@ -48,7 +48,10 @@ export const RECONNECT_JITTER_MS = 1_000
 
 // --- Refresh & debounce (milliseconds) ---
 export const SHELL_TTL_MS = 5_000
-export const HEARTBEAT_STALE_MS = 120_000
+// The default autonomous keepalive cadence is 300s. Allow one minute of
+// scheduling/transport jitter before classifying an otherwise healthy Keeper
+// as stale.
+export const HEARTBEAT_STALE_MS = 360_000
 export const UI_REFRESH_TTL_MS = 1_000
 export const MISSION_BRIEFING_POLL_DELAY_MS = 1_500
 export const SSE_DEFAULT_DEBOUNCE_MS = 500

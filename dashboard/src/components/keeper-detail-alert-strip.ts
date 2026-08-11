@@ -20,6 +20,7 @@ import {
 import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './keeper-detail-helpers'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'
+import { HEARTBEAT_STALE_MS } from '../config/constants'
 import {
   attentionReasonLabel,
   canonicalAttentionReason,
@@ -195,7 +196,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const trustLatestEvent = keeper.trust?.latest_causal_event ?? null
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
-  const hbStale = hbAgeMs != null && hbAgeMs > 300_000 // 5 minutes
+  const hbStale = hbAgeMs != null && hbAgeMs > HEARTBEAT_STALE_MS
   const needsAttention = keeperNeedsDiagnosticAttention(keeper)
   const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
   const hasActivitySignal = activity.timestamp != null || activity.ageSeconds != null

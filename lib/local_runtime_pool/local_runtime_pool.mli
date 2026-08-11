@@ -15,9 +15,9 @@
     if leasing semantics are needed in the future, the design
     should land at the AGENT_CORE runtime layer per RFC-0026 (the
     same architectural rollback as [admission_queue]).
-    The read-only accessors below remain in active use by
-    [tool_local_runtime_status] / [tool_local_runtime_verify]
-    / [tool_local_runtime_bench]. See
+    [parse_errors] below is currently unconsumed — the local-runtime
+    status tool that surfaced it was removed — but is retained because
+    it captures runtime.toml load-time parse errors. See
     [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
     §7.1 for the verification matrix.
 
@@ -68,13 +68,11 @@ type pool_state = {
   runtimes : runtime list;
   fingerprint : string;
   parse_errors : string list;
-  measured_ceiling : int option;
 }
 (** Snapshot of the pool.  [fingerprint] is recomputed from
     the discovery cache on each load and used by
     {!ensure_loaded} to detect that the underlying endpoints
-    have changed.  [measured_ceiling] is the operator-set
-    upper bound on total concurrent acquires. *)
+    have changed. *)
 
 (** {1 Constants + global state} *)
 
@@ -119,31 +117,6 @@ val snapshots : unit -> runtime_snapshot list
     {!runtime_snapshot} (adds derived [port]).  Caller may
     keep the list across yields — values are immutable. *)
 
-val configured_capacity : unit -> int
-(** Sum of [max_concurrency] over every runtime in the
-    pool.  Hard ceiling on simultaneous acquires across the
-    pool. *)
-
-val healthy_runtime_count : unit -> int
-(** Number of runtimes whose [cooldown_until] is unset or
-    in the past — the count of slots currently considered
-    eligible for new work. *)
-
-val allocated_slots : unit -> int
-(** Sum of [active_slots] across the pool.  Equals the
-    number of outstanding leases. *)
-
-val measured_ceiling : unit -> int option
-(** Operator-installed upper bound on
-    {!allocated_slots}.  [None] when no measurement has
-    been recorded yet; recorded by
-    [tool_local_runtime_bench] and surfaced by
-    [tool_local_runtime_status]. *)
-
-val record_measured_ceiling : int -> unit
-(** Stores a new [measured_ceiling].  Replaces the previous
-    value unconditionally (no monotonic guard — the
-    operator endpoint validates the value before calling). *)
 
 
 (** {1 Snapshot serialization} *)

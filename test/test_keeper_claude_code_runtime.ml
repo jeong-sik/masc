@@ -707,10 +707,24 @@ let test_post_effect_transport_enters_recovery () =
                 ~goal:"USE_TOOL_ONCE"
                 ()
             with
-            | Error
-                (Agent_core.Error.Provider
-                  (Llm_provider.Error.ProviderUnavailable _)) -> ()
-            | Error error -> fail (Agent_core.Error.to_string error)
+            | Error error ->
+              (* Since #28178 the provider-attempt effect fence wraps the
+                 provider error once an effect was attempted, so the caller no
+                 longer sees the raw [ProviderUnavailable]. The recovery phase
+                 asserted below is what this test is named for and is
+                 unchanged; here we only pin that the failure is the fence and
+                 that it forbids same-turn retry. *)
+              (match Keeper_internal_error.classify_masc_internal_error error with
+               | Some
+                   (Keeper_internal_error.Provider_attempt_effect_fenced
+                      { effect_disposition; _ }) ->
+                 check
+                   bool
+                   "post-effect failure is fenced against same-turn retry"
+                   false
+                   (Keeper_provider_attempt_effect.allows_same_turn_retry
+                      effect_disposition)
+               | _ -> fail (Agent_core.Error.to_string error))
             | Ok _ -> fail "post-effect response failure completed the Keeper turn");
        check int "tool effect count" 1 !call_count;
        let state = load_state base_path in
@@ -797,8 +811,28 @@ let test_quota_enters_typed_recovery () =
     (fun () ->
        with_fixture [ Emit rate_limit_rejected; Emit quota_result ] (fun cli_path ->
          (match run_keeper_turn ~base_path ~cli_path ~goal:"QUOTA_GOAL" () with
-          | Error (Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)) -> ()
-          | Error error -> fail (Agent_core.Error.to_string error)
+          | Error error ->
+            (* Since #28178 the fence also wraps failures where the runtime
+               lost complete effect observation, which is this path: the
+               caller no longer sees the raw [HardQuota]. The recovery
+               assertions below still carry the quota identity; here we pin
+               the fence and that the quota diagnostic survives it. *)
+            (match Keeper_internal_error.classify_masc_internal_error error with
+             | Some
+                 (Keeper_internal_error.Provider_attempt_effect_fenced
+                    { effect_disposition; diagnostic; _ }) ->
+               check
+                 bool
+                 "quota rejection is fenced against same-turn retry"
+                 false
+                 (Keeper_provider_attempt_effect.allows_same_turn_retry
+                    effect_disposition);
+               check
+                 bool
+                 "the fenced envelope keeps the quota diagnostic"
+                 true
+                 (Astring.String.is_infix ~affix:"quota" diagnostic)
+             | _ -> fail (Agent_core.Error.to_string error))
           | Ok _ -> fail "quota rejection completed the Keeper turn");
          let state = load_state base_path in
          match state.phase with
@@ -872,7 +906,13 @@ let run_direct_attempt ~base_path ~cli_path ~goal ~tools =
                     ~model_input_projection:None
                     ~hooks:None
                     ~context_injector:None
-                    ~context:None
+                      (* Dynamic tools require the Keeper shared context
+                         ([Keeper_official_client_host.dynamic_tools] rejects
+                         [tools <> []] with [context = None]). Supply one
+                         unconditionally: with [~tools:[]] the gate returns
+                         [Ok []] either way, so the no-tools attempts are
+                         unaffected. *)
+                    ~context:(Some (Agent_core.Context.create ()))
                     ~event_bus:None
                     ~raw_trace:None
                     ~on_event:None

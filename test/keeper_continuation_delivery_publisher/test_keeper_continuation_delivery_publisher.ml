@@ -69,6 +69,7 @@ let discord_intent () =
       ~channel_id:"channel-1"
       ~parent_channel_id:None
       ~thread_id:None
+      ~reply_to_message_id:"origin-message-1"
       ~user_id:"user-1"
     |> Result.fold ~ok:Fun.id ~error:fail
   in
@@ -91,6 +92,30 @@ let adapter ?(append = fun _ -> Ok (Publisher.Appended { row_id = "row-1" }))
   ; append_transcript = (fun ~config:_ intent -> append intent)
   ; send_connector = send
   }
+;;
+
+let test_discord_pending_replies_to_origin_message () =
+  with_temp_config (fun config ->
+    let observed_reply = ref None in
+    let intent = discord_intent () in
+    ignore
+      (Publisher.For_testing.publish_with_adapter
+         ~adapter:
+           (adapter
+              ~send:(function
+                | Publisher.Discord { reply_to_message_id; _ } ->
+                  observed_reply := reply_to_message_id;
+                  Publisher.Sent { message_id = "reply-message-1" }
+                | Publisher.Slack _ -> fail "expected Discord request")
+              ())
+         ~config
+         intent
+       |> expect_publish
+       : Publisher.outcome);
+    check (option string)
+      "Discord continuation replies to the originating message"
+      (Some "origin-message-1")
+      !observed_reply)
 ;;
 
 let stored config intent =
@@ -160,7 +185,10 @@ let test_external_send_and_transcript_deliver () =
            | Publisher.Discord { channel_id; content; reply_to_message_id } ->
              check string "exact Discord channel" "channel-1" channel_id;
              check string "exact response" "discord final answer" content;
-             check (option string) "no fabricated reply id" None reply_to_message_id
+             check (option string)
+               "origin reply id preserved"
+               (Some "origin-message-1")
+               reply_to_message_id
            | Publisher.Slack _ -> fail "Discord intent routed to Slack");
           Publisher.Sent { message_id = "discord-message-1" })
         ~append:(fun _ ->
@@ -264,6 +292,10 @@ let () =
             "dashboard pending delivers"
             `Quick
             test_dashboard_pending_delivers_once
+        ; test_case
+            "Discord reply preserves origin message"
+            `Quick
+            test_discord_pending_replies_to_origin_message
         ; test_case
             "dashboard attempting resumes"
             `Quick

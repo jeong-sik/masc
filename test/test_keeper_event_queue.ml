@@ -477,6 +477,34 @@ let () =
       | _ -> Alcotest.fail "Schedule_due codec round-trip changed payload shape")
    | Error msg -> Alcotest.fail ("Schedule_due stimulus round-trip failed: " ^ msg));
 
+  (* A pre-upgrade row has no payload occurrence_id, but its enclosing
+     post_id is already the exact scheduler occurrence identity.  A replay
+     after upgrade must deduplicate against that durable row instead of
+     executing the same occurrence twice. *)
+  let legacy_schedule =
+    { post_id = "schedule-occurrence:legacy-replay"
+    ; urgency = Immediate
+    ; arrived_at = 5.0
+    ; payload = Schedule_due { scheduled_wake with occurrence_id = "" }
+    }
+  in
+  let upgraded_schedule =
+    { legacy_schedule with
+      arrived_at = 6.0
+    ; payload =
+        Schedule_due
+          { scheduled_wake with
+            occurrence_id = "schedule-occurrence:legacy-replay"
+          }
+    }
+  in
+  assert (stimulus_identity_equal legacy_schedule upgraded_schedule);
+  assert
+    (not
+       (stimulus_identity_equal
+          legacy_schedule
+          { upgraded_schedule with post_id = "schedule-occurrence:next" }));
+
   let schedule_result_channel =
     match Keeper_continuation_channel.dashboard ~thread_id:"schedule-result-thread" with
     | Ok channel -> channel

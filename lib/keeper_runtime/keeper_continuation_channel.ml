@@ -5,6 +5,7 @@ type t =
       channel_id : string;
       parent_channel_id : string option;
       thread_id : string option;
+      reply_to_message_id : string option;
       user_id : string;
     }
   | Slack of {
@@ -35,25 +36,38 @@ let dashboard ~thread_id =
   Ok (Dashboard { thread_id })
 ;;
 
-let discord ~guild_id ~channel_id ~parent_channel_id ~thread_id ~user_id =
+let discord ~guild_id ~channel_id ~parent_channel_id ~thread_id
+      ?reply_to_message_id ~user_id =
   let* guild_id = validate_optional_nonblank "guild_id" guild_id in
   let* channel_id = validate_nonblank "channel_id" channel_id in
   let* parent_channel_id =
     validate_optional_nonblank "parent_channel_id" parent_channel_id
   in
   let* thread_id = validate_optional_nonblank "thread_id" thread_id in
+  let* reply_to_message_id =
+    validate_optional_nonblank "reply_to_message_id" reply_to_message_id
+  in
   let* user_id = validate_nonblank "user_id" user_id in
-  Ok (Discord { guild_id; channel_id; parent_channel_id; thread_id; user_id })
+  Ok
+    (Discord
+       { guild_id
+       ; channel_id
+       ; parent_channel_id
+       ; thread_id
+       ; reply_to_message_id
+       ; user_id
+       })
 ;;
 
 let discord_thread_parent t ~parent_channel_id =
   match t with
-  | Discord { guild_id; channel_id; user_id; _ } ->
+  | Discord { guild_id; channel_id; reply_to_message_id; user_id; _ } ->
     Discord
       { guild_id
       ; channel_id
       ; parent_channel_id = Some parent_channel_id
       ; thread_id = Some channel_id
+      ; reply_to_message_id
       ; user_id
       }
   | Dashboard _ | Slack _ | Unrouted _ -> t
@@ -85,16 +99,24 @@ let kind_label = function
 
 let describe = function
   | Dashboard { thread_id } -> Printf.sprintf "dashboard thread=%s" thread_id
-  | Discord { guild_id; channel_id; parent_channel_id; thread_id; user_id } ->
+  | Discord
+      { guild_id
+      ; channel_id
+      ; parent_channel_id
+      ; thread_id
+      ; reply_to_message_id
+      ; user_id
+      } ->
     let opt label = function
       | None -> ""
       | Some value -> Printf.sprintf " %s=%s" label value
     in
-    Printf.sprintf "discord%s channel=%s%s%s user=%s"
+    Printf.sprintf "discord%s channel=%s%s%s%s user=%s"
       (opt "guild" guild_id)
       channel_id
       (opt "parent_channel" parent_channel_id)
       (opt "thread" thread_id)
+      (opt "reply_to_message" reply_to_message_id)
       user_id
   | Slack { team_id; channel_id; thread_ts; user_id } ->
     let opt label = function
@@ -119,6 +141,7 @@ let same_route a b =
         ; channel_id = left_channel
         ; parent_channel_id = left_parent
         ; thread_id = left_thread
+        ; reply_to_message_id = left_reply
         ; user_id = left_user
         }
     , Discord
@@ -126,12 +149,14 @@ let same_route a b =
         ; channel_id = right_channel
         ; parent_channel_id = right_parent
         ; thread_id = right_thread
+        ; reply_to_message_id = right_reply
         ; user_id = right_user
         } ) ->
     same_string_option left_guild right_guild
     && String.equal left_channel right_channel
     && same_string_option left_parent right_parent
     && same_string_option left_thread right_thread
+    && same_string_option left_reply right_reply
     && String.equal left_user right_user
   | ( Slack
         { team_id = left_team
@@ -164,7 +189,14 @@ let option_string_fields fields =
 let to_yojson = function
   | Dashboard { thread_id } ->
     `Assoc [ ("kind", `String "dashboard"); ("thread_id", `String thread_id) ]
-  | Discord { guild_id; channel_id; parent_channel_id; thread_id; user_id } ->
+  | Discord
+      { guild_id
+      ; channel_id
+      ; parent_channel_id
+      ; thread_id
+      ; reply_to_message_id
+      ; user_id
+      } ->
     `Assoc
       ([ ("kind", `String "discord")
        ; ("channel_id", `String channel_id)
@@ -174,6 +206,7 @@ let to_yojson = function
            [ ("guild_id", guild_id)
            ; ("parent_channel_id", parent_channel_id)
            ; ("thread_id", thread_id)
+           ; ("reply_to_message_id", reply_to_message_id)
            ])
   | Slack { team_id; channel_id; thread_ts; user_id } ->
     `Assoc
@@ -246,6 +279,7 @@ let of_yojson json =
         ; "channel_id"
         ; "parent_channel_id"
         ; "thread_id"
+        ; "reply_to_message_id"
         ; "user_id"
         ]
         fields
@@ -255,7 +289,16 @@ let of_yojson json =
     let* guild_id = optional_string_field "guild_id" fields in
     let* parent_channel_id = optional_string_field "parent_channel_id" fields in
     let* thread_id = optional_string_field "thread_id" fields in
-    discord ~guild_id ~channel_id ~parent_channel_id ~thread_id ~user_id
+    let* reply_to_message_id =
+      optional_string_field "reply_to_message_id" fields
+    in
+    discord
+      ~guild_id
+      ~channel_id
+      ~parent_channel_id
+      ~thread_id
+      ?reply_to_message_id
+      ~user_id
   | "slack" ->
     let* () =
       validate_allowed_fields

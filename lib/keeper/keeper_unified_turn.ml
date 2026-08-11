@@ -1123,6 +1123,21 @@ let run_keeper_cycle
                          ; delivery_state
                          }
                      in
+                     let committed_delivery_of_recovered_intent intent =
+                       let delivery_state =
+                         match intent.Keeper_continuation_delivery_intent.state with
+                         | Keeper_continuation_delivery_intent.Delivered _ ->
+                           Delivery_delivered
+                         | Keeper_continuation_delivery_intent.Failed _ ->
+                           Delivery_failed
+                         | Keeper_continuation_delivery_intent.Ambiguous _ ->
+                           Delivery_ambiguous
+                         | Keeper_continuation_delivery_intent.Pending
+                         | Keeper_continuation_delivery_intent.Attempting _ ->
+                           Delivery_recovery_pending
+                       in
+                       committed_delivery intent delivery_state
+                     in
                      let delivery_settlement =
                        match
                          ( continuation_delivery_origin
@@ -1137,6 +1152,49 @@ let run_keeper_cycle
                        | _, None, _ -> Continuation_delivery_not_required
                        | _, Some intent, _ ->
                          (match Keeper_continuation_delivery_store.persist ~config intent with
+                          | Error
+                              (Keeper_continuation_delivery_store.Persistence_failed
+                                { publication =
+                                    Keeper_continuation_delivery_store.Published_indeterminate
+                                ; detail
+                                }) ->
+                            (* Atomic rename made the publication outcome
+                               indeterminate.  Re-read the deterministic final
+                               path before classifying the source: the intent
+                               may already be the durable recovery token. *)
+                            (match
+                               Keeper_continuation_delivery_recovery.settle_existing
+                                 ~config
+                                 ~keeper_name:meta.name
+                                 ~origin:intent.origin
+                             with
+                             | Keeper_continuation_delivery_recovery.Obligation_committed
+                                 { intent = recovered; recovery_detail } ->
+                               Log.Keeper.warn
+                                 ~keeper_name:meta.name
+                                 "continuation outbox commit was indeterminate but the exact final record was recovered: intent_id=%s detail=%s%s"
+                                 (Keeper_continuation_delivery_intent.Intent_id.to_string
+                                    recovered.intent_id)
+                                 detail
+                                 (match recovery_detail with
+                                  | None -> ""
+                                  | Some recovery -> "; recovery: " ^ recovery);
+                               committed_delivery_of_recovered_intent recovered
+                             | Keeper_continuation_delivery_recovery.No_obligation ->
+                               Continuation_delivery_quarantined
+                                 { detail =
+                                     "continuation outbox commit was indeterminate and the final record is absent: "
+                                     ^ detail
+                                 }
+                             | Keeper_continuation_delivery_recovery.Quarantine_required
+                                 { detail = recovery; _ } ->
+                               Continuation_delivery_quarantined
+                                 { detail =
+                                     "continuation outbox commit was indeterminate and exact recovery failed: "
+                                     ^ detail
+                                     ^ "; recovery: "
+                                     ^ recovery
+                                 })
                           | Error error ->
                             Continuation_delivery_quarantined
                               { detail =

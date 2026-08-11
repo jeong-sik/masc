@@ -256,6 +256,7 @@ let test_durable_accept_precedes_delivery_handoff () =
              ; channel_id
              ; parent_channel_id = continuation_parent_channel_id
              ; thread_id = continuation_thread_id
+             ; reply_to_message_id
              ; user_id
              }
        ; surface =
@@ -274,6 +275,8 @@ let test_durable_accept_precedes_delivery_handoff () =
        None continuation_parent_channel_id;
      check (option string) "Discord continuation thread"
        None continuation_thread_id;
+     check (option string) "Discord continuation reply target"
+       (Some "discord-exact-123") reply_to_message_id;
      check string "Discord surface channel" "C123" surface_channel_id;
      check (option string) "Discord surface guild" (Some "G123") guild_id;
      check (option string) "Discord surface parent" None parent_channel_id;

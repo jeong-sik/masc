@@ -1133,6 +1133,17 @@ let () =
   check
     "fresh runnable backlog is explicit warning, not ok"
     (String.equal (string_member "status" fresh_backlog) "warning");
+  let immediate_backlog =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:0.0
+      (queue ~count:1 ~oldest_age:(`Float 0.0))
+  in
+  check
+    "zero-second threshold degrades runnable backlog immediately"
+    (String.equal (string_member "status" immediate_backlog) "degraded");
+  check
+    "zero-second threshold requires operator action immediately"
+    (member "operator_action_required" immediate_backlog = `Bool true);
   let unavailable =
     Health_fleet.keeper_event_queue_health_dimensions
       ~stale_after_sec:300.0

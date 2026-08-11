@@ -212,7 +212,6 @@ let queue_assoc_bool name ~default fields =
 
 let keeper_event_queue_health_dimensions ~stale_after_sec = function
   | `Assoc fields ->
-    let stale_after_sec = Float.max 1.0 stale_after_sec in
     let source_status =
       match List.assoc_opt "status" fields with
       | Some (`String value) -> value

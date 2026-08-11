@@ -405,6 +405,11 @@ let application_status doc (row : Keeper_runtime_setting_registry.setting) =
     if Keeper_runtime_setting_registry.requires_restart row
     then "pending_restart"
     else "pending_effect_boundary"
+  | None, "toml" ->
+    (* The boot snapshot still serves the removed TOML value until restart.
+       Absence in the edited document is therefore a pending removal, not
+       "not configured". *)
+    "pending_restart"
   | None, _ ->
     (match row.exposure with
      | Keeper_runtime_setting_registry.Env_only -> "environment_only"
@@ -455,12 +460,18 @@ let overlay_application_to_yojson doc =
     Keeper_runtime_setting_registry.active_toml
     |> List.filter (fun row -> Option.is_some (configured_value doc row))
   in
+  let application_rows =
+    Keeper_runtime_setting_registry.active_toml
+    |> List.filter (fun row ->
+      Option.is_some (configured_value doc row)
+      || String.equal (effective_source row.env_name) "toml")
+  in
   let classified =
     List.map
       (fun row ->
          Option.value ~default:row.env_name (Keeper_runtime_setting_registry.toml_key_opt row),
          application_status doc row)
-      configured
+      application_rows
   in
   let keys_with_status expected =
     classified

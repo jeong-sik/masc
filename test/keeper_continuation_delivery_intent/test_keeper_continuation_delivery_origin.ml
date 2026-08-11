@@ -120,9 +120,21 @@ let test_wake_origin_requires_exact_route_and_source () =
     }
   in
   assert
-    (Result.is_error
+    (not
+       (Masc.Keeper_heartbeat_loop.source_requires_continuation_delivery
+          [ unrouted_stimulus ]));
+  assert
+    (Result.fold
+       ~ok:Option.is_none
+       ~error:(fun _ -> false)
        (Masc.Keeper_heartbeat_loop.continuation_delivery_origin_for_stimuli
           [ unrouted_stimulus ]));
+  assert
+    (Result.fold
+       ~ok:Option.is_none
+       ~error:(fun _ -> false)
+       (Masc.Keeper_heartbeat_loop.continuation_delivery_origin_for_stimuli
+          [ unrouted_stimulus; { unrouted_stimulus with post_id = "other" } ]));
   assert
     (Result.is_error
        (Masc.Keeper_heartbeat_loop.continuation_delivery_origin_for_stimuli

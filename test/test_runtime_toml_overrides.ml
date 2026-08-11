@@ -491,6 +491,39 @@ let test_rendering_keeps_the_verb_prefix () =
     ]
 ;;
 
+let test_removed_toml_overlay_is_pending_restart () =
+  with_clean_boot_overrides @@ fun () ->
+  Config_boot_overrides.set "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" "42";
+  let empty_doc = parse_or_fail "" in
+  let open Yojson.Safe.Util in
+  let setting =
+    Keeper_runtime_config.settings_projection_to_yojson empty_doc
+    |> to_list
+    |> List.find (fun row ->
+      String.equal
+        (row |> member "env" |> to_string)
+        "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC")
+  in
+  check string
+    "removed TOML value remains pending until restart"
+    "pending_restart"
+    (setting |> member "application_status" |> to_string);
+  let overlay = Keeper_runtime_config.overlay_application_to_yojson empty_doc in
+  check bool
+    "removed boot overlay requires restart"
+    true
+    (overlay |> member "requires_restart" |> to_bool);
+  check bool
+    "removed key is included in pending overlay summary"
+    true
+    (overlay
+     |> member "pending_keys"
+     |> to_list
+     |> List.exists (function
+       | `String "turn.stream_idle_timeout_sec" -> true
+       | _ -> false))
+;;
+
 let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
@@ -513,6 +546,8 @@ let () =
             test_every_failure_kind_has_a_label
         ; test_case "rendering keeps the verb prefix" `Quick
             test_rendering_keeps_the_verb_prefix
+        ; test_case "removed TOML overlay is pending restart" `Quick
+            test_removed_toml_overlay_is_pending_restart
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init

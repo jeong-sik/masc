@@ -29,7 +29,6 @@ type turn_in_flight =
 
 type autonomous_block =
   | Turn_busy of turn_in_flight option
-  | Chat_operations_pending of operation_projection
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
 type shutdown_reservation =
@@ -230,7 +229,6 @@ let turn_lane_to_string = function
 
 let autonomous_block_kind = function
   | Turn_busy _ -> "turn_busy"
-  | Chat_operations_pending _ -> "chat_operations_pending"
   | Shutdown_requested _ -> "shutdown_requested"
 ;;
 
@@ -241,13 +239,6 @@ let autonomous_block_to_string = function
       "reason=turn_busy holder_lane=%s holder_started_at=%.17g"
       (turn_lane_to_string lane)
       started_at
-  | Chat_operations_pending inventory ->
-    Printf.sprintf
-      "reason=chat_operations_pending queued_count=%d running_operation_id=%s"
-      inventory.queued_count
-      (match inventory.running_operation_id with
-       | None -> "none"
-       | Some operation_id -> Operation_id.to_string operation_id)
   | Shutdown_requested operation_id ->
     Printf.sprintf
       "reason=shutdown_requested operation_id=%s"
@@ -266,15 +257,6 @@ let autonomous_block_to_yojson = function
           ]
     in
     `Assoc [ "kind", `String "turn_busy"; "holder", holder ]
-  | Chat_operations_pending inventory ->
-    `Assoc
-      [ "kind", `String "chat_operations_pending"
-      ; "queued_count", `Int inventory.queued_count
-      ; ( "running_operation_id"
-        , match inventory.running_operation_id with
-          | None -> `Null
-          | Some operation_id -> `String (Operation_id.to_string operation_id) )
-      ]
   | Shutdown_requested operation_id ->
     `Assoc
       [ "kind", `String "shutdown_requested"
@@ -836,39 +818,29 @@ let start
                      resolve
                      (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
                  | None ->
-                   let inventory = Atomic.get t.operation_projection in
-                   if lane = Autonomous
-                      && (inventory.queued_count > 0
-                          || Option.is_some inventory.running_operation_id)
-                   then (
-                     Eio.Promise.resolve
-                       resolve
-                       (Ok (Autonomous_busy (Chat_operations_pending inventory)));
-                     start_child_if_needed state shutdown_operation_id)
-                   else (
-                     t.child_active := true;
-                     Atomic.set
-                       t.turn_in_flight
-                       (Some { lane; started_at = t.now () });
-                     Eio.Fiber.fork ~sw (fun () ->
-                       let outcome =
-                         try
-                           Ok
-                             (Eio.Switch.run (fun child_sw ->
-                                Atomic.set
-                                  t.child_cancel
-                                  (Some
-                                     (fun () -> Eio.Switch.fail child_sw Stop_active_child));
-                                run ()))
-                         with
-                         | exn -> Error (exn, Printexc.get_raw_backtrace ())
-                       in
-                       Atomic.set t.child_cancel None;
-                       ignore
-                         (request
-                            t
-                            (Child_finished
-                               (Autonomous_child_finished { outcome; resolve }))))))));
+                   t.child_active := true;
+                   Atomic.set
+                     t.turn_in_flight
+                     (Some { lane; started_at = t.now () });
+                   Eio.Fiber.fork ~sw (fun () ->
+                     let outcome =
+                       try
+                         Ok
+                           (Eio.Switch.run (fun child_sw ->
+                              Atomic.set
+                                t.child_cancel
+                                (Some
+                                   (fun () -> Eio.Switch.fail child_sw Stop_active_child));
+                              run ()))
+                       with
+                       | exn -> Error (exn, Printexc.get_raw_backtrace ())
+                     in
+                     Atomic.set t.child_cancel None;
+                     ignore
+                       (request
+                          t
+                          (Child_finished
+                             (Autonomous_child_finished { outcome; resolve }))))));
           loop state shutdown_operation_id
         | Command (Child_finished completion, resolve) ->
           let result =

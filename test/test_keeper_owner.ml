@@ -1451,77 +1451,43 @@ let test_owner_linearizes_autonomous_and_chat_children () =
   check bool "Owner clears active turn projection" true (Option.is_none (Owner.turn_in_flight owner))
 ;;
 
-let test_pending_chat_blocks_autonomous_until_runner_ready () =
+let test_unready_chat_queue_does_not_block_autonomous () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
-  let runner_ready = Atomic.make false in
-  let operation_started, resolve_operation_started = Eio.Promise.create () in
-  let autonomous_ran = Atomic.make false in
-  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
-    match claim () with
-    | Error error -> fail (Owner.error_to_string error)
-    | Ok None -> fail "pending chat disappeared before Owner claim"
-    | Ok (Some (operation : Chat_operation.t)) ->
-      Eio.Promise.resolve resolve_operation_started ();
-      Owner.Operation_succeeded
-        { outcome_ref =
-            "turn:" ^ Chat_operation.Operation_id.to_string operation.operation_id
-        }
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim:_ =
+    fail "unready operation runner must not start"
   in
   let owner =
     owner_ok
       (start_owner_with_executor_ready
-         ~operation_ready:(fun ~keeper_name:_ -> Atomic.get runner_ready)
+         ~operation_ready:(fun ~keeper_name:_ -> false)
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_executor:(Some operation_executor)
-         ~keeper_name:"chat-first-owner"
-         ~initial_meta:(Some (make_meta "chat-first-owner")))
+         ~keeper_name:"unready-chat-owner"
+         ~initial_meta:(Some (make_meta "unready-chat-owner")))
   in
-  let operation_id = operation_id "kmsg-chat-first-owner" in
+  let operation_id = operation_id "kmsg-unready-chat-owner" in
   ignore
     (owner_ok
        (Owner.submit_operation
           owner
           ~operation_id
           ~source:operation_source
-          ~input:(operation_input "must precede autonomous work")));
-  (match
-     Owner.run_autonomous_if_idle owner (fun () ->
-       Atomic.set autonomous_ran true)
-   with
-   | Ok
-       (`Busy
-         (Owner.Chat_operations_pending
-           { queued_count = 1; running_operation_id = None; _ } as block)) ->
-     check string
-       "pending chat has typed block kind"
-       "chat_operations_pending"
-       (Owner.autonomous_block_kind block);
-     check string
-       "pending chat block is inspectable"
-       "reason=chat_operations_pending queued_count=1 running_operation_id=none"
-       (Owner.autonomous_block_to_string block);
-     check int
-       "pending chat block JSON preserves count"
-       1
-       Yojson.Safe.Util.(Owner.autonomous_block_to_yojson block |> member "queued_count" |> to_int)
+          ~input:(operation_input "remain queued")));
+  (match Owner.run_autonomous_if_idle owner (fun () -> 7) with
+   | Ok (`Ran value) -> check int "autonomous callback ran" 7 value
    | Ok (`Busy block) ->
      fail
-       ("pending chat produced the wrong block: "
+       ("unclaimable chat queue blocked autonomous work: "
         ^ Owner.autonomous_block_to_string block)
-   | Ok (`Ran ()) -> fail "autonomous work passed a durable queued chat"
    | Error error -> fail (Owner.error_to_string error));
-  check bool "blocked autonomous callback did not run" false (Atomic.get autonomous_ran);
-  Atomic.set runner_ready true;
-  owner_ok (Owner.wake_operation_drain owner);
-  Eio.Promise.await operation_started;
-  let terminal = await_terminal owner operation_id 1_000 in
-  match terminal.state with
-  | Chat_operation.Succeeded _ -> ()
+  let observed = Option.get (owner_ok (Owner.exact_operation owner operation_id)) in
+  match observed.state with
+  | Chat_operation.Queued -> ()
   | state ->
     fail
-      ("chat did not drain after runner became ready: "
+      ("autonomous work mutated the unready chat operation: "
        ^ Chat_operation.state_to_string state)
 ;;
 
@@ -1571,8 +1537,6 @@ let test_owner_shutdown_linearizes_and_awaits_child () =
        true
        (Keeper_shutdown_types.Operation_id.equal reserved shutdown_id)
    | Ok (`Busy (Owner.Turn_busy _)) -> fail "shutdown was reported as ordinary busy"
-   | Ok (`Busy (Owner.Chat_operations_pending _)) ->
-     fail "shutdown was reported as pending chat"
    | Ok (`Ran _) -> fail "shutdown admitted a new turn"
    | Error error -> fail (Owner.error_to_string error));
   (match
@@ -2356,9 +2320,9 @@ let () =
             `Quick
             test_owner_linearizes_autonomous_and_chat_children
         ; test_case
-            "pending chat blocks autonomous until runner ready"
+            "unready chat queue does not block autonomous"
             `Quick
-            test_pending_chat_blocks_autonomous_until_runner_ready
+            test_unready_chat_queue_does_not_block_autonomous
         ; test_case
             "Owner shutdown linearizes and awaits child"
             `Quick

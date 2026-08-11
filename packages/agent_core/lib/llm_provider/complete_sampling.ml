@@ -235,22 +235,12 @@ let%test "gemini_url never leaks api_key even when set" =
     ; max_concurrent_requests = None
     }
   in
-  let contains_substring haystack needle =
-    let hlen = String.length haystack in
-    let nlen = String.length needle in
-    let rec scan i =
-      if i + nlen > hlen
-      then false
-      else if String.sub haystack i nlen = needle
-      then true
-      else scan (i + 1)
-    in
-    scan 0
-  in
   let url_sync = gemini_url ~config ~stream:false in
   let url_stream = gemini_url ~config ~stream:true in
-  (not (contains_substring url_sync "mykey"))
-  && not (contains_substring url_stream "mykey")
+  (not
+     (Agent_core_strings.contains_substring ~haystack:url_sync ~needle:"mykey"))
+  && not
+       (Agent_core_strings.contains_substring ~haystack:url_stream ~needle:"mykey")
 ;;
 
 let%test "gemini_url empty base_url no trailing slash" =

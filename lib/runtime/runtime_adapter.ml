@@ -152,7 +152,9 @@ let effective_credential_reference
     ~(provider_id : string)
     (credential : Runtime_schema.credential option) =
   let select_env key =
-    Runtime_schema.Env (Option.value ~default:key (selected_credential_env key))
+    match selected_credential_env key with
+    | Some selected -> Runtime_schema.Env selected
+    | None -> Runtime_schema.Env key
   in
   match credential with
   | Some (Runtime_schema.Env key) -> Some (select_env key)

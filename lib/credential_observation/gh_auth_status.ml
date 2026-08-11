@@ -174,9 +174,13 @@ let source_of_label label =
   then Ok (Environment label)
   else if
     String.equal label "hosts.yml"
-    || String.ends_with ~suffix:"/hosts.yml" label
-    || String.ends_with ~suffix:"\\hosts.yml" label
+    ||
+    (not (Filename.is_relative label)
+     && String.equal (Filename.basename label) "hosts.yml")
   then
+    (* Only the stable bare filename or a native absolute path is accepted.
+       Suffix matching would classify arbitrary relative or foreign-platform
+       labels as trusted config files. *)
     Ok (Config_file label)
   else Error "unknown gh token source label"
 ;;

@@ -122,12 +122,10 @@ let test_actual_cli_json_decodes () =
   | entries -> failf "expected one entry, got %d" (List.length entries)
 ;;
 
-let test_relative_config_and_documented_environment_sources () =
-  let config_sources =
+let test_config_source_paths_and_documented_environment_sources () =
+  let accepted_config_sources =
     [ "hosts.yml"
-    ; Filename.concat "config" "hosts.yml"
     ; Filename.concat (Filename.get_temp_dir_name ()) "hosts.yml"
-    ; "config\\hosts.yml"
     ]
   in
   List.iter
@@ -139,7 +137,7 @@ let test_relative_config_and_documented_environment_sources () =
                  [ replace_token_source config_source (keyring_entry ()) ] ) ]
        in
        let parsed = Gh_auth_status.parse config_json in
-       check (option string) "config source schema" None parsed.schema_error;
+       check (option string) "accepted config source schema" None parsed.schema_error;
        match parsed.entries with
        | [ observed ] ->
          (match observed.source with
@@ -148,7 +146,7 @@ let test_relative_config_and_documented_environment_sources () =
           | Gh_auth_status.Keyring | Gh_auth_status.Environment _ ->
             fail "hosts.yml was not classified as a config source")
        | entries -> failf "expected one entry, got %d" (List.length entries))
-    config_sources;
+    accepted_config_sources;
   List.iter
     (fun token_source ->
        let json =
@@ -250,6 +248,25 @@ let check_schema_declines label json =
   check bool (label ^ " has typed detail") true (Option.is_some parsed.schema_error);
   check int (label ^ " publishes no partial entries") 0 (List.length parsed.entries);
   check string (label ^ " verdict") "unknown" (verdict parsed "github.com")
+;;
+
+let test_rejected_config_source_paths () =
+  List.iter
+    (fun config_source ->
+       let config_json =
+         document
+           [ ( "github.com"
+             , `List
+                 [ replace_token_source config_source (keyring_entry ()) ] ) ]
+       in
+       check_schema_declines
+         ("rejected config source " ^ config_source)
+         config_json)
+    [ Filename.concat "config" "hosts.yml"
+    ; "config\\hosts.yml"
+    ; Filename.concat "config" "other.yml"
+    ; "hosts.yml.bak"
+    ]
 ;;
 
 let test_schema_drift_is_unknown () =
@@ -361,9 +378,13 @@ let () =
             test_command_rejects_empty_hostname
         ; test_case "actual CLI JSON decodes" `Quick test_actual_cli_json_decodes
         ; test_case
-            "relative config and documented environment sources"
+            "config source paths and documented environment sources"
             `Quick
-            test_relative_config_and_documented_environment_sources
+            test_config_source_paths_and_documented_environment_sources
+        ; test_case
+            "rejected config source paths"
+            `Quick
+            test_rejected_config_source_paths
         ; test_case
             "same-host environment shadows stored account"
             `Quick

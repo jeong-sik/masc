@@ -16,6 +16,8 @@ type config =
   ; model : string option
   ; system_prompt : string option
   ; timeout_s : float
+    (** Maximum silence between CLI stream messages. Each received message
+        resets the deadline; a progressing turn has no wall limit. *)
   }
 
 val default_timeout_s : float
@@ -68,6 +70,20 @@ type dynamic_tool =
   ; input_schema : Yojson.Safe.t
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
+
+type stream_event =
+  | Turn_started of
+      { turn_id : string
+      ; model : string
+      }
+  | Text_delta of string
+  | Dynamic_tool_started of
+      { call_id : string
+      ; tool_name : string
+      ; arguments : Yojson.Safe.t
+      }
+  | Dynamic_tool_finished of { call_id : string }
+  | Turn_finished of { text : string }
 
 val dynamic_tool_bytes : dynamic_tool list -> int
 (** Bytes the tool declarations occupy in the request this process builds. Not
@@ -124,6 +140,7 @@ val run_turn :
   ?on_session_ready:(session_id:string -> (unit, string) result) ->
   ?on_turn_starting:(session_id:string -> (unit, string) result) ->
   ?on_turn_started:(session_id:string -> turn_id:string -> (unit, string) result) ->
+  ?on_stream_event:(stream_event -> unit) ->
   config ->
   prompt:string ->
   (turn_result, error) result

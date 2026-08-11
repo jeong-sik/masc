@@ -176,6 +176,14 @@ describe('applyKeeperStreamEvent tool calls', () => {
     ])
 
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END', toolCallId: 'tc-1' })
+    const argsFinished = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-1')
+    expect(argsFinished?.delivery).toBe('streaming')
+    expect(argsFinished?.streamState).toBe('streaming')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { tool_call_id: 'tc-1' },
+    })
     const finished = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-1')
     expect(finished?.delivery).toBe('delivered')
     expect(finished?.streamState).toBeNull()
@@ -198,6 +206,11 @@ describe('applyKeeperStreamEvent tool calls', () => {
       type: 'TOOL_CALL_END',
       toolCallId,
     })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { tool_call_id: toolCallId },
+    })
 
     const thread = keeperThreads.value.sangsu ?? []
     expect(thread.find(entry => entry.id === `tool-${toolCallId}`)).toMatchObject({
@@ -212,6 +225,28 @@ describe('applyKeeperStreamEvent tool calls', () => {
         args: '{}',
       }),
     ])
+  })
+
+  it('keeps a ready tool delivered when the provider end arrives later', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-ready-first',
+      toolCallName: 'masc_status',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { tool_call_id: 'tc-ready-first' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_END',
+      toolCallId: 'tc-ready-first',
+    })
+
+    const finished = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-ready-first')
+    expect(finished?.delivery).toBe('delivered')
+    expect(finished?.streamState).toBeNull()
   })
 
   it('replaces tool-call args when Agent Core emits argument snapshots', () => {
@@ -271,6 +306,11 @@ describe('applyKeeperStreamEvent tool calls', () => {
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { tool_call_id: 'tc-ordered' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
       name: 'KEEPER_THINKING_DELTA',
       value: { delta: 'think B' },
     })
@@ -317,6 +357,11 @@ describe('applyKeeperStreamEvent tool calls', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_END',
       toolCallId: 'tc-progress',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { tool_call_id: 'tc-progress' },
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_MESSAGE_CONTENT',
@@ -413,6 +458,11 @@ describe('applyKeeperStreamEvent tool calls', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_END',
       toolCallId: 'tc-agentCore',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { tool_call_id: 'tc-agentCore' },
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -541,6 +591,11 @@ describe('applyKeeperStreamEvent tool calls', () => {
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', toolCallId: 'tc-repeat', delta: '{"post_id":"p-1"}' })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END', toolCallId: 'tc-repeat' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { tool_call_id: 'tc-repeat' },
+    })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
       toolCallId: 'tc-repeat',

@@ -119,7 +119,7 @@ let with_source_terminal_lane f =
        (match
           Keeper_owner_registry.install_from_store
             ~sw:(current_switch ())
-            ~operation_executor:None
+            ~operation_runner:None
             config
         with
         | Ok count -> Alcotest.(check int) "installed owner count" 1 count

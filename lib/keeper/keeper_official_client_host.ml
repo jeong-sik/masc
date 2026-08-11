@@ -52,6 +52,19 @@ let user_message text : Agent_core.Types.message =
   }
 ;;
 
+(* Official-client adapters own their provider instruction projection. Keep
+   dynamic context on that System path rather than copying Agent Core's
+   synthetic User-message encoding, while retaining the shared typed identity
+   used by prompt attribution and input-window projection. *)
+let extra_system_context_message text : Agent_core.Types.message =
+  { role = System
+  ; content = [ Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+  }
+;;
+
 let last_tool_results messages =
   messages
   |> List.rev
@@ -215,16 +228,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
   let messages =
     match turn_params.extra_system_context with
     | None -> messages
-    | Some text ->
-      messages
-      @ [ { Agent_core.Types.role = Agent_core.Types.User
-          ; content = [ Agent_core.Types.Text ("[system context] " ^ text) ]
-          ; name = None
-          ; tool_call_id = None
-          ; metadata =
-              Agent_core.Types.Extra_system_context_provenance.metadata
-          }
-        ]
+    | Some text -> messages @ [ extra_system_context_message text ]
   in
   let* messages =
     match model_input_projection with

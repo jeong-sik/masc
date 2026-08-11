@@ -712,6 +712,16 @@ let start_keepalive_outcome_to_string = function
   | Keepalive_lane_ownership_lost -> "lane ownership lost before fiber fork"
   | Keepalive_fork_rejected error -> Keeper_lane.start_error_to_string error
 
+let wake_queued_owner_operations ~base_path keeper_name =
+  match Keeper_owner_registry.wake_operation_drain ~base_path ~keeper_name with
+  | Ok () -> ()
+  | Error error ->
+    Log.Keeper.warn
+      "start_keepalive: owner operation drain wake rejected keeper=%s error=%s"
+      keeper_name
+      (Keeper_owner_registry.command_error_to_string error)
+;;
+
 let record_lifecycle_start_denial
       (meta : keeper_meta)
       (denial : Keeper_lifecycle_admission.autonomous_denial)
@@ -850,6 +860,9 @@ let start_keepalive
      | _ -> ());
     match Keeper_registry.get ~base_path:ctx.config.base_path m.name with
     | Some registered ->
+      wake_queued_owner_operations
+        ~base_path:ctx.config.base_path
+        m.name;
       Log.Keeper.emit
         Log.Info
         ~category:Log.Heartbeat
@@ -993,6 +1006,9 @@ let start_keepalive
               (Keeper_lane.start_error_to_string error));
           Keepalive_lane_ownership_lost)
         else (
+        wake_queued_owner_operations
+          ~base_path:ctx.config.base_path
+          live_meta.name;
         (* Telemetry feedback refresh loop removed in #6814:
          behavioral_stats no longer consumed by build_prompt. *)
         let current_failure_reason () =

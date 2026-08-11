@@ -145,19 +145,6 @@ let add_references ~path ~line references text =
          })
 ;;
 
-let contains_substring ~needle text =
-  let needle_length = String.length needle in
-  let text_length = String.length text in
-  let rec loop offset =
-    if offset + needle_length > text_length
-    then false
-    else if String.sub text offset needle_length = needle
-    then true
-    else loop (offset + 1)
-  in
-  needle_length = 0 || loop 0
-;;
-
 let rec references_in_json ~path ~line references = function
   | `String text -> add_references ~path ~line references text
   | (`Assoc fields as json) ->
@@ -226,7 +213,7 @@ let references_in_file ~ownership_root path =
                       (Yojson.Safe.from_string line)
                   with
                   | Yojson.Json_error detail ->
-                    if contains_substring ~needle:"\"_blob\"" line
+                    if String_util.contains_substring line "\"_blob\""
                     then
                       Error
                         (Malformed_structured_artifact_reference

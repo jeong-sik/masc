@@ -95,7 +95,10 @@ let start_owner_with_executor
     ~store
     ~operation_store_path:path
     ~now:(fun () -> 42.0)
-    ~operation_executor
+    ~operation_runner:
+      (Option.map
+         (fun execute -> Owner.{ ready = (fun ~keeper_name:_ -> true); execute })
+         operation_executor)
     ~keeper_name
     ~initial_meta
 ;;
@@ -1031,7 +1034,7 @@ let test_startup_interrupts_running_without_requeue () =
               ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
               ~operation_store_path:path
               ~now:(fun () -> 20.0)
-              ~operation_executor:None
+              ~operation_runner:None
               ~keeper_name:"interrupted-restart"
               ~initial_meta:(Some (make_meta "interrupted-restart")))
        in
@@ -1048,6 +1051,87 @@ let test_startup_interrupts_running_without_requeue () =
          "restart never requeues Running"
          true
          (Option.is_none (owner_ok (Owner.claim_next_operation owner))))
+;;
+
+let test_startup_queued_waits_for_runner_readiness () =
+  Eio_main.run @@ fun _env ->
+  let path = Filename.temp_file "keeper-owner-ready-" ".sqlite3" in
+  Unix.unlink path;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path)
+    (fun () ->
+       let first_id = operation_id "kmsg-ready-first" in
+       let second_id = operation_id "kmsg-ready-second" in
+       let seed =
+         Keeper_chat_operation_store.open_or_create ~path
+         |> Result.map_error Keeper_chat_operation_store.error_to_string
+         |> Result.get_ok
+       in
+       List.iter
+         (fun (operation_id, input) ->
+            Keeper_chat_operation_store.submit
+              seed
+              ~now:10.0
+              ~operation_id
+              ~source:operation_source
+              ~input
+            |> Result.get_ok
+            |> ignore)
+         [ first_id, operation_input "first"
+         ; second_id, operation_input "second"
+         ];
+       Keeper_chat_operation_store.close seed |> Result.get_ok;
+       let ready = ref false in
+       let executed = ref [] in
+       let execute ~sw:_ ~keeper_name:_ ~claim =
+         match claim () with
+         | Error error -> fail (Owner.error_to_string error)
+         | Ok None -> fail "ready operation runner did not find its FIFO head"
+         | Ok (Some (operation : Chat_operation.t)) ->
+           executed := operation.operation_id :: !executed;
+           Owner.Operation_succeeded
+             { outcome_ref =
+                 "turn:"
+                 ^ Chat_operation.Operation_id.to_string operation.operation_id
+             }
+       in
+       Eio.Switch.run @@ fun sw ->
+       let owner =
+         owner_ok
+           (Owner.start
+              ~sw
+              ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+              ~operation_store_path:path
+              ~now:(fun () -> 20.0)
+              ~operation_runner:
+                (Some Owner.{ ready = (fun ~keeper_name:_ -> !ready); execute })
+              ~keeper_name:"ready-after-registration"
+              ~initial_meta:(Some (make_meta "ready-after-registration")))
+       in
+       let first_before =
+         Option.get (owner_ok (Owner.exact_operation owner first_id))
+       in
+       let second_before =
+         Option.get (owner_ok (Owner.exact_operation owner second_id))
+       in
+       (match first_before.state, second_before.state with
+        | Chat_operation.Queued, Chat_operation.Queued -> ()
+        | _ -> fail "startup claimed Queued operations before runner readiness");
+       check int "executor did not run before readiness" 0 (List.length !executed);
+       ready := true;
+       ignore (owner_ok (Owner.wake_operation_drain owner));
+       let first = await_terminal owner first_id 1_000 in
+       let second = await_terminal owner second_id 1_000 in
+       (match first.state, second.state with
+        | Chat_operation.Succeeded _, Chat_operation.Succeeded _ -> ()
+        | _ -> fail "ready wake did not drain both Queued operations");
+       check
+         (list string)
+         "registration wake preserves FIFO"
+         [ Chat_operation.Operation_id.to_string first_id
+         ; Chat_operation.Operation_id.to_string second_id
+         ]
+         (List.rev_map Chat_operation.Operation_id.to_string !executed))
 ;;
 
 let test_operation_store_failure_fences_owner_mutations () =
@@ -1427,7 +1511,7 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        (match Keeper_meta_store.replace_snapshot config first with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed owner meta: " ^ detail));
-       (match Owner_registry.install_from_store ~sw ~operation_executor:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok count -> check int "strict startup owner count" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let loaded =
@@ -1495,7 +1579,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting () =
        ignore (Workspace.init config ~agent_name:(Some "owner-tool-test"));
        let meta = make_meta "agent-operation-target" in
        Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
-       Owner_registry.install_from_store ~sw ~operation_executor:None config
+       Owner_registry.install_from_store ~sw ~operation_runner:None config
        |> Result.get_ok
        |> ignore;
        let ctx : _ Keeper_tool_surface.context =
@@ -1652,7 +1736,7 @@ let test_connector_submit_uses_owner_operation_idempotency () =
        (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail detail);
-       (match Owner_registry.install_from_store ~sw ~operation_executor:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok 1 -> ()
         | Ok count -> failf "unexpected owner count %d" count
         | Error error -> fail (Owner_registry.install_error_to_string error));
@@ -1752,7 +1836,7 @@ let test_root_inventory_isolates_invalid_owner_snapshots () =
        Yojson.Safe.to_file
          (Filename.concat keepers_dir "inventory-path-name.json")
          (Keeper_meta_json.meta_to_json (make_meta "inventory-payload-name"));
-       (match Owner_registry.install_from_store ~sw ~operation_executor:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok count -> check int "only valid owner starts" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        (match Owner_registry.get ~base_path ~keeper_name:valid.name with
@@ -1805,7 +1889,7 @@ let test_registry_reads_owner_atomic_projection () =
        ignore (Workspace.init config ~agent_name:(Some "owner-projection-test"));
        let initial = make_meta "atomic-projection" in
        Keeper_meta_store.replace_snapshot config initial |> Result.get_ok;
-       Owner_registry.install_from_store ~sw ~operation_executor:None config
+       Owner_registry.install_from_store ~sw ~operation_runner:None config
        |> Result.get_ok
        |> ignore;
        let stale_entry =
@@ -1848,7 +1932,7 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
        (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed reserved owner meta: " ^ detail));
-       (match Owner_registry.install_from_store ~sw ~operation_executor:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok count -> check int "reserved owner count" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let token =
@@ -1900,7 +1984,7 @@ let test_create_waits_for_lifecycle_admission_before_installing_owner () =
        Eio.Switch.run @@ fun sw ->
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "owner-create-reservation-test"));
-       (match Owner_registry.install_from_store ~sw ~operation_executor:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok count -> check int "empty owner inventory" 0 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let meta = make_meta "create-reserved" in
@@ -2023,6 +2107,10 @@ let () =
             "startup interrupts Running without requeue"
             `Quick
             test_startup_interrupts_running_without_requeue
+        ; test_case
+            "startup Queued waits for runner readiness"
+            `Quick
+            test_startup_queued_waits_for_runner_readiness
         ; test_case
             "operation store failure fences owner mutations"
             `Quick

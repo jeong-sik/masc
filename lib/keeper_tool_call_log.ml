@@ -176,6 +176,8 @@ let current_log_path () =
 let configured_masc_root () =
   Option.map fst (Atomic.get store_state).configured
 
+exception Commit_required_but_store_unavailable
+
 let record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn =
   let durable_store = Dated_jsonl.base_dir store in
   let masc_root = Filename.dirname durable_store in
@@ -229,8 +231,11 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
          (Printexc.to_string gap_exn))
 ;;
 
-let append_to_store (entry : append_entry) =
-  try Dated_jsonl.append entry.store entry.json with
+let append_to_store_result (entry : append_entry) =
+  try
+    Dated_jsonl.append entry.store entry.json;
+    Ok ()
+  with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     let trace_id = entry.trace_id in
@@ -246,7 +251,13 @@ let append_to_store (entry : append_entry) =
       ~keeper_name:entry.keeper_name
       ~tool_name:entry.tool_name
       ?trace_id
-      exn
+      exn;
+    Error exn
+;;
+
+let append_to_store entry =
+  match append_to_store_result entry with
+  | Ok () | Error _ -> ()
 ;;
 
 let take_queued_append () =
@@ -393,10 +404,15 @@ let log_call
       ?runtime_profile
       ?result_bytes
       ?truncated_to
+      ?on_committed
       ()
   =
   match (Atomic.get store_state).store with
-    | None -> record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ()
+    | None ->
+      record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ();
+      (match on_committed with
+       | None -> ()
+       | Some _ -> raise Commit_required_but_store_unavailable)
     | Some store ->
       (* RFC-0225 §3.3: no ambient turn-context fallback. Both production
          callers (keeper_hooks_agent_core, mcp_server_eio_call_tool) pass their
@@ -594,7 +610,13 @@ let log_call
          captures) that would corrupt the JSONL file and cause downstream
          readers — including the dashboard — to silently skip entire rows. *)
       let safe_json = Inference_utils.sanitize_json_utf8 json in
-      append_or_enqueue { store; keeper_name; tool_name; trace_id; json = safe_json }
+      let entry = { store; keeper_name; tool_name; trace_id; json = safe_json } in
+      (match on_committed with
+       | None -> append_or_enqueue entry
+       | Some notify ->
+         (match append_to_store_result entry with
+          | Ok () -> notify ()
+          | Error exn -> raise exn))
 ;;
 
 (* Scan multiplier applied before the keeper filter: [read_recent] reads

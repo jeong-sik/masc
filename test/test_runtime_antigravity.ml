@@ -59,6 +59,7 @@ let fixture_script
     ?(require_resume = false)
     ?required_home
     ?(sleep_s = 0.0)
+    ?line_delay_s
     ?(exit_code = 0)
     lines
   =
@@ -68,6 +69,9 @@ let fixture_script
   output_string output
     "test -z \"${GEMINI_API_KEY+x}\" && test -z \"${GEMINI_API_KEY_WORK+x}\" && test -z \"${GOOGLE_API_TOKEN+x}\" && test -z \"${OPENAI_API_KEY+x}\" && test -z \"${OPENAI_API_KEY_MAIN+x}\" && test -z \"${ANTHROPIC_API_KEY+x}\" && test -z \"${ANTHROPIC_API_KEY_WORK+x}\" && test -z \"${AGY_ADC_AUTH+x}\" && test -z \"${MASC_PUBLIC_FIXTURE+x}\" || exit 92\n";
   output_string output "case \" $* \" in *\" --print \"*) exit 98 ;; esac\n";
+  output_string
+    output
+    "case \" $* \" in *\" --print-timeout 2562047h47m16.854775807s \"*) ;; *) exit 99 ;; esac\n";
   if require_resume
   then (
     output_string
@@ -89,7 +93,12 @@ let fixture_script
   output_string output "cat >/dev/null\n";
   if sleep_s > 0.0 then output_string output (Printf.sprintf "sleep %.3f\n" sleep_s);
   List.iter
-    (fun line -> output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
+    (fun line ->
+       Option.iter
+         (fun seconds ->
+            output_string output (Printf.sprintf "sleep %.3f\n" seconds))
+         line_delay_s;
+       output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     lines;
   output_string output (Printf.sprintf "exit %d\n" exit_code);
   close_out output;
@@ -97,8 +106,16 @@ let fixture_script
   path
 ;;
 
-let with_fixture ?require_resume ?required_home ?sleep_s ?exit_code lines f =
-  let path = fixture_script ?require_resume ?required_home ?sleep_s ?exit_code lines in
+let with_fixture ?require_resume ?required_home ?sleep_s ?line_delay_s ?exit_code lines f =
+  let path =
+    fixture_script
+      ?require_resume
+      ?required_home
+      ?sleep_s
+      ?line_delay_s
+      ?exit_code
+      lines
+  in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
@@ -106,6 +123,7 @@ let run_fixture
     ?conversation_mode
     ?home_dir
     ?on_conversation_ready
+    ?on_stream_event
     ?(timeout_s = 2.0)
     ?(prompt = "Return the fixture marker")
     path
@@ -121,11 +139,35 @@ let run_fixture
       ?conversation_mode
       ?home_dir
       ?on_conversation_ready
+      ?on_stream_event
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
       config
       ~prompt)
+;;
+
+let test_stream_events_preserve_available_wire_data () =
+  let events = ref [] in
+  with_fixture
+    [ init (); result () ]
+    (fun path ->
+       match
+         run_fixture
+           ~on_stream_event:(fun event -> events := event :: !events)
+           path
+       with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ ->
+         match List.rev !events with
+         | [ Runtime_antigravity.Turn_started
+               { conversation_id = "conversation-1"
+               ; model = "gemini-fixture"
+               }
+           ; Text_delta "MASC_ANTIGRAVITY_OK\n"
+           ; Turn_finished { text = "MASC_ANTIGRAVITY_OK\n" }
+           ] -> ()
+         | _ -> fail "Antigravity stream did not preserve available wire data")
 ;;
 
 let test_successful_official_client_turn () =
@@ -379,15 +421,27 @@ let test_unknown_protocol_vocabulary_fails_closed () =
     cases
 ;;
 
-let test_timeout_is_typed () =
+let test_progress_resets_stream_idle_timeout () =
+  with_fixture
+    ~line_delay_s:0.4
+    [ init (); step ~index:1 (); result () ]
+    (fun path ->
+       match run_fixture ~timeout_s:0.75 path with
+       | Ok turn ->
+         check string "progressing turn completes" "MASC_ANTIGRAVITY_OK\n" turn.text
+       | Error error -> fail (Runtime_antigravity.error_to_string error))
+;;
+
+let test_stream_idle_timeout_is_typed () =
   with_fixture
     ~sleep_s:1.0
     [ init (); result () ]
     (fun path ->
        match run_fixture ~timeout_s:0.05 path with
-       | Error (Runtime_antigravity.Timeout _) -> ()
+       | Error (Runtime_antigravity.Timeout seconds) ->
+         check (float 0.001) "exact idle timeout" 0.05 seconds
        | Error error -> fail (Runtime_antigravity.error_to_string error)
-       | Ok _ -> fail "slow CLI ignored the runtime timeout")
+       | Ok _ -> fail "silent Antigravity stream ignored its idle timeout")
 ;;
 
 let test_admission_is_process_free () =
@@ -460,6 +514,10 @@ let () =
             `Quick
             test_successful_official_client_turn
         ; test_case
+            "stream preserves available wire data"
+            `Quick
+            test_stream_events_preserve_available_wire_data
+        ; test_case
             "resume identity and argv"
             `Quick
             test_resume_requires_exact_identity_and_argv
@@ -506,7 +564,14 @@ let () =
             "unknown protocol vocabulary fails closed"
             `Quick
             test_unknown_protocol_vocabulary_fails_closed
-        ; test_case "typed timeout" `Quick test_timeout_is_typed
+        ; test_case
+            "progress resets stream idle timeout"
+            `Quick
+            test_progress_resets_stream_idle_timeout
+        ; test_case
+            "stream idle timeout is typed"
+            `Quick
+            test_stream_idle_timeout_is_typed
         ; test_case "process-free admission" `Quick test_admission_is_process_free
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]

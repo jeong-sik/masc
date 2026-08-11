@@ -387,6 +387,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
 let run_keeper_invocation_turn_admitted_inner
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
       ?event_bus
       ?continuation_channel
       ~surface
@@ -746,6 +747,7 @@ let run_keeper_invocation_turn_admitted_inner
 			                                ~world_observation
 		                                ~generation:meta.runtime.nonce
 		                                ?on_event
+		                                ?on_tool_result_ready
 		                                ~trajectory_acc
 		                                ?degraded_retry_runtime
 		                                ?fallback_reason
@@ -926,6 +928,7 @@ let run_keeper_invocation_turn_admitted_inner
 let run_keeper_invocation_turn_admitted
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
       ?event_bus
       ?continuation_channel
       ~surface
@@ -950,6 +953,7 @@ let run_keeper_invocation_turn_admitted
     run_keeper_invocation_turn_admitted_inner
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
       ?event_bus
       ?continuation_channel
       ~surface
@@ -969,6 +973,7 @@ let handle_keeper_msg_admitted
       ~admission_token:_
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
       ?event_bus
       ?continuation_channel
       ctx
@@ -980,6 +985,7 @@ let handle_keeper_msg_admitted
   run_keeper_invocation_turn_admitted
     ?on_text_delta
     ?on_event
+    ?on_tool_result_ready
     ?event_bus
     ?continuation_channel
     ~surface:Direct_message

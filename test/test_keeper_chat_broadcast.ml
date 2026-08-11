@@ -97,6 +97,25 @@ let test_projection_covers_thinking_and_tool_args () =
     (Some "TOOL_CALL_ARGS")
     (Yojson.Safe.Util.member "type" tool_args |> Yojson.Safe.Util.to_string_option)
 
+let test_tool_result_ready_projection_has_exact_identity () =
+  let state, _ =
+    project P.initial
+      (E.Run_started
+         { run_id = "run-3"; thread_id = "keeper-consumer:taskmaster" })
+  in
+  let _, ready =
+    project state (E.Tool_result_ready { tool_call_id = "tool-use-7" })
+  in
+  let ready = Ag_ui.event_to_json (projected_exn (state, ready)) in
+  Alcotest.(check (option string)) "result-ready custom event"
+    (Some "KEEPER_TOOL_RESULT_READY")
+    (Yojson.Safe.Util.member "name" ready |> Yojson.Safe.Util.to_string_option);
+  Alcotest.(check (option string)) "exact tool identity"
+    (Some "tool-use-7")
+    (Yojson.Safe.Util.member "value" ready
+     |> Yojson.Safe.Util.member "tool_call_id"
+     |> Yojson.Safe.Util.to_string_option)
+
 let () =
   Alcotest.run "keeper_chat_broadcast"
     [ ( "turn_event"
@@ -106,5 +125,7 @@ let () =
             test_projection_preserves_stream_identity
         ; Alcotest.test_case "projection covers thinking and tool args" `Quick
             test_projection_covers_thinking_and_tool_args
+        ; Alcotest.test_case "tool result readiness preserves exact identity" `Quick
+            test_tool_result_ready_projection_has_exact_identity
         ] )
     ]

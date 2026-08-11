@@ -89,6 +89,11 @@ type operation_executor =
   claim:(unit -> (Chat_operation.t option, error) result) ->
   operation_execution
 
+type operation_runner =
+  { ready : keeper_name:string -> bool
+  ; execute : operation_executor
+  }
+
 type 'a autonomous_response =
   | Autonomous_ran of 'a
   | Autonomous_busy of autonomous_block
@@ -146,6 +151,7 @@ type _ command =
       ; outcome_ref : string option
       }
       -> (Chat_operation.t, error) result command
+  | Wake_operation_drain : (unit, error) result command
   | Run_if_idle :
       { lane : turn_lane
       ; run : unit -> 'a
@@ -406,7 +412,7 @@ let start
       ~store
       ~operation_store_path
       ~now
-      ~operation_executor
+      ~operation_runner
       ~keeper_name
       ~initial_meta
   =
@@ -493,13 +499,14 @@ let start
         |> Result.map (fun _ -> ())
     in
     let rec start_child_if_needed state shutdown_operation_id =
-      match operation_executor with
+      match operation_runner with
       | None -> ()
       | Some _ when !(t.child_active) -> ()
       | Some _ when Option.is_some shutdown_operation_id -> ()
       | Some _ when (Keeper_owner_reducer.projection state).stopping -> ()
       | Some _ when Option.is_some !(t.store_error) -> ()
-      | Some executor ->
+      | Some runner when not (runner.ready ~keeper_name:t.keeper_name) -> ()
+      | Some runner ->
         let inventory = Atomic.get t.operation_projection in
         if inventory.queued_count > 0 && Option.is_none inventory.running_operation_id
         then (
@@ -529,7 +536,7 @@ let start
                       ; detail = "Keeper owner is stopping"
                       ; outcome_ref = None
                       }
-                  else executor ~sw:child_sw ~keeper_name ~claim)
+                  else runner.execute ~sw:child_sw ~keeper_name ~claim)
               with
               | Stop_active_child ->
                 Operation_failed
@@ -702,6 +709,10 @@ let start
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Wake_operation_drain, resolve) ->
+          Eio.Promise.resolve resolve (Ok ());
+          start_child_if_needed state shutdown_operation_id;
+          loop state shutdown_operation_id
         | Command (Begin_shutdown { operation_id }, resolve) ->
           (match shutdown_operation_id with
            | None ->
@@ -868,6 +879,7 @@ let start
 let exact_projection t = request t Exact_projection
 let apply_meta t command = request t (Apply_meta command)
 let exact_operation t operation_id = request t (Exact_operation operation_id)
+let wake_operation_drain t = request t Wake_operation_drain
 
 let submit_operation t ~operation_id ~source ~input =
   request t (Submit_operation { operation_id; source; input })

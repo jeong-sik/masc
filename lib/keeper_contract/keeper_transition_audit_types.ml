@@ -95,6 +95,62 @@ let turn_fsm_transition_to_json (r : turn_fsm_transition_record) : Yojson.Safe.t
     ]
 ;;
 
+let turn_fsm_transition_of_json = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let surface = "turn_fsm_transition" in
+    let json = `Assoc fields in
+    let allowed =
+      [ "turn_id"
+      ; "prev_state"
+      ; "new_state"
+      ; "action"
+      ; "stop_signaled_before"
+      ; "stop_signaled_after"
+      ; "wall_clock_at"
+      ]
+    in
+    let require_optional_bool field =
+      match List.assoc_opt field fields with
+      | Some `Null -> Ok None
+      | Some (`Bool value) -> Ok (Some value)
+      | Some value ->
+        Error
+          (Printf.sprintf
+             "%s.%s must be a bool or null, got %s"
+             surface
+             field
+             (Json_util.kind_name value))
+      | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+    in
+    let* () = Json_util.reject_unknown_fields ~surface ~allowed fields in
+    let* turn_fsm_turn_id = Json_util.require_int json "turn_id" in
+    let* turn_fsm_prev_state = Json_util.require_string json "prev_state" in
+    let* turn_fsm_new_state = Json_util.require_string json "new_state" in
+    let* turn_fsm_action = Json_util.require_string json "action" in
+    let* turn_fsm_stop_signaled_before =
+      require_optional_bool "stop_signaled_before"
+    in
+    let* turn_fsm_stop_signaled_after =
+      require_optional_bool "stop_signaled_after"
+    in
+    let* turn_fsm_wall_clock_at = Json_util.require_float json "wall_clock_at" in
+    Ok
+      { turn_fsm_turn_id
+      ; turn_fsm_prev_state
+      ; turn_fsm_new_state
+      ; turn_fsm_action
+      ; turn_fsm_stop_signaled_before
+      ; turn_fsm_stop_signaled_after
+      ; turn_fsm_wall_clock_at
+      }
+  | json ->
+    Error
+      (Printf.sprintf
+         "turn_fsm_transition must be an object, got %s"
+         (Json_util.kind_name json))
+;;
+
 let completed_turn_of_json = function
   | `Assoc fields ->
     (match

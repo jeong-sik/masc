@@ -290,5 +290,7 @@ let disable_window_read_count_for_testing () =
 ;;
 
 let window_read_count_for_testing () =
-  Option.value (Atomic.get window_read_count_for_testing_state) ~default:0
+  match Atomic.get window_read_count_for_testing_state with
+  | Some count -> count
+  | None -> 0
 ;;

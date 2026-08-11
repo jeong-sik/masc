@@ -82,6 +82,10 @@ let snapshot () = Atomic.get state
 
 let update f = Atomic_util.update state f
 
+(* NDT-OK: startup elapsed time is operational telemetry and timeout budgeting;
+   wall-clock sampling is confined to this observation boundary. *)
+let wall_clock_now = Unix.gettimeofday
+
 let phase_to_string = function
   | Blocking -> "blocking"
   | Lazy -> "lazy"
@@ -93,7 +97,7 @@ let phase_to_string = function
 let is_live () = true
 
 let elapsed_since_start () =
-  Unix.gettimeofday () -. (snapshot ()).started_at
+  wall_clock_now () -. (snapshot ()).started_at
 
 let watchdog_timeout_sec () = Env_config.Transport.startup_watchdog_sec ()
 
@@ -308,7 +312,7 @@ let to_yojson () =
         | Some value -> value
         | None -> `Null );
       ( "elapsed_sec",
-        `Float (Unix.gettimeofday () -. current.started_at) );
+        `Float (wall_clock_now () -. current.started_at) );
       ("watchdog_timeout_sec", `Float (watchdog_timeout_sec ()));
       ("product", Server_state_product.product_to_json product);
     ]

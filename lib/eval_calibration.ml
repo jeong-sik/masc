@@ -102,7 +102,7 @@ let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 let base_path () =
   Filename.concat (Env_config_core.base_path ()) "data/verdicts"
 
-let get_store () =
+let rec get_store () =
   match Atomic.get store_ref with
   | Some s -> s
   | None ->
@@ -113,7 +113,7 @@ let get_store () =
       (* Another domain published the process-wide store while this domain
          created its candidate.  All writers must use that single instance so
          Dated_jsonl's per-store serialization remains authoritative. *)
-      Option.get (Atomic.get store_ref)
+      get_store ()
 
 module For_testing = struct
   let reset_store () = Atomic.set store_ref None

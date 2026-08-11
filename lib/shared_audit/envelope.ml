@@ -6,6 +6,8 @@ type t = {
   prev_hash : string option;
 }
 
+(* Audit IDs intentionally use independent per-domain entropy;
+   NDT-OK: nondeterminism is confined to envelope ID generation. *)
 let random_state =
   Domain.DLS.new_key Random.State.make_self_init
 
@@ -14,8 +16,10 @@ let generate_id () =
   let random = Domain.DLS.get random_state in
   let now_ms = Int64.of_float (Unix.gettimeofday () *. 1000.0) in
   let ts_hex = Printf.sprintf "%016Lx" now_ms in
+  (* NDT-OK: these values are opaque identifier entropy, never branch inputs. *)
   let r1 = Random.State.int64 random 0x100000000L in
   let r2 = Random.State.int64 random 0x100000000L in
+  (* NDT-OK: same entropy boundary as the preceding random components. *)
   let r3 = Random.State.int64 random 0x10000L in
   let r_hex = Printf.sprintf "%08Lx%08Lx%04Lx" r1 r2 r3 in
   ts_hex ^ "-" ^ r_hex

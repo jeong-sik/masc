@@ -48,9 +48,23 @@ module For_testing : sig
     worktree_text:string ->
     telemetry_feedback_text:string ->
     turn_instructions_text:string ->
+    current_turn_evidence_text:string ->
     string
   (** Production composition boundary for fresh direct-turn context. The
       result is prompt-only and must never enter durable conversation history. *)
+
+  val current_turn_evidence_block :
+    invocation_kind:string ->
+    keeper_name:string ->
+    turn_id:int ->
+    runtime_id:string ->
+    trace_id:string ->
+    generation:int ->
+    sandbox_profile:string ->
+    network_mode:string ->
+    string
+  (** Prompt-only admission facts and the rule that historical context is not
+      current evidence. *)
 
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   (** Format a dashboard co-view context object ({ label, route, scene, fields })

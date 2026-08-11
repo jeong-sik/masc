@@ -338,6 +338,7 @@ let test_direct_turn_reuses_current_task_context () =
       ~worktree_text:"worktree state"
       ~telemetry_feedback_text:"telemetry state"
       ~turn_instructions_text:"turn instructions"
+      ~current_turn_evidence_text:"CURRENT_TURN_EVIDENCE=turn-7"
   in
   check int "current task is injected exactly once" 1
     (count_occurrences
@@ -358,10 +359,49 @@ let test_direct_turn_has_no_synthetic_task_context () =
       ~worktree_text:""
       ~telemetry_feedback_text:""
       ~turn_instructions_text:""
+      ~current_turn_evidence_text:""
   in
   check bool "no held task means no synthetic task context" false
     (contains ~needle:"### Current Task" context);
   check string "non-task context remains" "recent owner message" context
+
+let test_current_turn_evidence_fences_history () =
+  let evidence =
+    Turn.For_testing.current_turn_evidence_block
+      ~invocation_kind:"delegate"
+      ~keeper_name:"wake-context-keeper"
+      ~turn_id:17
+      ~runtime_id:"glm-coding.glm-5-turbo"
+      ~trace_id:"trace-current"
+      ~generation:4
+      ~sandbox_profile:"local"
+      ~network_mode:"inherit"
+  in
+  let context =
+    Turn.For_testing.direct_turn_dynamic_context
+      ~current_task:Inputs.No_current_task
+      ~recent_direct_conversation_text:
+        "HISTORICAL_EVIDENCE=LIVE_OBS_PROBE_20260809"
+      ~worktree_text:""
+      ~telemetry_feedback_text:""
+      ~turn_instructions_text:""
+      ~current_turn_evidence_text:evidence
+  in
+  let evidence_suffix =
+    String.sub context (String.length context - String.length evidence)
+      (String.length evidence)
+  in
+  check bool "historical text remains available for continuity" true
+    (contains ~needle:"HISTORICAL_EVIDENCE=LIVE_OBS_PROBE_20260809" context);
+  check bool "current-turn fence is present" true
+    (contains ~needle:"--- Current-turn evidence contract ---" context);
+  check bool "turn identity is explicit" true
+    (contains ~needle:"- turn_ref: trace-current#17" context);
+  check bool "runtime identity is explicit" true
+    (contains ~needle:"- runtime_id: glm-coding.glm-5-turbo" context);
+  check bool "missing live facts must be unknown" true
+    (contains ~needle:"answer UNKNOWN" context);
+  check string "evidence fence is the most recent context" evidence evidence_suffix
 
 let test_direct_and_autonomous_share_system_prompt () =
   with_repo_prompt_config @@ fun () ->
@@ -619,6 +659,8 @@ let () =
             test_direct_turn_reuses_current_task_context;
           test_case "direct reply invents no task when none is held" `Quick
             test_direct_turn_has_no_synthetic_task_context;
+          test_case "current-turn evidence fences historical context" `Quick
+            test_current_turn_evidence_fences_history;
           test_case "direct and autonomous turns share the stable contract"
             `Quick
             test_direct_and_autonomous_share_system_prompt;

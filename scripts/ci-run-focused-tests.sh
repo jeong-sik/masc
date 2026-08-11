@@ -93,6 +93,7 @@ normal_targets=(
   @test/runtest-test_keeper_antigravity_runtime
   @test/runtest-test_keeper_claude_code_runtime
   @test/runtest-test_server_dashboard_official_client_probe
+  @test/runtest-test_compaction_exact_output_conformance
   @test/runtest-test_host_fd_pressure_poller
   @test/runtest-test_keeper_turn_driver_failover
   @test/runtest-test_keeper_turn_driver_accept

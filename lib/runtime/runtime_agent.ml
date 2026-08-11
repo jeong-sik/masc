@@ -260,10 +260,32 @@ let transport_for_provider
 (* Typed field first (RFC-0371 B12): the id used to be recovered by parsing
    the "runtime:<id>/runtime" spelling the producer had printed into the
    human-facing [description]. The description is display-only now. *)
+let legacy_runtime_id_of_description = function
+  | Some description ->
+    let runtime_prefix = "runtime:" in
+    let runtime_suffix = "/runtime" in
+    (match
+       String.starts_with ~prefix:runtime_prefix description
+       && String.ends_with ~suffix:runtime_suffix description
+     with
+     | false -> None
+     | true ->
+       let prefix_len = String.length runtime_prefix in
+       let suffix_len = String.length runtime_suffix in
+       let len = String.length description - prefix_len - suffix_len in
+       if len > 0
+       then Some (String.sub description prefix_len len)
+       else None)
+  | None -> None
+;;
+
 let runtime_id_of_config (config : config) =
   match config.runtime_id with
   | Some runtime_id -> runtime_id
-  | None -> config.name
+  | None ->
+    Option.value
+      (legacy_runtime_id_of_description config.description)
+      ~default:config.name
 
 let runtime_observation_for_terminal_config ~total_duration_ms ?error
     (config : config) =

@@ -1295,7 +1295,10 @@ let test_runtime_agent_terminal_observation_uses_runtime_identity () =
       ~tools:[]
   in
   let config =
-    { config with description = Some "runtime:runpod_mtp.qwen/runtime" }
+    { config with
+        runtime_id = None
+      ; description = Some "runtime:runpod_mtp.qwen/runtime"
+      }
   in
   let observation =
     Runtime_agent.For_testing.runtime_observation_for_completed_config
@@ -1318,7 +1321,10 @@ let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
       ~tools:[]
   in
   let config =
-    { config with description = Some "runtime:runpod_mtp.qwen/runtime" }
+    { config with
+        runtime_id = None
+      ; description = Some "runtime:runpod_mtp.qwen/runtime"
+      }
   in
   let error = "Not found: OpenAI-compatible endpoint returned 404" in
   let observation =
@@ -1341,6 +1347,28 @@ let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
     (Keeper_execution_receipt.runtime_outcome_to_string
        (Keeper_agent_error.runtime_outcome_of_observation
           (Some observation)))
+
+let test_runtime_agent_typed_id_precedes_legacy_description () =
+  let config =
+    Runtime_agent.default_config
+      ~name:"agent_core-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config =
+    { config with
+        runtime_id = Some "typed-runtime-id"
+      ; description = Some "runtime:legacy-runtime-id/runtime"
+      }
+  in
+  let observation =
+    Runtime_agent.For_testing.runtime_observation_for_completed_config
+      ~total_duration_ms:42.9
+      config
+  in
+  check string "typed runtime id wins" "typed-runtime-id"
+    observation.runtime_id
 
 let test_runtime_agent_context_preserves_max_tokens_intent () =
   Eio_main.run (fun env ->
@@ -2050,6 +2078,10 @@ let () =
             "runtime agent terminal error observation marks failed attempt"
             `Quick
             test_runtime_agent_terminal_error_observation_marks_failed_attempt
+        ; test_case
+            "runtime agent typed id precedes legacy description"
+            `Quick
+            test_runtime_agent_typed_id_precedes_legacy_description
         ; test_case
             "runtime agent context preserves max_tokens intent"
             `Quick

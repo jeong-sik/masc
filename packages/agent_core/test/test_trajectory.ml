@@ -177,6 +177,75 @@ let test_tool_call_pairing () =
   | _ -> Alcotest.fail "expected Act step"
 ;;
 
+let test_blank_tool_use_ids_are_unpairable () =
+  let records =
+    [ make_record
+        ~seq:1
+        ~ts:250.0
+        ~agent_name:"blank-agent"
+        ~record_type:Run_started
+        ~prompt:"blank ids"
+        ()
+    ; make_record
+        ~seq:2
+        ~ts:250.1
+        ~agent_name:"blank-agent"
+        ~record_type:Tool_execution_started
+        ()
+    ; make_record
+        ~seq:3
+        ~ts:250.2
+        ~agent_name:"blank-agent"
+        ~record_type:Tool_execution_started
+        ~tool_use_id:""
+        ~tool_name:"empty"
+        ()
+    ; make_record
+        ~seq:4
+        ~ts:250.3
+        ~agent_name:"blank-agent"
+        ~record_type:Tool_execution_started
+        ~tool_use_id:" \t"
+        ~tool_name:"whitespace"
+        ()
+    ; make_record
+        ~seq:5
+        ~ts:250.4
+        ~agent_name:"blank-agent"
+        ~record_type:Tool_execution_finished
+        ~tool_result:"none"
+        ()
+    ; make_record
+        ~seq:6
+        ~ts:250.5
+        ~agent_name:"blank-agent"
+        ~record_type:Tool_execution_finished
+        ~tool_use_id:""
+        ~tool_result:"empty"
+        ()
+    ; make_record
+        ~seq:7
+        ~ts:250.6
+        ~agent_name:"blank-agent"
+        ~record_type:Tool_execution_finished
+        ~tool_use_id:" \t"
+        ~tool_result:"whitespace"
+        ()
+    ; make_record
+        ~seq:8
+        ~ts:250.7
+        ~agent_name:"blank-agent"
+        ~record_type:Run_finished
+        ()
+    ]
+  in
+  let traj = Trajectory.of_raw_trace_records records in
+  let _think, act, obs, _respond = Trajectory.count_steps traj in
+  Alcotest.(check int) "blank starts do not create Act steps" 0 act;
+  Alcotest.(check int) "blank finishes do not create Observe steps" 0 obs;
+  Alcotest.(check int) "blank ids do not create tool calls" 0 (Trajectory.total_tool_calls traj)
+;;
+
 let test_error_run () =
   let records =
     [ make_record
@@ -448,6 +517,10 @@ let () =
     [ ( "trajectory"
       , [ Alcotest.test_case "basic trajectory from records" `Quick test_basic_trajectory
         ; Alcotest.test_case "tool call pairing" `Quick test_tool_call_pairing
+        ; Alcotest.test_case
+            "blank tool ids are unpairable"
+            `Quick
+            test_blank_tool_use_ids_are_unpairable
         ; Alcotest.test_case "error run" `Quick test_error_run
         ; Alcotest.test_case "orphan tool finish" `Quick test_orphan_tool_finish
         ; Alcotest.test_case "unfinished tool" `Quick test_unfinished_tool

@@ -143,6 +143,11 @@ let initial_state =
   }
 ;;
 
+let non_blank_tool_use_id = function
+  | Some id when String.trim id <> "" -> Some id
+  | Some _ | None -> None
+;;
+
 let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
   let final_state =
     List.fold_left
@@ -192,7 +197,7 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
               slot, so id-less starts overwrote each other and finish events
               paired with whichever start happened to be last (RFC-0371 B10).
               Unpairable records are skipped instead of mispaired. *)
-           (match r.tool_use_id with
+           (match non_blank_tool_use_id r.tool_use_id with
             | None -> st
             | Some tool_use_id ->
               let tool_name = Option.value ~default:"unknown" r.tool_name in
@@ -208,7 +213,7 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
                 p_pending_tools = StringMap.add tool_use_id acc st.p_pending_tools
               })
          | Tool_execution_finished ->
-           (match r.tool_use_id with
+           (match non_blank_tool_use_id r.tool_use_id with
             | None -> st
             | Some tool_use_id ->
            let is_error = Option.value ~default:false r.tool_error in

@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
-DEFAULT_PHASES="control"
+DEFAULT_PHASES="collaboration,control"
 PHASES="${INTEGRATED_BENCH_PHASES:-$DEFAULT_PHASES}"
 OUTPUT_DIR="${INTEGRATED_BENCH_OUTPUT_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/masc-integrated-benchmark.XXXXXX")}"
 FAIL_FAST="${INTEGRATED_BENCH_FAIL_FAST:-false}"
@@ -23,6 +23,9 @@ require_tools() {
 
 phase_script() {
   case "$1" in
+    collaboration)
+      printf '%s\n' "$ROOT_DIR/scripts/harness/workload/keeper_multi_collaboration_acceptance.sh"
+      ;;
     control)
       printf '%s\n' "$ROOT_DIR/scripts/harness/workload/agent_swarm_live.sh"
       ;;

@@ -5,10 +5,9 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
-    # Readiness changes no code and no longer changes any CI allowance. The
-    # exact-head CI Gate from opened/synchronize/reopened therefore remains the
-    # merge authority without starting the same heavy graph a second time.
-    types: [opened, synchronize, reopened]
+    # Drafts stay cheap through pr-live-gate. ready_for_review starts the exact
+    # source and real-world product gates once the author asks for a verdict.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch: {}
 
 permissions:
@@ -28,7 +27,7 @@ concurrency:
     }}
   # Pushes supersede older CI for the same branch. Code-changing PR events
   # likewise replace an outdated run for that PR.
-  cancel-in-progress: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened"]'), github.event.action)) }}
+  cancel-in-progress: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
 
 jobs:
   pr-sync-check:
@@ -162,6 +161,7 @@ jobs:
       nav_event_parity: ${{ steps.scope.outputs.nav_event_parity }}
       shell_ir: ${{ steps.scope.outputs.shell_ir }}
       keeper_cwd: ${{ steps.scope.outputs.keeper_cwd }}
+      keeper_realworld: ${{ steps.scope.outputs.keeper_realworld }}
 
     steps:
       - name: Checkout
@@ -181,7 +181,7 @@ jobs:
           set -euo pipefail
 
           emit_all_true() {
-            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla agent_core spec_refs nav_event_parity shell_ir keeper_cwd; do
+            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla agent_core spec_refs nav_event_parity shell_ir keeper_cwd keeper_realworld; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
           }
@@ -241,6 +241,7 @@ jobs:
           nav_event_parity=false
           shell_ir=false
           keeper_cwd=false
+          keeper_realworld=false
 
           if has_match '^(\.github/workflows/ci\.yml|\.github/actions/)'; then
             ci_core=true
@@ -272,7 +273,7 @@ jobs:
           # runtime.toml, so a fixture edit changes test input while matching
           # none of the suffixes above (.toml is not .ml/.json/.sh) and the
           # Build job would skip.
-          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|scripts/keeper-full-lifecycle-evidence\.py$|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
             build=true
           fi
 
@@ -304,7 +305,7 @@ jobs:
             lib_deps=true
           fi
 
-          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$)'; then
+          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/keeper-full-lifecycle-evidence\.py$|scripts/install\.sh$)'; then
             doc_truth=true
           fi
 
@@ -332,6 +333,14 @@ jobs:
             keeper_cwd=true
           fi
 
+          # Product-critical Keeper changes require a real interaction gate in
+          # addition to compile and regression evidence. Keep the list scoped
+          # to the surfaces consumed by the RW01-RW16 mission; reports alone do
+          # not spend provider capacity.
+          if has_match '^(lib/keeper/|lib/keeper_runtime/|lib/keeper_chat_delivery_identity/|lib/config/(env_config_keeper|env_config_snapshot|keeper_runtime_setting_registry)\.mli?$|lib/(mcp_server_eio_execute|runtime_settings|schedule_payload_projection|tool_schedule)\.mli?$|lib/server/server_(dashboard_schedule_projection|routes_http_routes_dashboard|routes_http_runtime|routes_http_runtime_health_fleet|schedule_consumers)\.mli?$|lib/tool_schemas/tool_schemas_schedule\.ml$|dashboard/src/(api/dashboard|components/fusion-settings-panel|components/overview/overview|components/runtime-toml-editor|components/tools/scheduled-automation-panel)|scripts/(ci/run-keeper-realworld-acceptance\.sh|harness/workload/keeper_multi_collaboration_acceptance\.(py|sh)|fixtures/keeper-multi-collaboration/)|test/(keeper_continuation_delivery_|test_fusion_wake\.ml$|test_keeper_|test_official_client_session_store\.ml$|test_runtime_toml_overrides\.ml$|test_schedule_))'; then
+            keeper_realworld=true
+          fi
+
           if [ "${ci_core}" = true ]; then
             # Self-reference guard: edits to this workflow or local actions
             # set ci_core=true above, then force the core CI surfaces below.
@@ -346,6 +355,7 @@ jobs:
             agent_core=true
             shell_ir=true
             keeper_cwd=true
+            keeper_realworld=true
             # Note: dashboard/spec_refs/tla stay path-scoped. Pure CI
             # workflow/action edits should still validate the core OCaml/repo
             # guard lanes and Health, but they should not fan out into every
@@ -365,9 +375,10 @@ jobs:
           echo "nav_event_parity=${nav_event_parity}" >> "$GITHUB_OUTPUT"
           echo "shell_ir=${shell_ir}" >> "$GITHUB_OUTPUT"
           echo "keeper_cwd=${keeper_cwd}" >> "$GITHUB_OUTPUT"
+          echo "keeper_realworld=${keeper_realworld}" >> "$GITHUB_OUTPUT"
 
-          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s agent_core=%s nav_event_parity=%s shell_ir=%s keeper_cwd=%s\n' \
-            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${agent_core}" "${nav_event_parity}" "${shell_ir}" "${keeper_cwd}"
+          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s agent_core=%s nav_event_parity=%s shell_ir=%s keeper_cwd=%s keeper_realworld=%s\n' \
+            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${agent_core}" "${nav_event_parity}" "${shell_ir}" "${keeper_cwd}" "${keeper_realworld}"
 
   meta:
     name: Meta Guards
@@ -1248,8 +1259,74 @@ jobs:
             _build/default/bin/main_eio.exe \
             .release-evidence/main-release-evidence.md
 
+      - name: Verify Keeper full-lifecycle evidence bundle
+        if: >-
+          (github.event_name == 'pull_request') ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: |
+          python3 scripts/keeper-full-lifecycle-evidence.py \
+            --verify \
+            --output-dir .release-evidence/keeper-full-lifecycle
+
+      - name: Package exact-revision Keeper acceptance runtime
+        if: github.event_name == 'pull_request' && needs.changes.outputs.keeper_realworld == 'true'
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          runtime_dir=keeper-realworld-runtime
+          mkdir -p "$runtime_dir"
+          actual_source_sha="$(git rev-parse HEAD)"
+          if [ "$actual_source_sha" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "checkout mismatch: expected=$EXPECTED_SOURCE_SHA actual=$actual_source_sha" >&2
+            exit 1
+          fi
+          cp _build/default/bin/main_eio.exe "$runtime_dir/masc"
+          chmod +x "$runtime_dir/masc"
+          binary_sha256="$(sha256sum "$runtime_dir/masc" | awk '{print $1}')"
+          jq -n \
+            --arg schema "masc.keeper_acceptance_runtime.v1" \
+            --arg source_sha "$actual_source_sha" \
+            --arg pr_head_sha "$PR_HEAD_SHA" \
+            --arg pr_base_sha "$PR_BASE_SHA" \
+            --arg pr_number "$PR_NUMBER" \
+            --arg workflow_run_id "$WORKFLOW_RUN_ID" \
+            --arg workflow_run_attempt "$WORKFLOW_RUN_ATTEMPT" \
+            --arg binary_sha256 "$binary_sha256" \
+            '{
+              schema: $schema,
+              source_sha: $source_sha,
+              pr_head_sha: $pr_head_sha,
+              pr_base_sha: $pr_base_sha,
+              pr_number: $pr_number,
+              workflow_run_id: $workflow_run_id,
+              workflow_run_attempt: $workflow_run_attempt,
+              binary_sha256: $binary_sha256
+            }' >"$runtime_dir/manifest.json"
+
+      - name: Upload exact-revision Keeper acceptance runtime
+        if: github.event_name == 'pull_request' && needs.changes.outputs.keeper_realworld == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: keeper-realworld-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: keeper-realworld-runtime/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload PR release evidence
+        if: ${{ always() && github.event_name == 'pull_request' && steps.build_step.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-evidence-pr-${{ github.event.pull_request.number }}
+          path: .release-evidence/
+
       - name: Upload main release evidence
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.build_step.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: release-evidence-main
@@ -1266,6 +1343,132 @@ jobs:
           else
             echo "::notice::main_eio.exe not found, skipping config-diagnostic"
           fi
+
+  keeper-realworld-acceptance:
+    name: Keeper Real-World Acceptance
+    runs-on: ubuntu-latest
+    needs: [pr-live-gate, changes, build, ci-gate]
+    if: >-
+      ${{
+        always() &&
+        !cancelled() &&
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        needs.pr-live-gate.outputs.run_heavy == 'true' &&
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.keeper_realworld == 'true' &&
+        needs.build.result == 'success' &&
+        needs.ci-gate.result == 'success'
+      }}
+    timeout-minutes: 90
+    environment:
+      name: keeper-realworld-acceptance
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout exact CI revision
+        uses: actions/checkout@v7
+
+      - name: Download exact-revision runtime
+        uses: actions/download-artifact@v8
+        with:
+          name: keeper-realworld-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: keeper-realworld-runtime
+
+      - name: Install runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            jq \
+            libffi8 \
+            libgmp10 \
+            libpq5 \
+            libsqlite3-0 \
+            libssl3t64 \
+            libzstd1 \
+            zlib1g
+
+      - name: Run five-Keeper real-world collaboration gate
+        env:
+          KEEPER_ACCEPTANCE_BINARY: ${{ github.workspace }}/keeper-realworld-runtime/masc
+          KEEPER_ACCEPTANCE_MANIFEST: ${{ github.workspace }}/keeper-realworld-runtime/manifest.json
+          KEEPER_ACCEPTANCE_OUTPUT_DIR: ${{ runner.temp }}/keeper-realworld-evidence
+          KEEPER_ACCEPTANCE_EXPECTED_SHA: ${{ github.sha }}
+          KEEPER_ACCEPTANCE_RUNTIME_ID: glm-coding.glm-4-7-coding
+          KEEPER_ACCEPTANCE_TURN_TIMEOUT_SEC: 300
+          ZAI_API_KEY_SB: ${{ secrets.ZAI_API_KEY_SB }}
+        run: |
+          chmod +x scripts/ci/run-keeper-realworld-acceptance.sh
+          scripts/ci/run-keeper-realworld-acceptance.sh
+
+      - name: Upload Keeper real-world evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: keeper-realworld-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/keeper-realworld-evidence/
+          if-no-files-found: warn
+          retention-days: 30
+
+  keeper-realworld-gate:
+    name: Keeper Real-World Gate
+    runs-on: ubuntu-latest
+    needs: [pr-live-gate, changes, build, keeper-realworld-acceptance]
+    if: ${{ always() && !cancelled() }}
+    timeout-minutes: 10
+    permissions:
+      pull-requests: read
+
+    steps:
+      - name: Aggregate product acceptance status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TESTED_SOURCE_SHA: ${{ github.sha }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          REALWORLD_REQUIRED: ${{ needs.changes.outputs.keeper_realworld }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          ACCEPTANCE_RESULT: ${{ needs.keeper-realworld-acceptance.result }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "PASS Keeper Real-World Gate: non-PR workflow"
+            exit 0
+          fi
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "STOP Keeper Real-World Gate: changed-surface detection did not complete" >&2
+            exit 1
+          fi
+          if [ "$REALWORLD_REQUIRED" != "true" ]; then
+            echo "PASS Keeper Real-World Gate: product-critical Keeper surfaces unchanged"
+            exit 0
+          fi
+          if [ "$HEAD_REPOSITORY" != "$REPOSITORY" ]; then
+            echo "STOP Keeper Real-World Gate: secrets are unavailable to fork PRs; replay from a trusted branch" >&2
+            exit 1
+          fi
+          if [ "$BUILD_RESULT" != "success" ]; then
+            echo "STOP Keeper Real-World Gate: exact-revision runtime was not built successfully" >&2
+            exit 1
+          fi
+          if [ "$ACCEPTANCE_RESULT" != "success" ]; then
+            echo "FAIL Keeper Real-World Gate: acceptance result=$ACCEPTANCE_RESULT" >&2
+            exit 1
+          fi
+          live_head_sha="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')"
+          if [ "$live_head_sha" != "$EXPECTED_HEAD_SHA" ]; then
+            echo "STOP Keeper Real-World Gate: PR head moved expected=$EXPECTED_HEAD_SHA actual=$live_head_sha" >&2
+            exit 1
+          fi
+          echo "PASS Keeper Real-World Gate: stable head=$live_head_sha candidate=$TESTED_SOURCE_SHA passed RW01-RW16"
 
   lint:
     name: Lint
@@ -1314,6 +1517,11 @@ jobs:
         run: |
           chmod +x scripts/check-feature-flag-consistency.sh
           scripts/check-feature-flag-consistency.sh
+
+      - name: Check Keeper runtime setting registry
+        run: |
+          chmod +x scripts/check-keeper-runtime-setting-registry.sh
+          scripts/check-keeper-runtime-setting-registry.sh
 
       - name: Check TOML syntax
         run: |
@@ -1560,7 +1768,7 @@ jobs:
           make -C specs check-buggy
 
   ci-gate:
-    name: CI Gate
+    name: CI Regression Gate
     runs-on: ubuntu-latest
     needs: [pr-sync-check, pr-live-gate, changes, meta, build, lint, dashboard, health, structure-ratchet, shell-ir-ratchet, tla-specs]
     if: ${{ always() && !cancelled() }}
@@ -1633,3 +1841,32 @@ jobs:
           check "shell-ir-ratchet" "$SHELL_IR_RATCHET_RESULT"
           check "tla-specs"       "$TLA_RESULT"
           [ "$fail" -eq 0 ]
+
+  merge-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    needs: [ci-gate, keeper-realworld-gate]
+    if: ${{ always() && !cancelled() }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Aggregate regression and real-world authorities
+        env:
+          REGRESSION_GATE_RESULT: ${{ needs.ci-gate.result }}
+          REALWORLD_GATE_RESULT: ${{ needs.keeper-realworld-gate.result }}
+        run: |
+          set -euo pipefail
+          fail=0
+          if [ "$REGRESSION_GATE_RESULT" = "success" ]; then
+            echo "PASS CI Regression Gate"
+          else
+            echo "FAIL CI Regression Gate: $REGRESSION_GATE_RESULT" >&2
+            fail=1
+          fi
+          if [ "$REALWORLD_GATE_RESULT" = "success" ]; then
+            echo "PASS Keeper Real-World Gate"
+          else
+            echo "FAIL Keeper Real-World Gate: $REALWORLD_GATE_RESULT" >&2
+            fail=1
+          fi
+          exit "$fail"

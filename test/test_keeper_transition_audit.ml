@@ -260,6 +260,10 @@ let test_turn_fsm_emit_transition_appends_wal_row () =
       let sink = Filename.concat base_dir "transition-audit.jsonl" in
       with_env "MASC_KEEPER_TRANSITION_LOG" sink (fun () ->
           KTF.emit_transition
+            ~ctx:
+              { KTF.stop_signaled_before = false
+              ; stop_signaled_after = false
+              }
             ~keeper_name:"turn-fsm-wal-keeper"
             ~turn_id:42
             ~prev:KTF.Streaming
@@ -270,15 +274,58 @@ let test_turn_fsm_emit_transition_appends_wal_row () =
             check string "keeper" "turn-fsm-wal-keeper"
               (json |> member "keeper" |> to_string);
             let row = json |> member "turn_fsm_transition" in
-            check int "turn_id" 42 (row |> member "turn_id" |> to_int);
-            check string "prev_state" "streaming"
-              (row |> member "prev_state" |> to_string);
-            check string "new_state" "completing"
-              (row |> member "new_state" |> to_string);
-            check string "action" "StreamComplete"
-              (row |> member "action" |> to_string)
+            (match Audit.turn_fsm_transition_of_json row with
+             | Error error -> fail error
+             | Ok transition ->
+               check int "turn_id" 42 transition.turn_fsm_turn_id;
+               check string "prev_state" "streaming"
+                 transition.turn_fsm_prev_state;
+               check string "new_state" "completing"
+                 transition.turn_fsm_new_state;
+               check string "action" "StreamComplete"
+                 transition.turn_fsm_action;
+               check (option bool) "stop before" (Some false)
+                 transition.turn_fsm_stop_signaled_before;
+               check (option bool) "stop after" (Some false)
+                 transition.turn_fsm_stop_signaled_after)
           | rows ->
             failf "expected one turn_fsm_transition row, got %d" (List.length rows)))
+
+let test_turn_fsm_transition_decoder_is_exact () =
+  let record : Audit.turn_fsm_transition_record =
+    { turn_fsm_turn_id = 7
+    ; turn_fsm_prev_state = "streaming"
+    ; turn_fsm_new_state = "completing"
+    ; turn_fsm_action = "StreamComplete"
+    ; turn_fsm_stop_signaled_before = None
+    ; turn_fsm_stop_signaled_after = Some false
+    ; turn_fsm_wall_clock_at = 123.5
+    }
+  in
+  let json = Audit.turn_fsm_transition_to_json record in
+  (match Audit.turn_fsm_transition_of_json json with
+   | Error error -> fail error
+   | Ok decoded -> check bool "serializer round-trip" true (decoded = record));
+  let fields =
+    match json with
+    | `Assoc fields -> fields
+    | _ -> fail "turn_fsm_transition serializer must return an object"
+  in
+  let expect_error label candidate =
+    match Audit.turn_fsm_transition_of_json candidate with
+    | Error _ -> ()
+    | Ok _ -> failf "%s unexpectedly decoded" label
+  in
+  expect_error "unknown field" (`Assoc (("unexpected", `Null) :: fields));
+  expect_error "missing field" (`Assoc (List.remove_assoc "action" fields));
+  expect_error
+    "wrong optional bool type"
+    (`Assoc
+      (("stop_signaled_before", `String "false")
+       :: List.remove_assoc "stop_signaled_before" fields));
+  expect_error
+    "duplicate field"
+    (`Assoc (("action", `String "shadow") :: fields))
 
 (* ── Async append queue ─────────────────────────────────────────── *)
 
@@ -563,6 +610,8 @@ let () =
             test_runtime_trust_timeline_carries_transition_observation;
           test_case "turn FSM emit appends WAL row" `Quick
             test_turn_fsm_emit_transition_appends_wal_row;
+          test_case "turn FSM decoder requires the exact current shape" `Quick
+            test_turn_fsm_transition_decoder_is_exact;
         ] );
       ( "async_append_queue",
         [

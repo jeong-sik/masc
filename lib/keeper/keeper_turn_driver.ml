@@ -549,10 +549,10 @@ let run_named
      order passes through the sticky last-good preference so a known-healthy
      failover candidate is tried before re-hitting a dead head candidate. *)
   (* Quota-window demotion is ordering only — a demoted candidate is still
-     attempted when the lane has nothing else (RFC-0370 §3.3). It applies to
-     both candidate sources: the declared lane walk and a frozen deferred
-     suffix, whose next candidate may sit on an account whose window was
-     recorded after the freeze (PR #28202 review P2). *)
+     attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
+     selecting a fresh lane walk. A deferred suffix was already frozen before
+     pre-dispatch shaping, so re-reading wall-clock quota state here could make
+     the actual provider differ from the runtime used to shape the request. *)
   let demote_quota_exhausted candidates =
     quota_ordered_runtime_ids
       (* NDT-OK: scheduling intentionally compares the stored expiry with
@@ -563,7 +563,7 @@ let run_named
   let lane_id_opt, lane_candidate_ids =
     match deferred_runtime_lane with
     | Some hint ->
-      Some hint.assignment_id, demote_quota_exhausted (deferred_runtime_ids hint)
+      Some hint.assignment_id, deferred_runtime_ids hint
     | None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> None, []

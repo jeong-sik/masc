@@ -1025,6 +1025,7 @@
   test_mcp_session_task_lifecycle
   test_client_registry_eio
   test_minted_name_gate
+  test_caller_identity_credential_binding
   test_identity_e2e
   test_identity_edge_cases
   test_verification
@@ -1164,6 +1165,7 @@
   test_mcp_session_task_lifecycle
   test_client_registry_eio
   test_minted_name_gate
+  test_caller_identity_credential_binding
   test_identity_e2e
   test_identity_edge_cases
   test_verification

@@ -110,6 +110,16 @@ val completion : t -> Tool_contract.completion
 
 val descriptor_to_yojson : descriptor option -> Yojson.Safe.t
 
+(** Provider-facing tool definition for a schema that has no handler yet.
+
+    Distinct from {!Types.tool_schema_to_json}, which is the storage encoding:
+    that one always emits ["parameters"] and additionally emits
+    ["input_schema"] when the schema carries one, and a definition holding both
+    is rejected on the way out
+    ([Backend_openai_serialize.tool_definition_of_json]). Callers that build a
+    request rather than a checkpoint need this function. *)
+val wire_json_of_schema : Types.tool_schema -> Yojson.Safe.t
+
 (** Provider-facing tool definition. ["input_schema"] is the authoritative
     schema verbatim when the tool carries one, and
     [Types.params_to_input_schema] of the parameters otherwise. *)

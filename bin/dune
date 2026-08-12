@@ -174,6 +174,26 @@
  (package masc)
  (libraries masc masc.dashboard masc_core fs_compat unix yojson eio eio_main))
 
+;; RFC-0374 capability probe runner.  Answers "can runtime R reach tool T"
+;; without writing to the keeper's chat, checkpoint, or memory, which is what
+;; made the 2026-08-12 sweep measure its own traffic (masc#28414).
+
+(executable
+ (name keeper_capability_probe_cli)
+ (modules keeper_capability_probe_cli)
+ (public_name masc-keeper-capability-probe)
+ (package masc)
+ (libraries
+  masc
+  masc.server
+  masc.runtime
+  masc.fusion_core
+  masc_eio_context
+  unix
+  yojson
+  eio
+  eio_main))
+
 ;; Deployment preflight helper.  The shell gate delegates runtime lease
 ;; ownership and schedule signal decoding to the same OCaml authorities used
 ;; by the server instead of reimplementing either contract in shell.

@@ -120,23 +120,25 @@ let descriptor_to_yojson = function
 ;;
 
 (** Schema to JSON *)
-let schema_to_json tool =
+let wire_json_of_schema (schema : Types.tool_schema) =
   `Assoc
-    ([ "name", `String tool.schema.name
-     ; "description", `String tool.schema.description
+    ([ "name", `String schema.name
+     ; "description", `String schema.description
        (* The authoritative schema goes to the provider verbatim. Deriving it
           back from [parameters] would drop minimum/maximum/default/enum and
           nested properties, which the model then never sees. *)
      ; ( "input_schema"
-       , match tool.schema.input_schema with
-         | Some schema -> schema
-         | None -> Types.params_to_input_schema tool.schema.parameters )
+       , match schema.input_schema with
+         | Some authoritative -> authoritative
+         | None -> Types.params_to_input_schema schema.parameters )
      ]
      @
-     match tool.schema.strict with
+     match schema.strict with
      | Some strict -> [ "strict", `Bool strict ]
      | None -> [])
 ;;
+
+let schema_to_json tool = wire_json_of_schema tool.schema
 
 (** Wrap a tool to inject default arguments when not provided by the LLM.
     Defaults are merged into JSON object args before the handler runs. *)

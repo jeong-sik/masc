@@ -1075,6 +1075,87 @@ let test_serializer_ignored_block_variants () =
   check_int "blank reasoning-only assistant removed" 0 (List.length glm)
 ;;
 
+(* Two encoders take a [tool_schema] to JSON and only one of them may be put on
+   the wire. [Agent_core.Tool.wire_json_of_schema] emits exactly one parameter field;
+   [Types.tool_schema_to_json] is the storage encoding and always emits
+   "parameters" as a list of parameter objects, plus "input_schema" when the
+   schema carries one. Neither of its two shapes is admissible here.
+
+   A caller that reaches for the storage encoder gets a request that dies
+   inside [tool_definition_of_json] and surfaces as a provider rejection, which
+   reads like a quota or transport refusal. That is how it reached main in
+   keeper_capability_probe (masc#28444, fixed the same day it was first run
+   against a live provider). *)
+let test_wire_encoder_is_the_admissible_one () =
+  let authoritative =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties", `Assoc [ "city", `Assoc [ "type", `String "string" ] ]
+      ; "required", `List [ `String "city" ]
+      ]
+  in
+  let with_input_schema =
+    match
+      Types.tool_schema_of_input_schema
+        ~name:"lookup"
+        ~description:"d"
+        ~input_schema:authoritative
+        ()
+    with
+    | Ok schema -> schema
+    | Error detail -> Alcotest.fail detail
+  in
+  let wire = Serialize.build_openai_tool_json (Agent_core.Tool.wire_json_of_schema with_input_schema) in
+  check_string
+    "authoritative schema reaches the provider verbatim"
+    "city"
+    (member "function" wire
+     |> member "parameters"
+     |> member "required"
+     |> Yojson.Safe.Util.to_list
+     |> List.hd
+     |> to_string);
+  Alcotest.check_raises
+    "storage encoder emits both fields and is rejected"
+    (Invalid_argument
+       "Backend_openai_serialize.tool_definition_of_json: input_schema and parameters \
+        are mutually exclusive")
+    (fun () ->
+       ignore
+         (Serialize.build_openai_tool_json (Types.tool_schema_to_json with_input_schema)
+          : Yojson.Safe.t));
+  (* The other half of the storage encoder's output: with no authoritative
+     schema it emits "parameters" as a list, which the backend rejects for a
+     different reason. There is no input for which it is admissible. *)
+  let derived =
+    Types.tool_schema_of_params
+      ~name:"derived"
+      ~description:"d"
+      ~parameters:
+        [ { Types.name = "city"
+          ; description = "target"
+          ; param_type = Types.String
+          ; required = true
+          }
+        ]
+      ()
+  in
+  let derived_wire = Serialize.build_openai_tool_json (Agent_core.Tool.wire_json_of_schema derived) in
+  check_string
+    "derived schema is an object"
+    "object"
+    (member "function" derived_wire |> member "parameters" |> member "type" |> to_string);
+  Alcotest.check_raises
+    "storage encoder emits a parameter list and is rejected"
+    (Invalid_argument
+       "Backend_openai_serialize.tool_definition_of_json: parameters must be a JSON \
+        object")
+    (fun () ->
+       ignore
+         (Serialize.build_openai_tool_json (Types.tool_schema_to_json derived)
+          : Yojson.Safe.t))
+;;
+
 let test_parallel_tool_calls_fields () =
   (* SSOT for the parallel-tool-call wire field: emitted only to disable, and
      only when tools are present. *)
@@ -2230,6 +2311,10 @@ let () =
             "tool choice and schema conversion"
             `Quick
             test_tool_choice_and_tool_schema_conversion
+        ; Alcotest.test_case
+            "wire encoder is the admissible one"
+            `Quick
+            test_wire_encoder_is_the_admissible_one
         ; Alcotest.test_case
             "ignored block variants"
             `Quick

@@ -143,23 +143,6 @@ let error_to_string = function
   | Timeout seconds -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
 ;;
 
-(* [None] installs no timer, and the only other [Eio.Time.with_timeout_exn] in
-   this module is the process-termination grace window, which catches its own
-   [Eio.Time.Timeout] and reaps. So this arm exists for totality and is not
-   reachable by either timer. Reaching it means a deadline was installed by a
-   path this reasoning does not cover — that is a defect to find, not a turn
-   limit to report, so it must not be dressed up as one. *)
-let timeout_or_defect = function
-  | Some seconds -> Timeout seconds
-  | None ->
-    Protocol_error
-      { stage = "turn deadline"
-      ; detail = "Eio timeout raised while no turn deadline was installed"
-      }
-;;
-
-let timeout_error timeout_s = Error (timeout_or_defect timeout_s)
-
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
 let ( let* ) result f = Result.bind result f
 
@@ -176,6 +159,15 @@ end)
 open Shared_json
 
 let bounded_tail = Runtime_official_client_json.bounded_tail
+
+(* See {!Runtime_official_client_json.Make.no_turn_deadline_defect} for why the
+   [None] arm is unreachable and why it must not be dressed as a turn limit. *)
+let timeout_or_defect = function
+  | Some seconds -> Timeout seconds
+  | None -> Shared_json.no_turn_deadline_defect
+;;
+
+let timeout_error timeout_s = Error (timeout_or_defect timeout_s)
 
 let required_string ?(nonempty = true) stage name fields =
   match List.assoc_opt name fields with

@@ -466,7 +466,7 @@ let test_live_start_and_resume () =
         let config =
           { (Runtime_antigravity.default_config ~cwd ~model) with
             cli_path
-          ; timeout_s = 60.0
+          ; timeout_s = Some 60.0
           }
         in
         let run ?conversation_mode prompt =

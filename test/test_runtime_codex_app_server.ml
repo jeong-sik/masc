@@ -338,7 +338,7 @@ let test_subscription_probe_stops_before_thread () =
           let config =
             { (Runtime_codex_app_server.default_config ()) with
               cli_path = path
-            ; timeout_s = 2.0
+            ; timeout_s = Some 2.0
             }
           in
           Runtime_codex_app_server.probe_subscription
@@ -2702,7 +2702,7 @@ let test_live_chatgpt_subscription () =
       Eio_main.run (fun env ->
         let config =
           { (Runtime_codex_app_server.default_config ()) with
-            timeout_s = 60.0
+            timeout_s = Some 60.0
           }
         in
         Runtime_codex_app_server.run_turn
@@ -2740,7 +2740,7 @@ let test_live_dynamic_tool_subscription () =
       Eio_main.run (fun env ->
         let config =
           { (Runtime_codex_app_server.default_config ()) with
-            timeout_s = 60.0
+            timeout_s = Some 60.0
           }
         in
         Runtime_codex_app_server.run_turn
@@ -2768,7 +2768,7 @@ let test_live_history_injection_subscription () =
       Eio_main.run (fun env ->
         let config =
           { (Runtime_codex_app_server.default_config ()) with
-            timeout_s = 60.0
+            timeout_s = Some 60.0
           }
         in
         Runtime_codex_app_server.run_turn

@@ -45,6 +45,16 @@ module Make (E : Error) : sig
       except for [Eio.Cancel.Cancelled] and [Eio.Time.Timeout], which are
       re-raised so cancellation and deadlines stay control flow rather than
       turning into a reported protocol failure. *)
+
+  val no_turn_deadline_defect : E.t
+  (** What to report when [Eio.Time.Timeout] arrives at a turn while the
+      runtime installed no deadline. Each runtime catches its own
+      process-termination grace window and reaps, so with no turn deadline
+      nothing arms a timer and this is unreachable; it exists so the handler
+      stays total. Reaching it means some path installed a deadline outside
+      that reasoning, which is a defect to locate — not a turn limit to name,
+      and not a process or provider failure to blame. Shared so the three
+      runtimes cannot drift into three different accounts of one state. *)
 end
 
 val bounded_tail : limit:int -> string -> string -> string

@@ -992,7 +992,7 @@ let test_live_subscription () =
     let outcome =
       Eio_main.run (fun env ->
         let config =
-          { (Runtime_claude_code.default_config ~cwd:"/tmp") with timeout_s = 60.0 }
+          { (Runtime_claude_code.default_config ~cwd:"/tmp") with timeout_s = Some 60.0 }
         in
         Runtime_claude_code.run_turn
           ~mgr:(Eio.Stdenv.process_mgr env)

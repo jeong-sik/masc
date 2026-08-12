@@ -185,25 +185,6 @@ let error_kind = function
   | Timeout _ -> "timeout"
 ;;
 
-(* [None] installs no timer, and the only other [Eio.Time.with_timeout_exn] in
-   this module is the process-termination grace window, which catches its own
-   [Eio.Time.Timeout] and reaps. So this arm exists for totality and is not
-   reachable by either timer. Reaching it means a deadline was installed by a
-   path this reasoning does not cover — that is a defect to find, not a turn
-   limit to report. It must not become [Process_exited] either: that maps to
-   [ProviderUnavailable], which blames a provider that was answering and drops
-   [turn_accepted], the one bit that decides whether rotating would run the
-   goal twice. *)
-let timeout_error ~turn_accepted = function
-  | Some seconds -> Error (Timeout { seconds; turn_accepted })
-  | None ->
-    Error
-      (Protocol_error
-         { stage = "turn deadline"
-         ; detail = "Eio timeout raised while no turn deadline was installed"
-         })
-;;
-
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
 let ( let* ) result f = Result.bind result f
 
@@ -220,6 +201,16 @@ end)
 open Shared_json
 
 let bounded_tail = Runtime_official_client_json.bounded_tail
+
+(* See {!Runtime_official_client_json.Make.no_turn_deadline_defect} for why the
+   [None] arm is unreachable. Here it must also not become [Process_exited]:
+   that maps to [ProviderUnavailable], which blames a provider that was
+   answering and carries no [turn_accepted] — the one bit that decides whether
+   rotating would run the goal a second time. *)
+let timeout_error ~turn_accepted = function
+  | Some seconds -> Error (Timeout { seconds; turn_accepted })
+  | None -> Error Shared_json.no_turn_deadline_defect
+;;
 
 (* Present and a string, with no constraint on its contents. For payload
    fields whose value this decoder does not read: an emptiness rule there

@@ -4,6 +4,13 @@
 
 include Board_core_persist
 
+(* Every id parse and policy check in this module already returns
+   [(_, board_error) result] and the failure is always forwarded unchanged, so
+   the arms that spell that out by hand ([| Error e -> Error e]) are
+   [Result.bind] written out. Binding them keeps the happy path at one
+   indentation level. *)
+let ( let* ) = Result.bind
+
 let rollback_fresh_comment store ~(comment : comment) ~(previous_post : post) =
   with_lock store (fun () ->
     let post_key = Post_id.to_string comment.post_id in
@@ -221,32 +228,22 @@ let add_comment_with_audience
   =
   maybe_sweep store;
   (* Validate all IDs first *)
-  match Post_id.of_string post_id with
-  | Error e -> Error e
-  | Ok pid ->
-    (match Agent_id.of_string author with
-     | Error e -> Error e
-     | Ok author_id ->
-       let parent_result =
-         match parent_id with
-         | None -> Ok None
-         | Some p ->
-           (match Comment_id.of_string p with
-            | Ok cid -> Ok (Some cid)
-            | Error e -> Error e)
-       in
-       (match parent_result with
-        | Error e -> Error e
-        | Ok parent_cid ->
-          (* Validate content *)
-          if ttl_hours < 0
-          then Error (Validation_error "ttl_hours must be non-negative")
-          else if String.length content = 0
-          then Error (Validation_error "Content cannot be empty")
-          else
-            match Board_audience.audience_for_comment ~content with
-            | Error _ as error -> error
-            | Ok audience ->
+  let* pid = Post_id.of_string post_id in
+  let* author_id = Agent_id.of_string author in
+  let* parent_cid =
+    match parent_id with
+    | None -> Ok None
+    | Some p ->
+      let* cid = Comment_id.of_string p in
+      Ok (Some cid)
+  in
+  (* Validate content *)
+  if ttl_hours < 0
+  then Error (Validation_error "ttl_hours must be non-negative")
+  else if String.length content = 0
+  then Error (Validation_error "Content cannot be empty")
+  else
+    let* audience = Board_audience.audience_for_comment ~content in
             let board_result =
               with_lock store (fun () ->
                 (* Verify post exists *)
@@ -320,7 +317,7 @@ let add_comment_with_audience
                | Error e ->
                  rollback_fresh_comment store ~comment ~previous_post;
                  Error e)
-            | Error _ as e -> e))
+            | Error _ as e -> e
 ;;
 
 let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () =

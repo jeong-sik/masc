@@ -69,7 +69,7 @@ let to_string = function
 ;;
 
 let snapshot_entry =
-  Env_config_snapshot_core.effective_entry
+  Env_config_snapshot_collector.effective_entry
     ~default:(to_string default)
     ~read:(fun () ->
       let resolution = effective_resolution () in

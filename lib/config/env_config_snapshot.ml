@@ -4,8 +4,8 @@
     and root-level wrappers such as [Env_config_introspect] can reuse the same
     category definitions, masking rules, and source attribution logic. *)
 
-let entry = Env_config_snapshot_core.entry
-let category = Env_config_snapshot_core.category
+let entry = Env_config_snapshot_collector.entry
+let category = Env_config_snapshot_collector.category
 
 let server_entries =
   [

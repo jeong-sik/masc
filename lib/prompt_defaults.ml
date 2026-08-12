@@ -3,13 +3,6 @@
     register all prompts that have YAML frontmatter (description, category,
     template_variables).  No OCaml code changes needed to add new prompts. *)
 
-let existing_dir path =
-  Sys.file_exists path && Sys.is_directory path
-
-let prompt_markdown_dir_candidates ~workspace_path ~base_path =
-  let _ = workspace_path, base_path in
-  [ Config_dir_resolver.prompts_dir () ]
-
 let install_prompt_registry_observers () =
   Prompt_registry.set_restore_failure_observer (fun () ->
       Otel_metric_store.inc_counter
@@ -17,13 +10,12 @@ let install_prompt_registry_observers () =
         ~labels:[ ("prompt", "override_restore") ]
         ())
 
-let resolve_prompt_markdown_dir ~workspace_path ~base_path =
-  match
-    List.find_opt existing_dir
-      (prompt_markdown_dir_candidates ~workspace_path ~base_path)
-  with
-  | Some dir -> dir
-  | None -> Config_dir_resolver.prompts_dir ()
+(* The candidate list this searched has been a single element for a while,
+   and its fallback was that same element — the [Sys.file_exists] probe
+   decided nothing. The directory is created on demand by the asset sync
+   below, so absence at resolve time is not an error either. *)
+let resolve_prompt_markdown_dir ~workspace_path:_ ~base_path:_ =
+  Config_dir_resolver.prompts_dir ()
 
 let bootstrapped_signature : (string * string) option ref = ref None
 

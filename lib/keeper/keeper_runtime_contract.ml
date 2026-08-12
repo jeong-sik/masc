@@ -78,7 +78,9 @@ let backend_of_meta (meta : keeper_meta) =
 
 let task_is_linked_to_keeper_goals ?(task_goal_index = Hashtbl.create 0) goal_ids (task : Masc_domain.task) =
   let task_goal_ids =
-    try Hashtbl.find task_goal_index task.id with Not_found -> []
+    (* DET-OK: an absent bucket means no recorded links; this is the same []
+       returned by the replaced [Not_found] handler. *)
+    Option.value (Hashtbl.find_opt task_goal_index task.id) ~default:[]
   in
   List.exists
     (fun goal_id -> List.mem goal_id task_goal_ids)

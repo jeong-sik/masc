@@ -16,9 +16,16 @@ type post_target =
       (** Persist an assistant line + broadcast [keeper_chat_appended];
           the dashboard is always present. *)
   | To_discord of { channel_id : string }
-  | To_slack of { channel_id : string; blocks : rich_block list option }
-      (** Post to a bound Slack channel. [blocks] may carry Slack Block Kit
-          rich blocks to render alongside the plain-text fallback. *)
+  | To_slack of
+      { channel_id : string
+      ; thread_ts : string option
+      ; blocks : rich_block list option
+      }
+      (** Post to a bound Slack channel. [thread_ts] carries the continuation
+          thread coordinate when the post lands on the continuation's own
+          channel, so a threaded question is answered in its thread instead of
+          the channel root. [blocks] may carry Slack Block Kit rich blocks to
+          render alongside the plain-text fallback. *)
 
 val dashboard_label : string
 val discord_label : string
@@ -42,7 +49,9 @@ val resolve_target :
       keeps its thread channel as the target while authorizing it through
       the bound parent channel; an error names the bound channels when
       ambiguous, unbound, or foreign.
-    - ["slack"] → same semantics against [bound_slack_channels].
+    - ["slack"] → same semantics against [bound_slack_channels]. A typed
+      Slack continuation also supplies its [thread_ts], which travels with
+      the target only when the post lands on the continuation's own channel.
       A continuation for another connector never supplies an id.
     - any other label → error: P4 ships discord + dashboard + slack
       (generic gate connectors have no send surface yet). *)
@@ -54,9 +63,10 @@ val set_blocks : post_target -> rich_block list option -> post_target
 val matches_continuation_route :
   post_target -> Keeper_continuation_channel.t -> bool
 (** True only when the completed post proves the same concrete delivery route.
-    Keeper-global dashboard posts, Discord replies, and Slack thread replies
-    are not treated as exact matches when the post transport did not carry
-    those coordinates. *)
+    Keeper-global dashboard posts never match. A Slack post matches only when
+    it carried the continuation's exact thread coordinate ([thread_ts]
+    equality, including both-[None]); a root post does not prove delivery for
+    a threaded continuation. *)
 
 val ok_json : surface:string -> ?message_id:string -> unit -> string
 val error_json : string -> string

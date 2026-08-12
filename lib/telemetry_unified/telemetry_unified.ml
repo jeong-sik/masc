@@ -119,11 +119,25 @@ let latest_ts_of_entries (entries : Yojson.Safe.t list) : float option =
       if ts > 0.0 then max_ts_opt acc ts else acc)
     None entries
 
+(* How many newest rows a freshness probe scans. Rows are append-ordered by
+   time, but a row can carry no usable timestamp, so the probe takes the max
+   over a small window rather than trusting the newest row alone. *)
+let latest_ts_probe_rows = 64
+
+(* Projects each scanned row to its timestamp instead of returning the parsed
+   rows: this runs once per store, and the summary path runs it once per
+   keeper, so retaining [latest_ts_probe_rows] trees per store made the
+   resident set scale with keeper count — the axis RFC-0372 §5 gates Phase 2
+   on. Same value as [latest_ts_of_entries] over the same window. *)
 let latest_store_ts source dir label : float option =
   if not (Sys.file_exists dir) then None
   else
     match Dated_jsonl.create ~base_dir:dir () with
-    | store -> latest_ts_of_entries (Dated_jsonl.read_recent store 64)
+    | store ->
+      Dated_jsonl.filter_map_recent store latest_ts_probe_rows ~f:(fun json ->
+        let ts = extract_ts json in
+        if ts > 0.0 then Some ts else None)
+      |> List.fold_left max_ts_opt None
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->
       observe_source_read_failure_exn source ~site:"latest_store_ts" exn;
@@ -490,6 +504,33 @@ let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list 
       observe_source_read_failure_exn source ~site:"read_fixed_source" exn;
       []
 
+(* The probe stage of [read_keeper_metrics_fast_top] needs one number per
+   keeper directory: the newest timestamp that directory can offer. Reading its
+   rows and keeping them made the resident set scale with keeper count — up to
+   64 parsed rows per directory, held for every directory at once, at the
+   ~13 KB per entry this module measured above. That is the axis RFC-0372 §5
+   makes the Phase 2 gate: adding a keeper must not raise the ceiling.
+
+   Projecting to the timestamp during the read costs one float per row instead
+   of one tree. Store classification and failure handling mirror
+   {!read_fixed_source} exactly, including that only [Dated_jsonl.create] is
+   guarded — a read that raises still propagates. Entries are not tagged
+   because nothing downstream sees them. *)
+let probe_latest_ts dir source ~n : float option =
+  match classify_store_dir source ~site:"probe_latest_ts_dir" dir with
+  | Store_missing | Store_invalid -> None
+  | Store_directory ->
+    match Dated_jsonl.create ~base_dir:dir () with
+    | store ->
+      Dated_jsonl.filter_map_recent store n ~f:(fun json ->
+        let ts = extract_ts json in
+        if ts > 0.0 then Some ts else None)
+      |> List.fold_left max_ts_opt None
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+    | exception exn ->
+      observe_source_read_failure_exn source ~site:"probe_latest_ts" exn;
+      None
+
 (* ── Read keeper metrics (per-keeper directories) ───── *)
 
 let read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts ~n () :
@@ -504,21 +545,20 @@ let read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts ~n () :
 
 let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
   let target = n + 1 in
-  let probe_limit = min 64 target in
+  let probe_limit = min latest_ts_probe_rows target in
   let dirs = discover_keeper_metric_dirs masc_root in
   let probes =
     List.filter_map
       (fun (name, dir) ->
-        let entries = read_fixed_source dir Keeper_metric ~n:probe_limit () in
-        match latest_ts_of_entries entries with
+        match probe_latest_ts dir Keeper_metric ~n:probe_limit with
         | None -> None
-        | Some latest_ts -> Some (name, dir, latest_ts, entries))
+        | Some latest_ts -> Some (name, dir, latest_ts))
       dirs
-    |> List.sort (fun (_, _, a, _) (_, _, b, _) -> Float.compare b a)
+    |> List.sort (fun (_, _, a) (_, _, b) -> Float.compare b a)
   in
   let rec loop acc = function
     | [] -> acc
-    | (_name, dir, latest_ts, probe_entries) :: rest ->
+    | (_name, dir, latest_ts) :: rest ->
       let acc = sort_newest_first acc |> take_first target in
       let cutoff =
         if List.length acc < target then None
@@ -527,10 +567,11 @@ let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
       (match cutoff with
        | Some ts when latest_ts < ts -> acc
        | _ ->
-         let entries =
-           if target <= probe_limit then probe_entries
-           else read_fixed_source dir Keeper_metric ~n:target ()
-         in
+         (* Re-read rather than reusing probe rows. Holding them to save this
+            read for small [target] is what made the probe cost scale with
+            keeper count; the cutoff above already skips most directories, so
+            the reads this adds are the ones that contribute to the result. *)
+         let entries = read_fixed_source dir Keeper_metric ~n:target () in
          loop (sort_newest_first (entries @ acc) |> take_first target) rest)
   in
   loop [] probes

@@ -137,6 +137,7 @@ normal_targets=(
   @test/runtest-test_keeper_secret_redaction
   @test/runtest-test_keeper_sandbox_docker_route
   @test/runtest-test_dashboard_dev_token_host_gate
+  @test/runtest-test_telemetry_unified_keeper_fan_in
   @test/runtest-test_dated_jsonl
   @test/runtest-test_audit_log
   @test/keeper_github_identity/runtest

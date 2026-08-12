@@ -35,6 +35,7 @@ type connector_post_replay =
   | Replay_slack_post of
       { input : Yojson.Safe.t
       ; channel_id : string
+      ; thread_ts : string option
       ; content : string
       ; blocks : Yojson.Safe.t list
       }

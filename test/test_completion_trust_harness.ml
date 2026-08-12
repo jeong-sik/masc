@@ -70,6 +70,20 @@ let with_ws name fn =
       Eio.Switch.run @@ fun sw ->
       let config = Masc.Workspace.default_config dir in
       let meta = make_meta () in
+      (match Masc.Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error detail -> fail ("keeper meta fixture write failed: " ^ detail));
+      (match
+         Masc.Keeper_owner_registry.install_from_store
+           ~sw
+           ~operation_runner:None
+           config
+       with
+       | Ok 1 -> ()
+       | Ok count -> failf "expected one Keeper Owner fixture, got %d" count
+       | Error error ->
+         fail
+           (Masc.Keeper_owner_registry.install_error_to_string error));
       ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
       Fun.protect
         ~finally:(fun () ->
@@ -437,6 +451,8 @@ let test_legitimate_claim_succeeds () =
     | None -> fail "task-001 must be Claimed/InProgress after a legitimate claim")
 
 let () =
+  Masc.Workspace_metric_hooks.install ();
+  Masc.Keeper_task_owner_backend.install_hooks ();
   Masc_test_deps.init_unified_tool_registry ();
   Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test-evaluator-runtime");
   Atomic.set AR.run_llm_reviewer_fn reviewer;

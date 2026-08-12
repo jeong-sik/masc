@@ -53,6 +53,10 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let with_explicit_test_config_root config_root f =
+  with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" (Some "1") @@ fun () ->
+  with_env "MASC_CONFIG_DIR" (Some config_root) f
+
 let with_config_input name value f =
   let saved_env = Sys.getenv_opt name in
   let saved_override = Config_boot_overrides.get_opt name in
@@ -1337,7 +1341,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
       List.iter
         (write_config_root_keeper_toml config_root)
         [ "durable-paused" ];
-      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_explicit_test_config_root config_root @@ fun () ->
       let previous_state = Server_auth.For_testing.snapshot_server_state () in
       Config_dir_resolver.reset ();
       Fun.protect
@@ -2455,7 +2459,7 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
       ~autoboot_enabled:false
       config_root
       "canonical-meta-disabled";
-    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
@@ -2643,7 +2647,7 @@ let test_health_json_degrades_when_only_one_running_phase_lane_is_live () =
         "capacity-running-b";
         "capacity-missing";
       ];
-    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
@@ -2810,7 +2814,7 @@ let test_health_json_exposes_closed_non_executable_causes () =
     let config_root = make_base_path_config_root dir in
     let names = [ "fiber-dead"; "lane-exited"; "completion-settled" ] in
     List.iter (write_config_root_keeper_toml config_root) names;
-    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
@@ -2973,7 +2977,7 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
     List.iter
       (write_config_root_keeper_toml config_root)
       [ "target-missing"; "target-running" ];
-    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
@@ -3091,8 +3095,8 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
 
 let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
   with_temp_dir "health-persisted-only-keeper-target" (fun dir ->
-    let _config_root = make_base_path_config_root dir in
-    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    let config_root = make_base_path_config_root dir in
+    with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
@@ -3132,7 +3136,7 @@ let test_health_json_explains_phase_paused_capacity_blocker () =
   with_temp_dir "health-phase-paused-capacity-blocker" (fun dir ->
     let config_root = make_base_path_config_root dir in
     write_config_root_keeper_toml config_root "phase-paused";
-    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
@@ -3266,7 +3270,7 @@ let test_health_json_explains_terminal_capacity_blocker
   with_temp_dir dir_name (fun dir ->
     let config_root = make_base_path_config_root dir in
     write_config_root_keeper_toml config_root keeper_name;
-    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
@@ -3340,7 +3344,7 @@ let test_health_json_distinguishes_failing_executable_keepers () =
     List.iter
       (write_config_root_keeper_toml config_root)
       [ "capacity-paused"; "capacity-failing" ];
-    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect
@@ -3392,7 +3396,7 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
   with_temp_dir "health-nonrecoverable-failing-keeper" (fun dir ->
     let config_root = make_base_path_config_root dir in
     write_config_root_keeper_toml config_root "capacity-failing";
-    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_explicit_test_config_root config_root @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
     Fun.protect

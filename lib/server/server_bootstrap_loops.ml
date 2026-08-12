@@ -833,20 +833,10 @@ let start_keeper_loops_owned
       f
   in
   let config = workspace_scope.Mcp_server.config in
-  let keeper_owner_count =
-    match
-      Keeper_owner_registry.install_from_store
-        ~sw
-        ~operation_runner:
-          (Some (Server_routes_http_keeper_stream.operation_runner ~state ~clock))
-        config
-    with
-    | Ok count -> count
-    | Error error -> raise (Keeper_owner_registry.Install_failed error)
-  in
-  Log.Keeper.info
-    "keeper_owner: installed %d single-owner actor(s) under server root switch"
-    keeper_owner_count;
+  (* The owner inventory is installed by [initialize_owner_state_blocking]
+     before persistence preparation. Shutdown admission recovery is itself an
+     Owner command after the single-owner hard cut, so installing it here was
+     too late whenever a durable shutdown fence survived process death. *)
   (* [claimed_persistence] can only be constructed by the typed one-shot claim
      boundary before readiness publication. No late exception can turn an
      already-visible HTTP state into a degraded bootstrap. *)

@@ -592,6 +592,30 @@ let test_legacy_single_file_is_ignored () =
     0
     (List.length (Telemetry_eio.read_all_events config))
 
+(* [read_all_events] decodes rows during the read now instead of materialising
+   the window first. The decoder runs under a newest-first scan while the
+   result stays chronological, so order is the thing worth pinning. *)
+let test_read_all_events_is_chronological_across_day_files () =
+  with_temp_dir (fun base_dir ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Workspace.default_config base_dir in
+    let dir = telemetry_dir base_dir in
+    let row ts agent_id =
+      Printf.sprintf
+        {|{"timestamp":%.1f,"event":["Agent_session_bound",{"agent_id":"%s","capabilities":[]}]}|}
+        ts agent_id
+    in
+    write_dated_file dir "2026-01" "31" [ row 100.0 "a"; row 200.0 "b" ];
+    write_dated_file dir "2026-02" "01" [ "not-json"; row 300.0 "c" ];
+    let timestamps =
+      Telemetry_eio.read_all_events config
+      |> List.map (fun (record : Telemetry_eio.event_record) -> record.timestamp)
+    in
+    check (list (float 0.001))
+      "oldest first across months, malformed row dropped"
+      [ 100.0; 200.0; 300.0 ] timestamps)
+
 let test_track_applies_default_retention_days () =
   with_env "MASC_TELEMETRY_RETENTION_DAYS" "" (fun () ->
     with_env "MASC_TELEMETRY_MAX_BYTES" "0" (fun () ->
@@ -705,6 +729,8 @@ let () =
         test_summarize_tool_usage_reads_date_split_store_without_fs;
       test_case "legacy single telemetry file is ignored" `Quick
         test_legacy_single_file_is_ignored;
+      test_case "read_all_events is chronological across day files" `Quick
+        test_read_all_events_is_chronological_across_day_files;
       test_case "track applies default retention days" `Quick
         test_track_applies_default_retention_days;
       test_case "track applies telemetry max bytes" `Quick

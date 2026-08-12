@@ -174,17 +174,19 @@ let report_telemetry_drop ~reason ~path ~detail =
     ~on_drop:(fun () -> observe_telemetry_drop ~reason)
     ~surface:telemetry_eio_surface ~reason ~path ~detail
 
+(* Per-row decode. Reporting a drop only logs and bumps a counter, with no
+   quota or early stop, so this is safe to run under a newest-first scan. *)
+let parse_event_record (json : Yojson.Safe.t) : event_record option =
+  match event_record_of_yojson json with
+  | Ok record -> Some record
+  | Error msg ->
+      report_telemetry_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~path:"<in-memory>" ~detail:msg;
+      None
+
 let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
-  List.filter_map
-    (fun json ->
-      match event_record_of_yojson json with
-      | Ok record -> Some record
-      | Error msg ->
-          report_telemetry_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-            ~path:"<in-memory>" ~detail:msg;
-          None)
-    jsons
+  List.filter_map parse_event_record jsons
 
 let event_to_json event =
   let record = {
@@ -202,13 +204,13 @@ let track ?fs:_ config event : unit =
 (** Read all current date-split events. *)
 let read_all_events ?fs:_ config : event_record list =
   let store = get_telemetry_store config in
-  Dated_jsonl.read_recent store 100_000 |> parse_event_records
+  Dated_jsonl.filter_map_recent store 100_000 ~f:parse_event_record
 
 let read_recent_events ?fs:_ config ~limit : event_record list =
   if limit <= 0 then []
   else
     let store = get_telemetry_store config in
-    Dated_jsonl.read_recent store limit |> parse_event_records
+    Dated_jsonl.filter_map_recent store limit ~f:parse_event_record
 
 (* ── Tool usage summary cache ──────────────────────────────────────
    The dashboard refreshes Tool Monitor / Fleet Health / Tool Quality

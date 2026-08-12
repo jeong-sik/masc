@@ -108,8 +108,17 @@ val filter_map_recent :
     thing that accumulates.
 
     [n] and [offset] count parsed rows, not selected ones: [f] returning [None]
-    does not make the reader consume an extra row. Order, offset semantics, and
-    malformed-row skipping match {!read_recent} exactly.
+    does not make the reader consume an extra row. The returned list, the
+    offset semantics, and malformed-row skipping match {!read_recent} exactly.
+
+    {b [f] is called newest-first.} The scan walks months, day-files, and rows
+    in descending order and prepends, which is what makes the {e result}
+    chronological. So for a pure [f] this is exactly [List.filter_map f
+    (read_recent ?offset t n)], but for an [f] whose side effects depend on
+    call order — rate-limited error logging, "report the first N drops",
+    anything that stops after a quota — it is not: those effects see the
+    newest rows first. Convert such a call site with a test that pins the
+    effect, not by substitution.
 
     Callers that decode rows into their own record type should prefer this over
     [read_recent |> List.filter_map]: a [`Assoc] holds one cons cell, one tuple,

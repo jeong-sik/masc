@@ -312,7 +312,7 @@ jobs:
             tla=true
           fi
 
-          if has_match '^(\.github/workflows/ci\.yml$|packages/agent_core/|lib/(.*/)?(dune|[^/]+\.inc)$|lib/keeper/keeper_event_bridge\.ml$|scripts/check-agent-core-boundary\.sh$|test/test_agent_core_boundary\.sh$|test/test_keeper_execution_join\.ml$|test/test_keeper_hooks_agent_core_introspection\.ml$|dune-project$|.*\.opam$|masc\.opam\.locked$)'; then
+          if has_match '^(\.github/workflows/ci\.yml$|packages/agent_core/|packages/(dune|dune-file|dune-project)$|lib/(.*/)?(dune|dune-file|[^/]+\.inc)$|lib/keeper/(keeper_event_bridge|keeper_execution_join|hitl_summary_worker|keeper_hooks_agent_core(_introspection)?|keeper_run_tools[^/]*)\.mli?$|scripts/(check-agent-core-boundary\.sh|audit-sublib-cycle\.py|ci-run-focused-tests\.sh)$|test/(dune|test_agent_core_boundary\.sh|test_keeper_execution_join\.ml|test_keeper_hooks_agent_core_introspection\.ml|test_hitl_summary_worker\.ml|stanzas/test_keeper_execution_join\.inc|stanzas/test_hitl_summary_worker\.inc)$|(dune|dune-file)$|dune-project$|dune-workspace$|.*\.opam$|masc\.opam\.locked$)'; then
             agent_core=true
           fi
 
@@ -330,6 +330,14 @@ jobs:
 
           if has_match '^(lib/keeper/|scripts/keeper-cwd-leak-gate\.sh$|scripts/turn-path-provider-agnostic-gate\.sh$|\.github/workflows/ci\.yml$)'; then
             keeper_cwd=true
+          fi
+
+          # Agent Core owns non-source build inputs such as models.toml. Its
+          # focused behavior suite and resolved graph must not be reported as
+          # gate-skipped merely because the generic suffix classifier missed
+          # one of those inputs.
+          if [ "${agent_core}" = true ]; then
+            build=true
           fi
 
           if [ "${ci_core}" = true ]; then
@@ -542,7 +550,6 @@ jobs:
           scripts/check-sandbox-dune-version.sh
 
       - name: Check agent core ownership boundary
-        if: needs.changes.outputs.agent_core == 'true'
         run: |
           bash scripts/check-agent-core-boundary.sh
           bash test/test_agent_core_boundary.sh
@@ -810,7 +817,7 @@ jobs:
           chmod +x scripts/check-keeper-event-queue-projection-boundary.sh
           scripts/check-keeper-event-queue-projection-boundary.sh
 
-      - name: Sublib boundary gate against real dune graph (RFC-0056 G1)
+      - name: Library boundaries against resolved Dune graphs
         # The self-test (in the Meta Guards job) only validates the checker
         # against synthetic fixtures. This step runs the SAME checker against
         # the REAL dependency graph emitted by `dune describe`, asserting that
@@ -829,8 +836,65 @@ jobs:
         # describe sexp to the pure-python checker via --describe-file.
         # See: docs/rfc/RFC-0056-incremental-sublib-extraction.md G1, #19824.
         run: |
-          opam exec -- dune describe --root . > "$RUNNER_TEMP/sublib-describe.sexp"
-          python3 scripts/audit-sublib-cycle.py --describe-file "$RUNNER_TEMP/sublib-describe.sexp"
+          opam exec -- dune describe workspace \
+            --root . --format sexp --lang 0.1 \
+            > "$RUNNER_TEMP/sublib-describe.sexp"
+          python3 scripts/audit-sublib-cycle.py \
+            --describe-file "$RUNNER_TEMP/sublib-describe.sexp"
+
+          # Restrict Dune's project roots to Agent Core, then inspect the
+          # resolved dependency closure. Installed dependencies are explicit
+          # `local false` nodes; any `local true` library owned elsewhere in
+          # the workspace is a reverse MASC dependency. --with-pps also places
+          # compile-time PPX libraries in this restricted closure.
+          opam exec -- dune describe workspace packages/agent_core \
+            --root . --format sexp --lang 0.1 --with-pps \
+            > "$RUNNER_TEMP/agent-core-describe.sexp"
+          python3 scripts/audit-sublib-cycle.py \
+            --describe-file "$RUNNER_TEMP/agent-core-describe.sexp" \
+            --closed-source-root packages/agent_core \
+            --required-local-library masc.agent_core
+
+          # Every file below packages/agent_core already triggers this Build
+          # proof. A Dune include could move a library stanza to an arbitrary
+          # file outside that classifier, so use Dune's own parser/formatter
+          # and keep the package plus active ancestor Dune files include-free.
+          # Introducing the first include necessarily changes a classified
+          # dune file, so this check closes the input set inductively.
+          for control_file in packages dune-project dune-workspace packages/dune-project; do
+            if [[ -L "$control_file" ]]; then
+              echo "agent-core boundary: symlinked control input is forbidden: $control_file" >&2
+              exit 1
+            fi
+          done
+          while IFS= read -r dune_file; do
+            if [[ -L "$dune_file" ]]; then
+              echo "agent-core boundary: symlinked Dune input is forbidden: $dune_file" >&2
+              exit 1
+            fi
+            if [[ "$(head -c 20 "$dune_file")" == '(* -*- tuareg -*- *)' ]]; then
+              echo "agent-core boundary: OCaml-syntax Dune file is forbidden: $dune_file" >&2
+              exit 1
+            fi
+            formatted="$RUNNER_TEMP/agent-core-formatted.dune"
+            opam exec -- dune format-dune-file "$dune_file" > "$formatted"
+            if rg -n '^[[:space:]]*\((dynamic_)?include([[:space:]]|$)' "$formatted"; then
+              echo "agent-core boundary: Dune include stanza is forbidden: $dune_file" >&2
+              exit 1
+            fi
+          done < <(
+            {
+              find packages/agent_core -type f \
+                \( -name dune -o -name dune-file \) -print
+              printf '%s\n' dune
+              [[ ! -f packages/dune && ! -L packages/dune ]] \
+                || printf '%s\n' packages/dune
+              [[ ! -f dune-file && ! -L dune-file ]] \
+                || printf '%s\n' dune-file
+              [[ ! -f packages/dune-file && ! -L packages/dune-file ]] \
+                || printf '%s\n' packages/dune-file
+            } | LC_ALL=C sort -u
+          )
 
       - name: Runtime TOML validity gate
         # RFC-0058 §9: config/keeper_runtime.toml is the authoring SSOT.

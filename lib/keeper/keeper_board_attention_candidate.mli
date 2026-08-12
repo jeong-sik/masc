@@ -95,6 +95,19 @@ type status =
   | Consumed of consumed_state
   | Quarantine of quarantine_state
 
+type status_view =
+  | Direct_resumable of resumable_status
+      (** A candidate that has never entered quarantine. *)
+  | Requeued_resumable of
+      { resumable : resumable_status
+      ; quarantine : quarantine_state
+      }
+      (** A requeued candidate is operationally resumable while retaining the
+          quarantine identity needed by reconciliation and audit. *)
+  | Suspended_quarantine of quarantine_state
+      (** A quarantined or requeue-requested candidate is not operationally
+          resumable. *)
+
 type candidate =
   { candidate_id : string
   ; keeper_name : string
@@ -156,8 +169,10 @@ exception Candidate_unavailable of string
 val judgment_to_yojson : judgment -> Yojson.Safe.t
 val judgment_of_yojson : Yojson.Safe.t -> (judgment, string) result
 val quarantine_failure_category_to_string : quarantine_failure_category -> string
-val resumable_status : status -> resumable_status option
-val quarantine_state : status -> quarantine_state option
+val status_view : status -> status_view
+(** Total classification of a durable status. Unlike the removed pair of
+    optional projections, this preserves both operational resumability and
+    quarantine provenance without forcing callers to inspect [status] again. *)
 val signal_to_yojson : Board_dispatch.board_signal -> Yojson.Safe.t
 
 val singleton_judgment_request : candidate -> (Yojson.Safe.t, string) result

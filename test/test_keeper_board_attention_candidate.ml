@@ -176,6 +176,48 @@ let judgment decision : A.judgment =
   }
 ;;
 
+let quarantine_state ~phase prior_status : A.quarantine_state =
+  { quarantine =
+      { quarantine_id = "ba-quarantine-status-view"
+      ; partition_id = "ba-partition-status-view"
+      ; partition_generation =
+          Masc.Keeper_board_attention_partition_generation.initial
+      ; failure_category = A.Unexpected_worker_failure
+      ; attempt_provenance = None
+      ; quarantined_at = 3.0
+      ; prior_status
+      }
+  ; phase
+  }
+;;
+
+let test_status_view_preserves_resumability_and_quarantine () =
+  let pending = A.Resumable_pending { last_delivery_failure = None } in
+  (match A.status_view (A.Pending { last_delivery_failure = None }) with
+   | A.Direct_resumable observed when observed = pending -> ()
+   | A.Direct_resumable _
+   | A.Requeued_resumable _
+   | A.Suspended_quarantine _ ->
+     Alcotest.fail "direct Pending status lost its typed resumable value");
+  let suspended = quarantine_state ~phase:A.Quarantined pending in
+  (match A.status_view (A.Quarantine suspended) with
+   | A.Suspended_quarantine observed when observed = suspended -> ()
+   | A.Direct_resumable _
+   | A.Requeued_resumable _
+   | A.Suspended_quarantine _ ->
+     Alcotest.fail "active quarantine was not classified as suspended");
+  let requeued =
+    quarantine_state ~phase:(A.Requeued { requeued_at = 4.0 }) pending
+  in
+  match A.status_view (A.Quarantine requeued) with
+  | A.Requeued_resumable { resumable; quarantine }
+    when resumable = pending && quarantine = requeued -> ()
+  | A.Direct_resumable _
+  | A.Requeued_resumable _
+  | A.Suspended_quarantine _ ->
+    Alcotest.fail "requeued quarantine lost resumability or quarantine identity"
+;;
+
 let invalid_judgment_fixtures () =
   let valid = judgment J.Not_relevant in
   [ ( "blank verdict rationale"
@@ -807,6 +849,10 @@ let () =
             "codec and context identity are strict"
             `Quick
             test_codec_and_context_identity_are_strict
+        ; Alcotest.test_case
+            "status view preserves resumability and quarantine"
+            `Quick
+            test_status_view_preserves_resumability_and_quarantine
         ; Alcotest.test_case
             "singleton request is canonical and identity bound"
             `Quick

@@ -39,6 +39,7 @@ type execution_error =
 type report =
   { candidate : Candidate.candidate
   ; partition : Partition.t
+  ; failure_category : Candidate.quarantine_failure_category
   ; wake : Wake.wake_result
   }
 
@@ -245,14 +246,17 @@ let find_partition ~base_path command =
 ;;
 
 let matching_quarantine command candidate =
-  match Candidate.quarantine_state candidate.Candidate.status with
-  | Some state
+  match Candidate.status_view candidate.Candidate.status with
+  | (Candidate.Suspended_quarantine state
+    | Candidate.Requeued_resumable { quarantine = state; _ })
     when String.equal state.quarantine.partition_id command.partition_id
          && String.equal
               state.quarantine.quarantine_id
               command.request.expected_quarantine_id ->
     Ok state
-  | Some _ | None ->
+  | Candidate.Direct_resumable _
+  | Candidate.Suspended_quarantine _
+  | Candidate.Requeued_resumable _ ->
     Error
       (Candidate_state_conflict
          "candidate quarantine generation differs from the command")
@@ -297,9 +301,9 @@ let confirm_ready_partition ~base_path partition =
        Error (Durability_unconfirmed detail))
 ;;
 
-let request_wake ~base_path command candidate partition =
+let request_wake ~base_path ~failure_category command candidate partition =
   match Wake.request ~base_path ~keeper_name:command.keeper_name with
-  | Ok wake -> Ok { candidate; partition; wake }
+  | Ok wake -> Ok { candidate; partition; failure_category; wake }
   | Error detail -> Error (Wake_request_failed detail)
 ;;
 
@@ -404,14 +408,24 @@ let execute_with_before_partition_commit
   | Candidate.Requeued _, Partition.Blocked _ when generation_matches ->
     before_partition_commit partition;
     let* ready = commit_partition_ready ~base_path command partition in
-    request_wake ~base_path command candidate ready
+    request_wake
+      ~base_path
+      ~failure_category:observed.quarantine.failure_category
+      command
+      candidate
+      ready
   | Candidate.Requeued _, Partition.Blocked _ ->
     Error
       (Partition_state_conflict
          "a newer Blocked generation is awaiting candidate projection")
   | Candidate.Requeued _, Partition.Ready when ready_generation_matches ->
     let* ready = confirm_ready_partition ~base_path partition in
-    request_wake ~base_path command candidate ready
+    request_wake
+      ~base_path
+      ~failure_category:observed.quarantine.failure_category
+      command
+      candidate
+      ready
   | Candidate.Requeued _,
     Partition.Ready ->
     Error
@@ -451,7 +465,12 @@ let execute_with_before_partition_commit
     in
     before_partition_commit partition;
     let* ready = commit_partition_ready ~base_path command partition in
-    request_wake ~base_path command authorized ready
+    request_wake
+      ~base_path
+      ~failure_category:observed.quarantine.failure_category
+      command
+      authorized
+      ready
   | (Candidate.Quarantined | Candidate.Requeue_requested _),
     Partition.Blocked _ ->
     Error
@@ -509,11 +528,7 @@ let wake_to_string = function
 
 let success_json ~audit command report =
   let failure_category =
-    match Candidate.quarantine_state report.candidate.status with
-    | Some state ->
-      Candidate.quarantine_failure_category_to_string
-        state.quarantine.failure_category
-    | None -> "unknown"
+    Candidate.quarantine_failure_category_to_string report.failure_category
   in
   `Assoc
     [ "schema", `String result_schema

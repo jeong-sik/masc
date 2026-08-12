@@ -88,6 +88,14 @@ type status =
   | Consumed of consumed_state
   | Quarantine of quarantine_state
 
+type status_view =
+  | Direct_resumable of resumable_status
+  | Requeued_resumable of
+      { resumable : resumable_status
+      ; quarantine : quarantine_state
+      }
+  | Suspended_quarantine of quarantine_state
+
 type candidate =
   { candidate_id : string
   ; keeper_name : string
@@ -145,17 +153,14 @@ let quarantine_failure_category_of_string = function
   | _ -> None
 ;;
 
-let resumable_status = function
-  | Pending pending -> Some (Resumable_pending pending)
-  | Judged judged -> Some (Resumable_judged judged)
-  | Consumed consumed -> Some (Resumable_consumed consumed)
-  | Quarantine { quarantine; phase = Requeued _ } -> Some quarantine.prior_status
-  | Quarantine { phase = (Quarantined | Requeue_requested _); _ } -> None
-;;
-
-let quarantine_state = function
-  | Quarantine state -> Some state
-  | Pending _ | Judged _ | Consumed _ -> None
+let status_view = function
+  | Pending pending -> Direct_resumable (Resumable_pending pending)
+  | Judged judged -> Direct_resumable (Resumable_judged judged)
+  | Consumed consumed -> Direct_resumable (Resumable_consumed consumed)
+  | Quarantine ({ quarantine; phase = Requeued _ } as state) ->
+    Requeued_resumable { resumable = quarantine.prior_status; quarantine = state }
+  | Quarantine ({ phase = (Quarantined | Requeue_requested _); _ } as state) ->
+    Suspended_quarantine state
 ;;
 
 let status_of_resumable = function
@@ -1572,9 +1577,10 @@ let resumable_with_delivery_failure resumable failure =
 ;;
 
 let candidate_with_delivery_failure current failure =
-  match resumable_status current.status with
-  | None -> current
-  | Some resumable ->
+  match status_view current.status with
+  | Suspended_quarantine _ -> current
+  | Direct_resumable resumable
+  | Requeued_resumable { resumable; _ } ->
     let updated = resumable_with_delivery_failure resumable failure in
     if updated = resumable
     then current
@@ -1600,8 +1606,9 @@ let record_judgment ~base_path candidate judgment =
            "Board attention candidate not found: %s"
            candidate.candidate_id)
     | Some current ->
-      (match resumable_status current.status with
-       | Some (Resumable_pending _) ->
+      (match status_view current.status with
+       | Direct_resumable (Resumable_pending _)
+       | Requeued_resumable { resumable = Resumable_pending _; _ } ->
          let updated =
            { current with
              status =
@@ -1611,17 +1618,23 @@ let record_judgment ~base_path candidate judgment =
            }
          in
          Ok (Some updated, updated)
-       | Some (Resumable_judged judged)
+       | Direct_resumable (Resumable_judged judged)
+       | Requeued_resumable
+           { resumable = Resumable_judged judged; _ }
          when same_judgment judged.judgment judgment ->
          Ok (None, current)
-       | Some (Resumable_consumed consumed)
+       | Direct_resumable (Resumable_consumed consumed)
+       | Requeued_resumable
+           { resumable = Resumable_consumed consumed; _ }
          when same_judgment consumed.judgment judgment ->
          Ok (None, current)
-       | Some (Resumable_judged _ | Resumable_consumed _) ->
+       | Direct_resumable (Resumable_judged _ | Resumable_consumed _)
+       | Requeued_resumable
+           { resumable = (Resumable_judged _ | Resumable_consumed _); _ } ->
          Error
            ("Board attention candidate judgment conflict: "
             ^ candidate.candidate_id)
-       | None ->
+       | Suspended_quarantine _ ->
          Error
            ("Quarantined Board attention candidate cannot be judged: "
             ^ candidate.candidate_id)))
@@ -1636,8 +1649,10 @@ let mark_consumed ~base_path candidate judgment delivery =
            "Board attention candidate not found: %s"
            candidate.candidate_id)
     | Some current ->
-      (match resumable_status current.status with
-       | Some (Resumable_judged judged)
+      (match status_view current.status with
+       | Direct_resumable (Resumable_judged judged)
+       | Requeued_resumable
+           { resumable = Resumable_judged judged; _ }
          when same_judgment judged.judgment judgment ->
          let updated =
            { current with
@@ -1648,18 +1663,23 @@ let mark_consumed ~base_path candidate judgment delivery =
            }
          in
          Ok (Some updated, updated)
-       | Some (Resumable_consumed consumed)
+       | Direct_resumable (Resumable_consumed consumed)
+       | Requeued_resumable
+           { resumable = Resumable_consumed consumed; _ }
          when same_judgment consumed.judgment judgment
               && consumed.delivery = delivery -> Ok (None, current)
-       | Some (Resumable_pending _) ->
+       | Direct_resumable (Resumable_pending _)
+       | Requeued_resumable { resumable = Resumable_pending _; _ } ->
          Error
            ("Pending Board attention candidate cannot be consumed: "
             ^ candidate.candidate_id)
-       | Some (Resumable_judged _ | Resumable_consumed _) ->
+       | Direct_resumable (Resumable_judged _ | Resumable_consumed _)
+       | Requeued_resumable
+           { resumable = (Resumable_judged _ | Resumable_consumed _); _ } ->
          Error
            ("Board attention candidate consumption conflict: "
             ^ candidate.candidate_id)
-       | None ->
+       | Suspended_quarantine _ ->
          Error
            ("Quarantined Board attention candidate cannot be consumed: "
             ^ candidate.candidate_id)))
@@ -1749,12 +1769,10 @@ let quarantine
       Error ("Board attention candidate not found: " ^ candidate.candidate_id)
     | Some current ->
       let prior_status =
-        match resumable_status current.status with
-        | Some status -> status
-        | None ->
-          (match current.status with
-           | Quarantine state -> state.quarantine.prior_status
-           | Pending _ | Judged _ | Consumed _ -> assert false)
+        match status_view current.status with
+        | Direct_resumable status
+        | Requeued_resumable { resumable = status; _ } -> status
+        | Suspended_quarantine state -> state.quarantine.prior_status
       in
       let requested =
         { quarantine_id
@@ -1961,10 +1979,14 @@ let record_and_wake ~base_path candidate =
     Ok { candidate = persisted; persistence = Candidate_recorded; wake }
   | Duplicate persisted ->
     let* wake =
-      match resumable_status persisted.status with
-      | Some (Resumable_pending _ | Resumable_judged _) ->
+      match status_view persisted.status with
+      | Direct_resumable (Resumable_pending _ | Resumable_judged _)
+      | Requeued_resumable
+          { resumable = (Resumable_pending _ | Resumable_judged _); _ } ->
         request_worker persisted
-      | Some (Resumable_consumed _) | None -> Ok Wake_not_required
+      | Direct_resumable (Resumable_consumed _)
+      | Requeued_resumable { resumable = Resumable_consumed _; _ }
+      | Suspended_quarantine _ -> Ok Wake_not_required
     in
     Ok
       { candidate = persisted
@@ -1981,41 +2003,55 @@ let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
     | None -> Error ("Board attention candidate not found: " ^ candidate_id)
   in
   let* judged_candidate =
-    match resumable_status candidate.status with
-    | Some (Resumable_pending _) ->
+    match status_view candidate.status with
+    | Direct_resumable (Resumable_pending _)
+    | Requeued_resumable { resumable = Resumable_pending _; _ } ->
       record_judgment ~base_path candidate judgment
-    | Some (Resumable_judged judged)
+    | Direct_resumable (Resumable_judged judged)
+    | Requeued_resumable
+        { resumable = Resumable_judged judged; _ }
       when same_judgment judged.judgment judgment ->
       Ok candidate
-    | Some (Resumable_consumed consumed)
+    | Direct_resumable (Resumable_consumed consumed)
+    | Requeued_resumable
+        { resumable = Resumable_consumed consumed; _ }
       when same_judgment consumed.judgment judgment ->
       Ok candidate
-    | Some (Resumable_judged _ | Resumable_consumed _) ->
+    | Direct_resumable (Resumable_judged _ | Resumable_consumed _)
+    | Requeued_resumable
+        { resumable = (Resumable_judged _ | Resumable_consumed _); _ } ->
       Error ("Board attention candidate judgment conflicts with worker result: " ^ candidate_id)
-    | None ->
+    | Suspended_quarantine _ ->
       Error
         ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
          ^ candidate_id)
   in
-  match resumable_status judged_candidate.status with
-  | Some (Resumable_consumed _) ->
+  match status_view judged_candidate.status with
+  | Direct_resumable (Resumable_consumed _)
+  | Requeued_resumable { resumable = Resumable_consumed _; _ } ->
     normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
-  | Some (Resumable_pending _) ->
+  | Direct_resumable (Resumable_pending _)
+  | Requeued_resumable { resumable = Resumable_pending _; _ } ->
     Error ("Board attention candidate remained Pending after judgment commit: " ^ candidate_id)
-  | Some (Resumable_judged judged) ->
+  | Direct_resumable (Resumable_judged judged)
+  | Requeued_resumable
+      { resumable = Resumable_judged judged; _ } ->
     let* delivered = consume_judged ~base_path judged_candidate judged in
-    (match resumable_status delivered.status with
-     | Some (Resumable_consumed _) ->
+    (match status_view delivered.status with
+     | Direct_resumable (Resumable_consumed _)
+     | Requeued_resumable { resumable = Resumable_consumed _; _ } ->
        normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
-     | Some (Resumable_pending _ | Resumable_judged _) ->
+     | Direct_resumable (Resumable_pending _ | Resumable_judged _)
+     | Requeued_resumable
+         { resumable = (Resumable_pending _ | Resumable_judged _); _ } ->
        Error
          ("Board attention candidate delivery did not reach Consumed: "
           ^ candidate_id)
-     | None ->
+     | Suspended_quarantine _ ->
        Error
          ("Board attention candidate became quarantined during delivery: "
           ^ candidate_id))
-  | None ->
+  | Suspended_quarantine _ ->
     Error
       ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
        ^ candidate_id)

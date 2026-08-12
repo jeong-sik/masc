@@ -15,19 +15,25 @@ let check_json msg expected actual =
 let timeout_kind json =
   Yojson.Safe.Util.(member "timeout_kind" json |> to_string)
 
-let test_proactive_refresh_timeout_message_names_phase () =
-  let msg =
-    Proactive_refresh.For_testing.timeout_failure_message
-      ~label:"operator_snapshot"
-      ~phase:"refresh"
-      ~timeout_s:24.0
-      ~elapsed_s:33.2
+let test_proactive_refresh_timeout_is_typed_and_rendered_at_boundary () =
+  let failure =
+    Proactive_refresh.Timed_out
+      { label = "operator_snapshot"
+      ; phase = Proactive_refresh.Refresh
+      ; timeout_s = 24.0
+      ; elapsed_s = 33.2
+      }
   in
+  (match failure with
+   | Proactive_refresh.Timed_out { phase = Proactive_refresh.Refresh; _ } -> ()
+   | Proactive_refresh.Timed_out { phase = Proactive_refresh.Warm_cache; _ }
+   | Proactive_refresh.Raised _ ->
+     Alcotest.fail "refresh timeout lost its typed phase");
   Alcotest.(check string)
-    "typed proactive refresh timeout"
-    "refresh_timeout label=operator_snapshot phase=refresh timeout_s=24.0 \
-     elapsed_s=33.2"
-    msg
+    "operator boundary rendering"
+    "Failure(\"refresh_timeout label=operator_snapshot phase=refresh timeout_s=24.0 \
+     elapsed_s=33.2\")"
+    (Proactive_refresh.failure_message failure)
 
 let test_proactive_refresh_failure_warn_throttle () =
   let should_warn =
@@ -745,8 +751,8 @@ let () =
         ] );
       ( "timeout",
         [
-          test_case "proactive refresh timeout names phase" `Quick
-            test_proactive_refresh_timeout_message_names_phase;
+          test_case "proactive refresh timeout is typed" `Quick
+            test_proactive_refresh_timeout_is_typed_and_rendered_at_boundary;
           test_case "proactive refresh failure WARN throttle" `Quick
             test_proactive_refresh_failure_warn_throttle;
           test_case "proactive refresh can suppress first WARN" `Quick

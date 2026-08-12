@@ -126,7 +126,12 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0) with
         timeout_s = mission_refresh_timeout_s
-      ; on_error = Some (mark_cached_surface_error mission_cache)
+      ; on_failure =
+          Some
+            (fun failure ->
+              mark_cached_surface_error_message
+                mission_cache
+                (Proactive_refresh.failure_message failure))
       ; warm_delay_s = 90.0
       }
     ~compute

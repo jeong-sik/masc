@@ -66,6 +66,10 @@ val mark_cached_surface_error : cached_surface -> exn -> unit
     touch [last_success_*] or [s.json] — the previous successful
     snapshot remains served until the next success refreshes it. *)
 
+val mark_cached_surface_error_message : cached_surface -> string -> unit
+(** Store an already-rendered boundary failure without recreating an exception
+    solely to transport its text. *)
+
 val invalidate_cached_surface : cached_surface -> unit
 (** [invalidate_cached_surface s] clears all six timestamps but
     leaves [s.json] intact.  Used by tests to reset surface state

@@ -3885,12 +3885,16 @@ let test_full_health_refresh_timeout_preserves_last_snapshot () =
   let before = Server_routes_http_runtime.make_health_response_json request in
   let open Yojson.Safe.Util in
   let before_reaction_ledger = before |> member "keeper_reaction_ledger" in
-  let timeout_error =
-    Failure
-      "refresh_timeout label=full_health_snapshot phase=refresh timeout_s=16.0 \
-       elapsed_s=17.0"
+  let timeout_failure =
+    Proactive_refresh.Timed_out
+      { label = "full_health_snapshot"
+      ; phase = Proactive_refresh.Refresh
+      ; timeout_s = 16.0
+      ; elapsed_s = 17.0
+      }
   in
-  Server_routes_http_runtime.For_testing.mark_full_health_snapshot_error timeout_error;
+  Server_routes_http_runtime.For_testing.mark_full_health_snapshot_failure
+    timeout_failure;
   let after = Server_routes_http_runtime.make_health_response_json request in
   Alcotest.(check string) "timeout marks snapshot stale" "stale"
     (after |> member "full_health_snapshot" |> member "status" |> to_string);
@@ -3900,7 +3904,9 @@ let test_full_health_refresh_timeout_preserves_last_snapshot () =
   Alcotest.(check bool) "timeout keeps last-good marker" true
     (after |> member "full_health_snapshot" |> member "last_good_available"
      |> to_bool);
-  Alcotest.(check string) "timeout error is surfaced" (Printexc.to_string timeout_error)
+  Alcotest.(check string)
+    "timeout error is surfaced"
+    (Proactive_refresh.failure_message timeout_failure)
     (after |> member "full_health_snapshot" |> member "error" |> to_string);
   Alcotest.(check string) "timeout stale reason" "last_good_refresh_timeout"
     (after |> member "full_health_snapshot" |> member "stale_reason" |> to_string);
@@ -3919,12 +3925,16 @@ let test_full_health_refresh_timeout_preserves_last_snapshot () =
 let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
   let request = Httpun.Request.create `GET "/health?full=1" in
-  let timeout_error =
-    Failure
-      "refresh_timeout label=full_health_snapshot phase=refresh timeout_s=16.0 \
-       elapsed_s=17.0"
+  let timeout_failure =
+    Proactive_refresh.Timed_out
+      { label = "full_health_snapshot"
+      ; phase = Proactive_refresh.Refresh
+      ; timeout_s = 16.0
+      ; elapsed_s = 17.0
+      }
   in
-  Server_routes_http_runtime.For_testing.mark_full_health_snapshot_error timeout_error;
+  Server_routes_http_runtime.For_testing.mark_full_health_snapshot_failure
+    timeout_failure;
   let after = Server_routes_http_runtime.make_health_response_json request in
   let open Yojson.Safe.Util in
   Alcotest.(check string) "cold timeout status" "timeout"

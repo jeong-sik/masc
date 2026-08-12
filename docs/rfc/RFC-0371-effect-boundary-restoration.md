@@ -101,7 +101,7 @@ else `Bad_gateway
 
 아래 항목은 텍스트가 매치됐다는 이유만으로 reject 하지 않는다. 해당 PR이 새 implicit control channel 을 만들거나, 이미 보유한 typed 정보를 버린 뒤 문자열·환경·파일을 통해 재구성한다는 데이터 흐름 증거가 있을 때만 blocker 다. 외부 wire/프로세스 경계의 직렬화, 설정 로더의 env 읽기, store의 FS 접근, 명시적 오류 표시를 위한 문자열은 대상이 아니다.
 
-1. **typed→string→재파싱**: tool_input_validation:835, channel_gate:298/:323, proactive_refresh:36 → server_routes_http_runtime:311(`label=` 필드를 문자열에 박고 되꺼냄), failure_envelope:59-64(string→string→string 3단).
+1. **typed→string→재파싱**: tool_input_validation:835, channel_gate:298/:323, failure_envelope:59-64(string→string→string 3단).
 2. **요청 경로에서 이미 주입된 값을 env 로 재조회**: keeper_tool_execute_runtime:388, tool_workspace:60. 요청별 환경 정책을 명시적으로 소유하는 loader는 예외지만, `<> Some "false"` 같은 permissive 파싱으로 오타와 부재를 같은 값으로 합치는 경로는 허용하지 않는다.
 3. **결정 로직에서 owner API를 우회한 FS 접근·레이아웃 지식 이중화**: mcp_server:342(writer 레이아웃 재구현). store/loader가 자기 레이아웃을 읽는 것은 대상이 아니다.
 4. **Option/Result 의미 붕괴 후 재추론**: dashboard_verification:160(Result→failwith 로 실패 브랜치가 타입에서 소멸). 경계에서 모든 분기를 명시적으로 처리하는 정상 해소는 대상이 아니다.
@@ -210,7 +210,6 @@ Agent_core.Error.t ─(terminal_reason_code_of_core_error: typed→wire 렌더)�
 | `lib/keeper_runtime/keeper_internal_error.ml:963` | core-violation | confirmed | typed masc_internal_error 를 JSON 렌더해 Error.Internal 메시지 문자열에 박고 같은 프로세스가 재파싱 |
 | `lib/runtime/runtime_agent.ml:259` | core-violation | confirmed | 사람용 description 필드에 "runtime:%s/runtime" 를 밀수해 되읽음 |
 | `lib/server/masc_grpc_service.ml:246` | core-violation | confirmed | directive 계산이 workspace store 의 typed 읽기를 우회해 raw JSON 프로브 — 생산자 0 필드로 이미 drift |
-| `lib/server/proactive_refresh.ml:36` | core-violation | confirmed | timeout 조건(label/phase)을 Failure 문자열로 렌더해 던지고 소비자가 substring 재파싱 |
 | `lib/server/server_auth.ml:563` | core-violation | confirmed | mutation 인가 게이트가 요청마다 env 재독 |
 | `lib/server/server_routes_http_routes_channel_gate.ml:298` | core-violation | confirmed | 존재 확인을 위해 status 전체 디스패치 실행, typed Ok None 이 문자열이 되어 substring 재분류 |
 | `lib/tool_input_validation.ml:835` | core-violation | confirmed | typed params → JSON 렌더 → 재파싱 → failwith. typed 직접 생성자 존재(types.mli:183) |

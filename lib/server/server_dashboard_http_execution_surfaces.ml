@@ -878,11 +878,13 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0) with
         timeout_s = execution_refresh_timeout_s
-      ; on_error =
+      ; on_failure =
           Some
-            (fun exn ->
+            (fun failure ->
               clear_execution_default_light_http_body ();
-              Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn)
+              Server_dashboard_http_cache.mark_cached_surface_error_message
+                execution_cache
+                (Proactive_refresh.failure_message failure))
       ; warm_delay_s = 0.0
       }
     ~compute
@@ -931,10 +933,12 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s) with
         timeout_s
-      ; on_error =
+      ; on_failure =
           Some
-            (fun exn ->
-              Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache exn;
+            (fun failure ->
+              Server_dashboard_http_cache.mark_cached_surface_error_message
+                transport_health_cache
+                (Proactive_refresh.failure_message failure);
               broadcast_snapshot ())
       ; warm_delay_s = 0.0
       }
@@ -978,13 +982,13 @@ let start_execution_trust_refresh_loop ~state ~sw ~clock =
            ~interval_s:Dashboard_http_keeper_types.execution_trust_refresh_interval_s)
         with
         timeout_s = Env_config_runtime.Dashboard.execution_trust_timeout_sec
-      ; on_error =
+      ; on_failure =
           Some
-            (fun exn ->
+            (fun failure ->
               with_execution_trust_cache (fun () ->
-                Server_dashboard_http_cache.mark_cached_surface_error
+                Server_dashboard_http_cache.mark_cached_surface_error_message
                   execution_trust_cache
-                  exn))
+                  (Proactive_refresh.failure_message failure)))
       ; warm_delay_s = 0.0
       }
     ~compute

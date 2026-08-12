@@ -260,7 +260,16 @@ let test_dynamic_tool_progress_does_not_trip_the_repeat_guard () =
     let tool, terminal_error =
       one_dynamic_tool ~active (fun _input ->
         incr executions;
-        Error (Printf.sprintf "changing failure %d" !executions))
+        (* Identical in every field to the repeat-guard fixture above except
+           the message, which is the variable under test: the guard
+           fingerprints the tool's output, so a message that changes must not
+           accumulate toward the repeat threshold. *)
+        Error
+          { Agent_core.Types.message =
+              Printf.sprintf "changing failure %d" !executions
+          ; recoverable = false
+          ; error_class = Some Agent_core.Types.Deterministic
+          })
     in
     for index = 1 to 10 do
       let result =

@@ -16,9 +16,17 @@ type resolve_error =
       ; raw : string
       }
 
+(* [t] holds what [raw] parsed to. Its fields are named apart from [raw]'s
+   on purpose: while both records described the same two settings under the
+   same two names, every field access resolved against whichever type was
+   defined last, and read as a type error at some unrelated line -- twice so
+   far, at [read_env] and at [resolve]. Distinct names close that off instead
+   of asking each new function to annotate its way out. [t] is abstract in
+   the interface, so these names stay internal and the accessors below keep
+   the public vocabulary. *)
 type t =
-  { allow_anonymous_mutations : bool
-  ; loopback_dev_mutation_origins : Server_request_authority.serialized_origin list
+  { anonymous_mutations_allowed : bool
+  ; allowlisted_dev_origins : Server_request_authority.serialized_origin list
   }
 
 let read_env () : raw =
@@ -56,7 +64,7 @@ let parse_origins values =
 
 let resolve raw =
   let open Result.Syntax in
-  let* allow_anonymous_mutations =
+  let* anonymous_mutations_allowed =
     parse_boolean
       ~name:allow_anonymous_mutations_env
       raw.allow_anonymous_mutations
@@ -66,16 +74,16 @@ let resolve raw =
     | Some configured -> split_csv_nonempty configured
     | None -> Masc_network_defaults.vite_dev_default_origins
   in
-  let+ loopback_dev_mutation_origins = parse_origins origin_values in
-  { allow_anonymous_mutations; loopback_dev_mutation_origins }
+  let+ allowlisted_dev_origins = parse_origins origin_values in
+  { anonymous_mutations_allowed; allowlisted_dev_origins }
 ;;
 
 let fail_closed =
-  { allow_anonymous_mutations = false; loopback_dev_mutation_origins = [] }
+  { anonymous_mutations_allowed = false; allowlisted_dev_origins = [] }
 ;;
 
-let allow_anonymous_mutations config = config.allow_anonymous_mutations
-let loopback_dev_mutation_origins config = config.loopback_dev_mutation_origins
+let allow_anonymous_mutations config = config.anonymous_mutations_allowed
+let loopback_dev_mutation_origins config = config.allowlisted_dev_origins
 
 let resolve_error_to_string = function
   | Malformed_boolean { name; raw } ->

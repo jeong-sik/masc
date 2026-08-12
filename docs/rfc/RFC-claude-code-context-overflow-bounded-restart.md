@@ -303,9 +303,19 @@ generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설�
 
 ### 11.1 Adapter classification
 
-1. exact prompt-too-long 400만 typed context overflow가 된다.
-2. unrelated 400, case drift, 중간 substring은 generic failure로 남는다.
-3. tool/response activity flag가 terminal error에 보존된다.
+(2026-08-12 개정: CLI 2.1.228 result frame의 `terminal_reason` enum이
+`prompt_too_long`을 실제 방출함을 강제 overflow stdio 캡처로 확증하여 분류
+권위를 typed 축으로 이관했다. prose prefix는 enum 미방출 구버전 CLI 전용
+폴백으로만 남으며 범위를 확장하지 않는다.)
+
+1. `terminal_reason:"prompt_too_long"`을 보고한 frame은 status·문구와 무관하게
+   typed context overflow가 된다.
+2. `terminal_reason`이 다른 값이면 문구가 overflow prefix와 일치해도 generic
+   failure로 남는다 (typed 판정이 양방향 권위).
+3. `terminal_reason`이 없는 frame(구버전 CLI)에서만 exact prompt-too-long 400이
+   typed context overflow가 된다.
+4. unrelated 400, case drift, 중간 substring은 generic failure로 남는다.
+5. tool/response activity flag가 terminal error에 보존된다.
 
 ### 11.2 Frozen episode
 

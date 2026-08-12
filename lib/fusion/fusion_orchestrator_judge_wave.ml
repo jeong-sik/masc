@@ -51,6 +51,15 @@ let first_judge_web_tools ~judge_web_tools (j : Fusion_policy.judge_spec) =
   judge_web_tools || j.jweb_tools
 ;;
 
+(* 1차 심판의 응답 데드라인. [jmax_output_tokens]와 같은 우선순위 규칙이다:
+   자기 선언이 있으면 그것, 없으면 preset의 심판 데드라인. 1차 심판들은 서로 다른
+   모델일 수 있어(lens마다 다른 런타임) 속도 분포도 다르므로 per-judge 축이 있다. *)
+let first_judge_timeout_s ~(preset : Fusion_policy.preset) (j : Fusion_policy.judge_spec) =
+  match j.jtimeout_s with
+  | Some _ as deadline -> deadline
+  | None -> preset.judge_timeout_s
+;;
+
 let run_first_judge
       ~sw
       ~net
@@ -68,6 +77,7 @@ let run_first_judge
       ~sw
       ~net
       ?max_tokens:(first_judge_max_tokens ~preset j)
+      ?timeout_s:(first_judge_timeout_s ~preset j)
       ~judge_system_prompt:j.jsystem_prompt
       ~judge_model:j.jmodel
       ~question

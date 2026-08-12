@@ -76,6 +76,12 @@ type panel_failure =
           reasoning/thinking 본문은 노출하지 않는다. *)
   | Invalid_max_output_tokens of int
       (** Runtime defense-in-depth: output token override must be positive. *)
+  | Invalid_timeout_s of float
+      (** Runtime defense-in-depth: a response deadline must be finite and
+          positive. Config load already rejects these
+          ({!Fusion_policy.valid_timeout_s}), so reaching this means a direct
+          [build_agent] caller supplied one — fail loudly instead of dropping
+          the deadline. *)
 [@@deriving to_yojson, show, eq]
 
 val panel_failure_of_yojson : Yojson.Safe.t -> (panel_failure, string) result

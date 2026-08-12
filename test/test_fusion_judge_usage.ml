@@ -267,7 +267,7 @@ let test_sum_all_usage_empty_is_zero () =
    조용히 갈라졌다: [judge_max_output_tokens]는 1차 심판에만 미적용,
    [web_tools=true] 요청은 1차 심판에만 미주입. 결정을 순수 함수로 분리해 핀한다. *)
 
-let judge_spec ?(label = "") ?(web_tools = false) ?max_output_tokens model
+let judge_spec ?(label = "") ?(web_tools = false) ?max_output_tokens ?timeout_s model
   : Fusion_policy.judge_spec
   =
   { jmodel = model
@@ -275,9 +275,10 @@ let judge_spec ?(label = "") ?(web_tools = false) ?max_output_tokens model
   ; jsystem_prompt = "lens"
   ; jweb_tools = web_tools
   ; jmax_output_tokens = max_output_tokens
+  ; jtimeout_s = timeout_s
   }
 
-let preset_with ?judge_max_output_tokens judges : Fusion_policy.preset =
+let preset_with ?judge_max_output_tokens ?judge_timeout_s judges : Fusion_policy.preset =
   { name = "quorum"
   ; panels =
       [ { Fusion_policy.models = [ "p.one" ]
@@ -285,11 +286,13 @@ let preset_with ?judge_max_output_tokens judges : Fusion_policy.preset =
         ; system_prompt = "panelist"
         ; web_tools = false
         ; max_output_tokens = None
+        ; timeout_s = None
         }
       ]
   ; judge = "p.meta"
   ; judge_system_prompt = "meta"
   ; judge_max_output_tokens
+  ; judge_timeout_s
   ; judges
   ; min_answered = 1
   ; fallback_judge_model = None
@@ -315,6 +318,28 @@ let test_first_judge_budget_absent_stays_none () =
   let preset = preset_with [ j ] in
   check int_opt_t "no budget anywhere stays None (runtime default)" None
     (Fusion_orchestrator_judge_wave.first_judge_max_tokens ~preset j)
+
+let float_opt_t = testable (Fmt.option Fmt.float) (Option.equal Float.equal)
+
+let test_first_judge_deadline_prefers_own () =
+  let j = judge_spec ~timeout_s:90.0 "p.a" in
+  let preset = preset_with ~judge_timeout_s:180.0 [ j ] in
+  check float_opt_t "per-judge deadline wins over the preset judge deadline"
+    (Some 90.0)
+    (Fusion_orchestrator_judge_wave.first_judge_timeout_s ~preset j)
+
+let test_first_judge_deadline_falls_back_to_preset () =
+  let j = judge_spec "p.a" in
+  let preset = preset_with ~judge_timeout_s:180.0 [ j ] in
+  check float_opt_t "unset per-judge deadline falls back to the preset judge deadline"
+    (Some 180.0)
+    (Fusion_orchestrator_judge_wave.first_judge_timeout_s ~preset j)
+
+let test_first_judge_deadline_absent_stays_none () =
+  let j = judge_spec "p.a" in
+  let preset = preset_with [ j ] in
+  check float_opt_t "no deadline anywhere stays None (runtime/provider owns it)" None
+    (Fusion_orchestrator_judge_wave.first_judge_timeout_s ~preset j)
 
 let test_first_judge_web_tools_from_request () =
   let j = judge_spec ~web_tools:false "p.a" in
@@ -382,6 +407,14 @@ let () =
             test_first_judge_budget_falls_back_to_preset
         ; test_case "absent everywhere stays None" `Quick
             test_first_judge_budget_absent_stays_none
+        ] )
+    ; ( "first_judge_deadline"
+      , [ test_case "per-judge deadline wins" `Quick
+            test_first_judge_deadline_prefers_own
+        ; test_case "falls back to the preset judge deadline" `Quick
+            test_first_judge_deadline_falls_back_to_preset
+        ; test_case "absent everywhere stays None" `Quick
+            test_first_judge_deadline_absent_stays_none
         ] )
     ; ( "first_judge_web_tools"
       , [ test_case "request-derived setting reaches the judge" `Quick

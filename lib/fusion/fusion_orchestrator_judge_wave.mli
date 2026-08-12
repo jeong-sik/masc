@@ -41,6 +41,13 @@ val first_judge_web_tools
   -> Fusion_policy.judge_spec
   -> bool
 
+(** Response deadline for one first-pass judge: its own [jtimeout_s] when set,
+    otherwise the preset's [judge_timeout_s]. Pure. *)
+val first_judge_timeout_s
+  :  preset:Fusion_policy.preset
+  -> Fusion_policy.judge_spec
+  -> float option
+
 (** Run every first-pass judge concurrently over the same panel.
 
     [judge_web_tools] is the request/panel-derived setting

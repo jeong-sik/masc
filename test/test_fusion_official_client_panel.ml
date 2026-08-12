@@ -119,6 +119,7 @@ let test_official_client_panel_honors_no_deadline () =
       (Option.is_none
          (Masc.Fusion_official_client.For_testing.resolved_timeout_s
             ~runtime_id:official_client_runtime
+            ~override_s:None
             ~default_timeout_s:300.0)))
 ;;
 
@@ -142,6 +143,7 @@ let panel_group models : Fusion_policy.panel_group =
   ; system_prompt = "Answer in one word."
   ; web_tools = false
   ; max_output_tokens = None
+        ; timeout_s = None
   }
 ;;
 

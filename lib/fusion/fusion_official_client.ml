@@ -75,11 +75,20 @@ let eio_context ~runtime_id =
    panelist runs the same client the keeper would, minus the parts a panelist
    has no business using. *)
 
-let resolved_timeout_s ~runtime_id ~default_timeout_s =
-  match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
-  | None -> Some default_timeout_s
-  | Some seconds when seconds <= 0.0 -> None
-  | Some seconds -> Some seconds
+(* 데드라인 우선순위: preset 그룹의 [panel_timeout_s]([override_s]) > 런타임이 추론한
+   turn timeout > 어댑터 admission timeout. preset 이 가장 강한 이유는 그것이 이
+   요청에 대한 소비자의 명시 선언이기 때문이다 — 런타임 값은 모든 소비자가 공유하는
+   기본값이라, preset 이 그것을 이기지 못하면 "이 심의는 240s 까지 기다린다" 를
+   표현할 방법이 없다. [override_s] 는 [Fusion_policy.valid_timeout_s] 를 통과한
+   값만 들어온다(config 로드에서 판정). *)
+let resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s =
+  match override_s with
+  | Some _ as declared -> declared
+  | None ->
+    (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
+     | None -> Some default_timeout_s
+     | Some seconds when seconds <= 0.0 -> None
+     | Some seconds -> Some seconds)
 ;;
 
 let bounded_claude_probe_config ~fallback_timeout_s
@@ -90,7 +99,7 @@ let bounded_claude_probe_config ~fallback_timeout_s
   | None -> { config with timeout_s = Some fallback_timeout_s }
 ;;
 
-let claude_config ~base_dir ~runtime_id ~system_prompt
+let claude_config ~base_dir ~runtime_id ~system_prompt ~override_s
   (execution : Runtime_execution.claude_code)
   : Runtime_claude_code.config
   =
@@ -99,11 +108,12 @@ let claude_config ~base_dir ~runtime_id ~system_prompt
   ; model = execution.model
   ; system_prompt
   ; admission_timeout_s = execution.timeout_s
-  ; timeout_s = resolved_timeout_s ~runtime_id ~default_timeout_s:execution.timeout_s
+  ; timeout_s =
+      resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
   }
 ;;
 
-let codex_config ~runtime_id ~system_prompt
+let codex_config ~runtime_id ~system_prompt ~override_s
   (execution : Runtime_execution.codex_app_server)
   : Runtime_codex_app_server.config
   =
@@ -111,11 +121,12 @@ let codex_config ~runtime_id ~system_prompt
   ; model = execution.model
   ; developer_instructions = system_prompt
   ; admission_timeout_s = execution.timeout_s
-  ; timeout_s = resolved_timeout_s ~runtime_id ~default_timeout_s:execution.timeout_s
+  ; timeout_s =
+      resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
   }
 ;;
 
-let antigravity_config ~base_dir ~runtime_id
+let antigravity_config ~base_dir ~runtime_id ~override_s
   (execution : Runtime_execution.antigravity_cli)
   : Runtime_antigravity.config
   =
@@ -132,11 +143,12 @@ let antigravity_config ~base_dir ~runtime_id
   ; sandbox = true
   ; disable_slash_commands = true
   ; admission_timeout_s = execution.timeout_s
-  ; timeout_s = resolved_timeout_s ~runtime_id ~default_timeout_s:execution.timeout_s
+  ; timeout_s =
+      resolved_timeout_s ~runtime_id ~override_s ~default_timeout_s:execution.timeout_s
   }
 ;;
 
-let run_panelist ~base_dir ~runtime_id ~system_prompt ~prompt =
+let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ~prompt () =
   let ( let* ) = Result.bind in
   (* Both adapters take the system prompt as an option and treat [None] as
      "client default". An empty group prompt is not an instruction, so it
@@ -162,7 +174,9 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ~prompt =
          ~runtime_id
          "runtime is Agent_core-owned; it belongs on the Async_agent path")
   | Runtime_execution.Claude_code execution ->
-    let config = claude_config ~base_dir ~runtime_id ~system_prompt execution in
+    let config =
+      claude_config ~base_dir ~runtime_id ~system_prompt ~override_s:timeout_s execution
+    in
     let probe_config =
       bounded_claude_probe_config
         ~fallback_timeout_s:execution.timeout_s
@@ -194,14 +208,14 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ~prompt =
                ~runtime_id
                (Runtime_claude_code.error_to_string error))))
   | Runtime_execution.Codex_app_server execution ->
-    let config = codex_config ~runtime_id ~system_prompt execution in
+    let config = codex_config ~runtime_id ~system_prompt ~override_s:timeout_s execution in
     (match Runtime_codex_app_server.run_turn ~mgr ~clock ~cwd config ~prompt with
      | Ok (result : Runtime_codex_app_server.turn_result) -> Ok result.text
      | Error error ->
        Error
          (provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)))
   | Runtime_execution.Antigravity_cli execution ->
-    let config = antigravity_config ~base_dir ~runtime_id execution in
+    let config = antigravity_config ~base_dir ~runtime_id ~override_s:timeout_s execution in
     (* [home_dir] is left unset so the client uses the inherited HOME, which is
        where its OAuth token already lives. The keeper path overrides it for
        per-keeper isolation; a panelist has no durable state to isolate. *)

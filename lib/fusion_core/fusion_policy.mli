@@ -19,6 +19,11 @@ type panel_group =
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부. *)
   ; max_output_tokens : int option
       (** 그룹 모델당 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
+  ; timeout_s : float option
+      (** 그룹 모델당 응답 데드라인(초) — Agent_core 경로는 [body_timeout_s],
+          official-client 경로는 어댑터 turn timeout 으로 집행된다. [None]이면
+          런타임/provider 가 이미 선언한 값이 그대로 쓰인다: preset 은 그 위에
+          얹는 소비자 override 이며 별도 SSOT 가 아니다. *)
   }
 [@@deriving show, eq]
 
@@ -31,7 +36,9 @@ type judge_spec =
   ; jsystem_prompt : string  (** 이 1차 심판의 lens — config에서 필수(코드 default 없음). *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부. *)
   ; jmax_output_tokens : int option
-      (** 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
+      (** 출력 토큰 예산 override. [None]이면 preset 의 [judge_max_output_tokens]. *)
+  ; jtimeout_s : float option
+      (** 이 1차 심판의 응답 데드라인(초). [None]이면 preset 의 [judge_timeout_s]. *)
   }
 [@@deriving show, eq]
 
@@ -48,6 +55,9 @@ type preset =
       (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
   ; judge_max_output_tokens : int option
       (** 단일/refine/meta 심판 출력 토큰 예산 override. [None]이면 기본값. *)
+  ; judge_timeout_s : float option
+      (** 심판 응답 데드라인(초). single/refine/meta/stage-meta 와, 자기
+          [jtimeout_s] 가 없는 1차 심판에 적용된다. [None]이면 런타임/provider 설정. *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
@@ -78,6 +88,11 @@ val min_staged_judge_group_size : int
 
 (** Optional max-output-token overrides must be positive when present. *)
 val valid_max_output_tokens : int option -> bool
+
+(** Optional response deadlines must be finite and positive when present. Zero,
+    negative, NaN and infinity are rejected at load rather than given an
+    invented meaning; "no deadline" is expressed by omitting the key. *)
+val valid_timeout_s : float option -> bool
 
 (** 모든 그룹의 모델을 평탄화 (그룹순 × 그룹내 모델순 보존). *)
 val preset_models : preset -> string list
@@ -154,6 +169,8 @@ module Validated_preset : sig
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성({!panelist_id}) *)
     | Bad_max_output_tokens of int
         (** 그룹/심판 max_output_tokens override가 양수가 아님 *)
+    | Bad_timeout_s of float
+        (** 그룹/심판/1차 심판 응답 데드라인이 유한 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 (RFC-0283) *)
     | Min_answered_below_min of int

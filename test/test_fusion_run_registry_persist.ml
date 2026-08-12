@@ -15,19 +15,6 @@ let remove_if_exists path =
   | Sys_error _ -> ()
 ;;
 
-let contains_substring value needle =
-  let value_len = String.length value in
-  let needle_len = String.length needle in
-  let rec loop index =
-    if needle_len = 0
-    then true
-    else if index + needle_len > value_len
-    then false
-    else if String.sub value index needle_len = needle
-    then true
-    else loop (index + 1)
-  in
-  loop 0
 ;;
 
 let fresh_path suffix =
@@ -126,7 +113,7 @@ let test_replay_prunes_completed () =
   check bool "replayed running run dropped" true
     (Option.is_none (R.get t2 ~run_id:"r-running"));
   check bool "compacted log omits stale running run" false
-    (contains_substring (Fs_compat.load_file path) "r-running");
+    (String_util.contains_substring (Fs_compat.load_file path) "r-running");
   (* Newest completed run (r70) must be present; oldest (r1) pruned. *)
   check bool "newest completed kept" true (Option.is_some (R.get t2 ~run_id:"r70"));
   check bool "oldest completed pruned" true (Option.is_none (R.get t2 ~run_id:"r1"))
@@ -161,7 +148,7 @@ let test_replay_skips_malformed_lines () =
    | Some _ -> fail "expected replayed run to be completed as failed"
    | None -> fail "expected valid replay events around malformed line to load");
   check bool "malformed evidence is preserved" true
-    (contains_substring (Fs_compat.load_file path) "not-json")
+    (String_util.contains_substring (Fs_compat.load_file path) "not-json")
 ;;
 
 (* (5) Replay streams raw JSONL lines and compacts the retained state. *)

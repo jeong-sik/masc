@@ -119,15 +119,6 @@ let parse_json raw =
   try Yojson.Safe.from_string raw with
   | Yojson.Json_error err -> fail ("invalid json: " ^ err)
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    idx + needle_len <= text_len
-    && (String.sub text idx needle_len = needle || loop (idx + 1))
-  in
-  needle_len = 0 || loop 0
-
 (* Owner of a task if it is currently Claimed/InProgress, else None. *)
 let assignee_of config task_id =
   match
@@ -388,7 +379,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
     check string "LLM reject controls outcome" "failure"
       (outcome_label rejected.KTE.disposition);
     check bool "LLM reason is returned" true
-      (contains_substring rejected.KTE.raw_output "deliverable is not complete");
+      (String_util.contains_substring rejected.KTE.raw_output "deliverable is not complete");
     (match assignee_of config "task-001" with
      | Some assignee ->
        check string "task remains active for the same keeper"
@@ -448,7 +439,7 @@ let test_unavailable_evaluator_keeps_task_active () =
     check string "unavailable evaluator rejects" "failure"
       (outcome_label result.KTE.disposition);
     check bool "typed evaluator failure is visible" true
-      (contains_substring result.KTE.raw_output "evaluator unavailable");
+      (String_util.contains_substring result.KTE.raw_output "evaluator unavailable");
     match assignee_of config "task-001" with
     | Some assignee ->
       check string "only task remains active" meta.agent_name assignee

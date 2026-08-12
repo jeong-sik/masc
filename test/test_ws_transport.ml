@@ -30,15 +30,6 @@ let source_root () =
 
 let read_source_file rel = read_file (Filename.concat (source_root ()) rel)
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop i =
-    i + needle_len <= haystack_len
-    && (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
-  in
-  needle_len = 0 || loop 0
-
 let sse_frame json = Printf.sprintf "data: %s\n\n" json
 
 let count_substring haystack needle =
@@ -163,22 +154,22 @@ let test_session_close_wire_calls_stay_outside_registry_lock () =
   Alcotest.(check bool)
     "detaching from the registry does not wait on the session writer lock"
     false
-    (contains_substring detach_helper "write_mutex");
+    (String_util.contains_substring detach_helper "write_mutex");
   Alcotest.(check bool)
     "detaching from the registry does not close the wire"
     false
-    (contains_substring detach_helper close_marker);
+    (String_util.contains_substring detach_helper close_marker);
   Alcotest.(check bool)
     "wire close helper does not acquire sessions_mutex"
     false
-    (contains_substring close_helper "with_sessions_rw");
+    (String_util.contains_substring close_helper "with_sessions_rw");
   List.iteri
     (fun i span ->
       Alcotest.(check bool)
         (Printf.sprintf
            "registry lock span %d does not invoke detached wire close" i)
         false
-        (contains_substring span "close_detached_session_wsd"))
+        (String_util.contains_substring span "close_detached_session_wsd"))
     (function_call_spans source "with_sessions_rw")
 
 (* ====== SHA1 (httpun-ws handshake) ====== *)
@@ -420,15 +411,6 @@ let test_bigstring_of_shared_text_content_matches () =
   Alcotest.(check string) "content round-trips" text
     (Bigstringaf.to_string payload)
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop i =
-    i + nlen <= hlen
-    && (String.sub haystack i nlen = needle || loop (i + 1))
-  in
-  nlen = 0 || loop 0
-
 let test_bigstring_of_shared_text_repairs_invalid_utf8_for_text_frames () =
   let text =
     "id: 42\nevent: message\ndata: {\"type\":\"transport_health_snapshot\",\
@@ -439,7 +421,7 @@ let test_bigstring_of_shared_text_repairs_invalid_utf8_for_text_frames () =
   Alcotest.(check bool) "wire payload is valid UTF-8"
     true (String.is_valid_utf_8 wire);
   Alcotest.(check bool) "invalid byte is replaced"
-    true (contains_substring wire "\xEF\xBF\xBD")
+    true (String_util.contains_substring wire "\xEF\xBF\xBD")
 
 let test_bigstring_of_shared_text_invalidates_on_new_ref () =
   (* Force two distinct string allocations so physical equality differs
@@ -470,13 +452,13 @@ let test_shared_send_avoids_per_session_payload_string_copy () =
       ~end_marker:"let send_text_checked"
   in
   Alcotest.(check bool) "send path uses ws-direct bigstring API" true
-    (contains_substring send_span "Ws_wsd.send_text_bigstring");
+    (String_util.contains_substring send_span "Ws_wsd.send_text_bigstring");
   Alcotest.(check bool) "send path avoids payload string copy" false
-    (contains_substring send_span "Bytes.sub_string");
+    (String_util.contains_substring send_span "Bytes.sub_string");
   Alcotest.(check bool) "shared cache encodes to bigstring" true
-    (contains_substring cache_span "Bigstringaf.of_string");
+    (String_util.contains_substring cache_span "Bigstringaf.of_string");
   Alcotest.(check bool) "shared cache avoids bytes payload copy" false
-    (contains_substring cache_span "Bytes.of_string")
+    (String_util.contains_substring cache_span "Bytes.of_string")
 
 (* Observability: the Otel_metric_store counters must account exactly for the
    traffic the cache absorbs — hits for reuse, misses for fresh

@@ -61,22 +61,6 @@ let error_code_exn response =
   | _ -> fail "response not an object"
 ;;
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  if needle_len = 0
-  then true
-  else if needle_len > text_len
-  then false
-  else (
-    let rec loop i =
-      if i + needle_len > text_len
-      then false
-      else if String.sub text i needle_len = needle
-      then true
-      else loop (i + 1)
-    in
-    loop 0)
 ;;
 
 let error_message_exn response =
@@ -165,7 +149,7 @@ let test_tools_list_requires_auth_missing_token () =
        check int "auth error code" (-32001) (error_code_exn response);
        check bool "missing token message"
          true
-         (contains_substring (error_message_exn response) "bearer token required"))
+         (String_util.contains_substring (error_message_exn response) "bearer token required"))
 ;;
 
 let test_tools_list_requires_auth_invalid_token () =
@@ -178,7 +162,7 @@ let test_tools_list_requires_auth_invalid_token () =
        check int "auth error code" (-32001) (error_code_exn response);
        check bool "invalid token message"
          true
-         (contains_substring (error_message_exn response) "invalid bearer token"))
+         (String_util.contains_substring (error_message_exn response) "invalid bearer token"))
 ;;
 
 let test_tools_list_succeeds_with_valid_token () =

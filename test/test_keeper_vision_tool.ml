@@ -52,16 +52,6 @@ match Masc_test_deps.meta_of_json_fixture json with
 | Ok meta -> meta
 | Error e -> failwith e
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  if n_len = 0 then true else loop 0
-
 let substring_index s needle =
   let s_len = String.length s in
   let n_len = String.length needle in
@@ -210,9 +200,9 @@ let test_message_of_request () =
     assert (msg.Agent_core.Types.role = Agent_core.Types.User);
     (match msg.Agent_core.Types.content with
      | [ Agent_core.Types.Text q; Agent_core.Types.Image img ] ->
-       assert (contains_substring q "what color?");
-       assert (contains_substring q "Return only a JSON object");
-       assert (contains_substring q "field named text");
+       assert (String_util.contains_substring q "what color?");
+       assert (String_util.contains_substring q "Return only a JSON object");
+       assert (String_util.contains_substring q "field named text");
        assert (String.equal img.media_type "image/png");
        assert (
          String.equal
@@ -673,7 +663,7 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
            (assoc_string "error" json)
            "invalid_structured_response");
       assert (String.equal (assoc_string "failure_class" json) "runtime_failure");
-      assert (contains_substring (assoc_string "detail" json) "JSON parse error")))
+      assert (String_util.contains_substring (assoc_string "detail" json) "JSON parse error")))
 
 let test_run_vision_invalid_structured_response_is_typed () =
   with_temp_runtime_toml single_vision_runtime_toml (fun () ->
@@ -695,7 +685,7 @@ let test_run_vision_invalid_structured_response_is_typed () =
     in
     match outcome with
     | Vt.Vo_invalid_structured_response detail ->
-      assert (contains_substring detail "JSON parse error")
+      assert (String_util.contains_substring detail "JSON parse error")
     | _ -> failwith "expected Vo_invalid_structured_response")
 
 let test_retryable_provider_error_tries_next_runtime () =
@@ -902,9 +892,9 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
       ; Agent_core.Types.Text placeholder
       ; Agent_core.Types.Text "after"
       ] ->
-      assert (contains_substring placeholder "[image artifact:");
-      assert (contains_substring placeholder "media_type:image/png");
-      assert (contains_substring placeholder "not yet read");
+      assert (String_util.contains_substring placeholder "[image artifact:");
+      assert (String_util.contains_substring placeholder "media_type:image/png");
+      assert (String_util.contains_substring placeholder "not yet read");
       let handle = artifact_handle_of_placeholder placeholder in
       (match
          Store.load
@@ -942,7 +932,7 @@ let test_delegate_eviction_rejects_invalid_media_type_before_store () =
         ]
     with
     | [ Agent_core.Types.Text placeholder ] ->
-      assert (contains_substring placeholder "unsupported image media type");
+      assert (String_util.contains_substring placeholder "unsupported image media type");
       assert_metric_increment
         "vision_ingest invalid_media_type"
         before
@@ -967,7 +957,7 @@ let test_delegate_eviction_rejects_oversize_before_store () =
           ]
       with
       | [ Agent_core.Types.Text placeholder ] ->
-        assert (contains_substring placeholder "image too large")
+        assert (String_util.contains_substring placeholder "image too large")
       | _ -> failwith "oversize image must surface as a text placeholder"))
 
 let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
@@ -984,9 +974,9 @@ let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
       ]
   with
   | [ Agent_core.Types.Text placeholder ] ->
-    assert (contains_substring placeholder "could not store");
-    assert (contains_substring placeholder "invalid image payload");
-    assert (not (contains_substring placeholder "bad base64"))
+    assert (String_util.contains_substring placeholder "could not store");
+    assert (String_util.contains_substring placeholder "invalid image payload");
+    assert (not (String_util.contains_substring placeholder "bad base64"))
   | _ -> failwith "bad base64 must surface as a redacted text placeholder"
 
 let test_delegate_eviction_rejects_non_base64_source_before_store () =
@@ -1012,8 +1002,8 @@ let test_delegate_eviction_rejects_non_base64_source_before_store () =
           ]
       with
       | [ Agent_core.Types.Text placeholder ] ->
-        assert (contains_substring placeholder "could not store");
-        assert (contains_substring placeholder "unsupported image source");
+        assert (String_util.contains_substring placeholder "could not store");
+        assert (String_util.contains_substring placeholder "unsupported image source");
         assert_metric_increment
           ("vision_ingest invalid_source_type " ^ source_name)
           before

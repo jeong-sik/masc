@@ -7,18 +7,6 @@
 open Alcotest
 open Llm_provider
 
-let contains_substring ~sub text =
-  let sub_len = String.length sub in
-  let text_len = String.length text in
-  let rec loop index =
-    if index + sub_len > text_len
-    then false
-    else if String.sub text index sub_len = sub
-    then true
-    else loop (index + 1)
-  in
-  sub_len = 0 || loop 0
-;;
 
 let make_config
       ?(base_url = "http://admission.test:1")
@@ -147,18 +135,18 @@ let test_conflict_warning_sanitizes_base_url () =
     bool
     "the conflict warning was emitted"
     true
-    (contains_substring ~sub:"conflicting max_concurrent_requests" logged);
-  check bool "sanitized host survives" true (contains_substring ~sub:"leak.test:1" logged);
+    (Agent_core_strings.contains_substring ~needle:"conflicting max_concurrent_requests" ~haystack:logged);
+  check bool "sanitized host survives" true (Agent_core_strings.contains_substring ~needle:"leak.test:1" ~haystack:logged);
   check
     bool
     "userinfo credential is stripped from the log"
     false
-    (contains_substring ~sub:"secret" logged);
+    (Agent_core_strings.contains_substring ~needle:"secret" ~haystack:logged);
   check
     bool
     "query credential is stripped from the log"
     false
-    (contains_substring ~sub:"token=abc" logged)
+    (Agent_core_strings.contains_substring ~needle:"token=abc" ~haystack:logged)
 ;;
 
 let reject_dispatch_transport : Llm_transport.t =
@@ -191,7 +179,7 @@ let test_zero_declaration_rejected_before_dispatch () =
       bool
       "rejection names the offending field"
       true
-      (contains_substring ~sub:"max_concurrent_requests" reason)
+      (Agent_core_strings.contains_substring ~needle:"max_concurrent_requests" ~haystack:reason)
   | Ok _ -> fail "expected AcceptRejected for max_concurrent_requests = 0"
   | Error _ -> fail "expected AcceptRejected, got a different error kind"
 ;;

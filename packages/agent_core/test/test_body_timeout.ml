@@ -51,20 +51,6 @@ let starts_with ~prefix s =
   String.length s >= lp && String.equal (String.sub s 0 lp) prefix
 ;;
 
-let contains_substring ~needle s =
-  let ln = String.length needle in
-  let ls = String.length s in
-  if ln > ls
-  then false
-  else (
-    let found = ref false in
-    let i = ref 0 in
-    while (not !found) && !i <= ls - ln do
-      if String.equal (String.sub s !i ln) needle then found := true;
-      incr i
-    done;
-    !found)
-;;
 
 let test_message_has_promotion_prefix () =
   let msg = body_timeout_message 180.0 in
@@ -79,7 +65,7 @@ let test_message_includes_configured_value () =
   Alcotest.(check bool)
     "message records the configured deadline (180.0)"
     true
-    (contains_substring ~needle:"180.0" msg)
+    (Agent_core_strings.contains_substring ~needle:"180.0" ~haystack:msg)
 ;;
 
 let test_message_distinguishes_from_idle_timeout () =
@@ -90,11 +76,11 @@ let test_message_distinguishes_from_idle_timeout () =
   Alcotest.(check bool)
     "message names Complete.complete path"
     true
-    (contains_substring ~needle:"Complete.complete non-streaming path" msg);
+    (Agent_core_strings.contains_substring ~needle:"Complete.complete non-streaming path" ~haystack:msg);
   Alcotest.(check bool)
     "message disambiguates from stream_idle_timeout_s"
     true
-    (contains_substring ~needle:"Complete.complete non-streaming path" msg)
+    (Agent_core_strings.contains_substring ~needle:"Complete.complete non-streaming path" ~haystack:msg)
 ;;
 
 let () =

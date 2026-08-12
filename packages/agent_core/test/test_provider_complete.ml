@@ -19,18 +19,6 @@ let () =
      | Error msg -> Alcotest.failf "failed to load %s: %s" path msg)
 ;;
 
-let contains_substring ~sub text =
-  let sub_len = String.length sub in
-  let text_len = String.length text in
-  let rec loop idx =
-    if idx + sub_len > text_len
-    then false
-    else if String.sub text idx sub_len = sub
-    then true
-    else loop (idx + 1)
-  in
-  if sub_len = 0 then true else loop 0
-;;
 
 let catalog_capabilities ?provider_label model_id =
   let capabilities =
@@ -1184,8 +1172,8 @@ let test_complete_rejects_glm_named_forced_tool_choice_before_request () =
       Alcotest.(check bool)
         label
         true
-        (contains_substring ~sub:"tool_choice" reason
-         && contains_substring ~sub:"calculator" reason)
+        (Agent_core_strings.contains_substring ~needle:"tool_choice" ~haystack:reason
+         && Agent_core_strings.contains_substring ~needle:"calculator" ~haystack:reason)
     | Ok _ -> Alcotest.failf "%s: expected AcceptRejected" label
     | Error _ -> Alcotest.failf "%s: expected AcceptRejected" label
   in
@@ -1329,7 +1317,7 @@ let test_unknown_openai_compat_enable_rejected_sync_and_stream () =
        Alcotest.(check bool)
          ("rejection contains " ^ fragment)
          true
-         (contains_substring ~sub:fragment chat_sync))
+         (Agent_core_strings.contains_substring ~needle:fragment ~haystack:chat_sync))
     [ "enable_thinking=true"
     ; "thinking_control_format=No_thinking_control"
     ; "supports_reasoning=false"
@@ -1625,9 +1613,9 @@ let test_provider_default_thinking_drift_is_info () =
        (fun (level, ctx, message) ->
           level = Llm_provider.Diag.Info
           && ctx = "complete"
-          && contains_substring ~sub:"capability_observation" message
-          && contains_substring ~sub:"provider_default" message
-          && contains_substring ~sub:"low" message)
+          && Agent_core_strings.contains_substring ~needle:"capability_observation" ~haystack:message
+          && Agent_core_strings.contains_substring ~needle:"provider_default" ~haystack:message
+          && Agent_core_strings.contains_substring ~needle:"low" ~haystack:message)
        entries)
 ;;
 
@@ -1649,9 +1637,9 @@ let test_model_capability_thinking_drift_remains_warn () =
        (fun (level, ctx, message) ->
           level = Llm_provider.Diag.Warn
           && ctx = "complete"
-          && contains_substring ~sub:"capability_drift" message
-          && contains_substring ~sub:"model" message
-          && contains_substring ~sub:"high" message)
+          && Agent_core_strings.contains_substring ~needle:"capability_drift" ~haystack:message
+          && Agent_core_strings.contains_substring ~needle:"model" ~haystack:message
+          && Agent_core_strings.contains_substring ~needle:"high" ~haystack:message)
        entries)
 ;;
 
@@ -1671,8 +1659,8 @@ let test_declared_glm_model_thinking_uses_model_capability () =
     (List.exists
        (fun (_level, ctx, message) ->
           ctx = "complete"
-          && (contains_substring ~sub:"capability_observation" message
-              || contains_substring ~sub:"capability_drift" message))
+          && (Agent_core_strings.contains_substring ~needle:"capability_observation" ~haystack:message
+              || Agent_core_strings.contains_substring ~needle:"capability_drift" ~haystack:message))
        entries)
 ;;
 
@@ -1697,7 +1685,7 @@ let test_complete_rejects_output_schema_for_glm () =
     Alcotest.(check bool)
       "mentions glm json mode"
       true
-      (contains_substring ~sub:"json mode" (String.lowercase_ascii reason))
+      (Agent_core_strings.contains_substring ~needle:"json mode" ~haystack:(String.lowercase_ascii reason))
   | Ok _ -> Alcotest.fail "expected AcceptRejected for glm output_schema"
   | Error _ -> Alcotest.fail "expected AcceptRejected for glm output_schema"
 ;;
@@ -1732,7 +1720,7 @@ let test_complete_stream_rejects_output_schema_for_glm () =
     Alcotest.(check bool)
       "mentions glm json mode"
       true
-      (contains_substring ~sub:"json mode" (String.lowercase_ascii reason))
+      (Agent_core_strings.contains_substring ~needle:"json mode" ~haystack:(String.lowercase_ascii reason))
   | Ok _ -> Alcotest.fail "expected stream AcceptRejected for glm output_schema"
   | Error _ -> Alcotest.fail "expected stream AcceptRejected for glm output_schema"
 ;;

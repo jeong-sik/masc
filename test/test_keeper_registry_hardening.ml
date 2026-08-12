@@ -1249,14 +1249,6 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
        | Some _ | None -> fail "cancellation propagation invalidated committed Task")
 ;;
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    idx + needle_len <= text_len
-    && (String.sub text idx needle_len = needle || loop (idx + 1))
-  in
-  needle_len = 0 || loop 0
 ;;
 
 let test_tool_dispatch_preserves_exact_meta_after_replacement () =

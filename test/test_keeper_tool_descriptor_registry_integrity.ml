@@ -58,18 +58,6 @@ let descriptor_internal_name_set () =
   tbl
 ;;
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0
-  then true
-  else
-    let rec loop i =
-      i + needle_len <= haystack_len
-      &&
-      (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
-    in
-    loop 0
 ;;
 
 let source_path rel =
@@ -1294,7 +1282,7 @@ let test_run_tools_setup_has_no_direct_public_mcp_catalog_read () =
   Alcotest.(check bool)
     "keeper_run_tools_setup does not classify with Tool_catalog.is_public_mcp"
     false
-    (contains_substring source "Tool_catalog.is_public_mcp")
+    (String_util.contains_substring source "Tool_catalog.is_public_mcp")
 ;;
 
 (* RFC-0182 §3.1 — verify keeper descriptors project from name → descriptor

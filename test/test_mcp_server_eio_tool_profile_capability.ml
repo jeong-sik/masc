@@ -1,15 +1,5 @@
 open Alcotest
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop index =
-    if nlen = 0 then true
-    else if index + nlen > hlen then false
-    else if String.sub haystack index nlen = needle then true
-    else loop (index + 1)
-  in
-  loop 0
 ;;
 
 let annotation_fields tool_name =

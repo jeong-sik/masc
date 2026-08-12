@@ -77,15 +77,6 @@ let has_prefix ~prefix value =
   String.length value >= prefix_len
   && String.equal prefix (String.sub value 0 prefix_len)
 
-let contains_substring ~needle value =
-  let needle_len = String.length needle in
-  let value_len = String.length value in
-  let rec loop i =
-    i + needle_len <= value_len
-    && (String.equal needle (String.sub value i needle_len) || loop (i + 1))
-  in
-  String.equal needle "" || loop 0
-
 let test_parse_json_safe_rate_limits_repeated_utf8_repair_logs () =
   let open Safe_ops in
   reset_persistence_utf8_repair_stats_for_tests ();
@@ -374,7 +365,7 @@ let test_get_env_bool_logged_invalid_redacts_value () =
   let logs =
     Log.Ring.recent ~limit:20 ~module_filter:"Misc" ~since_seq:baseline ()
     |> List.filter (fun (entry : Log.Ring.entry) ->
-      contains_substring ~needle:"MASC_TEST_BOOL_SECRET_VAR" entry.message)
+      String_util.string_contains_substring ~needle:"MASC_TEST_BOOL_SECRET_VAR" entry.message)
   in
   check int "invalid bool warning emitted" 1 (List.length logs);
   let message =
@@ -383,9 +374,9 @@ let test_get_env_bool_logged_invalid_redacts_value () =
     | _ -> fail "expected exactly one invalid bool warning"
   in
   check bool "raw value is redacted" false
-    (contains_substring ~needle:"secret-token-value" message);
+    (String_util.string_contains_substring ~needle:"secret-token-value" message);
   check bool "redaction is explicit" true
-    (contains_substring ~needle:"value redacted" message)
+    (String_util.string_contains_substring ~needle:"value redacted" message)
 
 
 (* json_int_opt *)

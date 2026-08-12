@@ -40,19 +40,6 @@ let str json key =
   | _ -> None
 ;;
 
-let contains_substring value needle =
-  let value_length = String.length value in
-  let needle_length = String.length needle in
-  let rec loop index =
-    if needle_length = 0
-    then true
-    else if index + needle_length > value_length
-    then false
-    else if String.sub value index needle_length = needle
-    then true
-    else loop (index + 1)
-  in
-  loop 0
 ;;
 
 let register t ~verification_id ~started_at =
@@ -248,7 +235,7 @@ let test_unknown_outcome_label_is_an_error () =
   check bool "unknown outcome is not replayed" true
     (Option.is_none (R.get replayed ~verification_id:"vrf-unknown"));
   check bool "unknown outcome evidence is preserved" true
-    (contains_substring (Fs_compat.load_file path) "probably_fine");
+    (String_util.contains_substring (Fs_compat.load_file path) "probably_fine");
   remove_if_exists path
 ;;
 

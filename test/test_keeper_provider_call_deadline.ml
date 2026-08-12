@@ -16,7 +16,13 @@
       ([Keeper_provider_runtime_boundary.is_provider_timeout_error]) without
       any change to either classifier.
 
-    The Eio.Time.with_timeout_exn wrap itself has no unit fixture, matching
+    - {!Masc.Keeper_turn_driver_try_provider.attempt_stalled}: the stall
+      verdict itself (#28417). #27349 measured the deadline against total
+      elapsed time, which cannot separate "a turn that stopped" from "a turn
+      that is taking a while"; the fixtures below are the two 2026-08-12
+      production attempts that proved it, one of each kind.
+
+    The Eio fiber race that applies the verdict has no unit fixture, matching
     this file's existing coverage boundary (no test calls [run_try_provider]
     directly either -- see test_keeper_turn_driver_failover.ml for the
     candidate-rotation layer's equivalent boundary). *)
@@ -62,6 +68,88 @@ let test_a_steadily_progressing_turn_stays_near_zero () =
     (Pulse.in_flight_elapsed_ms ~now_ts ~started_at);
   check (float 0.001) "since-last-progress stays small" 1.0
     (Pulse.since_last_progress_ms ~now_ts ~last_progress_at)
+;;
+
+(* {1 attempt_stalled -- the verdict the deadline now applies (#28417)} *)
+
+module Try_provider = Masc.Keeper_turn_driver_try_provider
+
+let sample ~last_progress_at ~active_tool_count =
+  Some { Try_provider.last_progress_at; active_tool_count }
+;;
+
+let threshold_sec = 900.0
+let attempt_started_at = 1_000_000.0
+
+let test_a_progressing_attempt_is_not_stalled () =
+  (* rondo, 2026-08-12 13:59:44Z: the attempt was cancelled 6 seconds after a
+     successful masc_transition, with 30+ tool calls inside the window. Its
+     ELAPSED time had reached the threshold -- which is exactly why the
+     pre-#28417 axis killed it -- while its progress was 6 seconds old. *)
+  let now = attempt_started_at +. threshold_sec +. 1.0 in
+  check bool "progress 6s ago is not a stall, however long the attempt ran"
+    false
+    (Try_provider.attempt_stalled
+       ~now
+       ~threshold_sec
+       ~attempt_started_at
+       ~sample:(sample ~last_progress_at:(now -. 6.0) ~active_tool_count:0))
+;;
+
+let test_a_wedged_attempt_is_stalled () =
+  (* sangsu, 2026-08-12 10:04Z-11:10Z: zero trajectory events for 65 minutes.
+     This is the class #27355 introduced the deadline for and it must still
+     fire on the new axis. *)
+  let now = attempt_started_at +. 4_000.0 in
+  check bool "65 minutes without a progress signal is a stall" true
+    (Try_provider.attempt_stalled
+       ~now
+       ~threshold_sec
+       ~attempt_started_at
+       ~sample:(sample ~last_progress_at:(now -. 3_900.0) ~active_tool_count:0))
+;;
+
+let test_a_tool_in_flight_is_not_a_stall () =
+  (* One Execute ran 120s inside rondo's window without refreshing the
+     progress signal. A tool that has been issued but not completed is work,
+     not a stall -- the exclusion [active_tool_count] has documented since
+     RFC-0197 with no code reading it until now. *)
+  let now = attempt_started_at +. 500.0 in
+  check bool "a tool in flight suppresses the stall verdict" false
+    (Try_provider.attempt_stalled
+       ~now
+       ~threshold_sec:60.0
+       ~attempt_started_at
+       ~sample:(sample ~last_progress_at:(now -. 200.0) ~active_tool_count:1))
+;;
+
+let test_the_threshold_boundary_is_exclusive () =
+  let now = attempt_started_at +. threshold_sec in
+  check bool "exactly at the threshold is not yet a stall" false
+    (Try_provider.attempt_stalled
+       ~now
+       ~threshold_sec
+       ~attempt_started_at
+       ~sample:
+         (sample ~last_progress_at:(now -. threshold_sec) ~active_tool_count:0))
+;;
+
+let test_a_missing_sample_falls_back_to_elapsed () =
+  (* Losing the progress signal must not silently disable enforcement, so the
+     verdict degrades to the pre-#28417 elapsed ceiling rather than to
+     "never stalled". *)
+  check bool "no sample, elapsed past the threshold, is a stall" true
+    (Try_provider.attempt_stalled
+       ~now:(attempt_started_at +. threshold_sec +. 1.0)
+       ~threshold_sec
+       ~attempt_started_at
+       ~sample:None);
+  check bool "no sample, elapsed within the threshold, is not a stall" false
+    (Try_provider.attempt_stalled
+       ~now:(attempt_started_at +. 500.0)
+       ~threshold_sec
+       ~attempt_started_at
+       ~sample:None)
 ;;
 
 (* {1 the synthetic Wall_clock timeout joins existing paths} *)
@@ -129,6 +217,18 @@ let () =
             test_since_last_progress_ms_floors_at_zero
         ; test_case "a steadily progressing turn stays near zero" `Quick
             test_a_steadily_progressing_turn_stays_near_zero
+        ] )
+    ; ( "attempt_stalled"
+      , [ test_case "a progressing attempt is not stalled" `Quick
+            test_a_progressing_attempt_is_not_stalled
+        ; test_case "a wedged attempt is stalled" `Quick
+            test_a_wedged_attempt_is_stalled
+        ; test_case "a tool in flight is not a stall" `Quick
+            test_a_tool_in_flight_is_not_a_stall
+        ; test_case "the threshold boundary is exclusive" `Quick
+            test_the_threshold_boundary_is_exclusive
+        ; test_case "a missing sample falls back to elapsed" `Quick
+            test_a_missing_sample_falls_back_to_elapsed
         ] )
     ; ( "wall_clock_timeout_integration"
       , [ test_case "carries the Wall_clock phase" `Quick

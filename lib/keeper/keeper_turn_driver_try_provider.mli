@@ -1,5 +1,18 @@
 (** Extracted provider-attempt runner for keeper runtime turns. *)
 
+(** A reading of the keeper's live in-turn progress signal (#28417).
+
+    Mirrors the two [Keeper_registry_types.turn_observation] fields the stall
+    decision needs, so this module decides without depending on
+    [Keeper_registry]. *)
+type provider_progress_sample =
+  { last_progress_at : float
+        (** Unix timestamp of the most recent in-turn progress signal. *)
+  ; active_tool_count : int
+        (** Tools issued but not yet completed; non-zero means work in
+            flight, not a stall. *)
+  }
+
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
@@ -18,6 +31,13 @@ type try_provider_ctx =
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; provider_call_deadline_sec : float option
+        (** Seconds a provider attempt may go WITHOUT a progress signal
+            before it is cancelled and rotated (#28417 changed this from a
+            total-elapsed ceiling). [None] disables MASC-side enforcement. *)
+  ; provider_progress_probe : (unit -> provider_progress_sample option) option
+        (** Reads the keeper's live progress signal. Must not raise; return
+            [None] when unavailable, which degrades the deadline to the
+            pre-#28417 elapsed ceiling. *)
   ; temperature : float option
   ; accept : Agent_core.Types.api_response -> bool
   ; hooks : Agent_core.Hooks.hooks option
@@ -66,6 +86,25 @@ val observe_checkpoint_stage :
   bool Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
 
 val same_run_retry_allowed : bool Atomic.t -> bool
+
+val attempt_stalled :
+  now:float
+  -> threshold_sec:float
+  -> attempt_started_at:float
+  -> sample:provider_progress_sample option
+  -> bool
+(** The stall verdict for a running provider attempt (#28417), pure in its
+    inputs so it is testable without Eio or a registry.
+
+    With a [sample], the attempt is stalled when no tool is in flight AND the
+    last progress signal is older than [threshold_sec]. A tool call that runs
+    for minutes refreshes no progress signal while it runs, so tools in
+    flight count as work.
+
+    With [sample = None] (probe absent, or no live turn observation), the
+    verdict falls back to elapsed time since [attempt_started_at] — the
+    pre-#28417 behaviour, so a lost progress signal cannot silently disable
+    enforcement. *)
 
 val default_context_overflow_shrink_capacity : capacity_bytes:int -> int
 (** The shared provider-oracle target for one ordinary shrink step. The

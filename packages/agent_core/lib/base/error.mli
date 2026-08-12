@@ -125,7 +125,9 @@ type orchestration_error =
     this type with its own constructor, carries its typed error through
     {!Internal_carried}, and downcasts by matching its constructor back
     out — instead of rendering the error into the {!Internal} message
-    string and re-parsing it in the same process. *)
+    string and re-parsing it in the same process. A carrier is process-local:
+    serialization and persistence boundaries store [message], and a value
+    rehydrated from those bytes has no carrier to downcast. *)
 type carrier = ..
 
 type t =

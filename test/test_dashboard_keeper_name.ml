@@ -11,6 +11,7 @@
 
 module Helpers = Dashboard_execution_helpers
 module Identity = Masc.Keeper_identity
+module Codec = Keeper_name_codec
 open Alcotest
 
 let spellings =
@@ -61,6 +62,23 @@ let test_agrees_with_the_canonical_parser () =
     (spellings @ [ "claude-agent-abc"; "keeper-x-agent"; "keeper_"; "-agent"; "" ])
 ;;
 
+let test_codec_normalizes_all_spellings_round_trip () =
+  List.iter
+    (fun alias ->
+      match Codec.keeper_name_of_agent_alias alias with
+      | None -> failf "codec rejected accepted alias %S" alias
+      | Some keeper_name ->
+        check string (alias ^ ": parsed keeper") "sangsu" keeper_name;
+        let canonical_alias = Codec.keeper_agent_name keeper_name in
+        check string (alias ^ ": canonical render") "keeper-sangsu-agent" canonical_alias;
+        check
+          (option string)
+          (alias ^ ": render parses to the same keeper")
+          (Some keeper_name)
+          (Codec.keeper_name_of_agent_alias canonical_alias))
+    spellings
+;;
+
 let () =
   Alcotest.run
     "Dashboard keeper name"
@@ -72,6 +90,8 @@ let () =
         ; test_case "a non-alias passes through" `Quick test_non_alias_passes_through
         ; test_case "agrees with the canonical parser" `Quick
             test_agrees_with_the_canonical_parser
+        ; test_case "four spellings normalize and round-trip" `Quick
+            test_codec_normalizes_all_spellings_round_trip
         ] )
     ]
 ;;

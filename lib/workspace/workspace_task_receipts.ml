@@ -29,10 +29,14 @@ let keeper_name_from_agent_name agent_name =
   let trimmed = String.trim agent_name in
   match Keeper_name_codec.keeper_name_of_agent_alias trimmed with
   | Some keeper_name -> Some keeper_name
-  | None ->
-    if String.ends_with ~suffix:"-agent" trimmed && String.length trimmed > 6
-    then Some (String.sub trimmed 0 (String.length trimmed - 6))
-    else None
+  | None -> None
+;;
+
+let loose_keeper_name_from_agent_name agent_name =
+  let trimmed = String.trim agent_name in
+  if String.ends_with ~suffix:"-agent" trimmed && String.length trimmed > 6
+  then Some (String.sub trimmed 0 (String.length trimmed - 6))
+  else None
 ;;
 
 let agent_record_keeper_name config ~agent_name =
@@ -53,6 +57,7 @@ let keeper_receipt_candidate_names config ~agent_name =
   let base =
     [ agent_record_keeper_name config ~agent_name
     ; keeper_name_from_agent_name agent_name
+    ; loose_keeper_name_from_agent_name agent_name
     ; Some agent_name
     ]
     |> List.filter_map Fun.id

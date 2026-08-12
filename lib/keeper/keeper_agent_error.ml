@@ -288,9 +288,12 @@ let agent_core_timeout_observation :
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout { timeout_phase; _ }) ->
     Some { Keeper_turn_terminal_code.phase = timeout_phase }
   | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError { timeout_phase = Some phase; _ }) ->
+    Some { Keeper_turn_terminal_code.phase = Some phase }
+  | Agent_core.Error.Provider
       (Llm_provider.Error.NetworkError
-         { kind = Llm_provider.Http_client.Timeout; timeout_phase; _ }) ->
-    Some { Keeper_turn_terminal_code.phase = timeout_phase }
+         { kind = Llm_provider.Http_client.Timeout; timeout_phase = None; _ }) ->
+    Some { Keeper_turn_terminal_code.phase = None }
   | _ -> None
 ;;
 

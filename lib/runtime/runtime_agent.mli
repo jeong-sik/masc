@@ -83,7 +83,11 @@ type config = Runtime_agent_context.config = {
   event_bus : Agent_core.Event_bus.t option;
   session_id : string option;
   description : string option;
+      (** Human-facing display text only. Runtime logic must not parse identity
+          or capability policy out of this field. *)
   runtime_id : string option;
+      (** Typed catalog identity used by runtime logic. [None] means the caller
+          did not supply a catalog identity, so [name] is used. *)
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
   pre_dispatch_serialization_observer :

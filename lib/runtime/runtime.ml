@@ -61,7 +61,7 @@ let quota_scope_of_materialized
   Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential
 ;;
 
-let of_binding_result (cfg : config) (b : binding) : (t, string) result =
+let of_binding (cfg : config) (b : binding) : (t, string) result =
   if not b.enabled
   then Error "binding is disabled by runtime.toml"
   else match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
@@ -82,12 +82,6 @@ let of_binding_result (cfg : config) (b : binding) : (t, string) result =
        | Error reason -> Error reason)
   | None, _ -> Error (Printf.sprintf "provider not found: %s" b.provider_id)
   | Some _, None -> Error (Printf.sprintf "model not found: %s" b.model_id)
-;;
-
-(** {!of_binding_result} 의 option 투영. materialize 실패 이유가 필요 없는
-    호출자(단일 binding 성공 여부만 확인)를 위한 유지 API. *)
-let of_binding (cfg : config) (b : binding) : t option =
-  Result.to_option (of_binding_result cfg b)
 ;;
 
 let is_local_provider (provider : provider) =
@@ -115,7 +109,7 @@ let partition_bindings (cfg : config) (bindings : binding list)
   let runtimes, dropped =
     List.fold_left
       (fun (runtimes, dropped) (b : binding) ->
-         match of_binding_result cfg b with
+         match of_binding cfg b with
          | Ok rt -> rt :: runtimes, dropped
          | Error reason -> runtimes, (id_of_binding b, reason) :: dropped)
       ([], [])
@@ -1377,7 +1371,7 @@ let provider_id_of_runtime_id (id : string) : string option =
   | None -> None
 ;;
 
-(* Reads the scope frozen at materialization ({!of_binding_result}); no
+(* Reads the scope frozen at materialization ({!of_binding}); no
    environment access here, so a post-load env change cannot re-select the
    credential alias out from under the recorded window. *)
 let quota_scope_of_runtime (rt : t) : Runtime_quota_window.scope =

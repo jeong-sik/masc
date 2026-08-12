@@ -173,6 +173,14 @@ let date_bounds ?since ?until () =
   since, until
 ;;
 
+(* Both branches read at most [max_signal_scan] rows. They did not: the
+   unfiltered branch was bounded and the filtered one was not, so supplying a
+   date — which a caller does to narrow the result — removed the row cap and
+   scanned every day-file in range. A one-sided bound widens further, since the
+   missing side is filled with 2020-01-01 / 2099-12-31 below.
+
+   [read_range_recent] is the bounded reader for a date range and takes the
+   same cap the unfiltered branch already uses. *)
 let read_store_records store ?since ?until () =
   let since, until = date_bounds ?since ?until () in
   if since = "" && until = ""
@@ -180,7 +188,11 @@ let read_store_records store ?since ?until () =
   else (
     let start_date = if since = "" then "2020-01-01" else since in
     let end_date = if until = "" then "2099-12-31" else until in
-    Dated_jsonl.read_range store ~since:start_date ~until:end_date)
+    Dated_jsonl.read_range_recent
+      store
+      ~since:start_date
+      ~until:end_date
+      max_signal_scan)
 ;;
 
 let has_any_records store = Dated_jsonl.read_recent store 1 <> []
@@ -590,7 +602,12 @@ let read_keeper_metric_records ?since ?until (config : Workspace.config) keeper_
     let since, until = date_bounds ?since ?until () in
     let start_date = if since = "" then "2020-01-01" else since in
     let end_date = if until = "" then "2099-12-31" else until in
-    Dated_jsonl.read_range store ~since:start_date ~until:end_date
+    (* Same cap as the unfiltered branch below; see [read_store_records]. *)
+    Dated_jsonl.read_range_recent
+      store
+      ~since:start_date
+      ~until:end_date
+      max_signal_scan
   | None, None -> Dated_jsonl.read_recent store max_signal_scan
 ;;
 

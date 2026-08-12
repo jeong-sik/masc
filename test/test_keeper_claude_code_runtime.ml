@@ -1074,7 +1074,7 @@ let test_spawn_failure_releases_claim () =
          | _ -> fail "transient release evidence was not persisted"))
 ;;
 
-let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools =
+let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -1146,6 +1146,7 @@ let test_subscription_spawn_failure_is_pre_dispatch () =
          ~cli_path:missing_cli
          ~goal:"subscription probe should fail"
          ~tools:[]
+         ()
        |> check_pre_dispatch_attempt "subscription probe spawn failure")
 ;;
 
@@ -1168,6 +1169,7 @@ let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
            ~cli_path
            ~goal:"turn process spawn should fail"
            ~tools:[ tool ]
+           ()
          |> check_pre_dispatch_attempt "turn process spawn failure"))
 ;;
 
@@ -1222,6 +1224,7 @@ let test_repeated_tool_stop_records_pre_result_turn_identity () =
              ~cli_path
              ~goal:"REPEAT_TOOL"
              ~tools:[ repeated_tool () ]
+             ()
          in
          (match attempt.result with
           | Error error -> fail (Agent_core.Error.to_string error)
@@ -1265,6 +1268,7 @@ let test_repeated_tool_stop_preserves_terminal_hook_failure () =
              ~cli_path
              ~goal:"REPEAT_FAILED_HOOK"
              ~tools:[ repeated_tool () ]
+             ()
          in
          match attempt.result with
          | Ok _ -> fail "repeated host stop hid the terminal hook failure"

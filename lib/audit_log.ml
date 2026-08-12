@@ -261,18 +261,21 @@ let get_audit_store (config : config) : Dated_jsonl.t =
       audit_store_cache := StringMap.add base store !audit_store_cache;
       store)
 
-(** Parse JSON list into audit entries. Logs first 5 failures individually,
-    then a summary. Returns only successfully parsed entries. *)
+(** How many individual corrupt-entry failures {!collect_entries} reports
+    before it switches to a suppressed count in the summary. *)
 let max_logged_errors = 5
 
-let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
-  (* Logging side effects (per-entry corrupt-entry ERROR, rate-limited
-     by [max_logged_errors]) are kept inside the fold body — they are
-     observably equivalent to the original [List.iter] order. *)
+(* Takes decode results rather than rows. [read_entries] decodes during the
+   read so the parsed trees are not all held at once, and the reader calls its
+   projection newest-first — so the rate-limited logging below must stay out of
+   the projection, or which five failures get reported would flip. Folding over
+   the returned (chronological) list keeps the reported set and the [#N]
+   numbering identical to reading the whole window first. *)
+let collect_entries (decoded : (audit_entry, string) result list) :
+    audit_entry list =
   let ok_rev, err_count =
     List.fold_left
-      (fun (ok, errc) json ->
-        match entry_of_json_r json with
+      (fun (ok, errc) -> function
         | Ok entry -> (entry :: ok, errc)
         | Error reason ->
             let errc = errc + 1 in
@@ -280,11 +283,11 @@ let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
               Log.Misc.error "audit_log: corrupt entry (#%d): %s" errc reason;
             (ok, errc))
       ([], 0)
-      jsons
+      decoded
   in
   if err_count > 0 then
     Log.Misc.error "audit_log: %d/%d entries failed to parse (possible corruption)%s"
-      err_count (List.length jsons)
+      err_count (List.length decoded)
       (if err_count > max_logged_errors
        then Printf.sprintf " (%d more suppressed)" (err_count - max_logged_errors)
        else "");
@@ -294,7 +297,9 @@ let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
     Structural parse failures go through [parse_entries] ERROR path. *)
 let read_entries ?(n = 10_000) (config : config) : audit_entry list =
   let store = get_audit_store config in
-  Dated_jsonl.read_recent store n |> parse_entries
+  Dated_jsonl.filter_map_recent store n ~f:(fun json ->
+    Some (entry_of_json_r json))
+  |> collect_entries
 
 (** Append a single entry to the audit log (thread-safe via Dated_jsonl). *)
 let append_entry (config : config) (entry : audit_entry) =

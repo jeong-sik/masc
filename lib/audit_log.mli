@@ -12,7 +12,7 @@
 
     Internal helpers ([preview], [outcome_to_json]
     decoders, the [audit_store_cache] and its mutex,
-    [get_audit_store], [parse_entries], [max_logged_errors],
+    [get_audit_store], [collect_entries], [max_logged_errors],
     [remove_assoc_keys]) are hidden — callers use the typed log
     helpers and the read / prune / stats accessors only.
 

@@ -118,6 +118,47 @@ let test_get_stats_reports_oldest_and_newest_in_read_order () =
       check (option (float 0.001)) "newest is the last row read" (Some 300.0)
         stats.Audit_log.newest_timestamp)
 
+(* [read_entries] decodes rows during the read. The reader calls its
+   projection newest-first while returning the rows oldest-first, so the
+   caller-visible order is what needs pinning; the rate-limited corrupt-entry
+   logging stays out of the projection precisely so it cannot follow the scan
+   direction. *)
+let test_read_entries_is_chronological_and_drops_corrupt_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      List.iter
+        (fun ts ->
+          Audit_log.append_entry config
+            (entry ~timestamp:ts ~agent_id:(Printf.sprintf "keeper-%.0f" ts)
+               ~action:Audit_log.AuthSuccess ~outcome:Audit_log.Success))
+        [ 100.0; 200.0; 300.0 ];
+      (* Well-formed JSON that is not a decodable audit entry: it survives the
+         reader's own malformed-row filter and must be dropped by the decode
+         path instead. *)
+      let audit_dir =
+        Filename.concat (Workspace_utils.masc_dir config) "audit"
+      in
+      let day_file =
+        match Sys.readdir audit_dir with
+        | [| month |] ->
+          let month_dir = Filename.concat audit_dir month in
+          Filename.concat month_dir (Sys.readdir month_dir).(0)
+        | _ -> fail "expected exactly one month directory"
+      in
+      Fs_compat.append_file day_file ({|{"not":"an audit entry"}|} ^ "\n");
+      let entries = Audit_log.read_entries ~n:10 config in
+      check (list (float 0.001)) "oldest first"
+        [ 100.0; 200.0; 300.0 ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.timestamp) entries);
+      check (list string) "agents follow the same order"
+        [ "keeper-100"; "keeper-200"; "keeper-300" ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.agent_id) entries))
+
 (* ── Codec round-trip tests ────────────────────────────────────────── *)
 
 let action_roundtrip label action expected_wire =
@@ -312,6 +353,8 @@ let () =
             test_audit_events_filter_severity_before_paging;
           test_case "get_stats reports oldest and newest in read order" `Quick
             test_get_stats_reports_oldest_and_newest_in_read_order;
+          test_case "read_entries is chronological and drops corrupt rows"
+            `Quick test_read_entries_is_chronological_and_drops_corrupt_rows;
         ] );
       ( "codec_roundtrip",
         [

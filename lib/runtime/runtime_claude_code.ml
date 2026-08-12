@@ -80,10 +80,16 @@ type turn_result =
   ; usage : turn_usage option
   }
 
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
-  ; abort_turn : string option
+  ; abort_turn : host_stop option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -141,6 +147,7 @@ type error =
       ; response_emitted : bool
       }
   | Turn_failed of string
+  | Stopped_by_host of host_stop
   | Quota_blocked of
       { api_error_status : int option
       ; rate_limit : rate_limit option
@@ -173,6 +180,11 @@ let error_to_string = function
       response_emitted
       message
   | Turn_failed detail -> "Claude Code turn failed: " ^ detail
+  | Stopped_by_host (Repeated_tool_call { tool_name; repeated_count }) ->
+    Printf.sprintf
+      "Claude Code stopped after repeated tool call: tool=%s count=%d"
+      tool_name
+      repeated_count
   | Quota_blocked { api_error_status; rate_limit } ->
     let status =
       Option.fold
@@ -202,6 +214,7 @@ let error_kind = function
   | Turn_transport_interrupted _ -> "turn_transport_interrupted"
   | Context_window_exceeded _ -> "context_window_exceeded"
   | Turn_failed _ -> "turn_failed"
+  | Stopped_by_host _ -> "stopped_by_host"
   | Quota_blocked _ -> "quota_blocked"
   | Process_exited _ -> "process_exited"
   | Timeout _ -> "timeout"
@@ -484,7 +497,7 @@ let handle_control_request
       in
       (match !abort_turn with
        | None -> Ok ()
-       | Some detail -> Error (Turn_failed detail))
+       | Some stop -> Error (Stopped_by_host stop))
   | unsupported ->
     let* () =
       send_control_response

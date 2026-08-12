@@ -42,6 +42,11 @@ type execution_error =
 type report =
   { candidate : Keeper_board_attention_candidate.candidate
   ; partition : Keeper_board_attention_partition.t
+  ; failure_category :
+      Keeper_board_attention_candidate.quarantine_failure_category
+      (** Typed category captured when the command resolves the quarantine;
+          renderers never reopen the candidate status or synthesize an
+          ["unknown"] success value. *)
   ; wake : Keeper_board_attention_worker_wake.wake_result
   }
 

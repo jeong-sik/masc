@@ -18,12 +18,13 @@ printf 'exact-runtime-fixture\n' >"$binary"
 binary_sha="$(sha256sum "$binary" | awk '{print $1}')"
 
 write_manifest() {
-  local ref="${1:?ref is required}"
-  local protected="${2:?protected is required}"
-  local workflow_sha="${3:?workflow_sha is required}"
+  local event_name="${1:?event_name is required}"
+  local ref="${2:?ref is required}"
+  local protected="${3:?protected is required}"
+  local workflow_sha="${4:?workflow_sha is required}"
   jq -n \
     --arg schema "masc.keeper_acceptance_runtime.v2" \
-    --arg event_name "workflow_dispatch" \
+    --arg event_name "$event_name" \
     --arg source_sha "$source_sha" \
     --arg source_ref "$ref" \
     --argjson source_ref_protected "$protected" \
@@ -43,11 +44,13 @@ write_manifest() {
 }
 
 run_provenance() {
+  local expected_event="${1:?expected_event is required}"
   env \
     GITHUB_REPOSITORY="$repository" \
     KEEPER_ACCEPTANCE_BINARY="$binary" \
     KEEPER_ACCEPTANCE_MANIFEST="$manifest" \
     KEEPER_ACCEPTANCE_OUTPUT_DIR="$output_dir" \
+    KEEPER_ACCEPTANCE_EXPECTED_EVENT="$expected_event" \
     KEEPER_ACCEPTANCE_EXPECTED_SHA="$source_sha" \
     KEEPER_ACCEPTANCE_EXPECTED_REF="$source_ref" \
     KEEPER_ACCEPTANCE_EXPECTED_REF_PROTECTED=true \
@@ -60,22 +63,28 @@ run_provenance() {
 
 expect_failure() {
   local label="${1:?label is required}"
-  if run_provenance >"$tmp_root/$label.out" 2>"$tmp_root/$label.err"; then
+  local expected_event="${2:?expected_event is required}"
+  if run_provenance "$expected_event" >"$tmp_root/$label.out" 2>"$tmp_root/$label.err"; then
     echo "expected provenance failure: $label" >&2
     exit 1
   fi
 }
 
-write_manifest "$source_ref" true "$source_sha"
-run_provenance >/dev/null
+for trusted_event in push workflow_dispatch; do
+  write_manifest "$trusted_event" "$source_ref" true "$source_sha"
+  run_provenance "$trusted_event" >/dev/null
+done
 
-write_manifest "refs/heads/attacker" true "$source_sha"
-expect_failure branch-ref
+write_manifest push "refs/heads/attacker" true "$source_sha"
+expect_failure branch-ref push
 
-write_manifest "$source_ref" false "$source_sha"
-expect_failure unprotected-ref
+write_manifest push "$source_ref" false "$source_sha"
+expect_failure unprotected-ref push
 
-write_manifest "$source_ref" true "0000000000000000000000000000000000000000"
-expect_failure workflow-sha
+write_manifest push "$source_ref" true "0000000000000000000000000000000000000000"
+expect_failure workflow-sha push
+
+write_manifest push "$source_ref" true "$source_sha"
+expect_failure event-mismatch workflow_dispatch
 
 echo "keeper real-world secret boundary tests: PASS"

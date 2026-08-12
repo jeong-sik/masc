@@ -1149,11 +1149,21 @@ let ensure_roots ~base_path ~keeper_name candidates =
               then Error "candidate Keeper differs from partition ledger Keeper"
               else
                 let* () = valid_time "candidate recorded_at" candidate.recorded_at in
-                match Candidate.resumable_status candidate.status with
-                | None | Some (Candidate.Resumable_consumed _) -> Ok roots
-                | Some
+                match Candidate.status_view candidate.status with
+                | Candidate.Suspended_quarantine _
+                | Candidate.Direct_resumable (Candidate.Resumable_consumed _)
+                | Candidate.Requeued_resumable
+                    { resumable = Candidate.Resumable_consumed _; _ } ->
+                  Ok roots
+                | Candidate.Direct_resumable
                     (Candidate.Resumable_pending _
-                    | Candidate.Resumable_judged _) ->
+                    | Candidate.Resumable_judged _)
+                | Candidate.Requeued_resumable
+                    { resumable =
+                        (Candidate.Resumable_pending _
+                        | Candidate.Resumable_judged _)
+                    ; _
+                    } ->
                   let* context_key = Candidate.Context_key.of_candidate candidate in
                   (match Id_map.find_opt candidate.candidate_id view.live_candidate_owner with
                    | Some owner_id ->

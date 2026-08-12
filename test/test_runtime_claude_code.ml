@@ -586,7 +586,10 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
         (fun ~call_id:_ _ ->
           { success = false
           ; content = "same deterministic failure"
-          ; abort_turn = Some "repeated exact dynamic tool call detected"
+          ; abort_turn =
+              Some
+                (Repeated_tool_call
+                   { tool_name = "masc_probe"; repeated_count = 3 })
           })
     }
   in
@@ -598,9 +601,11 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
     ]
     (fun path ->
       match run_fixture ~dynamic_tools:[ tool ] path with
-      | Error (Runtime_claude_code.Turn_failed detail) ->
-        check bool "abort cause" true
-          (Astring.String.is_infix ~affix:"repeated exact" detail)
+      | Error
+          (Runtime_claude_code.Stopped_by_host
+            (Repeated_tool_call { tool_name; repeated_count })) ->
+        check string "tool" "masc_probe" tool_name;
+        check int "repeat count" 3 repeated_count
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
 ;;

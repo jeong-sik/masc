@@ -281,14 +281,26 @@ async function callMcpToolInternal(
 ): Promise<string> {
   const requestId = randomUuid()
   synchronizeMcpAuthRevision()
-  const explicitActor = explicitToolActor(args)
+  let explicitActor: string | null = null
   try {
     const binding = await ensureBinding()
+    // ensureBinding may install the loopback dev credential, so classify
+    // identity authority only after it returns. Never let a caller-supplied
+    // transport hint override the credential used by this request.
+    const hasBearer = getStoredToken() !== null
+    explicitActor = hasBearer ? null : explicitToolActor(args)
     const actor = explicitActor ?? implicitToolActor()
-    const toolArgs =
-      explicitActor == null && actor
+    const toolArgs = (() => {
+      if (hasBearer) {
+        const { _agent_name: _untrustedActor, ...credentialBoundArgs } = args
+        return actor
+          ? { ...credentialBoundArgs, _agent_name: actor }
+          : credentialBoundArgs
+      }
+      return explicitActor == null && actor
         ? { ...args, _agent_name: actor }
         : args
+    })()
     const text = await mcpPost({
       jsonrpc: '2.0',
       method: 'tools/call',

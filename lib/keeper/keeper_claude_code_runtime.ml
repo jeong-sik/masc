@@ -242,6 +242,9 @@ let claude_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.UnknownVariant
          { type_name = "claude_code.control_request"; value = subtype })
+  | Runtime_claude_code.Stopped_by_host _ ->
+    Agent_core.Error.Internal
+      "Claude Code host stop escaped the typed checkpoint boundary"
 ;;
 
 let recovery_failure_of_client_error = function
@@ -259,6 +262,7 @@ let recovery_failure_of_client_error = function
   | Runtime_claude_code.Turn_failed _
   | Runtime_claude_code.Quota_blocked _ ->
     Session_store.Provider_rejected
+  | Runtime_claude_code.Stopped_by_host _ -> Session_store.Protocol_failed
 ;;
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
@@ -541,6 +545,38 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       (List.length dynamic_tools)
       (Runtime_claude_code.dynamic_tool_bytes dynamic_tools);
     let started_at = Time_compat.now () in
+    let settle_host_stop stop =
+      match (!session_state).Session_store.phase with
+      | Turn_inflight { session_id; turn_id = Some turn_id; _ } ->
+        recovery_failure := Session_store.State_persistence_failed;
+        (match
+           Session_store.settle
+             ~base_path
+             ~keeper_name
+             ~expected:!session_state
+             ~session_id
+             ~turn_id
+             ~updated_at:(Time_compat.now ())
+         with
+         | Error detail ->
+           Error
+             (internal_error
+                ("Claude Code host-stop settlement failed: " ^ detail))
+         | Ok settled ->
+           session_state := settled;
+           Ok
+             (Host.repeated_tool_call_result
+                ~model:(Option.value config.model ~default:runtime_id)
+                ~session_id
+                ~turn_id
+                ~turns_used:turn_count
+                stop))
+      | Ready | Start _ | Active _ | Turn_inflight { turn_id = None; _ }
+      | Recovery_required _ | Settled _ ->
+        Error
+          (internal_error
+             "Claude Code host stop arrived without an acknowledged provider turn")
+    in
     let turn_result =
       let on_stream_event = claude_stream_callback on_event in
       try
@@ -588,6 +624,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              ~prompt
         in
         (match client_result with
+         | Error (Runtime_claude_code.Stopped_by_host stop) ->
+           settle_host_stop stop
          | Error error ->
            context_overflow_retry_safe :=
              (match error with

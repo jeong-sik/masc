@@ -439,6 +439,55 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let started_at = Time_compat.now () in
     let stream = stream_projection ~turn_count on_event in
+    let settle_host_stop stop =
+      match (!session_state).Session_store.phase with
+      | Turn_inflight { session_id; turn_id; _ } ->
+        let turn_id =
+          Option.value
+            turn_id
+            ~default:(provider_turn_identity ~conversation_id:session_id ~num_turns:turn_count)
+        in
+        let* () =
+          match turn_id, (!session_state).phase with
+          | turn_id, Turn_inflight { turn_id = None; _ } ->
+            update_session "host-stop turn identity transition" (fun expected ->
+              Session_store.mark_turn_started
+                ~base_path
+                ~keeper_name
+                ~expected
+                ~session_id
+                ~turn_id
+                ~turn_count
+                ~updated_at:(Time_compat.now ()))
+            |> Result.map_error internal_error
+          | _, Turn_inflight { turn_id = Some _; _ } -> Ok ()
+          | _, _ -> assert false
+        in
+        recovery_failure := Session_store.State_persistence_failed;
+        let* settled =
+          Session_store.settle
+            ~base_path
+            ~keeper_name
+            ~expected:!session_state
+            ~session_id
+            ~turn_id
+            ~updated_at:(Time_compat.now ())
+          |> Result.map_error (fun detail ->
+            internal_error ("Antigravity host-stop settlement failed: " ^ detail))
+        in
+        session_state := settled;
+        Ok
+          (Host.repeated_tool_call_result
+             ~model:config.model
+             ~session_id
+             ~turn_id
+             ~turns_used:turn_count
+             stop)
+      | Ready | Start _ | Active _ | Recovery_required _ | Settled _ ->
+        Error
+          (internal_error
+             "Antigravity host stop arrived without an admitted provider turn")
+    in
     let run_client () =
       let cleanup_error = ref None in
       let turn_result =
@@ -517,14 +566,12 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
               (fun () -> `Abort (Eio.Promise.await abort_turn))
           with
           | `Runtime client_result ->
-            Result.map_error
-              (fun error ->
-                 recovery_failure := recovery_failure_of_runtime_error error;
-                 runtime_error_to_core_error error)
-              client_result
-          | `Abort detail ->
-            recovery_failure := Session_store.Protocol_failed;
-            Error (internal_error detail))
+            client_result
+            |> Result.map (fun turn -> `Completed turn)
+            |> Result.map_error (fun error ->
+              recovery_failure := recovery_failure_of_runtime_error error;
+              runtime_error_to_core_error error)
+          | `Abort stop -> Ok (`Stopped stop))
       in
       match !cleanup_error with
       | None -> turn_result
@@ -536,7 +583,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       try
         match run_client () with
         | Error error -> Error error
-        | Ok turn ->
+        | Ok (`Stopped stop) -> settle_host_stop stop
+        | Ok (`Completed turn) ->
           recovery_failure := Session_store.Protocol_failed;
           let turn_id =
             provider_turn_identity

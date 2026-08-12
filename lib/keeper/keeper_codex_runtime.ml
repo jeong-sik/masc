@@ -305,6 +305,9 @@ let codex_error_to_core_error = function
   | Runtime_codex_app_server.Turn_interrupted ->
     Agent_core.Error.Internal
       (Runtime_codex_app_server.error_to_string Runtime_codex_app_server.Turn_interrupted)
+  | Runtime_codex_app_server.Stopped_by_host _ ->
+    Agent_core.Error.Internal
+      "Codex host stop escaped the typed checkpoint boundary"
 ;;
 
 let recovery_failure_of_client_error = function
@@ -323,6 +326,8 @@ let recovery_failure_of_client_error = function
   | Runtime_codex_app_server.Context_window_exceeded _
   | Runtime_codex_app_server.Turn_failed _ ->
     Keeper_official_client_session_store.Provider_rejected
+  | Runtime_codex_app_server.Stopped_by_host _ ->
+    Keeper_official_client_session_store.Protocol_failed
 ;;
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
@@ -613,6 +618,36 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       | Ambiguous | Fatal -> require_recovery detail
     in
     let started_at = Time_compat.now () in
+    let settle_host_stop stop =
+      match (!session_state).Keeper_official_client_session_store.phase with
+      | Turn_inflight { session_id; turn_id = Some turn_id; _ } ->
+        recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
+        (match
+           Keeper_official_client_session_store.settle
+             ~base_path
+             ~keeper_name
+             ~expected:!session_state
+             ~session_id
+             ~turn_id
+             ~updated_at:(Time_compat.now ())
+         with
+         | Error detail ->
+           Error (internal_error ("Codex host-stop settlement failed: " ^ detail))
+         | Ok settled ->
+           session_state := settled;
+           Ok
+             (Host.repeated_tool_call_result
+                ~model:(Option.value client_config.model ~default:runtime_id)
+                ~session_id
+                ~turn_id
+                ~turns_used:turn_count
+                stop))
+      | Ready | Start _ | Active _ | Turn_inflight { turn_id = None; _ }
+      | Recovery_required _ | Settled _ ->
+        Error
+          (internal_error
+             "Codex host stop arrived without an acknowledged provider turn")
+    in
     let turn_result =
       try
         let on_stream_event = codex_stream_callback on_event in
@@ -655,6 +690,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          client_config
          ~prompt
      with
+     | Error (Runtime_codex_app_server.Stopped_by_host stop) ->
+       settle_host_stop stop
      | Error error ->
        recovery_failure := recovery_failure_of_client_error error;
        Error (codex_error_to_core_error error)

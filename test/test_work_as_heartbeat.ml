@@ -206,18 +206,33 @@ let test_freshness_disabled_flag () =
   let fresh = work_as_hb && (now -. last_hb < max_silence) in
   check bool "feature disabled → always stale" false fresh
 
-let test_busy_cycle_records_no_turn_status_or_work_heartbeat () =
-  let accounting =
-    Masc.Keeper_heartbeat_loop.keepalive_cycle_accounting
+let test_completed_cycle_records_and_refreshes () =
+  match
+    Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
+      Masc.Keeper_heartbeat_loop.Turn_cycle_completed
+  with
+  | Masc.Keeper_heartbeat_loop.Record_turn_status Refresh_work_heartbeat -> ()
+  | _ -> fail "completed cycle must record and refresh work-heartbeat"
+;;
+
+let test_crashed_cycle_records_and_preserves_work_heartbeat () =
+  match
+    Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
+      Masc.Keeper_heartbeat_loop.Turn_cycle_crashed
+  with
+  | Masc.Keeper_heartbeat_loop.Record_turn_status Preserve_work_heartbeat -> ()
+  | _ -> fail "crashed cycle must record without refreshing work-heartbeat"
+;;
+
+let test_busy_cycle_defers_typed_block () =
+  match
+    Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
       (Masc.Keeper_heartbeat_loop.Turn_cycle_busy
          (Masc.Keeper_owner.Turn_busy None))
-  in
-  check bool "busy cycle records no turn status" false accounting.record_turn_status;
-  check
-    bool
-    "busy cycle refreshes no work-heartbeat success"
-    false
-    accounting.refresh_work_heartbeat
+  with
+  | Masc.Keeper_heartbeat_loop.Defer_autonomous_work
+      (Masc.Keeper_owner.Turn_busy None) -> ()
+  | _ -> fail "busy cycle must preserve its typed admission block"
 ;;
 
 (* ── Percentile function (Phase 0 profiling) ────────────── *)
@@ -299,11 +314,19 @@ let () =
       test_case "never heartbeated → stale" `Quick test_freshness_never_heartbeated;
       test_case "feature disabled → always stale" `Quick test_freshness_disabled_flag;
     ];
-    "cycle_accounting", [
+    "cycle_action", [
       test_case
-        "busy records no completion or work-heartbeat success"
+        "completed records and refreshes work-heartbeat"
         `Quick
-        test_busy_cycle_records_no_turn_status_or_work_heartbeat;
+        test_completed_cycle_records_and_refreshes;
+      test_case
+        "crashed records and preserves work-heartbeat"
+        `Quick
+        test_crashed_cycle_records_and_preserves_work_heartbeat;
+      test_case
+        "busy defers with its typed admission block"
+        `Quick
+        test_busy_cycle_defers_typed_block;
     ];
     "config_invariants", [
       test_case "max_silence >= interval" `Quick test_config_invariant_silence_ge_interval;

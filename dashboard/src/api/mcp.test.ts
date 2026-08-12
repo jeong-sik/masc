@@ -193,6 +193,32 @@ describe('MCP 2026-07-28 dashboard client', () => {
     expect(body.params.arguments).toEqual({})
   })
 
+  it('does not let _agent_name override a bearer credential owner', async () => {
+    getStoredToken.mockReturnValue('dashboard-token')
+    getStoredTokenMeta.mockReturnValue({
+      source: 'manual',
+      actor: 'dashboard',
+      scope: null,
+    })
+    authHeaders.mockReturnValue({ Authorization: 'Bearer dashboard-token' })
+    fetchWithTimeout.mockResolvedValueOnce(okToolResponse())
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_transition', {
+      task_id: 'task-223',
+      agent_name: 'dashboard-admin-deft-cobra',
+      _agent_name: 'dashboard-admin-deft-cobra',
+    })
+
+    const [, init] = callsByMethod('tools/call')[0]!
+    const body = JSON.parse(init.body as string)
+    expect(body.params.arguments).toEqual({
+      task_id: 'task-223',
+      agent_name: 'dashboard-admin-deft-cobra',
+    })
+    expect(authHeaders).toHaveBeenLastCalledWith({ actorName: null })
+  })
+
   // Pagination stops on absence of a cursor, and the guard is progress rather
   // than a page budget: #26771 capped at 50 pages, which refused a server with
   // 51 legitimate pages and let a non-progressing one run 50 round trips first.
@@ -394,6 +420,41 @@ describe('MCP 2026-07-28 dashboard client', () => {
     })
     expect(fetchWithTimeout.mock.calls.map(call => call[0]))
       .toEqual(['/api/v1/dashboard/dev-token', '/mcp'])
+  })
+
+  it('binds identity to a bearer bootstrapped during the call', async () => {
+    let token: string | null = null
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = null
+    let revision = 0
+    getStoredToken.mockImplementation(() => token)
+    getStoredTokenMeta.mockImplementation(() => meta)
+    currentStoredTokenRevision.mockImplementation(() => revision)
+    setStoredToken.mockImplementationOnce((nextToken, nextMeta) => {
+      token = nextToken
+      meta = nextMeta
+      revision += 1
+    })
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'loopback-dev-token', actor: 'dashboard', role: 'worker',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(okToolResponse())
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_transition', {
+      task_id: 'task-223',
+      agent_name: 'target-keeper',
+      _agent_name: 'foreign-caller',
+    })
+
+    const [, init] = callsByMethod('tools/call')[0]!
+    const body = JSON.parse(init.body as string)
+    expect(body.params.arguments).toEqual({
+      task_id: 'task-223',
+      agent_name: 'target-keeper',
+      _agent_name: 'dashboard',
+    })
+    expect(authHeaders).toHaveBeenLastCalledWith({ actorName: 'dashboard' })
   })
 
   it('uses distinct platform UUIDs for consecutive tool request identities', async () => {

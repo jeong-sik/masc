@@ -240,11 +240,14 @@ let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
     let second = call 2 in
     let third = call 3 in
     check int "three calls executed" 3 !executions;
-    check (option string) "first call continues" None first.abort_turn;
-    check (option string) "second call continues" None second.abort_turn;
-    check bool "reordered object still aborts third call" true
-      (Option.is_some third.abort_turn);
-    check bool "terminal cause is retained" true (Option.is_some !terminal_error))
+    check bool "first call continues" true (Option.is_none first.abort_turn);
+    check bool "second call continues" true (Option.is_none second.abort_turn);
+    (match third.abort_turn with
+     | Some (Repeated_tool_call { tool_name; repeated_count }) ->
+       check string "repeated tool" "masc_probe" tool_name;
+       check int "repeat count" 3 repeated_count
+     | None -> fail "reordered object did not produce a typed host stop");
+    check (option string) "host stop is not a terminal error" None !terminal_error)
 ;;
 
 let test_dynamic_tool_progress_does_not_trip_the_repeat_guard () =
@@ -261,10 +264,32 @@ let test_dynamic_tool_progress_does_not_trip_the_repeat_guard () =
           ~call_id:(Printf.sprintf "progress-%d" index)
           (`Assoc [ "same", `String "input" ])
       in
-      check (option string) "changing result continues" None result.abort_turn
+      check bool "changing result continues" true (Option.is_none result.abort_turn)
     done;
     check int "all progressing calls execute" 10 !executions;
     check (option string) "progress is not terminal" None !terminal_error)
+;;
+
+let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
+  let result =
+    Host.repeated_tool_call_result
+      ~model:"official-client-model"
+      ~session_id:"session-1"
+      ~turn_id:"turn-2"
+      ~turns_used:2
+      (Repeated_tool_call { tool_name = "masc_probe"; repeated_count = 3 })
+  in
+  check string "session" "session-1" result.session_id;
+  check int "turns" 2 result.turns;
+  check bool "no synthetic Agent Core checkpoint" true
+    (Option.is_none result.checkpoint);
+  match result.stop_reason with
+  | Runtime_agent.Yielded_after_repeated_tool_call
+      { turns_used; tool_name; repeated_count } ->
+    check int "typed turns" 2 turns_used;
+    check string "typed tool" "masc_probe" tool_name;
+    check int "typed count" 3 repeated_count
+  | _ -> fail "host stop was not projected as a repeated-tool checkpoint yield"
 ;;
 
 let msg role content : Agent_core.Types.message =
@@ -693,6 +718,10 @@ let () =
             "dynamic tool progress does not trip repeat guard"
             `Quick
             test_dynamic_tool_progress_does_not_trip_the_repeat_guard
+        ; test_case
+            "repeated host stop is a checkpoint yield"
+            `Quick
+            test_repeated_tool_host_stop_is_a_checkpoint_yield
         ] )
     ; ( "history encoding"
       , [ test_case

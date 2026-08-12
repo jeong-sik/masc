@@ -1049,8 +1049,10 @@ let process_claimed
          partition
          (Partition.Candidate_membership_conflict detail)
      | Ok () ->
-       (match Candidate.resumable_status candidate.status with
-        | Some (Candidate.Resumable_pending _) ->
+       (match Candidate.status_view candidate.status with
+        | Candidate.Direct_resumable (Candidate.Resumable_pending _)
+        | Candidate.Requeued_resumable
+            { resumable = Candidate.Resumable_pending _; _ } ->
           (match prepared with
            | Some (candidate_id, prepared)
              when String.equal candidate_id candidate.candidate_id ->
@@ -1066,21 +1068,25 @@ let process_claimed
                ("Board attention claimed Pending candidate without successful "
                 ^ "pre-claim exact setup: "
                 ^ candidate.candidate_id))
-        | Some (Candidate.Resumable_judged judged) ->
+        | Candidate.Direct_resumable (Candidate.Resumable_judged judged)
+        | Candidate.Requeued_resumable
+            { resumable = Candidate.Resumable_judged judged; _ } ->
           complete_existing_judgment
             ~now
             ~worker_epoch
             ~base_path
             latest_partition
             judged.judgment
-        | Some (Candidate.Resumable_consumed consumed) ->
+        | Candidate.Direct_resumable (Candidate.Resumable_consumed consumed)
+        | Candidate.Requeued_resumable
+            { resumable = Candidate.Resumable_consumed consumed; _ } ->
           settle_existing_consumed
             ~now
             ~worker_epoch
             ~base_path
             latest_partition
             consumed.judgment
-        | None ->
+        | Candidate.Suspended_quarantine _ ->
           Error
             ("Quarantined Board attention candidate became claimable: "
              ^ candidate.candidate_id)))
@@ -1115,8 +1121,10 @@ let prepare_next_ready
        (match validate_partition_member partition candidate with
         | Error _ -> selected None
         | Ok () ->
-          (match Candidate.resumable_status candidate.status with
-           | Some (Candidate.Resumable_pending _) ->
+          (match Candidate.status_view candidate.status with
+           | Candidate.Direct_resumable (Candidate.Resumable_pending _)
+           | Candidate.Requeued_resumable
+               { resumable = Candidate.Resumable_pending _; _ } ->
              (match prepare candidate with
               | Ok prepared ->
                 selected (Some (candidate.candidate_id, prepared))
@@ -1124,10 +1132,16 @@ let prepare_next_ready
                 Error
                   ("Board attention exact setup unavailable before claim: "
                    ^ setup_error_detail error))
-           | Some
+           | Candidate.Direct_resumable
                (Candidate.Resumable_judged _
                | Candidate.Resumable_consumed _)
-           | None -> selected None)))
+           | Candidate.Requeued_resumable
+               { resumable =
+                   (Candidate.Resumable_judged _
+                   | Candidate.Resumable_consumed _)
+               ; _
+               }
+           | Candidate.Suspended_quarantine _ -> selected None)))
 ;;
 
 let confirm_requeue_transition ~base_path transition =
@@ -1170,10 +1184,13 @@ let rec converge_requeue_conflict
          ^ partition.candidate_id)
   in
   let* () =
-    match Candidate.quarantine_state candidate.status with
-    | Some
-        { quarantine
-        ; phase = Candidate.Requeued _
+    match Candidate.status_view candidate.status with
+    | Candidate.Requeued_resumable
+        { quarantine =
+            { quarantine
+            ; phase = Candidate.Requeued _
+            }
+        ; _
         }
       when String.equal quarantine.partition_id partition.partition_id
            && String.equal quarantine.quarantine_id expected_quarantine_id
@@ -1181,7 +1198,9 @@ let rec converge_requeue_conflict
                 quarantine.partition_generation
                 partition.generation ->
       Ok ()
-    | Some _ | None ->
+    | Candidate.Direct_resumable _
+    | Candidate.Requeued_resumable _
+    | Candidate.Suspended_quarantine _ ->
       Error
         ("candidate quarantine generation changed during requeue convergence: "
          ^ partition.partition_id)
@@ -1278,8 +1297,10 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
             ("partition candidate is absent during quarantine reconciliation: "
              ^ partition.candidate_id)
       in
-      (match partition.state, Candidate.quarantine_state candidate.status with
-       | Partition.Blocked _, Some state
+      (match partition.state, Candidate.status_view candidate.status with
+       | ( Partition.Blocked _
+         , (Candidate.Suspended_quarantine state
+           | Candidate.Requeued_resumable { quarantine = state; _ }) )
          when String.equal
                 state.quarantine.partition_id
                 partition.partition_id
@@ -1321,7 +1342,9 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
        | Partition.Blocked _, _ ->
          let* () = quarantine_blocked_partition ~base_path partition in
          loop rest
-       | Partition.Ready, Some state
+       | ( Partition.Ready
+         , (Candidate.Suspended_quarantine state
+           | Candidate.Requeued_resumable { quarantine = state; _ }) )
          when String.equal
                 state.quarantine.partition_id
                 partition.partition_id
@@ -1345,7 +1368,9 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
               confirm_requeue_transition ~base_path confirmation
             in
             loop rest)
-       | Partition.Ready, Some state
+       | ( Partition.Ready
+         , (Candidate.Suspended_quarantine state
+           | Candidate.Requeued_resumable { quarantine = state; _ }) )
          when String.equal
                 state.quarantine.partition_id
                 partition.partition_id ->

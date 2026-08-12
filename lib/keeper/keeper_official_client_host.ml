@@ -278,6 +278,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
+  ; abort_turn : string option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -300,6 +301,35 @@ let tool_hook_error_to_string = function
 
 let record_terminal_error terminal_error detail =
   if Option.is_none !terminal_error then terminal_error := Some detail
+;;
+
+type repeated_call_state =
+  { fingerprint : string
+  ; count : int
+  }
+
+let repeated_call_abort_threshold = 3
+
+let dynamic_tool_fingerprint ~tool_name ~input result =
+  let open Digestif.SHA256 in
+  let context = feed_string empty tool_name in
+  let context = feed_string context (Yojson.Safe.to_string input) in
+  let context = feed_string context (if result.success then "success" else "failure") in
+  let context = feed_string context result.content in
+  get context |> to_hex
+;;
+
+let rec observe_repeated_call state fingerprint =
+  let before = Atomic.get state in
+  let after =
+    match before with
+    | Some previous when String.equal previous.fingerprint fingerprint ->
+      { fingerprint; count = previous.count + 1 }
+    | Some _ | None -> { fingerprint; count = 1 }
+  in
+  if Atomic.compare_and_set state before (Some after)
+  then after.count
+  else observe_repeated_call state fingerprint
 ;;
 
 type raw_trace_stage =
@@ -463,7 +493,7 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
 
 let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context ~tools
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector ~terminal_error
-    ~raw_trace_run ~next_dynamic_invocation_index
+    ~raw_trace_run ~next_dynamic_invocation_index ~repeated_call_state
     (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
@@ -515,7 +545,7 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
                  })
           in
           match pre_tool_use with
-          | Block detail -> { success = false; content = detail }
+          | Block detail -> { success = false; content = detail; abort_turn = None }
           | HookFailed { stage; detail } ->
             let detail =
               Printf.sprintf
@@ -523,7 +553,7 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
                 (Agent_core.Hooks.hook_stage_to_string stage)
                 detail
             in
-            { success = false; content = detail }
+            { success = false; content = detail; abort_turn = None }
           | (ElicitToolApproval _ | ElicitInput _) as decision ->
             let detail =
               Printf.sprintf
@@ -533,7 +563,7 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
                    (Agent_core.Hooks.classify_decision decision))
             in
             record_terminal_error terminal_error detail;
-            { success = false; content = detail }
+            { success = false; content = detail; abort_turn = None }
           | (AdjustParams _ | Nudge _) as decision ->
             let detail =
               Printf.sprintf
@@ -543,7 +573,7 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
                    (Agent_core.Hooks.classify_decision decision))
             in
             record_terminal_error terminal_error detail;
-            { success = false; content = detail }
+            { success = false; content = detail; abort_turn = None }
           | Continue ->
             (match
                Agent_core.Agent_tools.find_and_execute_tool
@@ -570,6 +600,7 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
                { success =
                    not (Agent_core.Types.tool_result_outcome_is_error result.outcome)
                ; content = result.content
+               ; abort_turn = None
                }
              | Error error ->
                let detail = tool_hook_error_to_string error in
@@ -579,12 +610,29 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
                   record_terminal_error terminal_error detail;
                   { success = true
                   ; content = "Tool completed, but its post-execution hook failed; do not retry"
+                  ; abort_turn = None
                   }
                 | Agent_core.Agent_tools.Hook_execution_failed _ ->
-                  { success = false; content = detail }))
+                  { success = false; content = detail; abort_turn = None }))
         in
         match execute () with
-        | result -> settle result
+        | result ->
+          let result = settle result in
+          let fingerprint =
+            dynamic_tool_fingerprint ~tool_name:tool.schema.name ~input result
+          in
+          let repeated_count = observe_repeated_call repeated_call_state fingerprint in
+          if repeated_count < repeated_call_abort_threshold
+          then result
+          else
+            let detail =
+              Printf.sprintf
+                "repeated exact dynamic tool call detected: tool=%s count=%d"
+                tool.schema.name
+                repeated_count
+            in
+            record_terminal_error terminal_error detail;
+            { result with abort_turn = Some detail }
         | exception exn ->
           let backtrace = Printexc.get_raw_backtrace () in
           Eio.Cancel.protect (fun () ->
@@ -592,6 +640,7 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
               (settle
                  { success = false
                  ; content = "dynamic tool call exited without an authoritative result"
+                 ; abort_turn = None
                  }));
           Printexc.raise_with_backtrace exn backtrace)
   }
@@ -608,6 +657,7 @@ let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_b
          (runtime_label ^ " dynamic tools require the Keeper shared context"))
   | tools, Some context ->
     let next_dynamic_invocation_index = Atomic.make 0 in
+    let repeated_call_state = Atomic.make None in
     Ok
       (List.map
          (dynamic_tool_of_agent_core
@@ -621,6 +671,7 @@ let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_b
             ~context_injector
             ~terminal_error
             ~raw_trace_run
-            ~next_dynamic_invocation_index)
+            ~next_dynamic_invocation_index
+            ~repeated_call_state)
          tools)
 ;;

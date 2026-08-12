@@ -216,7 +216,7 @@ let test_dynamic_tool_callback () =
         (fun ~call_id:id input ->
           call_id := Some id;
           arguments := input;
-          { success = true; content = "MASC_TOOL_RESULT" })
+          { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None })
     }
   in
   with_fixture
@@ -260,6 +260,30 @@ let test_dynamic_tool_callback () =
           | _ -> fail "Codex live stream events were not projected in wire order"))
 ;;
 
+let test_dynamic_tool_abort_stops_the_provider_loop () =
+  let tool : Runtime_codex_app_server.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "Abort a repeated provider loop"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = false
+          ; content = "same deterministic failure"
+          ; abort_turn = Some "repeated exact dynamic tool call detected"
+          })
+    }
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request ]
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ tool ] path with
+      | Error (Runtime_codex_app_server.Turn_failed detail) ->
+        check bool "abort cause" true
+          (Astring.String.is_infix ~affix:"repeated exact" detail)
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "dynamic tool abort did not stop the Codex turn")
+;;
+
 let test_context_error_records_prior_tool_effect () =
   let tool : Runtime_codex_app_server.dynamic_tool =
     { name = "masc_probe"
@@ -267,7 +291,10 @@ let test_context_error_records_prior_tool_effect () =
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; call =
         (fun ~call_id:_ _ ->
-          { Runtime_codex_app_server.success = true; content = "effect applied" })
+          { Runtime_codex_app_server.success = true
+          ; content = "effect applied"
+          ; abort_turn = None
+          })
     }
   in
   let failed =
@@ -388,7 +415,9 @@ let test_thread_resume_sends_dynamic_tools () =
          { name = "masc_probe"
          ; description = "Return a deterministic fixture marker"
          ; input_schema = `Assoc [ "type", `String "object" ]
-         ; call = (fun ~call_id:_ _ -> { success = true; content = "unused" })
+         ; call =
+             (fun ~call_id:_ _ ->
+               { success = true; content = "unused"; abort_turn = None })
          }
        in
        with_fixture
@@ -662,7 +691,12 @@ let test_dynamic_tool_bytes_counts_name_description_and_schema () =
     { Runtime_codex_app_server.name
     ; description
     ; input_schema = schema
-    ; call = (fun ~call_id:_ _ -> { Runtime_codex_app_server.success = true; content = "" })
+    ; call =
+        (fun ~call_id:_ _ ->
+          { Runtime_codex_app_server.success = true
+          ; content = ""
+          ; abort_turn = None
+          })
     }
   in
   (* {"type":"object"} serializes to 17 bytes; name 2 + description 3 + 17 = 22. *)
@@ -2860,7 +2894,7 @@ let test_live_dynamic_tool_subscription () =
       ; call =
           (fun ~call_id:_ _ ->
             incr tool_calls;
-            { success = true; content = "MASC_TOOL_RESULT" })
+            { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None })
       }
     in
     let result =
@@ -3221,6 +3255,10 @@ let () =
             `Quick
             test_dispatch_validation_is_process_free
         ; test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
+        ; test_case
+            "dynamic tool abort stops provider loop"
+            `Quick
+            test_dynamic_tool_abort_stops_the_provider_loop
         ; test_case
             "context error records prior tool effect"
             `Quick

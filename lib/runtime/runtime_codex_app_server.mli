@@ -52,6 +52,7 @@ type turn_result =
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
+  ; abort_turn : string option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =

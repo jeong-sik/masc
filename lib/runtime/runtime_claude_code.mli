@@ -69,6 +69,7 @@ type turn_result =
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
+  ; abort_turn : string option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -113,7 +114,7 @@ type error =
   | Context_window_exceeded of
       { message : string
       ; tool_effect_attempted : bool
-      ; response_started : bool
+      ; response_emitted : bool
       }
   | Turn_failed of string
   | Quota_blocked of

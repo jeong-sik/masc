@@ -218,6 +218,49 @@ let test_cancellation_records_terminal_raw_observation () =
     check int "one tool finish" 1 (count Agent_core.Raw_trace.Tool_execution_finished))
 ;;
 
+let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let executions = ref 0 in
+    let tool, terminal_error =
+      one_dynamic_tool ~active (fun _input ->
+        incr executions;
+        Error "same deterministic failure")
+    in
+    let call index =
+      tool.call
+        ~call_id:(Printf.sprintf "repeat-%d" index)
+        (`Assoc [ "same", `String "input" ])
+    in
+    let first = call 1 in
+    let second = call 2 in
+    let third = call 3 in
+    check int "three calls executed" 3 !executions;
+    check (option string) "first call continues" None first.abort_turn;
+    check (option string) "second call continues" None second.abort_turn;
+    check bool "third call aborts" true (Option.is_some third.abort_turn);
+    check bool "terminal cause is retained" true (Option.is_some !terminal_error))
+;;
+
+let test_dynamic_tool_progress_does_not_trip_the_repeat_guard () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let executions = ref 0 in
+    let tool, terminal_error =
+      one_dynamic_tool ~active (fun _input ->
+        incr executions;
+        Error (Printf.sprintf "changing failure %d" !executions))
+    in
+    for index = 1 to 10 do
+      let result =
+        tool.call
+          ~call_id:(Printf.sprintf "progress-%d" index)
+          (`Assoc [ "same", `String "input" ])
+      in
+      check (option string) "changing result continues" None result.abort_turn
+    done;
+    check int "all progressing calls execute" 10 !executions;
+    check (option string) "progress is not terminal" None !terminal_error)
+;;
+
 let msg role content : Agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
@@ -636,6 +679,14 @@ let () =
             "cancellation records terminal RAW observation"
             `Quick
             test_cancellation_records_terminal_raw_observation
+        ; test_case
+            "repeated exact dynamic tool call aborts the turn"
+            `Quick
+            test_repeated_exact_dynamic_tool_call_aborts_the_turn
+        ; test_case
+            "dynamic tool progress does not trip repeat guard"
+            `Quick
+            test_dynamic_tool_progress_does_not_trip_the_repeat_guard
         ] )
     ; ( "history encoding"
       , [ test_case

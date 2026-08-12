@@ -972,7 +972,10 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; call =
         (fun ~call_id:_ _ ->
-          { success = true; content = String.make (1024 * 1024) 'x' })
+          { success = true
+          ; content = String.make (1024 * 1024) 'x'
+          ; abort_turn = None
+          })
     }
   in
   with_fixture

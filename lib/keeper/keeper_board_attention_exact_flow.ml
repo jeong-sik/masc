@@ -94,18 +94,32 @@ let flow_candidates selected_slots =
 
 let prepare ~base_path:_ ~keeper_name:_ ~net candidate =
   match
-    ( Keeper_board_attention_candidate.resumable_status
+    ( Keeper_board_attention_candidate.status_view
         candidate.Keeper_board_attention_candidate.status
     , net )
   with
-  | ( None
-    | Some
+  | ( Keeper_board_attention_candidate.Suspended_quarantine _
+    | Keeper_board_attention_candidate.Direct_resumable
         (Keeper_board_attention_candidate.Resumable_judged _
-        | Keeper_board_attention_candidate.Resumable_consumed _) ), _ ->
+        | Keeper_board_attention_candidate.Resumable_consumed _)
+    | Keeper_board_attention_candidate.Requeued_resumable
+        { resumable =
+            (Keeper_board_attention_candidate.Resumable_judged _
+            | Keeper_board_attention_candidate.Resumable_consumed _)
+        ; _
+        } ), _ ->
     Error Candidate_not_pending
-  | Some (Keeper_board_attention_candidate.Resumable_pending _), None ->
+  | ( Keeper_board_attention_candidate.Direct_resumable
+        (Keeper_board_attention_candidate.Resumable_pending _)
+    | Keeper_board_attention_candidate.Requeued_resumable
+        { resumable = Keeper_board_attention_candidate.Resumable_pending _; _ }
+    ), None ->
     Error Network_unavailable
-  | Some (Keeper_board_attention_candidate.Resumable_pending _), Some net ->
+  | ( Keeper_board_attention_candidate.Direct_resumable
+        (Keeper_board_attention_candidate.Resumable_pending _)
+    | Keeper_board_attention_candidate.Requeued_resumable
+        { resumable = Keeper_board_attention_candidate.Resumable_pending _; _ }
+    ), Some net ->
     let* messages =
       messages candidate
       |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)

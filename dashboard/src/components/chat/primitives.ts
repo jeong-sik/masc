@@ -2470,12 +2470,46 @@ function ChatControlStatusCard({
   }
 
   if (status === 'external_effect_completed') {
+    // The delivery target names where the terminal surface post actually
+    // landed; legacy events without it keep the generic connector copy.
+    const target = entry.details?.externalEffectTarget ?? null
+    const copy = (() => {
+      if (target?.kind === 'dashboard') {
+        return {
+          title: '대시보드에 게시 완료',
+          body: 'Keeper의 답변이 이 대시보드 채팅에 게시되었습니다.',
+          hint: '위 대화에서 확인할 수 있습니다.',
+        }
+      }
+      if (target?.kind === 'slack') {
+        return {
+          title: 'Slack으로 답변 완료',
+          body: target.threadTs
+            ? `Keeper의 답변이 Slack 채널 ${target.channelId}의 스레드로 전송되었습니다.`
+            : `Keeper의 답변이 Slack 채널 ${target.channelId}로 전송되었습니다.`,
+          hint: '답변 내용은 해당 채널에서 확인할 수 있습니다.',
+        }
+      }
+      if (target?.kind === 'discord') {
+        return {
+          title: 'Discord로 답변 완료',
+          body: `Keeper의 답변이 Discord 채널 ${target.channelId}로 전송되었습니다.`,
+          hint: '답변 내용은 해당 채널에서 확인할 수 있습니다.',
+        }
+      }
+      return {
+        title: '커넥터로 답변 완료',
+        body: 'Keeper의 답변이 외부 커넥터(Slack/Discord)로 전송되었습니다.',
+        hint: '답변 내용은 해당 채널에서 확인할 수 있습니다.',
+      }
+    })()
     return html`
       <article
         class="w-full rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-subtle)] px-4 py-3.5"
         role="status"
         aria-live="polite"
         data-chat-control-status="external_effect_completed"
+        data-chat-effect-target=${target?.kind ?? undefined}
         data-chat-entry-id=${entry.id}
         data-chat-turn-ref=${entry.turnRef ?? undefined}
       >
@@ -2488,16 +2522,16 @@ function ChatControlStatusCard({
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">커넥터로 답변 완료</strong>
+              <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">${copy.title}</strong>
               ${timestamp
                 ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
                 : null}
             </div>
             <p class="mt-1 text-sm leading-paragraph text-[var(--color-fg-secondary)]">
-              Keeper의 답변이 외부 커넥터(Slack/Discord)로 전송되었습니다.
+              ${copy.body}
             </p>
             <p class="mt-0.5 text-xs leading-paragraph text-[var(--color-fg-muted)]">
-              답변 내용은 해당 채널에서 확인할 수 있습니다.
+              ${copy.hint}
             </p>
           </div>
         </div>
@@ -3429,6 +3463,37 @@ function ChatResponseTraceStep({
   `
 }
 
+/** Addressable identity for one turn's timeline block. The assistant row owns
+ *  a turn bundle; a tool-only group is addressed by its first tool row. Both
+ *  ids come from the conversation store, so they survive the transcript
+ *  unmount that a keeper switch causes. */
+function traceCardIdentity(
+  assistant: KeeperConversationEntry | null,
+  tools: readonly KeeperConversationEntry[],
+): string | null {
+  if (assistant) return `turn:${assistant.id}`
+  const first = tools[0]
+  return first ? `tools:${first.id}` : null
+}
+
+/** Turn timelines the operator explicitly opened or collapsed. Only explicit
+ *  toggles are recorded, so the map is bounded by operator actions rather
+ *  than by transcript size. */
+const traceCardOpenChoices = new Map<string, boolean>()
+
+function traceCardOpenOverride(cardKey: string): boolean | undefined {
+  return traceCardOpenChoices.get(cardKey)
+}
+
+function setTraceCardOpenOverride(cardKey: string, open: boolean): void {
+  traceCardOpenChoices.set(cardKey, open)
+}
+
+/** Test-only: drop recorded collapse choices between cases. */
+export function _resetTraceCardOpenChoicesForTests(): void {
+  traceCardOpenChoices.clear()
+}
+
 function ToolTraceCard({
   tools,
   traceSteps = [],
@@ -3448,14 +3513,22 @@ function ToolTraceCard({
 }) {
   const liveTurn = assistant !== null && !turnComplete
   const structuralSummary = assistant?.source === 'autonomous_turn'
-  const userToggledRef = useRef(false)
-  const [open, setOpen] = useState(() => !liveTurn)
-  useEffect(() => {
-    if (!liveTurn && !userToggledRef.current) setOpen(true)
-  }, [liveTurn])
+  // Collapse state is derived, not stored-and-resynced: the operator's
+  // explicit choice for this turn if there is one, otherwise "open once the
+  // turn is no longer live". The choice lives outside the component because
+  // switching keepers unmounts the whole transcript — with the state held in
+  // `useState` + a `useRef` "did the user toggle" flag, both reset on remount
+  // and every collapsed timeline sprang back open.
+  const cardKey = traceCardIdentity(assistant, tools)
+  const [localOpen, setLocalOpen] = useState<boolean | null>(null)
+  const open =
+    (cardKey !== null ? traceCardOpenOverride(cardKey) : localOpen) ?? !liveTurn
   const toggleOpen = () => {
-    userToggledRef.current = true
-    setOpen((o) => !o)
+    const next = !open
+    if (cardKey !== null) setTraceCardOpenOverride(cardKey, next)
+    // Also drives the re-render; carries the state outright for a card with
+    // no addressable turn identity.
+    setLocalOpen(next)
   }
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
   const coverageStateForEntry = (entry: KeeperConversationEntry): ToolOutputCoverageState =>

@@ -326,11 +326,34 @@ function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseR
     'KEEPER_CONNECTED',
     'KEEPER_STREAM_MESSAGE_STOP',
     'KEEPER_STREAM_PING',
-    'KEEPER_EXTERNAL_EFFECT_COMPLETED',
   ].includes(name)) {
     return payload === null
       ? ok(true)
       : fail('ag_ui_event.value', `Expected null ${name} payload`)
+  }
+
+  if (name === 'KEEPER_EXTERNAL_EFFECT_COMPLETED') {
+    // null is the legacy wire value; a typed payload carries the delivery
+    // target of the completed surface post (#28374).
+    if (payload === null) return ok(true)
+    const object = exactCustomObject(payload, name, ['target'])
+    if (!object.success) return object
+    const target = object.data.target
+    if (!isRecord(target)) {
+      return fail('ag_ui_event.value.target', `Expected ${name} target object`)
+    }
+    const targetObject = exactCustomObject(target, name, [
+      'kind',
+      'channel_id',
+      'thread_ts',
+    ])
+    if (!targetObject.success) return targetObject
+    const kind = target.kind
+    if (kind === 'dashboard') return ok(true)
+    if (kind !== 'discord' && kind !== 'slack') {
+      return fail('ag_ui_event.value.target.kind', `Unknown ${name} target kind`)
+    }
+    return requiredString(targetObject.data, 'channel_id')
   }
 
   const allowedFields: Record<string, readonly string[]> = {

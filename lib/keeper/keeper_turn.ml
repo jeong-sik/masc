@@ -776,7 +776,17 @@ let run_keeper_invocation_turn_admitted_inner
                                   detail)
                          | None -> None)
                 in
-                `Assoc [
+                let external_effect_target_field =
+                  match result.terminal_effect_receipt with
+                  | Some (Keeper_tool_execution.Surface_post_completed target) ->
+                    [ ( Keeper_surface_post.delivery_target_wire_key
+                      , Keeper_surface_post.delivery_target_to_yojson
+                          (Keeper_surface_post.delivery_target_of_post_target
+                             target) )
+                    ]
+                  | None -> []
+                in
+                `Assoc ([
                   ("reply", `String result.response_text);
                   ( Keeper_turn_outcome.wire_key,
                     `String
@@ -800,7 +810,7 @@ let run_keeper_invocation_turn_admitted_inner
                      chat row via append_turn ?turn_ref. *)
                   ( Keeper_turn_outcome.turn_ref_wire_key,
                     Ids.Turn_ref.to_yojson turn_ref );
-                ]
+                ] @ external_effect_target_field)
               in
               tool_result_ok_data reply_json
 

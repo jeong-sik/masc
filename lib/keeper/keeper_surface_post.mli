@@ -31,6 +31,32 @@ val dashboard_label : string
 val discord_label : string
 val slack_label : string
 
+type delivery_target =
+  | Delivered_to_dashboard
+  | Delivered_to_discord of { channel_id : string }
+  | Delivered_to_slack of { channel_id : string; thread_ts : string option }
+(** Where a completed surface post actually landed — the destination
+    coordinates of a [post_target] without its payload ([blocks]). Carried on
+    the turn's reply payload and the [External_effect_completed] chat event so
+    the dashboard can name the real destination instead of assuming an
+    external connector (issue #28374). *)
+
+val delivery_target_of_post_target : post_target -> delivery_target
+
+val delivery_target_to_yojson : delivery_target -> Yojson.Safe.t
+(** [{"kind":"dashboard"}], [{"kind":"discord","channel_id":_}] or
+    [{"kind":"slack","channel_id":_,"thread_ts"?:_}]. [thread_ts] is omitted,
+    never [null], when absent. *)
+
+val delivery_target_of_yojson : Yojson.Safe.t -> (delivery_target, string) result
+(** Closed decode of {!delivery_target_to_yojson}. Unknown kinds, missing or
+    blank coordinates are errors, never defaults. *)
+
+val delivery_target_wire_key : string
+(** ["external_effect_target"] — the reply-payload field carrying the
+    delivery target. Shared by the producer ({!Keeper_turn}) and the stream
+    decoder so the wire name cannot drift. *)
+
 val resolve_target :
   surface:string ->
   channel_id:string option ->

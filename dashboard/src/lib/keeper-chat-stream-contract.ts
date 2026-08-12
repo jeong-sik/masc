@@ -134,7 +134,19 @@ type KeeperChatCustomEvent =
       name: 'KEEPER_CONTINUATION_CHECKPOINT'
       value: { message?: string; request_id?: string }
     }
-  | { type: 'CUSTOM'; name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED'; value: null }
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED'
+      // null is the legacy wire value; a typed target names the real
+      // destination of the completed surface post (#28374).
+      value: {
+        target?: {
+          kind?: 'dashboard' | 'discord' | 'slack'
+          channel_id?: string
+          thread_ts?: string
+        }
+      } | null
+    }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_REPLY_DETAILS'

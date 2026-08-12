@@ -1011,6 +1011,7 @@ jobs:
             @test/runtest-test_auth_oauth \
             @test/runtest-test_server_oauth_protocol \
             @test/runtest-test_server_auth_dashboard_actor_resolution \
+            @test/runtest-test_caller_identity_credential_binding \
             @test/runtest-test_error_body_wire_shape \
             @test/runtest-test_mcp_error_code \
             @test/runtest-test_tool_registry_consistency \
@@ -1051,6 +1052,7 @@ jobs:
             @test/runtest-test_clean_only_bug_mirrors \
             @test/runtest-test_contract_harness_auth_script \
             @test/runtest-test_eio_guard_yield_meter \
+            @test/runtest-test_run_registry_concurrent_mutation \
             @test/runtest-test_event_bus_subscription_contract \
             @test/runtest-test_fs_compat_home_guard \
             @test/runtest-test_guarded_dispatch_telemetry \

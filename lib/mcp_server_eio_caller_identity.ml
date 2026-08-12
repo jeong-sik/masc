@@ -203,6 +203,39 @@ let resolve_auth_fallback_agent_name
   | None -> minted
   | Some _ -> minted
 
+(** May the workspace display alias rewrite this caller name?
+
+    [Workspace.resolve_agent_name] answers "which agent record should this
+    name display as" by scanning [agents_dir] for the first file whose name
+    starts with [agent_name ^ "-"]. That is a display-layer lookup over a
+    directory listing, and it happily maps one identity onto an unrelated
+    record that merely shares the prefix — with no [dashboard.json] record
+    present, ["dashboard"] resolves to ["dashboard-admin-deft-cobra"].
+
+    The resolved name is then the subject of [Auth.authorize_tool_v2], which
+    verifies the presented token against *that subject's* credential. So a
+    caller holding the dashboard's own valid credential was authorized as a
+    different agent and rejected with [InvalidToken "Token mismatch"] — the
+    token was never the problem, and no token refresh could fix it.
+
+    The bearer credential is the authority on who the caller is. The display
+    alias may only rewrite a name the presented credential does not already
+    own. *)
+let alias_may_rewrite_identity ~credential_owner ~agent_name =
+  match credential_owner with
+  | Some owner -> not (String.equal owner agent_name)
+  | None -> true
+
+(** The authorization subject for this call: [agent_name], put through the
+    display alias only where {!alias_may_rewrite_identity} allows it.
+    [resolve_alias] is the workspace lookup, injected so the ordering between
+    the guard and the lookup is testable without a live workspace. *)
+let resolve_identity_alias ~credential_owner ~resolve_alias agent_name =
+  if alias_may_rewrite_identity ~credential_owner ~agent_name then
+    resolve_alias agent_name
+  else
+    agent_name
+
 let resolve_explicit_bound_alias ~config ~workspace_initialized ~log_mcp_exn
     ~has_explicit_agent_name agent_name =
   if has_explicit_agent_name && not (Nickname.is_generated_nickname agent_name)
@@ -249,17 +282,23 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
     | Some raw -> Auth.verify_internal_keeper_token config.base_path ~token:raw
     | None -> false
   in
-  let owner_keeper_identity =
+  (* The agent that owns the presented bearer credential. Resolved once and
+     used for both the keeper-owner projection and the alias guard below, so
+     one request performs one credential lookup instead of two. *)
+  let credential_owner =
     match token with
     | None -> None
     | Some raw -> (
         match Auth.resolve_agent_from_token config.base_path ~token:raw with
-        | Ok owner_name -> resolve_owner_keeper_identity config owner_name
+        | Ok owner_name -> Some owner_name
         | Error msg ->
             Log.Auth.routine
-              "owner_keeper_identity: token resolve failed: %s"
+              "caller identity: bearer token resolve failed: %s"
               (Masc_domain.masc_error_to_string msg);
             None)
+  in
+  let owner_keeper_identity =
+    Option.bind credential_owner (resolve_owner_keeper_identity config)
   in
   let mode_gate_error =
     if
@@ -283,8 +322,12 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
      decision. The record field [agent_name] stays a [string]. *)
   let agent_name = minted_name_to_string resolved_minted in
   let agent_name =
-    resolve_explicit_bound_alias ~config ~workspace_initialized ~log_mcp_exn
-      ~has_explicit_agent_name agent_name
+    resolve_identity_alias
+      ~credential_owner
+      ~resolve_alias:
+        (resolve_explicit_bound_alias ~config ~workspace_initialized
+           ~log_mcp_exn ~has_explicit_agent_name)
+      agent_name
   in
   {
     agent_name;

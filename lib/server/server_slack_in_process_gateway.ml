@@ -430,8 +430,39 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
       Slack_observability.Ignored;
     None
 
-let submit_event ?deliver ?team_id ingress ~dispatch_for_delivery ~clock
-    ~base_dir (ev : Gw.slack_event) =
+(* Inbound identity rendering (issue #28376): resolve the author's display
+   label and rewrite [<@U…>] mention escapes before the event reaches the
+   triggered/ambient lanes, so keeper prompts and durable transcripts carry
+   names instead of raw ids. Rendering only — [user_id] stays the identity
+   key everywhere (dedup, speaker_id, continuation channels). Runs after
+   [decode_event], so [mentions_bot] was already detected on the raw wire
+   text. Without a directory (no bot token) events pass through unchanged. *)
+let resolve_event_identity ?user_directory (ev : Gw.slack_event) =
+  match user_directory with
+  | None -> ev
+  | Some directory ->
+    (match ev with
+     | Gw.Message_create ({ user_id; user_name; text; _ } as message) ->
+       let user_name =
+         match user_name with
+         | Some _ as supplied -> supplied
+         | None -> Slack_user_directory.display_label directory ~user_id
+       in
+       Gw.Message_create
+         { message with
+           user_name
+         ; text = Slack_user_directory.rewrite_mentions directory text
+         }
+     | Gw.App_mention ({ text; _ } as mention) ->
+       Gw.App_mention
+         { mention with
+           text = Slack_user_directory.rewrite_mentions directory text
+         }
+     | Gw.Reaction_added _ | Gw.Ignored_event _ -> ev)
+
+let submit_event ?deliver ?team_id ?user_directory ingress ~dispatch_for_delivery
+    ~clock ~base_dir (ev : Gw.slack_event) =
+  let ev = resolve_event_identity ?user_directory ev in
   let submit ~channel_id ~event_id =
     match State.resolve_keeper_for_channel_result ~channel_id with
     | Error reason ->
@@ -628,7 +659,9 @@ let on_ambient ?resolved_keeper_name ?team_id ~base_dir (ev : Gw.slack_event) =
       Slack_observability.Reaction_added
   | Gw.Ignored_event _ -> ()
 
-let submit_ambient_event ?team_id ingress ~base_dir (ev : Gw.slack_event) =
+let submit_ambient_event ?team_id ?user_directory ingress ~base_dir
+    (ev : Gw.slack_event) =
+  let ev = resolve_event_identity ?user_directory ev in
   match ev with
   | Gw.Message_create { channel_id; ts; bot_id = None; _ } -> (
     match State.resolve_keeper_for_channel_result ~channel_id with
@@ -674,6 +707,7 @@ module For_testing = struct
   let submit_ambient_event = submit_ambient_event
   let record_external_attention = record_external_attention
   let mark_attention_resolved = mark_attention_resolved
+  let resolve_event_identity = resolve_event_identity
 end
 
 (* ---------------------------------------------------------------- *)
@@ -705,26 +739,39 @@ let start ~sw ~env ~state =
           without it, [app_mention] events still trigger (a mention by
           construction); only plain-message mention detection on the [message]
           event degrades. *)
-       let bot_user_id, team_id =
+       let bot_user_id, team_id, user_directory =
          match Env_config_slack.bot_token_opt () with
          | None ->
            Log.Server.warn
              "RFC-0317: SLACK_BOT_TOKEN unset; Slack plain-message mention \
               detection disabled (app_mention still triggers)";
-           None, None
-         | Some bot_token -> (
-           match Slack_rest_client.auth_test ~clock ~token:bot_token () with
-           | Ok { user_id; team_id } ->
-             State.record_ready ~bot_user_id:user_id;
-             Log.Server.info "RFC-0317: Slack auth.test ok (bot_user_id=%s)"
-               user_id;
-             Some user_id, team_id
-           | Error e ->
-             Log.Server.warn
-               "RFC-0317: Slack auth.test failed (%s); proceeding without \
-                bot_user_id"
-               (Format.asprintf "%a" Slack_rest_client.pp_error e);
-             None, None)
+           None, None, None
+         | Some bot_token ->
+           (* Inbound identity rendering (issue #28376) shares the bot token:
+              the directory resolves author ids to display labels through
+              users.info, bounded by the same gateway clock. *)
+           let user_directory =
+             Some
+               (Slack_user_directory.create
+                  ~fetch:(fun ~user_id ->
+                    Slack_rest_client.users_info ~clock ~token:bot_token
+                      ~user_id ())
+                  ~now:Unix.gettimeofday
+                    (* NDT-OK: cache-expiry clock only *)
+                  ())
+           in
+           (match Slack_rest_client.auth_test ~clock ~token:bot_token () with
+            | Ok { user_id; team_id } ->
+              State.record_ready ~bot_user_id:user_id;
+              Log.Server.info "RFC-0317: Slack auth.test ok (bot_user_id=%s)"
+                user_id;
+              Some user_id, team_id, user_directory
+            | Error e ->
+              Log.Server.warn
+                "RFC-0317: Slack auth.test failed (%s); proceeding without \
+                 bot_user_id"
+                (Format.asprintf "%a" Slack_rest_client.pp_error e);
+              None, None, user_directory)
        in
        State.set_trigger_policy policy;
        let ingress =
@@ -755,13 +802,14 @@ let start ~sw ~env ~state =
                  ingress
                  ~dispatch_for_delivery:(dispatch_for_config config)
                  ?team_id
+                 ?user_directory
                  ~clock
                  ~base_dir:config.base_path
                  ev)
              ~on_ambient:(fun ev ->
                let config = Mcp_server.workspace_config state in
-               submit_ambient_event ingress ?team_id ~base_dir:config.base_path
-                 ev)
+               submit_ambient_event ingress ?team_id ?user_directory
+                 ~base_dir:config.base_path ev)
              ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e

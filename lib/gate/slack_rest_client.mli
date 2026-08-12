@@ -126,3 +126,32 @@ val parse_auth_test_response :
 (** Classifies an [auth.test] response. Non-2xx HTTP status is [Http_status];
     2xx Slack [ok=false] is [Slack_api]; [ok=true] without [user_id] is
     [Other]. *)
+
+(** One user's profile names from [users.info] (issue #28376). Blank fields
+    are [None], never empty labels. *)
+type user_info_ok = {
+  user_id : string;
+  name : string option;         (** Legacy handle. *)
+  real_name : string option;    (** [profile.real_name]. *)
+  display_name : string option; (** [profile.display_name]. *)
+}
+
+val users_info :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  user_id:string ->
+  unit ->
+  (user_info_ok, error) result
+(** [users.info] for one Slack user id. Bounded by [timeout_sec] (default
+    {!default_http_timeout_sec}) when [~clock] is supplied. A missing
+    [users:read] scope surfaces as [Slack_api]. *)
+
+val build_users_info_request :
+  token:string -> user_id:string -> string * (string * string) list * string
+(** Pure request builder for [users.info], exposed for unit tests. *)
+
+val parse_users_info_response :
+  status:int -> body:string -> (user_info_ok, error) result
+(** Classifies a [users.info] response. Non-2xx HTTP status is
+    [Http_status]; 2xx Slack [ok=false] is [Slack_api]. *)

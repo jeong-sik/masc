@@ -3,6 +3,7 @@ import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { parseAgentStatus } from './agent-status'
 import { UNKNOWN_STATUS_LABEL } from './format-string'
 import {
+  keeperNeedsAttention,
   deriveKeeperRuntimeProjection,
   type KeeperRuntimeProjection,
 } from './keeper-runtime-projection'
@@ -268,7 +269,7 @@ function keeperBand(projection: KeeperRuntimeProjection): RuntimeBand {
   if (projection.opState.kind === 'offline') return 'offline'
   if (projection.opState.phase === 'Draining') return 'paused'
   if (isTransientPhase(projection.opState.phase)) return 'transient'
-  if (projection.signals.some(signal => signal.contributesToAttention)) {
+  if (keeperNeedsAttention(projection)) {
     return 'attention'
   }
   return 'active'

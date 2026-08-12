@@ -103,6 +103,59 @@ let test_external_effect_completed_has_no_direct_reply_error () =
        (Some payload_json)
        "")
 
+let test_canonical_payload_carries_delivery_target () =
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"post-target" ~absolute_turn:3 in
+  let body_with target_json =
+    `Assoc
+      ([ "reply", `String ""
+       ; TO.wire_key, `String (TO.to_label TO.External_effect_completed)
+       ; TO.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref
+       ]
+       @ target_json)
+    |> Yojson.Safe.to_string
+  in
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_with
+          [ ( Masc.Keeper_surface_post.delivery_target_wire_key
+            , `Assoc [ "kind", `String "dashboard" ] )
+          ])
+   with
+   | Ok canonical ->
+     (match canonical.external_effect_target with
+      | Some Masc.Keeper_surface_post.Delivered_to_dashboard -> ()
+      | Some _ | None ->
+        fail "dashboard delivery target was not decoded from the payload")
+   | Error error ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          error));
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_with [])
+   with
+   | Ok canonical ->
+     (match canonical.external_effect_target with
+      | None -> ()
+      | Some _ -> fail "legacy payload without the field must decode to None")
+   | Error error ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          error));
+  match
+    Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+      (body_with
+         [ ( Masc.Keeper_surface_post.delivery_target_wire_key
+           , `Assoc [ "kind", `String "telegram" ] )
+         ])
+  with
+  | Error (Stream.Invalid_external_effect_target _) -> ()
+  | Error error ->
+    fail
+      (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+         error)
+  | Ok _ -> fail "unknown delivery target kind must reject the payload"
+
 let test_external_effect_status_survives_server_projection () =
   let turn_outcome =
     TO.of_result_surface
@@ -668,6 +721,8 @@ let () =
             test_external_effect_completed_has_no_direct_reply_error;
           test_case "external effect status survives server projection" `Quick
             test_external_effect_status_survives_server_projection;
+          test_case "canonical payload carries the delivery target" `Quick
+            test_canonical_payload_carries_delivery_target;
           test_case "external effect status becomes persisted chat block" `Quick
             test_external_effect_status_becomes_persisted_chat_block;
           test_case "terminal effect defer kinds remain distinct" `Quick

@@ -2589,7 +2589,11 @@ let test_dashboard_bootstrap_omits_eager_goal_tree () =
    poll Yojson-parse up to the read clamp (#20659: 50k) per source across
    all sources and peg the single Eio domain -> keeper-fleet freeze. *)
 let test_telemetry_n_default_is_bounded () =
-  let resolve = Server_routes_http_routes_dashboard_setup.resolve_telemetry_n in
+  let resolve ~has_time_window ~n_param =
+    Telemetry_unified.read_limit_to_int
+      (Server_routes_http_routes_dashboard_setup.resolve_telemetry_limit
+         ~has_time_window ~n_param)
+  in
   Alcotest.(check int)
     "windowed + no n -> bounded default, never 0"
     2000 (resolve ~has_time_window:true ~n_param:None);
@@ -2599,11 +2603,25 @@ let test_telemetry_n_default_is_bounded () =
   Alcotest.(check int)
     "unparseable n -> bounded default, never 0"
     2000 (resolve ~has_time_window:true ~n_param:(Some "garbage"));
-  (* #20659 all-in-window contract: explicit n=0 is honoured (clamped
-     downstream), so an operator can still request the full window. *)
+  (* RFC-0372 replaces the #20659 all-in-window opt-out. Explicit n=0 used to
+     pass 0 through as "unbounded"; it now resolves to a positive limit like
+     any other input, and a window larger than that limit is reported via
+     [truncated] instead of scanning every store to its own cap. *)
   Alcotest.(check int)
-    "explicit n=0 preserved"
-    0 (resolve ~has_time_window:true ~n_param:(Some "0"));
+    "explicit n=0 is bounded, not unbounded"
+    Telemetry_unified.default_read_entries
+    (resolve ~has_time_window:true ~n_param:(Some "0"));
+  Alcotest.(check bool)
+    "no input resolves to a non-positive limit"
+    true
+    (List.for_all
+       (fun raw -> resolve ~has_time_window:true ~n_param:(Some raw) > 0)
+       [ "0"; "-1"; "-99999"; "garbage"; "" ]);
+  Alcotest.(check int)
+    "a request above the ceiling is clamped"
+    Telemetry_unified.max_read_entries
+    (resolve ~has_time_window:true
+       ~n_param:(Some (string_of_int (Telemetry_unified.max_read_entries + 1))));
   Alcotest.(check int)
     "explicit positive n honoured"
     500 (resolve ~has_time_window:true ~n_param:(Some "500"))

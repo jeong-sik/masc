@@ -373,7 +373,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         in
         on_send_result final_result;
         send_text_rich_embeds ?clock ~token ~channel_id acc_text
-    | External_effect_completed ->
+    | External_effect_completed _ ->
         external_effect_completed := true;
         continue ()
     | Event_error { message } ->

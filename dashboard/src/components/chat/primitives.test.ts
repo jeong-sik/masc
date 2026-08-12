@@ -12,6 +12,7 @@ import {
   ChatComposer,
   ChatTranscript,
   THINKING_TRACE_PREVIEW_CHARS,
+  _resetTraceCardOpenChoicesForTests,
   type ChatComposerSendPayload,
 } from './primitives'
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
@@ -115,6 +116,13 @@ function entry(
     ...rest,
   }
 }
+
+// Turn-timeline collapse choices are module state by design: they outlive
+// the transcript unmount that switching keepers causes. Clear them between
+// cases so no test inherits another's toggle.
+beforeEach(() => {
+  _resetTraceCardOpenChoicesForTests()
+})
 
 describe('ChatTranscript', () => {
   let container: HTMLDivElement
@@ -242,6 +250,107 @@ describe('ChatTranscript', () => {
     expect(status?.textContent).toContain('커넥터로 답변 완료')
     expect(status?.textContent).toContain('해당 채널에서 확인')
     expect(container.querySelector('.chat-bubble')).toBeNull()
+  })
+
+  it('names the dashboard as the delivery target instead of claiming a connector', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'dashboard-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'analyst',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: { kind: 'dashboard' },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('dashboard')
+    expect(status?.textContent).toContain('대시보드에 게시 완료')
+    expect(status?.textContent).not.toContain('Slack/Discord')
+  })
+
+  it('names the Slack thread destination on a threaded delivery target', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'slack-thread-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'kidsnote',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: {
+                kind: 'slack',
+                channelId: 'C09TK9L4DV4',
+                threadTs: '1786524720.554309',
+              },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('slack')
+    expect(status?.textContent).toContain('Slack으로 답변 완료')
+    expect(status?.textContent).toContain('C09TK9L4DV4')
+    expect(status?.textContent).toContain('스레드로 전송')
+  })
+
+  it('names the Discord channel destination on a discord delivery target', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'discord-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: { kind: 'discord', channelId: 'D-123' },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('discord')
+    expect(status?.textContent).toContain('Discord로 답변 완료')
+    expect(status?.textContent).toContain('D-123')
   })
 
   it('renders a typed continuation checkpoint as durable status, not assistant prose', () => {
@@ -2823,6 +2932,89 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(settledTrace?.getAttribute('data-chat-turn-complete')).toBe('true')
     expect(container.querySelector('[data-chat-trace-step="think"]')?.textContent).toContain(thinking)
     expect(container.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('완료된 응답')
+  })
+
+  // Switching keepers unmounts the whole transcript. The operator's collapse
+  // choice is addressed by turn id, not by component instance, so it has to
+  // survive that unmount — otherwise every timeline the operator folded away
+  // springs back open on return.
+  it('keeps a collapsed turn timeline collapsed across a transcript remount', async () => {
+    const settled = entry({
+      id: 'turn-collapse',
+      text: '완료된 응답',
+      role: 'assistant',
+      source: 'direct_assistant',
+      streamState: null,
+      delivery: 'history',
+      traceSteps: [{ kind: 'think', text: 'considered the options' }],
+    })
+    const renderTurn = (): void => {
+      render(
+        html`<${ChatTranscript}
+          entries=${[settled]}
+          emptyText="empty"
+          groupToolCalls=${true}
+          variant="messenger"
+        />`,
+        container,
+      )
+    }
+    const toggleEl = (): HTMLButtonElement | null =>
+      container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+
+    renderTurn()
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('true')
+
+    fireEvent.click(toggleEl() as HTMLButtonElement)
+    await waitFor(() => {
+      expect(toggleEl()?.getAttribute('aria-expanded')).toBe('false')
+    })
+
+    // The keeper switch: transcript unmounted, then mounted again.
+    render(null, container)
+    renderTurn()
+
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('[data-chat-trace-step="think"]')).toBeNull()
+  })
+
+  it('re-opens a turn timeline the operator expanded after a remount', async () => {
+    const live = (streaming: boolean): KeeperConversationEntry =>
+      entry({
+        id: 'turn-expand',
+        text: streaming ? '응답 작성 중' : '완료된 응답',
+        role: 'assistant',
+        source: 'direct_assistant',
+        streamState: streaming ? 'streaming' : null,
+        delivery: streaming ? 'streaming' : 'history',
+        traceSteps: [{ kind: 'think', text: 'considered the options' }],
+      })
+    const renderTurn = (streaming: boolean): void => {
+      render(
+        html`<${ChatTranscript}
+          entries=${[live(streaming)]}
+          emptyText="empty"
+          groupToolCalls=${true}
+          variant="messenger"
+        />`,
+        container,
+      )
+    }
+    const toggleEl = (): HTMLButtonElement | null =>
+      container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+
+    renderTurn(true)
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(toggleEl() as HTMLButtonElement)
+    await waitFor(() => {
+      expect(toggleEl()?.getAttribute('aria-expanded')).toBe('true')
+    })
+
+    render(null, container)
+    renderTurn(true)
+
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('true')
   })
 
   it('renders board post ids in assistant prose as board detail links', () => {

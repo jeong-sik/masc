@@ -455,7 +455,7 @@ let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
   let result =
     Telemetry_unified.read_unified_result ~base_path:dir
       ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Keeper_metric ]
-      ~n:100 ()
+      ~limit:(Telemetry_unified.read_limit_of_int 100) ()
   in
   Alcotest.(check int) "limited result" 100 (List.length result.entries);
   Alcotest.(check int) "marker total" 101 result.total_matching_entries;
@@ -490,7 +490,7 @@ let test_keeper_metrics_fast_path_sets_truncated_with_marker () =
   let result =
     Telemetry_unified.read_unified_result ~base_path:dir
       ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Keeper_metric ]
-      ~n:2 ()
+      ~limit:(Telemetry_unified.read_limit_of_int 2) ()
   in
   Alcotest.(check int) "returned limit" 2 (List.length result.entries);
   Alcotest.(check int) "marker total" 3 result.total_matching_entries;
@@ -538,7 +538,7 @@ let test_n_limits_output () =
   );
   let entries =
     Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
-      ~sources:[Telemetry_unified.Agent_event] ~n:10 ()
+      ~sources:[Telemetry_unified.Agent_event] ~limit:(Telemetry_unified.read_limit_of_int 10) ()
   in
   Alcotest.(check int) "limited to 10" 10 (List.length entries)
 
@@ -558,7 +558,7 @@ let test_time_window_reports_total_before_limit () =
   let result =
     Telemetry_unified.read_unified_result ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event]
-      ~since_ts:(now -. 3_600.0) ~until_ts:now ~n:2 ()
+      ~since_ts:(now -. 3_600.0) ~until_ts:now ~limit:(Telemetry_unified.read_limit_of_int 2) ()
   in
   Alcotest.(check int) "total matching preserved before limit" 3
     result.total_matching_entries;
@@ -603,7 +603,7 @@ let test_time_window_reads_matching_day_files () =
   Alcotest.(check (list string)) "range spans multiple day files"
     ["today"; "yesterday"] events
 
-let test_time_window_n_zero_disables_truncation () =
+let test_time_window_n_zero_is_bounded () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_window_unbounded" in
@@ -618,17 +618,24 @@ let test_time_window_n_zero_disables_truncation () =
   let result =
     Telemetry_unified.read_unified_result ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event]
-      ~since_ts:(now -. 3_600.0) ~until_ts:now ~n:0 ()
+      ~since_ts:(now -. 3_600.0) ~until_ts:now ~limit:(Telemetry_unified.read_limit_of_int 0) ()
   in
-  Alcotest.(check int) "returns every matching entry" 3 (List.length result.entries);
+  (* RFC-0372: n=0 no longer opts out of truncation. It resolves to
+     [default_read_entries], which still covers these three entries, so the
+     window contract holds — what changed is that a store larger than the
+     limit is now truncated instead of scanned whole. *)
+  Alcotest.(check int) "window entries within the limit are all returned" 3
+    (List.length result.entries);
   Alcotest.(check int) "total matching preserved" 3 result.total_matching_entries;
-  Alcotest.(check bool) "unbounded result is not truncated" false result.truncated
+  Alcotest.(check bool) "below the limit, nothing is truncated" false
+    result.truncated
 
-(* n=0 ("unlimited") with no time window must reach the tail-bounded reader
-   ([read_recent]), not the full-store [read_range] scan (1970->today) that
-   Yojson-parsed the whole store and starved keeper fibers, and not the empty
-   list the #20649 regression produced for fixed sources. With fewer entries
-   than [unbounded_window_scan_cap], all are returned. *)
+(* n=0 with no time window must reach the tail-bounded reader ([read_recent]),
+   not the full-store [read_range] scan (1970->today) that Yojson-parsed the
+   whole store and starved keeper fibers, and not the empty list the #20649
+   regression produced for fixed sources. Since RFC-0372 n=0 is not "unlimited"
+   at all — it resolves to [default_read_entries] — so with fewer entries than
+   that, all are returned. *)
 let test_n_zero_no_window_returns_bounded () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -644,10 +651,27 @@ let test_n_zero_no_window_returns_bounded () =
   let result =
     Telemetry_unified.read_unified_result ~base_path:dir
       ~masc_root:(masc_root dir)
-      ~sources:[ Telemetry_unified.Agent_event ] ~n:0 ()
+      ~sources:[ Telemetry_unified.Agent_event ] ~limit:(Telemetry_unified.read_limit_of_int 0) ()
   in
   Alcotest.(check int) "n=0 no-window returns all via bounded reader" 3
     (List.length result.entries)
+
+(* RFC-0372 Phase 1: the request-level limit is a closed type. No input can
+   express "unbounded", which is what let one request materialise every store
+   to its own 50k cap. These are the boundary values a caller can supply. *)
+let test_read_limit_has_no_unbounded_form () =
+  let to_int n = Telemetry_unified.read_limit_to_int
+                   (Telemetry_unified.read_limit_of_int n) in
+  Alcotest.(check int) "zero maps to the default, not to unbounded"
+    Telemetry_unified.default_read_entries (to_int 0);
+  Alcotest.(check int) "negative maps to the default"
+    Telemetry_unified.default_read_entries (to_int (-1));
+  Alcotest.(check int) "a request above the ceiling is clamped to it"
+    Telemetry_unified.max_read_entries
+    (to_int (Telemetry_unified.max_read_entries + 1));
+  Alcotest.(check int) "an in-range request is preserved" 42 (to_int 42);
+  Alcotest.(check bool) "every limit is positive" true
+    (to_int 0 > 0 && to_int (-1) > 0)
 
 (* ── Summary with data ───────────────────────────── *)
 
@@ -933,7 +957,7 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
           Telemetry_unified.Execution_receipt;
         ]
       ~keeper_name:"alice"
-      ~n:10
+      ~limit:(Telemetry_unified.read_limit_of_int 10)
       ()
   in
   if List.length entries <> 2 then
@@ -989,7 +1013,7 @@ let test_scope_filter_matches_runtime_contract_fields () =
       ~session_id:"sess-nested"
       ~operation_id:"op-nested"
       ~worker_run_id:"run-nested"
-      ~n:10
+      ~limit:(Telemetry_unified.read_limit_of_int 10)
       ()
   in
   Alcotest.(check int) "runtime contract scoped row visible" 1
@@ -1036,7 +1060,7 @@ let test_goal_event_source_and_summary () =
       ~base_path:dir
       ~masc_root:root
       ~sources:[ Telemetry_unified.Goal_event ]
-      ~n:10
+      ~limit:(Telemetry_unified.read_limit_of_int 10)
       ()
   in
   Alcotest.(check int) "two goal events" 2 (List.length entries);
@@ -1510,10 +1534,12 @@ let () =
             test_time_window_reports_total_before_limit;
           Alcotest.test_case "time window reads matching day files" `Quick
             test_time_window_reads_matching_day_files;
-          Alcotest.test_case "time window n=0 disables truncation" `Quick
-            test_time_window_n_zero_disables_truncation;
+          Alcotest.test_case "time window n=0 is bounded" `Quick
+            test_time_window_n_zero_is_bounded;
           Alcotest.test_case "n=0 no-window returns bounded (not full scan)"
             `Quick test_n_zero_no_window_returns_bounded;
+          Alcotest.test_case "read_limit has no unbounded form" `Quick
+            test_read_limit_has_no_unbounded_form;
           Alcotest.test_case "trajectory and receipts" `Quick
             test_read_unified_reads_trajectory_and_execution_receipts;
           Alcotest.test_case "runtime contract scope filter" `Quick

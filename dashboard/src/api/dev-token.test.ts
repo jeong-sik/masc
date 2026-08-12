@@ -197,7 +197,10 @@ describe('ensureDevToken', () => {
 
     await expect(refreshDevTokenAfterAuthError('invalid_token')).resolves.toBe(true)
     expect(token).toBe('fresh-token')
-    expect(clearStoredToken).toHaveBeenCalledTimes(1)
+    // Recovery replaces the token in place. Clearing first would be a second
+    // token-revision change, and each one re-dials the dashboard websocket.
+    expect(clearStoredToken).not.toHaveBeenCalled()
+    expect(setStoredToken).toHaveBeenCalledTimes(1)
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
 
     await expect(refreshDevTokenAfterAuthError('insufficient_role')).resolves.toBe(false)
@@ -229,7 +232,7 @@ describe('ensureDevToken', () => {
 
     const first = refreshDevTokenAfterAuthError('invalid_token')
     const second = refreshDevTokenAfterAuthError('token_expired')
-    expect(clearStoredToken).toHaveBeenCalledTimes(1)
+    expect(clearStoredToken).not.toHaveBeenCalled()
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
 
     resolveFetch(jsonResponse({
@@ -240,5 +243,39 @@ describe('ensureDevToken', () => {
 
     await expect(Promise.all([first, second])).resolves.toEqual([true, true])
     expect(token).toBe('fresh-token')
+  })
+
+  // A rejection the token cannot fix (server-side identity or policy) hands
+  // back the same credential. Calling that "recovered" makes the caller retry
+  // the identical request and refresh again on the identical failure, and
+  // every pass re-dials the websocket.
+  it('does not report recovery when the endpoint returns the same token', async () => {
+    let token: string | null = 'current-token'
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = {
+      source: 'dev',
+      actor: 'dashboard',
+      role: 'admin',
+    }
+    getStoredToken.mockImplementation(() => token)
+    getStoredTokenMeta.mockImplementation(() => meta)
+    clearStoredToken.mockImplementation(() => {
+      token = null
+      meta = null
+    })
+    setStoredToken.mockImplementation((nextToken, nextMeta) => {
+      token = nextToken
+      meta = nextMeta
+    })
+    fetchWithTimeout.mockResolvedValueOnce(jsonResponse({
+      token: 'current-token',
+      actor: 'dashboard',
+      role: 'admin',
+    }))
+
+    await expect(refreshDevTokenAfterAuthError('invalid_token')).resolves.toBe(false)
+    expect(token).toBe('current-token')
+    // Unchanged credential, so nothing may announce a token change.
+    expect(setStoredToken).not.toHaveBeenCalled()
+    expect(clearStoredToken).not.toHaveBeenCalled()
   })
 })

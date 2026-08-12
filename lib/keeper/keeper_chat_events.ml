@@ -44,7 +44,8 @@ type keeper_chat_event =
   | Text_message_start of { message_id : string; role : role }
   | Text_delta of string
   | Text_message_end
-  | External_effect_completed
+  | External_effect_completed of
+      { target : Keeper_surface_post.delivery_target option }
   | Run_finished of { run_id : string }
   | Event_error of { message : string }
   | Reply_details of reply_details

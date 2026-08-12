@@ -281,6 +281,45 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
+  it('accepts external-effect completion with and without a delivery target', () => {
+    const event = (value: unknown) => ({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ag_ui_event: {
+        type: 'CUSTOM',
+        threadId: 'keeper-consumer:sangsu',
+        name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
+        value,
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(SSEMessageSchema.safeParse(event(null)).success).toBe(true)
+    expect(
+      SSEMessageSchema.safeParse(event({ target: { kind: 'dashboard' } })).success,
+    ).toBe(true)
+    expect(
+      SSEMessageSchema.safeParse(
+        event({
+          target: {
+            kind: 'slack',
+            channel_id: 'C09TK9L4DV4',
+            thread_ts: '1786524720.554309',
+          },
+        }),
+      ).success,
+    ).toBe(true)
+    expect(
+      SSEMessageSchema.safeParse(event({ target: { kind: 'telegram' } })).success,
+    ).toBe(false)
+    expect(
+      SSEMessageSchema.safeParse(event({ target: { kind: 'slack' } })).success,
+    ).toBe(false)
+    expect(
+      SSEMessageSchema.safeParse(event({ widened: true })).success,
+    ).toBe(false)
+  })
+
   it('rejects an untyped Keeper custom event name', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'keeper_chat_operation_event',

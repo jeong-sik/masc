@@ -102,8 +102,18 @@ let project ~timestamp ~redact_text ~redact_json state event =
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
              ~run_id:state.run_id ~message_id:state.message_id
              Ag_ui.Text_message_end) )
-  | External_effect_completed ->
-      state, Some (custom ~timestamp ~redact_json state External_effect_completed `Null)
+  | External_effect_completed { target } ->
+      (* [`Null] is the legacy wire value; a typed target upgrades it to an
+         object naming the real destination so the dashboard stops assuming
+         an external connector (#28374). *)
+      let value =
+        match target with
+        | None -> `Null
+        | Some target ->
+          `Assoc
+            [ "target", Keeper_surface_post.delivery_target_to_yojson target ]
+      in
+      state, Some (custom ~timestamp ~redact_json state External_effect_completed value)
   | Agent_core_stream_connected ->
       state, Some (custom ~timestamp ~redact_json state Connected `Null)
   | Agent_core_stream_message_start { provider_message_id; model; usage } ->

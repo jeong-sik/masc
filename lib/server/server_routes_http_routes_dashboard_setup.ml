@@ -48,27 +48,37 @@ let handle_dashboard_workspace = Server_routes_http_dashboard_handlers.handle_da
    ([observatory.ts] fetchTelemetry with since_ms/until_ms and no n) then
    Yojson-parsed up to the telemetry read clamp (50k, #20659) entries per
    source across all sources — enough to peg the single Eio domain on a
-   non-yielding parse and freeze the keeper fleet. Bound the DEFAULT here;
-   an explicit n=0 still honours the all-in-window contract from #20659. *)
+   non-yielding parse and freeze the keeper fleet. These bound the DEFAULT;
+   since RFC-0372 an explicit n=0 no longer opts out — see
+   [resolve_telemetry_limit]. *)
 let default_telemetry_limit = 100
 let default_windowed_telemetry_limit = 2000
 
 (* Resolve the effective entry limit for /api/v1/dashboard/telemetry.
    Absent or unparseable [n_param] falls back to a bounded default
    (windowed: [default_windowed_telemetry_limit], else
-   [default_telemetry_limit]) so no request defaults to an unbounded read.
-   An explicit n=0 parses to [Some 0] and is preserved (all-in-window,
-   clamped downstream by #20659). Pure + exposed so the freeze guard
-   (no permissive 0 default) is unit-testable. *)
-let resolve_telemetry_n ~has_time_window ~(n_param : string option) =
+   [default_telemetry_limit]).
+
+   RFC-0372: the result is a [Telemetry_unified.read_limit], not an int, so
+   "unbounded" cannot leave this function. #20659 preserved an explicit n=0 as
+   an all-in-window contract; that form is now clamped to
+   [Telemetry_unified.max_read_entries] and answered with [truncated = true]
+   instead of scanning every store to its own cap. The response contract
+   (entries + truncated) is unchanged; only the unbounded read is gone.
+
+   Pure + exposed so the freeze guard is unit-testable. *)
+let resolve_telemetry_limit ~has_time_window ~(n_param : string option) =
   let default_n =
     if has_time_window
     then default_windowed_telemetry_limit
     else default_telemetry_limit
   in
-  match n_param with
-  | Some raw -> Option.value ~default:default_n (int_of_string_opt raw) |> max 0
-  | None -> default_n
+  let requested =
+    match n_param with
+    | Some raw -> Option.value ~default:default_n (int_of_string_opt raw)
+    | None -> default_n
+  in
+  Telemetry_unified.read_limit_of_int requested
 
 (* Telemetry unified view handler — extracted from add_routes pipeline
    as part of godfile near-threshold split. *)
@@ -93,10 +103,11 @@ let handle_telemetry request reqd =
         (float_query_param req "until_ms")
     in
     let has_time_window = Option.is_some since_ts || Option.is_some until_ts in
-    let n =
-      resolve_telemetry_n ~has_time_window
+    let limit =
+      resolve_telemetry_limit ~has_time_window
         ~n_param:(Server_utils.query_param req "n")
     in
+    let n = Telemetry_unified.read_limit_to_int limit in
     let offset =
       match Server_utils.query_param req "offset" with
       | Some raw ->
@@ -176,7 +187,7 @@ let handle_telemetry request reqd =
         Server_timing.measure timing Telemetry_query (fun () ->
           Telemetry_unified.read_unified_result ~base_path ~masc_root
             ~sources ?keeper_name ?session_id ?operation_id
-            ?worker_run_id ?since_ts ?until_ts ~n ~offset ())
+            ?worker_run_id ?since_ts ?until_ts ~limit ~offset ())
       in
       let generated_at = Masc_domain.now_iso () in
       Server_timing.measure timing Json_serialize (fun () ->

@@ -57,6 +57,19 @@ const FeatureHealthWireSchema = Schema.Struct({
 
 type FeatureHealthWire = Schema.Schema.Type<typeof FeatureHealthWireSchema>
 
+function sameFeature(
+  left: FeatureHealthWire['all_features'][number],
+  right: FeatureHealthWire['all_features'][number],
+): boolean {
+  return left.env_name === right.env_name
+    && left.description === right.description
+    && left.category === right.category
+    && left.lifecycle === right.lifecycle
+    && left.is_enabled === right.is_enabled
+    && left.source === right.source
+    && left.status === right.status
+}
+
 function featureHealthInvariantIssues(data: FeatureHealthWire) {
   const issues: Array<{ readonly path: ReadonlyArray<PropertyKey>; readonly message: string }> = []
   const addIssue = (
@@ -114,14 +127,20 @@ function featureHealthInvariantIssues(data: FeatureHealthWire) {
     'must equal the number of env-sourced features',
   )
 
-  const allNames = new Set(data.all_features.map(feature => feature.env_name))
+  const allFeaturesByName = new Map(
+    data.all_features.map(feature => [feature.env_name, feature] as const),
+  )
+  const allNames = new Set(allFeaturesByName.keys())
+  const allCategories = new Set(
+    data.all_features.map(feature => feature.category),
+  )
   addIssue(
     allNames.size === data.all_features.length,
     ['all_features'],
     'must not contain duplicate env_name values',
   )
 
-  const categorizedNames: string[] = []
+  const categorizedFeatures: FeatureHealthWire['all_features'][number][] = []
   for (const [category, categoryData] of Object.entries(
     data.features_by_category,
   )) {
@@ -143,11 +162,18 @@ function featureHealthInvariantIssues(data: FeatureHealthWire) {
       ['features_by_category', category, 'features'],
       'must contain only features from this category',
     )
-    categorizedNames.push(
-      ...categoryData.features.map(feature => feature.env_name),
-    )
+    categorizedFeatures.push(...categoryData.features)
   }
 
+  const categoryNames = Object.keys(data.features_by_category)
+  addIssue(
+    categoryNames.length === allCategories.size
+      && categoryNames.every(category => allCategories.has(category)),
+    ['features_by_category'],
+    'keys must equal the categories present in all_features',
+  )
+
+  const categorizedNames = categorizedFeatures.map(feature => feature.env_name)
   const categorizedNameSet = new Set(categorizedNames)
   addIssue(
     categorizedNames.length === data.all_features.length
@@ -155,6 +181,14 @@ function featureHealthInvariantIssues(data: FeatureHealthWire) {
       && [...allNames].every(name => categorizedNameSet.has(name)),
     ['features_by_category'],
     'must partition all_features exactly once',
+  )
+  addIssue(
+    categorizedFeatures.every(feature => {
+      const canonical = allFeaturesByName.get(feature.env_name)
+      return canonical !== undefined && sameFeature(feature, canonical)
+    }),
+    ['features_by_category'],
+    'must contain the same feature values as all_features',
   )
 
   return issues

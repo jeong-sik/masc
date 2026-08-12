@@ -125,4 +125,36 @@ describe('decodeFeatureHealthData', () => {
 
     expect(error.message).toContain('features_by_category')
   })
+
+  it('rejects a category key that is absent from all_features', () => {
+    const error = expectDrift({
+      ...currentWire(),
+      features_by_category: {
+        ...currentWire().features_by_category,
+        ghost: { total: 0, enabled: 0, features: [] },
+      },
+    })
+
+    expect(error.message).toContain('keys must equal the categories')
+  })
+
+  it('rejects a category projection that disagrees with all_features', () => {
+    const wire = currentWire()
+    const error = expectDrift({
+      ...wire,
+      features_by_category: {
+        transport: {
+          ...wire.features_by_category.transport,
+          features: [
+            {
+              ...wire.features_by_category.transport.features[0],
+              description: 'stale projection',
+            },
+          ],
+        },
+      },
+    })
+
+    expect(error.message).toContain('same feature values as all_features')
+  })
 })

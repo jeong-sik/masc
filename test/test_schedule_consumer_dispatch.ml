@@ -99,7 +99,7 @@ let with_workspace f =
   Board_dispatch.init_jsonl ();
   let config = Workspace.default_config dir in
   ignore (Workspace.init config ~agent_name:(Some "test"));
-  (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config with
+  (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
    | Ok _ -> ()
    | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
   Executor_pool_ref.For_testing.with_pool

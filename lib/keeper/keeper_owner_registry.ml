@@ -28,6 +28,7 @@ type pool =
   ; owner_handles : Keeper_owner.t list Atomic.t
   ; stopping : bool Atomic.t
   ; operation_runner : Keeper_owner.operation_runner option
+  ; on_turn_slot_released : (keeper_name:string -> unit) option
   }
 
 let pools : (string, pool) Hashtbl.t = Hashtbl.create 4
@@ -166,6 +167,8 @@ let start_owner pool ~keeper_name ~initial_meta =
       (* NDT-OK: wall time is injected once at the Owner persistence boundary. *)
       ~now:Unix.gettimeofday
       ~operation_runner:pool.operation_runner
+      ~on_turn_slot_released:
+        (Option.map (fun notify () -> notify ~keeper_name) pool.on_turn_slot_released)
       ~keeper_name
       ~initial_meta
 ;;
@@ -241,7 +244,7 @@ let ensure_empty_in_pool pool keeper_name =
               Ok owner)))
 ;;
 
-let install_from_store ~sw ~operation_runner config =
+let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
   let base_path = pool_key config.Workspace.base_path in
   match load_all config with
   | Error _ as error -> error
@@ -255,6 +258,7 @@ let install_from_store ~sw ~operation_runner config =
       ; owner_handles = Atomic.make []
       ; stopping = Atomic.make false
       ; operation_runner
+      ; on_turn_slot_released
       }
     in
     let installed =

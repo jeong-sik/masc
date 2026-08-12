@@ -367,6 +367,7 @@ type wakeup_intent =
   | Compaction_signal
   | Attention_result
   | Runtime_parameter_change
+  | Turn_slot_released
 
 let wakeup_intent_to_wire = function
   | Reactive_signal -> "reactive_signal"
@@ -378,6 +379,7 @@ let wakeup_intent_to_wire = function
   | Compaction_signal -> "compaction_signal"
   | Attention_result -> "attention_result"
   | Runtime_parameter_change -> "runtime_parameter_change"
+  | Turn_slot_released -> "turn_slot_released"
 ;;
 
 type wakeup_outcome =

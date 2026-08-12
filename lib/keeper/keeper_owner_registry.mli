@@ -27,6 +27,7 @@ exception Install_failed of install_error
 val install_from_store
   :  sw:Eio.Switch.t
   -> operation_runner:Keeper_owner.operation_runner option
+  -> on_turn_slot_released:(keeper_name:string -> unit) option
   -> Workspace.config
   -> (int, install_error) result
 (** Load each valid persisted Keeper independently and start exactly one owner

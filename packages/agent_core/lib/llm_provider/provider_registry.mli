@@ -29,15 +29,12 @@ type entry =
   ; is_available : unit -> bool
   }
 
-(** Mutable provider registry. *)
+(** Provider registry backed by atomic immutable snapshots. *)
 type t
 
-(** Create an empty registry using {!Eio.Mutex}. *)
+(** Create an empty registry. Reads observe one immutable snapshot and writes
+    atomically swap a pure state transition. *)
 val create : unit -> t
-
-(** Create an empty registry using {!Stdlib.Mutex} for synchronous tests and
-    serialization code that runs outside of an Eio scheduler. *)
-val create_sync : unit -> t
 
 (** Register a provider. Overwrites if name already exists. *)
 val register : t -> entry -> unit

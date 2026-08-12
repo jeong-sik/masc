@@ -120,7 +120,7 @@ let with_fixture ?auth_json ?before_initialize_response steps f =
 
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
-    ?on_stream_event path =
+    ?on_turn_started_delay_s ?on_stream_event path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     let config =
@@ -137,6 +137,13 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
            Ok ())
         on_session_ready_delay_s
     in
+    let on_turn_started =
+      Option.map
+        (fun delay_s ~session_id:_ ~turn_id:_ ->
+           Eio.Time.sleep clock delay_s;
+           Ok ())
+        on_turn_started_delay_s
+    in
     Runtime_claude_code.run_turn
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock
@@ -144,6 +151,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       ~dynamic_tools
       ?session_mode
       ?on_session_ready
+      ?on_turn_started
       ?on_stream_event
       config
       ~prompt:"Return the fixture marker")
@@ -237,6 +245,21 @@ let test_no_deadline_starts_after_user_message () =
        with
        | Ok turn -> check string "unbounded result" "MASC_CLAUDE_OK" turn.text
        | Error error -> fail (Runtime_claude_code.error_to_string error))
+;;
+
+let test_no_deadline_keeps_turn_started_callback_bounded () =
+  with_fixture [ Emit assistant; Emit result ] (fun path ->
+    match
+      run_fixture
+        ~admission_timeout_s:0.05
+        ~no_turn_deadline:true
+        ~on_turn_started_delay_s:0.2
+        path
+    with
+    | Error (Runtime_claude_code.Timeout seconds) ->
+      check (float 0.001) "host callback timeout" 0.05 seconds
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "no-deadline turn made the host state callback unbounded")
 ;;
 
 let test_state_callback_timeout_is_typed () =
@@ -1087,6 +1110,10 @@ let () =
             "no deadline starts after user message"
             `Quick
             test_no_deadline_starts_after_user_message
+        ; test_case
+            "no deadline keeps turn-started callback bounded"
+            `Quick
+            test_no_deadline_keeps_turn_started_callback_bounded
         ; test_case
             "state callback timeout is typed"
             `Quick

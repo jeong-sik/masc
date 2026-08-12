@@ -670,23 +670,47 @@ let test_ag_ui_frames_are_wire_encoded () =
               event_id))
     first_masc_events
 
-let test_dashboard_dev_token_cannot_call_admin_route () =
-  with_server @@ fun ~port ~auth_token ~base_path:_ ->
-  let result =
-    run_curl
-      ~headers:
-        [ ("Accept", "application/json")
-        ; ("Authorization", "Bearer " ^ auth_token)
-        ; ("Content-Type", "application/json")
-        ]
-      ~method_:"POST"
-      ~body:"{}"
-      ~max_time:2.0
-      ~port
-      ~path:"/api/v1/dashboard/gate/mode"
-      ()
-  in
-  check_status "dashboard Worker token denied CanAdmin route" 403 result
+(* A credential the server accepts as a genuine non-admin caller. The loopback
+   dashboard dev-token used to serve that role here, but #28354 issues it as
+   [Masc_domain.Admin], so probing a CanAdmin gate with it stopped proving the
+   gate exists. Mint the negative probe explicitly instead of borrowing a
+   credential whose role is someone else's decision. *)
+let create_worker_token base_path ~agent_name =
+  match Auth.create_token base_path ~agent_name ~role:Masc_domain.Worker with
+  | Ok (raw_token, _) -> raw_token
+  | Error error ->
+    fail ("create_token failed: " ^ Masc_domain.masc_error_to_string error)
+
+let gate_mode_post ~port ~token =
+  run_curl
+    ~headers:
+      [ ("Accept", "application/json")
+      ; ("Authorization", "Bearer " ^ token)
+      ; ("Content-Type", "application/json")
+      ]
+    ~method_:"POST"
+    ~body:"{}"
+    ~max_time:2.0
+    ~port
+    ~path:"/api/v1/dashboard/gate/mode"
+    ()
+
+let test_gate_mode_route_is_admin_gated () =
+  with_server @@ fun ~port ~auth_token ~base_path ->
+  let worker_token = create_worker_token base_path ~agent_name:"sse-storm-worker" in
+  check_status
+    "Worker token denied CanAdmin route"
+    403
+    (gate_mode_post ~port ~token:worker_token);
+  (* The dashboard dev-token is Admin since #28354, so it clears authorization
+     and the empty body is what the route rejects. Asserting "not 403" rather
+     than a specific success code keeps this pinned to the authorization
+     decision, which is the subject, and leaves the request schema free to
+     change. *)
+  match (gate_mode_post ~port ~token:auth_token).status with
+  | Some 403 -> fail "dashboard dev-token was denied a CanAdmin route (#28354 issues it as Admin)"
+  | Some _ -> ()
+  | None -> fail "dashboard dev-token gate/mode request produced no HTTP status"
 
 let check_operation_error label expected_code result =
   match Yojson.Safe.from_string result.body with
@@ -774,9 +798,15 @@ let test_official_client_recovery_uses_real_admin_route () =
   let session_path =
     "/api/v1/runtime/sessions/official-client?keeper_name=" ^ keeper_name
   in
+  (* Probe with a minted Worker rather than the dashboard dev-token: #28354
+     issues that token as Admin, so it now reads this route successfully and
+     would turn the assertion into a claim about nothing. *)
+  let worker_token =
+    create_worker_token base_path ~agent_name:"sse-storm-recovery-worker"
+  in
   let worker =
     run_curl
-      ~headers:[ "Authorization", "Bearer " ^ auth_token ]
+      ~headers:[ "Authorization", "Bearer " ^ worker_token ]
       ~max_time:2.0
       ~port
       ~path:session_path
@@ -921,9 +951,9 @@ let () =
     [
       ( "auth"
       , [ test_case
-            "dev-token cannot call admin route"
+            "gate/mode is admin gated"
             `Slow
-            test_dashboard_dev_token_cannot_call_admin_route
+            test_gate_mode_route_is_admin_gated
         ; test_case
             "dev-token can use Keeper operation routes"
             `Slow

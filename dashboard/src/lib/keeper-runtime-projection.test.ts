@@ -184,6 +184,7 @@ describe('deriveKeeperRuntimeProjection', () => {
       'ksm_phase',
       'heartbeat',
       'context_ratio',
+      'blocked_tasks',
       'fiber_alive',
       'stop_requested',
       'runtime_trace',
@@ -233,5 +234,39 @@ describe('deriveKeeperRuntimeProjection', () => {
 
     expect(projection.headline).toBe('턴 진행 중')
     expect(projection.tone).toBe('ok')
+  })
+})
+
+
+// One attention axis: whatever a fleet surface uses to say 주의 has to come
+// from this list. The keepers roster used to answer from the execution row's
+// blocked/needs_attention fields while monitoring answered from these signals,
+// so the same keeper read 주의 on one surface and 실행 중 on the other.
+describe('attention axis', () => {
+  const attentionKinds = (k: Keeper) =>
+    deriveKeeperRuntimeProjection({ keeper: k, composite: null, nowMs: NOW_MS })
+      .signals.filter(signal => signal.contributesToAttention)
+      .map(signal => signal.kind)
+
+  it('raises an attention signal for blocked work carried on the execution row', () => {
+    expect(attentionKinds(keeper({ blocked_task_count: 3 }))).toContain('blocked_tasks')
+  })
+
+  it('raises an attention signal for an explicit attention flag', () => {
+    expect(attentionKinds(keeper({ needs_attention: true }))).toContain('blocked_tasks')
+  })
+
+  it('stays clear when there is no blocked work and no flag', () => {
+    expect(attentionKinds(keeper({ blocked_task_count: 0 }))).not.toContain('blocked_tasks')
+  })
+
+  it('carries the blocked count in the signal detail so a surface can show it', () => {
+    const signal = deriveKeeperRuntimeProjection({
+      keeper: keeper({ blocked_task_count: 3 }),
+      composite: null,
+      nowMs: NOW_MS,
+    }).signals.find(s => s.kind === 'blocked_tasks')
+    expect(signal?.detail).toBe('blocked_task_count 3')
+    expect(signal?.hint).toContain('3건')
   })
 })

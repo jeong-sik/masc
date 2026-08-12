@@ -317,7 +317,7 @@ let test_nullable_string_projection_is_literal base_path =
         ; "goal_id", `String "goal-9"
         ; "goal_ids", `List [ `String "goal-9" ]
         ; "actor", `String "operator"
-        ; "decision_source", `String "manual"
+        ; "decision_source", `String "human_operator"
         ; "authorization_source", `Null
         ; "rule_match", `Null
         ; "source_approval_id", `Null
@@ -345,7 +345,7 @@ let test_nullable_string_projection_is_literal base_path =
         ; "goal_id", `String "goal-9"
         ; "goal_ids", `List [ `String "goal-9" ]
         ; "actor", `String "operator"
-        ; "decision_source", `String "manual"
+        ; "decision_source", `String "human_operator"
         ; "summary_status", `String "not_requested"
         ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
         ]

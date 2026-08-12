@@ -576,6 +576,38 @@ let test_read_state_raises_on_corrupt () =
   | exception Schedule_store.Corrupt_ledger_exn _ -> ()
 ;;
 
+(* [load] decides over two probes — the primary ledger and its [.last-good]
+   mirror — and an absent mirror is the only recovery result whose meaning
+   depends on which way the primary failed: an uninitialised store is [Fresh],
+   a broken primary with no mirror is [Corrupt].
+
+   [corrupt_both] leaves the mirror present-but-unparseable, so neither of
+   these two inputs was covered. Collapsing the primary axis would turn the
+   second into an empty state, which is the silent-data-loss shape
+   [test_mutation_refused_and_preserves_corrupt_ledger] exists to prevent. *)
+let test_absent_mirror_separates_uninitialised_from_corrupt () =
+  with_workspace
+  @@ fun config ->
+  (match Schedule_store.read_state_result config with
+   | Ok state ->
+     check int "an uninitialised store reads as empty" 0
+       (List.length state.Schedule_store.schedules)
+   | Error error ->
+     failf
+       "an uninitialised store must not read as corrupt: %s"
+       (Schedule_store.read_error_to_string error));
+  let req = make_request () in
+  ignore (insert_ok config req);
+  Workspace_core.write_text config (schedules_path config) "{not json";
+  Workspace_core.delete_path config (recovery_path config);
+  check bool "recovery mirror removed" false
+    (Workspace_utils.path_exists config (recovery_path config));
+  match Schedule_store.read_state_result config with
+  | Ok _ -> fail "a broken primary with no mirror must not read as empty"
+  | Error (Schedule_store.Corrupt_read_ledger { recovery_err; _ }) ->
+    check (option string) "no mirror means no recovery detail" None recovery_err
+;;
+
 (* The core silent-failure-to-data-loss regression: a mutation on a corrupt
    ledger must be refused (typed [Corrupt_ledger]) and must NOT overwrite the
    present-but-corrupt files with an empty default. *)
@@ -941,6 +973,8 @@ let () =
             test_startup_recovery_refuses_corrupt_ledger;
           test_case "read_state raises on corrupt ledger" `Quick
             test_read_state_raises_on_corrupt;
+          test_case "absent mirror separates uninitialised from corrupt" `Quick
+            test_absent_mirror_separates_uninitialised_from_corrupt;
           test_case "mutation refused and corrupt ledger preserved" `Quick
             test_mutation_refused_and_preserves_corrupt_ledger;
           test_case "primary write failure is surfaced" `Quick

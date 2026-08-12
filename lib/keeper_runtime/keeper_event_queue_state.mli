@@ -156,6 +156,15 @@ val reprioritize_pending :
 (** Change only the exact selected source priority. A real change receives the
     next source incarnation; unrelated pending entries retain theirs. *)
 
+val defer_pending :
+  selection:pending_selection ->
+  t ->
+  (t * int64, string) result
+(** Move one exact selected source to the back of its current urgency lane and
+    assign a new source incarnation. This is the durable fairness primitive for
+    transient failures: no source is lost, but it cannot monopolize the head of
+    the active queue while independent work is waiting. *)
+
 val cancel_pending_accepted :
   current_owner_nonce:int ->
   applied_at:float ->

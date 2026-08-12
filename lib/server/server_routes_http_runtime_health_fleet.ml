@@ -191,10 +191,204 @@ let runtime_base_path_opt () =
   | Some state -> Some (Mcp_server.workspace_config state).base_path
   | None -> None
 
+let queue_assoc_int name fields =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> value
+  | _ -> 0
+;;
+
+let queue_assoc_float_opt name fields =
+  match List.assoc_opt name fields with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (float_of_int value)
+  | _ -> None
+;;
+
+let queue_assoc_bool name ~default fields =
+  match List.assoc_opt name fields with
+  | Some (`Bool value) -> value
+  | _ -> default
+;;
+
+let keeper_event_queue_health_dimensions ~stale_after_sec = function
+  | `Assoc fields ->
+    let source_status =
+      match List.assoc_opt "status" fields with
+      | Some (`String value) -> value
+      | _ -> "unknown"
+    in
+    let source_unavailable =
+      match Health_status.of_string source_status with
+      | Health_status.Unavailable
+      | Health_status.Unknown
+      | Health_status.Blocked
+      | Health_status.Error
+      | Health_status.Timeout ->
+        true
+      | Health_status.Ok
+      | Health_status.Warming
+      | Health_status.Snapshot_not_ready
+      | Health_status.Degraded
+      | Health_status.Stale
+      | Health_status.Warning ->
+        false
+    in
+    let counts_complete = queue_assoc_bool "counts_complete" ~default:false fields in
+    let read_error_count = queue_assoc_int "read_error_count" fields in
+    let transition_outbox_count = queue_assoc_int "transition_outbox_count" fields in
+    let runnable_backlog_count = queue_assoc_int "runnable_backlog_count" fields in
+    let recoverable_backlog_count =
+      queue_assoc_int "recoverable_backlog_count" fields
+    in
+    let retained_disabled_backlog_count =
+      queue_assoc_int "retained_disabled_backlog_count" fields
+    in
+    let paused_dead_backlog_count =
+      queue_assoc_int "paused_dead_backlog_count" fields
+    in
+    let shutdown_fenced_backlog_count =
+      queue_assoc_int "shutdown_fenced_backlog_count" fields
+    in
+    let non_runnable_backlog_count =
+      recoverable_backlog_count
+      + retained_disabled_backlog_count
+      + paused_dead_backlog_count
+      + shutdown_fenced_backlog_count
+    in
+    let runnable_oldest_age_seconds =
+      queue_assoc_float_opt "runnable_oldest_age_seconds" fields
+    in
+    let storage_degraded =
+      (not source_unavailable)
+      && ((not counts_complete) || read_error_count > 0 || transition_outbox_count > 0)
+    in
+    let storage_status =
+      if source_unavailable then "unavailable"
+      else if storage_degraded then "degraded"
+      else "ok"
+    in
+    let backlog_stale =
+      runnable_backlog_count > 0
+      && Option.fold
+           ~none:false
+           ~some:(fun age -> age >= stale_after_sec)
+           runnable_oldest_age_seconds
+    in
+    let work_status, work_state =
+      if source_unavailable || not counts_complete
+      then "unavailable", "unknown"
+      else if backlog_stale
+      then "degraded", "stalled"
+      else if runnable_backlog_count > 0
+      then "warning", "backlogged"
+      else if non_runnable_backlog_count > 0
+      then "warning", "blocked"
+      else "ok", "idle"
+    in
+    let source_action_required =
+      queue_assoc_bool "operator_action_required" ~default:false fields
+    in
+    let work_action_required =
+      backlog_stale || non_runnable_backlog_count > 0
+    in
+    let operator_action_required =
+      source_action_required || storage_degraded || work_action_required
+    in
+    let status =
+      Health_status.max_string
+        source_status
+        (Health_status.max_string storage_status work_status)
+    in
+    let status_reasons =
+      []
+      |> (fun reasons ->
+        if not counts_complete then "storage_counts_incomplete" :: reasons else reasons)
+      |> (fun reasons ->
+        if read_error_count > 0 then "storage_read_error" :: reasons else reasons)
+      |> (fun reasons ->
+        if transition_outbox_count > 0
+        then "transition_projection_pending" :: reasons
+        else reasons)
+      |> (fun reasons ->
+        if runnable_backlog_count > 0 then "runnable_backlog" :: reasons else reasons)
+      |> (fun reasons ->
+        if recoverable_backlog_count > 0
+        then "recoverable_backlog" :: reasons
+        else reasons)
+      |> (fun reasons ->
+        if retained_disabled_backlog_count > 0
+        then "retained_disabled_backlog" :: reasons
+        else reasons)
+      |> (fun reasons ->
+        if paused_dead_backlog_count > 0
+        then "paused_dead_backlog" :: reasons
+        else reasons)
+      |> (fun reasons ->
+        if shutdown_fenced_backlog_count > 0
+        then "shutdown_fenced_backlog" :: reasons
+        else reasons)
+      |> (fun reasons ->
+        if backlog_stale then "runnable_backlog_stale" :: reasons else reasons)
+      |> List.rev
+    in
+    let without name fields = List.remove_assoc name fields in
+    let fields =
+      fields
+      |> without "schema"
+      |> without "status"
+      |> without "operator_action_required"
+      |> without "status_reasons"
+      |> without "storage_integrity"
+      |> without "work_liveness"
+      |> without "backlog_clean"
+    in
+    `Assoc
+      ([ "schema", `String "masc.keeper_event_queue.fleet_summary.v4"
+       ; "status", `String status
+       ; "operator_action_required", `Bool operator_action_required
+       ; "status_reasons", `List (List.map (fun reason -> `String reason) status_reasons)
+       ; ( "backlog_clean"
+         , `Bool
+             (counts_complete
+              && (not source_unavailable)
+              && read_error_count = 0
+              && transition_outbox_count = 0
+              && runnable_backlog_count = 0
+              && non_runnable_backlog_count = 0) )
+       ; ( "storage_integrity"
+         , `Assoc
+             [ "schema", `String "masc.keeper_event_queue.storage_integrity.v1"
+             ; "status", `String storage_status
+             ; "counts_complete", `Bool counts_complete
+             ; "read_error_count", `Int read_error_count
+             ; "transition_outbox_count", `Int transition_outbox_count
+             ; "operator_action_required", `Bool storage_degraded
+             ] )
+       ; ( "work_liveness"
+         , `Assoc
+             [ "schema", `String "masc.keeper_event_queue.work_liveness.v1"
+             ; "status", `String work_status
+             ; "state", `String work_state
+             ; "runnable_backlog_count", `Int runnable_backlog_count
+             ; ( "runnable_oldest_age_seconds"
+               , Option.fold
+                   ~none:`Null
+                   ~some:(fun value -> `Float value)
+                   runnable_oldest_age_seconds )
+             ; "stale_after_seconds", `Float stale_after_sec
+             ; "operator_action_required", `Bool work_action_required
+             ] )
+       ]
+       @ fields)
+  | json -> json
+;;
+
 let keeper_event_queue_health_json ~execution_snapshot () =
+  let stale_after_sec = Env_config.KeeperHealth.durable_queue_stale_sec () in
   match current_server_state_opt () with
   | None ->
-    `Assoc
+    keeper_event_queue_health_dimensions ~stale_after_sec
+      (`Assoc
       [ "schema", `String "masc.keeper_event_queue.fleet_summary.v3"
       ; "status", `String "unavailable"
       ; "operator_action_required", `Bool false
@@ -240,7 +434,7 @@ let keeper_event_queue_health_json ~execution_snapshot () =
       ; "read_error_count", `Int 0
       ; "read_errors", `List []
       ; "keepers", `List []
-      ]
+      ])
   | Some state ->
     let config = Mcp_server.workspace_config state in
     let base_path = config.base_path in
@@ -270,6 +464,7 @@ let keeper_event_queue_health_json ~execution_snapshot () =
       ~now
       ~base_path
       ~owner_lifecycle
+    |> keeper_event_queue_health_dimensions ~stale_after_sec
 
 let keeper_fleet_runtime_resolution_base_fields
     ?meta_scan

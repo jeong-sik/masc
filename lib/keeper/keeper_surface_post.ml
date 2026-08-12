@@ -110,6 +110,40 @@ let set_blocks target blocks_opt =
   | To_slack s -> To_slack { s with blocks = blocks_opt }
   | other -> other
 
+let matches_continuation_route target channel =
+  match target, channel with
+  | ( To_discord { channel_id = posted }
+    , Keeper_continuation_channel.Discord { channel_id; _ } ) ->
+    (* Discord [channel_id] is the innermost conversation locus — a thread's id
+       is its own channel_id (server_discord_in_process_gateway.discord_delivery)
+       — and the surface-post tool posts to that channel_id, so a same-channel
+       post reaches the continuation's conversation whether or not the inbound
+       was a reply. [reply_to_message_id] names the triggering message, not a
+       different destination, so it does not gate delivery. Every Discord
+       continuation now carries [reply_to_message_id = Some _], so requiring
+       [= None] here quarantined all of them (PR #28225 review). *)
+    String.equal posted channel_id
+  | ( To_slack { channel_id = posted; _ }
+    , Keeper_continuation_channel.Slack
+        { channel_id; thread_ts = None; _ } ) ->
+    (* Slack differs from Discord: [thread_ts] is a destination distinct from the
+       channel root and the surface-post tool does not thread its post, so a
+       same-channel post only proves delivery for an unthreaded continuation.
+       Threaded Slack continuations settle through the recovery publisher, which
+       does thread via [?reply_to_message_id]. *)
+    String.equal posted channel_id
+  | ( To_dashboard
+    , Keeper_continuation_channel.Dashboard _ ) ->
+    (* Dashboard posts are currently keeper-global ([session_id=None]), so
+       they cannot prove delivery to one exact continuation thread. *)
+    false
+  | ( To_dashboard | To_discord _ | To_slack _ )
+    , ( Keeper_continuation_channel.Dashboard _
+      | Keeper_continuation_channel.Discord _
+      | Keeper_continuation_channel.Slack _
+      | Keeper_continuation_channel.Unrouted _ ) ->
+    false
+
 let ok_json ~surface ?message_id () =
   let fields =
     [ ("status", `String "posted"); ("surface", `String surface) ]

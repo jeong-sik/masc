@@ -298,10 +298,9 @@ let surfaces =
     };
     {
       id = "keeper_turn";
-      description = "Keeper LLM turn parameters: temperature, tokens, tools, slots";
+      description = "Keeper LLM turn parameters with verified runtime consumers";
       param_keys = [
         "keeper.turn.temperature";
-        "keeper.turn.max_output_tokens";
         "keeper.turn.batch_limit";
       ];
     };

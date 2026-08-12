@@ -79,10 +79,3 @@ val body_timeout_override_sec : unit -> float option
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override}. *)
 val provider_call_deadline_sec : unit -> float option
-
-(** CLI subprocess stdout-idle timeout, read fresh per turn from
-    [MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC] and clamped to [10, 600].
-    Default 120 s. Honoured by [Json_stream_cli_transport_local]; other CLI
-    transports require an AGENT_CORE upstream change to expose
-    [stdout_idle_timeout_s]. *)
-val cli_subprocess_idle_sec : unit -> float

@@ -19,7 +19,7 @@ type terminal_effect_state =
   | Terminal_effect_open
   | Deferred_tool_result
   | External_effect_deferred
-  | Terminal_effect_completed
+  | Terminal_effect_completed of Keeper_tool_execution.terminal_effect_receipt
   | Terminal_effect_failed of terminal_effect_failure
 
 type gate_replay_delivery =

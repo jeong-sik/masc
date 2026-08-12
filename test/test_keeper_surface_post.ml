@@ -67,6 +67,7 @@ let test_discord_continuation_selects_exact_bound_channel () =
         ~parent_channel_id:None
         ~thread_id:None
         ~user_id:"user"
+        ()
     with
     | Ok channel -> channel
     | Error message -> fail message
@@ -85,6 +86,7 @@ let test_discord_thread_continuation_stays_in_thread () =
         ~parent_channel_id:(Some "parent-1")
         ~thread_id:(Some "thread-1")
         ~user_id:"user"
+        ()
     with
     | Ok channel -> channel
     | Error message -> fail message
@@ -107,6 +109,7 @@ let test_discord_thread_foreign_explicit_channel_is_error () =
         ~parent_channel_id:(Some "parent-1")
         ~thread_id:(Some "thread-1")
         ~user_id:"user"
+        ()
     with
     | Ok channel -> channel
     | Error message -> fail message
@@ -235,6 +238,66 @@ let test_set_blocks_ignores_other_targets () =
     (SP.To_discord { channel_id = "D1" })
     (SP.set_blocks (SP.To_discord { channel_id = "D1" }) (Some [ block ]))
 
+let test_terminal_receipt_requires_exact_supported_route () =
+  let discord ?reply_to_message_id channel_id =
+    match
+      Keeper_continuation_channel.discord
+        ~guild_id:(Some "guild")
+        ~channel_id
+        ~parent_channel_id:None
+        ~thread_id:None
+        ?reply_to_message_id
+        ~user_id:"user"
+        ()
+    with
+    | Ok channel -> channel
+    | Error message -> fail message
+  in
+  check bool "same direct Discord channel" true
+    (SP.matches_continuation_route
+       (SP.To_discord { channel_id = "D1" })
+       (discord "D1"));
+  check bool "different Discord channel" false
+    (SP.matches_continuation_route
+       (SP.To_discord { channel_id = "D2" })
+       (discord "D1"));
+  (* PR #28225 review (comment 3761300281): Discord channel_id is the innermost
+     conversation locus, so a same-channel post delivers a reply-scoped
+     continuation. reply_to_message_id names the trigger, not a destination. *)
+  check bool "Discord post to the channel delivers a reply-scoped continuation"
+    true
+    (SP.matches_continuation_route
+       (SP.To_discord { channel_id = "D1" })
+       (discord ~reply_to_message_id:"message-1" "D1"));
+  let slack ?thread_ts channel_id =
+    match
+      Keeper_continuation_channel.slack
+        ~team_id:(Some "team")
+        ~channel_id
+        ~thread_ts
+        ~user_id:"user"
+    with
+    | Ok channel -> channel
+    | Error message -> fail message
+  in
+  check bool "Slack post to the channel delivers an unthreaded continuation" true
+    (SP.matches_continuation_route
+       (SP.To_slack { channel_id = "C1"; blocks = None })
+       (slack "C1"));
+  (* Slack thread_ts is a destination distinct from the channel root and the
+     tool does not thread its post, so a channel post does not prove delivery of
+     a threaded Slack continuation; recovery settles it. *)
+  check bool "Slack channel post does not satisfy a threaded continuation" false
+    (SP.matches_continuation_route
+       (SP.To_slack { channel_id = "C1"; blocks = None })
+       (slack ~thread_ts:"1700000000.000100" "C1"));
+  check bool "keeper-global dashboard post has no exact thread receipt" false
+    (SP.matches_continuation_route
+       SP.To_dashboard
+       (match Keeper_continuation_channel.dashboard ~thread_id:"thread-1" with
+        | Ok channel -> channel
+        | Error message -> fail message))
+
 (* ── append_assistant_message ───────────────────────────────────── *)
 
 let with_temp_base_dir f =
@@ -320,6 +383,11 @@ let () =
             test_set_blocks_attaches_to_slack;
           test_case "ignores non-slack targets" `Quick
             test_set_blocks_ignores_other_targets;
+        ] );
+      ( "terminal receipt",
+        [
+          test_case "requires exact supported route" `Quick
+            test_terminal_receipt_requires_exact_supported_route;
         ] );
       ( "assistant append",
         [

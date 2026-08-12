@@ -204,7 +204,7 @@ val run_turn
   -> ?event_bus:Agent_core.Event_bus.t
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t
-  -> ?continuation_delivery_channel:Keeper_continuation_channel.t
+  -> ?continuation_delivery_origin:Keeper_continuation_delivery_intent.origin
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?autonomous_yield_requested:
        (unit -> (autonomous_yield_request option, string) result)

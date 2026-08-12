@@ -308,6 +308,16 @@ val reprioritize_pending_result :
 (** Source-incarnation-fenced priority change. Unrelated queue mutations do
     not invalidate the selected source. *)
 
+val defer_pending_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  unit ->
+  (int64, string) result
+(** Durably rotate one exact transiently blocked source to the tail of its
+    current urgency lane. *)
+
 type enqueue_stimulus_result =
   | Enqueued
   | Already_present

@@ -3749,7 +3749,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
           fail "invalid terminal input unexpectedly deferred a tool result"
         | Masc.Keeper_tools_agent_core.External_effect_deferred ->
           fail "invalid terminal input unexpectedly deferred an external effect"
-        | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
           fail "invalid terminal input completed the terminal effect"
         | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
           fail "invalid terminal input poisoned the terminal effect");
@@ -3765,7 +3765,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Error error ->
           failf "corrected terminal input failed: %s" error.Agent_core.Types.message);
        (match bundle.terminal_effect_state () with
-        | Masc.Keeper_tools_agent_core.Terminal_effect_completed -> ()
+        | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ -> ()
         | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
           fail "corrected terminal input left the terminal effect open"
         | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
@@ -3801,7 +3801,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
          fail "later failure unexpectedly became a generic defer"
        | Masc.Keeper_tools_agent_core.External_effect_deferred ->
          fail "later failure unexpectedly became an external defer"
-       | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
          fail "later failure was hidden by the completed terminal effect")
 ;;
 
@@ -3978,7 +3978,7 @@ let test_deferred_web_search_yields_before_provider_retry () =
          fail "Gate deferred effect became a generic tool defer"
        | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
          fail "deferred effect was not observed at the tool boundary"
-       | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
          fail "deferred effect became terminal completion"
        | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
          fail "deferred effect became terminal failure")
@@ -4075,7 +4075,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                fail "failed surface delivery became a generic defer"
              | Masc.Keeper_tools_agent_core.External_effect_deferred ->
                fail "failed surface delivery became an external defer"
-             | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
                fail "failed surface delivery set terminal completion");
             let first_terminal_failure =
               match terminal_state with
@@ -4083,7 +4083,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
               | Masc.Keeper_tools_agent_core.Terminal_effect_open
               | Masc.Keeper_tools_agent_core.Deferred_tool_result
               | Masc.Keeper_tools_agent_core.External_effect_deferred
-              | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
                 fail "failed surface delivery lost its terminal failure"
             in
             Unix.rmdir chat_path;
@@ -4112,7 +4112,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                fail "later success changed failure into a generic defer"
              | Masc.Keeper_tools_agent_core.External_effect_deferred ->
                fail "later success changed failure into an external defer"
-             | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
                fail "later success overwrote the failed terminal effect");
             Unix.unlink chat_path;
             Unix.mkdir chat_path 0o755;
@@ -4207,7 +4207,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                fail "runtime terminal failure became a generic defer"
              | Masc.Keeper_tools_agent_core.External_effect_deferred ->
                fail "runtime terminal failure became an external defer"
-             | Masc.Keeper_tools_agent_core.Terminal_effect_completed ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
                fail "runtime terminal failure became completion");
             check int
               "runtime failure emits no keeper chat broadcast"

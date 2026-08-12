@@ -1,6 +1,8 @@
 type context =
   { config : Workspace.config
   ; agent_name : string
+  ; stamp_keeper_wake_result_delivery :
+      payload:Yojson.Safe.t -> (Yojson.Safe.t, string) result
   ; admit_keeper_wake_creation :
       Workspace.config ->
       keeper_name:string ->
@@ -338,6 +340,7 @@ let request_result ~tool_name ~start_time = function
 let handle_create ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
+    let* payload = ctx.stamp_keeper_wake_result_delivery ~payload in
     let* () = validate_known_payload_request ~payload in
     let* keeper_wake_target =
       Schedule_payload_projection.creation_keeper_wake_target ~payload

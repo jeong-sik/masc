@@ -215,6 +215,16 @@ let keeper_wake_payload_for keeper_name =
 
 let keeper_wake_payload = keeper_wake_payload_for "schedule-keeper"
 
+let keeper_wake_payload_with_result_delivery channel =
+  match
+    Schedule_payload_projection.set_keeper_wake_result_delivery
+      ~payload:keeper_wake_payload
+      ~channel:(Some channel)
+  with
+  | Ok payload -> payload
+  | Error detail -> fail detail
+;;
+
 let unsupported_payload =
   `Assoc
     [ "kind", `String "legacy.unsupported_scheduler_payload"
@@ -233,6 +243,7 @@ let canonical_keeper_wake_receipt_fields () =
   ; "queue", `String "keeper_event_queue"
   ; "stimulus", `String "schedule_due"
   ; "stimulus_id", `String "canonical-occurrence"
+  ; "result_delivery_policy", `String "none"
   ; "reaction_ledger_status", `String "recorded"
   ; "reaction_ledger_error", `Null
   ; "occurrence_status", `String "awaiting_ack"
@@ -301,7 +312,11 @@ let test_keeper_wake_receipt_decoder_rejects_noncanonical_shapes () =
     (canonical
      |> set_receipt_field "activation_status" (`String "not_required")
      |> set_receipt_field "activation_reason" `Null
-     |> set_receipt_field "activation_detail" `Null)
+     |> set_receipt_field "activation_detail" `Null);
+  reject
+    "unknown result delivery policy"
+    (canonical
+     |> set_receipt_field "result_delivery_policy" (`String "best_effort"))
 ;;
 
 let create_board_schedule config =
@@ -323,6 +338,24 @@ let create_keeper_wake_schedule ?recurrence config =
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload:keeper_wake_payload ~source:Schedule_domain.Operator_request
       ?recurrence ()
+  with
+  | Ok request -> request
+  | Error err ->
+    fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let create_routed_keeper_wake_schedule config channel =
+  match
+    Schedule_service.create
+      config
+      ~schedule_id:"keeper-wake-routed-sched-1"
+      ~requested_at:100.0
+      ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent")
+      ~due_at:200.0
+      ~payload:(keeper_wake_payload_with_result_delivery channel)
+      ~source:Schedule_domain.Operator_request
+      ()
   with
   | Ok request -> request
   | Error err ->
@@ -504,6 +537,8 @@ let test_keeper_wake_consumer_records_wake_receipt () =
           (detail |> member "queue" |> to_string);
         check string "wake detail stimulus" "schedule_due"
           (detail |> member "stimulus" |> to_string);
+        check string "legacy wake has explicit no-result receipt" "none"
+          (detail |> member "result_delivery_policy" |> to_string);
         check string "wake keeper" "schedule-keeper"
           (detail |> member "keeper_name" |> to_string);
         check string "durable enqueue is separate from activation" "deferred"
@@ -531,13 +566,16 @@ let test_keeper_wake_consumer_records_wake_receipt () =
      check (float 0.001) "arrived_at from tick now" 201.0 stimulus.arrived_at;
      (match stimulus.payload with
      | Keeper_event_queue.Schedule_due wake ->
+       check string "wake occurrence identity" occurrence_id wake.occurrence_id;
        check string "wake schedule" request.schedule_id wake.schedule_id;
        check string "wake title" "Scheduled lane wake" (Option.get wake.title);
        check string "wake message" "Run the scheduled maintenance lane now."
          wake.message;
        check string "wake digest"
          (Schedule_domain.payload_digest request.payload)
-         wake.payload_digest
+         wake.payload_digest;
+       check bool "legacy schedule has no result destination" true
+         (Option.is_none wake.result_delivery)
       | _ -> fail "expected Schedule_due payload"))
   ;
   check int "keeper wake does not create board posts" 0
@@ -576,6 +614,8 @@ let test_keeper_wake_consumer_records_wake_receipt () =
       (receipt |> member "post_id" |> to_string);
     check string "receipt reaction ledger recorded" "recorded"
       (receipt |> member "reaction_ledger_status" |> to_string);
+    check string "receipt result policy remains explicit" "none"
+      (receipt |> member "result_delivery_policy" |> to_string);
     let queue_evidence = row |> member "keeper_queue_evidence" in
     check string "queue evidence matched" "matched_pending"
       (queue_evidence |> member "projection_status" |> to_string);
@@ -620,7 +660,305 @@ let test_keeper_wake_consumer_records_wake_receipt () =
       (terminal_row
        |> member "dispatch_receipt"
        |> member "projection_status"
-       |> to_string)
+       |> to_string);
+    check string "dispatch success is explicit" "succeeded"
+      (terminal_row |> member "dispatch_status" |> to_string);
+    check string "legacy schedule result delivery is not required" "not_required"
+      (terminal_row |> member "result_delivery" |> member "status" |> to_string)
+;;
+
+let test_routed_schedule_carries_occurrence_destination_to_keeper () =
+  with_workspace
+  @@ fun config ->
+  let channel =
+    match
+      Keeper_continuation_channel.slack
+        ~team_id:(Some "team-1")
+        ~channel_id:"channel-1"
+        ~thread_ts:(Some "1710000000.100")
+        ~user_id:"user-1"
+    with
+    | Ok channel -> channel
+    | Error detail -> fail detail
+  in
+  let request = create_routed_keeper_wake_schedule config channel in
+  let result =
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      tick_ok config ~now:201.0)
+  in
+  let occurrence_id = single_occurrence_id result in
+  let queue =
+    Keeper_registry_event_queue.snapshot
+      ~base_path:config.Workspace_utils.base_path
+      "schedule-keeper"
+  in
+  let stimulus =
+    match Keeper_event_queue.dequeue queue with
+    | Some (stimulus, _) -> stimulus
+    | None -> fail "expected routed scheduled wake"
+  in
+  (match stimulus.payload with
+   | Keeper_event_queue.Schedule_due wake ->
+     check string "schedule occurrence survives due consumption"
+       occurrence_id
+       wake.occurrence_id;
+     (match wake.result_delivery with
+      | Some persisted ->
+        check bool "exact schedule result route survives due consumption" true
+          (Keeper_continuation_channel.same_route channel persisted)
+      | None -> fail "scheduled result destination was lost");
+     (match
+        Keeper_continuation_delivery_intent.origin_of_payload stimulus.payload
+      with
+      | Ok (Some origin) ->
+        check bool "schedule occurrence creates the exact continuation origin" true
+          (match origin.source with
+           | Keeper_continuation_delivery_intent.Schedule_occurrence
+               { occurrence_id = source_occurrence_id } ->
+             String.equal occurrence_id source_occurrence_id
+             && Keeper_continuation_channel.same_route channel origin.channel
+           | Keeper_continuation_delivery_intent.Fusion_completion _
+           | Keeper_continuation_delivery_intent.Hitl_resolution _
+           | Keeper_continuation_delivery_intent.Connector_attention _ ->
+             false)
+      | Ok None -> fail "routed schedule did not create a delivery origin"
+      | Error error ->
+        fail (Keeper_continuation_delivery_intent.error_to_string error))
+   | _ -> fail "expected Schedule_due payload");
+  let dashboard =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
+  check string "schedule FSM reports dispatch acceptance" "succeeded"
+    (row |> member "dispatch_status" |> to_string);
+  check string "dispatch receipt preserves routed result policy" "reply_to_origin"
+    (row
+     |> member "dispatch_receipt"
+     |> member "result_delivery_policy"
+     |> to_string);
+  check string "result remains separately pending execution" "execution_pending"
+    (row |> member "result_delivery" |> member "status" |> to_string);
+  check string "result projection is bound to the exact occurrence"
+    occurrence_id
+    (row |> member "result_delivery" |> member "occurrence_id" |> to_string);
+  let public_destination = row |> member "result_delivery" |> member "destination" in
+  check string "public result destination exposes only connector kind" "slack"
+    (public_destination |> member "kind" |> to_string);
+  check string "public result destination coordinates are redacted" "redacted"
+    (public_destination |> member "coordinates" |> to_string);
+  let public_delivery_json =
+    row |> member "result_delivery" |> Yojson.Safe.to_string
+  in
+  List.iter
+    (fun private_coordinate ->
+       check bool
+         ("public delivery omits " ^ private_coordinate)
+         false
+         (String_util.contains_substring public_delivery_json private_coordinate))
+    [ "team-1"; "channel-1"; "1710000000.100"; "user-1" ];
+  let origin =
+    match
+      Keeper_continuation_delivery_intent.origin_of_payload stimulus.payload
+    with
+    | Ok (Some origin) -> origin
+    | Ok None -> fail "routed schedule origin disappeared"
+    | Error error ->
+      fail (Keeper_continuation_delivery_intent.error_to_string error)
+  in
+  let pending =
+    match
+      Keeper_continuation_delivery_intent.create
+        ~keeper_name:"schedule-keeper"
+        ~keeper_turn_id:1
+        ~origin
+        ~response_text:"scheduled work completed"
+    with
+    | Ok intent -> intent
+    | Error error ->
+      fail (Keeper_continuation_delivery_intent.error_to_string error)
+  in
+  let persist intent =
+    match Keeper_continuation_delivery_store.persist ~config intent with
+    | Ok _ -> ()
+    | Error error ->
+      fail (Keeper_continuation_delivery_store.error_to_string error)
+  in
+  persist pending;
+  let active_delivery_dir =
+    match
+      Keeper_continuation_delivery_store.For_testing.active_directory
+        ~config
+        ~keeper_name:pending.keeper_name
+    with
+    | Ok path -> path
+    | Error error ->
+      fail (Keeper_continuation_delivery_store.error_to_string error)
+  in
+  write_file
+    (Filename.concat active_delivery_dir "unrelated-corrupt-peer")
+    "{broken-json";
+  let pending_row =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+    |> fun dashboard ->
+    dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id
+  in
+  check string "persisted obligation is visible independently" "pending"
+    (pending_row |> member "result_delivery" |> member "status" |> to_string);
+  check string
+    "unrelated corrupt intent stays observable without hiding the exact occurrence"
+    "unrelated continuation delivery records are malformed"
+    (pending_row
+     |> member "result_delivery"
+     |> member "inventory_warning"
+     |> to_string);
+  let public_failures =
+    pending_row
+    |> member "result_delivery"
+    |> member "record_failures"
+    |> to_list
+  in
+  check int "malformed public record remains observable" 1
+    (List.length public_failures);
+  let public_failure_path =
+    List.hd public_failures |> member "path" |> to_string
+  in
+  check string "public malformed record exposes basename only"
+    "unrelated-corrupt-peer"
+    public_failure_path;
+  check bool "public malformed record omits absolute store path" false
+    (String_util.contains_substring
+       (pending_row |> member "result_delivery" |> Yojson.Safe.to_string)
+       active_delivery_dir);
+  let attempting =
+    match
+      Keeper_continuation_delivery_intent.start_attempt
+        ~started_at:202.0
+        pending
+    with
+    | Ok intent -> intent
+    | Error error ->
+      fail (Keeper_continuation_delivery_intent.error_to_string error)
+  in
+  persist attempting;
+  let delivered =
+    match
+      Keeper_continuation_delivery_intent.mark_delivered
+        ~completed_at:203.0
+        ~connector_message_id:"slack-message-1"
+        attempting
+    with
+    | Ok intent -> intent
+    | Error error ->
+      fail (Keeper_continuation_delivery_intent.error_to_string error)
+  in
+  persist delivered;
+  let delivered_row =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+    |> fun dashboard ->
+    dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id
+  in
+  check string "user-visible delivery has its own terminal state" "delivered"
+    (delivered_row |> member "result_delivery" |> member "status" |> to_string);
+  check string "dispatch terminal remains unchanged" "succeeded"
+    (delivered_row |> member "dispatch_status" |> to_string)
+;;
+
+let test_dashboard_result_delivery_follows_transferred_owner () =
+  with_workspace
+  @@ fun config ->
+  let source_keeper = "schedule-keeper" in
+  let target_keeper = "schedule-delivery-target" in
+  let base_path = config.Workspace_utils.base_path in
+  let channel =
+    match
+      Keeper_continuation_channel.dashboard
+        ~thread_id:"schedule-transfer-result-thread"
+    with
+    | Ok channel -> channel
+    | Error detail -> fail detail
+  in
+  let request = create_routed_keeper_wake_schedule config channel in
+  let result = tick_ok config ~now:201.0 in
+  let occurrence_id = single_occurrence_id result in
+  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
+  let target_meta = persist_keeper_meta config target_keeper in
+  let transfer : Keeper_registry_event_queue.accepted_transfer =
+    { source = selection.source
+    ; source_incarnation = selection.admitted_revision
+    ; owner_nonce = 71
+    ; operator_operation_id = "schedule-result-owner-transfer"
+    ; from_keeper = source_keeper
+    ; to_keeper = target_keeper
+    ; target_generation = target_meta.runtime.nonce
+    ; target_trace_id = target_meta.runtime.trace_id
+    }
+  in
+  (match
+     Keeper_registry_event_queue.transfer_pending_accepted_result
+       ~base_path
+       source_keeper
+       ~current_owner_nonce:71
+       ~applied_at:201.5
+       ~transfer
+   with
+   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
+   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
+     fail "fresh schedule transfer was already applied"
+   | Ok
+       (Keeper_registry_event_queue.Transition_committed_followup_failed
+          { detail; _ }) ->
+     fail detail
+   | Error detail ->
+     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
+  (match
+     Keeper_event_queue_recovery.project_owner_result
+       ~base_path
+       ~keeper_name:source_keeper
+   with
+   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok _ -> fail "schedule transfer projection did not converge"
+   | Error error ->
+     fail
+       (Keeper_event_queue_recovery.projection_error_to_string error));
+  let origin =
+    match
+      Keeper_continuation_delivery_intent.origin_of_payload
+        selection.source.payload
+    with
+    | Ok (Some origin) -> origin
+    | Ok None -> fail "transferred schedule lost its continuation origin"
+    | Error error ->
+      fail (Keeper_continuation_delivery_intent.error_to_string error)
+  in
+  let pending =
+    match
+      Keeper_continuation_delivery_intent.create
+        ~keeper_name:target_keeper
+        ~keeper_turn_id:1
+        ~origin
+        ~response_text:"transferred scheduled work completed"
+    with
+    | Ok intent -> intent
+    | Error error ->
+      fail (Keeper_continuation_delivery_intent.error_to_string error)
+  in
+  (match Keeper_continuation_delivery_store.persist ~config pending with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Keeper_continuation_delivery_store.error_to_string error));
+  let result_delivery =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+    |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+    |> Yojson.Safe.Util.member "result_delivery"
+  in
+  let open Yojson.Safe.Util in
+  check string "dashboard follows the durable transfer owner" target_keeper
+    (result_delivery |> member "delivery_keeper_name" |> to_string);
+  check string "transferred owner's exact intent remains visible" "pending"
+    (result_delivery |> member "status" |> to_string);
+  check string "transfer stays bound to the schedule occurrence" occurrence_id
+    (result_delivery |> member "occurrence_id" |> to_string)
 ;;
 
 let test_recurring_wakes_keep_distinct_occurrence_ids () =
@@ -1521,12 +1859,14 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
     | Error message -> fail ("stale payload parse failed: " ^ message)
   in
   let stale_wake : Keeper_event_queue.scheduled_wake =
-    { schedule_instance_id = request.schedule_instance_id
+    { occurrence_id = "stale-schedule-occurrence"
+    ; schedule_instance_id = request.schedule_instance_id
     ; schedule_id = request.schedule_id
     ; due_at = request.due_at +. 60.0
     ; payload_digest = Schedule_domain.payload_digest stale_payload
     ; title = Some "Scheduled lane wake"
     ; message = "Run a different scheduled occurrence."
+    ; result_delivery = None
     }
   in
   let stale_stimulus : Keeper_event_queue.stimulus =
@@ -2009,6 +2349,10 @@ let () =
             test_board_post_schedule_is_rejected_without_mutation
         ; test_case "keeper wake records wake receipt" `Quick
             test_keeper_wake_consumer_records_wake_receipt
+        ; test_case "routed schedule carries occurrence destination to Keeper" `Quick
+            test_routed_schedule_carries_occurrence_destination_to_keeper
+        ; test_case "dashboard result delivery follows transferred owner" `Quick
+            test_dashboard_result_delivery_follows_transferred_owner
         ; test_case "recurring wakes keep distinct occurrence ids" `Quick
             test_recurring_wakes_keep_distinct_occurrence_ids
         ; test_case "reused schedule id does not match pruned terminal receipt"

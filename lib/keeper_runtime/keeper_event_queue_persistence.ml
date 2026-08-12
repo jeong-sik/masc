@@ -856,6 +856,17 @@ let reprioritize_pending_result
     State.reprioritize_pending ~selection ~urgency state)
 ;;
 
+let defer_pending_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~selection
+      ()
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    State.defer_pending ~selection state)
+;;
+
 type enqueue_stimulus_result =
   | Enqueued
   | Already_present

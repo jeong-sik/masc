@@ -1754,16 +1754,28 @@ let runtime_config_write_outcome
        Runtime_exact_output_registry.Committed (`Durability_unconfirmed failure))
 ;;
 
+(* Pure save precondition shared by the writer and the preview endpoint: TOML
+   parse, config materialization, and dispatch-cap validation, with no write and
+   no [set_loaded]. Keeping this as the single source of the precondition means
+   [can_save] previews cannot diverge from what [commit_runtime_config_text]
+   actually enforces. *)
+let parse_and_validate_config_text ~config_path content =
+  let* loaded, exact_output_lanes =
+    materialize_runtime_config_text ~config_path content
+  in
+  (* TEL-OK: validation is pure; config commit owns visible failure reporting. *)
+  let* () = validate_keeper_dispatch_request_caps ~config_path loaded in
+  Ok (loaded, exact_output_lanes)
+;;
+
 let commit_runtime_config_text
     ?(replace_file = Fs_compat.save_file_atomic_strict_staged)
     ~path
     content
   =
   let* loaded, exact_output_lanes =
-    materialize_runtime_config_text ~config_path:path content
+    parse_and_validate_config_text ~config_path:path content
   in
-  (* TEL-OK: validation is pure; config commit owns visible failure reporting. *)
-  let* () = validate_keeper_dispatch_request_caps ~config_path:path loaded in
   match
     Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
   with
@@ -1824,6 +1836,14 @@ let save_config_text ?runtime_config_path content =
     ?runtime_config_path
     ~replace_file:Fs_compat.save_file_atomic_strict_staged
     content
+;;
+
+let validate_config_text ?runtime_config_path content =
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* _loaded, _exact_output_lanes =
+    parse_and_validate_config_text ~config_path:path content
+  in
+  Ok ()
 ;;
 
 module For_testing = struct

@@ -1,14 +1,12 @@
 (** Source-disposal decision tests for
-    [Keeper_heartbeat_loop.failed_selection_terminal_detail] (#26546).
+    [Keeper_heartbeat_loop.failed_source_disposition] (#26546).
 
     With automatic overflow-compaction recovery removed, the heartbeat owns
-    two terminalization opinions for a failed turn holding a pending Event
-    Queue selection: a typed context-overflow terminal route, and a provider
-    attempt whose effect fence forbids replay. With no deferred runtime lane,
-    either consumes the selection as failed; every other failure shape
-    preserves it. These tests pin each preserving class independently so a
-    refactor cannot silently widen the consuming arm back to a blanket
-    [Exhausted_visible_alive] match (the 2026-08-01 review regression). *)
+    typed liveness disposition for a failed turn holding a pending Event Queue
+    selection: a frozen successor preserves it, transient failure rotates it
+    behind independent work, deterministic failure quarantines only the source,
+    an effect-fenced provider failure quarantines that source even if a stale
+    successor exists, and transcript corruption alone pauses the Keeper. *)
 
 open Alcotest
 
@@ -50,10 +48,12 @@ let deferred_lane =
 ;;
 
 let test_overflow_without_successor_terminalizes () =
-  match Loop.failed_selection_terminal_detail (overflow_failure ()) with
-  | Some detail ->
+  match Loop.failed_source_disposition (overflow_failure ()) with
+  | Loop.Quarantine_source { detail } ->
     check bool "detail is non-empty" true (String.length detail > 0)
-  | None ->
+  | Loop.Preserve_for_deferred_runtime
+  | Loop.Defer_to_queue_tail
+  | Loop.Pause_keeper_for_integrity _ ->
     fail
       "context overflow with no recovery successor must terminalize the \
        selection: retrying re-dispatches the same bounded payload every \
@@ -61,12 +61,16 @@ let test_overflow_without_successor_terminalizes () =
 ;;
 
 let test_overflow_with_deferred_lane_preserves () =
-  check
-    (option string)
-    "a frozen successor lane keeps the selection bound to it"
-    None
-    (Loop.failed_selection_terminal_detail
-       (overflow_failure ~deferred_runtime_lane:deferred_lane ()))
+  check bool "a frozen successor lane keeps the selection bound to it" true
+    (match
+       Loop.failed_source_disposition
+         (overflow_failure ~deferred_runtime_lane:deferred_lane ())
+     with
+     | Loop.Preserve_for_deferred_runtime -> true
+     | Loop.Defer_to_queue_tail
+     | Loop.Quarantine_source _
+     | Loop.Pause_keeper_for_integrity _ ->
+       false)
 ;;
 
 let test_effect_fenced_failure_terminalizes_exact_source () =
@@ -83,29 +87,31 @@ let test_effect_fenced_failure_terminalizes_exact_source () =
     KFR.route_of_error ~boundary:KFR.Masc_execution error
   in
   match
-    Loop.failed_selection_terminal_detail
+    Loop.failed_source_disposition
       (failure
          ~deferred_runtime_lane:deferred_lane
          ~route
          ~source_disposition:Turn.Follow_failure_route
          error)
   with
-  | Some detail -> check bool "detail is non-empty" true (String.length detail > 0)
-  | None ->
+  | Loop.Quarantine_source { detail } ->
+    check bool "detail is non-empty" true (String.length detail > 0)
+  | Loop.Preserve_for_deferred_runtime
+  | Loop.Defer_to_queue_tail
+  | Loop.Pause_keeper_for_integrity _ ->
     fail
       "effect-fenced failure must terminalize the exact failed source instead \
        of replaying it on the next heartbeat"
 ;;
 
 let preserving_terminal_classes =
-  [ "config_mismatch", KFR.Config_mismatch
-  ; "internal_opaque", KFR.Internal_opaque
+  [ "internal_opaque", KFR.Internal_opaque
   ; "deterministic_request", KFR.Deterministic_request
   ; "terminal_effect_runtime_failure", KFR.Terminal_effect_runtime_failure
   ]
 ;;
 
-let test_other_terminal_classes_preserve () =
+let test_other_terminal_classes_quarantine_source () =
   List.iter
     (fun (label, terminal) ->
        let route =
@@ -116,50 +122,138 @@ let test_other_terminal_classes_preserve () =
            }
        in
        check
-         (option string)
-         (label ^ " terminal preserves the selection")
-         None
-         (Loop.failed_selection_terminal_detail
-            (failure
-               ~route
-               ~source_disposition:Turn.Follow_failure_route
-               overflow_error)))
+         bool
+         (label ^ " terminal quarantines only the source")
+         true
+         (match
+            Loop.failed_source_disposition
+              (failure
+                 ~route
+                 ~source_disposition:Turn.Follow_failure_route
+                 overflow_error)
+          with
+          | Loop.Quarantine_source { detail } -> String.length detail > 0
+          | Loop.Preserve_for_deferred_runtime
+          | Loop.Defer_to_queue_tail
+          | Loop.Pause_keeper_for_integrity _ ->
+            false))
     preserving_terminal_classes
 ;;
 
-let test_retryable_route_preserves () =
+let exhausted_configuration_classes =
+  [ "config_mismatch", KFR.Config_mismatch
+  ; "provider_integration", KFR.Provider_integration
+  ]
+;;
+
+let test_exhausted_configuration_classes_quarantine_source () =
+  List.iter
+    (fun (label, terminal) ->
+       let route =
+         KFR.Exhausted_visible_alive
+           { terminal
+           ; provenance = KFR.Masc_internal_error
+           ; detail = label
+           }
+       in
+       check bool (label ^ " quarantines without stopping the Keeper") true
+         (match
+            Loop.failed_source_disposition
+              (failure
+                 ~route
+                 ~source_disposition:Turn.Follow_failure_route
+                 overflow_error)
+          with
+          | Loop.Quarantine_source _ -> true
+          | Loop.Preserve_for_deferred_runtime
+          | Loop.Defer_to_queue_tail
+          | Loop.Pause_keeper_for_integrity _ ->
+            false))
+    exhausted_configuration_classes
+;;
+
+let test_retryable_route_defers_to_queue_tail () =
   let route =
     KFR.Retry_after_observed
       { retry_class = KFR.Network_transient; retry_after = None }
   in
-  check
-    (option string)
-    "retryable route stays pending for the next cycle"
-    None
-    (Loop.failed_selection_terminal_detail
-       (failure
-          ~route
-          ~source_disposition:Turn.Follow_failure_route
-          overflow_error))
+  check bool "retryable route yields to independent work" true
+    (match
+       Loop.failed_source_disposition
+         (failure
+            ~route
+            ~source_disposition:Turn.Follow_failure_route
+            overflow_error)
+     with
+     | Loop.Defer_to_queue_tail -> true
+     | Loop.Preserve_for_deferred_runtime
+     | Loop.Quarantine_source _
+     | Loop.Pause_keeper_for_integrity _ ->
+       false)
 ;;
 
-let test_transcript_corruption_owned_elsewhere () =
+let test_transcript_corruption_pauses_keeper () =
+  check bool "transcript corruption is the explicit Keeper pause path" true
+    (match
+       Loop.failed_source_disposition
+         (failure
+            ~route:
+              (KFR.route_of_error
+                 ~boundary:KFR.Agent_core_execution
+                 overflow_error)
+            ~source_disposition:
+              (Turn.Pause_after_transcript_corruption { detail = "corrupt" })
+            overflow_error)
+     with
+     | Loop.Pause_keeper_for_integrity { detail } ->
+       String.equal detail "corrupt"
+     | Loop.Preserve_for_deferred_runtime
+     | Loop.Defer_to_queue_tail
+     | Loop.Quarantine_source _ ->
+       false)
+;;
+
+let test_defer_pending_rotates_within_urgency_lane () =
+  let stimulus post_id : Keeper_event_queue.stimulus =
+    { post_id
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = 1.0
+    ; payload = Keeper_event_queue.Bootstrap
+    }
+  in
+  let queue =
+    [ stimulus "source-a"; stimulus "source-b"; stimulus "source-c" ]
+    |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
+  in
+  let state =
+    Keeper_event_queue_state.with_pending queue Keeper_event_queue_state.empty
+  in
+  let selection =
+    match Keeper_event_queue_state.pending_selections state with
+    | selection :: _ -> selection
+    | [] -> fail "missing pending selection"
+  in
+  let deferred, incarnation =
+    match Keeper_event_queue_state.defer_pending ~selection state with
+    | Ok result -> result
+    | Error detail -> fail detail
+  in
   check
-    (option string)
-    "transcript corruption is consumed by its own pause path"
-    None
-    (Loop.failed_selection_terminal_detail
-       (failure
-          ~route:(KFR.route_of_error ~boundary:KFR.Agent_core_execution overflow_error)
-          ~source_disposition:
-            (Turn.Pause_after_transcript_corruption { detail = "corrupt" })
-          overflow_error))
+    (list string)
+    "transient source moves behind independent peers"
+    [ "source-b"; "source-c"; "source-a" ]
+    (deferred
+     |> Keeper_event_queue_state.pending
+     |> Keeper_event_queue.to_list
+     |> List.map (fun source -> source.Keeper_event_queue.post_id));
+  check bool "deferred source receives a new incarnation" true
+    (Int64.compare incarnation selection.admitted_revision > 0)
 ;;
 
 let () =
   run
     "keeper_failed_selection_disposition"
-    [ ( "failed_selection_terminal_detail"
+    [ ( "failed_source_disposition"
       , [ test_case
             "overflow without successor terminalizes"
             `Quick
@@ -173,17 +267,25 @@ let () =
             `Quick
             test_effect_fenced_failure_terminalizes_exact_source
         ; test_case
-            "other terminal classes preserve"
+            "other terminal classes quarantine source"
             `Quick
-            test_other_terminal_classes_preserve
+            test_other_terminal_classes_quarantine_source
         ; test_case
-            "retryable route preserves"
+            "exhausted configuration classes quarantine source"
             `Quick
-            test_retryable_route_preserves
+            test_exhausted_configuration_classes_quarantine_source
         ; test_case
-            "transcript corruption owned elsewhere"
+            "retryable route defers to queue tail"
             `Quick
-            test_transcript_corruption_owned_elsewhere
+            test_retryable_route_defers_to_queue_tail
+        ; test_case
+            "transcript corruption pauses Keeper"
+            `Quick
+            test_transcript_corruption_pauses_keeper
+        ; test_case
+            "defer rotates within urgency lane"
+            `Quick
+            test_defer_pending_rotates_within_urgency_lane
         ] )
     ]
 ;;

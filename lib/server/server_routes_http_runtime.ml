@@ -672,6 +672,10 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("keeper_owner", keeper_owner_json);
     ("keeper_board_event_collection", board_event_collection_json);
     ("keeper_event_queue", keeper_event_queue_json);
+    ( "keeper_terminal_effect_policy"
+    , Keeper_terminal_effect_policy.matrix_to_yojson () );
+    ( "keeper_observability_artifacts"
+    , Keeper_observability_artifact_registry.to_yojson () );
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
        run turns and may no longer have a live registry entry. Operators still
        need a durable count and the typed pause cause. *)
@@ -778,6 +782,8 @@ let full_health_cached_field_names =
     "keeper_owner";
     "keeper_board_event_collection";
     "keeper_event_queue";
+    "keeper_terminal_effect_policy";
+    "keeper_observability_artifacts";
     "paused_keepers";
     "keeper_config_error_count";
     "keeper_config_errors";
@@ -854,9 +860,32 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         "keeper_board_event_collection" );
     ( "keeper_event_queue",
       `Assoc
-        [ ("schema", `String "masc.keeper_event_queue.fleet_summary.v3")
+        [ ("schema", `String "masc.keeper_event_queue.fleet_summary.v4")
         ; ("status", `String status)
         ; ("operator_action_required", `Bool false)
+        ; ("status_reasons", `List [])
+        ; ("backlog_clean", `Bool false)
+        ; ( "storage_integrity"
+          , `Assoc
+              [ ( "schema"
+                , `String "masc.keeper_event_queue.storage_integrity.v1" )
+              ; ("status", `String status)
+              ; ("counts_complete", `Bool false)
+              ; ("read_error_count", `Int 0)
+              ; ("transition_outbox_count", `Int 0)
+              ; ("operator_action_required", `Bool false)
+              ] )
+        ; ( "work_liveness"
+          , `Assoc
+              [ ("schema", `String "masc.keeper_event_queue.work_liveness.v1")
+              ; ("status", `String status)
+              ; ("state", `String "unknown")
+              ; ("runnable_backlog_count", `Int 0)
+              ; ("runnable_oldest_age_seconds", `Null)
+              ; ( "stale_after_seconds"
+                , `Float (Env_config.KeeperHealth.durable_queue_stale_sec ()) )
+              ; ("operator_action_required", `Bool false)
+              ] )
         ; ("keeper_count", `Int 0)
         ; ("keeper_names", `List [])
         ; ("pending_count", `Int 0)
@@ -899,6 +928,10 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         ; ("keepers", `List [])
         ; ("component_timed_out", `Bool component_timed_out)
         ] );
+    ( "keeper_terminal_effect_policy"
+    , Keeper_terminal_effect_policy.matrix_to_yojson () );
+    ( "keeper_observability_artifacts"
+    , Keeper_observability_artifact_registry.to_yojson () );
     ( "paused_keepers",
       `Assoc
         [

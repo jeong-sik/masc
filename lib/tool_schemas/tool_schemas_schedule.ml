@@ -94,7 +94,7 @@ let create_schema =
         "payload_schema_version"
     ; object_prop
         ~description:
-          "Payload body used when payload is omitted. For masc.keeper_wake use {keeper_name, message, optional title, optional urgency}."
+          "Payload body used when payload is omitted. For masc.keeper_wake use {keeper_name, message, optional title, optional urgency}. Result delivery policy is stamped by the runtime from the current continuation and cannot be supplied by the model."
         "payload_body"
     ; string_prop ~description:"Optional stable schedule id." "schedule_id"
     ; number_prop ~description:"Optional request timestamp for replay/tests." "requested_at_unix"
@@ -180,7 +180,7 @@ let definition ~action ~id ~name ~description ~input_schema ~read_only =
 let definitions : definition list =
   [ definition ~action:Create_request ~id:"create" ~name:"masc_schedule_create"
       ~description:
-        "Create a durable Keeper wake request. For 'every day at 09:00 KST', use recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, recurrence_timezone=Asia/Seoul. For compact calendar rules, use recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. The due request wakes its Keeper; it does not authorize later effects."
+        "Create a durable Keeper wake request. For 'every day at 09:00 KST', use recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, recurrence_timezone=Asia/Seoul. For compact calendar rules, use recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. The due request wakes its Keeper; it does not authorize later effects. When the creating turn has a routable continuation, the runtime records that exact route as the result destination; otherwise it records an explicit no-delivery policy."
       ~input_schema:create_schema ~read_only:false
   ; definition ~action:List_requests ~id:"list" ~name:"masc_schedule_list"
       ~description:"List durable scheduled internal automation requests."

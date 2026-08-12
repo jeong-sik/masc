@@ -119,6 +119,24 @@ type keeper_wake_occurrence_status =
   | Keeper_wake_already_failed
   | Keeper_wake_already_cancelled
 
+type keeper_wake_result_delivery_policy =
+  | Keeper_wake_result_delivery_none
+  | Keeper_wake_result_delivery_reply_to_origin
+
+let keeper_wake_result_delivery_policy_to_string = function
+  | Keeper_wake_result_delivery_none -> "none"
+  | Keeper_wake_result_delivery_reply_to_origin -> "reply_to_origin"
+;;
+
+let keeper_wake_result_delivery_policy_of_fields fields =
+  let* policy = optional_string_field "result_delivery_policy" fields in
+  match policy with
+  | None -> Ok Keeper_wake_result_delivery_none
+  | Some "none" -> Ok Keeper_wake_result_delivery_none
+  | Some "reply_to_origin" -> Ok Keeper_wake_result_delivery_reply_to_origin
+  | Some value -> Error ("unsupported result_delivery_policy: " ^ value)
+;;
+
 let keeper_wake_occurrence_status_to_string = function
   | Keeper_wake_awaiting_ack -> "awaiting_ack"
   | Keeper_wake_already_acked -> "already_acked"
@@ -245,6 +263,7 @@ type dispatch_receipt =
       ; stimulus : string
       ; stimulus_id : string option
       ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
+      ; result_delivery_policy : keeper_wake_result_delivery_policy
       ; occurrence_status : keeper_wake_occurrence_status
       ; activation_outcome : keeper_wake_activation_outcome
       }
@@ -264,6 +283,9 @@ let dispatch_receipt_of_detail = function
       let* stimulus_id = optional_string_field "stimulus_id" fields in
       let* reaction_ledger_status =
         keeper_wake_reaction_ledger_status_of_fields fields
+      in
+      let* result_delivery_policy =
+        keeper_wake_result_delivery_policy_of_fields fields
       in
       let* occurrence_status =
         let* value = string_field "occurrence_status" fields in
@@ -302,6 +324,7 @@ let dispatch_receipt_of_detail = function
            ; stimulus
            ; stimulus_id
            ; reaction_ledger_status
+           ; result_delivery_policy
            ; occurrence_status
            ; activation_outcome
            })
@@ -320,6 +343,7 @@ let dispatch_receipt_to_yojson = function
       ; stimulus
       ; stimulus_id
       ; reaction_ledger_status
+      ; result_delivery_policy
       ; occurrence_status
       ; activation_outcome
       } ->
@@ -336,6 +360,10 @@ let dispatch_receipt_to_yojson = function
        ; "schedule_id", `String schedule_id
        ; "urgency", `String urgency
        ; "post_id", `String post_id
+       ; ( "result_delivery_policy"
+         , `String
+             (keeper_wake_result_delivery_policy_to_string
+                result_delivery_policy) )
        ; ( "occurrence_status"
          , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
        ]
@@ -923,6 +951,10 @@ let dispatch_keeper_wake
     terminal_dispatch_result
       (Schedule_payload_projection.body_optional_string payload "title")
   in
+  let* result_delivery =
+    terminal_dispatch_result
+      (Schedule_payload_projection.body_result_delivery payload)
+  in
   let* urgency = terminal_dispatch_result (body_keeper_wake_urgency payload) in
   let urgency =
     urgency
@@ -932,12 +964,14 @@ let dispatch_keeper_wake
     |> keeper_queue_urgency_of_schedule_urgency
   in
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_instance_id = request.Schedule_domain.schedule_instance_id
+    { occurrence_id = Schedule_occurrence_id.to_string signal.occurrence_id
+    ; schedule_instance_id = request.Schedule_domain.schedule_instance_id
     ; schedule_id = request.Schedule_domain.schedule_id
     ; due_at = request.due_at
     ; payload_digest = Schedule_domain.payload_digest request.payload
     ; title
     ; message
+    ; result_delivery
     }
   in
   let stimulus : Keeper_event_queue.stimulus =
@@ -1008,6 +1042,11 @@ let dispatch_keeper_wake
          ; "schedule_id", `String request.schedule_id
          ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
          ; "post_id", `String stimulus.post_id
+         ; ( "result_delivery_policy"
+           , `String
+               (match result_delivery with
+                | None -> "none"
+                | Some _ -> "reply_to_origin") )
          ; ( "occurrence_status"
            , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
          ]

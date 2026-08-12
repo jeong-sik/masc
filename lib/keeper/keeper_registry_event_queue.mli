@@ -287,6 +287,13 @@ val reprioritize_pending_result :
   urgency:Keeper_event_queue.urgency ->
   (int64, string) result
 
+val defer_pending_result :
+  base_path:string ->
+  string ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  (int64, string) result
+(** Durable queue-tail rotation for a transiently blocked exact source. *)
+
 val drop_by_post_id :
   base_path:string
   -> string

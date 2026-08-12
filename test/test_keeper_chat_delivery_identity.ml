@@ -37,6 +37,24 @@ let test_fusion_roundtrip () =
     (Identity.delivery_key_equal key (Identity.Operation request_id))
 ;;
 
+let test_continuation_roundtrip () =
+  let request_id =
+    Identity.Request_id.of_string "kdelivery-continuation-test" |> expect_ok
+  in
+  let key = Identity.Continuation request_id in
+  let decoded =
+    Identity.delivery_key_to_yojson key
+    |> Identity.delivery_key_of_yojson
+    |> expect_ok
+  in
+  check bool "continuation identity roundtrips" true
+    (Identity.delivery_key_equal key decoded);
+  check bool "continuation namespace differs from operation" false
+    (Identity.delivery_key_equal key (Identity.Operation request_id));
+  check bool "continuation namespace differs from Fusion" false
+    (Identity.delivery_key_equal key (Identity.Fusion_run request_id))
+;;
+
 let test_transcript_slot_roundtrip () =
   let slots =
     [ Identity.Accepted_user
@@ -141,6 +159,10 @@ let () =
             "Fusion run roundtrip"
             `Quick
             test_fusion_roundtrip
+        ; test_case
+            "continuation roundtrip"
+            `Quick
+            test_continuation_roundtrip
         ; test_case
             "transcript slots roundtrip"
             `Quick

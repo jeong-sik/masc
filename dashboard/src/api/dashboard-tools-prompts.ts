@@ -126,6 +126,7 @@ export type DashboardScheduledAutomationDispatchReceipt =
       schedule_id: string
       urgency: string
       post_id: string
+      result_delivery_policy?: 'none' | 'reply_to_origin'
     } & DashboardScheduledAutomationOccurrenceActivation)
   | {
       projection_status: 'unrecognized_detail'
@@ -206,9 +207,48 @@ export interface DashboardScheduledAutomationSignal {
   payload_kind?: string | null
 }
 
+export interface DashboardScheduledAutomationResultDelivery {
+  schema?: 'masc.dashboard.schedule_result_delivery.v1'
+  policy: 'none' | 'reply_to_origin' | 'invalid'
+  required: boolean
+  status:
+    | 'not_required'
+    | 'awaiting_occurrence'
+    | 'awaiting_dispatch_receipt'
+    | 'execution_pending'
+    | 'pending'
+    | 'attempting'
+    | 'delivered'
+    | 'failed'
+    | 'ambiguous'
+    | 'invalid_policy'
+    | 'unrecognized_dispatch_receipt'
+    | 'read_error'
+    | 'destination_conflict'
+    | 'identity_conflict'
+  destination?: Record<string, unknown>
+  occurrence_id?: string
+  keeper_name?: string
+  intent_id?: string
+  response_sha256?: string
+  attempt_started_at?: number
+  attempt_started_at_iso?: string
+  idempotency_key?: string
+  completed_at?: number
+  completed_at_iso?: string
+  detected_at?: number
+  detected_at_iso?: string
+  connector_message_id?: string | null
+  failure_kind?: string
+  detail?: string
+  record_failures?: Array<{ path: string; detail: string }>
+}
+
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
   status: 'scheduled' | 'due' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'expired'
+  /** Alias that makes clear this FSM tracks schedule dispatch, not result delivery. */
+  dispatch_status?: DashboardScheduledAutomationRequest['status']
   source: string
   requested_by?: DashboardScheduledAutomationActor | null
   scheduled_by?: DashboardScheduledAutomationActor | null
@@ -238,6 +278,7 @@ export interface DashboardScheduledAutomationRequest {
   recurrence_summary?: string | null
   last_wake?: DashboardScheduledAutomationWakeReceipt | null
   dispatch_receipt?: DashboardScheduledAutomationDispatchReceipt | null
+  result_delivery?: DashboardScheduledAutomationResultDelivery
   keeper_queue_evidence?: DashboardScheduledAutomationKeeperQueueEvidence | null
   keeper_reaction_evidence?: DashboardScheduledAutomationKeeperReactionEvidence | null
 }
@@ -538,9 +579,39 @@ export interface DashboardScheduleRunnerStatus {
   last_error_age_sec?: number | null
 }
 
+export interface DashboardKeeperQueueStorageIntegrity {
+  schema?: string
+  status: string
+  counts_complete: boolean
+  read_error_count: number
+  transition_outbox_count: number
+  operator_action_required: boolean
+}
+
+export interface DashboardKeeperQueueWorkLiveness {
+  schema?: string
+  status: string
+  state: 'idle' | 'backlogged' | 'blocked' | 'stalled' | 'unknown'
+  runnable_backlog_count: number
+  runnable_oldest_age_seconds: number | null
+  stale_after_seconds: number | null
+  operator_action_required: boolean
+}
+
+export interface DashboardKeeperEventQueueHealth {
+  schema?: string
+  status: string
+  operator_action_required: boolean
+  status_reasons: string[]
+  backlog_clean: boolean
+  storage_integrity: DashboardKeeperQueueStorageIntegrity | null
+  work_liveness: DashboardKeeperQueueWorkLiveness | null
+}
+
 export interface DashboardFullHealthResponse {
   health_detail?: string
   schedule_runner?: DashboardScheduleRunnerStatus | null
+  keeper_event_queue?: DashboardKeeperEventQueueHealth | null
 }
 
 // --- Runtime probe (KV-cache / model load probe) ---
@@ -769,9 +840,60 @@ export function normalizeFullHealthResponse(
   raw: DashboardFullHealthResponse,
 ): DashboardFullHealthResponse {
   const scheduleRunner = normalizeScheduleRunnerStatus(raw.schedule_runner)
+  const keeperEventQueue = normalizeKeeperEventQueueHealth(raw.keeper_event_queue)
   return {
     ...raw,
     ...(scheduleRunner ? { schedule_runner: scheduleRunner } : {}),
+    ...(keeperEventQueue ? { keeper_event_queue: keeperEventQueue } : {}),
+  }
+}
+
+function normalizeKeeperEventQueueHealth(raw: unknown): DashboardKeeperEventQueueHealth | null {
+  const record = asRecord(raw)
+  if (!record) return null
+  const storage = asRecord(record.storage_integrity)
+  const work = asRecord(record.work_liveness)
+  const workState = work?.state
+  const normalizedWorkState: DashboardKeeperQueueWorkLiveness['state'] =
+    workState === 'idle'
+      || workState === 'backlogged'
+      || workState === 'blocked'
+      || workState === 'stalled'
+      ? workState
+      : 'unknown'
+  return {
+    schema: typeof record.schema === 'string' ? record.schema : undefined,
+    status: typeof record.status === 'string' ? record.status : 'unknown',
+    operator_action_required: record.operator_action_required === true,
+    status_reasons: Array.isArray(record.status_reasons)
+      ? record.status_reasons.filter((value): value is string => typeof value === 'string')
+      : [],
+    backlog_clean: record.backlog_clean === true,
+    storage_integrity: storage
+      ? {
+          schema: typeof storage.schema === 'string' ? storage.schema : undefined,
+          status: typeof storage.status === 'string' ? storage.status : 'unknown',
+          counts_complete: storage.counts_complete === true,
+          read_error_count: typeof storage.read_error_count === 'number' ? storage.read_error_count : 0,
+          transition_outbox_count:
+            typeof storage.transition_outbox_count === 'number' ? storage.transition_outbox_count : 0,
+          operator_action_required: storage.operator_action_required === true,
+        }
+      : null,
+    work_liveness: work
+      ? {
+          schema: typeof work.schema === 'string' ? work.schema : undefined,
+          status: typeof work.status === 'string' ? work.status : 'unknown',
+          state: normalizedWorkState,
+          runnable_backlog_count:
+            typeof work.runnable_backlog_count === 'number' ? work.runnable_backlog_count : 0,
+          runnable_oldest_age_seconds:
+            typeof work.runnable_oldest_age_seconds === 'number' ? work.runnable_oldest_age_seconds : null,
+          stale_after_seconds:
+            typeof work.stale_after_seconds === 'number' ? work.stale_after_seconds : null,
+          operator_action_required: work.operator_action_required === true,
+        }
+      : null,
   }
 }
 

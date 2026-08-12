@@ -7,6 +7,7 @@ type execution_result =
   { tool_result : Tool_result.result
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
+  ; terminal_effect_receipt : Keeper_tool_execution.terminal_effect_receipt option
   }
 
 let producer_payload ~raw = function
@@ -151,6 +152,7 @@ let execute_with_observers
       { tool_result = dispatch_result
       ; failure_effect_disposition = Some result.failure_effect_disposition
       ; deferred_kind = None
+      ; terminal_effect_receipt = None
       }
     | Tool_result.Completed () ->
       Option.iter
@@ -214,6 +216,7 @@ let execute_with_observers
       { tool_result = observed_result
       ; failure_effect_disposition = None
       ; deferred_kind = None
+      ; terminal_effect_receipt = result.terminal_effect_receipt
       }
     | Tool_result.Deferred () ->
       Option.iter
@@ -273,6 +276,7 @@ let execute_with_observers
       { tool_result = observed_result
       ; failure_effect_disposition = None
       ; deferred_kind = result.deferred_kind
+      ; terminal_effect_receipt = None
       }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -341,5 +345,6 @@ let execute_with_observers
     { tool_result = exception_result
     ; failure_effect_disposition = Some Tool_result.Effect_outcome_unknown
     ; deferred_kind = None
+    ; terminal_effect_receipt = None
     }
 ;;

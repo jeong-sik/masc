@@ -28,6 +28,12 @@ type operator_disposition =
 type run_result =
   { response_text : string
   ; turn_outcome : Keeper_turn_outcome.t
+  ; continuation_delivery_intent :
+      Keeper_continuation_delivery_intent.t option
+      (** For a visible continuation reply this Pending intent is already
+          durable before assistant history/checkpoint finalization. Consumers
+          publish or replay it; they do not create the recovery token. *)
+  ; terminal_effect_receipt : Keeper_tool_execution.terminal_effect_receipt option
   ; model_used : string
   ; runtime_id : string
   ; max_context : int
@@ -48,6 +54,19 @@ type run_result =
   ; inference_telemetry : Agent_core.Types.inference_telemetry option
   ; tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   }
+
+val continuation_delivery_intent_for_result :
+  keeper_name:string ->
+  keeper_turn_id:int ->
+  origin:Keeper_continuation_delivery_intent.origin option ->
+  response_text:string ->
+  turn_outcome:Keeper_turn_outcome.t ->
+  (Keeper_continuation_delivery_intent.t option,
+   Keeper_continuation_delivery_intent.error)
+    result
+(** Build the producer-owned delivery obligation only for a visible reply
+    whose exact continuation origin was admitted with the turn.  Control and
+    external-effect outcomes never become connector prose. *)
 
 val tool_call_detail_to_json : tool_call_detail -> Yojson.Safe.t
 (** Serialize a tool call detail to JSON. Reached via the

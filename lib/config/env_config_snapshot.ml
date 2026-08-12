@@ -7,6 +7,22 @@
 let entry = Env_config_snapshot_collector.entry
 let category = Env_config_snapshot_collector.category
 
+let keeper_registry_entries predicate =
+  Keeper_runtime_setting_registry.active
+  |> List.filter predicate
+  |> List.map (fun (row : Keeper_runtime_setting_registry.setting) ->
+    entry ~default:row.default_display row.env_name row.description)
+;;
+
+let keeper_runtime_entries =
+  keeper_registry_entries (fun row ->
+    String.starts_with ~prefix:"MASC_KEEPER_" row.env_name)
+;;
+
+let keeper_web_search_entries =
+  keeper_registry_entries (fun row -> String.equal row.category "web_search")
+;;
+
 let server_entries =
   [
     entry ~default:Masc_network_defaults.masc_http_default_port_s Env_config_core.http_port_env_key "HTTP server port";
@@ -118,20 +134,12 @@ let transport_entries =
 
 let keeper_entries =
   [
-    entry ~default:"true" "MASC_KEEPER_BOOTSTRAP_ENABLED"
-      "Enable keeper auto-bootstrap";
-    entry ~default:"300" "MASC_KEEPER_SNAPSHOT_SEC"
-      "Keeper keepalive snapshot interval";
-    entry ~default:"false" "MASC_KEEPER_DEBUG" "Enable keeper debug logging";
     entry ~default:"(none)" "MASC_TLA_TRACE"
       "Enable TLA+ trace emission";
   ]
 
 let keeper_execution_entries =
   [
-    entry ~default:"0.4" "MASC_KEEPER_UNIFIED_TEMP" "Unified turn temperature";
-    entry ~default:"131072" "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-      "Unified turn max output tokens";
     entry ~default:"4000" "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS"
       "Autonomous execution max tokens";
   ]
@@ -273,85 +281,10 @@ let internal_timer_entries =
       "Stalled session threshold (seconds, 5 min)";
   ]
 
-let keeper_grpc_entries =
-  [
-    entry ~default:"5.0" "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"
-      "Backoff delay between gRPC reconnect attempts (clamped 1-60 seconds)";
-  ]
-
-let keeper_keepalive_entries =
-  [
-    entry ~default:"300" "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
-      "Heartbeat cycle interval (positive integer, no implicit upper bound)";
-    entry ~default:"300.0" "MASC_KEEPER_MAX_SILENCE_SEC"
-      "Max seconds since last heartbeat before presence sync required";
-    entry ~default:"0.5" "MASC_KEEPER_SLEEP_CHUNK_SEC"
-      "Interruptible sleep chunk size (seconds, clamped 0.1-10)";
-    entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"
-      "Successful workspace heartbeat after turn counts as presence proof (feature flag)";
-  ]
-
-let keeper_metrics_entries =
-  [
-    entry ~default:"10485760" "MASC_KEEPER_METRICS_MAX_BYTES"
-      "Max metrics file size before rotation (10MB)";
-    entry ~default:"1" "MASC_KEEPER_METRICS_MAX_ROTATED"
-      "Number of rotated files to keep";
-  ]
-
-let keeper_health_entries =
-  [
-    entry ~default:"0.0" "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC"
-      "Durable keeper event-queue backlog age before full-health degrades (seconds)";
-  ]
-
-let keeper_proactive_entries =
-  [
-    entry ~default:"100" "MASC_KEEPER_STAGE_TIMING_RING_SIZE"
-      "Stage timing ring buffer size for profiling (clamped 10-1000)";
-  ]
-
-let keeper_supervisor_entries =
-  [
-    entry ~default:"3600.0" "MASC_KEEPER_DEAD_TTL_SEC"
-      "Dead tombstone TTL before cleanup (seconds, floor 60)";
-    entry ~default:"30.0" "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
-      "Supervisor sweep interval (seconds)";
-  ]
-
 let local_runtime_entries =
   [
     entry ~default:"(none)" "MASC_URL"
       "MASC MCP endpoint URL";
-  ]
-
-module Memory_os_defaults = Env_config_keeper.KeeperMemoryOs
-
-(* Env-var names come from Env_config_keeper.KeeperMemoryOs (the reader
-   module), never from re-spelled literals: a registry entry whose env var
-   nothing reads is a silent no-op reported as source=env. *)
-let memory_entries =
-  [
-    entry
-      ~default:(string_of_bool Memory_os_defaults.recall_enabled_default)
-      Memory_os_defaults.recall_env_key
-      "Memory OS recall prompt injection enabled; invalid values fail closed";
-    entry
-      ~default:(string_of_bool Memory_os_defaults.librarian_enabled_default)
-      Memory_os_defaults.librarian_env_key
-      "Memory OS post-turn librarian extraction enabled; invalid values fail closed";
-    entry
-      ~default:(string_of_int Memory_os_defaults.librarian_cadence_turns_default)
-      Memory_os_defaults.librarian_cadence_turns_env_key
-      "Turns between librarian extraction attempts per keeper (floor 1)";
-    entry
-      ~default:(string_of_int Memory_os_defaults.librarian_max_messages_default)
-      Memory_os_defaults.librarian_max_messages_env_key
-      "Recent-message window for librarian extraction (floor 1)";
-    entry
-      ~default:(string_of_int Memory_os_defaults.recall_facts_max_bytes_default)
-      Memory_os_defaults.recall_facts_max_bytes_env_key
-      "Maximum UTF-8 bytes for rendered Memory OS recall fact lines (floor 1)";
   ]
 
 let message_gc_entries =
@@ -470,22 +403,6 @@ let tool_entries =
       "Tool list page size (clamped 10-1024)";
   ]
 
-let web_search_entries =
-  [
-    entry ~default:"(none)" "MASC_SEARXNG_URL"
-      "SearXNG instance URL; None when unset";
-    entry ~default:"30.0" "MASC_WEB_SEARCH_CACHE_TTL_SEC"
-      "Web search cache TTL (seconds, floor 0)";
-    entry ~default:"(none)" "MASC_WEB_SEARCH_FALLBACKS"
-      "Web search fallback providers; None when unset";
-    entry ~default:"(none)" "MASC_WEB_SEARCH_PROVIDER"
-      "Web search provider override; None when unset";
-    entry ~default:"(none)" "MASC_WEB_SEARCH_PROVIDER_ORDER"
-      "Web search provider fallback order; None when unset";
-    entry ~default:"15" "MASC_WEB_SEARCH_TIMEOUT_SEC"
-      "Web search timeout (clamped 1-60 seconds)";
-  ]
-
 let worker_entries =
   [
     entry ~default:"(none)" "MASC_LOCAL_RUNTIME_COOLDOWN_SEC"
@@ -501,7 +418,7 @@ let category_specs =
       @ docker_playground_entries @ test_entries );
     "auth", auth_entries;
     "transport", transport_entries;
-    "storage", storage_entries @ cache_entries @ memory_entries @ board_entries;
+    "storage", storage_entries @ cache_entries @ board_entries;
     ( "runtime"
     , runtime_entries
       @ message_gc_entries @ internal_timer_entries
@@ -510,21 +427,18 @@ let category_specs =
     "rate_limiting", rate_limiting_entries;
     "inference", model_routing_entries @ agent_core_sse_entries @ local_runtime_entries;
     ( "keeper"
-    , keeper_entries
-      @ keeper_keepalive_entries @ keeper_metrics_entries
-      @ keeper_health_entries
+    , keeper_runtime_entries @ keeper_entries
       @ docker_playground_entries
       @ keeper_sandbox_entries );
     ( "keeper_execution"
-    , keeper_execution_entries @ decision_entries @ keeper_proactive_entries
-      @ keeper_grpc_entries );
-    "autonomy", autonomy_entries @ keeper_supervisor_entries;
+    , keeper_execution_entries @ decision_entries );
+    "autonomy", autonomy_entries;
     "dashboard", dashboard_entries;
     "operations", operator_entries @ orchestrator_entries;
     "channel", channel_gate_entries;
     "process", shutdown_entries;
     "worker", worker_entries;
-    "web_search", web_search_entries;
+    "web_search", keeper_web_search_entries;
     "session", session_entries @ tempo_entries;
   ]
 

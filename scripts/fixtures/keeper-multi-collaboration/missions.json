@@ -1,0 +1,207 @@
+{
+  "schema": "masc.keeper_multi_collaboration_missions.v1",
+  "acceptance_authority": "real_world_product_outcomes",
+  "minimum_keeper_count": 5,
+  "roles": [
+    "coordinator",
+    "builder-a",
+    "builder-b",
+    "reviewer",
+    "researcher"
+  ],
+  "operator_required_tools": [
+    "masc_keeper_up",
+    "masc_keeper_down",
+    "masc_keeper_msg",
+    "masc_keeper_delegate_status",
+    "masc_keeper_status",
+    "masc_agent_timeline",
+    "masc_goal_upsert",
+    "masc_goal_assign",
+    "masc_goal_list",
+    "masc_add_task",
+    "masc_tasks",
+    "masc_task_history",
+    "masc_board_post",
+    "masc_board_search",
+    "masc_board_post_get",
+    "masc_schedule_create",
+    "masc_schedule_get",
+    "masc_fusion_status"
+  ],
+  "keeper_required_tools": [
+    "keeper_tasks_list",
+    "keeper_task_claim",
+    "keeper_task_done",
+    "keeper_memory_write",
+    "tool_write_file",
+    "keeper_ide_annotate",
+    "masc_board_comment",
+    "masc_board_post",
+    "masc_goal_list",
+    "masc_fusion",
+    "masc_schedule_get"
+  ],
+  "missions": [
+    {
+      "id": "RW01",
+      "phase": "bootstrap",
+      "name": "five_keeper_role_fleet",
+      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
+      "capabilities": ["Keeper", "Goal"],
+      "user_story": "서로 다른 책임을 가진 다섯 Keeper가 같은 Goal 범위에서 모두 실행 가능하다.",
+      "assertions": ["all_keepers_live", "role_identity_preserved"],
+      "evidence": ["health.json", "keeper-status/*.json"]
+    },
+    {
+      "id": "RW02",
+      "phase": "bootstrap",
+      "name": "shared_goal_assignment",
+      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
+      "capabilities": ["Goal", "Task"],
+      "user_story": "공유 Goal이 coordinator에게 배정되고 모든 작업이 그 Goal identity를 유지한다.",
+      "assertions": ["goal_visible", "goal_assignment_visible", "tasks_linked_to_goal"],
+      "evidence": ["observations/goals.json", "observations/tasks.json"]
+    },
+    {
+      "id": "RW03",
+      "phase": "parallel_wave",
+      "name": "parallel_distinct_task_work",
+      "actors": ["builder-a", "builder-b", "researcher"],
+      "capabilities": ["Task", "Board"],
+      "user_story": "세 Keeper가 서로 다른 Task를 병렬로 진행하며 한 Keeper의 지연이 나머지를 막지 않는다.",
+      "assertions": ["parallel_wave_completed", "parallel_keeper_overlap_observed", "multiple_task_owners_visible"],
+      "evidence": ["turns/parallel-*.json", "observations/task-history-*.json"]
+    },
+    {
+      "id": "RW04",
+      "phase": "parallel_wave",
+      "name": "board_comment_handoff",
+      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
+      "capabilities": ["Board", "Comment"],
+      "user_story": "공통 Board thread에서 계획, 구현, 검토, 연구 결과가 댓글로 합쳐진다.",
+      "assertions": ["board_thread_visible", "multi_author_comments_visible"],
+      "evidence": ["observations/board-search.json", "observations/board-post.json"]
+    },
+    {
+      "id": "RW05",
+      "phase": "parallel_wave",
+      "name": "ide_artifact_task_evidence",
+      "actors": ["builder-a", "builder-b"],
+      "capabilities": ["IDE", "Task"],
+      "user_story": "구현 Keeper가 실제 파일을 만들고 IDE annotation과 Task evidence로 같은 결과를 연결한다.",
+      "assertions": ["ide_annotation_observed", "task_evidence_submitted"],
+      "evidence": ["observations/timeline-builder-a.json", "observations/timeline-builder-b.json", "observations/task-history-*.json"]
+    },
+    {
+      "id": "RW06",
+      "phase": "parallel_wave",
+      "name": "fusion_while_peers_progress",
+      "actors": ["researcher", "builder-a", "builder-b"],
+      "capabilities": ["Fusion", "Task", "Board"],
+      "user_story": "Fusion이 비동기로 실행되는 동안 다른 Keeper들의 Task와 Board 진행이 완료된다.",
+      "assertions": ["fusion_started", "peer_progress_during_fusion"],
+      "evidence": ["observations/fusion-status.json", "observations/timeline-researcher.json", "turns/parallel-*.json"]
+    },
+    {
+      "id": "RW07",
+      "phase": "async_sources",
+      "name": "schedule_wake_interleaves",
+      "actors": ["coordinator", "reviewer"],
+      "capabilities": ["Schedule", "Task", "Board", "Comment"],
+      "user_story": "예약 wake가 도착해도 이미 진행 중인 Task와 Board 협업이 계속된다.",
+      "assertions": ["schedule_terminal_visible", "scheduled_wake_progress_visible"],
+      "evidence": ["observations/schedule.json", "keeper-status/coordinator-after-schedule.json"]
+    },
+    {
+      "id": "RW08",
+      "phase": "failure_isolation",
+      "name": "deterministic_tool_rejection_recovery",
+      "actors": ["builder-b"],
+      "capabilities": ["IDE", "Board", "Comment"],
+      "user_story": "잘못된 IDE 입력 하나가 거부되어도 다음 source에서 같은 Keeper가 정상 작업을 계속한다.",
+      "assertions": ["invalid_tool_turn_settled", "same_keeper_recovered"],
+      "evidence": ["turns/invalid-tool.json", "turns/recovery-after-invalid.json", "observations/board-post.json"]
+    },
+    {
+      "id": "RW09",
+      "phase": "failure_isolation",
+      "name": "fleet_failure_isolation",
+      "actors": ["builder-b", "coordinator", "reviewer"],
+      "capabilities": ["Keeper", "Task", "Board"],
+      "user_story": "한 Keeper의 거부/복구 과정 중에도 다른 Keeper의 독립 작업 결과가 남는다.",
+      "assertions": ["same_keeper_recovered", "unaffected_peers_progressed"],
+      "evidence": ["turns/*.json", "observations/tasks.json", "observations/board-post.json"]
+    },
+    {
+      "id": "RW10",
+      "phase": "restart",
+      "name": "restart_context_continuity",
+      "actors": ["coordinator"],
+      "capabilities": ["Keeper", "Context", "Board", "Comment"],
+      "user_story": "coordinator 재시작 뒤에도 이전 대화의 비밀 표식을 다시 제시하지 않고 회수한다.",
+      "assertions": ["restart_succeeded", "context_secret_recalled"],
+      "evidence": ["turns/parallel-coordinator.json", "turns/context-after-restart.json", "keeper-status/coordinator-after-restart.json"]
+    },
+    {
+      "id": "RW11",
+      "phase": "restart",
+      "name": "durable_memory_continuity",
+      "actors": ["coordinator"],
+      "capabilities": ["Memory", "Context", "Board"],
+      "user_story": "재시작 전 기록한 Keeper memory가 재시작 후 제품 결과에 다시 사용된다.",
+      "assertions": ["memory_write_observed", "context_secret_recalled"],
+      "evidence": ["keeper-status/coordinator-before-restart.json", "observations/timeline-coordinator.json", "observations/board-post.json"]
+    },
+    {
+      "id": "RW12",
+      "phase": "verification",
+      "name": "completion_authority_boundary",
+      "actors": ["builder-a", "builder-b", "reviewer"],
+      "capabilities": ["Task", "Gate"],
+      "user_story": "작업 결과는 직접 done 처리되지 않고 evidence 제출 뒤 typed completion authority 상태로 간다.",
+      "assertions": ["task_evidence_submitted", "no_illegal_direct_done"],
+      "evidence": ["observations/tasks.json", "observations/task-history-*.json", "observations/timeline-builder-*.json"]
+    },
+    {
+      "id": "RW13",
+      "phase": "contention",
+      "name": "single_task_claim_contention",
+      "actors": ["builder-a", "builder-b"],
+      "capabilities": ["Task", "Owner"],
+      "user_story": "동일 Task에 대한 동시 claim 중 하나만 소유권을 얻고 중복 효과가 발생하지 않는다.",
+      "assertions": ["contention_single_owner", "contention_loser_continued"],
+      "evidence": ["turns/contention-*.json", "observations/task-history-contention.json"]
+    },
+    {
+      "id": "RW14",
+      "phase": "verification",
+      "name": "goal_task_reconciliation",
+      "actors": ["coordinator", "reviewer"],
+      "capabilities": ["Goal", "Task", "Board"],
+      "user_story": "Task 상태와 Board 검토 결과가 Goal 관측에서 사라지지 않는다.",
+      "assertions": ["goal_visible", "tasks_linked_to_goal", "reviewer_progress_visible"],
+      "evidence": ["observations/goals.json", "observations/tasks.json", "observations/board-post.json"]
+    },
+    {
+      "id": "RW15",
+      "phase": "verification",
+      "name": "all_surface_interleave",
+      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
+      "capabilities": ["Schedule", "Task", "Board", "Goal", "IDE", "Comment", "Fusion", "Memory", "Context"],
+      "user_story": "모든 주요 surface가 한 미션 안에서 함께 사용되고 어떤 하나도 전체 흐름을 독점하지 않는다.",
+      "assertions": ["all_surfaces_observed", "unaffected_peers_progressed"],
+      "evidence": ["bundle.json", "keeper-status/*.json", "observations/*.json"]
+    },
+    {
+      "id": "RW16",
+      "phase": "verification",
+      "name": "correlated_product_outcome_bundle",
+      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
+      "capabilities": ["Keeper", "Evidence"],
+      "user_story": "Goal, Task, Board, Schedule, Fusion, IDE, Memory 결과가 하나의 mission id와 source SHA로 다시 검증된다.",
+      "assertions": ["correlation_marker_complete", "artifact_bundle_complete"],
+      "evidence": ["bundle.json", "bundle.md", "raw/*.json"]
+    }
+  ]
+}

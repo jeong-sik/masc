@@ -1,0 +1,26 @@
+(test
+ (name test_keeper_continuation_delivery_publisher)
+ (modules test_keeper_continuation_delivery_publisher)
+ (libraries
+  alcotest
+  eio
+  eio_main
+  masc
+  masc.fs_compat
+  masc.keeper_runtime
+  masc.string_util
+  unix
+  yojson))
+
+(test
+ (name test_keeper_continuation_delivery_conformance)
+ (modules test_keeper_continuation_delivery_conformance)
+ (libraries
+  alcotest
+  eio
+  eio_main
+  masc
+  masc.fs_compat
+  masc.keeper_runtime
+  unix
+  yojson))

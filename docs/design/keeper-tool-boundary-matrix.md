@@ -66,6 +66,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper_outcome_taxonomy/keeper_execution_receipt_outcome_kind.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt.ml` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt.mli` - execution-dispatch
+- `lib/keeper/keeper_execution_outcome.ml` - execution-dispatch
+- `lib/keeper/keeper_execution_outcome.mli` - execution-dispatch
 - `lib/keeper/keeper_execution.ml` - execution-dispatch
 - `lib/keeper/keeper_execution.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_execution.ml` - execution-dispatch

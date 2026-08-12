@@ -74,7 +74,13 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
       then Ok ()
       else Error "Dashboard Keeper chat operation cannot carry an external speaker"
     | ( Keeper_continuation_channel.Discord
-          { guild_id; channel_id; parent_channel_id; thread_id = route_thread; user_id }
+          { guild_id
+          ; channel_id
+          ; parent_channel_id
+          ; thread_id = route_thread
+          ; user_id
+          ; _
+          }
       , Surface_ref.Discord
           { guild_id = surface_guild
           ; channel_id = surface_channel

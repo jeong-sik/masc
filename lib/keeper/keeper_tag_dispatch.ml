@@ -109,6 +109,11 @@ let dispatch
       Tool_schedule.dispatch
         { Tool_schedule.config
         ; agent_name
+        ; stamp_keeper_wake_result_delivery =
+            (fun ~payload ->
+               Schedule_payload_projection.set_keeper_wake_result_delivery
+                 ~payload
+                 ~channel:None)
         ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
         }
         ~name

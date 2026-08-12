@@ -36,7 +36,11 @@ module In_turn_pulse = Keeper_heartbeat_loop_in_turn_pulse
 module Observations = Keeper_heartbeat_loop_observations
 
 type cycle_outcome =
-  | Completed of keeper_meta
+  | Completed of
+      { meta : keeper_meta
+      ; continuation_delivery :
+          Keeper_unified_turn.continuation_delivery_completion
+      }
   | Checkpointed of keeper_meta
   | Input_required of keeper_meta
   | Cancelled of keeper_meta
@@ -59,7 +63,7 @@ type cycle_outcome =
       }
 
 let rec meta = function
-  | Completed meta
+  | Completed { meta; _ }
   | Checkpointed meta
   | Input_required meta
   | Cancelled meta
@@ -105,7 +109,7 @@ let run_keeper_cycle_admitted
       ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
-      ?continuation_delivery_channel
+      ?continuation_delivery_origin
       ~ctx
       ~meta_after_triage
       ~stop
@@ -128,7 +132,7 @@ let run_keeper_cycle_admitted
         ~generation:meta_after_triage.runtime.nonce
         ~wake
         ?hitl_resolution
-        ?continuation_delivery_channel
+        ?continuation_delivery_origin
         (* RFC-0315: pass the whole decision, not just its channel — the
            prompt renders the verdict reasons so the turn knows why it woke. *)
         ~turn_decision
@@ -192,7 +196,10 @@ let run_keeper_cycle_admitted
         meta_after_triage
     in
     Failed { meta; failure }
-  | Ok (Keeper_unified_turn.Turn_completed updated) -> Completed updated
+  | Ok
+      (Keeper_unified_turn.Turn_completed
+        { meta; continuation_delivery }) ->
+    Completed { meta; continuation_delivery }
   | Ok (Keeper_unified_turn.Turn_checkpointed updated) -> Checkpointed updated
   | Ok (Keeper_unified_turn.Turn_input_required updated) -> Input_required updated
   | Ok (Keeper_unified_turn.Turn_cancelled meta) -> Cancelled meta
@@ -206,7 +213,7 @@ let run_keeper_cycle_with
       ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
-      ?continuation_delivery_channel
+      ?continuation_delivery_origin
       ~ctx
       ~meta_after_triage
       ~stop
@@ -232,7 +239,7 @@ let run_keeper_cycle_with
       ~wake
       ?event_bus
       ?hitl_resolution
-      ?continuation_delivery_channel
+      ?continuation_delivery_origin
       ()
   in
   match manual_compaction_requested with
@@ -272,7 +279,7 @@ let run_keeper_cycle
       ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
-      ?continuation_delivery_channel
+      ?continuation_delivery_origin
       ~ctx
       ~meta_after_triage
       ~stop
@@ -303,7 +310,7 @@ run_keeper_cycle_with
     ?on_deferred_runtime_consumed
     ?event_bus
     ?hitl_resolution
-    ?continuation_delivery_channel
+    ?continuation_delivery_origin
     ~ctx
     ~meta_after_triage
     ~stop

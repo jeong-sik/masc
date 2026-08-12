@@ -127,12 +127,14 @@ and connector_attention = {
 }
 
 and scheduled_wake = {
+  occurrence_id : string;
   schedule_instance_id : string;
   schedule_id : string;
   due_at : float;
   payload_digest : string;
   title : string option;
   message : string;
+  result_delivery : Keeper_continuation_channel.t option;
 }
 
 and goal_assignment = {
@@ -265,6 +267,13 @@ let stimulus_identity_equal a b =
   match a.payload, b.payload with
   | Fusion_completed left, Fusion_completed right ->
     fusion_completion_identity_equal left right
+  | Schedule_due _, Schedule_due _ ->
+    (* [post_id] is the scheduler occurrence identity.  Pre-occurrence-id
+       durable rows decode with an empty payload [occurrence_id], while a
+       replay after upgrade carries the same occurrence in both places.  The
+       first committed row owns the payload, so comparing the payload again
+       would turn that representation upgrade into a second execution. *)
+    true
   | _ -> identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =
@@ -519,12 +528,17 @@ let payload_to_yojson = function
   | Schedule_due sw ->
     `Assoc
       [ "kind", `String "schedule_due"
+      ; "occurrence_id", `String sw.occurrence_id
       ; "schedule_instance_id", `String sw.schedule_instance_id
       ; "schedule_id", `String sw.schedule_id
       ; "due_at_unix", `Float sw.due_at
       ; "payload_digest", `String sw.payload_digest
       ; "title", option_json (fun value -> `String value) sw.title
       ; "message", `String sw.message
+      ; ( "result_delivery"
+        , match sw.result_delivery with
+          | None -> `Null
+          | Some channel -> Keeper_continuation_channel.to_yojson channel )
       ]
   | Connector_attention ca ->
     `Assoc
@@ -687,15 +701,74 @@ let payload_of_yojson json =
     let* channel = continuation_channel_field fields in
     Ok (Fusion_completed { run_id; terminal; board_post_id; channel })
   | "schedule_due" ->
+    let allowed_fields =
+      [ "kind"
+      ; "occurrence_id"
+      ; "schedule_instance_id"
+      ; "schedule_id"
+      ; "due_at_unix"
+      ; "payload_digest"
+      ; "title"
+      ; "message"
+      ; "result_delivery"
+      ]
+    in
+    let field_names = List.map fst fields in
+    let* () =
+      if
+        List.length field_names
+        = List.length (List.sort_uniq String.compare field_names)
+      then Ok ()
+      else Error "stimulus.payload.schedule_due has duplicate fields"
+    in
+    let* () =
+      match
+        List.find_opt
+          (fun name -> not (List.mem name allowed_fields))
+          field_names
+      with
+      | None -> Ok ()
+      | Some name ->
+        Error ("stimulus.payload.schedule_due has unknown field: " ^ name)
+    in
+    let* occurrence_id =
+      match List.assoc_opt "occurrence_id" fields with
+      | None -> Ok ""
+      | Some _ -> string_field ~context "occurrence_id" fields
+    in
     let* schedule_instance_id = string_field ~context "schedule_instance_id" fields in
     let* schedule_id = string_field ~context "schedule_id" fields in
     let* due_at = float_field ~context "due_at_unix" fields in
     let* payload_digest = string_field ~context "payload_digest" fields in
     let* title = optional_string_field ~context "title" fields in
     let* message = string_field ~context "message" fields in
+    let* result_delivery =
+      match List.assoc_opt "result_delivery" fields with
+      | None | Some `Null -> Ok None
+      | Some channel_json ->
+        Keeper_continuation_channel.of_yojson channel_json
+        |> Result.map Option.some
+    in
+    let* () =
+      match result_delivery with
+      | None -> Ok ()
+      | Some _ when String.trim occurrence_id = "" ->
+        Error "stimulus.payload.schedule_due delivery requires occurrence_id"
+      | Some channel when not (Keeper_continuation_channel.is_routable channel) ->
+        Error "stimulus.payload.schedule_due result_delivery must be routable"
+      | Some _ -> Ok ()
+    in
     Ok
       (Schedule_due
-         { schedule_instance_id; schedule_id; due_at; payload_digest; title; message })
+         { occurrence_id
+         ; schedule_instance_id
+         ; schedule_id
+         ; due_at
+         ; payload_digest
+         ; title
+         ; message
+         ; result_delivery
+         })
   | "connector_attention" ->
     let* event_id = string_field ~context "event_id" fields in
     let* channel = continuation_channel_field fields in

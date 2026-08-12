@@ -219,6 +219,7 @@ let fusion_tool_policy () : Fusion_policy.t =
 ;;
 
 let scheduled_wake
+      ?(occurrence_id = "schedule-occurrence:test")
       ?(schedule_instance_id = "instance-sched-1")
       ?(schedule_id = "sched-1")
       ?(due_at = 3000.0)
@@ -228,7 +229,15 @@ let scheduled_wake
       ()
   : Keeper_event_queue.scheduled_wake
   =
-  { schedule_instance_id; schedule_id; due_at; payload_digest; title; message }
+  { occurrence_id
+  ; schedule_instance_id
+  ; schedule_id
+  ; due_at
+  ; payload_digest
+  ; title
+  ; message
+  ; result_delivery = None
+  }
 ;;
 
 let schedule_stimulus ?schedule_id ?due_at ?payload_digest ?title ?message ()
@@ -394,6 +403,7 @@ let discord_channel =
     ~parent_channel_id:None
     ~thread_id:None
     ~user_id:"user-3"
+    ()
   |> Result.get_ok
 ;;
 
@@ -682,6 +692,7 @@ let test_wake_isolates_keeper_run_identity () =
         ~parent_channel_id:None
         ~thread_id:None
         ~user_id:"user-7"
+        ()
       |> Result.get_ok
     in
     (match

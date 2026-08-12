@@ -20,6 +20,9 @@ module R = Masc.Keeper_execution_receipt
 module C = Masc.Keeper_contract_classifier
 module Tr = Keeper_terminal_reason
 module UTS = Masc.Keeper_unified_turn_success.For_testing
+module KTP = Masc.Keeper_terminal_effect_policy
+module KOAR = Masc.Keeper_observability_artifact_registry
+module Health_fleet = Server_routes_http_runtime_health_fleet
 module KMC = Masc.Keeper_meta_contract
 module KMS = Masc.Keeper_meta_store
 module Keeper_identity = Masc.Keeper_identity
@@ -893,6 +896,8 @@ let () =
     in
     { response_text = "completed"
     ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
+    ; continuation_delivery_intent = None
+    ; terminal_effect_receipt = None
     ; model_used = "test-model"
     ; runtime_id = "test-runtime"
     ; max_context = 1000
@@ -914,14 +919,56 @@ let () =
     ; tool_surface
     }
   in
+  let direct_outcome =
+    Masc.Keeper_execution_outcome.create
+      ~lane:Masc.Keeper_execution_outcome.Direct
+      (run_result ())
+  in
+  let autonomous_outcome =
+    Masc.Keeper_execution_outcome.create
+      ~lane:
+        (Masc.Keeper_execution_outcome.Autonomous
+           Masc.Keeper_world_observation.Reactive)
+      (run_result ())
+  in
+  check
+    "direct/autonomous normalize the same response"
+    (String.equal
+       (Masc.Keeper_execution_outcome.response_text direct_outcome)
+       (Masc.Keeper_execution_outcome.response_text autonomous_outcome));
+  check
+    "direct/autonomous normalize the same terminal class"
+    (Masc.Keeper_execution_outcome.terminal direct_outcome
+     = Masc.Keeper_execution_outcome.terminal autonomous_outcome);
+  check
+    "direct projects through reactive metrics channel"
+    (Masc.Keeper_execution_outcome.metrics_channel direct_outcome
+     = Masc.Keeper_world_observation.Reactive);
   let reactive_success ~last_outcome ~last_reason =
     let proactive_rt =
       { meta.runtime.proactive_rt with last_outcome; last_reason }
     in
     let prior = { meta with runtime = { meta.runtime with proactive_rt } } in
+    let reactive_event : Masc.Keeper_world_observation.pending_board_event =
+      { event_kind = Masc.Keeper_world_observation.Board_post_created
+      ; post_id = "reactive-success"
+      ; author = "peer"
+      ; title = "Reactive wake"
+      ; preview = "Continue ordinary work."
+      ; hearth = None
+      ; post_kind = Masc.Board.Human_post
+      ; updated_at = 0.0
+      ; explicit_mention = false
+      ; matched_targets = []
+      ; self_commented = false
+      ; new_external_since = 1
+      ; latest_external_author = Some "peer"
+      ; latest_external_preview = Some "Continue ordinary work."
+      }
+    in
     let observation : Masc.Keeper_world_observation.world_observation =
       { pending_messages = []
-      ; pending_board_events = []
+      ; pending_board_events = [ reactive_event ]
       ; idle_seconds = 0
       ; active_goals = []
       ; unclaimed_task_count = 0
@@ -1005,6 +1052,181 @@ let () =
        check
          "successful terminal turn clears turn consecutive failures"
          (entry_after_success.turn_consecutive_failures = 0))
+;;
+
+let () =
+  check
+    "delivery outbox failure blocks durable settlement"
+    (KTP.failure_blocks_product_success KTP.Continuation_delivery_outbox);
+  check
+    "connector projection failure cannot rewrite committed execution"
+    (not
+       (KTP.failure_blocks_product_success
+          KTP.Continuation_delivery_projection));
+  check
+    "checkpoint failure blocks product success"
+    (KTP.failure_blocks_product_success KTP.Checkpoint_store);
+  check
+    "receipt failure blocks product success"
+    (KTP.failure_blocks_product_success KTP.Execution_receipt);
+  check
+    "Owner meta failure blocks product success"
+    (KTP.failure_blocks_product_success KTP.Owner_meta);
+  check
+    "metrics failure cannot rewrite product success"
+    (not (KTP.failure_blocks_product_success KTP.Metrics_snapshot));
+  let observed = ref 0 in
+  KTP.run_best_effort
+    ~terminal_effect:KTP.Activity_graph
+    ~on_error:(fun _ -> incr observed)
+    (fun () -> failwith "injected activity projection failure");
+  check "best-effort failure is observed once" (!observed = 1);
+  let critical_rejected =
+    try
+      KTP.run_best_effort
+        ~terminal_effect:KTP.Continuation_delivery_outbox
+        ~on_error:(fun _ -> ())
+        (fun () -> ());
+      false
+    with
+    | Invalid_argument _ -> true
+  in
+  check "critical effect cannot enter best-effort wrapper" critical_rejected
+;;
+
+let () =
+  check
+    "observability artifacts all have consumer and retention owners"
+    (KOAR.validate () = []);
+  check
+    "observability inventory covers the six audited stores"
+    (List.length KOAR.entries = 6);
+  check
+    "observability artifacts never claim command authority"
+    (match KOAR.to_yojson () with
+     | `Assoc fields -> List.assoc_opt "command_authority" fields = Some (`Bool false)
+     | _ -> false)
+;;
+
+let () =
+  let member name = function
+    | `Assoc fields -> Option.value ~default:`Null (List.assoc_opt name fields)
+    | _ -> `Null
+  in
+  let string_member name json =
+    match member name json with
+    | `String value -> value
+    | _ -> ""
+  in
+  let queue ~count ~oldest_age =
+    `Assoc
+      [ "status", `String "ok"
+      ; "operator_action_required", `Bool false
+      ; "counts_complete", `Bool true
+      ; "read_error_count", `Int 0
+      ; "transition_outbox_count", `Int 0
+      ; "runnable_backlog_count", `Int count
+      ; "runnable_oldest_age_seconds", oldest_age
+      ; "recoverable_backlog_count", `Int 0
+      ; "retained_disabled_backlog_count", `Int 0
+      ; "paused_dead_backlog_count", `Int 0
+      ; "shutdown_fenced_backlog_count", `Int 0
+      ]
+  in
+  let stalled =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      (queue ~count:2 ~oldest_age:(`Float 600.0))
+  in
+  check
+    "healthy storage remains distinct from stalled work"
+    (String.equal (string_member "status" (member "storage_integrity" stalled)) "ok"
+     && String.equal (string_member "state" (member "work_liveness" stalled)) "stalled");
+  check
+    "stalled runnable work degrades queue status"
+    (String.equal (string_member "status" stalled) "degraded");
+  check
+    "runnable backlog is never backlog-clean"
+    (member "backlog_clean" stalled = `Bool false);
+  let fresh_backlog =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      (queue ~count:1 ~oldest_age:(`Float 5.0))
+  in
+  check
+    "fresh runnable backlog is explicit warning, not ok"
+    (String.equal (string_member "status" fresh_backlog) "warning");
+  let recoverable =
+    match queue ~count:0 ~oldest_age:`Null with
+    | `Assoc fields ->
+      `Assoc
+        (("status", `String "degraded")
+         :: ("operator_action_required", `Bool true)
+         :: ("recoverable_backlog_count", `Int 2)
+         :: List.remove_assoc "status"
+              (List.remove_assoc "operator_action_required"
+                 (List.remove_assoc "recoverable_backlog_count" fields)))
+    | _ -> assert false
+  in
+  let recoverable =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      recoverable
+  in
+  check
+    "non-runnable actionable backlog carries an explicit reason"
+    (match member "status_reasons" recoverable with
+     | `List reasons -> List.mem (`String "recoverable_backlog") reasons
+     | _ -> false);
+  check
+    "non-runnable actionable backlog is never backlog-clean"
+    (member "backlog_clean" recoverable = `Bool false);
+  check
+    "non-runnable actionable backlog reports blocked work"
+    (String.equal
+       (string_member "state" (member "work_liveness" recoverable))
+       "blocked"
+     && member "operator_action_required" (member "work_liveness" recoverable)
+        = `Bool true);
+  let projection_pending =
+    match queue ~count:0 ~oldest_age:`Null with
+    | `Assoc fields ->
+      `Assoc
+        (("transition_outbox_count", `Int 1)
+         :: List.remove_assoc "transition_outbox_count" fields)
+    | _ -> assert false
+  in
+  let projection_pending =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      projection_pending
+  in
+  check
+    "pending transition projection is never backlog-clean"
+    (member "backlog_clean" projection_pending = `Bool false);
+  let immediate_backlog =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:0.0
+      (queue ~count:1 ~oldest_age:(`Float 0.0))
+  in
+  check
+    "zero-second threshold degrades runnable backlog immediately"
+    (String.equal (string_member "status" immediate_backlog) "degraded");
+  check
+    "zero-second threshold requires operator action immediately"
+    (member "operator_action_required" immediate_backlog = `Bool true);
+  let unavailable =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      (`Assoc
+         [ "status", `String "unavailable"
+         ; "counts_complete", `Bool false
+         ; "runnable_backlog_count", `Int 0
+         ])
+  in
+  check
+    "unavailable queue never claims backlog clean"
+    (member "backlog_clean" unavailable = `Bool false)
 ;;
 
 let () =

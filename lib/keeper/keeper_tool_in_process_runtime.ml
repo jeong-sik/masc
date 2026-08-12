@@ -1163,7 +1163,10 @@ let handle_surface_post_with_outcome
       ~args
       ()
   =
-  let succeed payload = Keeper_tool_execution.success payload in
+  let succeed target payload =
+    Keeper_tool_execution.success payload
+    |> Keeper_tool_execution.with_surface_post_receipt target
+  in
   let fail
         ?(class_ = Tool_result.Workflow_rejection)
         ~effect_disposition
@@ -1259,8 +1262,10 @@ let handle_surface_post_with_outcome
              ~source:"dashboard"
              ~content:safe_content
              ();
-           succeed (Keeper_surface_post.ok_json ~surface ()))
-    | Ok (Keeper_surface_post.To_discord { channel_id }) ->
+           succeed
+             Keeper_surface_post.To_dashboard
+             (Keeper_surface_post.ok_json ~surface ()))
+    | Ok (Keeper_surface_post.To_discord { channel_id } as target) ->
       let input =
         connector_post_gate_input
           ~connector:surface
@@ -1275,7 +1280,8 @@ let handle_surface_post_with_outcome
         ?gate_context
         ?gate_grant
         (Replay_discord_post { input; channel_id; content = safe_content })
-    | Ok (Keeper_surface_post.To_slack { channel_id; blocks = _ }) ->
+      |> Keeper_tool_execution.with_surface_post_receipt target
+    | Ok (Keeper_surface_post.To_slack { channel_id; blocks = _ } as target) ->
       let slack_blocks =
         Keeper_chat_slack.content_blocks_of_text safe_content
       in
@@ -1298,7 +1304,8 @@ let handle_surface_post_with_outcome
            ; channel_id
            ; content = safe_content
            ; blocks = slack_blocks
-           }))
+           })
+      |> Keeper_tool_execution.with_surface_post_receipt target)
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
@@ -1441,10 +1448,22 @@ let handle_masc_agent_timeline_with_outcome ~(config : Workspace.config) ~(meta 
   |> dispatch_option_to_execution ~name
 ;;
 
-let handle_masc_schedule_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_schedule_with_outcome
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ~name
+      ~args
+      ()
+  =
   let ctx : Tool_schedule.context =
     { config
     ; agent_name = meta.name
+    ; stamp_keeper_wake_result_delivery =
+        (fun ~payload ->
+           Schedule_payload_projection.set_keeper_wake_result_delivery
+             ~payload
+             ~channel:continuation_channel)
     ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
     }
   in

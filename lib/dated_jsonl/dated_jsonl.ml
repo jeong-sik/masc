@@ -322,9 +322,24 @@ let day_file_name_is_valid ~year ~month name =
   | None, _ | _, None -> false
 ;;
 
+(* A name this layout can never produce is a foreign file, not a corrupted
+   member of it. Month directories are [YYYY-MM] and day files are
+   [DD.jsonl]; neither can begin with a dot, so a dotfile was written by
+   something other than this store.
+
+   macOS writes [.DS_Store] into any directory Finder opens, and the live
+   store sits under a browsed home, so failing the whole read for one would
+   take every reader of that store down for the rest of a Finder visit.
+   Entries that do belong to the layout stay strict: a directory named
+   [2026-13] or a file named [32.jsonl] is corruption and still fails. *)
+let entry_is_foreign_to_layout entry =
+  String.length entry > 0 && Char.equal entry.[0] '.'
+;;
+
 let validate_layout_entries ~parent ~expected ~is_valid entries =
   let rec loop valid_entries = function
     | [] -> Ok (List.rev valid_entries)
+    | entry :: rest when entry_is_foreign_to_layout entry -> loop valid_entries rest
     | entry :: rest ->
       if is_valid entry
       then loop (entry :: valid_entries) rest

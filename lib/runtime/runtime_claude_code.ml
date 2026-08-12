@@ -810,13 +810,23 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~on_turn_started ~on_stream_event ~stream_started ~response_emitted ~ignored
   | "result" ->
-    let* turn_id, result, usage =
+    let parsed_result =
       parse_result
         ~expected_session_id
         ~rate_limit
         ~tool_effect_attempted:(!tool_call_count > 0)
         ~response_emitted:!response_emitted
         fields
+    in
+    let* turn_id, result, usage =
+      match parsed_result with
+      | Error
+          (Context_window_exceeded
+             { tool_effect_attempted = false; response_emitted = false; _ } as error) ->
+        if !stream_started
+        then emit_stream_event on_stream_event (Turn_finished { text = "" });
+        Error error
+      | result -> result
     in
     let* () =
       invoke_state_callback ~stage:"turn started callback" (fun () ->

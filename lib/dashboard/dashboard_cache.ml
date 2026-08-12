@@ -603,6 +603,37 @@ let timeout_error_json ?timeout_kind ?(waiting = false) key timeout_sec =
       ("key", `String key);
     ]
 
+(* RFC-0372 Phase 4 — bound how many uncached computes run at once.
+
+   A timeout bounds how long one compute may hold resources; it does not bound
+   how many run together. Nothing stopped N simultaneous cache misses from each
+   materialising their own working set, so peak heap was (concurrent misses x
+   per-request cost) with no ceiling on the first factor. Measured per-request
+   cost is ~80MB for the widest read, so a handful of concurrent misses is
+   already gigabytes.
+
+   The semaphore and the timeout only work as a pair: a semaphore alone lets the
+   queue grow without limit, a timeout alone leaves concurrency unbounded.
+   Acquisition happens INSIDE [Eio.Time.with_timeout], so waiting for a slot is
+   itself bounded and a queued request fails as a timeout rather than hanging.
+
+   Cache hits and stale-while-revalidate reads never reach here, so the common
+   dashboard poll does not touch the semaphore at all. *)
+let compute_slots_default = 4
+
+let compute_slots =
+  Eio.Semaphore.make
+    (match int_of_string_opt (Sys.getenv_opt "MASC_DASHBOARD_COMPUTE_SLOTS" |> Option.value ~default:"") with
+     | Some n when n >= 1 -> n
+     | _ -> compute_slots_default)
+
+let with_compute_slot f =
+  Eio.Semaphore.acquire compute_slots;
+  (* fun-protect-finally-ok: [Eio.Semaphore.release] does not raise, so it
+     cannot mask an exception escaping [f]. *)
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release compute_slots) f
+;;
+
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
     timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec
@@ -613,7 +644,7 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
           get_or_compute_eio ~wait_timeout_sec:timeout_sec key ~ttl (fun () ->
             match
               Eio.Time.with_timeout clock timeout_sec (fun () ->
-                Ok (compute ()))
+                Ok (with_compute_slot compute))
             with
             | Ok value -> value
             | Error `Timeout ->

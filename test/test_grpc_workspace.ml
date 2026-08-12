@@ -8,6 +8,20 @@
 
 module T = Masc_grpc_types
 module Keeper_directive = Masc.Keeper_directive
+module Keeper_registry = Masc.Keeper_registry
+
+let keeper_meta ~name ~agent_name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String name
+        ; "agent_name", `String agent_name
+        ; "trace_id", `String ("trace-" ^ name)
+        ])
+  with
+  | Ok meta -> meta
+  | Error error -> Alcotest.failf "invalid keeper meta fixture: %s" error
+;;
 
 let task_id value =
   match Keeper_id.Task_id.of_string value with
@@ -684,14 +698,84 @@ let test_heartbeat_projects_workspace_view () =
     | _ -> Alcotest.fail "Heartbeat bidi handler missing")
 ;;
 
-let test_heartbeat_projects_workspace_pause_directive () =
+let test_heartbeat_projects_keeper_pause_not_workspace_pause () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  with_temp_dir "masc-grpc-heartbeat-workspace-pause" (fun dir ->
+  Keeper_registry.For_testing.clear ();
+  with_temp_dir "masc-grpc-heartbeat-keeper-pause" (fun dir ->
+    Fun.protect
+      ~finally:Keeper_registry.For_testing.clear
+      (fun () ->
     let workspace_config = Workspace_utils.default_config dir in
-    ignore (Masc.Workspace.init workspace_config ~agent_name:(Some "alpha"));
+    let agent_name = "keeper-alpha-agent" in
+    let keeper_name = "alpha" in
+    ignore (Masc.Workspace.init workspace_config ~agent_name:(Some agent_name));
+    let meta = keeper_meta ~name:keeper_name ~agent_name in
+    ignore
+      (Keeper_registry.For_testing.register
+         ~base_path:workspace_config.base_path
+         keeper_name
+         meta);
     Masc.Workspace.pause workspace_config ~by:"operator" ~reason:"maintenance";
+    let service =
+      Masc_grpc_service.create_service
+        ~workspace_config
+        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
+          Error "test stub")
+    in
+    match Grpc_eio.Service.get_method service "Heartbeat" with
+    | Some { handler = `Bidi handler; _ } ->
+      Eio.Switch.run
+      @@ fun sw ->
+      let request_stream = Grpc_eio.Stream.create 16 in
+      let response_stream = handler ~sw request_stream in
+      let send_heartbeat session_id =
+        Grpc_eio.Stream.add
+          request_stream
+          (T.HeartbeatPing.to_bytes
+             { agent_name
+             ; session_id
+             ; timestamp_ms = 1700000000000L
+             ; current_task_id = ""
+             });
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
+          Grpc_eio.Stream.take response_stream)
+        |> T.HeartbeatAck.of_bytes
+      in
+      let workspace_paused_ack = send_heartbeat "sess-workspace-pause" in
+      Alcotest.(check (list string))
+        "workspace pause does not become a durable keeper pause"
+        []
+        (List.map T.HeartbeatAck.directive_to_wire workspace_paused_ack.directives);
+      ignore (Masc.Workspace.resume workspace_config ~by:"operator");
+      ignore
+        (Keeper_registry.For_testing.register
+           ~base_path:workspace_config.base_path
+           keeper_name
+           { meta with paused = true });
+      let keeper_paused_ack = send_heartbeat "sess-keeper-pause" in
+      Alcotest.(check (list string))
+        "durable keeper pause reaches its control stream"
+        [ "pause" ]
+        (List.map T.HeartbeatAck.directive_to_wire keeper_paused_ack.directives);
+      Grpc_eio.Stream.close request_stream
+    | _ -> Alcotest.fail "Heartbeat bidi handler missing"))
+;;
+
+let test_heartbeat_does_not_materialize_uninitialized_workspace () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Keeper_registry.For_testing.clear ();
+  with_temp_dir "masc-grpc-heartbeat-uninitialized" (fun dir ->
+    Fun.protect
+      ~finally:Keeper_registry.For_testing.clear
+      (fun () ->
+    let workspace_config = Workspace_utils.default_config dir in
+    let state_path = Workspace_utils.state_path workspace_config in
+    Alcotest.(check bool) "state absent before heartbeat" false (Sys.file_exists state_path);
     let service =
       Masc_grpc_service.create_service
         ~workspace_config
@@ -708,8 +792,8 @@ let test_heartbeat_projects_workspace_pause_directive () =
       Grpc_eio.Stream.add
         request_stream
         (T.HeartbeatPing.to_bytes
-           { agent_name = "alpha"
-           ; session_id = "sess-workspace-pause"
+           { agent_name = "uninitialized-grpc-agent"
+           ; session_id = "sess-uninitialized"
            ; timestamp_ms = 1700000000000L
            ; current_task_id = ""
            });
@@ -719,11 +803,15 @@ let test_heartbeat_projects_workspace_pause_directive () =
         |> T.HeartbeatAck.of_bytes
       in
       Alcotest.(check (list string))
-        "workspace pause reaches keeper control stream"
-        [ "pause" ]
+        "uninitialized heartbeat has no directives"
+        []
         (List.map T.HeartbeatAck.directive_to_wire ack.directives);
+      Alcotest.(check bool)
+        "heartbeat leaves state absent"
+        false
+        (Sys.file_exists state_path);
       Grpc_eio.Stream.close request_stream
-    | _ -> Alcotest.fail "Heartbeat bidi handler missing")
+    | _ -> Alcotest.fail "Heartbeat bidi handler missing"))
 ;;
 
 (* ====== Test suite ====== *)
@@ -795,9 +883,13 @@ let () =
             `Quick
             test_heartbeat_projects_workspace_view
         ; Alcotest.test_case
-            "heartbeat projects workspace pause directive"
+            "heartbeat projects keeper pause only"
             `Quick
-            test_heartbeat_projects_workspace_pause_directive
+            test_heartbeat_projects_keeper_pause_not_workspace_pause
+        ; Alcotest.test_case
+            "heartbeat leaves uninitialized workspace absent"
+            `Quick
+            test_heartbeat_does_not_materialize_uninitialized_workspace
         ] )
     ; ( "server_config"
       , [ Alcotest.test_case "default_port" `Quick test_grpc_default_port

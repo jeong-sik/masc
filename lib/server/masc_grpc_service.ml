@@ -189,7 +189,7 @@ type task_directive_decision =
       }
 
 type heartbeat_workspace_view =
-  { workspace_paused : bool
+  { keeper_paused : bool
   ; active_agent_count : int
   ; pending_task_count : int
   ; task_directive : task_directive_decision
@@ -223,9 +223,9 @@ let decide_task_directive tasks =
   first_todo tasks
 ;;
 
-(** Pure projection from one authoritative Workspace snapshot. *)
-let heartbeat_workspace_view ~workspace_paused ~active_agents ~tasks =
-  { workspace_paused
+(** Pure projection from authoritative Workspace and Keeper snapshots. *)
+let heartbeat_workspace_view ~keeper_paused ~active_agents ~tasks =
+  { keeper_paused
   ; active_agent_count = List.length active_agents
   ; pending_task_count =
       List.fold_left
@@ -234,6 +234,20 @@ let heartbeat_workspace_view ~workspace_paused ~active_agents ~tasks =
         tasks
   ; task_directive = decide_task_directive tasks
   }
+;;
+
+let keeper_paused_for_heartbeat ~base_path ~agent_name =
+  match
+    Keeper_registry_lookup.find_all_by_agent_name_in_base_path ~base_path agent_name
+  with
+  | [] -> false
+  | [ entry ] -> entry.meta.paused
+  | entries ->
+    Log.Transport.warn
+      "gRPC heartbeat: ambiguous keeper agent binding for %s (%d entries)"
+      agent_name
+      (List.length entries);
+    false
 ;;
 
 let directives_of_view ~agent_name view =
@@ -249,7 +263,7 @@ let directives_of_view ~agent_name view =
         error;
       []
   in
-  if view.workspace_paused
+  if view.keeper_paused
   then Keeper_directive.Pause :: task_directives
   else task_directives
 ;;
@@ -300,7 +314,10 @@ let handle_heartbeat
               let tasks = Workspace.get_tasks_safe workspace_config in
               let view =
                 heartbeat_workspace_view
-                  ~workspace_paused:(Workspace.is_paused workspace_config)
+                  ~keeper_paused:
+                    (keeper_paused_for_heartbeat
+                       ~base_path:workspace_config.base_path
+                       ~agent_name:ping.agent_name)
                   ~active_agents
                   ~tasks
               in

@@ -8,6 +8,13 @@ let _preserve_public_raw_sync_response_surface
   ()
 ;;
 
+let _preserve_public_sync_transport_receipt_surface
+      ({ response = _; response_header_evidence = _ } :
+        Http_client.sync_transport_receipt)
+  =
+  ()
+;;
+
 let _preserve_public_success_surface
       ({ call_id = _; receipt = _; output = _; provenance = _; raw_response = _ } :
         EO.success)

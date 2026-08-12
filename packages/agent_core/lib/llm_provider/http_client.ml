@@ -353,12 +353,57 @@ let classify_unix_error = function
     Unknown
 ;;
 
+type http_scheme =
+  | Http
+  | Https
+
+type validated_uri =
+  { uri : Uri.t
+  ; url : string
+  ; scheme : http_scheme
+  ; host : string
+  ; port : int
+  }
+
+let http_scheme_to_string = function
+  | Http -> "http"
+  | Https -> "https"
+;;
+
+let invalid_url url detail =
+  Error
+    (NetworkError
+       { message = Printf.sprintf "invalid URL %S: %s" url detail; kind = Unknown })
+;;
+
 let parse_uri url =
-  try Ok (Uri.of_string url) with
-  | Invalid_argument msg ->
-    Error
-      (NetworkError
-         { message = Printf.sprintf "invalid URL %S: %s" url msg; kind = Unknown })
+  match Uri.of_string url with
+  | exception Invalid_argument detail -> invalid_url url detail
+  | uri ->
+    let* scheme =
+      match Option.map String.lowercase_ascii (Uri.scheme uri) with
+      | Some "http" -> Ok Http
+      | Some "https" -> Ok Https
+      | Some unsupported ->
+        invalid_url url (Printf.sprintf "unsupported scheme %S" unsupported)
+      | None -> invalid_url url "missing HTTP scheme"
+    in
+    let* host =
+      match Uri.host uri with
+      | Some host when String.trim host <> "" -> Ok host
+      | Some _ | None -> invalid_url url "missing host"
+    in
+    let* port =
+      match Uri.port uri with
+      | Some port when port > 0 && port <= 65535 -> Ok port
+      | Some port -> invalid_url url (Printf.sprintf "invalid port %d" port)
+      | None ->
+        Ok
+          (match scheme with
+           | Http -> 80
+           | Https -> 443)
+    in
+    Ok { uri; url; scheme; host; port }
 ;;
 
 let log_close_failure ~url ~message =
@@ -1279,6 +1324,52 @@ type raw_sync_response =
   ; retry_after_header : float option
   }
 
+type validated_sync_request =
+  { origin : validated_uri
+  ; header : Http.Header.t
+  ; body : string
+  }
+
+type sync_transport_receipt =
+  { response : raw_sync_response
+  ; response_header_evidence : response_header_evidence
+  }
+
+let prepare_sync_request ~url ~headers ~body =
+  let* origin = parse_uri url in
+  let* header =
+    try Ok (Http.Header.of_list headers) with
+    | Invalid_argument reason -> Error (AcceptRejected { reason })
+  in
+  Ok { origin; header; body }
+;;
+
+let%test "prepare_sync_request rejects missing host before dispatch" =
+  match prepare_sync_request ~url:"http:///v1/messages" ~headers:[] ~body:"{}" with
+  | Error (NetworkError { kind = Unknown; _ }) -> true
+  | Ok _
+  | Error
+      ( HttpError _
+      | NetworkError _
+      | TimeoutError _
+      | AcceptRejected _
+      | ProviderTerminal _
+      | ProviderFailure _ ) -> false
+;;
+
+let%test "prepare_sync_request rejects unsupported schemes before dispatch" =
+  match prepare_sync_request ~url:"ftp://example.com/v1" ~headers:[] ~body:"{}" with
+  | Error (NetworkError { kind = Unknown; _ }) -> true
+  | Ok _
+  | Error
+      ( HttpError _
+      | NetworkError _
+      | TimeoutError _
+      | AcceptRejected _
+      | ProviderTerminal _
+      | ProviderFailure _ ) -> false
+;;
+
 let%test "Retry-After is captured once with explicit duplicate ambiguity" =
   let capture headers =
     headers |> Http.Header.of_list |> capture_response_header_evidence |> snd
@@ -1330,36 +1421,33 @@ module Cache_key = struct
     | n -> n
   ;;
 
-  let default_port_for_scheme scheme =
-    match scheme with
-    | "https" -> 443
-    | _ -> 80
+  let of_origin (origin : validated_uri) =
+    { scheme = http_scheme_to_string origin.scheme
+    ; host = origin.host
+    ; port = origin.port
+    }
   ;;
 
-  let of_uri uri =
-    let scheme = Uri.scheme uri |> Option.value ~default:"http" in
-    let host =
-      match Uri.host uri with
-      | Some "" | None -> "localhost"
-      | Some h -> h
-    in
-    let port = Uri.port uri |> Option.value ~default:(default_port_for_scheme scheme) in
-    { scheme; host; port }
+  let%test "Cache_key.of_origin resolves https port 443 once" =
+    match parse_uri "https://example.com/path" with
+    | Ok origin ->
+      let key = of_origin origin in
+      key.scheme = "https" && key.host = "example.com" && key.port = 443
+    | Error _ -> false
   ;;
 
-  let%test "Cache_key.of_uri defaults to https port 443" =
-    let key = of_uri (Uri.of_string "https://example.com/path") in
-    key.scheme = "https" && key.host = "example.com" && key.port = 443
+  let%test "Cache_key.of_origin resolves http port 80 once" =
+    match parse_uri "http://example.com/path" with
+    | Ok origin ->
+      let key = of_origin origin in
+      key.scheme = "http" && key.host = "example.com" && key.port = 80
+    | Error _ -> false
   ;;
 
-  let%test "Cache_key.of_uri defaults to http port 80" =
-    let key = of_uri (Uri.of_string "http://example.com/path") in
-    key.scheme = "http" && key.host = "example.com" && key.port = 80
-  ;;
-
-  let%test "Cache_key.of_uri preserves explicit port" =
-    let key = of_uri (Uri.of_string "https://example.com:8443/path") in
-    key.port = 8443
+  let%test "Cache_key.of_origin preserves explicit port" =
+    match parse_uri "https://example.com:8443/path" with
+    | Ok origin -> (of_origin origin).port = 8443
+    | Error _ -> false
   ;;
 end
 
@@ -1491,13 +1579,13 @@ let cache_stats (cache : cache) : cache_stats =
     })
 ;;
 
-(** Find a warm client for [uri] and remove it from the cache so it is
+(** Find a warm client for [origin] and remove it from the cache so it is
     owned by the caller. Returns [None] if no entry is available. *)
-let cache_take (cache : cache) uri : cache_entry option =
+let cache_take (cache : cache) origin : cache_entry option =
   if Atomic.get cache.stop
   then None
   else (
-    let key = Cache_key.of_uri uri in
+    let key = Cache_key.of_origin origin in
     Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
       match Cache_map.find_opt key cache.entries with
       | Some (e :: rest) ->
@@ -1509,11 +1597,11 @@ let cache_take (cache : cache) uri : cache_entry option =
 
 (** Park a client back into the cache, or close it if the per-host cap
     is reached. [close] is the entry's own shutdown function. *)
-let cache_return (cache : cache) uri (entry : cache_entry) : unit =
+let cache_return (cache : cache) origin (entry : cache_entry) : unit =
   if Atomic.get cache.stop
   then Eio.Resource.close entry.connection
   else (
-    let key = Cache_key.of_uri uri in
+    let key = Cache_key.of_origin origin in
     let now = cache.now () in
     let entry = { entry with last_used_at = now } in
     let parked =
@@ -1528,33 +1616,19 @@ let cache_return (cache : cache) uri (entry : cache_entry) : unit =
     if not parked then Eio.Resource.close entry.connection)
 ;;
 
-(** Resolve the origin for [uri] and prepare the TLS wrapper if needed.
+(** Resolve [origin] and prepare the TLS wrapper if needed.
     The result is reused by both one-shot clients and cached connections. *)
-let resolve_origin net uri =
+let resolve_origin net (origin : validated_uri) =
   let net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t) in
-  let* host =
-    match Uri.host uri with
-    | Some host when String.trim host <> "" -> Ok host
-    | Some _ | None ->
-      Error
-        (NetworkError
-           { message = Printf.sprintf "invalid URL %S: missing host" (Uri.to_string uri)
-           ; kind = Unknown
-           })
-  in
-  let service =
-    match Uri.port uri with
-    | Some port -> Int.to_string port
-    | None -> Uri.scheme uri |> Option.value ~default:"http"
-  in
+  let service = Int.to_string origin.port in
   let* addr =
     try
-      match Eio.Net.getaddrinfo_stream ~service net host with
+      match Eio.Net.getaddrinfo_stream ~service net origin.host with
       | ip :: _ -> Ok ip
       | [] ->
         Error
           (NetworkError
-             { message = Printf.sprintf "failed to resolve hostname: %s" host
+             { message = Printf.sprintf "failed to resolve hostname: %s" origin.host
              ; kind = Dns_failure
              })
     with
@@ -1565,21 +1639,21 @@ let resolve_origin net uri =
            { message = Printexc.to_string exn; kind = classify_unix_error code })
     | Failure msg -> Error (unknown_network_error msg)
   and* tls_wrap =
-    match Uri.scheme uri with
-    | Some "https" ->
+    match origin.scheme with
+    | Https ->
       let wrap_error reason =
         NetworkError
           { message =
               Printf.sprintf
                 "HTTPS requested but TLS not available for %s: %s"
-                (Uri.to_string uri)
+                origin.url
                 (Api_common.https_init_error_to_string reason)
           ; kind = https_init_error_network_kind reason
           }
       in
       let+ wrap = Result.map_error wrap_error (Api_common.make_https_result ()) in
       Some wrap
-    | Some "http" | Some _ | None -> Ok None
+    | Http -> Ok None
   in
   Ok (net, addr, tls_wrap)
 ;;
@@ -1588,14 +1662,14 @@ let resolve_origin net uri =
     Returns [Ok (client, close)] where [close] shuts down all transports
     created by this client. The client is NOT bound to any switch; the
     caller decides when to close it or park it in a cache. *)
-let make_client ~net ~uri =
-  let+ net, addr, tls_wrap = resolve_origin net uri in
+let make_client ~net ~origin =
+  let+ net, addr, tls_wrap = resolve_origin net origin in
   let tracked_transports : connection list Atomic.t = Atomic.make [] in
   let connect ~sw:conn_sw _uri =
     let sock = Eio.Net.connect ~sw:conn_sw net addr in
     let transport : connection =
       match tls_wrap with
-      | Some wrap -> (wrap uri sock :> connection)
+      | Some wrap -> (wrap origin.uri sock :> connection)
       | None -> (sock :> connection)
     in
     let rec push () =
@@ -1609,7 +1683,7 @@ let make_client ~net ~uri =
       "http_client"
       "connect: new transport #%d for %s"
       (List.length (Atomic.get tracked_transports))
-      (Uri.to_string uri);
+      origin.url;
     transport
   in
   let client = Cohttp_eio.Client.make_generic connect in
@@ -1622,17 +1696,17 @@ let make_client ~net ~uri =
         "http_client"
         "close: closing %d transport(s) for %s"
         n
-        (Uri.to_string uri);
+        origin.url;
     Eio.Cancel.protect (fun () ->
       List.iter
         (fun t ->
            try
              Eio.Resource.close t;
-             Diag.debug "http_client" "transport closed for %s" (Uri.to_string uri)
+             Diag.debug "http_client" "transport closed for %s" origin.url
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
-             log_close_failure ~url:(Uri.to_string uri) ~message:(Printexc.to_string exn))
+             log_close_failure ~url:origin.url ~message:(Printexc.to_string exn))
         transports)
   in
   client, close
@@ -1640,16 +1714,16 @@ let make_client ~net ~uri =
 
 (** Create a single transport connection bound to [sw]. This is the unit
     stored in the connection cache and reused across requests. *)
-let make_connection ~sw ~net ~uri : (connection, http_error) result =
-  let* net, addr, tls_wrap = resolve_origin net uri in
+let make_connection ~sw ~net ~origin : (connection, http_error) result =
+  let* net, addr, tls_wrap = resolve_origin net origin in
   try
     let sock = Eio.Net.connect ~sw net addr in
     let conn : connection =
       match tls_wrap with
-      | Some wrap -> (wrap uri sock :> connection)
+      | Some wrap -> (wrap origin.uri sock :> connection)
       | None -> (sock :> connection)
     in
-    Diag.debug "http_client" "make_connection: new connection for %s" (Uri.to_string uri);
+    Diag.debug "http_client" "make_connection: new connection for %s" origin.url;
     Ok conn
   with
   | Eio.Io (err, _) as exn -> Error (network_error_of_eio err exn)
@@ -1662,8 +1736,8 @@ let make_connection ~sw ~net ~uri : (connection, http_error) result =
 (** Client wrapper that tracks the socket for explicit close.
     The caller provides the concrete URI so host resolution and TLS
     availability can be checked up front and reported as typed errors. *)
-let make_closing_client ~sw ~net ~uri =
-  let+ client, close = make_client ~net ~uri in
+let make_closing_client ~sw ~net ~origin =
+  let+ client, close = make_client ~net ~origin in
   Eio.Switch.on_release sw close;
   client
 ;;
@@ -1678,10 +1752,10 @@ let make_closing_client ~sw ~net ~uri =
     [('a, http_error) result]. The wrapper distinguishes [Ok] from [Error]
     for cache lifecycle decisions; exceptions are treated as fatal for the
     connection. *)
-let with_client ?cache ~sw ~net ~uri f =
+let with_client ?cache ~sw ~net ~origin f =
   match cache with
   | None ->
-    let* client, close = make_client ~net ~uri in
+    let* client, close = make_client ~net ~origin in
     Fun.protect
       ~finally:(fun () ->
         try Eio.Cancel.protect close with
@@ -1694,10 +1768,10 @@ let with_client ?cache ~sw ~net ~uri f =
       (fun () -> f ~sw client)
   | Some cache ->
     let* conn, was_cached =
-      match cache_take cache uri with
+      match cache_take cache origin with
       | Some e -> Ok (e.connection, true)
       | None ->
-        let+ conn = make_connection ~sw:cache.sw ~net ~uri in
+        let+ conn = make_connection ~sw:cache.sw ~net ~origin in
         Atomic.incr cache.create_count_total;
         conn, false
     in
@@ -1709,7 +1783,7 @@ let with_client ?cache ~sw ~net ~uri f =
       ~finally:(fun () ->
         try
           if !ok
-          then cache_return cache uri { connection = conn; last_used_at = 0.0 }
+          then cache_return cache origin { connection = conn; last_used_at = 0.0 }
           else Eio.Resource.close conn
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1748,11 +1822,13 @@ let get_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
       ~timeout_s
   in
   catch_network (fun () ->
-    let* uri = parse_uri url in
-    with_client ?cache ~sw ~net ~uri (fun ~sw client ->
+    let* origin = parse_uri url in
+    with_client ?cache ~sw ~net ~origin (fun ~sw client ->
       let hdr = Http.Header.of_list (maybe_add_connection_close ?cache headers) in
       with_explicit_deadline deadline (fun () ->
-        let resp, resp_body = Cohttp_eio.Client.get ~sw client ~headers:hdr uri in
+        let resp, resp_body =
+          Cohttp_eio.Client.get ~sw client ~headers:hdr origin.uri
+        in
         let code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
         let* body_str = read_response_body resp_body in
         Ok (code, body_str))))
@@ -1767,8 +1843,8 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
       ~timeout_s
   in
   catch_network (fun () ->
-    let* uri = parse_uri url in
-    with_client ?cache ~sw ~net ~uri (fun ~sw client ->
+    let* origin = parse_uri url in
+    with_client ?cache ~sw ~net ~origin (fun ~sw client ->
       (* Explicitly set Content-Length to prevent chunked transfer encoding.
          Ollama's yyjson parser rejects chunked bodies with
          "Value looks like object, but can't find closing '}' symbol". *)
@@ -1784,7 +1860,7 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
             client
             ~headers:hdr
             ~body:(Cohttp_eio.Body.of_string body)
-            uri
+            origin.uri
         in
         let code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
         profile_headers_on_client_error
@@ -1802,13 +1878,12 @@ let post_sync_once_after_validation
       ~connect_deadline
       ~body_deadline
       ~net
-      ~uri
-      ~header
-      ~body
+      ~(request : validated_sync_request)
       ()
   =
   Eio.Switch.run
   @@ fun sw ->
+  let { origin; header; body } = request in
   let request_sw =
     match cache with
     | Some cache -> cache.sw
@@ -1913,12 +1988,12 @@ let post_sync_once_after_validation
       with_headers_deadline (fun () ->
         let* conn =
           match cache with
-          | None -> make_connection ~sw:request_sw ~net ~uri
+          | None -> make_connection ~sw:request_sw ~net ~origin
           | Some cache ->
-            (match cache_take cache uri with
+            (match cache_take cache origin with
              | Some entry -> Ok entry.connection
              | None ->
-               let+ conn = make_connection ~sw:cache.sw ~net ~uri in
+               let+ conn = make_connection ~sw:cache.sw ~net ~origin in
                Atomic.incr cache.create_count_total;
                conn)
         in
@@ -1934,7 +2009,7 @@ let post_sync_once_after_validation
             client
             ~headers:header
             ~body:(Cohttp_eio.Body.of_string body)
-            uri
+            origin.uri
         in
         let response_status =
           Cohttp.Response.status response |> Cohttp.Code.code_of_status
@@ -2005,7 +2080,7 @@ let post_sync_once_after_validation
          with
          | Some cache, true ->
            (try
-              cache_return cache uri { connection = conn; last_used_at = 0.0 };
+              cache_return cache origin { connection = conn; last_used_at = 0.0 };
               connection := None;
               Ok ()
             with
@@ -2020,19 +2095,19 @@ let post_sync_once_after_validation
           fail error
         | Ok () ->
           Ok
-            ( { status = response_status; body = response_body; retry_after_header }
-            , response_header_evidence )))
+            { response =
+                { status = response_status; body = response_body; retry_after_header }
+            ; response_header_evidence
+            }))
 ;;
 
-let post_sync_once_with_evidence
+let dispatch_sync_request
       ?cache
       ?clock
       ?connect_timeout_s
       ?body_timeout_s
       ~net
-      ~url
-      ~headers
-      ~body
+      request
       ()
   =
   let before_dispatch error = Error (Before_dispatch_error error) in
@@ -2054,25 +2129,37 @@ let post_sync_once_with_evidence
      with
      | Error error -> before_dispatch error
      | Ok body_deadline ->
-       (match parse_uri url with
-        | Error error -> before_dispatch error
-        | Ok uri ->
-          let header =
-            try Ok (Http.Header.of_list headers) with
-            | Invalid_argument reason -> Error (AcceptRejected { reason })
-          in
-          (match header with
-           | Error error -> before_dispatch error
-           | Ok header ->
-             post_sync_once_after_validation
-               ?cache
-               ~connect_deadline
-               ~body_deadline
-               ~net
-               ~uri
-               ~header
-               ~body
-               ())))
+       post_sync_once_after_validation
+         ?cache
+         ~connect_deadline
+         ~body_deadline
+         ~net
+         ~request
+         ())
+;;
+
+let post_sync_once_with_evidence
+      ?cache
+      ?clock
+      ?connect_timeout_s
+      ?body_timeout_s
+      ~net
+      ~url
+      ~headers
+      ~body
+      ()
+  =
+  match prepare_sync_request ~url ~headers ~body with
+  | Error error -> Error (Before_dispatch_error error)
+  | Ok request ->
+    dispatch_sync_request
+      ?cache
+      ?clock
+      ?connect_timeout_s
+      ?body_timeout_s
+      ~net
+      request
+      ()
 ;;
 
 let post_sync_once
@@ -2098,7 +2185,7 @@ let post_sync_once
       ~body
       ()
   with
-  | Ok (response, _) -> Ok response
+  | Ok receipt -> Ok receipt.response
   | Error error -> Error error
 ;;
 
@@ -2116,8 +2203,8 @@ let post_stream ?cache ?clock ?connect_timeout_s ~sw ~net ~url ~headers ~body ()
      cache-aware streaming. *)
   ignore cache;
   catch_network (fun () ->
-    let* uri = parse_uri url in
-    let* client = make_closing_client ~sw ~net ~uri in
+    let* origin = parse_uri url in
+    let* client = make_closing_client ~sw ~net ~origin in
     let headers_with_length =
       ("content-length", string_of_int (String.length body))
       :: add_connection_close headers
@@ -2134,7 +2221,7 @@ let post_stream ?cache ?clock ?connect_timeout_s ~sw ~net ~url ~headers ~body ()
              client
              ~headers:hdr
              ~body:(Cohttp_eio.Body.of_string body)
-             uri))
+             origin.uri))
     in
     match Cohttp.Response.status resp with
     | `OK -> Ok (Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body resp_body)
@@ -2218,15 +2305,15 @@ let with_post_stream
      connection is NOT parked until [f] has fully consumed the reader. *)
   let post_result =
     catch_network (fun () ->
-      let* uri = parse_uri url in
+      let* origin = parse_uri url in
       let* conn =
         match cache with
-        | None -> make_connection ~sw:request_sw ~net ~uri
+        | None -> make_connection ~sw:request_sw ~net ~origin
         | Some cache ->
-          (match cache_take cache uri with
+          (match cache_take cache origin with
            | Some e -> Ok e.connection
            | None ->
-             let+ conn = make_connection ~sw:cache.sw ~net ~uri in
+             let+ conn = make_connection ~sw:cache.sw ~net ~origin in
              Atomic.incr cache.create_count_total;
              conn)
       in
@@ -2246,7 +2333,7 @@ let with_post_stream
                  client
                  ~headers:hdr
                  ~body:(Cohttp_eio.Body.of_string body)
-                 uri))
+                 origin.uri))
         in
         let status = Cohttp.Response.status resp in
         Option.iter
@@ -2263,7 +2350,7 @@ let with_post_stream
           let reader =
             Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body resp_body
           in
-          Ok (uri, conn, reusable, transport_eof_seen, reader)
+          Ok (origin, conn, reusable, transport_eof_seen, reader)
         | status ->
           let code = Cohttp.Code.code_of_status status in
           let resp_headers = Cohttp.Response.headers resp in
@@ -2294,7 +2381,7 @@ let with_post_stream
 
      The connection is parked back into the cache only after [f] returns
      successfully, ensuring the reader is no longer using the flow. *)
-  let* uri, conn, response_is_reusable, transport_eof_seen, reader = post_result in
+  let* origin, conn, response_is_reusable, transport_eof_seen, reader = post_result in
   let body_result =
     try Ok (f reader) with
     | Eio.Time.Timeout ->
@@ -2322,7 +2409,7 @@ let with_post_stream
   (match body_result, cache with
    | Ok _, Some cache
      when response_is_reusable && Eio.Buf_read.eof_seen reader && not !transport_eof_seen
-     -> cache_return cache uri { connection = conn; last_used_at = 0.0 }
+     -> cache_return cache origin { connection = conn; last_used_at = 0.0 }
    | Ok _, Some _ | Ok _, None -> Eio.Resource.close conn
    | Error _, _ -> Eio.Resource.close conn);
   body_result

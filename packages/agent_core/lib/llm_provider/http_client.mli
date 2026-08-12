@@ -437,6 +437,27 @@ type raw_sync_response =
   ; retry_after_header : float option
   }
 
+(** URI, headers, and body admitted before transport effects begin. The URI has
+    an explicit HTTP(S) scheme, non-empty host, and resolved port; callers cannot
+    reopen those optional URI fields after this boundary. *)
+type validated_sync_request
+
+(** Successful one-dispatch receipt. Status, body, retry evidence, and canonical
+    response-header evidence stay together through downstream parsing. *)
+type sync_transport_receipt =
+  { response : raw_sync_response
+  ; response_header_evidence : response_header_evidence
+  }
+
+(** Validate a synchronous POST request without performing DNS, connection, or
+    HTTP effects. Unsupported schemes, missing hosts, invalid ports, and invalid
+    headers fail before dispatch. *)
+val prepare_sync_request
+  :  url:string
+  -> headers:(string * string) list
+  -> body:string
+  -> (validated_sync_request, http_error) result
+
 (** Failure evidence from {!post_sync_once}. The variant makes phase/status
     combinations explicit: only a received response can carry an HTTP status. *)
 type post_sync_once_error =
@@ -446,6 +467,19 @@ type post_sync_once_error =
       { status : int
       ; error : http_error
       }
+
+(** Execute one already-validated request. This is the effect boundary for
+    callers that must observe or persist pre-dispatch evidence only after all
+    request decoding has succeeded. *)
+val dispatch_sync_request
+  :  ?cache:cache
+  -> ?clock:_ Eio.Time.clock
+  -> ?connect_timeout_s:float
+  -> ?body_timeout_s:float
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> validated_sync_request
+  -> unit
+  -> (sync_transport_receipt, post_sync_once_error) result
 
 (** Submit exactly one HTTP POST and return the unparsed response.
 
@@ -476,8 +510,8 @@ val post_sync_once
 
 (** Evidence-bearing transport variant. It performs the same sole POST as
     {!post_sync_once}, while also returning opaque canonical response-header
-    evidence. The public wrapper calls this function once and discards that
-    evidence; neither path retries. *)
+    evidence in one typed receipt. The public wrapper calls this function once
+    and discards that evidence; neither path retries. *)
 val post_sync_once_with_evidence
   :  ?cache:cache
   -> ?clock:_ Eio.Time.clock
@@ -488,7 +522,7 @@ val post_sync_once_with_evidence
   -> headers:(string * string) list
   -> body:string
   -> unit
-  -> (raw_sync_response * response_header_evidence, post_sync_once_error) result
+  -> (sync_transport_receipt, post_sync_once_error) result
 
 (** POST JSON body for SSE/NDJSON streaming.
     Returns [Ok reader] on HTTP 200 (10 MB buffer).

@@ -42,6 +42,39 @@ type read_result = {
   truncated : bool;
 }
 
+(** How many entries one read may return.
+
+    Abstract so that "no limit" cannot be constructed. Before RFC-0372 the
+    limit was a plain [int] where [n <= 0] meant unbounded, and the scan cap
+    that backed it applied per store rather than per request: with nine
+    sources, three of which fan out per keeper, one request could materialise
+    the whole store and the ceiling rose every time a keeper was added.
+
+    Values are clamped into [1, max_read_entries] at construction, so every
+    reader downstream holds a positive bound by type. A caller that wants
+    "everything in the window" gets [max_read_entries] and a [truncated] flag,
+    not an unbounded scan — the response contract is preserved, the unbounded
+    read is not. *)
+type read_limit
+
+(** Ceiling a single read may return, whatever the store size. *)
+val max_read_entries : int
+
+(** Applied when a request omits the limit. *)
+val default_read_entries : int
+
+(** Clamp into [1, max_read_entries].
+
+    Zero and negatives map to [default_read_entries], NOT to "unbounded":
+    the old permissive reading of [n = 0] is the defect RFC-0372 closes, so it
+    is mapped here once rather than re-checked at each reader. *)
+val read_limit_of_int : int -> read_limit
+
+val read_limit_to_int : read_limit -> int
+
+(** [default_read_entries] as a limit. *)
+val default_read_limit : read_limit
+
 val read_unified :
   base_path:string ->
   masc_root:string ->
@@ -52,16 +85,21 @@ val read_unified :
   ?worker_run_id:string ->
   ?since_ts:float ->
   ?until_ts:float ->
-  ?n:int ->
+  ?limit:read_limit ->
   ?offset:int ->
   unit ->
   Yojson.Safe.t list
 (** [read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
-      ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ()]
+      ?operation_id ?worker_run_id ?since_ts ?until_ts ?limit ()]
     reads entries from [sources] (default: all sources), optionally filtered
     by [keeper_name], generic correlation keys, and an optional unix-second
-    window. Returns at most [n] entries (default 100) sorted by timestamp
-    descending (newest first).  When [n <= 0], no truncation is applied.
+    window. Returns at most [read_limit_to_int limit] entries (default
+    [default_read_limit]) sorted by timestamp descending (newest first).
+
+    Truncation always applies. There is no "return everything" form: a limit
+    is a positive bound by construction ({!read_limit}), and a caller asking
+    for more than [max_read_entries] receives that ceiling with
+    [truncated = true] rather than a full-store scan (RFC-0372).
 
     [masc_root] is the cluster-aware .masc directory (use
     [Workspace.masc_root_dir config] to obtain it).  [base_path] is the
@@ -79,7 +117,7 @@ val read_unified_result :
   ?worker_run_id:string ->
   ?since_ts:float ->
   ?until_ts:float ->
-  ?n:int ->
+  ?limit:read_limit ->
   ?offset:int ->
   unit ->
   read_result

@@ -108,7 +108,7 @@ module Make (Payload : Payload) = struct
   type t =
     { entries : entry list Atomic.t
     ; path : string option
-    ; mutation_mutex : Stdlib.Mutex.t
+    ; mutation_mutex : Cross_context_mutex.t
     }
 
   type event =
@@ -154,7 +154,7 @@ module Make (Payload : Payload) = struct
   let create ?path () =
     { entries = Atomic.make []
     ; path
-    ; mutation_mutex = Stdlib.Mutex.create ()
+    ; mutation_mutex = Cross_context_mutex.create ()
     }
 
   let event_to_yojson = function
@@ -299,14 +299,26 @@ module Make (Payload : Payload) = struct
        this registry-local lock, a completion on another domain can observe the
        new row after the CAS and append [Complete] before this [Register]
        reaches the path-level append lock. Replay then skips the completion as
-       unknown and drops the trailing register as stale Running. *)
-    Stdlib.Mutex.protect t.mutation_mutex (fun () ->
+       unknown and drops the trailing register as stale Running.
+
+       [Cross_context_mutex], not [Stdlib.Mutex]: the critical section performs
+       a durable JSONL append, which suspends the fiber. A raw pthread mutex
+       held across that suspension is still held by the *same OS thread* when
+       the scheduler runs another fiber on this domain, so the second fiber's
+       lock attempt is a recursive acquisition and raises
+       [Sys_error "Mutex.lock: Resource deadlock avoided"]. Measured on the
+       live fleet: 218 occurrences on 2026-08-11 and 37 on 2026-08-10, most
+       swallowed by worker handlers and one fatal in
+       [Completion_authority_agent.process_task_once], which took the server
+       down. The Eio gate makes a waiting fiber yield instead; the durable
+       variant keeps cancellation out of the committed transaction. *)
+    Cross_context_mutex.with_durable_lock t.mutation_mutex (fun () ->
       append_event_exn t (Register { id; started_at; registration });
       replace_entry_locked t entry)
   ;;
 
   let complete t ~id ~completion =
-    Stdlib.Mutex.protect t.mutation_mutex (fun () ->
+    Cross_context_mutex.with_durable_lock t.mutation_mutex (fun () ->
       let current = Atomic.get t.entries in
       if not (List.exists (fun entry -> String.equal entry.id id) current)
       then (
@@ -487,7 +499,7 @@ module Make (Payload : Payload) = struct
     then compact_replay_log path entries;
     { entries = Atomic.make entries
     ; path = Some path
-    ; mutation_mutex = Stdlib.Mutex.create ()
+    ; mutation_mutex = Cross_context_mutex.create ()
     }
   ;;
 end

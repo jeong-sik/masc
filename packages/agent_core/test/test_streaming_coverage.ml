@@ -49,13 +49,20 @@ let check_zero_usage = function
 
 (** Unwrap finalize result or fail the test. *)
 let finalize_ok acc =
-  if not !(acc.Streaming.stop_reason_received)
-  then
+  match Streaming.finalize_stream_acc acc with
+  | Ok resp -> resp
+  | Error
+      (Stream_incomplete
+        { reason =
+            ("stream_terminated_without_stop_reason"
+            | "stream_terminal_without_stop_reason")
+        }) ->
     Streaming.accumulate_event
       acc
       (MessageDelta { stop_reason = Some EndTurn; usage = None });
-  match Streaming.finalize_stream_acc acc with
-  | Ok resp -> resp
+    (match Streaming.finalize_stream_acc acc with
+     | Ok resp -> resp
+     | Error err -> fail_unexpected_stream_error err)
   | Error err -> fail_unexpected_stream_error err
 ;;
 
@@ -200,9 +207,8 @@ let test_acc_delta_creates_buffer_on_missing_index () =
   Streaming.accumulate_event
     acc
     (ContentBlockDelta { index = 5; delta = TextDelta "surprise" });
-  (* The buffer should be created on demand.
-     But without a block_type, finalize won't produce content for it.
-     This tests the None branch of Hashtbl.find_opt in accumulate_event. *)
+  (* The immutable state retains the unannounced block while projection omits
+     it because no typed block header was observed. *)
   let resp = finalize_ok acc in
   (* No block_type registered for index 5, so content stays empty *)
   check_int "no content (no block_type)" 0 (List.length resp.content)
@@ -215,10 +221,6 @@ let test_acc_message_delta_stop_reason () =
   Streaming.accumulate_event
     acc
     (MessageDelta { stop_reason = Some StopToolUse; usage = None });
-  check_bool "stop reason received" true !(acc.Streaming.stop_reason_received);
-  (match !(acc.Streaming.stop_reason) with
-   | StopToolUse -> ()
-   | _ -> Alcotest.fail "expected accumulated StopToolUse");
   let resp = finalize_ok acc in
   (* Finalization reconciles a tool-stop with no tool blocks to the typed
      UnmatchedToolCalls outcome. *)
@@ -508,7 +510,10 @@ let test_finalize_unknown_content_type () =
 
 let test_finalize_registered_type_without_buffer () =
   let acc = Streaming.create_stream_acc () in
-  Hashtbl.replace acc.block_types 7 "text";
+  Streaming.accumulate_event
+    acc
+    (ContentBlockStart
+       { index = 7; content_type = "text"; tool_id = None; tool_name = None });
   let resp = finalize_ok acc in
   match resp.content with
   | [ Text "" ] -> ()

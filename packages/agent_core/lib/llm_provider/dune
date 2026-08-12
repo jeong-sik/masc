@@ -5,6 +5,7 @@
  (public_name masc.agent_core.llm_provider)
  (private_modules
   complete_stream_error
+  complete_stream_state
   model_catalog_embedded
   provider_http_codec
   tool_result_projection

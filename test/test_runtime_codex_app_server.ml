@@ -281,7 +281,10 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
         (fun ~call_id:_ _ ->
           { success = false
           ; content = "same deterministic failure"
-          ; abort_turn = Some "repeated exact dynamic tool call detected"
+          ; abort_turn =
+              Some
+                (Repeated_tool_call
+                   { tool_name = "masc_probe"; repeated_count = 3 })
           })
     }
   in
@@ -289,9 +292,11 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
     [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request ]
     (fun path ->
       match run_fixture ~dynamic_tools:[ tool ] path with
-      | Error (Runtime_codex_app_server.Turn_failed detail) ->
-        check bool "abort cause" true
-          (Astring.String.is_infix ~affix:"repeated exact" detail)
+      | Error
+          (Runtime_codex_app_server.Stopped_by_host
+            (Repeated_tool_call { tool_name; repeated_count })) ->
+        check string "tool" "masc_probe" tool_name;
+        check int "repeat count" 3 repeated_count
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok _ -> fail "dynamic tool abort did not stop the Codex turn")
 ;;

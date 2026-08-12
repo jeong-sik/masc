@@ -10,13 +10,22 @@
     here once and the three re-export it by type equation, which makes those
     copies unnecessary rather than merely shorter. *)
 
+type host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+(** A host-owned, non-failure terminal that must stop a vendor-owned model
+    loop after the current tool outcome has been returned. *)
+
 type dynamic_tool_result =
   { success : bool
   ; content : string
-  ; abort_turn : string option
+  ; abort_turn : host_stop option
     (** Host-owned terminal reason. The transport returns the current tool
         outcome, then stops the provider loop instead of admitting another
-        tool call. *)
+        tool call. The typed reason must remain a checkpoint terminal rather
+        than being projected as a provider failure. *)
   }
 
 type dynamic_tool =

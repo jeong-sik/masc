@@ -6,6 +6,12 @@ let config_error ~field detail =
 
 let internal_error detail = Agent_core.Error.Internal detail
 
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+
 let text_of_blocks ~runtime_label ~field blocks =
   let rec loop texts = function
     | [] -> Ok (String.concat "\n" (List.rev texts))
@@ -114,6 +120,34 @@ let with_run_lifecycle_events ~event_bus ~keeper_name run =
     ~current_run_id:(fun () -> None)
     ~classify:lifecycle_outcome
     run
+;;
+
+let repeated_tool_call_result ~model ~session_id ~turn_id ~turns_used = function
+  | Repeated_tool_call { tool_name; repeated_count } ->
+    let response : Agent_core.Types.api_response =
+      { id = turn_id
+      ; model
+      ; stop_reason = Agent_core.Types.EndTurn
+      ; content = []
+      ; usage = None
+      ; telemetry =
+          Some
+            { Agent_core.Types.default_inference_telemetry with
+              canonical_model_id = Some model
+            }
+      }
+    in
+    { Runtime_agent.response
+    ; checkpoint = None
+    ; session_id
+    ; turns = turns_used
+    ; trace_ref = None
+    ; run_validation = None
+    ; runtime_observation = None
+    ; stop_reason =
+        Runtime_agent.Yielded_after_repeated_tool_call
+          { turns_used; tool_name; repeated_count }
+    }
 ;;
 
 type prepared_turn =
@@ -278,7 +312,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
-  ; abort_turn : string option
+  ; abort_turn : host_stop option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -633,8 +667,11 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
                 tool.schema.name
                 repeated_count
             in
-            record_terminal_error terminal_error detail;
-            { result with abort_turn = Some detail }
+            Log.Keeper.warn ~keeper_name "%s" detail;
+            { result with
+              abort_turn =
+                Some (Repeated_tool_call { tool_name = tool.schema.name; repeated_count })
+            }
         | exception exn ->
           let backtrace = Printexc.get_raw_backtrace () in
           Eio.Cancel.protect (fun () ->

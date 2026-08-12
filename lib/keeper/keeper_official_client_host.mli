@@ -20,10 +20,16 @@ type prepared_turn =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
-  ; abort_turn : string option
+  ; abort_turn : host_stop option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -173,3 +179,14 @@ val with_run_lifecycle_events :
 (** Publish the same typed start and terminal lifecycle owned by Agent Core.
     Official clients own their internal model loop, so this host boundary is
     the single MASC owner for those events. *)
+
+val repeated_tool_call_result :
+  model:string ->
+  session_id:string ->
+  turn_id:string ->
+  turns_used:int ->
+  host_stop ->
+  Runtime_agent.run_result
+(** Build the provider-neutral checkpoint terminal after an official-client
+    adapter stops its vendor-owned loop. The external client session is the
+    durable continuation owner, so no Agent Core checkpoint is synthesized. *)

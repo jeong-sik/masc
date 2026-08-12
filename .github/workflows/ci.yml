@@ -1347,12 +1347,14 @@ jobs:
             --output-dir .release-evidence/keeper-full-lifecycle
 
       - name: Package exact-revision Keeper acceptance runtime
-        if: github.event_name == 'pull_request' && needs.changes.outputs.keeper_realworld == 'true'
+        if: >-
+          needs.changes.outputs.keeper_realworld == 'true' &&
+          (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
         env:
           EXPECTED_SOURCE_SHA: ${{ github.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          PR_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'workflow-dispatch' }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
@@ -1388,7 +1390,9 @@ jobs:
             }' >"$runtime_dir/manifest.json"
 
       - name: Upload exact-revision Keeper acceptance runtime
-        if: github.event_name == 'pull_request' && needs.changes.outputs.keeper_realworld == 'true'
+        if: >-
+          needs.changes.outputs.keeper_realworld == 'true' &&
+          (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v7
         with:
           name: keeper-realworld-runtime-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1432,8 +1436,13 @@ jobs:
       ${{
         always() &&
         !cancelled() &&
-        github.event_name == 'pull_request' &&
-        github.event.pull_request.head.repo.full_name == github.repository &&
+        (
+          github.event_name == 'workflow_dispatch' ||
+          (
+            github.event_name == 'pull_request' &&
+            github.event.pull_request.head.repo.full_name == github.repository
+          )
+        ) &&
         needs.pr-live-gate.outputs.run_heavy == 'true' &&
         needs.changes.result == 'success' &&
         needs.changes.outputs.keeper_realworld == 'true' &&
@@ -1519,6 +1528,26 @@ jobs:
           ACCEPTANCE_RESULT: ${{ needs.keeper-realworld-acceptance.result }}
         run: |
           set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$CHANGES_RESULT" != "success" ]; then
+              echo "STOP Keeper Real-World Gate: changed-surface detection did not complete" >&2
+              exit 1
+            fi
+            if [ "$REALWORLD_REQUIRED" != "true" ]; then
+              echo "STOP Keeper Real-World Gate: workflow_dispatch did not select product acceptance" >&2
+              exit 1
+            fi
+            if [ "$BUILD_RESULT" != "success" ]; then
+              echo "STOP Keeper Real-World Gate: exact-revision runtime was not built successfully" >&2
+              exit 1
+            fi
+            if [ "$ACCEPTANCE_RESULT" != "success" ]; then
+              echo "FAIL Keeper Real-World Gate: acceptance result=$ACCEPTANCE_RESULT" >&2
+              exit 1
+            fi
+            echo "PASS Keeper Real-World Gate: trusted dispatch candidate=$TESTED_SOURCE_SHA passed RW01-RW16"
+            exit 0
+          fi
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "PASS Keeper Real-World Gate: non-PR workflow"
             exit 0

@@ -153,15 +153,33 @@ level, so callers cannot collapse them:
 type outcome =
   | Tool_invoked      of { tool : string; elapsed_s : float }
   | Replied_no_tool   of { reply_bytes : int; tools_seen : string list }
-  | Surface_absent    of { requested : string; advertised : string list }
+  | Not_projected     of { requested : string; projected : string list }
   | Provider_rejected of Agent_core.Error.t
   | Transport_failed  of Agent_core.Error.t
 ```
 
-`Surface_absent` is decidable before the model call — the probe compares the
-requested tool against the projected surface and returns without spending a
-turn. That alone answers the antigravity class of question (bridge advertises
-97 tools, CLI consumes none) at zero cost.
+`Not_projected` is decidable before the model call: MASC either puts the tool
+in the surface it hands the client, or it does not. When it does not, no turn
+is worth spending.
+
+**Its converse is not "reachable", and the naming has to keep that visible.**
+Projection is MASC's side of the wire; consumption is the client's. The two
+diverge, and that divergence is the largest single finding of the audit this
+RFC comes from — the antigravity bridge advertised 97 tools including all ten
+probed, `initialize` and `tools/list` both answered, and the models still
+reported no masc tool present. A probe that resolved capability from the
+projected surface alone would have called those runtimes healthy.
+
+So the lane keeps the two questions apart:
+
+| Question                        | Answered by      | Cost   |
+|---------------------------------|------------------|--------|
+| Does MASC project T?            | `probe_surface`  | none   |
+| Does the client consume what MASC projects? | `probe_invocation`, and only by observing a call | one turn |
+
+`Not_projected` is therefore a *sufficient* explanation for failure and never
+a sufficient basis for success. `probe_surface` returning "projected" means
+the turn is worth spending, nothing more.
 
 No `Unknown -> permissive` arm. An unresolvable runtime id is an `Error`, per
 RFC-0206 §2.1 and the same rule `resolve_runtime_providers` already follows.
@@ -203,7 +221,8 @@ These are the invariants the tests exist to hold:
 | Probe leaves keeper_chat byte-identical | hash before/after a probe run |
 | Probe leaves the real checkpoint byte-identical | hash before/after |
 | Probe leaves memory revision unchanged | compare `revision` before/after |
-| `Surface_absent` needs no provider call | probe a nonexistent tool with the provider unreachable; must still answer |
+| `Not_projected` needs no provider call | probe a nonexistent tool with the provider unreachable; must still answer |
+| "projected" is not reported as reachable | a runtime whose client ignores the surface (antigravity) yields `Replied_no_tool`, never a success from `probe_surface` alone |
 | Probe identity cannot be a configured keeper | config admission rejects a keeper named in the probe namespace |
 | Outcomes stay distinguishable | a quota-exhausted runtime yields `Provider_rejected`, never `Replied_no_tool` |
 

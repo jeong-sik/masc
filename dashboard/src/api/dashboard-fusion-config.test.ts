@@ -81,12 +81,13 @@ describe('parseFusionConfigResponse', () => {
     })
     expect(parsed.enabled).toBe(true)
     expect(parsed.stagedJudgeGroupSize).toBe(3)
-    const [only] = parsed.presets
-    expect(only.panels[0].timeoutS).toBe(240)
-    expect(only.panels[0].maxOutputTokens).toBe(2048)
-    expect(only.panels[0].models).toEqual(['a', 'b'])
+    const only = parsed.presets.at(0)
+    if (!only) throw new Error('expected exactly one preset')
+    expect(only.panels.at(0)?.timeoutS).toBe(240)
+    expect(only.panels.at(0)?.maxOutputTokens).toBe(2048)
+    expect(only.panels.at(0)?.models).toEqual(['a', 'b'])
     expect(only.judgeTimeoutS).toBe(180)
-    expect(only.judges[0].timeoutS).toBe(90.5)
+    expect(only.judges.at(0)?.timeoutS).toBe(90.5)
     expect(only.minAnswered).toBe(2)
   })
 
@@ -109,8 +110,10 @@ describe('parseFusionConfigResponse', () => {
         ],
       },
     })
-    expect(parsed.presets[0].judgeTimeoutS).toBeNull()
-    expect(parsed.presets[0].panels[0].timeoutS).toBeNull()
+    const first = parsed.presets.at(0)
+    if (!first) throw new Error('expected exactly one preset')
+    expect(first.judgeTimeoutS).toBeNull()
+    expect(first.panels.at(0)?.timeoutS).toBeNull()
   })
 })
 

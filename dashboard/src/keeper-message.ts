@@ -1,5 +1,9 @@
 import { asNumber, asString, isRecord } from './components/common/normalize'
-import type { KeeperConversationDetails, KeeperTurnOutcome } from './types'
+import type {
+  KeeperConversationDetails,
+  KeeperExternalEffectTarget,
+  KeeperTurnOutcome,
+} from './types'
 
 function stripSkillRouteLines(text: string): string {
   return text
@@ -34,6 +38,26 @@ function normalizeKeeperTurnOutcome(value: unknown): KeeperTurnOutcome | null {
     default:
       return null
   }
+}
+
+// Closed decode of the reply payload's `external_effect_target` /
+// KEEPER_EXTERNAL_EFFECT_COMPLETED value. Missing field (legacy payload) or
+// any malformed shape decodes to null; the card then keeps its generic copy
+// instead of guessing a destination.
+export function normalizeKeeperExternalEffectTarget(
+  value: unknown,
+): KeeperExternalEffectTarget | null {
+  if (!isRecord(value)) return null
+  const kind = asString(value.kind, '').trim()
+  if (kind === 'dashboard') return { kind: 'dashboard' }
+  const channelId = asString(value.channel_id, '').trim()
+  if (!channelId) return null
+  if (kind === 'discord') return { kind: 'discord', channelId }
+  if (kind === 'slack') {
+    const threadTs = asString(value.thread_ts, '').trim()
+    return { kind: 'slack', channelId, threadTs: threadTs || null }
+  }
+  return null
 }
 
 function normalizeKeeperUsage(raw: unknown): NonNullable<KeeperConversationDetails['usage']> | null {
@@ -88,6 +112,9 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
     usage,
     replyText: reply || null,
     turnOutcome: normalizeKeeperTurnOutcome(payload.turn_outcome),
+    externalEffectTarget: normalizeKeeperExternalEffectTarget(
+      payload.external_effect_target,
+    ),
     rawPayload: payload,
   }
 }

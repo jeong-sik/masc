@@ -195,7 +195,7 @@ let test_completed_external_effect_settles_without_duplicate_send () =
   let sends = ref 0 in
   let outcomes =
     run_adapter
-      [ Masc.Keeper_chat_events.External_effect_completed
+      [ Masc.Keeper_chat_events.External_effect_completed { target = None }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-effect" }
       ]
       ~post_message:(fun ~content:_ ->

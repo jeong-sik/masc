@@ -344,6 +344,63 @@ let test_terminal_receipt_requires_exact_supported_route () =
         | Ok channel -> channel
         | Error message -> fail message))
 
+(* ── delivery_target codec ──────────────────────────────────────── *)
+
+let delivery_target_pp fmt = function
+  | SP.Delivered_to_dashboard -> Format.fprintf fmt "dashboard"
+  | SP.Delivered_to_discord { channel_id } ->
+      Format.fprintf fmt "discord{%s}" channel_id
+  | SP.Delivered_to_slack { channel_id; thread_ts } ->
+      Format.fprintf fmt "slack{%s,%s}" channel_id
+        (Option.value thread_ts ~default:"root")
+
+let delivery_target : SP.delivery_target testable =
+  testable delivery_target_pp ( = )
+
+let test_delivery_target_json_round_trip () =
+  List.iter
+    (fun target ->
+      match SP.delivery_target_of_yojson (SP.delivery_target_to_yojson target) with
+      | Ok decoded -> check delivery_target "round trip" target decoded
+      | Error message -> fail message)
+    [ SP.Delivered_to_dashboard
+    ; SP.Delivered_to_discord { channel_id = "D1" }
+    ; SP.Delivered_to_slack { channel_id = "C1"; thread_ts = None }
+    ; SP.Delivered_to_slack
+        { channel_id = "C1"; thread_ts = Some "1700000000.000100" }
+    ]
+
+let test_delivery_target_decode_rejects_widened_input () =
+  List.iter
+    (fun json ->
+      match SP.delivery_target_of_yojson json with
+      | Error _ -> ()
+      | Ok _ -> fail "widened delivery target must not decode")
+    [ `Assoc [ ("kind", `String "telegram") ]
+    ; `Assoc [ ("kind", `String "slack") ]
+    ; `Assoc [ ("kind", `String "slack"); ("channel_id", `String " ") ]
+    ; `Assoc
+        [ ("kind", `String "slack")
+        ; ("channel_id", `String "C1")
+        ; ("thread_ts", `Int 1700000000)
+        ]
+    ; `Assoc [ ("channel_id", `String "C1") ]
+    ; `String "dashboard"
+    ]
+
+let test_delivery_target_of_post_target_drops_payload_only () =
+  check delivery_target "dashboard maps" SP.Delivered_to_dashboard
+    (SP.delivery_target_of_post_target SP.To_dashboard);
+  check delivery_target "slack keeps destination coordinates"
+    (SP.Delivered_to_slack
+       { channel_id = "C1"; thread_ts = Some "1700000000.000100" })
+    (SP.delivery_target_of_post_target
+       (SP.To_slack
+          { channel_id = "C1"
+          ; thread_ts = Some "1700000000.000100"
+          ; blocks = Some [ `Assoc [ ("type", `String "section") ] ]
+          }))
+
 (* ── append_assistant_message ───────────────────────────────────── *)
 
 let with_temp_base_dir f =
@@ -434,6 +491,15 @@ let () =
         [
           test_case "requires exact supported route" `Quick
             test_terminal_receipt_requires_exact_supported_route;
+        ] );
+      ( "delivery target",
+        [
+          test_case "json round trip" `Quick
+            test_delivery_target_json_round_trip;
+          test_case "decode rejects widened input" `Quick
+            test_delivery_target_decode_rejects_widened_input;
+          test_case "post target maps to destination coordinates" `Quick
+            test_delivery_target_of_post_target_drops_payload_only;
         ] );
       ( "assistant append",
         [

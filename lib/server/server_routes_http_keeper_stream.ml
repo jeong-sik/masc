@@ -710,11 +710,13 @@ type canonical_reply_payload_error =
   | Invalid_payload_field_type of string
   | Unknown_turn_outcome
   | Invalid_turn_ref
+  | Invalid_external_effect_target of string
 
 type canonical_reply_payload =
   { payload_json : Yojson.Safe.t
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
+  ; external_effect_target : Keeper_surface_post.delivery_target option
   ; visible_reply : string
   ; poll_body : string
   }
@@ -733,6 +735,10 @@ let canonical_reply_payload_error_to_string = function
   | Unknown_turn_outcome ->
     "keeper reply payload contains an unknown turn_outcome"
   | Invalid_turn_ref -> "keeper reply payload contains an invalid turn_ref"
+  | Invalid_external_effect_target detail ->
+    Printf.sprintf
+      "keeper reply payload carries an invalid external_effect_target: %s"
+      detail
 ;;
 
 let required_unique_string_field field fields =
@@ -778,6 +784,26 @@ let canonical_reply_payload_of_body ~redact_text body =
     | Some turn_ref -> Ok turn_ref
     | None -> Error Invalid_turn_ref
   in
+  let* external_effect_target =
+    (* Absent on legacy payloads that predate the field; present means the
+       producer serialized a typed delivery target and it must decode. *)
+    match
+      List.filter_map
+        (fun (key, value) ->
+           if String.equal key Keeper_surface_post.delivery_target_wire_key
+           then Some value
+           else None)
+        fields
+    with
+    | [] -> Ok None
+    | [ value ] ->
+      (match Keeper_surface_post.delivery_target_of_yojson value with
+       | Ok target -> Ok (Some target)
+       | Error detail -> Error (Invalid_external_effect_target detail))
+    | _ ->
+      Error
+        (Duplicate_payload_field Keeper_surface_post.delivery_target_wire_key)
+  in
   let visible_reply =
     strip_keeper_visible_reply reply_raw |> redact_text |> String.trim
   in
@@ -788,6 +814,7 @@ let canonical_reply_payload_of_body ~redact_text body =
     { payload_json
     ; turn_outcome
     ; turn_ref
+    ; external_effect_target
     ; visible_reply
     ; poll_body = Yojson.Safe.to_string payload_json
     }
@@ -1345,7 +1372,8 @@ let process_single_turn ~user_row_origin ~submission
                | Duplicate_payload_field _
                | Invalid_payload_field_type _
                | Unknown_turn_outcome
-               | Invalid_turn_ref -> detail
+               | Invalid_turn_ref
+               | Invalid_external_effect_target _ -> detail
              in
              Log.Keeper.error
                "keeper_stream: canonical terminal projection rejected keeper=%s error=%s"
@@ -1802,7 +1830,9 @@ let process_single_turn ~user_row_origin ~submission
             Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.External_effect_completed
           then
-            Keeper_chat_events.publish events External_effect_completed;
+            Keeper_chat_events.publish events
+              (External_effect_completed
+                 { target = canonical_reply.external_effect_target });
           if
             Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.External_effect_pending

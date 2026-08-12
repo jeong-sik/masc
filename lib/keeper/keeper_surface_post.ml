@@ -13,6 +13,62 @@ let dashboard_label = "dashboard"
 let discord_label = "discord"
 let slack_label = "slack"
 
+type delivery_target =
+  | Delivered_to_dashboard
+  | Delivered_to_discord of { channel_id : string }
+  | Delivered_to_slack of { channel_id : string; thread_ts : string option }
+
+let delivery_target_of_post_target = function
+  | To_dashboard -> Delivered_to_dashboard
+  | To_discord { channel_id } -> Delivered_to_discord { channel_id }
+  | To_slack { channel_id; thread_ts; blocks = _ } ->
+    Delivered_to_slack { channel_id; thread_ts }
+
+let delivery_target_to_yojson = function
+  | Delivered_to_dashboard -> `Assoc [ "kind", `String dashboard_label ]
+  | Delivered_to_discord { channel_id } ->
+    `Assoc [ "kind", `String discord_label; "channel_id", `String channel_id ]
+  | Delivered_to_slack { channel_id; thread_ts } ->
+    `Assoc
+      ([ "kind", `String slack_label; "channel_id", `String channel_id ]
+       @ match thread_ts with
+         | None -> []
+         | Some thread_ts -> [ "thread_ts", `String thread_ts ])
+
+let delivery_target_of_yojson json =
+  let field key fields =
+    match List.assoc_opt key fields with
+    | Some (`String value) when String.trim value <> "" -> Ok value
+    | Some _ ->
+      Error
+        (Printf.sprintf "delivery target %s must be a non-empty string" key)
+    | None -> Error (Printf.sprintf "delivery target is missing %s" key)
+  in
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String kind) when String.equal kind dashboard_label ->
+       Ok Delivered_to_dashboard
+     | Some (`String kind) when String.equal kind discord_label ->
+       Result.map
+         (fun channel_id -> Delivered_to_discord { channel_id })
+         (field "channel_id" fields)
+     | Some (`String kind) when String.equal kind slack_label ->
+       Result.bind (field "channel_id" fields) (fun channel_id ->
+           match List.assoc_opt "thread_ts" fields with
+           | None -> Ok (Delivered_to_slack { channel_id; thread_ts = None })
+           | Some (`String thread_ts) when String.trim thread_ts <> "" ->
+             Ok (Delivered_to_slack { channel_id; thread_ts = Some thread_ts })
+           | Some _ ->
+             Error "delivery target thread_ts must be a non-empty string")
+     | Some (`String kind) ->
+       Error (Printf.sprintf "unknown delivery target kind %S" kind)
+     | Some _ -> Error "delivery target kind must be a string"
+     | None -> Error "delivery target is missing kind")
+  | _ -> Error "delivery target must be a JSON object"
+
+let delivery_target_wire_key = "external_effect_target"
+
 let resolve_target ~surface ~channel_id ?continuation_channel
     ?(bound_discord_channels = [])
     ?(bound_slack_channels = []) () : (post_target, string) result =

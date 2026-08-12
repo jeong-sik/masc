@@ -673,6 +673,15 @@ export type KeeperTurnOutcome =
   | 'external_effect_pending'
   | 'no_visible_reply'
 
+// Where an `external_effect_completed` turn actually delivered its reply
+// (`external_effect_target` on the reply payload / the
+// KEEPER_EXTERNAL_EFFECT_COMPLETED event value). Absent on legacy payloads
+// that predate the field — the card then falls back to generic copy.
+export type KeeperExternalEffectTarget =
+  | { kind: 'dashboard' }
+  | { kind: 'discord'; channelId: string }
+  | { kind: 'slack'; channelId: string; threadTs: string | null }
+
 export interface KeeperConversationDetails {
   traceId?: string | null
   turnRef?: string | null
@@ -685,6 +694,7 @@ export interface KeeperConversationDetails {
   usage?: KeeperConversationUsage | null
   replyText?: string | null
   turnOutcome?: KeeperTurnOutcome | null
+  externalEffectTarget?: KeeperExternalEffectTarget | null
   rawPayload?: unknown
 }
 

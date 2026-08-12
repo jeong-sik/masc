@@ -252,6 +252,107 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.chat-bubble')).toBeNull()
   })
 
+  it('names the dashboard as the delivery target instead of claiming a connector', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'dashboard-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'analyst',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: { kind: 'dashboard' },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('dashboard')
+    expect(status?.textContent).toContain('대시보드에 게시 완료')
+    expect(status?.textContent).not.toContain('Slack/Discord')
+  })
+
+  it('names the Slack thread destination on a threaded delivery target', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'slack-thread-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'kidsnote',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: {
+                kind: 'slack',
+                channelId: 'C09TK9L4DV4',
+                threadTs: '1786524720.554309',
+              },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('slack')
+    expect(status?.textContent).toContain('Slack으로 답변 완료')
+    expect(status?.textContent).toContain('C09TK9L4DV4')
+    expect(status?.textContent).toContain('스레드로 전송')
+  })
+
+  it('names the Discord channel destination on a discord delivery target', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'discord-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: { kind: 'discord', channelId: 'D-123' },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('discord')
+    expect(status?.textContent).toContain('Discord로 답변 완료')
+    expect(status?.textContent).toContain('D-123')
+  })
+
   it('renders a typed continuation checkpoint as durable status, not assistant prose', () => {
     render(
       html`<${ChatTranscript}

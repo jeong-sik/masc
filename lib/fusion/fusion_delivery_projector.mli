@@ -8,17 +8,12 @@ type projection_error =
   | Non_durable_settlement
   | Ambiguous_settlement
   | Nonterminal_status of Keeper_msg_async.request_status
-  | Evidence_unavailable
   | Evidence_invalid of string
   | Projection_failed of string
   | Obligation_removal_failed of Fusion_delivery_obligation.error
 
 val projection_error_to_string : projection_error -> string
 
-val projection_error_failure_code : projection_error -> string
-(** Sink failure code derived from the typed error. Only errors delivered
-    through [Fusion_sink.emit_failure] have a code (currently
-    [Evidence_unavailable]); any other error raises [Invalid_argument]. *)
 
 val on_worker_settled :
   ?registry:Fusion_run_registry.t -> base_path:string -> Keeper_msg_async.worker_settlement -> unit

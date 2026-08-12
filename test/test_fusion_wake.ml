@@ -598,14 +598,80 @@ let test_emit_success_projects_board_chat_and_registry () =
     | None -> fail "fusion run should remain visible")
 ;;
 
+(* 취소가 실제로 [Fusion_cancelled] 로 키퍼에게 도달하는지 — 이 파일의 기존
+   cancellation 테스트는 stimulus 를 손으로 만들어 코덱과 렌더러만 확인했고, 그래서
+   "아무도 그 terminal 을 생산하지 않는다" 를 통과시켰다. 실제로 오랫동안 생산자가
+   0 이었고 취소된 run 은 전부 [Fusion_failed] 로 도착했다. 이 테스트는 sink 의 실제
+   실패 투영 경로를 태워 durable 큐에 들어간 terminal 을 읽는다. *)
+let test_cancelled_delivery_reaches_the_keeper_as_cancelled () =
+  with_isolated_base_path "fusion-cancel" (fun base_dir registry ->
+    let keeper = Printf.sprintf "fusion-cancel-%d" (Random.bits ()) in
+    let run_id = Printf.sprintf "fus-cancel-%d" (Random.bits ()) in
+    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"trio"
+      ~topology:Fusion_types.Simple ~started_at:1.0;
+    let result =
+      Fusion_sink.emit_failure ~registry ~base_dir ~keeper ~run_id
+        ~channel:discord_channel
+        ~failure:
+          (Fusion_sink.Cancelled { reason = "operator stop"; cancelled_by = "vincent" })
+    in
+    check bool "cancellation projects" true (Result.is_ok result);
+    (match
+       Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
+       |> Keeper_event_queue.dequeue
+     with
+     | Some ({ payload = Keeper_event_queue.Fusion_completed fc; _ }, _) ->
+       (match fc.terminal with
+        | Keeper_event_queue.Fusion_cancelled -> ()
+        | Keeper_event_queue.Fusion_failed _ ->
+          fail "a cancelled run must not arrive as a judge failure"
+        | Keeper_event_queue.Fusion_succeeded _ -> fail "cancellation arrived as success")
+     | Some _ -> fail "unexpected durable stimulus kind"
+     | None -> fail "cancellation must be durably queued");
+    (* registry wire 는 계속 문자열 code 를 싣는다(대시보드가 읽는다) — 다만 그 값이
+       typed 실패에서 파생된다. *)
+    match Fusion_run_registry.get registry ~run_id with
+    | Some { status = Fusion_run_registry.Completed (Fusion_run_registry.Failed { code; _ }); _ }
+      -> check string "registry code derives from the typed failure" "cancelled" code
+    | _ -> fail "registry must record the run as failed with its code")
+;;
+
+(* 대조군: 심판 실패는 여전히 [Fusion_failed] 로 간다. 이게 없으면 위 테스트는
+   "모든 실패를 cancelled 로 보내도" 통과한다. *)
+let test_judge_failure_still_reaches_the_keeper_as_failed () =
+  with_isolated_base_path "fusion-failed" (fun base_dir registry ->
+    let keeper = Printf.sprintf "fusion-failed-%d" (Random.bits ()) in
+    let run_id = Printf.sprintf "fus-failed-%d" (Random.bits ()) in
+    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"trio"
+      ~topology:Fusion_types.Simple ~started_at:1.0;
+    let result =
+      Fusion_sink.emit_failure ~registry ~base_dir ~keeper ~run_id
+        ~channel:discord_channel ~failure:(Fusion_sink.Computation_failed "boom")
+    in
+    check bool "failure projects" true (Result.is_ok result);
+    match
+      Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
+      |> Keeper_event_queue.dequeue
+    with
+    | Some ({ payload = Keeper_event_queue.Fusion_completed fc; _ }, _) ->
+      (match fc.terminal with
+       | Keeper_event_queue.Fusion_failed _ -> ()
+       | Keeper_event_queue.Fusion_cancelled ->
+         fail "a computation failure must not arrive as a cancellation"
+       | Keeper_event_queue.Fusion_succeeded _ -> fail "failure arrived as success")
+    | Some _ -> fail "unexpected durable stimulus kind"
+    | None -> fail "failure must be durably queued")
+;;
+
 let test_wake_durable_commit_carries_channel () =
   with_isolated_base_path "fusion-wake-durable" (fun base_dir _registry ->
     let keeper = Printf.sprintf "fusion-wake-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-%d" (Random.bits ()) in
     let result =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true
-        ~resolved_answer:"WAKE-DURABLE-ANSWER" ~board_post_id:"post-wake-1"
+        ~channel:discord_channel
+        ~terminal:(Keeper_event_queue.Fusion_succeeded "WAKE-DURABLE-ANSWER")
+        ~board_post_id:"post-wake-1"
     in
     check bool "wake commits durably" true (Result.is_ok result);
     (match
@@ -624,7 +690,7 @@ let test_wake_durable_commit_carries_channel () =
      | None -> fail "completion stimulus must be durably persisted with its channel");
     let replay =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true ~resolved_answer:"WAKE-DURABLE-ANSWER"
+        ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "WAKE-DURABLE-ANSWER")
         ~board_post_id:"post-wake-1"
     in
     check bool "exact-recipient replay accepts the committed recipient" true
@@ -672,8 +738,7 @@ let test_wake_fail_closed_rejects_conflicting_delivery () =
      | Error e -> fail (Printf.sprintf "seeding the conflicting durable row should commit: %s" e));
     let result =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true
-        ~resolved_answer:"REAL-ANSWER" ~board_post_id
+        ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "REAL-ANSWER") ~board_post_id
     in
     check bool "conflicting durable commit fails the wake" true (Result.is_error result))
 ;;
@@ -699,15 +764,13 @@ let test_wake_isolates_keeper_run_identity () =
     in
     (match
        Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper:keeper_a
-         ~run_id ~channel:discord_channel ~ok:true
-         ~resolved_answer:"ANSWER-A" ~board_post_id:"post-iso-a"
+         ~run_id ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "ANSWER-A") ~board_post_id:"post-iso-a"
      with
      | Ok () -> ()
      | Error e -> fail (Printf.sprintf "keeper-a wake must commit: %s" e));
     (match
        Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper:keeper_b
-         ~run_id ~channel:channel_b ~ok:true
-         ~resolved_answer:"ANSWER-B" ~board_post_id:"post-iso-b"
+         ~run_id ~channel:channel_b ~terminal:(Keeper_event_queue.Fusion_succeeded "ANSWER-B") ~board_post_id:"post-iso-b"
      with
      | Ok () -> ()
      | Error e -> fail (Printf.sprintf "keeper-b wake must commit: %s" e));
@@ -766,8 +829,7 @@ let test_completion_wake_commits_durably_across_lane_replacement () =
          in
          let result =
            Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-             ~channel:discord_channel ~ok:true
-             ~resolved_answer:"REPLACED-LANE-ANSWER" ~board_post_id:"post-replaced"
+             ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "REPLACED-LANE-ANSWER") ~board_post_id:"post-replaced"
          in
          check bool "completion commits despite replaced live lane" true
            (Result.is_ok result);
@@ -802,19 +864,19 @@ let test_wake_board_recovery_keeps_canonical_identity () =
     let run_id = Printf.sprintf "fus-board-recovery-%d" (Random.bits ()) in
     let first =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true ~resolved_answer:"RECOVERED-ANSWER"
+        ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "RECOVERED-ANSWER")
         ~board_post_id:"post-canonical"
     in
     check bool "completion commits with Board evidence" true (Result.is_ok first);
     let replay =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true ~resolved_answer:"RECOVERED-ANSWER"
+        ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "RECOVERED-ANSWER")
         ~board_post_id:"post-canonical"
     in
     check bool "canonical replay is idempotent" true (Result.is_ok replay);
     let conflicting =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true ~resolved_answer:"RECOVERED-ANSWER"
+        ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "RECOVERED-ANSWER")
         ~board_post_id:"post-divergent"
     in
     check bool "divergent Board identity fails closed" true
@@ -1048,6 +1110,14 @@ let () =
             "scheduled wake is actionable (non-empty, carries message)"
             `Quick
             test_scheduled_wake_is_actionable
+        ; test_case
+            "cancelled delivery reaches the keeper as cancelled"
+            `Quick
+            test_cancelled_delivery_reaches_the_keeper_as_cancelled
+        ; test_case
+            "judge failure still reaches the keeper as failed"
+            `Quick
+            test_judge_failure_still_reaches_the_keeper_as_failed
         ] )
     ]
 ;;

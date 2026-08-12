@@ -804,6 +804,17 @@ jobs:
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
 
+      - name: Run typed functional-core boundary audit
+        env:
+          OCAML_BOUNDARY_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
+          fi
+          opam exec -- dune build --root . @tools/ocaml_boundary_audit/runtest
+          bash scripts/ocaml-boundary-ratchet.sh
+
       - name: Run runtime deployment preflight self-test
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:

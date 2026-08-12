@@ -26,6 +26,26 @@ module For_testing : sig
       permissive default. *)
   val resolve_lang : string -> resolved_lang
 
+  type document_request_error =
+    | Missing_document_uri
+    | Document_uri_outside_workspace
+
+  type resolved_document_request =
+    { uri : string
+    ; relative_path : string
+    ; line : int option
+    ; language : resolved_lang
+    }
+
+  (** Decode the document URI, workspace-relative path, optional non-negative
+      line, and language verdict once. Missing/out-of-workspace documents stay
+      typed errors rather than becoming [""] paths, and malformed/negative
+      positions stay [None] rather than [-1]. *)
+  val resolve_document_request :
+    base:string ->
+    Yojson.Safe.t ->
+    (resolved_document_request, document_request_error) result
+
   (** Per-language LSP health (task-1691). [Overlay_only] carries the last
       error that forced the language into overlay-only mode. *)
   type health =

@@ -125,6 +125,7 @@ let atom_suffix_bytes ~measure_message_bytes ~atom_count labelled =
 ;;
 
 let next_shrink_capacity_bytes
+    ?(allow_empty_history = false)
     ~measure_message_bytes
     ~target_capacity_bytes
     messages =
@@ -141,7 +142,7 @@ let next_shrink_capacity_bytes
     List.filter (fun message -> not (is_synthetic_preamble message)) messages
   in
   let labelled, atom_count = annotate shrinkable_messages in
-  if atom_count <= 1
+  if atom_count = 0
   then None
   else (
     let pinned_bytes =
@@ -181,6 +182,7 @@ let next_shrink_capacity_bytes
            upward to that atom's boundary rather than returning a capacity
            that the projection must reject locally. *)
         Some newest_atom_bytes
+      | None when allow_empty_history -> Some 0
       | None -> None
     in
     Option.bind retained_atom_bytes (fun retained ->
@@ -192,6 +194,37 @@ let next_shrink_capacity_bytes
       if framed_capacity < rejected_window_bytes
       then Some framed_capacity
       else None))
+;;
+
+let minimum_capacity_bytes ~measure_message_bytes messages =
+  let rejected_window_bytes =
+    List.fold_left
+      (fun total message -> total + measure_message_bytes message)
+      0
+      messages
+  in
+  let shrinkable_messages =
+    List.filter (fun message -> not (is_synthetic_preamble message)) messages
+  in
+  let labelled, atom_count = annotate shrinkable_messages in
+  if atom_count = 0
+  then None
+  else (
+    let pinned_bytes =
+      List.fold_left
+        (fun total (message, label) ->
+           match label with
+           | Pinned -> total + measure_message_bytes message
+           | Atom _ -> total)
+        0
+        labelled
+    in
+    let floor_capacity_bytes =
+      pinned_bytes + measure_message_bytes preamble_message
+    in
+    if floor_capacity_bytes < rejected_window_bytes
+    then Some floor_capacity_bytes
+    else None)
 ;;
 
 (* Smallest multiple of [atoms_per_window] whose remaining suffix fits
@@ -225,7 +258,7 @@ let exact_drop ~available_bytes ~atom_count suffix =
   scan 0
 ;;
 
-let assemble ~drop ~messages labelled =
+let assemble ~allow_empty_history ~atom_count ~drop ~messages labelled =
   if drop = 0
   then messages
   else (
@@ -247,6 +280,7 @@ let assemble ~drop ~messages labelled =
     in
     let kept = List.map fst kept_labelled in
     match first_kept_atom_role with
+    | None when allow_empty_history && drop >= atom_count -> preamble_message :: kept
     | Some Agent_core.Types.User | None -> kept
     | Some Agent_core.Types.Assistant
     | Some Agent_core.Types.Tool
@@ -254,6 +288,7 @@ let assemble ~drop ~messages labelled =
 ;;
 
 let project_with_drop
+    ?(allow_empty_history = false)
     ~measure_message_bytes
     ~capacity_bytes
     ~reserved_bytes
@@ -278,7 +313,7 @@ let project_with_drop
   let preamble_bytes = measure_message_bytes preamble_message in
   let undroppable_bytes = pinned_bytes + preamble_bytes in
   let available_bytes = capacity_bytes - reserved_bytes - undroppable_bytes in
-  if available_bytes <= 0
+  if available_bytes < 0 || (available_bytes = 0 && not allow_empty_history)
   then
     Error
       (Reservation_exceeds_capacity
@@ -290,21 +325,33 @@ let project_with_drop
       atom_suffix_bytes ~measure_message_bytes ~atom_count labelled
     in
     match quantized_drop ~available_bytes ~atom_count suffix with
-    | Some drop -> Ok { messages = assemble ~drop ~messages labelled; dropped_atoms = drop }
+    | Some drop ->
+      Ok
+        { messages =
+            assemble ~allow_empty_history ~atom_count ~drop ~messages labelled
+        ; dropped_atoms = drop
+        }
     | None ->
       let drop = exact_drop ~available_bytes ~atom_count suffix in
-      if drop >= atom_count
+      if drop >= atom_count && not allow_empty_history
       then
         Error
           (Newest_atom_exceeds_available
              { available_bytes; newest_atom_bytes = per_atom.(atom_count - 1) })
-      else Ok { messages = assemble ~drop ~messages labelled; dropped_atoms = drop })
+      else
+        Ok
+          { messages =
+              assemble ~allow_empty_history ~atom_count ~drop ~messages labelled
+          ; dropped_atoms = drop
+          })
 ;;
 
-let project ~measure_message_bytes ~capacity_bytes ~reserved_bytes messages =
+let project ?(allow_empty_history = false) ~measure_message_bytes ~capacity_bytes
+    ~reserved_bytes messages =
   Result.map
     (fun projection -> projection.messages)
     (project_with_drop
+       ~allow_empty_history
        ~measure_message_bytes
        ~capacity_bytes
        ~reserved_bytes

@@ -1,6 +1,6 @@
 ---
 rfc: "claude-code-context-overflow-bounded-restart"
-title: "Recover Claude Code context overflow with an effect-safe bounded restart"
+title: "Admit Claude Code bootstrap input without replaying rejected episodes"
 status: Draft
 created: 2026-08-12
 updated: 2026-08-12
@@ -11,232 +11,390 @@ related: ["0351", "0353", "0368", "0371"]
 implementation_prs: [28284]
 ---
 
-# RFC: Claude Code context overflow bounded restart
+# RFC: Claude Code bootstrap admission and rejected-episode fence
 
 ## 1. Decision
 
-Claude Code의 official-client adapter가 provider terminal frame에서 다음 세
-조건을 모두 직접 관측한 경우에만 이를 typed
-`Agent_core.Retry.ContextOverflow`로 승격한다.
+Claude Code `Start`를 일반적인 multi-turn replay로 취급하지 않는다. MASC는 durable
+checkpoint history 전체를 `masc.claude-code.initial-turn.v1` JSON 하나로 직렬화해
+Claude의 **현재 User prompt 한 개**로 전달한다. 따라서 Claude가 말하는
+`single-exchange conversation`은 provider 내부 compaction으로 줄일 수 없다.
 
-1. `is_error = true`
-2. `api_error_status = 400`
-3. trim한 provider `result`가 정확한 호환 prefix `Prompt is too long`으로 시작
+이 RFC는 그 요청을 하나의 **bootstrap episode**로 모델링한다.
 
-그 실패가 **dynamic tool 진입 전**이고 **assistant response stream 시작 전**이면,
-같은 runtime 안에서 fresh provider session을 만들고 provider-bound history 사본만
-더 작은 atom 경계로 다시 조립한다. durable checkpoint는 수정하지 않는다.
+1. provider-bound 입력과 hook 결과를 한 번만 준비해 frozen episode를 만든다.
+2. 아직 거부된 적 없는 episode는 full-history view를 정확히 한 번 보낸다.
+3. effect와 response가 시작되기 전 typed context overflow만 더 작은 history view를
+   허가한다.
+4. 제한된 중간 view 뒤 마지막 시도는 반드시 **bootstrap floor**를 보낸다.
+5. floor도 거부되면 같은 episode의 재진입을 durable하게 차단한다.
+6. episode identity가 바뀌면 floor rejection fence는 자동으로 무효화된다.
+7. effect 또는 response가 관측된 episode는 입력 변경만으로 해제하지 않으며 기존
+   recovery resolution을 요구한다.
 
-아직 이 `(keeper, runtime)`에서 provider 거부를 관측하지 않은 첫 시도는 전체
-history를 그대로 보낸다. 같은 process에서 overflow 뒤 성공한 bounded capacity가
-있으면 다음 턴은 그 provider-derived capacity에서 시작할 수 있다. 운영자 선언
-예산으로 미리 자르는 선제 cap은 다시 도입하지 않는다.
+durable checkpoint 원문은 어느 경로에서도 삭제하거나 덮어쓰지 않는다.
 
-## 2. Problem and root cause
+## 2. Incident evidence
 
-2026-08-12 live `analyst`는 Claude Code가 요청을 context limit 초과로 거부한 뒤
-동일한 약 4.86 MB checkpoint seed를 3,144회 반복했다. 운영자가 checkpoint를
-백업한 뒤 비워야만 다시 진행했다. 이 작업은 state recovery였고 root fix가
-아니었다.
+2026-08-12 운영자가 clear하기 직전 `analyst` snapshot은 다음과 같았다.
 
-반복은 네 경계의 결합으로 발생했다.
+- checkpoint message 수: `3,144`
+- checkpoint message JSON: `4,326,961 B`
+- checkpoint tool 수: `97`
+- checkpoint tool JSON: `114,709 B`
+- 가장 큰 단일 message JSON: `124,891 B`
+- Claude Code official-client session: fresh `Start`, `turn_count = 1`
 
-1. Claude CLI는 terminal frame에 `api_error_status = 400`과
-   `Prompt is too long ...`을 함께 보냈다.
-2. `Runtime_claude_code`는 이를 generic `Turn_failed`로 납작하게 만들었다.
-3. 따라서 `Keeper_turn_driver_try_provider.context_overflow_shrink_sequence`가
-   소비하는 typed `ContextOverflow`에 도달하지 못했다.
-4. failed official-client claim은 `Recovery_required`가 된 뒤 다음 claim에서 fresh
-   session으로 자동 supersede되었다. fresh `Start`는 같은 durable history 전체를
-   다시 seed하므로 실패 조건이 그대로 재생산됐다.
+실행 영수증에서 같은 prompt-too-long 계열 실패는 `599`건이었다.
 
-문제는 checkpoint가 크다는 사실 하나가 아니다. **provider가 이미 명시한 admission
-failure가 typed retry contract에 도달하지 않아, recovery가 같은 입력을 재생한 것**이
-근본 결함이다.
+- 기간: `2026-08-10T17:51:06Z` ~ `2026-08-12T01:15:56Z`
+- `claude_code.claude-opus-5-max`: `466`건
+- `claude_code.claude-haiku-4-5`: `133`건
+- provider 보고 request: 약 `1,697,942` ~ `2,227,128` tokens
+- provider 보고 conversation: 약 `1,089,881` ~ `1,094,432` tokens
 
-## 3. Existing contracts
+따라서 `3,144`는 재시도 횟수가 아니라 **매번 다시 보낸 durable message 수**다.
+실제 장애는 동일한 약 4.33 MB history seed를 최소 599회 재전송한 replay loop다.
 
-### 3.1 `#28185`: no preemptive seed cut
+provider 문구의 `request - conversation` 차이는 곧바로 MASC가 줄일 수 없는 고정
+overhead로 해석하지 않는다. 그 문구는 system prompt, tool definitions, attachment
+content를 한 범주로 묶으며, attachment content 일부는 MASC history view 안에 있을 수
+있다. shrinkable과 unshrinkable의 권위는 MASC가 frozen request composition에서 직접
+분류하고, 최종 적합성은 provider floor probe가 판정한다.
 
-`#28185`는 declared byte ceiling으로 official-client seed를 미리 자르던 경로를
-삭제했다. byte cap이 provider token window의 권위인 것처럼 동작했고, provider가
-수락할 수도 있던 history를 먼저 버렸기 때문이다.
+## 3. Root cause
 
-본 RFC는 그 결정을 유지한다.
+### 3.1 History is collapsed into one current prompt
 
-- 아직 working capacity를 학습하지 않은 첫 attempt는 byte-identical full seed다.
-- 축소 권한은 provider의 실제 거부 이후에만 열린다.
-- 이후 턴의 bounded 시작점도 같은 process가 실제 성공으로 확인한 값만 쓴다.
-- 축소는 provider-bound 사본에만 적용된다.
-- 성공하거나 실패해도 durable checkpoint 원문은 그대로다.
-
-### 3.2 `#28128` / RFC-0351: reactive bounded transmission view
-
-Codex official-client 경로는 이미 typed context overflow 뒤 같은 runtime을
-구조적으로 축소해 재시도한다. 본 RFC는 새 retry 정책을 만들지 않고 그 shared
-`context_overflow_shrink_sequence`와 `Runtime_model_input_tail_window` 계약을 Claude
-Code에 연결한다.
-
-### 3.3 RFC-0371: effect boundary owns retry authority
-
-provider error 종류만으로 재시도를 허가하지 않는다. 재시도 권한은 adapter가
-관측한 effect/response 경계가 소유한다. outer runtime lane의 effect disposition은
-계속 fail-closed이고, 이 RFC가 여는 것은 Claude adapter 내부의 좁은 same-runtime
-restart 한 번뿐이다.
-
-## 4. Design
-
-### 4.1 Boundary classification
-
-Claude CLI는 이 failure에 구조화된 enum을 제공하지 않는다. 따라서 provider prose
-호환은 외부 adapter 한 곳에서만 수행하고 즉시 closed variant로 바꾼다.
+`Keeper_claude_code_runtime.initial_turn_prompt`는 모든 non-System history와 현재 goal을
+다음 JSON 한 개로 만든다.
 
 ```text
-terminal JSON
-  -- is_error + status 400 + exact prefix --> Context_window_exceeded
-  -- every other 400 ----------------------> Turn_failed
+{
+  "schema": "masc.claude-code.initial-turn.v1",
+  "history": [...all selected durable messages...],
+  "current_goal": "..."
+}
 ```
 
-substring 검색, case folding, token 수치 추출은 하지 않는다. 문구가 바뀌면 generic
-failure로 닫히며 자동 retry 권한이 생기지 않는다. Claude가 structured code를
-제공하면 이 prefix adapter를 삭제하고 그 code를 단일 권위로 교체한다.
+Claude CLI에는 이것이 stream-json User message 하나로 전달된다. provider에는 과거
+turn 경계가 없으므로 자체 compaction이 작동할 수 없다. bootstrap 크기의 소유자는
+MASC다.
 
-typed error는 진단 원문과 함께 다음 관측을 운반한다.
+### 3.2 Failure recovery re-enters the identical episode
 
-- `tool_effect_attempted`: admitted dynamic tool handler가 실행됐는가
-- `response_started`: assistant stream이 시작됐는가
+terminal provider rejection은 official-client session을 `Recovery_required`로 만든다.
+현재 `plan_claim`은 다음 cycle에서 그 recovery를 fresh `Start`로 자동 supersede한다.
+같은 durable history와 goal이 다시 조립되므로 provider가 거부한 episode가 변화 없이
+재생된다.
 
-### 4.2 State transition
+### 3.3 The current prototype is bounded only inside one call
+
+PR #28284의 첫 prototype은 exact Claude 400을 typed `ContextOverflow`로 보존하고
+한 `run` 안에서 최대 세 번 history capacity를 줄인다. 이는 필요한 adapter 수리지만
+다음 조건을 아직 보장하지 않는다.
+
+- 최대 횟수 전에 진짜 최소 view를 시도했는가
+- 모든 history를 제거한 request도 거부되는가
+- 다음 heartbeat가 같은 full episode를 다시 시작하지 않는가
+- retry마다 hook, source projection, tool preparation을 다시 실행하지 않는가
+- effect-fenced failure가 다음 cycle에서 fresh session으로 재생되지 않는가
+
+따라서 typed classification과 bounded halving만으로는 root fix가 아니다.
+
+## 4. Bootstrap episode
+
+### 4.1 Frozen preparation
+
+한 logical Keeper turn에서 다음 값은 provider를 spawn하기 전에 한 번만 준비한다.
+
+- base system prompt와 turn override
+- current goal
+- full durable history snapshot
+- extra-system-context와 source projection 결과
+- exact dynamic-tool surface
+- model/reasoning parameters
+- official-client context codec version
+
+축소 attempt는 frozen value를 재사용하고 **history selection만** 바꾼다. retry가
+`before_turn`, `before_turn_params`, operator-note consumption, Gate replay projection,
+prompt capture, tool assignment을 다시 실행해서는 안 된다.
+
+### 4.2 Episode identity
+
+`episode_sha256`은 view capacity와 session UUID를 제외한 logical input identity다.
 
 ```text
-full Start or Resume
-  -> provider Context_window_exceeded
-  -> durable claim records Provider_rejected / Recovery_required
-  -> only when tool_effect_attempted=false and response_started=false:
-       fresh claim auto-supersedes recovery
-       Start with a smaller provider-bound history view
-  -> success: settle turn 1 and remember working capacity process-locally
-  -> overflow again: repeat at a strictly smaller atom boundary, shared max 3
-  -> no smaller boundary or attempts exhausted: return the original typed failure
+sha256(
+  runtime_id,
+  model,
+  context_codec_version,
+  base system prompt,
+  current goal / goal blocks,
+  full durable history,
+  tool_surface_sha256
+)
 ```
 
-session recovery evidence is not skipped or rewritten. Each failed provider process closes,
-the claim transitions durably, and the next internal attempt follows the existing fresh-claim
-path.
+volatile timestamp나 retry capacity는 identity에 넣지 않는다. 동일 work item이 매
+heartbeat마다 다른 fingerprint를 얻어 fence를 우회하면 안 된다.
 
-### 4.3 Projection order
+입력 identity가 바뀌는 예는 다음과 같다.
 
-각 attempt는 다음 순서를 지킨다.
+- 새 durable message가 commit됨
+- current goal/source가 바뀜
+- operator가 base prompt를 수정함
+- tool surface 또는 runtime/model이 바뀜
 
-1. durable `initial_messages`에서 provider-bound working copy를 만든다.
-2. 첫 attempt면 그대로 두고, retry면 `Runtime_model_input_tail_window`로 atom-safe
-   suffix를 만든다.
-3. 현재 view에서 다음 **strictly smaller** structural boundary를 계산한다.
-4. Gate replay 같은 source projection은 그 뒤에 적용한다.
-5. Claude `Start` prompt를 조립한다. `Resume`은 provider session을 사용한다.
+### 4.3 View identity
 
-tool use/result 쌍, pinned system context, newest atom floor는 기존 tail-window
-불변식을 그대로 사용한다. boundary가 더 작아지지 않으면 provider를 다시 호출하지
+각 attempt는 별도의 `view_sha256`, retained/dropped atom 수, measured history bytes를
+기록한다. 이것은 관측용이며 episode re-entry admission에는 사용하지 않는다.
+
+## 5. Bootstrap floor
+
+일반 conversation tail window는 newest atom을 보존한다. Claude `Start` bootstrap에서는
+current goal이 history 밖에 별도로 존재하므로 모든 prior-history atom을 제거할 수
+있다. 따라서 bootstrap 전용 floor는 다음으로 정의한다.
+
+- current goal
+- effective system prompt
+- exact dynamic-tool surface
+- pinned extra-system-context
+- history omission preamble
+- **zero shrinkable prior-history atoms**
+
+System/extra-context message가 history list에 있으면 pinned component로 floor에 남는다.
+User/Assistant/Tool prior history는 structural atom 단위로 모두 제거할 수 있다.
+
+full view가 거부됐을 때 시도 순서는 다음과 같다.
+
+```text
+full
+  -> optional midpoint 1
+  -> optional midpoint 2
+  -> mandatory floor
+```
+
+- view는 항상 strictly smaller여야 한다.
+- 중복 boundary는 건너뛴다.
+- floor와 현재 view가 같으면 provider를 다시 호출하지 않는다.
+- 최대 provider dispatch 수는 episode당 4회다.
+- 마지막 dispatch가 floor가 아니면 “attempts exhausted”를 선언할 수 없다.
+
+floor 성공은 durable history가 불필요하다는 뜻이 아니다. 그 turn의 provider bootstrap
+view만 최소화됐다는 뜻이며, durable checkpoint와 memory retrieval은 그대로 남는다.
+
+## 6. Durable replay fence
+
+### 6.1 Session-store authority
+
+별도 process-local counter가 아니라 `Keeper_official_client_session_store`의 durable CAS
+경계가 re-entry를 소유한다. provider terminal과 replay fence를 다른 파일에 쓰면 두
+write 사이 crash가 동일 effect/request를 다시 열 수 있기 때문이다.
+
+session state에 typed input rejection을 추가한다.
+
+```text
+Input_rejected {
+  episode_sha256;
+  reason = Bootstrap_floor_exceeded | Effect_fenced;
+  recovery evidence;
+}
+```
+
+### 6.2 Admission rules
+
+- `Bootstrap_floor_exceeded` + same episode: local typed refusal, provider spawn 없음
+- `Bootstrap_floor_exceeded` + changed episode: fresh `Start` 허용
+- `Effect_fenced`: episode 변경과 무관하게 operator recovery resolution 전까지 차단
+- success: session `Settled`, matching rejection 없음
+
+기존 `Recovery_required`를 무조건 fresh claim으로 auto-supersede하는 경로는 typed
+context-overflow episode에 사용하지 않는다.
+
+### 6.3 Internal retry authority
+
+safe overflow 뒤 더 작은 view가 존재할 때만 현재 process가 exact recovery id에 대해
+`Restart_fresh`를 CAS로 승인한다. 다음 attempt가 그 resolution을 소비한다.
+
+승인 조건은 모두 참이어야 한다.
+
+- error가 typed Claude context overflow다.
+- `tool_effect_attempted = false`
+- `response_started = false`
+- next view가 current view보다 strictly smaller다.
+- retry budget 안이다.
+
+final floor rejection에는 다음 retry authority를 만들지 않고 `Input_rejected`를
+commit한다.
+
+## 7. Effect boundary
+
+Claude process spawn 자체는 outer lane에서 계속
+`Observation_unavailable`로 취급한다. adapter 내부에서 정확한 terminal frame까지
+관측한 경우에만 좁은 bootstrap retry authority를 얻는다.
+
+다음 중 하나라도 참이면 automatic retry는 같은 run과 다음 cycle 모두 금지한다.
+
+- dynamic tool handler가 실행됨
+- assistant response stream이 시작됨
+- terminal observation이 완전하지 않음
+
+이 경우 session state는 `Input_rejected Effect_fenced` 또는 기존 ambiguous recovery로
+남고 operator가 `retry_previous` 또는 `restart_fresh`를 결정한다.
+
+## 8. Error surface and operator action
+
+두 실패를 구분해 노출한다.
+
+- `context_overflow_recoverable`: 더 작은 bootstrap view를 같은 run에서 시도 중
+- `bootstrap_floor_exceeded`: MASC가 소유한 history 축을 모두 제거했지만 provider가
+  거부함; system prompt, current goal, tool surface, pinned context를 줄이거나 runtime을
+  변경해야 함
+
+same-episode local refusal은 provider error처럼 위장하지 않는다. dashboard blocker와
+turn receipt는 다음을 포함한다.
+
+- `episode_sha256`
+- runtime/model
+- rejection reason
+- full/floor measured bytes
+- retained/dropped atom 수
+- system prompt bytes
+- tool count/tool surface bytes
+- current goal bytes
+- operator next action
+
+provider token 수치는 진단 원문으로 보존하되 byte/token 환산 상수로 admission을
+결정하지 않는다.
+
+## 9. Why durable compaction is not the first repair
+
+과거 automatic overflow compaction은 실제로 더 작은 checkpoint를 commit한 운영 증거가
+없어 #26546에서 제거됐다. 실패한 compaction 뒤 동일 source를 재queue해 또 다른 loop를
+만들었다.
+
+이 RFC는 그 경로를 되살리지 않는다.
+
+- bootstrap view는 provider transmission projection이다.
+- durable checkpoint는 사실 보존 SSOT다.
+- floor rejection fence는 provider call을 멈추는 liveness 장치다.
+- durable summary/handoff는 별도 정책이며 commit 성공과 source transition을 하나의
+  transaction으로 증명한 뒤에만 재도입할 수 있다.
+
+## 10. Tool-surface follow-up
+
+incident checkpoint의 97개 tool schema는 약 115 KB로 4.33 MB history보다 작았으므로
+이번 사건의 1차 원인은 아니다. 다만 200k-token runtime에서 floor까지 거부되면 tool
+surface가 주요 unshrinkable component가 될 수 있다.
+
+그 경우 후속 RFC는 stable bootstrap broker를 검토한다.
+
+- 소수의 capability-discovery/tool-dispatch tool만 항상 노출
+- 실제 tool schema는 필요할 때 조회
+- authorization과 typed argument validation은 host registry가 계속 소유
+- tool subset 변화가 매번 provider session을 무효화하지 않도록 stable digest 유지
+
+generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설계는 허용하지
 않는다.
 
-### 4.4 Effect and response fence
+## 11. Required tests
 
-다음 중 하나라도 참이면 자동 shrink retry를 금지한다.
+### 11.1 Adapter classification
 
-- dynamic tool handler에 진입했다.
-- assistant response stream이 시작됐다.
-- terminal frame까지의 effect 관측이 불완전하다.
+1. exact prompt-too-long 400만 typed context overflow가 된다.
+2. unrelated 400, case drift, 중간 substring은 generic failure로 남는다.
+3. tool/response activity flag가 terminal error에 보존된다.
 
-금지된 실패는 기존 `Provider_attempt_effect_fenced` 경로를 유지한다. 다른 runtime
-후보로 회전하거나 provider effect를 보상·재생하지 않는다. tool handler가 한 번
-실행된 fixture에서는 호출 횟수가 반드시 1이어야 한다.
+### 11.2 Frozen episode
 
-### 4.5 Capacity memory
+1. full + shrink retries 전체에서 preparation hook은 한 번만 실행된다.
+2. source projection과 operator-note consumption은 한 번만 실행된다.
+3. tool surface와 system prompt는 모든 view에서 동일하다.
+4. capacity만 달라지고 `episode_sha256`은 동일하다.
 
-성공한 bounded capacity는 `(keeper_name, runtime_id)` 키로 process-local하게만
-기억한다. 다음 턴은 그 크기에서 시작해 같은 overflow 탐색을 반복하지 않는다.
+### 11.3 Floor convergence
 
-이 값은 correctness state가 아니다.
+1. full rejection 뒤 midpoint가 성공한다.
+2. midpoint가 계속 실패하면 마지막 attempt는 zero-history floor다.
+3. floor 성공 뒤 turn이 settle된다.
+4. floor rejection 뒤 provider attempt는 더 발생하지 않는다.
+5. prior history가 단일 atom이어도 zero-history floor를 시도한다.
+6. oversized current goal/pinned context는 floor rejection으로 분류된다.
 
-- restart 시 사라져도 full seed부터 다시 안전하게 탐색한다.
-- durable checkpoint나 session schema에 쓰지 않는다.
-- 성공하지 않은 capacity는 기록하지 않는다.
-- unbounded sentinel은 기록하지 않는다.
+### 11.4 Durable re-entry
 
-## 5. Safety invariants
+1. 같은 episode의 다음 heartbeat는 provider를 spawn하지 않는다.
+2. process restart 뒤에도 같은 episode는 spawn되지 않는다.
+3. 새 durable message/goal/tool surface/runtime은 floor fence를 무효화한다.
+4. effect-fenced episode는 입력 변경만으로 재개되지 않는다.
+5. operator resolution만 effect fence를 해제한다.
 
-1. **Durable fidelity**: checkpoint message를 삭제·요약·재작성하지 않는다.
-2. **Provider oracle**: 미학습 첫 attempt는 full seed이며 provider의 명시 거부만
-   축소 권한을 만든다. 이후 bounded 시작점은 같은 process에서 성공한 값만 쓴다.
-3. **Exact classification**: unrelated 400은 typed overflow가 아니다.
-4. **No effect replay**: tool 진입 뒤에는 같은 turn을 자동 재시도하지 않는다.
-5. **No response replay**: response stream 시작 뒤에는 자동 재시도하지 않는다.
-6. **Same runtime only**: shrink는 동일 Claude runtime의 fresh session 안에서만
-   일어나며 fallback/rotation 권한을 만들지 않는다.
-7. **Strict convergence**: 다음 capacity가 현재보다 작지 않으면 즉시 중단한다.
-8. **Bounded attempts**: shared policy의 최대 3회 shrink를 복제 없이 재사용한다.
-9. **Evidence retention**: 실패 claim과 recovery 기록은 정상 session transition을
-   거친다.
+### 11.5 Incident fixture
 
-## 6. Observability
+sanitized fixture는 최소 다음 shape를 유지한다.
 
-각 shrink retry는 keeper log에 다음을 남긴다.
+- 3,144 messages
+- 약 4.33 MB encoded history
+- 97 tools / 약 115 KB schema
+- fresh Claude `Start`
 
-- `shrink_attempt`
-- `previous_capacity_bytes`
-- `capacity_bytes`
+fake provider는 full과 midpoint를 거부하고 floor를 수락하는 경우, floor도 거부하는
+경우를 각각 검증한다. 어떤 경우에도 다음 cycle에서 동일 full prompt가 재전송되면
+실패다.
 
-기존 Claude composition log의 `mode`, `prompt_bytes`, `system_prompt_bytes`, tool 수,
-tool surface bytes를 함께 보면 full attempt와 bounded restart를 구분할 수 있다.
-byte 값은 provider token 수가 아니라 MASC가 소유한 transmission view의 구조적
-수렴 지표다.
+## 12. Implementation phases
 
-후속으로 runtime manifest에 Codex와 동일한 typed shrink observation을 붙일 수 있다.
-그 관측이 없다는 이유로 본 안전 수리를 지연하지 않는다.
+### Phase A — evidence-preserving adapter
 
-## 7. Verification and rollout
+- exact Claude terminal classification
+- tool/response activity flags
+- typed Keeper bridge
 
-### 7.1 Required tests
+### Phase B — frozen bootstrap projection
 
-1. exact prompt-too-long 400은 `Context_window_exceeded`가 된다.
-2. unrelated 400과 prefix가 아닌 문장 포함은 `Turn_failed`로 남는다.
-3. tool effect 뒤 overflow는 activity flag를 보존한다.
-4. response 시작 뒤 overflow는 activity flag를 보존한다.
-5. Keeper 첫 attempt는 full history를 보내고 두 번째는 더 작은 non-empty history로
-   성공한다.
-6. tool effect 뒤 overflow는 provider attempt와 tool effect 모두 한 번뿐이며
-   recovery evidence가 남는다.
+- preparation과 dispatch 분리
+- bootstrap-specific zero-history floor
+- mandatory floor sequence
+- per-view observation
 
-### 7.2 Deployment proof
+### Phase C — durable rejected-episode admission
 
-merge, build, deployment, live health를 분리해서 확인한다.
+- session-store typed `Input_rejected`
+- same-episode local refusal
+- input-change invalidation
+- effect-fence operator resolution
 
-1. PR exact head의 focused tests와 CI를 확인한다.
-2. main merge commit으로 `main_eio.exe`를 rebuild한다.
-3. 실행 중 process의 executable/commit이 그 build를 가리키는지 확인한다.
-4. oversized fixture 또는 다음 실제 Claude overflow에서 full attempt 뒤 smaller
-   attempt가 관측되고 turn이 settle되는지 확인한다.
-5. fleet health의 다른 degraded reason은 이 feature의 성공과 분리해 보고한다.
+### Phase D — rollout proof
 
-## 8. Non-goals and rejected alternatives
+- exact-head focused tests와 full CI
+- incident-size sanitized fixture
+- deployed process/commit 확인
+- live full -> smaller/floor -> settle 또는 durable block 관측
+- 동일 episode provider dispatch가 다시 생기지 않음을 heartbeat 두 번 이상 확인
 
-- **checkpoint clear/purge**: incident recovery일 뿐 root fix가 아니다.
-- **preemptive `max-prompt-bytes` cap**: `#28185`의 제거 사유를 되살린다.
-- **durable history truncation/compaction**: 본 수리는 transmission view만 바꾼다.
-- **string search anywhere else**: provider compatibility parser 밖의 prose 분류는
-  금지한다.
-- **retry after effects or streamed response**: duplicate effect/delivery 위험 때문에
-  금지한다.
-- **cross-provider fallback**: effect 관측이 불완전한 official-client attempt를 다른
-  provider로 재생하지 않는다.
-- **Claude context policy 일반화**: structured enum이 없는 이 transport의 좁은 adapter
-  수리다. shared retry/tail-window 정책 자체는 변경하지 않는다.
+## 13. Current PR status
 
-## 9. Integration note
+PR #28284는 Phase A와 Phase B 일부의 prototype이다. 다음 조건을 만족하기 전에는
+root fix 또는 merge-ready로 부르지 않는다.
 
-`#28263`은 본 구현 전에 main에 머지되어 official-client context codec을 v2로
-hard-cut했다. shrink 측정기는 별도 JSON 형식을 복제하지 않고
-`Host.encode_history_message`에 위임한다. 따라서 System과 history role 모두 실제
-provider projection과 같은 v2 envelope를 사용한다. focused shrink fixture는 full
-attempt와 bounded retry 양쪽의 schema가 현재 codec인지 확인한다. compatibility
-reader나 v1/v2 이중 경로는 만들지 않는다.
+- preparation이 attempt마다 재실행되지 않음
+- zero-history floor가 마지막 attempt로 보장됨
+- floor rejection이 durable session admission에 기록됨
+- same episode의 다음 heartbeat/provider spawn이 차단됨
+- effect-fenced overflow가 다음 cycle에서 auto-supersede되지 않음
+
+## 14. Rejected alternatives
+
+- **checkpoint clear/purge**: incident recovery일 뿐 재발 방지가 아니다.
+- **fixed three halvings only**: 한 call은 끝내지만 다음 heartbeat replay를 막지 못한다.
+- **process-local rejected-capacity cache**: restart가 loop를 다시 연다.
+- **provider 문구의 token 숫자로 byte cap 계산**: provider tokenization과 MASC byte
+  measurement를 같은 축으로 가장한다.
+- **newest history atom 강제 보존**: Claude bootstrap에는 current goal이 따로 있어 진짜
+  floor가 아니다.
+- **retry마다 hook 재실행**: logical turn 하나에서 prompt/tool/effect preparation을
+  중복한다.
+- **effect 뒤 fresh restart**: external effect 또는 response를 중복할 수 있다.
+- **cross-provider replay**: observation-unavailable effect를 다른 provider로 재생한다.

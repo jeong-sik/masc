@@ -238,7 +238,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-0034d-stale-agent-sync | d — release_stale_claims agent-side sync | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
-| RFC-claude-code-context-overflow-bounded-restart | Recover Claude Code context overflow with an effect-safe bounded restart | Draft | - |
+| RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |
 | RFC-compaction-deterministic-floor | Compaction must never deadlock: a deterministic structural floor, typed outco... | Draft | - |
 | RFC-connector-ambient-attention-wake | Connector ambient attention wake: drive an idle keeper turn from external-att... | Draft | - |
 | RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Draft | - |

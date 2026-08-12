@@ -215,6 +215,32 @@ let test_non_decreasing_custom_shrink_does_not_repeat_provider_attempt () =
   check int "no false shrink event is emitted" 0 !shrink_events
 ;;
 
+let test_last_retry_uses_the_measured_floor () =
+  let attempted_capacities = ref [] in
+  let result =
+    Try_provider.context_overflow_shrink_sequence
+      ~starting_capacity_bytes:1024
+      ~same_run_retry_authorized:always_authorized
+      ~final_shrink_capacity:(fun ~capacity_bytes:_ -> Some 17)
+      ~record_success:(fun ~capacity_bytes:_ -> fail "overflow never succeeds here")
+      ~on_shrink_retry:
+        (fun ~shrink_attempt:_ ~previous_capacity_bytes:_ ~capacity_bytes:_ -> ())
+      ~attempt:(fun ~capacity_bytes ->
+        attempted_capacities := capacity_bytes :: !attempted_capacities;
+        Error (context_overflow ()))
+      ()
+  in
+  check bool "the floor overflow is preserved" true
+    (match result with
+     | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)) -> true
+     | Error _ | Ok _ -> false);
+  check
+    (list int)
+    "the final bounded dispatch jumps to the measured floor"
+    [ 1024; 512; 256; 17 ]
+    (List.rev !attempted_capacities)
+;;
+
 (* {1 Keeper_context_overflow_shrink_state} *)
 
 let test_state_defaults_to_max_capacity_when_unseen () =
@@ -291,6 +317,10 @@ let () =
             "a non-decreasing custom shrink does not repeat the provider attempt"
             `Quick
             test_non_decreasing_custom_shrink_does_not_repeat_provider_attempt
+        ; test_case
+            "the last retry uses the measured floor"
+            `Quick
+            test_last_retry_uses_the_measured_floor
         ] )
     ; ( "shrink_state"
       , [ test_case

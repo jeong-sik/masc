@@ -103,8 +103,10 @@ let first_text (messages : Types.message list) =
    exercise structure rather than the budget. *)
 let unbounded_capacity = 100_000_000
 
-let project ?(capacity_bytes = unbounded_capacity) ?(reserved_bytes = 0) history =
+let project ?(allow_empty_history = false) ?(capacity_bytes = unbounded_capacity)
+    ?(reserved_bytes = 0) history =
   Window.project
+    ~allow_empty_history
     ~measure_message_bytes
     ~capacity_bytes
     ~reserved_bytes
@@ -259,6 +261,60 @@ let test_next_shrink_rejects_larger_framed_retry () =
     Alcotest.failf
       "synthetic framing expanded a 700-byte refusal into a %d-byte retry"
       capacity_bytes
+;;
+
+let test_bootstrap_floor_drops_the_only_prior_atom () =
+  let pinned =
+    message
+      ~metadata:Types.Extra_system_context_provenance.metadata
+      ~role:Types.User
+      "pinned-context"
+  in
+  let only_prior_atom = padded ~role:Types.User ~tag:"prior|" 600 in
+  let history = [ pinned; only_prior_atom ] in
+  let floor_capacity_bytes =
+    match Window.minimum_capacity_bytes ~measure_message_bytes history with
+    | Some capacity -> capacity
+    | None -> Alcotest.fail "a single prior atom must have a bootstrap floor"
+  in
+  let projected =
+    ok_exn
+      ~what:"bootstrap floor"
+      (project ~allow_empty_history:true ~capacity_bytes:floor_capacity_bytes history)
+  in
+  Alcotest.(check int) "all prior atoms were removed" 0 (count_atoms projected);
+  Alcotest.(check bool)
+    "pinned context survived"
+    true
+    (List.exists (fun message -> message == pinned) projected);
+  Alcotest.(check bool)
+    "zero-history floor carries the omission preamble"
+    true
+    (List.exists is_preamble projected);
+  fits_budget ~capacity_bytes:floor_capacity_bytes ~reserved_bytes:0 projected
+;;
+
+let test_bootstrap_next_shrink_reaches_zero_history () =
+  let only_prior_atom = padded ~role:Types.Assistant ~tag:"prior|" 600 in
+  match
+    Window.next_shrink_capacity_bytes
+      ~allow_empty_history:true
+      ~measure_message_bytes
+      ~target_capacity_bytes:300
+      [ only_prior_atom ]
+  with
+  | None -> Alcotest.fail "bootstrap shrink must remove the only prior atom"
+  | Some capacity_bytes ->
+    let projected =
+      ok_exn
+        ~what:"single-atom bootstrap shrink"
+        (project
+           ~allow_empty_history:true
+           ~capacity_bytes
+           [ only_prior_atom ])
+    in
+    Alcotest.(check int) "no organic atom remains" 0 (count_atoms projected);
+    Alcotest.(check bool) "the floor is framed" true (List.exists is_preamble projected)
 ;;
 
 let test_cut_is_quantized_when_a_quantized_cut_fits () =
@@ -521,6 +577,14 @@ let () =
             "next shrink rejects larger framed retry"
             `Quick
             test_next_shrink_rejects_larger_framed_retry
+        ; Alcotest.test_case
+            "bootstrap floor drops the only prior atom"
+            `Quick
+            test_bootstrap_floor_drops_the_only_prior_atom
+        ; Alcotest.test_case
+            "bootstrap next shrink reaches zero history"
+            `Quick
+            test_bootstrap_next_shrink_reaches_zero_history
         ; Alcotest.test_case "cut is quantized when a quantized cut fits" `Quick
             test_cut_is_quantized_when_a_quantized_cut_fits
         ; Alcotest.test_case "cut point is stable while the budget holds" `Quick

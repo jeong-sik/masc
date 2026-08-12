@@ -178,9 +178,14 @@ type t =
   ; connect_timeout_s : float option
     (** Explicit connect + initial-response-headers wall-clock timeout.
       [None] applies no agent-core-owned deadline. [Some s] forces [s] seconds for
-      the connect/headers phase only — it is independent of
-      the body deadline ([body_timeout_s]) and the inter-chunk stream-idle
-      deadline ([stream_idle_timeout_s]).
+      the connect/headers phase only — it is independent of the body deadline and
+      the inter-chunk stream-idle deadline.
+
+      Those two are {b not fields of this record}: they are per-request arguments
+      of {!Complete.complete} ([?body_timeout_s] / [?stream_idle_timeout_s]),
+      because a deadline for one call is a property of that call rather than of
+      the endpoint. Naming them in brackets here read as sibling fields and sent
+      readers looking for them in this type.
 
       The consumer declares any deadline; AGENT_CORE never selects one from provider
       kind, URL, model, or process environment.

@@ -75,6 +75,18 @@ let test_parse_llm_endpoints_env () =
 (* [test_acquire_requires_explicit_or_runtime_model] removed 2026-05-05 —
    covered the acquire surface that was archived. *)
 
+let test_missing_discovery_is_scoped_not_fleet_health () =
+  let open Yojson.Safe.Util in
+  let result = Masc.Tool_local_runtime_verify.runtime_verify_json () in
+  Alcotest.(check string) "local verification scope"
+    "local_openai_compatible_runtime_pool"
+    (result |> member "verification_scope" |> to_string);
+  Alcotest.(check bool) "does not block Keeper turns" false
+    (result |> member "blocks_keeper_turns" |> to_bool);
+  Alcotest.(check string) "fleet provider health is not assessed"
+    "not_assessed"
+    (result |> member "fleet_provider_health" |> to_string)
+
 (* [test_failure_cooldown_from_env] removed 2026-05-05 — exercised the
    failure-streak path through release/acquire which was archived. *)
 
@@ -86,5 +98,7 @@ let () =
           Alcotest.test_case "parse runtime env" `Quick test_parse_runtime_env;
           Alcotest.test_case "parse LLM_ENDPOINTS env" `Quick
             test_parse_llm_endpoints_env;
+          Alcotest.test_case "missing discovery is local-only" `Quick
+            test_missing_discovery_is_scoped_not_fleet_health;
         ] );
     ]

@@ -68,5 +68,9 @@ val runtime_verify_json :
     diagnostics + the {!classify_runtime_blocker} verdict.  [?runtime_pool]
     selects the pool by name; default behaviour is "use the
     default pool" via {!Local_runtime_pool.default_pool_label}.  When
-    discovery has no resolvable endpoints, the result fails closed with
-    [runtime_blocker = "agent_core_discovery_unavailable"]. *)
+    discovery has no resolvable endpoints, the local-runtime diagnostic fails
+    closed with [runtime_blocker = "agent_core_discovery_unavailable"]. The
+    response also pins [verification_scope =
+    "local_openai_compatible_runtime_pool"], [blocks_keeper_turns = false],
+    and [fleet_provider_health = "not_assessed"] so callers cannot treat
+    absence of this optional local pool as a fleet-wide provider outage. *)

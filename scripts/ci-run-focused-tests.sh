@@ -38,6 +38,7 @@ paused_targets=(
 
 normal_targets=(
   @test/runtest-test_board_dispatch
+  @test/runtest-test_transport_integration
   @test/runtest-test_keeper_playground_checkout_discovery
   @test/runtest-test_keeper_autonomous_turn_source
   @test/runtest-test_keeper_autoboot_single_owner

@@ -203,15 +203,20 @@ let error_kind = function
   | Timeout _ -> "timeout"
 ;;
 
-(* An [Eio.Time.Timeout] can still arrive with no turn bound installed: the
-   process-termination grace window is its own deadline. Reporting that as a
-   turn timeout would name a limit the operator never set. *)
+(* [None] installs no timer, and the only other [Eio.Time.with_timeout_exn] in
+   this module is the process-termination grace window, which catches its own
+   [Eio.Time.Timeout] and reaps. So this arm exists for totality and is not
+   reachable by either timer. Reaching it means a deadline was installed by a
+   path this reasoning does not cover — that is a defect to find, not a turn
+   limit to report, so it must not be dressed up as one. *)
 let timeout_error = function
   | Some seconds -> Error (Timeout seconds)
   | None ->
     Error
-      (Process_exited
-         "client did not settle within the process-termination grace window")
+      (Protocol_error
+         { stage = "turn deadline"
+         ; detail = "Eio timeout raised while no turn deadline was installed"
+         })
 ;;
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
@@ -1079,7 +1084,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->
         let with_timeout callback =
-          Eio.Time.with_timeout_exn clock config.timeout_s callback
+          with_optional_timeout clock config.timeout_s callback
         in
         run_protocol
           { send; receive }

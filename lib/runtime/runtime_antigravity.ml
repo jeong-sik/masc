@@ -143,16 +143,22 @@ let error_to_string = function
   | Timeout seconds -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
 ;;
 
-(* An [Eio.Time.Timeout] can still arrive with no turn bound installed: the
-   process-termination grace window is its own deadline. Reporting that as a
-   turn timeout would name a limit the operator never set. *)
-let timeout_error = function
-  | Some seconds -> Error (Timeout seconds)
+(* [None] installs no timer, and the only other [Eio.Time.with_timeout_exn] in
+   this module is the process-termination grace window, which catches its own
+   [Eio.Time.Timeout] and reaps. So this arm exists for totality and is not
+   reachable by either timer. Reaching it means a deadline was installed by a
+   path this reasoning does not cover — that is a defect to find, not a turn
+   limit to report, so it must not be dressed up as one. *)
+let timeout_or_defect = function
+  | Some seconds -> Timeout seconds
   | None ->
-    Error
-      (Process_exited
-         "client did not settle within the process-termination grace window")
+    Protocol_error
+      { stage = "turn deadline"
+      ; detail = "Eio timeout raised while no turn deadline was installed"
+      }
 ;;
+
+let timeout_error timeout_s = Error (timeout_or_defect timeout_s)
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
 let ( let* ) result f = Result.bind result f
@@ -718,7 +724,8 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
        signal_spawned_process proc stdin_w;
        process_settled := true;
        raise exn
-     | Eio.Time.Timeout -> abort_with_runtime_error (Timeout config.timeout_s)
+     | Eio.Time.Timeout ->
+       abort_with_runtime_error (timeout_or_defect config.timeout_s)
      | Runtime_error _ as exn -> raise exn
      | exn ->
        abort_with_runtime_error

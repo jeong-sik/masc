@@ -185,16 +185,23 @@ let error_kind = function
   | Timeout _ -> "timeout"
 ;;
 
-(* An [Eio.Time.Timeout] can still arrive with no turn bound installed: the
-   process-termination grace window below is its own deadline. Reporting that
-   as a turn timeout would name a limit the operator never set, so it is
-   surfaced as what it is. *)
+(* [None] installs no timer, and the only other [Eio.Time.with_timeout_exn] in
+   this module is the process-termination grace window, which catches its own
+   [Eio.Time.Timeout] and reaps. So this arm exists for totality and is not
+   reachable by either timer. Reaching it means a deadline was installed by a
+   path this reasoning does not cover — that is a defect to find, not a turn
+   limit to report. It must not become [Process_exited] either: that maps to
+   [ProviderUnavailable], which blames a provider that was answering and drops
+   [turn_accepted], the one bit that decides whether rotating would run the
+   goal twice. *)
 let timeout_error ~turn_accepted = function
   | Some seconds -> Error (Timeout { seconds; turn_accepted })
   | None ->
     Error
-      (Process_exited
-         "client did not settle within the process-termination grace window")
+      (Protocol_error
+         { stage = "turn deadline"
+         ; detail = "Eio timeout raised while no turn deadline was installed"
+         })
 ;;
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
@@ -1028,7 +1035,7 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
     ~on_turn_starting ~on_turn_started ~on_stream_event =
   with_spawned_client ~mgr ~clock ~cwd config (fun io ->
     let with_timeout callback =
-      Eio.Time.with_timeout_exn clock config.timeout_s callback
+      with_optional_timeout clock config.timeout_s callback
     in
     run_protocol
       io
@@ -1172,11 +1179,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Eio.Time.Timeout ->
-            Error
-              (Timeout
-                 { seconds = config.timeout_s
-                 ; turn_accepted = !turn_accepted
-                 })
+            timeout_error ~turn_accepted:!turn_accepted config.timeout_s
           | exn -> Error (Spawn_failed (Printexc.to_string exn)))
        with
        | Error (Timeout { seconds; turn_accepted = dispatch_ambiguous }) ->

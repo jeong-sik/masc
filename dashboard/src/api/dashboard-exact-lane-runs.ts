@@ -20,16 +20,17 @@ export type ExactLanePersistenceState = 'not_persisted' | 'durability_unknown'
 
 export type ExactLaneRunInput = { kind: 'exact'; payload: unknown }
 
-export interface ExactLaneRunRecord {
+// A listing row. The exact input and output payloads are deliberately absent:
+// a lane run embeds the whole rendered prompt, so carrying them here made one
+// listing 246 MB. They arrive from fetchExactLaneRun when a row is opened.
+export interface ExactLaneRunSummary {
   runId: string
   lane: ExactLane
   subjectId: string
   actor: string
   startedAt: number
-  input: ExactLaneRunInput
   status: ExactLaneRunStatus
   elapsedSeconds?: number
-  output?: unknown
   code?: string
   detail?: string
   intendedStatus?: ExactLaneIntendedStatus
@@ -39,9 +40,17 @@ export interface ExactLaneRunRecord {
   persistenceState?: ExactLanePersistenceState
 }
 
+// One opened run, payloads included.
+export interface ExactLaneRunRecord extends ExactLaneRunSummary {
+  input: ExactLaneRunInput
+  output?: unknown
+}
+
 export interface DashboardExactLaneRunsResponse {
-  runs: ExactLaneRunRecord[]
+  runs: ExactLaneRunSummary[]
   count: number
+  total: number
+  hasMore: boolean
   generatedAt: string
 }
 
@@ -101,14 +110,19 @@ function parseInput(raw: unknown, context: string): ExactLaneRunInput {
   return fail(`${context}.kind has unknown value ${JSON.stringify(kind)}`)
 }
 
-function parseRun(raw: unknown, index: number): ExactLaneRunRecord {
-  const context = `runs[${index}]`
+function parseRun(raw: unknown, index: number, withPayloads: false): ExactLaneRunSummary
+function parseRun(raw: unknown, index: number, withPayloads: true): ExactLaneRunRecord
+function parseRun(raw: unknown, index: number, withPayloads: boolean): ExactLaneRunSummary {
+  const context = withPayloads ? 'root.run' : `runs[${index}]`
   if (!isRecord(raw)) fail(`${context} must be an object`)
   const status = string(raw.status, `${context}.status`)
   if (!STATUSES.includes(status)) fail(`${context}.status has unknown value ${JSON.stringify(status)}`)
   const lane = string(raw.lane, `${context}.lane`)
   if (!LANES.includes(lane)) fail(`${context}.lane has unknown value ${JSON.stringify(lane)}`)
-  const base = ['run_id', 'lane', 'subject_id', 'actor', 'started_at', 'input', 'status']
+  const base = ['run_id', 'lane', 'subject_id', 'actor', 'started_at', 'status']
+    .concat(withPayloads ? ['input'] : [])
+  // `output` rides with the payloads; a summary never carries it.
+  const completion = withPayloads ? ['elapsed_s', 'output'] : ['elapsed_s']
   const persistenceFailure = status === 'completion_persistence_failed'
     || status === 'completion_durability_unknown'
   const intendedStatus = persistenceFailure
@@ -124,15 +138,14 @@ function parseRun(raw: unknown, index: number): ExactLaneRunRecord {
       ? [
           ...base,
           'intended_status',
-          'elapsed_s',
-          'output',
+          ...completion,
           'persistence_error',
           'persistence_state',
           ...(intendedFailure ? ['intended_code', 'intended_detail'] : []),
         ]
       : status === 'failed'
-        ? [...base, 'elapsed_s', 'output', 'code', 'detail']
-        : [...base, 'elapsed_s', 'output']
+        ? [...base, ...completion, 'code', 'detail']
+        : [...base, ...completion]
   exactFields(raw, required, [], context)
   const persistenceState = persistenceFailure
     ? string(raw.persistence_state, `${context}.persistence_state`)
@@ -151,10 +164,14 @@ function parseRun(raw: unknown, index: number): ExactLaneRunRecord {
     subjectId: string(raw.subject_id, `${context}.subject_id`),
     actor: string(raw.actor, `${context}.actor`),
     startedAt: number(raw.started_at, `${context}.started_at`),
-    input: parseInput(raw.input, `${context}.input`),
+    ...(withPayloads
+      ? {
+          input: parseInput(raw.input, `${context}.input`),
+          output: status === 'running' ? undefined : raw.output,
+        }
+      : {}),
     status: status as ExactLaneRunStatus,
     elapsedSeconds: status === 'running' ? undefined : number(raw.elapsed_s, `${context}.elapsed_s`),
-    output: status === 'running' ? undefined : raw.output,
     code: status === 'failed' ? string(raw.code, `${context}.code`) : undefined,
     detail: status === 'failed' ? string(raw.detail, `${context}.detail`) : undefined,
     intendedStatus: intendedStatus as ExactLaneIntendedStatus | undefined,
@@ -169,23 +186,62 @@ function parseRun(raw: unknown, index: number): ExactLaneRunRecord {
 
 export function parseExactLaneRunsResponse(raw: unknown): DashboardExactLaneRunsResponse {
   if (!isRecord(raw)) fail('root must be an object')
-  exactFields(raw, ['runs', 'count', 'generated_at'], [], 'root')
+  exactFields(raw, ['runs', 'count', 'total', 'has_more', 'generated_at'], [], 'root')
   if (!Array.isArray(raw.runs)) fail('root.runs must be an array')
   if (!Number.isSafeInteger(raw.count) || (raw.count as number) < 0) {
     fail('root.count must be a non-negative safe integer')
   }
-  const runs = raw.runs.map(parseRun)
+  if (!Number.isSafeInteger(raw.total) || (raw.total as number) < 0) {
+    fail('root.total must be a non-negative safe integer')
+  }
+  if (typeof raw.has_more !== 'boolean') fail('root.has_more must be a boolean')
+  const runs = raw.runs.map((run, index) => parseRun(run, index, false))
   if (raw.count !== runs.length) fail('root.count must match runs.length')
   return {
     runs,
     count: raw.count as number,
+    total: raw.total as number,
+    hasMore: raw.has_more,
     generatedAt: string(raw.generated_at, 'root.generated_at'),
   }
 }
 
+export function parseExactLaneRunResponse(raw: unknown): ExactLaneRunRecord {
+  if (!isRecord(raw)) fail('root must be an object')
+  exactFields(raw, ['run', 'generated_at'], [], 'root')
+  return parseRun(raw.run, 0, true)
+}
+
+// The cursor is the caller's own last row, not server state: the server keeps
+// nothing between calls, and carrying the run_id alongside the timestamp is
+// what stops two runs recorded in the same float second from straddling a page
+// boundary.
+export type ExactLaneRunCursor = { startedAt: number; runId: string }
+
 export async function fetchExactLaneRuns(
-  opts?: AbortableRequestOptions,
+  opts?: AbortableRequestOptions & { limit?: number; before?: ExactLaneRunCursor },
 ): Promise<DashboardExactLaneRunsResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/exact-lane-runs', { signal: opts?.signal })
+  const params = new URLSearchParams()
+  if (opts?.limit != null) params.set('limit', String(opts.limit))
+  if (opts?.before != null) {
+    params.set('before_started_at', String(opts.before.startedAt))
+    params.set('before_run_id', opts.before.runId)
+  }
+  const query = params.toString()
+  const raw = await get<unknown>(
+    `/api/v1/dashboard/exact-lane-runs${query === '' ? '' : `?${query}`}`,
+    { signal: opts?.signal },
+  )
   return parseExactLaneRunsResponse(raw)
+}
+
+export async function fetchExactLaneRun(
+  runId: string,
+  opts?: AbortableRequestOptions,
+): Promise<ExactLaneRunRecord> {
+  const raw = await get<unknown>(
+    `/api/v1/dashboard/exact-lane-runs/${encodeURIComponent(runId)}`,
+    { signal: opts?.signal },
+  )
+  return parseExactLaneRunResponse(raw)
 }

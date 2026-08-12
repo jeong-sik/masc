@@ -245,6 +245,74 @@ let test_observation_reads_do_not_wait_for_durable_writer () =
            (read_elapsed_s < 0.2))
 ;;
 
+(* Paging exists because listing everything serialized 5,908 runs to 246 MB on
+   every load. The properties that make a page trustworthy are that it is a
+   total order (so a boundary cannot lose a run) and that a summary carries no
+   payload (so the size that forced paging cannot creep back). *)
+let test_pages_are_a_total_order_over_equal_timestamps () =
+  let registry = R.create () in
+  List.iter
+    (fun run_id ->
+       R.register_running
+         registry
+         ~run_id
+         ~lane:R.Librarian
+         ~subject_id:"trace-1"
+         ~actor:"keeper-a"
+         ~started_at:10.0
+         ~input:(R.Exact_input (`Assoc [ "n", `Int 1 ])))
+    [ "run-a"; "run-b"; "run-c"; "run-d" ];
+  let first = R.recent_runs registry ~limit:2 ~before:None in
+  check int "page size honoured" 2 (List.length first.runs);
+  check int "total counts every retained run, not the page" 4 first.total;
+  check bool "more remains" true first.has_more;
+  let last = List.nth first.runs 1 in
+  let second =
+    R.recent_runs registry ~limit:2 ~before:(Some (last.R.started_at, last.R.run_id))
+  in
+  check int "second page size" 2 (List.length second.runs);
+  check bool "no more after the last page" false second.has_more;
+  let ids page = List.map (fun (run : R.run) -> run.R.run_id) page in
+  let seen = ids first.runs @ ids second.runs in
+  check int "every run appears exactly once across pages" 4 (List.length (List.sort_uniq String.compare seen));
+  check
+    (list string)
+    "identical started_at is ordered by run_id, newest first"
+    [ "run-d"; "run-c"; "run-b"; "run-a" ]
+    seen
+;;
+
+let test_summary_carries_no_payload () =
+  let registry = R.create () in
+  R.register_running
+    registry
+    ~run_id:"run-1"
+    ~lane:R.Librarian
+    ~subject_id:"trace-1"
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input (`Assoc [ "conversation_history", `String "…megabytes…" ]));
+  mark_completed_exn
+    registry
+    ~run_id:"run-1"
+    ~outcome:R.Succeeded
+    ~elapsed_s:0.5
+    ~output:(`Assoc [ "fact_count", `Int 3 ]);
+  let run = R.get registry ~run_id:"run-1" |> Option.get in
+  let field name json =
+    match json with
+    | `Assoc fields -> List.assoc_opt name fields
+    | _ -> None
+  in
+  let summary = R.run_summary_to_yojson run in
+  let detail = R.run_to_yojson run in
+  check bool "summary omits input" true (Option.is_none (field "input" summary));
+  check bool "summary omits output" true (Option.is_none (field "output" summary));
+  check bool "detail keeps input" true (Option.is_some (field "input" detail));
+  check bool "detail keeps output" true (Option.is_some (field "output" detail));
+  check bool "summary still identifies the run" true (Option.is_some (field "run_id" summary))
+;;
+
 let () =
   run
     "exact_lane_run_registry"
@@ -260,5 +328,8 @@ let () =
             test_failed_durable_completion_is_explicitly_visible
         ; test_case "observation reads do not wait for durable writer" `Quick
             test_observation_reads_do_not_wait_for_durable_writer
+        ; test_case "pages are a total order over equal timestamps" `Quick
+            test_pages_are_a_total_order_over_equal_timestamps
+        ; test_case "summary carries no payload" `Quick test_summary_carries_no_payload
         ] )
     ]

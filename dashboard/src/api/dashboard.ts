@@ -61,11 +61,15 @@ export {
   fetchVerificationRuns,
 } from './dashboard-verification-runs'
 export {
+  fetchExactLaneRun,
   fetchExactLaneRuns,
+  parseExactLaneRunResponse,
   parseExactLaneRunsResponse,
   type DashboardExactLaneRunsResponse,
   type ExactLane,
+  type ExactLaneRunCursor,
   type ExactLaneRunRecord,
+  type ExactLaneRunSummary,
   type ExactLaneRunInput,
   type ExactLaneRunStatus,
 } from './dashboard-exact-lane-runs'

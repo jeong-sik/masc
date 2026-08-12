@@ -327,7 +327,46 @@ let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
     Error error
 ;;
 
+(* [total] counts every retained run, not the page, so a caller can say
+   "50 of 5,908" without asking for the rest. *)
+type run_page =
+  { runs : run list
+  ; total : int
+  ; has_more : bool
+  }
+
 let list_runs t = Atomic.get t.projection
+
+(* Newest first, ties broken by run_id, so a page boundary is a total order and
+   two runs recorded in the same float second cannot straddle it. *)
+let newer_first left right =
+  match Float.compare right.started_at left.started_at with
+  | 0 -> String.compare right.run_id left.run_id
+  | order -> order
+;;
+
+let is_older_than ~before run =
+  match before with
+  | None -> true
+  | Some (started_at, run_id) ->
+    Float.compare run.started_at started_at < 0
+    || (Float.equal run.started_at started_at && String.compare run.run_id run_id < 0)
+;;
+
+let recent_runs t ~limit ~before =
+  if limit <= 0
+  then { runs = []; total = List.length (Atomic.get t.projection); has_more = false }
+  else (
+    let all = Atomic.get t.projection in
+    let candidates = List.filter (is_older_than ~before) all |> List.sort newer_first in
+    let rec take taken index = function
+      | [] -> List.rev taken, false
+      | _ :: _ when index >= limit -> List.rev taken, true
+      | run :: rest -> take (run :: taken) (index + 1) rest
+    in
+    let runs, has_more = take [] 0 candidates in
+    { runs; total = List.length all; has_more })
+;;
 
 let get t ~run_id =
   List.find_opt (fun run -> String.equal run.run_id run_id) (Atomic.get t.projection)
@@ -343,30 +382,35 @@ let status_label = function
     "completion_durability_unknown"
 ;;
 
-let run_to_yojson run =
+(* Identity and outcome of a run, without either exact payload. A lane run
+   embeds the whole rendered prompt — on this host one field,
+   [rendered_prompt_variables.conversation_history], was 136.6 MB of a 286 MB
+   store — so a list that carried payloads shipped hundreds of megabytes to
+   draw a table of timestamps. The payloads live behind {!run_to_yojson}, which
+   the detail route serves for one run at a time. *)
+let run_summary_fields run =
   let base =
     [ "run_id", `String run.run_id
     ; "lane", `String (lane_key run.lane)
     ; "subject_id", `String run.subject_id
     ; "actor", `String run.actor
     ; "started_at", `Float run.started_at
-    ; "input", input_to_yojson run.input
     ; "status", `String (status_label run.status)
     ]
   in
   let completion =
     match run.status with
     | Running -> []
-    | Completed { outcome; elapsed_s; output } ->
+    | Completed { outcome; elapsed_s; output = _ } ->
       let detail =
         match outcome with
         | Succeeded | Cancelled -> []
         | Failed { code; detail } ->
           [ "code", `String code; "detail", `String detail ]
       in
-      [ "elapsed_s", `Float elapsed_s; "output", output ] @ detail
+      [ "elapsed_s", `Float elapsed_s ] @ detail
     | Completion_persistence_failed
-        { intended_outcome; elapsed_s; output; failure } ->
+        { intended_outcome; elapsed_s; output = _; failure } ->
       let intended_failure =
         match intended_outcome with
         | Succeeded | Cancelled -> []
@@ -375,7 +419,6 @@ let run_to_yojson run =
       in
       [ "intended_status", `String (outcome_label intended_outcome)
       ; "elapsed_s", `Float elapsed_s
-      ; "output", output
       ; "persistence_error", `String failure.detail
       ; ( "persistence_state"
         , `String
@@ -385,7 +428,21 @@ let run_to_yojson run =
       ]
       @ intended_failure
   in
-  `Assoc (base @ completion)
+  base @ completion
+;;
+
+let run_summary_to_yojson run = `Assoc (run_summary_fields run)
+
+(* The whole record, exact payloads included. Served one run at a time by the
+   detail route; a list never carries these. *)
+let run_to_yojson run =
+  let output_field =
+    match run.status with
+    | Running -> []
+    | Completed { output; _ } | Completion_persistence_failed { output; _ } ->
+      [ "output", output ]
+  in
+  `Assoc ((run_summary_fields run @ [ "input", input_to_yojson run.input ]) @ output_field)
 ;;
 
 type global_install_error = Already_installed

@@ -1,10 +1,12 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
+  fetchExactLaneRun,
   fetchExactLaneRuns,
   fetchFusionRuns,
   fetchVerificationRuns,
   type ExactLaneRunRecord,
+  type ExactLaneRunSummary,
   type FusionRunRecord,
   type VerificationRunRecord,
 } from '../api/dashboard'
@@ -33,7 +35,7 @@ type Filter =
   | 'verification'
   | 'fusion'
 type Row =
-  | { source: 'exact'; id: string; run: ExactLaneRunRecord }
+  | { source: 'exact'; id: string; run: ExactLaneRunSummary }
   | { source: 'verification'; id: string; run: VerificationRunRecord }
   | { source: 'fusion'; id: string; run: FusionRunRecord }
 type CommittedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'committed' }>
@@ -290,6 +292,82 @@ function LibrarianJournal({
   `
 }
 
+// The listing carries no payloads, so opening a row is what fetches them. The
+// alternative — shipping every run's input and output with the list — is what
+// made this panel download 246 MB before it could draw a single line.
+function ExactRunDetail({ runId }: { runId: string }) {
+  const [run, setRun] = useState<ExactLaneRunRecord | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setRun(null)
+    setError(null)
+    fetchExactLaneRun(runId, { signal: controller.signal })
+      .then(setRun)
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return
+        setError(String(cause))
+      })
+    return () => controller.abort()
+  }, [runId])
+
+  if (error !== null) {
+    return html`
+      <div class="grid gap-2 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)] text-xs">
+        <p class="text-[var(--color-danger)]">이 실행의 typed 값을 읽지 못했습니다: ${error}</p>
+      </div>
+    `
+  }
+  if (run === null) {
+    return html`
+      <div class="grid gap-2 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)] text-xs">
+        <p class="text-[var(--color-fg-muted)]">typed 입출력을 불러오는 중…</p>
+      </div>
+    `
+  }
+    const output = run.output ?? { code: run.code, detail: run.detail }
+    const memoryEvidence = run.lane === 'librarian_exact'
+      ? librarianMemoryEvidence(run.output)
+      : null
+    return html`
+      <div class="grid gap-3 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)]">
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <${EvidenceBadge} kind="typed" />
+          <strong>Exact-output registry metadata</strong>
+          <span class="text-[var(--color-fg-muted)]">Admin-only 실제 typed 값 · Librarian exact에는 research RAW 입력 없음</span>
+          <a class="ml-auto text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>
+        </div>
+        <div class="grid gap-3 lg:grid-cols-2">
+          <${JsonViewerCard} title="실제 입력 · typed" data=${run.input.payload} expandAll=${true} />
+          <${JsonViewerCard} title="실제 출력 · typed" data=${output} expandAll=${true} />
+        </div>
+        ${run.persistenceError === undefined
+          ? null
+          : html`<p class="text-xs text-[var(--color-danger)]">완료 의도 <code>${run.intendedStatus}</code> · persistence <code>${run.persistenceState}</code>: ${run.persistenceError}${run.intendedCode ? ` · ${run.intendedCode}: ${run.intendedDetail}` : ''}</p>`}
+        <p class="text-xs text-[var(--color-fg-muted)]"><span class="mr-2 inline-flex rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">TOOL-FREE</span>이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.</p>
+        ${memoryEvidence === null
+          ? null
+          : html`<div class="grid gap-2 border-t border-[var(--color-border-default)] pt-3">
+              <div class="flex items-center gap-2 text-xs"><${EvidenceBadge} kind="typed" /><strong>Memory before → after</strong><span class="text-[var(--color-fg-muted)]">registry에는 count/revision만, 실제 추가·제거는 아래 journal</span></div>
+              <div class="grid gap-3 lg:grid-cols-2">
+                <${JsonViewerCard} title="Before memory · typed" data=${memoryEvidence.before} expandAll=${true} />
+                <${JsonViewerCard} title="After memory + change · typed" data=${memoryEvidence.after} expandAll=${true} />
+              </div>
+            </div>`}
+        ${run.lane === 'librarian_exact'
+          ? html`<div class="border-t border-[var(--color-border-default)] pt-3">
+              <${LibrarianJournal}
+                keeper=${run.actor}
+                traceId=${run.subjectId}
+                revision=${librarianRevision(run.output)}
+              />
+            </div>`
+          : null}
+      </div>
+    `
+}
+
 function Details({ row }: { row: Row }) {
   if (row.source === 'verification') {
     const tools = row.run.tools ?? []
@@ -339,46 +417,7 @@ function Details({ row }: { row: Row }) {
     `
   }
   if (row.source === 'exact') {
-    const output = row.run.output ?? { code: row.run.code, detail: row.run.detail }
-    const memoryEvidence = row.run.lane === 'librarian_exact'
-      ? librarianMemoryEvidence(row.run.output)
-      : null
-    return html`
-      <div class="grid gap-3 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)]">
-        <div class="flex flex-wrap items-center gap-2 text-xs">
-          <${EvidenceBadge} kind="typed" />
-          <strong>Exact-output registry metadata</strong>
-          <span class="text-[var(--color-fg-muted)]">Admin-only 실제 typed 값 · Librarian exact에는 research RAW 입력 없음</span>
-          <a class="ml-auto text-[var(--color-accent)] hover:underline" href=${keeperHref(row.run.actor)}>Keeper 전체 evidence 열기 →</a>
-        </div>
-        <div class="grid gap-3 lg:grid-cols-2">
-          <${JsonViewerCard} title="실제 입력 · typed" data=${row.run.input.payload} expandAll=${true} />
-          <${JsonViewerCard} title="실제 출력 · typed" data=${output} expandAll=${true} />
-        </div>
-        ${row.run.persistenceError === undefined
-          ? null
-          : html`<p class="text-xs text-[var(--color-danger)]">완료 의도 <code>${row.run.intendedStatus}</code> · persistence <code>${row.run.persistenceState}</code>: ${row.run.persistenceError}${row.run.intendedCode ? ` · ${row.run.intendedCode}: ${row.run.intendedDetail}` : ''}</p>`}
-        <p class="text-xs text-[var(--color-fg-muted)]"><span class="mr-2 inline-flex rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">TOOL-FREE</span>이 exact 실행은 immutable Librarian input만 사용하며 외부 research/RAW 입력을 받지 않습니다.</p>
-        ${memoryEvidence === null
-          ? null
-          : html`<div class="grid gap-2 border-t border-[var(--color-border-default)] pt-3">
-              <div class="flex items-center gap-2 text-xs"><${EvidenceBadge} kind="typed" /><strong>Memory before → after</strong><span class="text-[var(--color-fg-muted)]">registry에는 count/revision만, 실제 추가·제거는 아래 journal</span></div>
-              <div class="grid gap-3 lg:grid-cols-2">
-                <${JsonViewerCard} title="Before memory · typed" data=${memoryEvidence.before} expandAll=${true} />
-                <${JsonViewerCard} title="After memory + change · typed" data=${memoryEvidence.after} expandAll=${true} />
-              </div>
-            </div>`}
-        ${row.run.lane === 'librarian_exact'
-          ? html`<div class="border-t border-[var(--color-border-default)] pt-3">
-              <${LibrarianJournal}
-                keeper=${row.run.actor}
-                traceId=${row.run.subjectId}
-                revision=${librarianRevision(row.run.output)}
-              />
-            </div>`
-          : null}
-      </div>
-    `
+    return html`<${ExactRunDetail} runId=${row.run.runId} />`
   }
   return html`
     <div class="grid gap-2 p-3 bg-[var(--color-bg-surface)] border-t border-[var(--color-border-default)] text-xs">

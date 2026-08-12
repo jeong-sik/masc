@@ -855,10 +855,8 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       | `GET, "/api/v1/dashboard/scheduled-automation" ->
           with_h2_public_read h2_reqd (fun state ->
             let json =
-              Domain_pool_ref.submit_io_or_inline (fun () ->
-                Server_dashboard_schedule_projection
-                .scheduled_automation_dashboard_json
-                  (Mcp_server.workspace_config state))
+              dashboard_scheduled_automation_http_json
+                ~config:(Mcp_server.workspace_config state)
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 

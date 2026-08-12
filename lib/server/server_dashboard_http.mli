@@ -79,6 +79,13 @@ val dashboard_gate_http_json :
 val dashboard_gate_tool_events_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
 
+val dashboard_scheduled_automation_http_json :
+  config:Workspace.config -> Yojson.Safe.t
+(** Schedule projection for [GET /api/v1/dashboard/scheduled-automation],
+    cached and offloaded. Both the HTTP/1 router and the H2 gateway call this
+    rather than the projection directly, so the two transports cannot serve
+    different data or drift on cache policy. *)
+
 val dashboard_proof_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
 

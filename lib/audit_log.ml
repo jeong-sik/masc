@@ -261,40 +261,66 @@ let get_audit_store (config : config) : Dated_jsonl.t =
       audit_store_cache := StringMap.add base store !audit_store_cache;
       store)
 
-(** Parse JSON list into audit entries. Logs first 5 failures individually,
-    then a summary. Returns only successfully parsed entries. *)
+(** How many corrupt entries are reported individually before the reader falls
+    back to a single suppressed-count summary. *)
 let max_logged_errors = 5
 
-let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
-  (* Logging side effects (per-entry corrupt-entry ERROR, rate-limited
-     by [max_logged_errors]) are kept inside the fold body — they are
-     observably equivalent to the original [List.iter] order. *)
+(* What one row turned into. Small enough that a window's worth of these costs
+   a fraction of the [`Assoc] trees they stand in for, which is what lets the
+   read path drop each tree before parsing the next row. *)
+type parsed_row =
+  | Parsed of audit_entry
+  | Corrupt of string
+
+let parsed_row_of_json json =
+  match entry_of_json_r json with
+  | Ok entry -> Parsed entry
+  | Error reason -> Corrupt reason
+
+(* The rate-limited logging lives here, over a chronological list, and both
+   read paths call it. "First five" therefore means the same five rows however
+   the rows were obtained — see [read_entries], where the projection runs
+   newest-first. *)
+let report_and_keep_parsed (rows : parsed_row list) : audit_entry list =
   let ok_rev, err_count =
     List.fold_left
-      (fun (ok, errc) json ->
-        match entry_of_json_r json with
-        | Ok entry -> (entry :: ok, errc)
-        | Error reason ->
+      (fun (ok, errc) row ->
+        match row with
+        | Parsed entry -> (entry :: ok, errc)
+        | Corrupt reason ->
             let errc = errc + 1 in
             if errc <= max_logged_errors then
               Log.Misc.error "audit_log: corrupt entry (#%d): %s" errc reason;
             (ok, errc))
       ([], 0)
-      jsons
+      rows
   in
   if err_count > 0 then
     Log.Misc.error "audit_log: %d/%d entries failed to parse (possible corruption)%s"
-      err_count (List.length jsons)
+      err_count (List.length rows)
       (if err_count > max_logged_errors
        then Printf.sprintf " (%d more suppressed)" (err_count - max_logged_errors)
        else "");
   List.rev ok_rev
 
+
 (** Read recent audit entries from the date-split store.
     Structural parse failures go through [parse_entries] ERROR path. *)
 let read_entries ?(n = 10_000) (config : config) : audit_entry list =
   let store = get_audit_store config in
-  Dated_jsonl.read_recent store n |> parse_entries
+  (* [read_recent |> parse_entries] held the whole window's [`Assoc] trees and
+     the decoded entries at once; the default window is 10_000 rows and
+     /api/v1/audit asks for up to 5_000. Projecting during the read makes a
+     row's tree unreachable before the next row is parsed.
+
+     [filter_map_recent] calls [f] newest-first but returns chronologically, so
+     the projection here is pure and every order-dependent effect stays in
+     [report_and_keep_parsed] below it, running over the chronological list.
+     Which five corrupt entries get logged, and the order they are numbered in,
+     are unchanged. *)
+  Dated_jsonl.filter_map_recent store n ~f:(fun json ->
+    Some (parsed_row_of_json json))
+  |> report_and_keep_parsed
 
 (** Append a single entry to the audit log (thread-safe via Dated_jsonl). *)
 let append_entry (config : config) (entry : audit_entry) =

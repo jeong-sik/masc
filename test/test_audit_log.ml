@@ -118,6 +118,99 @@ let test_get_stats_reports_oldest_and_newest_in_read_order () =
       check (option (float 0.001)) "newest is the last row read" (Some 300.0)
         stats.Audit_log.newest_timestamp)
 
+(* The reader projects rows during the read, and [Dated_jsonl.filter_map_recent]
+   applies the projection newest-first. These pin the two things that would
+   break if the order-dependent work ever moved into the projection: the
+   returned entries stay chronological, and a row the decoder rejects is
+   skipped rather than ending the read. *)
+
+let raw_audit_store base_dir =
+  Dated_jsonl.create
+    ~base_dir:
+      (Filename.concat
+         (Workspace_utils.masc_dir (Workspace.default_config base_dir))
+         Audit_log.store_dirname)
+    ()
+
+let test_read_entries_returns_chronological_order () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      List.iter
+        (fun ts ->
+          Audit_log.append_entry config
+            (entry ~timestamp:ts ~agent_id:"keeper-a"
+               ~action:Audit_log.AuthSuccess ~outcome:Audit_log.Success))
+        [ 100.0; 200.0; 300.0; 400.0 ];
+      let timestamps =
+        Audit_log.read_entries ~n:10 config
+        |> List.map (fun (e : Audit_log.audit_entry) -> e.Audit_log.timestamp)
+      in
+      check (list (float 0.001)) "entries are oldest-first"
+        [ 100.0; 200.0; 300.0; 400.0 ] timestamps)
+
+let test_read_entries_skips_rows_the_decoder_rejects () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      let store = raw_audit_store base_dir in
+      (* Interleaved so a reader that stops at the first rejected row returns a
+         short prefix rather than the full set, and one that drops the wrong
+         side returns the corrupt rows' neighbours. *)
+      Audit_log.append_entry config
+        (entry ~timestamp:100.0 ~agent_id:"keeper-a"
+           ~action:Audit_log.AuthSuccess ~outcome:Audit_log.Success);
+      Dated_jsonl.append store (`Assoc [ ("not", `String "an audit entry") ]);
+      Audit_log.append_entry config
+        (entry ~timestamp:200.0 ~agent_id:"keeper-a"
+           ~action:Audit_log.AuthSuccess ~outcome:Audit_log.Success);
+      Dated_jsonl.append store (`Assoc [ ("still", `String "not one") ]);
+      Audit_log.append_entry config
+        (entry ~timestamp:300.0 ~agent_id:"keeper-a"
+           ~action:Audit_log.AuthSuccess ~outcome:Audit_log.Success);
+      let timestamps =
+        Audit_log.read_entries ~n:10 config
+        |> List.map (fun (e : Audit_log.audit_entry) -> e.Audit_log.timestamp)
+      in
+      check (list (float 0.001))
+        "every decodable row survives its corrupt neighbours, in order"
+        [ 100.0; 200.0; 300.0 ] timestamps)
+
+(* [n] bounds rows parsed, not rows returned, so a window that covers the
+   corrupt rows still yields fewer entries than [n]. *)
+let test_read_entries_window_counts_parsed_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      let store = raw_audit_store base_dir in
+      Audit_log.append_entry config
+        (entry ~timestamp:100.0 ~agent_id:"keeper-a"
+           ~action:Audit_log.AuthSuccess ~outcome:Audit_log.Success);
+      Dated_jsonl.append store (`Assoc [ ("not", `String "an audit entry") ]);
+      Audit_log.append_entry config
+        (entry ~timestamp:200.0 ~agent_id:"keeper-a"
+           ~action:Audit_log.AuthSuccess ~outcome:Audit_log.Success);
+      let timestamps =
+        Audit_log.read_entries ~n:2 config
+        |> List.map (fun (e : Audit_log.audit_entry) -> e.Audit_log.timestamp)
+      in
+      (* The two newest rows are the corrupt one and 200.0, so a window of 2
+         yields one entry. Reading 3 more would mean n counted selected rows. *)
+      check (list (float 0.001)) "the window bounds parsed rows"
+        [ 200.0 ] timestamps)
+
 (* ── Codec round-trip tests ────────────────────────────────────────── *)
 
 let action_roundtrip label action expected_wire =
@@ -312,6 +405,12 @@ let () =
             test_audit_events_filter_severity_before_paging;
           test_case "get_stats reports oldest and newest in read order" `Quick
             test_get_stats_reports_oldest_and_newest_in_read_order;
+          test_case "read_entries returns chronological order" `Quick
+            test_read_entries_returns_chronological_order;
+          test_case "read_entries skips rows the decoder rejects" `Quick
+            test_read_entries_skips_rows_the_decoder_rejects;
+          test_case "read_entries window counts parsed rows" `Quick
+            test_read_entries_window_counts_parsed_rows;
         ] );
       ( "codec_roundtrip",
         [

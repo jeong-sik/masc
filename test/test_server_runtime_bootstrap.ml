@@ -1278,6 +1278,7 @@ let mark_keeper_dead_with_registry_cause config
             provider_id = Some "runpod";
             http_status = Some 500;
             runtime_id = Some "runtime-a";
+            agent_core_timeout = None;
             reason = None;
           }));
   Keeper_registry.set_last_error_entry ~base_path ~name:meta.name
@@ -3458,6 +3459,7 @@ let test_health_json_redacts_registry_failure_reason () =
                     provider_id = Some "provider-internal";
                     http_status = Some 500;
                     runtime_id = Some "runtime-internal";
+                    agent_core_timeout = None;
                     reason = None;
                   }));
           terminate_keeper_fiber config failing;

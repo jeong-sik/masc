@@ -7,33 +7,12 @@ let generate_trace_id ?(now = Time_compat.now ()) () : string =
   let seq = Atomic.fetch_and_add trace_counter 1 land 0xFFFFF in
   Printf.sprintf "trace-%d-%05x" ts seq
 
-let parse_keeper_agent_name ~prefix ~suffix agent_name =
-  let plen = String.length prefix and slen = String.length suffix in
-  let alen = String.length agent_name in
-  if alen > plen + slen
-     && String.sub agent_name 0 plen = prefix
-     && String.sub agent_name (alen - slen) slen = suffix
-  then
-    let keeper_name = String.sub agent_name plen (alen - plen - slen) in
-    if Keeper_config.validate_name keeper_name then Some keeper_name else None
-  else
-    None
-
-(* The four accepted spellings of a runtime keeper-agent identity. Enumerated
-   once: they used to be listed separately in [keeper_name_from_agent_name] and
-   [is_keeper_agent_alias], so adding a spelling to one and not the other made
-   a name an alias that no keeper name could be derived from. *)
-let keeper_agent_affixes =
-  [ "keeper-", "-agent"; "keeper_", "_agent"; "keeper-", "_agent"; "keeper_", "-agent" ]
-;;
-
-(* Answering "is this an agent identity?" and "which keeper does it denote?"
-   with one parse is what removes the unrepresentable middle: a caller cannot
-   observe the first without the second, so it never has to invent a name. *)
-let keeper_name_of_agent_alias agent_name =
-  List.find_map
-    (fun (prefix, suffix) -> parse_keeper_agent_name ~prefix ~suffix agent_name)
-    keeper_agent_affixes
+(* The parse and the affix table live in Keeper_name_codec (masc_core) so
+   layers that cannot depend on lib/keeper — workspace receipt lookup was
+   carrying a degraded one-affix copy — share this exact codec
+   (RFC-0371 B12). [Keeper_config.validate_name] is the same predicate the
+   codec applies ([Safe_identifier.is_portable_name]). *)
+let keeper_name_of_agent_alias = Keeper_name_codec.keeper_name_of_agent_alias
 
 let keeper_name_from_agent_name agent_name =
   match keeper_name_of_agent_alias agent_name with
@@ -74,24 +53,9 @@ let is_keeper_principal_agent_name agent_name =
       && Option.is_some (canonical_keeper_name_from_agent_name trimmed))
 
 (** Phase A F5 (2026-04-27): single source of truth for the
-    ["keeper-<name>"] prefix pattern.  Two call sites used to embed
-    [String.sub trimmed 0 7 = "keeper-"] manually; both now go through
-    this helper. *)
-let strip_keeper_prefix (s : string) : string option =
-  let prefix = "keeper-" in
-  let plen = String.length prefix in
-  let slen = String.length s in
-  if slen > plen && String.starts_with s ~prefix then
-    Some (String.sub s plen (slen - plen))
-  else None
-
-let keeper_agent_name name =
-  let stable =
-    match strip_keeper_prefix name with
-    | Some stripped -> stripped
-    | None -> name
-  in
-  Printf.sprintf "keeper-%s-agent" stable
+    ["keeper-<name>"] prefix pattern; now delegated to the shared codec. *)
+let strip_keeper_prefix = Keeper_name_codec.strip_keeper_prefix
+let keeper_agent_name = Keeper_name_codec.keeper_agent_name
 
 let canonical_keeper_name raw_name =
   let trimmed = String.trim raw_name in

@@ -10,6 +10,7 @@
  (modules
   atomic_util
   json_util
+  keeper_name_codec
   safe_ops
   common
   exec_buffer

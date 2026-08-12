@@ -78,6 +78,7 @@ let test_provider_runtime_error_carrier_none () =
       ; provider_id = None
       ; http_status = None
       ; runtime_id = None
+      ; agent_core_timeout = None
       ; reason = None
       }
   in
@@ -94,6 +95,7 @@ let test_provider_runtime_error_carrier_some () =
       ; provider_id = Some "runpod_mtp"
       ; http_status = Some 502
       ; runtime_id = None
+      ; agent_core_timeout = None
       ; reason = None
       }
   in

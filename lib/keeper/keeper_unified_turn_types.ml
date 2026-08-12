@@ -92,6 +92,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; provider_id = None
          ; http_status = None
          ; runtime_id = Some (runtime_id)
+         ; agent_core_timeout = None
          ; reason = Some (registry_reason_of_internal_reason reason)
          })
   | Some (Keeper_internal_error.Capacity_backpressure { detail = capacity_detail; _ }) ->
@@ -102,6 +103,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; provider_id = None
          ; http_status = None
          ; runtime_id = None
+         ; agent_core_timeout = None
          ; reason = None
          })
   | Some
@@ -147,6 +149,12 @@ let registry_failure_reason_of_terminal_reason
          ; provider_id = None
          ; http_status = None
          ; runtime_id = None
+           (* The typed observation rides along with the verbatim wire
+              (RFC-0371 §6.1(3)); consumers stop re-parsing the code. *)
+         ; agent_core_timeout =
+             (match c with
+              | Keeper_turn_terminal_code.Agent_core_error { timeout; _ } -> timeout
+              | _ -> None)
          ; reason = None
          })
   | Keeper_turn_disposition.Runtime_attempts_exhausted ->
@@ -157,6 +165,7 @@ let registry_failure_reason_of_terminal_reason
          ; provider_id = None
          ; http_status = None
          ; runtime_id = None
+         ; agent_core_timeout = None
          ; reason = None
          })
   | Keeper_turn_disposition.Success

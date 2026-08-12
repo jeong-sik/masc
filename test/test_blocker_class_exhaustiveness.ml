@@ -244,6 +244,7 @@ let provider_runtime_surface_exn
       ; provider_id = None
       ; http_status = None
       ; runtime_id = Some "r"
+      ; agent_core_timeout = None
       ; reason
       }
   in

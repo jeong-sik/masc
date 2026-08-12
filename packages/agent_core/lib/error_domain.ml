@@ -168,6 +168,7 @@ let of_core_error (err : Error.t) : core_error_poly =
   | Error.Io e -> `Io (Error.to_string (Error.Io e))
   | Error.Orchestration e -> `Orchestration (Error.to_string (Error.Orchestration e))
   | Error.Internal s -> `Internal s
+  | Error.Internal_carried { message = s; _ } -> `Internal s
 ;;
 
 (* ── Conversion back to Error.t ─────────────────── *)

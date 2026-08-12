@@ -114,9 +114,41 @@ type t =
   | Provider_timeout of provider_timeout
   | Not_provider_runtime_failure
 
-let timeout_phase_of_agent_core_phase phase =
-  Llm_provider.Http_client.timeout_phase_to_label phase
-  |> timeout_phase_of_label
+(* Direct variant-to-variant translation (RFC-0371 B12): this used to render
+   the agent-core phase to its label and re-parse the label into the MASC
+   vocabulary — a typed->string->typed round trip inside one function. Both
+   matches are exhaustive, so a new constructor on either side is a compile
+   error here instead of a silent [None]. *)
+let stream_idle_state_of_agent_core :
+      Llm_provider.Http_client.stream_idle_state -> stream_idle_state
+  = function
+  | Llm_provider.Http_client.Awaiting_first_event -> Awaiting_first_event
+  | Awaiting_first_delta -> Awaiting_first_delta
+  | Streaming_answer -> Streaming_answer
+  | Streaming_thinking -> Streaming_thinking
+  | Streaming_tool_call -> Streaming_tool_call
+  | Streaming_heartbeat -> Streaming_heartbeat
+  | Streaming_substrate -> Streaming_substrate
+  | Streaming_done -> Streaming_done
+  | Streaming_unknown -> Streaming_unknown
+;;
+
+let timeout_phase_of_agent_core_phase :
+      Llm_provider.Http_client.timeout_phase -> timeout_phase option
+  = function
+  | Llm_provider.Http_client.First_token -> Some First_token
+  | Http_operation -> Some Http_operation
+  | Non_streaming_body -> Some Non_streaming_body
+  | Stream_body -> Some Stream_body
+  | Stream_idle state -> Some (Stream_idle (stream_idle_state_of_agent_core state))
+  | Provider_step -> Some Provider_step
+  | Cli_stdout_idle -> Some Cli_stdout_idle
+  | Wall_clock -> Some Wall_clock
+  | Capacity_backpressure -> Some Capacity_backpressure
+  | Unknown_timeout -> Some Unknown_timeout
+  (* MASC's vocabulary has no pre-request phases; the label path dropped
+     them to [None] and the typed map preserves that. *)
+  | Admission | Queue -> None
 ;;
 
 let suffix_after_prefix text prefix =
@@ -160,18 +192,29 @@ let provider_runtime_error_looks_like_timeout ~code =
   || String.starts_with ~prefix:"provider_error_network:timeout:" code
 ;;
 
-let classify_provider_runtime_error_record ~code ~detail =
+let classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () =
   ignore detail;
-  if provider_runtime_error_looks_like_timeout ~code
-  then
+  (* Typed observation first (RFC-0371 §6.1(3)): records built while the
+     original agent-core error was in hand carry it, and no string is
+     consulted. The prefix parse below survives only for records rehydrated
+     from persisted wire, where the string is all that remains. *)
+  match agent_core_timeout with
+  | Some { Keeper_turn_terminal_code.phase } ->
     Provider_timeout
       { source = Agent_core_provider
-      ; phase =
-        (Option.bind
-           (provider_runtime_error_timeout_phase_label ~code)
-           timeout_phase_of_label)
+      ; phase = Option.bind phase timeout_phase_of_agent_core_phase
       }
-  else Not_provider_runtime_failure
+  | None ->
+    if provider_runtime_error_looks_like_timeout ~code
+    then
+      Provider_timeout
+        { source = Agent_core_provider
+        ; phase =
+          (Option.bind
+             (provider_runtime_error_timeout_phase_label ~code)
+             timeout_phase_of_label)
+        }
+    else Not_provider_runtime_failure
 ;;
 
 let provider_timeout ~source ~phase =
@@ -243,7 +286,7 @@ let classify_core_error (err : Agent_core.Error.t) : t =
      | Agent_core.Error.Serialization _
      | Agent_core.Error.Io _
      | Agent_core.Error.Orchestration _
-     | Agent_core.Error.Internal _ ->
+     | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
        Not_provider_runtime_failure)
 ;;
 

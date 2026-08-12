@@ -216,9 +216,13 @@ let dashboard_dev_token ~port =
              , List.assoc_opt "actor" fields
              , List.assoc_opt "role" fields )
            with
+           (* [Server_routes_http_dashboard_dev_token.dashboard_dev_role] is
+              [Masc_domain.Admin] since #28354; this arm still required the
+              pre-#28354 [worker] and so failed every run against a server that
+              honours the current contract. *)
            | ( Some (`String token)
              , Some (`String "dashboard")
-             , Some (`String "worker") )
+             , Some (`String "admin") )
              when String.trim token <> "" ->
              token
            | _ ->

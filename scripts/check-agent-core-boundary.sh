@@ -38,11 +38,125 @@ coordinator_library_pattern="$(
   printf '%s\n' "${coordinator_library_names}" | paste -sd '|' -
 )" || fail "could not build coordinator library matcher"
 
+emit_agent_core_dune_files() {
+  find "${core_root}" -type f -name dune -print0 \
+    | AGENT_CORE_SCAN_ROOT="${core_root}" perl -0 -e '
+      use strict;
+      use warnings;
+      use Cwd qw(abs_path);
+      use File::Basename qw(dirname);
+      use File::Spec;
+
+      my $root = abs_path($ENV{AGENT_CORE_SCAN_ROOT});
+      die "could not resolve agent core root\n" unless defined $root;
+
+      my @queue;
+      while (defined(my $path = <STDIN>)) {
+        $path =~ s/\0\z//;
+        push @queue, $path if length $path;
+      }
+
+      my %seen;
+      while (@queue) {
+        my $candidate = shift @queue;
+        my $path = abs_path($candidate);
+        die "missing Dune include: $candidate\n"
+          unless defined $path && -f $path;
+        die "Dune include escapes agent core: $path\n"
+          unless $path eq $root || index($path, $root . "/") == 0;
+        next if $seen{$path}++;
+
+        print $path, "\0";
+        open my $fh, "<", $path or die "could not read $path: $!\n";
+        local $/;
+        my $raw = <$fh>;
+        close $fh or die "could not close $path: $!\n";
+
+        my $code = "";
+        my $in_string = 0;
+        my $escaped = 0;
+        for (my $idx = 0; $idx < length($raw); $idx++) {
+          my $ch = substr($raw, $idx, 1);
+          if (!$in_string && $ch eq ";") {
+            $idx++ while $idx + 1 < length($raw)
+              && substr($raw, $idx + 1, 1) ne "\n";
+            next;
+          }
+          $code .= $ch;
+          if ($in_string && $escaped) {
+            $escaped = 0;
+          } elsif ($in_string && $ch eq "\\") {
+            $escaped = 1;
+          } elsif ($ch eq "\"") {
+            $in_string = !$in_string;
+          }
+        }
+        die "unterminated Dune string in $path\n" if $in_string;
+
+        my @tokens;
+        for (my $idx = 0; $idx < length($code); ) {
+          my $ch = substr($code, $idx, 1);
+          if ($ch =~ /\s/) {
+            $idx++;
+          } elsif ($ch eq "(") {
+            push @tokens, ["open", $ch];
+            $idx++;
+          } elsif ($ch eq ")") {
+            push @tokens, ["close", $ch];
+            $idx++;
+          } elsif ($ch eq "\"") {
+            $idx++;
+            my $value = "";
+            my $closed = 0;
+            while ($idx < length($code)) {
+              $ch = substr($code, $idx, 1);
+              if ($ch eq "\\") {
+                die "unterminated Dune escape in $path\n"
+                  if $idx + 1 >= length($code);
+                $value .= substr($code, $idx + 1, 1);
+                $idx += 2;
+              } elsif ($ch eq "\"") {
+                $closed = 1;
+                $idx++;
+                last;
+              } else {
+                $value .= $ch;
+                $idx++;
+              }
+            }
+            die "unterminated Dune string in $path\n" unless $closed;
+            push @tokens, ["value", $value];
+          } else {
+            my $start = $idx;
+            $idx++ while $idx < length($code)
+              && substr($code, $idx, 1) !~ /[\s()]/;
+            push @tokens, ["atom", substr($code, $start, $idx - $start)];
+          }
+        }
+
+        for (my $idx = 0; $idx + 3 < @tokens; $idx++) {
+          next unless $tokens[$idx][0] eq "open";
+          next unless $tokens[$idx + 1][0] eq "atom"
+            && $tokens[$idx + 1][1] eq "include";
+          next unless $tokens[$idx + 2][0] eq "atom"
+            || $tokens[$idx + 2][0] eq "value";
+          next unless $tokens[$idx + 3][0] eq "close";
+          my $target = $tokens[$idx + 2][1];
+          die "dynamic Dune include is unsupported in $path: $target\n"
+            if $target =~ /%\{/;
+          die "absolute Dune include is forbidden in $path: $target\n"
+            if File::Spec->file_name_is_absolute($target);
+          push @queue, File::Spec->catfile(dirname($path), $target);
+        }
+      }
+    '
+}
+
 dune_violations="$({
   # In Dune syntax, [;] starts a comment through end-of-line unless it appears
   # inside a quoted string. Preserve quoted semicolons while scanning the code
   # prefix so comments cannot hide or imitate a library dependency.
-  find "${core_root}" -type f \( -name dune -o -name '*.inc' \) -print0 \
+  emit_agent_core_dune_files \
     | while IFS= read -r -d '' dune_file; do
         if code="$(awk '
           BEGIN {
@@ -94,7 +208,7 @@ dune_violations="$({
           [[ "${status}" -eq 1 ]] || exit "${status}"
         fi
       done
-})"
+})" || fail "could not resolve or scan agent core Dune files"
 [[ -z "${dune_violations}" ]] || {
   printf '%s\n' "${dune_violations}" >&2
   fail "agent core must not depend on MASC coordinator libraries"
@@ -104,7 +218,7 @@ coordinator_module_pattern='(Masc_[A-Za-z0-9_]*|Keeper_[A-Za-z0-9_]*|Board_[A-Za
 if module_violations="$(rg -n \
   -e "\\b${coordinator_module_pattern}\\." \
   -e "\\b(open!?|include)[[:space:]]+${coordinator_module_pattern}\\b" \
-  -e "\\bmodule([[:space:]]+type)?[[:space:]]+[A-Z][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*${coordinator_module_pattern}\\b" \
+  -e "\\bmodule([[:space:]]+type)?[[:space:]]+[A-Z][A-Za-z0-9_]*([[:space:]]*:[^=[:cntrl:]]+)?[[:space:]]*=[[:space:]]*${coordinator_module_pattern}\\b" \
   -e "\\([[:space:]]*module[[:space:]]+${coordinator_module_pattern}\\b" \
   "${core_root}/lib" \
   --glob '*.ml' --glob '*.mli')"; then

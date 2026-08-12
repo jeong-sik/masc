@@ -62,6 +62,18 @@ fi
 
 cp "${fixture}/lib/dune.safe" "${fixture}/lib/dune"
 rm "${fixture}/lib/deps.inc"
+mkdir -p "${fixture}/lib/fragments/nested"
+printf '(include nested/deps.data)\n' > "${fixture}/lib/fragments/outer.sexp"
+printf '(library (name bad) (libraries masc_keeper_runtime))\n' \
+  > "${fixture}/lib/fragments/nested/deps.data"
+printf '\n(include fragments/outer.sexp)\n' >> "${fixture}/lib/dune"
+if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
+  echo "boundary self-test: nested arbitrary Dune include was accepted" >&2
+  exit 1
+fi
+
+cp "${fixture}/lib/dune.safe" "${fixture}/lib/dune"
+rm -rf "${fixture:?}/lib/fragments"
 printf '\n(library (name bad) (libraries voice_config))\n' >> "${fixture}/lib/dune"
 if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
   echo "boundary self-test: private coordinator library name was accepted" >&2
@@ -75,6 +87,14 @@ if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
   exit 1
 fi
 rm "${fixture}/lib/open_bypass.ml"
+
+printf 'module M : sig end = Server_runtime\n' \
+  > "${fixture}/lib/constrained_alias_bypass.ml"
+if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then
+  echo "boundary self-test: constrained coordinator alias was accepted" >&2
+  exit 1
+fi
+rm "${fixture}/lib/constrained_alias_bypass.ml"
 
 rm -rf "${fixture:?}/lib"
 if AGENT_CORE_ROOT="${fixture}" "${gate}" >/dev/null 2>&1; then

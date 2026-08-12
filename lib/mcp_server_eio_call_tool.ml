@@ -149,18 +149,6 @@ let record_mcp_server_operation_duration result ~duration_ms =
     ~duration_seconds:(float_of_int duration_ms /. 1000.0)
 ;;
 
-(** MCP tools/call [arguments] is optional (spec: "arguments?: object").
-    Absence therefore means an empty object. An explicitly supplied [`Null]
-    is not absence and must remain [`Null] so AGENT_CORE strict validation rejects it
-    instead of silently repairing an invalid wire value. *)
-let arguments_of_params = function
-  | `Assoc fields ->
-    (match List.assoc_opt "arguments" fields with
-     | None -> `Assoc []
-     | Some value -> value)
-  | _ -> `Null
-;;
-
 let failure_observation ~duration_ms
     : Tool_result.result -> (Tool_result.tool_failure_class * string) option
   = function
@@ -176,7 +164,6 @@ let failure_observation ~duration_ms
 
 module For_testing = struct
   let activity_tool_called_payload = activity_tool_called_payload
-  let arguments_of_params = arguments_of_params
   let failure_observation = failure_observation
   let record_mcp_server_operation_duration = record_mcp_server_operation_duration
   let record_mcp_server_operation_duration_sample =
@@ -477,9 +464,9 @@ let record_runtime_mcp_keeper_tool_trace
        ~message)
 
 (** Resolve managed agent tool call to canonical operation *)
-let resolve_managed_agent_call ?mcp_session_id params =
-  let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
-  let arguments = arguments_of_params params in
+let resolve_managed_agent_call ?mcp_session_id request =
+  let requested_name = Mcp_server_eio_call_request.requested_name request in
+  let arguments = Mcp_server_eio_call_request.arguments request in
   let identity =
     Client_registry_eio.get_or_create_identity ?mcp_session_id arguments
   in
@@ -490,7 +477,7 @@ let resolve_managed_agent_call ?mcp_session_id params =
 (** Handle tools/call JSON-RPC method *)
 let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ~broadcast_tools_list_changed ~sw ~clock ?(profile = Full) ?mcp_session_id
-    ?auth_token ?(internal_keeper_runtime = false) state id params =
+    ?auth_token ?(internal_keeper_runtime = false) state id request =
   (* The active workspace is an admission fact for this call.  In particular,
      [masc_start] may publish a new current scope while executing, but the
      initiating call and every post-execution observation remain attributed to
@@ -519,18 +506,18 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
            ("handle_call_tool_eio admitted an invalid MCP invocation scope: "
             ^ Tool_invocation_ref.error_to_string error))
   in
-  let (name, arguments) =
+  let requested_name = Mcp_server_eio_call_request.requested_name request in
+  let admitted_arguments = Mcp_server_eio_call_request.arguments request in
+  let name, arguments =
     match profile with
     | Managed_agent -> (
-        match resolve_managed_agent_call ?mcp_session_id params with
+        match resolve_managed_agent_call ?mcp_session_id request with
         | Ok resolved -> resolved
         | Error msg ->
             raise
               (Invalid_argument
                  ("managed agent tool translation failed: " ^ msg)))
-    | Full | Operator_remote ->
-        (* DET-OK: pre-existing empty-name default fails typed downstream; arguments_of_params maps MCP-optional absence to a typed empty object. *)
-        (Json_util.get_string params "name" |> Option.value ~default:"", arguments_of_params params)
+    | Full | Operator_remote -> requested_name, admitted_arguments
   in
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in

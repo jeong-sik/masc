@@ -34,8 +34,6 @@ val record_mcp_server_operation_duration_sample :
     {!Otel_dispatch_hook.with_request_context}. *)
 
 module For_testing : sig
-  val arguments_of_params : Yojson.Safe.t -> Yojson.Safe.t
-
   val failure_observation :
     duration_ms:int ->
     Tool_result.result ->
@@ -139,7 +137,7 @@ val handle_call_tool_eio :
   ?internal_keeper_runtime:bool ->
   Mcp_server.server_state ->
   Yojson.Safe.t ->
-  Yojson.Safe.t ->
+  Mcp_server_eio_call_request.t ->
   Yojson.Safe.t
 (** Handles a [tools/call] JSON-RPC request.
 

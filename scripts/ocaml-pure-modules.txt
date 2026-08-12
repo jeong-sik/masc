@@ -7,6 +7,7 @@ lib/config/env_config_snapshot_core.ml
 packages/agent_core/lib/llm_provider/provider_registry_state.ml
 lib/server/server_runtime_param_request.ml
 lib/server/server_prompt_override_request.ml
+lib/mcp_server_eio_call_request.ml
 lib/schedule/schedule_domain.ml
 lib/turn_fsm/turn_fsm.ml
 lib/types/masc_domain.ml

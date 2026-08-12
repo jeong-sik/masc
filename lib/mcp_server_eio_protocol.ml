@@ -939,15 +939,18 @@ let handle_request
                            (max 0.0 (Eio.Time.now clock -. operation_start_time));
                        make_error_typed ~id code message)
 	                in
-	                (match req.params with
-	                 | Some params ->
-	                   let params_tool_name () =
-	                     match Json_util.get_string params "name" with
-	                     | Some name -> name
-	                     | None -> ""
-	                   in
+	                (match Mcp_server_eio_call_request.decode req.params with
+	                 | Error error ->
+	                   failed_tool_call_error
+	                     ~tool_name:
+	                       (Option.value
+	                          ~default:""
+	                          (Mcp_server_eio_call_request.error_requested_name error))
+	                     Mcp_error_code.Invalid_params
+	                     (Mcp_server_eio_call_request.error_message error)
+	                 | Ok call ->
+	                   let name = Mcp_server_eio_call_request.requested_name call in
 	                   (try
-	                      let name = params_tool_name () in
 	                      (* Issue #8699: exhaustive match on tool_profile.
 	                               Catch-all `_ -> Full` would silently elevate any
 	                               future restricted profile to full tool access
@@ -1000,7 +1003,7 @@ let handle_request
                                  ~internal_keeper_runtime
                                  state
                                  id
-                                 params)
+                                 call)
                         in
                         let outcome = tool_call_outcome result in
                         let outcome_s = Tool_result.string_of_tool_call_outcome outcome in
@@ -1021,24 +1024,14 @@ let handle_request
                              outcome_s);
                         result)
 	                    with
-	                    | Yojson.Safe.Util.Type_error (_, _) ->
-	                      failed_tool_call_error
-	                        Mcp_error_code.Invalid_params
-	                        "Invalid params: name must be a string"
 	                    | Invalid_argument msg
 		                      when String.starts_with
 		                             ~prefix:"managed agent tool translation failed:"
 		                             msg ->
-		                      let name =
-		                        try params_tool_name () with
-		                        | Yojson.Safe.Util.Type_error (_, _) -> ""
-		                      in
 		                      failed_tool_call_error
 		                        ~tool_name:name
 		                        Mcp_error_code.Invalid_params
-	                        msg)
-	                 | None ->
-	                   failed_tool_call_error Mcp_error_code.Invalid_params "Missing params")
+	                        msg))
                 in
                 with_required_auth
                   ~base_path

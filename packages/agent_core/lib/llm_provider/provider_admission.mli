@@ -21,6 +21,10 @@
     reordered across the FIFO, or dropped. Retry policy remains the
     consumer's responsibility.
 
+    Registry decisions are pure immutable transitions. Scheduler creation,
+    diagnostics, snapshots, and permit waiting are performed after leaving
+    the registry's short process-wide critical section.
+
     @since 0.216.0 *)
 
 (** [with_admission ~config f] runs [f] under the endpoint's concurrency

@@ -193,6 +193,32 @@ describe('MCP 2026-07-28 dashboard client', () => {
     expect(body.params.arguments).toEqual({})
   })
 
+  it('does not let _agent_name override a bearer credential owner', async () => {
+    getStoredToken.mockReturnValue('dashboard-token')
+    getStoredTokenMeta.mockReturnValue({
+      source: 'manual',
+      actor: 'dashboard',
+      scope: null,
+    })
+    authHeaders.mockReturnValue({ Authorization: 'Bearer dashboard-token' })
+    fetchWithTimeout.mockResolvedValueOnce(okToolResponse())
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_transition', {
+      task_id: 'task-223',
+      agent_name: 'dashboard-admin-deft-cobra',
+      _agent_name: 'dashboard-admin-deft-cobra',
+    })
+
+    const [, init] = callsByMethod('tools/call')[0]!
+    const body = JSON.parse(init.body as string)
+    expect(body.params.arguments).toEqual({
+      task_id: 'task-223',
+      agent_name: 'dashboard-admin-deft-cobra',
+    })
+    expect(authHeaders).toHaveBeenLastCalledWith({ actorName: null })
+  })
+
   // Pagination stops on absence of a cursor, and the guard is progress rather
   // than a page budget: #26771 capped at 50 pages, which refused a server with
   // 51 legitimate pages and let a non-progressing one run 50 round trips first.

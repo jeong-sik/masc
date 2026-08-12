@@ -21,7 +21,7 @@ type t =
   ; loopback_dev_mutation_origins : Server_request_authority.serialized_origin list
   }
 
-let read_env () =
+let read_env () : raw =
   { allow_anonymous_mutations =
       Env_config_core.raw_value_opt allow_anonymous_mutations_env
   ; loopback_dev_mutation_origins =

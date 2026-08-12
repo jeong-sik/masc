@@ -133,6 +133,8 @@ normal_targets=(
   @test/runtest-test_telemetry_eio_pbt
   @test/runtest-test_process_eio_coverage
   @test/runtest-test_keeper_secret_redaction
+  @test/runtest-test_keeper_sandbox_docker_route
+  @test/keeper_github_identity/runtest
 )
 
 board_attention_targets=(

@@ -19,17 +19,11 @@ let project_messages messages =
     | (message : Agent_core.Types.message) :: rest ->
       (match message.role with
        | Agent_core.Types.System ->
-         let* text =
-           Host.text_of_blocks
-             ~runtime_label
-             ~field:"initial_messages"
-             message.content
-         in
-         loop (text :: system) history rest
+         loop (Host.encode_history_message message :: system) history rest
        | Agent_core.Types.User | Agent_core.Types.Assistant | Agent_core.Types.Tool ->
          loop
            system
-           (Keeper_context_core.message_to_json message :: history)
+           (Keeper_official_client_context_codec.to_json message :: history)
            rest)
   in
   loop [] [] messages

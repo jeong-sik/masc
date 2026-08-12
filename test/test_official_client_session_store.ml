@@ -31,6 +31,30 @@ let owner_epoch = "11111111-1111-4111-8111-111111111111"
 let next_owner_epoch = "22222222-2222-4222-8222-222222222222"
 let empty_surface = tool_surface_sha256 []
 
+let test_context_message_schema_is_part_of_the_resume_digest () =
+  let expected =
+    `Assoc
+      [ ( "context_message_schema"
+        , `String Keeper_official_client_context_codec.schema )
+      ; "tools", `List []
+      ]
+    |> Yojson.Safe.to_string
+    |> Digestif.SHA256.digest_string
+    |> Digestif.SHA256.to_hex
+  in
+  Alcotest.(check string)
+    "context projection participates in the durable digest"
+    expected
+    empty_surface;
+  let bare_tool_list =
+    Digestif.SHA256.digest_string "[]" |> Digestif.SHA256.to_hex
+  in
+  Alcotest.(check bool)
+    "a tools-only digest cannot resume the new projection"
+    false
+    (String.equal bare_tool_list empty_surface)
+;;
+
 let claim_new ~base_path ~keeper_name ~client_kind ~runtime_id ~owner_epoch ~at =
   claim
     ~base_path
@@ -969,6 +993,10 @@ let () =
             "tool surface fingerprint canonical"
             `Quick
             test_tool_surface_fingerprint_is_canonical
+        ; test_case
+            "context message schema participates in resume digest"
+            `Quick
+            test_context_message_schema_is_part_of_the_resume_digest
         ] )
     ]
 ;;

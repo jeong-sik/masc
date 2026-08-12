@@ -473,7 +473,15 @@ let test_keeper_projects_mcp_tool_and_settles () =
       check bool
         "fresh prompt carries dynamic System context"
         true
-        (String_util.contains_substring prompt dynamic_context);
+        (String_util.contains_substring
+           prompt
+           (Keeper_official_client_host.encode_history_message
+              { Agent_core.Types.role = System
+              ; content = [ Text dynamic_context ]
+              ; name = None
+              ; tool_call_id = None
+              ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+              }));
       let resumed_prompt =
         match !observed_resumed_prompt with
         | Some prompt -> prompt
@@ -482,7 +490,15 @@ let test_keeper_projects_mcp_tool_and_settles () =
       check bool
         "resume carries dynamic System context"
         true
-        (String_util.contains_substring resumed_prompt dynamic_context);
+        (String_util.contains_substring
+           resumed_prompt
+           (Keeper_official_client_host.encode_history_message
+              { Agent_core.Types.role = System
+              ; content = [ Text dynamic_context ]
+              ; name = None
+              ; tool_call_id = None
+              ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+              }));
       check bool
         "resume keeps the goal"
         true

@@ -19,29 +19,7 @@ let text_of_blocks ~runtime_label ~field blocks =
   loop [] blocks
 ;;
 
-let encode_history_message (message : Agent_core.Types.message) =
-  let text_only =
-    message.role <> Tool
-    && List.for_all
-         (function
-           | Agent_core.Types.Text _ -> true
-           | _ -> false)
-         message.content
-  in
-  if text_only
-  then
-    message.content
-    |> List.filter_map (function
-      | Agent_core.Types.Text text -> Some text
-      | _ -> None)
-    |> String.concat "\n"
-  else
-    `Assoc
-      [ "schema", `String "masc.official-client-context-message.v1"
-      ; "message", Keeper_context_core.message_to_json message
-      ]
-    |> Yojson.Safe.to_string
-;;
+let encode_history_message = Keeper_official_client_context_codec.encode
 
 let user_message text : Agent_core.Types.message =
   { role = User
@@ -155,14 +133,9 @@ let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
   | None -> Ok reasoning_effort
 ;;
 
-(* The canonical MASC message encoder, the same one the Agent_core budget path
-   measures with. It is not any adapter's own rendering: antigravity renders
-   "ROLE:\ntext" and the JSON form of that message is strictly larger, so the
-   measure is at or above what each adapter actually sends and the ceiling
-   cannot be exceeded by measuring here. *)
-let measure_message_bytes (message : Agent_core.Types.message) =
-  String.length
-    (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
+(* Measure the shared, content-dependent envelope. Each adapter may add a fixed
+   role prefix or protocol framing around it. *)
+let measure_message_bytes message = String.length (encode_history_message message)
 ;;
 
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools

@@ -88,11 +88,10 @@ val text_of_blocks :
   (string, Agent_core.Error.t) result
 
 val encode_history_message : Agent_core.Types.message -> string
-(** Preserve one canonical message on a text-only official-client wire.
-    Text-only non-tool messages remain plain text. Tool-role messages and any
-    message containing typed blocks are encoded as the canonical message JSON
-    inside a versioned envelope, so role, block payloads, tool identities, and
-    metadata remain visible instead of being discarded. *)
+(** Preserve one canonical message on a text-only official-client wire. Every
+    role uses the same versioned envelope, so raw user bytes cannot spoof the
+    framing layer and typed block payloads, tool identities, structured result
+    content, failure provenance, and message metadata remain visible. *)
 
 val hook_error :
   runtime_label:string ->

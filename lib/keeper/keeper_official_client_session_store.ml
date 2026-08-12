@@ -185,7 +185,14 @@ let tool_surface_sha256 tools =
   |> List.sort (fun (left : Agent_core.Tool.t) right ->
     String.compare left.schema.name right.schema.name)
   |> List.map tool_json
-  |> fun tools -> Yojson.Safe.to_string (`List tools)
+  |> fun tools ->
+  `Assoc
+    [ ( "context_message_schema"
+      , `String Keeper_official_client_context_codec.schema )
+    ; "tools", `List tools
+    ]
+  |> canonical_json
+  |> Yojson.Safe.to_string
   |> Digestif.SHA256.digest_string
   |> Digestif.SHA256.to_hex
 ;;

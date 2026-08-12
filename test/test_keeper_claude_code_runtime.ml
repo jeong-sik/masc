@@ -445,6 +445,16 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
        in
        (match history with
         | [ assistant_history; tool_history ] ->
+          let envelope_message value =
+            let open Yojson.Safe.Util in
+            check string
+              "history envelope schema"
+              Keeper_official_client_context_codec.schema
+              (value |> member "schema" |> to_string);
+            value |> member "message"
+          in
+          let assistant_history = envelope_message assistant_history in
+          let tool_history = envelope_message tool_history in
           check string
             "assistant history role"
             "assistant"

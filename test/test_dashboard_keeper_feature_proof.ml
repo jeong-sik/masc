@@ -42,7 +42,7 @@ let with_workspace f =
   Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
-  (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config with
+  (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
    | Ok _ -> ()
    | Error error ->
      fail

@@ -100,6 +100,7 @@ let start_owner_with_executor_ready
       (Option.map
          (fun execute -> Owner.{ ready = operation_ready; execute })
          operation_executor)
+    ~on_turn_slot_released:None
     ~keeper_name
     ~initial_meta
 ;;
@@ -809,6 +810,82 @@ let test_stopping_cancels_and_joins_autonomous_child () =
 
    The test states the blocked lane, not just the fact of blocking, because the
    holder's identity is what a fairness change would alter (RFC-0373). *)
+(* The release signal states availability, not completion. A listener woken by
+   "a turn ended" would find the slot already taken whenever a chat operation
+   was queued behind it, defer, and wait out its own cadence again — the exact
+   loop the notification exists to end. So the Owner fires it only after the
+   queued chat operation, if any, has been offered the slot and declined to
+   exist. Both directions are asserted here; only the negative one can tell the
+   two meanings apart. *)
+let test_turn_slot_release_signals_availability () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let released = ref 0 in
+  let path = Filename.temp_file "keeper-owner-slot-release-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () ->
+    if Sys.file_exists path then Unix.unlink path);
+  let chat_started, resolve_chat_started = Eio.Promise.create () in
+  let release_chat, resolve_release_chat = Eio.Promise.create () in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    (match claim () with
+     | Error error -> fail (Owner.error_to_string error)
+     | Ok None -> fail "chat runner did not find its FIFO head"
+     | Ok (Some _) -> ());
+    Eio.Promise.resolve resolve_chat_started ();
+    Eio.Promise.await release_chat;
+    Owner.Operation_succeeded { outcome_ref = "turn:slot-release" }
+  in
+  let owner =
+    owner_ok
+      (Owner.start
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_store_path:path
+         ~now:(fun () -> 42.0)
+         ~operation_runner:
+           (Some Owner.{ ready = (fun ~keeper_name:_ -> true); execute })
+         ~on_turn_slot_released:(Some (fun () -> incr released))
+         ~keeper_name:"slot-release"
+         ~initial_meta:(Some (make_meta "slot-release")))
+  in
+  let autonomous_started, resolve_autonomous_started = Eio.Promise.create () in
+  let release_autonomous, resolve_release_autonomous = Eio.Promise.create () in
+  let autonomous_result = Eio.Stream.create 1 in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Stream.add
+      autonomous_result
+      (Owner.run_autonomous_if_idle owner (fun () ->
+         Eio.Promise.resolve resolve_autonomous_started ();
+         Eio.Promise.await release_autonomous)));
+  Eio.Promise.await autonomous_started;
+  (* Queue the chat operation while the slot is held, so releasing it produces
+     the contested handoff: [Child_finished] frees the slot and offers it to the
+     queued operation in the same step. *)
+  ignore
+    (owner_ok
+       (Owner.submit_operation
+          owner
+          ~operation_id:(operation_id "kmsg-slot-release")
+          ~source:operation_source
+          ~input:(operation_input "queued behind autonomous")));
+  check int "a held slot signals nothing" 0 !released;
+  Eio.Promise.resolve resolve_release_autonomous ();
+  ignore (Eio.Stream.take autonomous_result);
+  Eio.Promise.await chat_started;
+  (* The chat operation took the slot in that handoff, so no turn can start and
+     no availability is owed. A signal here would mean "a turn ended", and its
+     listener would wake only to be told the slot is busy. *)
+  check
+    int
+    "a handoff claimed by chat owes no availability signal"
+    0
+    !released;
+  Eio.Promise.resolve resolve_release_chat ();
+  ignore (await_terminal owner (operation_id "kmsg-slot-release") 1_000);
+  check int "the slot left unclaimed signals once" 1 !released
+;;
+
 let test_chat_lane_holder_blocks_autonomous_admission () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -1252,6 +1329,7 @@ let test_startup_interrupts_running_without_requeue () =
               ~operation_store_path:path
               ~now:(fun () -> 20.0)
               ~operation_runner:None
+           ~on_turn_slot_released:None
               ~keeper_name:"interrupted-restart"
               ~initial_meta:(Some (make_meta "interrupted-restart")))
        in
@@ -1322,6 +1400,7 @@ let test_startup_queued_waits_for_runner_readiness () =
               ~now:(fun () -> 20.0)
               ~operation_runner:
                 (Some Owner.{ ready = (fun ~keeper_name:_ -> !ready); execute })
+              ~on_turn_slot_released:None
               ~keeper_name:"ready-after-registration"
               ~initial_meta:(Some (make_meta "ready-after-registration")))
        in
@@ -1768,7 +1847,7 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        (match Keeper_meta_store.replace_snapshot config first with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed owner meta: " ^ detail));
-       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
         | Ok count -> check int "strict startup owner count" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let loaded =
@@ -1836,7 +1915,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting () =
        ignore (Workspace.init config ~agent_name:(Some "owner-tool-test"));
        let meta = make_meta "agent-operation-target" in
        Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
-       Owner_registry.install_from_store ~sw ~operation_runner:None config
+       Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config
        |> Result.get_ok
        |> ignore;
        let ctx : _ Keeper_tool_surface.context =
@@ -1993,7 +2072,7 @@ let test_connector_submit_uses_owner_operation_idempotency () =
        (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail detail);
-       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
         | Ok 1 -> ()
         | Ok count -> failf "unexpected owner count %d" count
         | Error error -> fail (Owner_registry.install_error_to_string error));
@@ -2094,7 +2173,7 @@ let test_root_inventory_isolates_invalid_owner_snapshots () =
        Yojson.Safe.to_file
          (Filename.concat keepers_dir "inventory-path-name.json")
          (Keeper_meta_json.meta_to_json (make_meta "inventory-payload-name"));
-       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
         | Ok count -> check int "only valid owner starts" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        (match Owner_registry.get ~base_path ~keeper_name:valid.name with
@@ -2147,7 +2226,7 @@ let test_registry_reads_owner_atomic_projection () =
        ignore (Workspace.init config ~agent_name:(Some "owner-projection-test"));
        let initial = make_meta "atomic-projection" in
        Keeper_meta_store.replace_snapshot config initial |> Result.get_ok;
-       Owner_registry.install_from_store ~sw ~operation_runner:None config
+       Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config
        |> Result.get_ok
        |> ignore;
        let stale_entry =
@@ -2190,7 +2269,7 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
        (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed reserved owner meta: " ^ detail));
-       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
         | Ok count -> check int "reserved owner count" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let token =
@@ -2242,7 +2321,7 @@ let test_create_waits_for_lifecycle_admission_before_installing_owner () =
        Eio.Switch.run @@ fun sw ->
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "owner-create-reservation-test"));
-       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
         | Ok count -> check int "empty owner inventory" 0 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let meta = make_meta "create-reserved" in
@@ -2353,6 +2432,10 @@ let () =
             "chat lane holder blocks autonomous admission"
             `Quick
             test_chat_lane_holder_blocks_autonomous_admission
+        ; test_case
+            "turn slot release signals availability"
+            `Quick
+            test_turn_slot_release_signals_availability
         ; test_case
             "operation lifecycle is durable and projected"
             `Quick

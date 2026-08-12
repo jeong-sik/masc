@@ -950,6 +950,7 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
           Masc.Keeper_owner_registry.install_from_store
             ~sw
             ~operation_runner:(Some operation_runner)
+            ~on_turn_slot_released:None
             config
         with
         | Ok 1 -> ()

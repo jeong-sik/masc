@@ -129,17 +129,26 @@ let invocation_error_to_string = function
   | Tool_schema_rejected detail -> Printf.sprintf "tool schema rejected: %s" detail
 ;;
 
-(* The wire form has to be the one a real turn sends, so it goes through the
-   same [tool_schema_to_json] that [Agent_turn.prepare_tools] uses. Hand-rolling
-   the JSON here would make a probe that passes while the real turn's encoding
-   has drifted -- the failure this module exists to prevent. *)
+(* The wire form has to be the one a real turn sends, so it goes through
+   [Tool.wire_json_of_schema] -- the function [Agent_turn.prepare_tools]
+   reaches through [Tool.schema_to_json]. Hand-rolling the JSON here would make
+   a probe that passes while the real turn's encoding has drifted, the failure
+   this module exists to prevent.
+
+   The first version of this used [Types.tool_schema_to_json], on the strength
+   of a comment asserting it was the same encoder. It is not: that one is the
+   storage encoding and emits "parameters" alongside "input_schema", which the
+   OpenAI backend rejects as mutually exclusive before the request leaves the
+   process. Every live probe returned [Provider_rejected] -- indistinguishable
+   at a glance from a quota refusal, and the offline tests could not see it
+   because none of them reach the encoder's consumer. *)
 let wire_tool_of_schema (schema : Masc_domain.tool_schema) =
   Agent_core.Types.tool_schema_of_input_schema
     ~name:schema.name
     ~description:schema.description
     ~input_schema:schema.input_schema
     ()
-  |> Result.map Agent_core.Types.tool_schema_to_json
+  |> Result.map Agent_core.Tool.wire_json_of_schema
 ;;
 
 let tool_use_names (response : Agent_core.Types.api_response) =

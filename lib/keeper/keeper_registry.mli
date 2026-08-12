@@ -442,6 +442,7 @@ type wakeup_intent =
   | Compaction_signal
   | Attention_result
   | Runtime_parameter_change
+  | Turn_slot_released
 
 type wakeup_outcome =
   | Signaled

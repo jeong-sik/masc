@@ -198,6 +198,7 @@ type t =
   ; child_cancel : (unit -> unit) option Atomic.t
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
+  ; on_turn_slot_released : (unit -> unit) option
   }
 
 let error_to_string = function
@@ -220,6 +221,30 @@ let projection t = Atomic.get t.projection
 let operation_projection t = Atomic.get t.operation_projection
 let turn_in_flight t = Atomic.get t.turn_in_flight
 let shutdown_operation_id t = Atomic.get t.shutdown_operation_id
+
+(* The freed slot is offered to a queued chat operation first (the caller runs
+   [start_child_if_needed] immediately before this). Notifying only when it is
+   still unclaimed makes the signal mean "a turn can start now" rather than "a
+   turn ended": a listener woken by the latter would find the slot taken and
+   defer again, which is the cycle this notification exists to end.
+
+   The callback runs on the Owner fiber, so an exception from it would take
+   down the actor that every producer depends on. Contain it; a lost wake
+   degrades to the listener's own cadence, which is the behaviour before this
+   notification existed. *)
+let notify_turn_slot_released t =
+  match t.on_turn_slot_released with
+  | None -> ()
+  | Some notify ->
+    if Option.is_none (Atomic.get t.turn_in_flight)
+    then (
+      try notify () with
+      | exn ->
+        Log.Keeper.routine
+          ~keeper_name:t.keeper_name
+          "turn slot release listener raised: %s"
+          (Printexc.to_string exn))
+;;
 
 let turn_lane_to_string = function
   | Autonomous -> "autonomous"
@@ -423,6 +448,7 @@ let start
       ~operation_store_path
       ~now
       ~operation_runner
+      ~on_turn_slot_released
       ~keeper_name
       ~initial_meta
   =
@@ -471,6 +497,7 @@ let start
     ; child_cancel = Atomic.make None
     ; stopping_waiters = ref []
     ; shutdown_idle_waiters = ref []
+    ; on_turn_slot_released
     }
   in
   Eio.Switch.on_release sw (fun () ->
@@ -872,6 +899,7 @@ let start
             (fun waiter -> Eio.Promise.resolve waiter result)
             shutdown_idle_waiters;
           start_child_if_needed state shutdown_operation_id;
+          notify_turn_slot_released t;
           loop state shutdown_operation_id
         | Command (Begin_stopping, resolve) ->
           let transition = Keeper_owner_reducer.begin_stopping state in

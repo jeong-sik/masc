@@ -294,7 +294,7 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
       init_runtime_default_for_snapshot base_dir;
       ignore (Workspace.init config ~agent_name:(Some "owner"));
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
-      (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config with
+      (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
        | Ok _ -> ()
        | Error error ->
          Alcotest.fail (Keeper_owner_registry.install_error_to_string error));

@@ -552,6 +552,60 @@ let string_field name j =
   | `String value -> value
   | _ -> Alcotest.fail (Printf.sprintf "%s not string" name)
 
+(* A stored file the schema cannot read must not take the projection with it.
+
+   This is the shape that reached production: a producer removed on 2026-08-07
+   left 171 records whose [criteria] entries are objects rather than strings,
+   and the projection raised on the first of them, so /api/v1/dashboard/proof
+   answered 500 for five days while 122 readable records sat beside them. The
+   fixture writes that exact shape rather than truncated JSON, so the case
+   fails if the projection ever goes back to reading the store all-or-nothing. *)
+let superseded_criteria_record =
+  {|{"id":"vrf-superseded","task_id":"t-superseded","output":null,|}
+  ^ {|"criteria":[{"type":"custom","description":"Task scope satisfied"}],|}
+  ^ {|"worker":"w","created_at":1.0}|}
+
+let test_projection_survives_an_unreadable_record () =
+  with_temp_base_path (fun base_path ->
+    let readable =
+      create_pending_request ~base_path ~task_id:"t-readable" ~worker:"w"
+        ~criteria:[ "criterion" ] ~evidence:[]
+    in
+    let dir = Filename.concat base_path ".masc/verifications" in
+    Fs_compat.save_file
+      (Filename.concat dir "vrf-superseded.json")
+      superseded_criteria_record;
+
+    let requests = D.requests_json ~base_path () in
+    Alcotest.(check int)
+      "the readable request is still projected"
+      1
+      (int_field "total" requests);
+    Alcotest.(check int)
+      "the unreadable record is counted, not swallowed"
+      1
+      (int_field "unreadable_total" requests);
+    (match member "unreadable" requests with
+     | `List [ entry ] ->
+       Alcotest.(check bool)
+         "the unreadable entry names its file"
+         true
+         (Astring.String.is_infix ~affix:"vrf-superseded.json"
+            (string_field "path" entry));
+       Alcotest.(check bool)
+         "the unreadable entry carries why it could not be read"
+         false
+         (String.equal (String.trim (string_field "detail" entry)) "")
+     | _ -> Alcotest.fail "unreadable is not a one-element list");
+
+    (* The summary projection reads the same store and must agree. *)
+    let summary = D.summary_json ~base_path () in
+    Alcotest.(check int) "summary counts the readable request"
+      1 (int_field "total" summary);
+    Alcotest.(check int) "summary counts the unreadable record"
+      1 (int_field "unreadable_total" summary);
+    ignore readable)
+
 let test_requests_and_summary_remain_available_after_fd_observation () =
   with_temp_base_path (fun base_path ->
     let _ =
@@ -620,6 +674,8 @@ let () =
         test_requests_json_snapshot_projection_edges;
       Alcotest.test_case "fd pressure remains observation-only" `Quick
         test_requests_and_summary_remain_available_after_fd_observation;
+      Alcotest.test_case "survives an unreadable record" `Quick
+        test_projection_survives_an_unreadable_record;
     ];
     "summary_json", [
       Alcotest.test_case "immutable submission count" `Quick

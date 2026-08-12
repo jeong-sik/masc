@@ -1238,6 +1238,7 @@ let with_owner_inventory config f =
      Keeper_owner_registry.install_from_store
        ~sw
        ~operation_runner:None
+           ~on_turn_slot_released:None
        config
    with
    | Ok _ -> ()
@@ -1552,6 +1553,7 @@ let test_health_json_observes_owner_turn () =
              Keeper_owner_registry.install_from_store
                ~sw
                ~operation_runner:None
+           ~on_turn_slot_released:None
                config
            with
            | Ok _ -> ()
@@ -2928,6 +2930,7 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
              Keeper_owner_registry.install_from_store
                ~sw
                ~operation_runner:None
+           ~on_turn_slot_released:None
                config
            with
            | Ok _ -> ()

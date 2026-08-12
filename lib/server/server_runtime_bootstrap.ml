@@ -907,6 +907,20 @@ let initialize_owner_state_blocking
         ~sw
         ~operation_runner:
           (Some (Server_routes_http_keeper_stream.operation_runner ~state ~clock))
+        (* The chat lane is told when its dependency is ready
+           ([wake_operation_drain]); the autonomous lane had no equivalent and
+           rediscovered a freed slot only on its next keepalive cadence, which
+           RFC-0373 measured as up to five consecutive lost cycles. The Owner
+           fires this only when the freed slot is still unclaimed, so the wake
+           means a turn can start now. *)
+        ~on_turn_slot_released:
+          (Some
+             (fun ~keeper_name ->
+               ignore
+                 (Keeper_registry.wakeup_running
+                    ~intent:Keeper_registry.Turn_slot_released
+                    ~base_path:(Mcp_server.workspace_config state).base_path
+                    keeper_name)))
         (Mcp_server.workspace_config state)
     with
     | Ok count -> count

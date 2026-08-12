@@ -1312,8 +1312,8 @@ let dispatch_message cs msg =
                           cs
                           n
                           Mcp_error_code.(to_wire_code Invalid_params)
-                          ("No LSP server for: " ^ request.relative_path)))
-             | None -> ())))
+                          ("No LSP server for: " ^ request.relative_path))))
+             | None -> ()))
        (* No method field *)
        | None, Some n -> send_error cs n Mcp_error_code.(to_wire_code Invalid_request) "Missing method field"
        | None, None -> ())

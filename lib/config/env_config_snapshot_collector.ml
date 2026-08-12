@@ -34,7 +34,7 @@ let effective_entry ?(sensitive = false) ~default ~read env_name description =
   }
 ;;
 
-let collect collector =
+let collect (collector : t) =
   { spec = collector.spec; observation = collector.collect () }
 
 let project observed =

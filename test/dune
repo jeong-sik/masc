@@ -1634,6 +1634,8 @@
 
 (include stanzas/test_slack_rest_client.inc)
 
+(include stanzas/test_slack_user_directory.inc)
+
 (include stanzas/test_server_slack_gateway_attention.inc)
 
 (include stanzas/test_discord_wss_bridge.inc)

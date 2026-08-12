@@ -197,3 +197,73 @@ let auth_test ?clock ?(timeout_sec = default_http_timeout_sec) ~token () =
   match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_auth_test_response ~status ~body
+
+(* users.info — resolve one user's profile names for inbound identity
+   rendering (issue #28376). Slack Web API accepts form-encoded POST for this
+   method; ids come from Slack's own events ([A-Z0-9], no URL escaping
+   needed). A missing [users:read] scope surfaces as [Slack_api]. *)
+type user_info_ok = {
+  user_id : string;
+  name : string option;
+  real_name : string option;
+  display_name : string option;
+}
+
+let build_users_info_request ~token ~user_id =
+  let url = "https://slack.com/api/users.info" in
+  let headers =
+    ("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+    :: auth_headers ~token
+  in
+  (url, headers, "user=" ^ user_id)
+
+let parse_users_info_response ~status ~body =
+  if status < 200 || status >= 300 then Error (Http_status { code = status; body })
+  else
+    match parse_json_safe body with
+    | None -> Error (Other ("response not JSON: " ^ body))
+    | Some json ->
+      let ok =
+        match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
+      in
+      if not ok then
+        let err =
+          match field_opt "error" json with
+          | Some (`String e) -> e
+          | _ -> "users.info failed"
+        in
+        Error (Slack_api { error = err })
+      else
+        (match field_opt "user" json with
+         | Some (`Assoc _ as user) ->
+           (match field_opt "id" user with
+            | Some (`String user_id) ->
+              (* Blank profile fields are represented as absent, not as empty
+                 labels a renderer would print verbatim. *)
+              let non_blank = function
+                | Some (`String s) when String.trim s <> "" -> Some s
+                | Some _ | None -> None
+              in
+              let profile =
+                match field_opt "profile" user with
+                | Some (`Assoc _ as profile) -> Some profile
+                | Some _ | None -> None
+              in
+              let profile_field key =
+                Option.bind profile (fun p -> non_blank (field_opt key p))
+              in
+              Ok
+                { user_id
+                ; name = non_blank (field_opt "name" user)
+                ; real_name = profile_field "real_name"
+                ; display_name = profile_field "display_name"
+                }
+            | Some _ | None -> Error (Other "ok=true but missing user.id"))
+         | Some _ | None -> Error (Other "ok=true but missing 'user'"))
+
+let users_info ?clock ?(timeout_sec = default_http_timeout_sec) ~token ~user_id
+    () =
+  let (url, headers, body) = build_users_info_request ~token ~user_id in
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) -> parse_users_info_response ~status ~body

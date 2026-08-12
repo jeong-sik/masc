@@ -27,6 +27,7 @@
   slack_gateway_state
   slack_socket_client
   slack_rest_client
+  slack_user_directory
   slack_observability
   gate_protocol
   gate_surface

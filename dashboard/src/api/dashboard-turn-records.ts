@@ -217,6 +217,13 @@ export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   durable_store: string
   dashboard_surface: '/api/v1/keepers/:name/turn-records'
   freshness_slo_s: number
+  // Emitted unconditionally by the turn-records handler
+  // (server_dashboard_http_keeper_api.ml): live_turn_in_progress is true iff a
+  // turn is mid-flight for this keeper, in which case both timestamps are
+  // non-null wall-clock seconds; all three are null/false together otherwise.
+  live_turn_in_progress: boolean
+  live_turn_started_at_unix: number | null
+  live_turn_last_progress_at_unix: number | null
   latest_ts_unix: number | null
   latest_ts_iso: string | null
   latest_age_s: number | null
@@ -846,6 +853,9 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     'durable_store',
     'dashboard_surface',
     'freshness_slo_s',
+    'live_turn_in_progress',
+    'live_turn_started_at_unix',
+    'live_turn_last_progress_at_unix',
     'latest_ts_unix',
     'latest_ts_iso',
     'latest_age_s',
@@ -866,6 +876,9 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     ? raw.dashboard_surface
     : null
   const freshness_slo_s = asNumber(raw.freshness_slo_s)
+  const live_turn_in_progress = asBoolean(raw.live_turn_in_progress)
+  const live_turn_started_at_unix = decodeNullableNumber(raw.live_turn_started_at_unix)
+  const live_turn_last_progress_at_unix = decodeNullableNumber(raw.live_turn_last_progress_at_unix)
   const latest_ts_unix = decodeNullableNumber(raw.latest_ts_unix)
   const latest_ts_iso = decodeNullableString(raw.latest_ts_iso)
   const latest_age_s = decodeNullableNumber(raw.latest_age_s)
@@ -901,6 +914,11 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     || dashboard_surface === null
     || freshness_slo_s == null
     || freshness_slo_s <= 0
+    || live_turn_in_progress == null
+    || live_turn_started_at_unix === undefined
+    || live_turn_last_progress_at_unix === undefined
+    || live_turn_in_progress !== (live_turn_started_at_unix !== null)
+    || live_turn_in_progress !== (live_turn_last_progress_at_unix !== null)
     || latest_ts_unix === undefined
     || latest_ts_iso === undefined
     || latest_age_s === undefined
@@ -946,6 +964,9 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     durable_store,
     dashboard_surface,
     freshness_slo_s,
+    live_turn_in_progress,
+    live_turn_started_at_unix,
+    live_turn_last_progress_at_unix,
     latest_ts_unix,
     latest_ts_iso,
     latest_age_s,

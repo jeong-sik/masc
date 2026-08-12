@@ -26,6 +26,13 @@ val build_agent
   -> system_prompt:string
   -> ?tools:Agent_core.Tool.t list
   -> ?max_tokens:int
+  -> ?timeout_s:float
+       (** Response deadline in seconds, enforced as the agent's
+           [body_timeout_s] (AGENT_CORE's total non-streaming round-trip cap).
+           Omitted leaves whatever the runtime/provider already declares — this
+           is a per-request override, not a second source of truth. A
+           non-positive or non-finite value fails with
+           [Invalid_timeout_s] rather than being dropped. *)
   -> ?name:string
   -> ?provider_config_transform:
        (Llm_provider.Provider_config.t

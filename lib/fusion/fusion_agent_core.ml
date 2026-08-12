@@ -77,6 +77,7 @@ let panel_failure_code (failure : Fusion_types.panel_failure) : string =
   | Fusion_types.Invalid_structured_response _ -> "invalid_structured_response"
   | Fusion_types.Empty_response _ -> "empty_response"
   | Fusion_types.Invalid_max_output_tokens _ -> "invalid_max_output_tokens"
+  | Fusion_types.Invalid_timeout_s _ -> "invalid_timeout_s"
 
 let panel_failure_detail ~runtime_id (failure : Fusion_types.panel_failure) : string =
   match failure with
@@ -87,6 +88,7 @@ let panel_failure_detail ~runtime_id (failure : Fusion_types.panel_failure) : st
   | Fusion_types.Empty_response detail -> detail
   | Fusion_types.Invalid_max_output_tokens n ->
     Printf.sprintf "invalid max_output_tokens %d" n
+  | Fusion_types.Invalid_timeout_s s -> Printf.sprintf "invalid timeout_s %g" s
 
 (* 이미 attribution된 실패를 재-attribution 없이 렌더한다. Provider_error의 detail은
    실패 시점(panel outcome_of_result / build_agent)에 provider_error_detail
@@ -103,6 +105,7 @@ let panel_failure_text (failure : Fusion_types.panel_failure) : string =
   | Fusion_types.Empty_response detail -> detail
   | Fusion_types.Invalid_max_output_tokens n ->
     Printf.sprintf "invalid max_output_tokens %d" n
+  | Fusion_types.Invalid_timeout_s s -> Printf.sprintf "invalid timeout_s %g" s
 
 (** [Keeper_tool_descriptor]에서 날것의 web tool descriptor를 찾아
     [Agent_core.Tool.t]로 변환한다. 패널/심판이 web_search/web_fetch를
@@ -141,6 +144,7 @@ let build_agent
     ~system_prompt
     ?(tools = [])
     ?max_tokens
+    ?timeout_s
     ?name
     ?provider_config_transform
     (model : string)
@@ -187,6 +191,23 @@ let build_agent
          | Some n when Fusion_policy.valid_max_output_tokens (Some n) ->
            Ok { base_config with max_tokens = Some n }
          | Some n -> Error (Fusion_types.Invalid_max_output_tokens n)
+       in
+       (* preset 데드라인은 [Runtime_agent.config.body_timeout_s]로 집행한다 —
+          AGENT_CORE가 이미 소유한 손잡이이며(Builder.with_body_timeout →
+          Complete.complete 비스트리밍 총 왕복 cap), provider의
+          [connect_timeout_s]와 달리 이름이 하는 일과 일치한다. provider config를
+          변형하지 않으므로 같은 런타임을 쓰는 다른 소비자(키퍼 턴 등)의 예산은
+          그대로다: override의 blast radius가 이 fusion 요청으로 한정된다.
+          [None]이면 base_config를 그대로 둬 런타임/provider 선언이 유일한 값으로
+          남는다. 유효성은 policy가 로드 시 이미 판정했지만, 직접 호출도 있으므로
+          여기서도 닫아 잘못된 데드라인이 조용히 무시되지 않게 한다. *)
+       let config =
+         match config, timeout_s with
+         | (Error _ as err), _ -> err
+         | Ok config, None -> Ok config
+         | Ok config, Some s when Fusion_policy.valid_timeout_s (Some s) ->
+           Ok { config with body_timeout_s = Some s }
+         | Ok _, Some s -> Error (Fusion_types.Invalid_timeout_s s)
        in
        match config with
        | Error _ as err -> err

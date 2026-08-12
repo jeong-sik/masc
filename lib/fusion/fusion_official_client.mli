@@ -24,10 +24,13 @@ module For_testing : sig
 
   val resolved_timeout_s
     :  runtime_id:string
+    -> override_s:float option
     -> default_timeout_s:float
     -> float option
   (** Resolve the same declared turn timeout used by each official-client
-      panel adapter. [turn-timeout-s = 0] produces [None]. *)
+      panel adapter. [override_s] (the preset group's declared deadline) wins
+      when present; otherwise the runtime's inferred turn timeout applies and
+      [turn-timeout-s = 0] produces [None]. *)
 
   val bounded_claude_probe_config
     :  fallback_timeout_s:float
@@ -41,9 +44,18 @@ val run_panelist
   :  base_dir:string
   -> runtime_id:string
   -> system_prompt:string
+  -> ?timeout_s:float
   -> prompt:string
+  -> unit
   -> (string, Fusion_types.panel_failure) result
 (** Execute [prompt] as a single turn on [runtime_id] and return the answer text.
+
+    [timeout_s] is the preset group's declared deadline. When present it wins
+    over the runtime-inferred turn timeout, because it is this request's
+    explicit statement while the runtime value is a default shared by every
+    consumer of that runtime. When absent the adapter resolves its own deadline
+    exactly as before. It does not move [admission_timeout_s], which bounds
+    waiting for admission rather than the answer.
 
     [base_dir] is the directory the official client is spawned in. There is no
     global accessor for the MASC base path, so callers thread it down from

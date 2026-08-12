@@ -87,12 +87,13 @@ let run ~base_dir ~sw ~net ~groups ~prompt ()
                [Panels_unavailable], 섞이면 정족수로 완료되면서 그 자리는 조용히
                비었다. 여기서 갈라 별도 실행 경로로 보낸다. *)
             if Fusion_official_client.is_official_client ~runtime_id:model
-            then (oks, (panelist, model, g.system_prompt) :: officials, fails)
+            then (oks, (panelist, model, g.system_prompt, g.timeout_s) :: officials, fails)
             else (
               match
                 Fusion_agent_core.build_agent ~sw ~net ~system_prompt:g.system_prompt
                   ~tools
                   ?max_tokens:g.max_output_tokens
+                  ?timeout_s:g.timeout_s
                   ~name:panelist model
               with
               | Ok agent -> ((agent, panelist, model) :: oks, officials, fails)
@@ -135,18 +136,19 @@ let run ~base_dir ~sw ~net ~groups ~prompt ()
           Fusion_types.Failed { failed_model = panelist; reason })
         built
   in
-  (* official-client 패널리스트는 Agent_core fan-out 과 동시에 돈다. 각 어댑터가
-     자기 timeout 을 소유하므로 여기서 두 번째 데드라인을 걸지 않는다 —
-     [Async_agent.all] 쪽과 같은 규약이다.
+  (* official-client 패널리스트는 Agent_core fan-out 과 동시에 돈다. 데드라인은
+     그룹의 [timeout_s] 가 있으면 그것이, 없으면 어댑터가 소유한 turn timeout 이
+     쓰인다 — Agent_core 축이 [body_timeout_s] 를 override 하는 것과 같은 규약이며,
+     두 축 모두 preset 이 선언하지 않으면 런타임 설정이 유일한 값으로 남는다.
 
      usage 는 [zero_usage] 다. 공식 클라이언트는 토큰 회계를 돌려주지 않으므로,
      추정치를 지어내는 대신 "측정하지 않음" 을 0 으로 남긴다. *)
   let official_answered =
     Eio.Fiber.List.map
-      (fun (panelist, model, system_prompt) ->
+      (fun (panelist, model, system_prompt, timeout_s) ->
         match
           Fusion_official_client.run_panelist ~base_dir ~runtime_id:model ~system_prompt
-            ~prompt
+            ?timeout_s ~prompt ()
         with
         | Error reason -> Fusion_types.Failed { failed_model = panelist; reason }
         | Ok text ->

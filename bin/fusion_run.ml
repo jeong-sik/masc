@@ -55,6 +55,7 @@ let string_of_failure (f : Fusion_types.panel_failure) : string =
     "invalid_structured_response: " ^ detail
   | Fusion_types.Invalid_max_output_tokens n ->
     Printf.sprintf "invalid_max_output_tokens: %d" n
+  | Fusion_types.Invalid_timeout_s s -> Printf.sprintf "invalid_timeout_s: %g" s
 
 let string_of_decision (d : Fusion_types.judge_decision) : string =
   match d with

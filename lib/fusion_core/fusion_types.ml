@@ -68,6 +68,7 @@ type panel_failure =
   | Invalid_structured_response of string
   | Empty_response of string
   | Invalid_max_output_tokens of int
+  | Invalid_timeout_s of float
 [@@deriving to_yojson, show, eq]
 
 let panel_failure_of_yojson = function
@@ -80,6 +81,12 @@ let panel_failure_of_yojson = function
   | `List [ `String "Empty_response"; `String detail ] -> Ok (Empty_response detail)
   | `List [ `String "Invalid_max_output_tokens"; `Int value ] ->
     Ok (Invalid_max_output_tokens value)
+  | `List [ `String "Invalid_timeout_s"; `Float value ] -> Ok (Invalid_timeout_s value)
+  (* durable 레코드가 정수로 직렬화된 데드라인을 담을 수 있다(Yojson은 3.0을 [`Int 3]
+     으로 쓰지 않지만, 손으로 쓴 레코드/이전 wire는 그럴 수 있다). 같은 값의 두 표현을
+     한쪽만 받아 replay를 깨뜨리지 않는다. *)
+  | `List [ `String "Invalid_timeout_s"; `Int value ] ->
+    Ok (Invalid_timeout_s (float_of_int value))
   | json ->
     Error
       (Printf.sprintf

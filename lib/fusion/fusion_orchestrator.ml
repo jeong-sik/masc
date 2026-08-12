@@ -37,6 +37,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request () : compute_outcome =
           let run_single_judge () =
             Fusion_judge.run ~sw ~net
               ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+              ?timeout_s:preset.Fusion_policy.judge_timeout_s
               ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
               ~judge_model:preset.Fusion_policy.judge
               ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools ()
@@ -49,6 +50,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request () : compute_outcome =
             match
               Fusion_judge.run_refine ~sw ~net
                 ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                ?timeout_s:preset.Fusion_policy.judge_timeout_s
                 ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                 ~judge_model:preset.Fusion_policy.judge
                 ~question:req.Fusion_types.prompt ~panel ~prior:s1
@@ -132,6 +134,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request () : compute_outcome =
                  (match
                     Fusion_judge.run_meta ~sw ~net
                       ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                      ?timeout_s:preset.Fusion_policy.judge_timeout_s
                       ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                       ~judge_model:preset.Fusion_policy.judge
                       ~question:req.Fusion_types.prompt ~panel ~priors
@@ -213,6 +216,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request () : compute_outcome =
                   (match
                      Fusion_judge.run_meta ~sw ~net
                        ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                       ?timeout_s:preset.Fusion_policy.judge_timeout_s
                        ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                        ~judge_model:preset.Fusion_policy.judge
                        ~question:req.Fusion_types.prompt ~panel ~priors
@@ -265,6 +269,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request () : compute_outcome =
                  (match
                     Fusion_judge.run_meta ~sw ~net
                       ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                      ?timeout_s:preset.Fusion_policy.judge_timeout_s
                       ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                       ~judge_model:preset.Fusion_policy.judge
                       ~question:req.Fusion_types.prompt ~panel ~priors

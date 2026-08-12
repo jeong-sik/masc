@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Exit 75 is reserved for lease-admission rejection. After admission, the
+# wrapped command's status (including 75) is forwarded unchanged; callers that
+# need to distinguish them must also inspect the explicit admission diagnostic.
+
 usage() {
   echo "usage: scripts/opam-switch-rw-lock.sh read|write -- command [args...]" >&2
   exit 2
@@ -28,7 +32,8 @@ case "${mode}" in
     ;;
   __admit_read)
     reader_path="${1:-}"
-    [[ -n "${reader_path}" && "$#" -eq 1 ]] || usage
+    reader_identity="${2:-}"
+    [[ -n "${reader_path}" && -n "${reader_identity}" && "$#" -eq 2 ]] || usage
     ;;
   __admit_write)
     [[ "$#" -eq 0 ]] || usage
@@ -116,6 +121,17 @@ probe_lock_state() {
   esac
 }
 
+file_identity() {
+  local path="$1"
+  if stat -f '%d:%i' "${path}" >/dev/null 2>&1; then
+    stat -f '%d:%i' "${path}"
+  elif stat -c '%d:%i' "${path}" >/dev/null 2>&1; then
+    stat -c '%d:%i' "${path}"
+  else
+    return 1
+  fi
+}
+
 clean_stale_readers() {
   local reader_path=""
   local state=""
@@ -141,15 +157,28 @@ active_reader_paths() {
 }
 
 admit_read() {
+  local reader_path="$1"
+  local expected_reader_identity="$2"
+  local current_reader_identity=""
+  local reader_state="free"
   local writer_state="free"
   clean_stale_readers
+  current_reader_identity="$(file_identity "${reader_path}" 2>/dev/null || true)"
+  if [[ -z "${current_reader_identity}" || "${current_reader_identity}" != "${expected_reader_identity}" ]]; then
+    echo "[opam-rw-lock] reader lease path no longer names its locked inode; read lease rejected" >&2
+    return 75
+  fi
+  reader_state="$(probe_lock_state "${reader_path}")"
+  if [[ "${reader_state}" != "held" ]]; then
+    echo "[opam-rw-lock] reader lease path is not held; read lease rejected" >&2
+    return 75
+  fi
   if [[ -f "${writer_path}" ]]; then
     writer_state="$(probe_lock_state "${writer_path}")"
     if [[ "${writer_state}" = "held" ]]; then
       echo "[opam-rw-lock] switch mutation is active; read lease rejected" >&2
       return 75
     fi
-    rm -f "${writer_path}"
   fi
 }
 
@@ -174,7 +203,12 @@ case "${mode}" in
     exec_holder write "${writer_path}" "${script_path}" __run_write -- "$@"
     ;;
   __run_read)
-    with_gate "${script_path}" __admit_read "${reader_path}"
+    reader_identity="$(file_identity "${reader_path}" 2>/dev/null || true)"
+    if [[ -z "${reader_identity}" ]]; then
+      echo "[opam-rw-lock] reader lease path disappeared before admission; read lease rejected" >&2
+      exit 75
+    fi
+    with_gate "${script_path}" __admit_read "${reader_path}" "${reader_identity}"
     export MASC_OPAM_READ_LEASE_HELD=1
     exec "$@"
     ;;
@@ -184,7 +218,7 @@ case "${mode}" in
     exec "$@"
     ;;
   __admit_read)
-    admit_read
+    admit_read "${reader_path}" "${reader_identity}"
     ;;
   __admit_write)
     admit_write

@@ -312,6 +312,11 @@ let test_dune_lock_wait_reports_holder () =
         (Printf.sprintf
            {|#!/bin/sh
 printf 'argv=%%s\n' "$*" >> %s
+last=""
+for arg in "$@"; do last="$arg"; done
+case "$*:$last" in
+  *"/readers/reader."*:true) exit 75 ;;
+esac
 while [ "${1#-}" != "$1" ]; do
   case "$1" in
     -t) shift 2 ;;
@@ -472,6 +477,52 @@ test ! -e %s/$$
         (String_util.contains_substring stderr "switch readers are active");
       check bool "reader rejection is explicit" true
         (String_util.contains_substring stderr "switch mutation is active"))
+
+let test_opam_reader_admission_requires_held_inode_and_keeps_writer_file () =
+  with_temp_dir "opam-switch-rw-lock-inode" (fun dir ->
+      let script = opam_switch_rw_lock_script_path () in
+      let lock_base = Filename.concat dir "switch" in
+      let writer_path = lock_base ^ ".state/writer" in
+      let reader_path = lock_base ^ ".state/readers/unheld" in
+      let command =
+        Printf.sprintf
+          {|set -eu
+export OPAM_SWITCH_PREFIX=/tmp/masc-test-switch
+export MASC_OPAM_LOCK_PATH=%s
+%s write -- true
+test -f %s
+printf 'not-held\n' > %s
+if stat -f '%%d:%%i' %s >/dev/null 2>&1; then
+  identity=$(stat -f '%%d:%%i' %s)
+else
+  identity=$(stat -c '%%d:%%i' %s)
+fi
+set +e
+%s __admit_read %s "$identity"
+status=$?
+set -e
+test "$status" -eq 75
+|}
+          (quote lock_base)
+          (quote script)
+          (quote writer_path)
+          (quote reader_path)
+          (quote reader_path)
+          (quote reader_path)
+          (quote reader_path)
+          (quote script)
+          (quote reader_path)
+      in
+      let code, _stdout, stderr =
+        run_process ~cwd:dir "/bin/bash" [| "/bin/bash"; "-c"; command |]
+      in
+      check int "unheld reader is rejected" 0 code;
+      check bool "writer inode remains addressable" true
+        (Sys.file_exists writer_path);
+      check bool "reader rejection identifies the inode race" true
+        (String_util.contains_substring
+           stderr
+           "no longer names its locked inode"))
 
 let test_dune_runs_under_opam_read_lease () =
   with_temp_dir "dune-local-opam-read-lease" (fun dir ->
@@ -785,6 +836,8 @@ let () =
             test_live_build_lock_aborts_before_dune;
           test_case "opam read leases overlap and exclude mutation" `Quick
             test_opam_read_leases_overlap_and_exclude_writer;
+          test_case "opam reader admission requires its held inode" `Quick
+            test_opam_reader_admission_requires_held_inode_and_keeps_writer_file;
           test_case "Dune executes under an opam read lease" `Quick
             test_dune_runs_under_opam_read_lease;
           test_case "clean subcommand reaches Dune" `Quick

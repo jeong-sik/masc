@@ -28,11 +28,6 @@ let process_termination_grace_s = 2.0
 (* [None] installs no deadline. The vendor client owns when its own turn ends;
    a declared bound is the operator's optional liveness guard over a silent
    client, not a limit on how long legitimate work may take. *)
-let with_optional_timeout clock timeout_s f =
-  match timeout_s with
-  | None -> f ()
-  | Some seconds -> Eio.Time.with_timeout_exn clock seconds f
-;;
 let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 4096
 let max_wire_line_bytes = 8 * 1024 * 1024
@@ -49,12 +44,6 @@ let default_config () =
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
   }
-;;
-
-let timeout_s_for_phase config ~turn_accepted =
-  if turn_accepted
-  then config.timeout_s
-  else Some config.admission_timeout_s
 ;;
 
 type thread_mode =
@@ -210,16 +199,6 @@ open Shared_json
 
 let bounded_tail = Runtime_official_client_json.bounded_tail
 
-(* See {!Runtime_official_client_json.Make.no_turn_deadline_defect} for why the
-   [None] arm is unreachable. Here it must also not become [Process_exited]:
-   that maps to [ProviderUnavailable], which blames a provider that was
-   answering and carries no [turn_accepted] — the one bit that decides whether
-   rotating would run the goal a second time. *)
-let timeout_error ~turn_accepted = function
-  | Some seconds -> Error (Timeout { seconds; turn_accepted })
-  | None -> Error Shared_json.no_turn_deadline_defect
-;;
-
 (* Present and a string, with no constraint on its contents. For payload
    fields whose value this decoder does not read: an emptiness rule there
    ends the turn over a byte nobody looks at. *)
@@ -296,6 +275,7 @@ let parse_wire_line line =
 type io =
   { send : Yojson.Safe.t -> unit
   ; receive : unit -> (wire_message, error) result
+  ; set_timeout_s : float option -> unit
   }
 
 let send_request io ~id ~method_ ~params =
@@ -860,6 +840,10 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
           @ optional_field
               "effort"
               (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)));
+  (* The complete request is now outside this process. Admission stays finite
+     through dispatch; only the subsequent model turn adopts its declared
+     idle policy, including [None]. *)
+  io.set_timeout_s config.timeout_s;
   let* turn =
     match await_response io ~id:turn_request_id ~method_:"turn/start" with
     | Error (Timeout { seconds; turn_accepted = _ }) ->
@@ -982,7 +966,7 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
-let with_spawned_client ~mgr ~clock ~cwd config ~turn_accepted run =
+let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -999,29 +983,27 @@ let with_spawned_client ~mgr ~clock ~cwd config ~turn_accepted run =
     Eio.Flow.close stderr_w;
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
-    let current_timeout_s () =
-      timeout_s_for_phase config ~turn_accepted:!turn_accepted
-    in
+    let active_timeout_s = ref initial_timeout_s in
     let send json =
-      with_optional_timeout clock (current_timeout_s ()) (fun () ->
+      with_optional_timeout clock !active_timeout_s (fun () ->
         Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
         Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
-      let timeout_s = current_timeout_s () in
       try
-        with_optional_timeout clock timeout_s (fun () ->
+        with_optional_timeout clock !active_timeout_s (fun () ->
           Eio.Buf_read.line reader)
         |> parse_wire_line
       with
       | End_of_file ->
         let detail = String.trim !stderr_tail in
         Error (Process_exited (if detail = "" then "stdout closed" else detail))
-      | Eio.Time.Timeout ->
+      | Idle_timeout seconds ->
         (* The transport cannot know whether turn/start was already accepted;
            the entry points rewrap with the observed turn state. *)
-        timeout_error ~turn_accepted:!turn_accepted timeout_s
+        Error (Timeout { seconds; turn_accepted = false })
       | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Eio.Time.Timeout as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
     (* Cleanup must run before [Switch.run] waits for the stderr drainer. The
@@ -1030,18 +1012,29 @@ let with_spawned_client ~mgr ~clock ~cwd config ~turn_accepted run =
        preserves cleanup across fiber cancellation. *)
     Fun.protect
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
-      (fun () -> run { send; receive }))
+      (fun () ->
+         run
+           { send
+           ; receive
+           ; set_timeout_s = (fun timeout_s -> active_timeout_s := timeout_s)
+           }))
 ;;
 
 let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
     ~reasoning_effort ~thread_mode ~history ~prompt ~on_thread_ready
-    ~on_turn_starting ~on_turn_started ~on_stream_event ~turn_accepted =
-  with_spawned_client ~mgr ~clock ~cwd config ~turn_accepted (fun io ->
-    let with_timeout callback =
-      with_optional_timeout
-        clock
-        (timeout_s_for_phase config ~turn_accepted:!turn_accepted)
-        callback
+    ~on_turn_starting ~on_turn_started ~on_stream_event =
+  with_spawned_client
+    ~mgr
+    ~clock
+    ~cwd
+    ~initial_timeout_s:(Some config.admission_timeout_s)
+    config
+    (fun io ->
+    let with_admission_timeout callback =
+      with_optional_timeout clock (Some config.admission_timeout_s) callback
+    in
+    let with_turn_timeout callback =
+      with_optional_timeout clock config.timeout_s callback
     in
     run_protocol
       io
@@ -1053,11 +1046,11 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
       ~history
       ~prompt
       ~on_thread_ready:(fun ~thread_id ->
-        with_timeout (fun () -> on_thread_ready ~thread_id))
+        with_admission_timeout (fun () -> on_thread_ready ~thread_id))
       ~on_turn_starting:(fun ~thread_id ->
-        with_timeout (fun () -> on_turn_starting ~thread_id))
+        with_admission_timeout (fun () -> on_turn_starting ~thread_id))
       ~on_turn_started:(fun ~thread_id ~turn_id ->
-        with_timeout (fun () -> on_turn_started ~thread_id ~turn_id))
+        with_turn_timeout (fun () -> on_turn_started ~thread_id ~turn_id))
       ~on_stream_event)
 ;;
 
@@ -1133,22 +1126,20 @@ let probe_subscription ~mgr ~clock ~cwd config =
   let result =
     let* () = validate_process_config config in
     let* _ = native_cwd cwd in
-    let turn_accepted = ref false in
     try
       with_spawned_client
         ~mgr
         ~clock
         ~cwd
+        ~initial_timeout_s:(Some config.admission_timeout_s)
         config
-        ~turn_accepted
         probe_protocol
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Eio.Time.Timeout ->
+    | Idle_timeout seconds ->
       (* The probe never starts a turn. *)
-      timeout_error
-        ~turn_accepted:false
-        (timeout_s_for_phase config ~turn_accepted:false)
+      Error (Timeout { seconds; turn_accepted = false })
+    | Eio.Time.Timeout as exn -> raise exn
     | exn -> Error (Spawn_failed (Printexc.to_string exn))
   in
   (match result with
@@ -1161,7 +1152,8 @@ let probe_subscription ~mgr ~clock ~cwd config =
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
-    ?(history = []) ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
+    ?(history = [])
+    ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
     ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
     ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event
     config ~prompt =
@@ -1197,13 +1189,11 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
               ~on_turn_starting
               ~on_turn_started
               ~on_stream_event
-              ~turn_accepted
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | Eio.Time.Timeout ->
-            timeout_error
-              ~turn_accepted:!turn_accepted
-              (timeout_s_for_phase config ~turn_accepted:!turn_accepted)
+          | Idle_timeout seconds ->
+            Error (Timeout { seconds; turn_accepted = !turn_accepted })
+          | Eio.Time.Timeout as exn -> raise exn
           | exn -> Error (Spawn_failed (Printexc.to_string exn)))
        with
        | Error (Timeout { seconds; turn_accepted = dispatch_ambiguous }) ->

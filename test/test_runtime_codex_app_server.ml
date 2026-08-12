@@ -834,6 +834,86 @@ let test_state_callback_timeout_is_typed () =
     | Ok _ -> fail "blocking app-server callback ignored its timeout")
 ;;
 
+let test_no_deadline_keeps_admission_bounded () =
+  with_fixture [ init_result; account_chatgpt; thread_result ] (fun path ->
+    let outcome =
+      Eio_main.run (fun env ->
+        let clock = Eio.Stdenv.clock env in
+        let config =
+          { (Runtime_codex_app_server.default_config ()) with
+            cli_path = path
+          ; admission_timeout_s = 0.05
+          ; timeout_s = None
+          }
+        in
+        Runtime_codex_app_server.run_turn
+          ~mgr:(Eio.Stdenv.process_mgr env)
+          ~clock
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+          ~on_thread_ready:(fun ~thread_id:_ ->
+            Eio.Time.sleep clock 0.2;
+            Ok ())
+          config
+          ~prompt:"fixture")
+    in
+    match outcome with
+    | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = false }) ->
+      check (float 0.001) "admission timeout" 0.05 seconds
+    | Error (Runtime_codex_app_server.Timeout { turn_accepted = true; _ }) ->
+      fail "pre-dispatch admission timeout was marked turn-accepted"
+    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+    | Ok _ -> fail "no-deadline turn removed the admission timeout")
+;;
+
+let test_no_deadline_begins_after_turn_dispatch () =
+  with_fixture
+    ~terminal_line_delay_s:0.1
+    [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
+    (fun path ->
+       let outcome =
+         Eio_main.run (fun env ->
+           let config =
+             { (Runtime_codex_app_server.default_config ()) with
+               cli_path = path
+             ; admission_timeout_s = 0.05
+             ; timeout_s = None
+             }
+           in
+           Runtime_codex_app_server.run_turn
+             ~mgr:(Eio.Stdenv.process_mgr env)
+             ~clock:(Eio.Stdenv.clock env)
+             ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+             config
+             ~prompt:"fixture")
+       in
+       match outcome with
+       | Ok turn -> check string "turn completes" "MASC_SUBSCRIPTION_OK" turn.text
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error))
+;;
+
+let test_callback_timeout_origin_is_preserved_without_deadline () =
+  with_fixture [ init_result; account_chatgpt; thread_result ] (fun path ->
+    check_raises
+      "callback-origin timeout escapes unchanged"
+      Eio.Time.Timeout
+      (fun () ->
+         Eio_main.run (fun env ->
+           let config =
+             { (Runtime_codex_app_server.default_config ()) with
+               cli_path = path
+             ; timeout_s = None
+             }
+           in
+           Runtime_codex_app_server.run_turn
+             ~mgr:(Eio.Stdenv.process_mgr env)
+             ~clock:(Eio.Stdenv.clock env)
+             ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+             ~on_thread_ready:(fun ~thread_id:_ -> raise Eio.Time.Timeout)
+             config
+             ~prompt:"fixture"
+           |> ignore)))
+;;
+
 let test_terminal_error_notification_uses_official_context_error_enum () =
   let terminal =
     {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}|}
@@ -3108,6 +3188,18 @@ let () =
             "state callback timeout is typed"
             `Quick
             test_state_callback_timeout_is_typed
+        ; test_case
+            "no deadline keeps admission bounded"
+            `Quick
+            test_no_deadline_keeps_admission_bounded
+        ; test_case
+            "no deadline begins after turn dispatch"
+            `Quick
+            test_no_deadline_begins_after_turn_dispatch
+        ; test_case
+            "callback timeout origin is preserved without deadline"
+            `Quick
+            test_callback_timeout_origin_is_preserved_without_deadline
         ; test_case
             "terminal error notification uses official context error enum"
             `Quick

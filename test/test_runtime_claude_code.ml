@@ -253,6 +253,29 @@ let test_state_callback_timeout_is_typed () =
     | Ok _ -> fail "blocking Claude callback ignored its timeout")
 ;;
 
+let test_callback_timeout_origin_is_preserved_without_deadline () =
+  with_fixture [] (fun path ->
+    check_raises
+      "callback-origin timeout escapes unchanged"
+      Eio.Time.Timeout
+      (fun () ->
+         Eio_main.run (fun env ->
+           let config =
+             { (Runtime_claude_code.default_config ~cwd:"/tmp") with
+               cli_path = path
+             ; timeout_s = None
+             }
+           in
+           Runtime_claude_code.run_turn
+             ~mgr:(Eio.Stdenv.process_mgr env)
+             ~clock:(Eio.Stdenv.clock env)
+             ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+             ~on_session_ready:(fun ~session_id:_ -> raise Eio.Time.Timeout)
+             config
+             ~prompt:"fixture"
+           |> ignore)))
+;;
+
 (* [dynamic_tool_bytes] measures what the tool declarations add to a request.
    The request-side check #27427 needs is a comparison against a declared
    window, and a size that silently ignores part of what it sends is what made
@@ -1068,6 +1091,10 @@ let () =
             "state callback timeout is typed"
             `Quick
             test_state_callback_timeout_is_typed
+        ; test_case
+            "callback timeout origin is preserved without deadline"
+            `Quick
+            test_callback_timeout_origin_is_preserved_without_deadline
         ; test_case
             "non-subscription rejected"
             `Quick

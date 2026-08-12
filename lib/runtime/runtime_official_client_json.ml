@@ -7,6 +7,16 @@ end
 module Make (E : Error) = struct
   let protocol_error stage detail = Error (E.protocol ~stage ~detail)
   let ( let* ) result f = Result.bind result f
+  exception Idle_timeout of float
+
+  let with_optional_timeout clock timeout_s f =
+    match timeout_s with
+    | None -> f ()
+    | Some seconds ->
+      (match Eio.Time.with_timeout clock seconds (fun () -> Ok (f ())) with
+       | Ok value -> value
+       | Error `Timeout -> raise (Idle_timeout seconds))
+  ;;
 
   let rec validate_unique_object_keys ~stage ~path = function
     | `Assoc fields ->
@@ -85,15 +95,11 @@ module Make (E : Error) = struct
       | Error detail -> protocol_error stage detail
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Idle_timeout _ as exn -> raise exn
     | Eio.Time.Timeout as exn -> raise exn
     | exn -> protocol_error stage (Printexc.to_string exn)
   ;;
 
-  let no_turn_deadline_defect =
-    E.protocol
-      ~stage:"turn deadline"
-      ~detail:"Eio timeout raised while no turn deadline was installed"
-  ;;
 end
 
 let bounded_tail ~limit current addition =

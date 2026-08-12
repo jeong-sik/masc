@@ -1,78 +1,32 @@
-// Transport health schema — schema-at-boundary for
-// `GET /api/v1/dashboard/transport-health`.
-//
-// Every field below is emitted by the current cached transport-health producer.
-//
-import {
-  array,
-  boolean,
-  check,
-  literal,
-  nullable,
-  number,
-  strictObject,
-  pipe,
-  string,
-  union,
-  type BaseIssue,
-  type InferOutput,
-} from 'valibot'
+import { Data, Effect, ParseResult, Schema } from 'effect'
 
-import { SchemaDriftError, parseOrThrow } from './drift-error'
+const NonNegativeNumberSchema = Schema.JsonNumber.pipe(Schema.nonNegative())
+const NonNegativeIntegerSchema = Schema.NonNegativeInt
+const PortSchema = Schema.Int.pipe(Schema.between(1, 65_535))
 
-// --- Hot session ---
-
-const NonNegativeNumberSchema = pipe(
-  number(),
-  check((value: number) => Number.isFinite(value), 'value must be finite'),
-  check((value: number) => value >= 0, 'value must be non-negative'),
-)
-
-const NonNegativeIntegerSchema = pipe(
-  NonNegativeNumberSchema,
-  check((value: number) => Number.isInteger(value), 'value must be an integer'),
-)
-
-const PortSchema = pipe(
-  NonNegativeIntegerSchema,
-  check(
-    (value: number) => value > 0 && value <= 65535,
-    'port must be in 1..65535',
-  ),
-)
-
-const HotSessionSchema = strictObject({
-  session_id: pipe(
-    string(),
-    check((value) => value.length > 0, 'session_id must be non-empty'),
-  ),
-  kind: union([
-    literal('observer'),
-    literal('agent_stream'),
-    literal('presence'),
-  ]),
+const HotSessionSchema = Schema.Struct({
+  session_id: Schema.NonEmptyString,
+  kind: Schema.Literal('observer', 'agent_stream', 'presence'),
   queue_depth: NonNegativeIntegerSchema,
   last_event_id: NonNegativeIntegerSchema,
   idle_seconds: NonNegativeNumberSchema,
 })
 
-export type HotSession = InferOutput<typeof HotSessionSchema>
+export type HotSession = Schema.Schema.Type<typeof HotSessionSchema>
 
-// --- Subsection schemas ---
-
-const SummarySchema = strictObject({
-  primary_path: union([
-    literal('webrtc_datachannel'),
-    literal('grpc_subscribe'),
-    literal('websocket'),
-    literal('sse'),
-    literal('streamable_http'),
-  ]),
-  queue_pressure: union([literal('steady'), literal('watch'), literal('high')]),
+const SummarySchema = Schema.Struct({
+  primary_path: Schema.Literal(
+    'webrtc_datachannel',
+    'grpc_subscribe',
+    'websocket',
+    'sse',
+    'streamable_http',
+  ),
+  queue_pressure: Schema.Literal('steady', 'watch', 'high'),
   external_fanout_targets: NonNegativeIntegerSchema,
 })
 
-const SseOuterSchema = strictObject({
+const SseOuterSchema = Schema.Struct({
   sessions_observer: NonNegativeIntegerSchema,
   sessions_agent_stream: NonNegativeIntegerSchema,
   sessions_presence: NonNegativeIntegerSchema,
@@ -90,12 +44,12 @@ const SseOuterSchema = strictObject({
   relay_drop_queue: NonNegativeIntegerSchema,
   relay_drop_append: NonNegativeIntegerSchema,
   relay_drop_broadcast: NonNegativeIntegerSchema,
-  hot_sessions: array(HotSessionSchema),
+  hot_sessions: Schema.Array(HotSessionSchema),
 })
 
-const GrpcSchema = strictObject({
-  configured: boolean(),
-  listening: boolean(),
+const GrpcSchema = Schema.Struct({
+  configured: Schema.Boolean,
+  listening: Schema.Boolean,
   port: PortSchema,
   active_streams: NonNegativeIntegerSchema,
   subscribers: NonNegativeIntegerSchema,
@@ -104,7 +58,7 @@ const GrpcSchema = strictObject({
   events_dropped: NonNegativeIntegerSchema,
 })
 
-const WebsocketDeliverySchema = strictObject({
+const WebsocketDeliverySchema = Schema.Struct({
   bytes_cache_hits: NonNegativeIntegerSchema,
   bytes_cache_misses: NonNegativeIntegerSchema,
   client_acks: NonNegativeIntegerSchema,
@@ -113,20 +67,20 @@ const WebsocketDeliverySchema = strictObject({
   client_buffered_bytes_count: NonNegativeIntegerSchema,
 })
 
-const WebsocketSchema = strictObject({
-  configured: boolean(),
-  listening: boolean(),
-  mode: literal('standalone'),
+const WebsocketSchema = Schema.Struct({
+  configured: Schema.Boolean,
+  listening: Schema.Boolean,
+  mode: Schema.Literal('standalone'),
   port: PortSchema,
   sessions: NonNegativeIntegerSchema,
-  relay_source: literal('sse_external_subscriber'),
+  relay_source: Schema.Literal('sse_external_subscriber'),
   delivery: WebsocketDeliverySchema,
 })
 
-const WebrtcSchema = strictObject({
-  configured: boolean(),
-  signaling_available: boolean(),
-  signaling_mode: literal('shared_http'),
+const WebrtcSchema = Schema.Struct({
+  configured: Schema.Boolean,
+  signaling_available: Schema.Boolean,
+  signaling_mode: Schema.Literal('shared_http'),
   pending_offers: NonNegativeIntegerSchema,
   active_peers: NonNegativeIntegerSchema,
   live_connections: NonNegativeIntegerSchema,
@@ -134,51 +88,45 @@ const WebrtcSchema = strictObject({
   ice_server_count: NonNegativeIntegerSchema,
 })
 
-const StreamableHttpSchema = strictObject({
-  endpoint: literal('/mcp'),
-  observer_stream: literal('/mcp?sse_kind=observer'),
-  presence_stream: literal('/events/presence'),
-  supports_post: literal(true),
-  supports_sse_upgrade: literal(true),
+const StreamableHttpSchema = Schema.Struct({
+  endpoint: Schema.Literal('/mcp'),
+  observer_stream: Schema.Literal('/mcp?sse_kind=observer'),
+  presence_stream: Schema.Literal('/events/presence'),
+  supports_post: Schema.Literal(true),
+  supports_sse_upgrade: Schema.Literal(true),
 })
 
-const Http2Schema = union([
-  strictObject({
-    listener_mode: literal('auto'),
-    multiplex_ready: literal(true),
+const Http2Schema = Schema.Union(
+  Schema.Struct({
+    listener_mode: Schema.Literal('auto'),
+    multiplex_ready: Schema.Literal(true),
   }),
-  strictObject({
-    listener_mode: literal('h1_only'),
-    multiplex_ready: literal(false),
+  Schema.Struct({
+    listener_mode: Schema.Literal('h1_only'),
+    multiplex_ready: Schema.Literal(false),
   }),
-  strictObject({
-    listener_mode: literal('h2_only'),
-    multiplex_ready: literal(true),
+  Schema.Struct({
+    listener_mode: Schema.Literal('h2_only'),
+    multiplex_ready: Schema.Literal(true),
   }),
-])
+)
 
-const AgentHealthSchema = strictObject({
+const AgentHealthSchema = Schema.Struct({
   stale_total: NonNegativeIntegerSchema,
   lifecycle_dispatch_rejections_total: NonNegativeIntegerSchema,
 })
 
-const ProjectionDiagnosticsSchema = strictObject({
-  source: literal('cached_surface'),
-  cache_state: union([
-    literal('initializing'),
-    literal('fresh'),
-    literal('stale'),
-  ]),
-  last_success_at: nullable(string()),
-  last_attempt_at: nullable(string()),
-  last_error_at: nullable(string()),
-  stale_reason: nullable(string()),
-  stale_age_ms: nullable(NonNegativeIntegerSchema),
+const ProjectionDiagnosticsSchema = Schema.Struct({
+  source: Schema.Literal('cached_surface'),
+  cache_state: Schema.Literal('initializing', 'fresh', 'stale'),
+  last_success_at: Schema.OptionFromNullOr(Schema.String),
+  last_attempt_at: Schema.OptionFromNullOr(Schema.String),
+  last_error_at: Schema.OptionFromNullOr(Schema.String),
+  stale_reason: Schema.OptionFromNullOr(Schema.String),
+  stale_age_ms: Schema.OptionFromNullOr(NonNegativeIntegerSchema),
 })
 
-// --- Outer schemas ---
-
-const TransportHealthReadySchema = strictObject({
+const TransportHealthReadySchema = Schema.Struct({
   summary: SummarySchema,
   sse: SseOuterSchema,
   grpc: GrpcSchema,
@@ -187,35 +135,26 @@ const TransportHealthReadySchema = strictObject({
   streamable_http: StreamableHttpSchema,
   http2: Http2Schema,
   agent_health: AgentHealthSchema,
-  generated_at: pipe(
-    string(),
-    check((s) => s.length > 0, 'generated_at must be non-empty'),
-  ),
+  generated_at: Schema.NonEmptyString,
   projection_diagnostics: ProjectionDiagnosticsSchema,
 })
 
-const GeneratedAtSchema = pipe(
-  string(),
-  check((s) => s.length > 0, 'generated_at must be non-empty'),
-)
-
-const TransportHealthInitializingSchema = strictObject({
-  status: literal('initializing'),
-  generated_at: GeneratedAtSchema,
-  message: pipe(
-    string(),
-    check((s) => s.length > 0, 'message must be non-empty'),
-  ),
+const TransportHealthInitializingSchema = Schema.Struct({
+  status: Schema.Literal('initializing'),
+  generated_at: Schema.NonEmptyString,
+  message: Schema.NonEmptyString,
   projection_diagnostics: ProjectionDiagnosticsSchema,
 })
 
-const TransportHealthSnapshotSchema = union([
+export const TransportHealthSnapshotSchema = Schema.Union(
   TransportHealthReadySchema,
   TransportHealthInitializingSchema,
-])
+)
 
-export type TransportHealthData = InferOutput<typeof TransportHealthReadySchema>
-export type TransportHealthSnapshot = InferOutput<
+export type TransportHealthData = Schema.Schema.Type<
+  typeof TransportHealthReadySchema
+>
+export type TransportHealthSnapshot = Schema.Schema.Type<
   typeof TransportHealthSnapshotSchema
 >
 
@@ -225,16 +164,41 @@ export function isTransportHealthReady(
   return !('status' in snapshot)
 }
 
-export class TransportHealthSchemaDriftError extends SchemaDriftError {
-  constructor(issues: readonly BaseIssue<unknown>[]) {
-    super('transport-health', issues)
-  }
+export class TransportHealthSchemaDriftError extends Data.TaggedError(
+  'TransportHealthSchemaDriftError',
+)<{
+  readonly domain: 'transport-health'
+  readonly issues: ReadonlyArray<ParseResult.ArrayFormatterIssue>
+  readonly message: string
+}> {}
+
+function schemaDriftError(
+  error: ParseResult.ParseError,
+): TransportHealthSchemaDriftError {
+  const issues = ParseResult.ArrayFormatter.formatErrorSync(error)
+  const details = issues
+    .map(issue => {
+      const path = issue.path.length > 0 ? issue.path.join('.') : '<root>'
+      return `${path}: ${issue.message}`
+    })
+    .join('; ')
+  return new TransportHealthSchemaDriftError({
+    domain: 'transport-health',
+    issues,
+    message: `transport-health schema drift: ${details}`,
+  })
 }
 
-export function parseTransportHealthData(data: unknown): TransportHealthSnapshot {
-  return parseOrThrow(
-    TransportHealthSchemaDriftError,
+const STRICT_PARSE_OPTIONS = {
+  errors: 'all',
+  onExcessProperty: 'error',
+} as const
+
+export function decodeTransportHealthData(
+  data: unknown,
+): Effect.Effect<TransportHealthSnapshot, TransportHealthSchemaDriftError> {
+  return Schema.decodeUnknown(
     TransportHealthSnapshotSchema,
-    data,
-  )
+    STRICT_PARSE_OPTIONS,
+  )(data).pipe(Effect.mapError(schemaDriftError))
 }

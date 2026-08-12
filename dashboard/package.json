@@ -39,6 +39,7 @@
     "@preact/signals": "^2.9.0",
     "cytoscape": "^3.33.3",
     "dompurify": "3.4.13",
+    "effect": "3.22.1",
     "htm": "^3.1.1",
     "lucide-preact": "^1.14.0",
     "marked": "^18.0.3",

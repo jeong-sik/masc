@@ -60,6 +60,10 @@ function isValibotModule(moduleId: string): boolean {
   return moduleId.includes('/node_modules/') && moduleId.includes('/valibot/')
 }
 
+function isEffectModule(moduleId: string): boolean {
+  return moduleId.includes('/node_modules/') && moduleId.includes('/effect/')
+}
+
 describe('dashboard production bundle preloads', () => {
   afterEach(() => {
     while (outDirs.length > 0) {
@@ -99,6 +103,16 @@ describe('dashboard production bundle preloads', () => {
 
     const preloads = modulePreloads(html)
     expect(preloads).toEqual([dashboardHrefForManifestEntry(vendorEntry)])
+    const effectRuntimeEntries = manifestEntriesByName(
+      manifest,
+      'effect-runtime',
+    )
+    expect(effectRuntimeEntries).toHaveLength(1)
+    const effectRuntimeEntry = effectRuntimeEntries[0]?.[1]
+    if (!effectRuntimeEntry) throw new Error('effect-runtime manifest entry missing')
+    expect(preloads).not.toContain(
+      dashboardHrefForManifestEntry(effectRuntimeEntry),
+    )
 
     const outputs = (Array.isArray(buildResult) ? buildResult : [buildResult]) as Rollup.RollupOutput[]
     const chunks = outputs.flatMap(output => output.output)
@@ -113,6 +127,8 @@ describe('dashboard production bundle preloads', () => {
       .map(moduleId => moduleId.replaceAll('\\', '/'))
     expect(allModuleIds.some(isValibotModule)).toBe(true)
     expect(initialModuleIds.some(isValibotModule)).toBe(false)
+    expect(allModuleIds.some(isEffectModule)).toBe(true)
+    expect(initialModuleIds.some(isEffectModule)).toBe(false)
   }, 120_000)
 
   it('reads modulepreloads from parsed link attributes', () => {

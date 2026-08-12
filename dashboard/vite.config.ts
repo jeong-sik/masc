@@ -164,6 +164,9 @@ export default defineConfig(({ command }) => {
             if (normalizedId.includes('/node_modules/mermaid/dist/mermaid.core.mjs')) {
               return 'mermaid-core'
             }
+            if (chunkByPackage(normalizedId, ['effect'])) {
+              return 'effect-runtime'
+            }
             if (chunkByPackage(normalizedId, ['preact', 'htm', '@preact/signals', '@preact/signals-core'])) {
               return 'vendor'
             }

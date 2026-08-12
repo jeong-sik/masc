@@ -2,16 +2,16 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-lock_path="${DUNE_LOCAL_LOCK:-/tmp/me-dune-local.lock}"
-opam_lock_path="${MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock}"
+repo_lock_key="$(printf '%s' "${repo_root}" | cksum | awk '{print $1}')"
+lock_path="${DUNE_LOCAL_LOCK:-${TMPDIR:-/tmp}/masc-dune-${UID:-$(id -u)}-${repo_lock_key}.lock}"
 
 usage() {
   cat <<'USAGE'
 Usage: scripts/dune-local.sh [dune-subcommand] [args...]
 
 Local Dune wrapper for multi-agent development:
-  - serializes local Dune invocations with a machine-wide lock
-  - serializes opam switch validation with external dependency pin mutations
+  - serializes Dune invocations only inside the same worktree
+  - shares one read lease across builds while excluding opam switch mutations
   - defaults local concurrency to DUNE_JOBS, or 2
   - disables the shared Dune artifact cache by default for local builds
   - injects --root <repo-root> unless --root is already present
@@ -21,13 +21,9 @@ Local Dune wrapper for multi-agent development:
 
 Set MASC_DUNE_THROTTLE=0 to bypass the local lock.
 Set MASC_DUNE_CACHE=enabled or enabled-except-user-rules to opt into the shared Dune cache.
-Set MASC_SKIP_OPAM_LOCK=1 to bypass the shared opam switch lock.
-Set MASC_OPAM_LOCK_PATH=/path/to/lock to override the shared opam lock path.
-Set MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=seconds to bound opam-lock wait after the Dune lock (0 = wait forever).
 Set MASC_DUNE_LOCK_DIAG=0 to suppress best-effort lock holder diagnostics.
 Set MASC_DUNE_DRY_RUN=1 to print the command without running it.
 Set MASC_DUNE_ALLOW_LIVE_BUILD_LOCK=1 to wait behind a live _build/.lock holder.
-Set MASC_DUNE_ALLOW_BARE_DUNE=1 to run despite a live Dune process outside this wrapper.
 Set MASC_SKIP_DEPS_CHECK=1 to skip the required-findlib guard.
 Set MASC_SKIP_OCAML_VERSION_CHECK=1 to skip the exact OCaml toolchain guard.
 USAGE
@@ -152,119 +148,8 @@ _print_lock_holders() {
   done <<< "$pids"
 }
 
-_list_unwrapped_dune_processes() {
-  command -v ps >/dev/null 2>&1 || return 0
-
-  ps ax -o pid=,ppid=,command= 2>/dev/null \
-    | awk '
-        /^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+/ {
-          pid = $1
-          ppid = $2
-          $1 = ""
-          $2 = ""
-          sub(/^[[:space:]]+/, "", $0)
-          parent[pid] = ppid
-          cmd[pid] = $0
-        }
-
-        function has_wrapper_ancestor(pid, cur, depth) {
-          cur = pid
-          depth = 0
-          while ((cur in cmd) && depth < 64) {
-            if (cmd[cur] ~ /dune-local[.]sh/ ||
-                cmd[cur] ~ /me-dune-local[.]lock/ ||
-                cmd[cur] ~ /MASC_DUNE_LOCK_HELD=1/) {
-              return 1
-            }
-            cur = parent[cur]
-            depth++
-          }
-          return 0
-        }
-
-        function basename(token, parts, n) {
-          n = split(token, parts, "/")
-          return parts[n]
-        }
-
-        function is_dune_subcommand(token) {
-          return token == "build" || token == "test" || token == "exec" || token == "runtest" || token == "clean"
-        }
-
-        function is_dune_option(token) {
-          return token ~ /^--[[:alnum:]][[:alnum:]_-]*(=.*)?$/ ||
-                 token ~ /^-[[:alnum:]][[:alnum:]_-]*$/
-        }
-
-        function dune_subcommand_index(argc, argv, dune_index, i, token) {
-          i = dune_index + 1
-          while (i <= argc) {
-            token = argv[i]
-            if (is_dune_subcommand(token)) {
-              return i
-            } else if (token ~ /^--[[:alnum:]][[:alnum:]_-]*=/) {
-              i++
-            } else if (is_dune_option(token) && i + 1 <= argc && !is_dune_subcommand(argv[i + 1]) && argv[i + 1] !~ /^-/) {
-              i += 2
-            } else if (is_dune_option(token)) {
-              i++
-            } else {
-              return 0
-            }
-          }
-          return 0
-        }
-
-        function is_dune_command(text, argv, argc, i) {
-          argc = split(text, argv, /[[:space:]]+/)
-          if (argc < 2) {
-            return 0
-          }
-          if (basename(argv[1]) == "dune") {
-            return dune_subcommand_index(argc, argv, 1) > 0
-          }
-          if (basename(argv[1]) == "opam" && argv[2] == "exec") {
-            for (i = 3; i <= argc; i++) {
-              if (basename(argv[i]) == "dune") {
-                return dune_subcommand_index(argc, argv, i) > 0
-              }
-            }
-          }
-          return 0
-        }
-
-        END {
-          for (pid in cmd) {
-            if (is_dune_command(cmd[pid]) && !has_wrapper_ancestor(pid)) {
-              printf "%s %s %s\n", pid, parent[pid], cmd[pid]
-            }
-          }
-        }'
-}
-
-_check_unwrapped_dune_processes() {
-  [[ "${GITHUB_ACTIONS:-}" != "true" ]] || return 0
-  [[ "${MASC_DUNE_DRY_RUN:-0}" != "1" ]] || return 0
-  [[ "${MASC_DUNE_ALLOW_BARE_DUNE:-0}" != "1" ]] || return 0
-  [[ "${_subcommand}" != "clean" ]] || return 0
-
-  local rows
-  rows="$(_list_unwrapped_dune_processes || true)"
-  [[ -n "$rows" ]] || return 0
-
-  printf '[dune-local] live Dune process outside scripts/dune-local.sh detected:\n' >&2
-  printf '%s\n' "$rows" | sed 's/^/[dune-local]   /' >&2
-  printf '[dune-local] refusing to start another local build while the machine-wide Dune lock is bypassed\n' >&2
-  printf '[dune-local] stop the bare Dune process, rerun it via scripts/dune-local.sh, or set MASC_DUNE_ALLOW_BARE_DUNE=1 to proceed anyway\n' >&2
-  exit 75
-}
-
-_check_unwrapped_dune_processes
-
-# Acquire the build throttle before the opam-switch lock.  The opam lock is
-# intentionally held while the active build uses the shared switch, but queued
-# builds must not hold it while waiting for the Dune throttle; otherwise stale
-# worktrees can block pin repair before they are actually compiling.
+# This throttle is scoped by the canonical worktree path. Dune already gives
+# each worktree its own build directory, so unrelated Keepers do not queue here.
 if _needs_dune_lock; then
   printf '[dune-local] waiting for lock %s\n' "$lock_path" >&2
   _print_lock_holders "$lock_path" "Dune"
@@ -279,104 +164,19 @@ if _needs_dune_lock; then
   fi
 fi
 
-_check_unwrapped_dune_processes
-
-_needs_opam_lock() {
+_needs_opam_read_lease() {
   [[ "${GITHUB_ACTIONS:-}" != "true" ]] || return 1
-  # MASC_OPAM_LOCK=0 was retired (masc#25123 Wave 2): MASC_SKIP_OPAM_LOCK=1
-  # is the single opt-out. Warn so an operator habit does not silently stop
-  # working.
-  if [[ "${MASC_OPAM_LOCK:-1}" == "0" ]]; then
-    echo "[dune-local] MASC_OPAM_LOCK is retired and ignored; use MASC_SKIP_OPAM_LOCK=1" >&2
-  fi
-  [[ "${MASC_SKIP_OPAM_LOCK:-0}" != "1" ]] || return 1
   [[ "${MASC_DUNE_DRY_RUN:-0}" != "1" ]] || return 1
   [[ "${_subcommand}" != "clean" ]] || return 1
-  [[ "${MASC_OPAM_LOCK_HELD:-0}" != "1" ]] || return 1
+  [[ "${MASC_OPAM_READ_LEASE_HELD:-0}" != "1" ]] || return 1
   command -v opam >/dev/null 2>&1 || return 1
   return 0
 }
 
-if _needs_opam_lock; then
-  printf '[dune-local] waiting for opam switch lock %s\n' "$opam_lock_path" >&2
-  _print_lock_holders "$opam_lock_path" "opam switch"
-  # Apply the bounded-wait deadlock guard whenever this invocation is
-  # already holding the Dune lock AND the operator opted in by setting
-  # MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=<positive integer>. Default is
-  # unset, which preserves the historical "wait indefinitely" semantics
-  # so existing operators are not surprised by builds that suddenly
-  # fail under long-lived opam lock holders.
-  opam_bounded_wait=0
-  opam_lock_timeout=""
-  if [[ "${MASC_DUNE_LOCK_HELD:-0}" = "1" \
-        && -n "${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT:-}" ]]; then
-    opam_lock_timeout="${MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT}"
-    if ! [[ "$opam_lock_timeout" =~ ^[0-9]+$ ]]; then
-      printf '[dune-local] invalid MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=%q; expected non-negative integer seconds\n' \
-        "$opam_lock_timeout" >&2
-      exit 2
-    fi
-    opam_lock_timeout="$((10#$opam_lock_timeout))"
-    if (( opam_lock_timeout > 0 )); then
-      opam_bounded_wait=1
-    fi
-  fi
-  if command -v lockf >/dev/null 2>&1; then
-    if [[ "$opam_bounded_wait" = "1" ]]; then
-      set +e
-      env_cmd="${ENV_CMD:-/usr/bin/env}"
-      lockf -k -t "$opam_lock_timeout" "$opam_lock_path" \
-        "$env_cmd" MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
-      status=$?
-      set -e
-      if [[ "$status" -eq 0 ]]; then
-        exit 0
-      fi
-      if [[ "$status" -eq 75 ]]; then
-        printf '[dune-local] opam switch lock stayed busy for %ss after acquiring Dune lock; releasing Dune lock to avoid mixed lock-order deadlock\n' \
-          "$opam_lock_timeout" >&2
-        printf '[dune-local] retry after older dune-local invocations drain, or unset MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT (or set =0) to wait indefinitely\n' >&2
-      fi
-      exit "$status"
-    fi
-    env_cmd="${ENV_CMD:-/usr/bin/env}"
-    exec lockf -k "$opam_lock_path" "$env_cmd" MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
-  elif command -v flock >/dev/null 2>&1; then
-    if [[ "$opam_bounded_wait" = "1" ]]; then
-      # flock(1) honors -w/--timeout to bound the wait; without it the
-      # mixed-lock-order deadlock the lockf branch above already handles
-      # would resurface on flock-only hosts (Linux without lockf).
-      set +e
-      env_cmd="${ENV_CMD:-/usr/bin/env}"
-      flock -w "$opam_lock_timeout" "$opam_lock_path" \
-        "$env_cmd" MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
-      status=$?
-      set -e
-      if [[ "$status" -eq 0 ]]; then
-        exit 0
-      fi
-      # flock returns 1 when the lock cannot be acquired within the
-      # timeout (vs >1 for command failures). Match the lockf message
-      # so operators see consistent diagnostics across hosts.
-      if [[ "$status" -eq 1 ]]; then
-        printf '[dune-local] opam switch lock stayed busy for %ss after acquiring Dune lock; releasing Dune lock to avoid mixed lock-order deadlock\n' \
-          "$opam_lock_timeout" >&2
-        printf '[dune-local] retry after older dune-local invocations drain, or unset MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT (or set =0) to wait indefinitely\n' >&2
-      fi
-      exit "$status"
-    fi
-    env_cmd="${ENV_CMD:-/usr/bin/env}"
-    exec flock "$opam_lock_path" "$env_cmd" MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
-  elif [[ "$dune_lock_warning_emitted" != "1" ]]; then
-    # Skip the warning when the Dune-lock branch above already printed
-    # an equivalent "neither lockf nor flock found" message in this
-    # process. The Dune-lock branch tracks that via the local
-    # [dune_lock_warning_emitted] flag (not MASC_DUNE_LOCK_HELD, which
-    # is only set when the Dune lock was actually acquired); using the
-    # flag avoids the case where opam is available but neither lock
-    # tool is, where the env-var check would let both warnings print.
-    printf '[dune-local] warning: neither lockf nor flock found; opam switch checks are unlocked\n' >&2
-  fi
+if _needs_opam_read_lease; then
+  exec "$(dirname "${script_path}")/opam-switch-rw-lock.sh" \
+    read -- "${ENV_CMD:-/usr/bin/env}" MASC_OPAM_READ_LEASE_HELD=1 \
+    "${script_path}" "$@"
 fi
 
 if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
@@ -403,9 +203,8 @@ fi
 # socket, or exclusive-lock spin on a stale file).
 #
 # This guard removes stale artifacts when no live Dune process holds them.
-# It runs after the machine-wide dune-local lock is acquired, so no other
-# dune-local.sh wrapper is active — but a bare `dune` invocation outside
-# the wrapper could still hold them.
+# It runs after the worktree-local wrapper lock is acquired. Other worktrees
+# use independent build directories and do not participate in this decision.
 #
 # Skipped when:
 #   GITHUB_ACTIONS=true     – CI builds are clean-workspace

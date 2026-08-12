@@ -52,7 +52,8 @@ masc keeper-github status --keeper NAME [--hostname HOST] [--base-path PATH]
 masc keeper-github logout --keeper NAME [--hostname HOST] [--base-path PATH]
 ```
 
-The Keeper runtime panel exposes status, refresh, and `GitHub 로그인`. The POST
+The Keeper config panel (권한·샌드박스 tab) exposes status, refresh, and
+`GitHub 로그인`. The POST
 response streams secret-redacted stdout/stderr from `gh`. The browser only
 recognizes generic HTTP URLs for links; it does not parse device codes or GitHub
 prose. Closing the modal aborts the request.

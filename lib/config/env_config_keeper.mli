@@ -45,6 +45,27 @@ module KeeperPollIntervals : sig
   val crash_persistence_drain_sec : float
 end
 
+(** {1 Autonomous turns} *)
+
+module KeeperAutonomous : sig
+  val max_wake_prompt_bytes : int
+  (** Byte bound on a wake prompt. The value is appended to the durable
+      checkpoint every autonomous turn, so its cost recurs for the life of the
+      conversation rather than being paid once. *)
+
+  val validate_wake_prompt : string -> (string, string) result
+  (** Trims, then rejects blank and over-bound values with an operator-facing
+      reason. Shared by [MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT] and the per-keeper
+      [autonomous_wake_prompt], so the two authoring surfaces cannot accept
+      different values. *)
+
+  val wake_prompt_opt : unit -> string option
+  (** Fleet wake prompt, [None] when unset. Raises
+      {!Env_config_core.Config_error} on a set-but-invalid value rather than
+      falling back, so a typo surfaces at read time instead of silently
+      restoring the default. *)
+end
+
 (** {1 Keeper runtime} *)
 
 module KeeperRuntime : sig

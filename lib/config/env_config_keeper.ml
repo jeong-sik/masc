@@ -136,6 +136,54 @@ module KeeperPollIntervals = struct
   ;;
 end
 
+(** {1 Autonomous turn configuration} *)
+
+module KeeperAutonomous = struct
+  (** Upper bound on the wake prompt, in bytes.
+
+      This value is not a system prompt: it is appended to the durable
+      checkpoint as the user turn of every autonomous cycle, so its cost is
+      paid again on each subsequent turn that replays the history. A long
+      operator string therefore consumes prompt budget permanently rather
+      than once, which is why the bound is enforced where the value is read
+      instead of being left to the operator's judgement. *)
+  let max_wake_prompt_bytes = 2048
+
+  (** Shared contract for both authoring surfaces -- this env var and the
+      per-keeper [autonomous_wake_prompt] in keeper TOML. [Error] carries an
+      operator-facing reason; blank is rejected rather than folded into the
+      default, so "unset" and "set to nothing" stay distinguishable. *)
+  let validate_wake_prompt raw =
+    let trimmed = String.trim raw in
+    if String.equal trimmed ""
+    then Error "autonomous wake prompt must not be blank"
+    else if String.length trimmed > max_wake_prompt_bytes
+    then
+      Error
+        (Printf.sprintf
+           "autonomous wake prompt is %d bytes, over the %d-byte bound (it is \
+            appended to the durable checkpoint on every autonomous turn)"
+           (String.length trimmed)
+           max_wake_prompt_bytes)
+    else Ok trimmed
+  ;;
+
+  (** Fleet-wide wake prompt, or [None] when unset. Read as a function: the
+      value is steerable through the boot override store, and a keeper process
+      outlives module-load time. *)
+  let wake_prompt_opt () =
+    match Env_config_core.raw_value_opt "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT" with
+    | None -> None
+    | Some raw ->
+      (match validate_wake_prompt raw with
+       | Ok value -> Some value
+       | Error reason ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT: %s" reason)))
+  ;;
+end
+
 (** {1 Keeper Runtime Configuration} *)
 
 module KeeperRuntime = struct

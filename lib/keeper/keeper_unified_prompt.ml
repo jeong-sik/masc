@@ -25,8 +25,39 @@ type turn_prompt_parts = {
 
 (* Ordinary user input for an autonomous continuation. The durable checkpoint
    carries this cue and the assistant/tool suffix in normal conversation order;
-   the fresh observation frame alone rides [world_state] and stays ephemeral. *)
+   the fresh observation frame alone rides [world_state] and stays ephemeral.
+
+   This is the last resort, not the only value: see
+   [effective_autonomous_wake_prompt]. Nothing classifies a turn by matching
+   this string -- autonomy is a typed property of the turn -- and nothing may
+   start, because the operator can change it. *)
 let autonomous_wake_marker = "Continue."
+
+(* keeper profile, else fleet setting, else the literal above.
+
+   The two configured sources are deliberately different in kind. The fleet
+   value answers "how is a keeper woken here", the keeper value answers "what
+   is this keeper always being asked", and a keeper that states neither should
+   read the same as it did before this was configurable. Both are validated at
+   their own parse boundary, so an invalid value never reaches this point --
+   resolution stays total and cannot fail mid-prompt. *)
+let effective_autonomous_wake_prompt
+      ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
+      ()
+  =
+  (* DET-OK: total resolution over two known sources, then a literal. *)
+  let fleet_or_literal () =
+    Option.value
+      (Env_config_keeper.KeeperAutonomous.wake_prompt_opt ())
+      ~default:autonomous_wake_marker
+  in
+  match profile_defaults with
+  | Some d ->
+    (match d.autonomous_wake_prompt with
+     | Some prompt -> prompt
+     | None -> fleet_or_literal ())
+  | None -> fleet_or_literal ()
+;;
 
 let format_pending_messages
       (messages : Keeper_world_observation_message_scope.pending_message list)
@@ -1228,7 +1259,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
      retrieve them; call a tool when you need to look something up or act.\n\n"
     ^ Keeper_context_layers.assemble ~content_of
   in
-  let user_message = autonomous_wake_marker in
+  let user_message = effective_autonomous_wake_prompt ?profile_defaults () in
   { system_prompt; world_state; user_message }
 ;;
 

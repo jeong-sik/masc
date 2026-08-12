@@ -7,6 +7,7 @@ include Keeper_types_profile_agent_core_env
 let keeper_toml_field_names =
   [ "name"
   ; "instructions"
+  ; "autonomous_wake_prompt"
   ; "autoboot_enabled"
   ; "mention_targets"
   ; "proactive_enabled"
@@ -58,7 +59,7 @@ let toml_value_kind = function
 
 let validate_known_keeper_field_types doc =
   let string_fields =
-    [ "name"; "instructions"; "sandbox_profile"
+    [ "name"; "instructions"; "autonomous_wake_prompt"; "sandbox_profile"
     ; "sandbox_image"; "network_mode"; "multimodal_policy" ]
   in
   let bool_fields =
@@ -184,9 +185,25 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       Keeper_config.validate_max_context_override_value value
       |> Result.map Option.some
   in
+  (* Same contract the fleet env var is held to, so an operator cannot author a
+     blank or unbounded wake prompt on one surface and a valid one on the other. *)
+  let autonomous_wake_prompt_result =
+    match str "autonomous_wake_prompt" with
+    | None -> Ok None
+    | Some value ->
+      Env_config_keeper.KeeperAutonomous.validate_wake_prompt value
+      |> Result.map Option.some
+      |> Result.map_error (fun reason -> "keeper.autonomous_wake_prompt: " ^ reason)
+  in
+  let max_context_override_result =
+    Result.bind max_context_override_result (fun max_context_override ->
+      Result.map
+        (fun autonomous_wake_prompt -> max_context_override, autonomous_wake_prompt)
+        autonomous_wake_prompt_result)
+  in
   Result.bind result (fun () ->
     Result.map
-      (fun max_context_override ->
+      (fun (max_context_override, autonomous_wake_prompt) ->
       {
         id = None;
         manifest_path = None;
@@ -204,6 +221,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           Option.bind (str "network_mode") network_mode_of_string;
         multimodal_policy =
           Option.bind (str "multimodal_policy") multimodal_policy_of_string;
+        autonomous_wake_prompt;
         active_goal_ids =
           if has "active_goal_ids" then
             Some (normalize_name_list (strs "active_goal_ids"))
@@ -241,6 +259,8 @@ let merge_keeper_profile_defaults
     id = prefer overlay.id base.id;
     manifest_path = prefer overlay.manifest_path base.manifest_path;
     instructions = prefer overlay.instructions base.instructions;
+    autonomous_wake_prompt =
+      prefer overlay.autonomous_wake_prompt base.autonomous_wake_prompt;
     autoboot_enabled = prefer overlay.autoboot_enabled base.autoboot_enabled;
     mention_targets =
       merge_string_list ~base:base.mention_targets overlay.mention_targets;

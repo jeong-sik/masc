@@ -44,6 +44,7 @@ import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
+import { refreshDevTokenAfterAuthError } from './api/dev-token'
 import { timeBoardRequest } from './board-metrics'
 import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
@@ -779,6 +780,30 @@ function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | nu
   }
 }
 
+/* The shell reports a rejected credential inside the body of a 200 response
+   — `token_valid: false` plus the typed `auth_error_code` — because the
+   loopback read contract stays available to an unauthenticated caller. The
+   MCP client recovers from a rejected token by inspecting the auth error
+   envelope of a *failed* call (`api/mcp.ts`), so a tab whose traffic is the
+   shell/bootstrap poll never reaches that path and re-sends the same
+   rejected token for the life of the tab.
+
+   Measured on the live fleet 2026-08-12: one browser session re-sent a
+   single rejected token (`sha256[0:8] = 75598b82`) every 6 minutes across
+   two server restarts, and the server answered each one with
+   `[silent:dashboard_actor_fallback] outcome=error err_kind=token_mismatch`
+   — 7 in the 33 minutes sampled, with no terminating condition.
+
+   `refreshDevTokenAfterAuthError` owns the whole policy: it ignores codes
+   that a new token cannot fix, refuses to touch a manually pasted token,
+   deduplicates concurrent attempts, and reports failure when the refetched
+   token is identical, so a token that is rejected for some other reason
+   cannot drive a refresh loop. */
+function recoverFromRejectedShellAuth(auth: DashboardShellAuthSummary | null): void {
+  if (auth === null || auth.token_valid || !auth.token_present) return
+  void refreshDevTokenAfterAuthError(auth.auth_error_code)
+}
+
 export function hydrateShellSnapshot(
   data: DashboardShellResponse,
   opts?: { light?: boolean; preserveAuth?: boolean },
@@ -787,6 +812,7 @@ export function hydrateShellSnapshot(
   const preserveAuth = opts?.preserveAuth === true
   const normalizedAuth = normalizeShellAuthSummary(data.auth)
   if (!preserveAuth) {
+    recoverFromRejectedShellAuth(normalizedAuth)
     setCanonicalDashboardActor(
       normalizedAuth?.token_valid
         ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null

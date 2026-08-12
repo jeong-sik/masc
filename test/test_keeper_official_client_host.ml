@@ -248,7 +248,9 @@ let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
     check bool "second call continues" true (Option.is_none second.abort_turn);
     (match third.abort_turn with
      | Some (Repeated_tool_call { tool_name; repeated_count }) ->
-       check string "repeated tool" "masc_probe" tool_name;
+       (* [one_dynamic_tool] names its fixture "effect"; "masc_probe" belongs
+          to the hand-built stop below, which never goes through the host. *)
+       check string "repeated tool" "effect" tool_name;
        check int "repeat count" 3 repeated_count
      | None -> fail "reordered object did not produce a typed host stop");
     check (option string) "host stop is not a terminal error" None !terminal_error)

@@ -25,17 +25,34 @@ type turn_prompt_parts = {
           to the persisted message history. *)
   user_message : string;
       (** Current user-turn input. Operator utterances are durable. For an
-          autonomous continuation this is {!autonomous_wake_marker}, which is
-          also durable: each cycle is an ordinary next user turn followed by
-          its assistant/tool suffix. HITL resolutions are appended by the turn
-          driver. *)
+          autonomous continuation this is
+          {!effective_autonomous_wake_prompt}, which is also durable: each
+          cycle is an ordinary next user turn followed by its assistant/tool
+          suffix. HITL resolutions are appended by the turn driver. *)
 }
 
 val autonomous_wake_marker : string
-(** Durable input for an autonomous continuation. It is appended to the same
-    checkpoint as the following assistant/tool suffix. The fresh observation
-    frame lives separately in {!turn_prompt_parts.world_state} and is never
-    persisted. *)
+(** Last-resort input for an autonomous continuation, used when neither the
+    keeper nor the fleet configures one. It is appended to the same checkpoint
+    as the following assistant/tool suffix. The fresh observation frame lives
+    separately in {!turn_prompt_parts.world_state} and is never persisted.
+
+    Do not compare a turn's [user_message] against this to decide whether the
+    turn was autonomous: operators can change the value, and that classifier
+    would then be wrong for exactly the deployments that configured it. *)
+
+val effective_autonomous_wake_prompt :
+  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  unit ->
+  string
+(** Resolves the wake prompt: the keeper's [autonomous_wake_prompt], else the
+    fleet [autonomous.wake_prompt] / [MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT], else
+    {!autonomous_wake_marker}. Total -- both configured sources are validated
+    where they are parsed, so this cannot fail while a prompt is being built.
+
+    Changing either source affects turns taken after the change. Earlier turns
+    keep the wording they were woken with, because the checkpoint is history
+    rather than a view. *)
 
 val format_current_task : Masc_domain.task -> string
 

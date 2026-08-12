@@ -146,6 +146,15 @@ let all =
       ~category:"lifecycle"
       "Global kill-switch for autonomous keeper activation"
   ; setting
+      ~env_name:"MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT"
+      ~exposure:(Toml_and_env "autonomous.wake_prompt")
+      ~value_kind:String
+      ~default:"Continue."
+      ~reload_class:Next_turn
+      ~consumers:[ "Keeper_unified_prompt" ]
+      ~category:"lifecycle"
+      "User message an autonomous turn is woken with, before any keeper override"
+  ; setting
       ~range:(float_range ~min:0.0 ())
       ~lifecycle:
         (retired

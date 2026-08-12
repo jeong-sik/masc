@@ -412,6 +412,77 @@ let test_absent_session_identity_is_rejected () =
   | Error _ -> ()
 ;;
 
+(* #28413. The wake prompt is the user turn every autonomous cycle is woken
+   with, and it is kept by the durable checkpoint, so it is worth configuring
+   per keeper -- and worth bounding, since its cost recurs on every later turn
+   that replays the history. *)
+
+let wake_prompt_profile prompt =
+  { Keeper_types_profile.empty_keeper_profile_defaults with
+    autonomous_wake_prompt = prompt
+  }
+;;
+
+let test_wake_prompt_validation_rejects_blank_and_unbounded () =
+  let validate = Env_config_keeper.KeeperAutonomous.validate_wake_prompt in
+  Alcotest.(check bool)
+    "blank is rejected rather than folded into the default"
+    true
+    (Result.is_error (validate "   "));
+  Alcotest.(check bool) "empty is rejected" true (Result.is_error (validate ""));
+  let bound = Env_config_keeper.KeeperAutonomous.max_wake_prompt_bytes in
+  Alcotest.(check bool)
+    "a value at the bound is admitted"
+    true
+    (Result.is_ok (validate (String.make bound 'x')));
+  Alcotest.(check bool)
+    "one byte over the bound is rejected"
+    true
+    (Result.is_error (validate (String.make (bound + 1) 'x')));
+  match validate "  ask a better question  " with
+  | Error reason -> Alcotest.failf "a valid prompt was rejected: %s" reason
+  | Ok value ->
+    Alcotest.(check string) "surrounding whitespace is trimmed"
+      "ask a better question" value
+;;
+
+(* Ordering matters: the literal case must run before this process sets the
+   fleet variable, because OCaml's Unix has no unsetenv to undo it. *)
+let test_wake_prompt_resolution_order () =
+  let resolve ?profile_defaults () =
+    Keeper_unified_prompt.effective_autonomous_wake_prompt ?profile_defaults ()
+  in
+  Alcotest.(check string)
+    "no keeper and no fleet value resolves to the literal"
+    Keeper_unified_prompt.autonomous_wake_marker
+    (resolve ());
+  Alcotest.(check string)
+    "a keeper value is used even with no fleet value"
+    "keeper asks"
+    (resolve ~profile_defaults:(wake_prompt_profile (Some "keeper asks")) ());
+  Unix.putenv "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT" "fleet asks";
+  Alcotest.(check string)
+    "a keeper without its own value inherits the fleet value"
+    "fleet asks"
+    (resolve ~profile_defaults:(wake_prompt_profile None) ());
+  Alcotest.(check string)
+    "no profile at all still inherits the fleet value"
+    "fleet asks"
+    (resolve ());
+  Alcotest.(check string)
+    "a keeper value overrides the fleet value"
+    "keeper asks"
+    (resolve ~profile_defaults:(wake_prompt_profile (Some "keeper asks")) ());
+  (* A set-but-invalid fleet value must surface, not silently restore the
+     default -- otherwise a typo reads as "configuration had no effect". *)
+  Unix.putenv "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT" "   ";
+  Alcotest.check_raises
+    "a blank fleet value raises instead of falling back"
+    (Env_config_core.Config_error
+       "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT: autonomous wake prompt must not be blank")
+    (fun () -> ignore (resolve ()))
+;;
+
 let () =
   Alcotest.run "keeper_autonomous_turn_source"
     [ ( "load_recent"
@@ -441,5 +512,11 @@ let () =
             test_session_identity_mismatch_is_rejected
         ; Alcotest.test_case "rejects an absent session identity" `Quick
             test_absent_session_identity_is_rejected
+        ] )
+    ; ( "wake_prompt"
+      , [ Alcotest.test_case "rejects blank and over-bound values" `Quick
+            test_wake_prompt_validation_rejects_blank_and_unbounded
+        ; Alcotest.test_case "keeper then fleet then literal (#28413)" `Quick
+            test_wake_prompt_resolution_order
         ] )
     ]

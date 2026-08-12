@@ -425,6 +425,31 @@ let test_complete_request_wire_observer_sees_exact_sync_body () =
   | Exit -> ()
 ;;
 
+let test_complete_invalid_uri_rejects_before_wire_observation () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let observed_request_count = ref 0 in
+  let request_wire_observer _observation =
+    incr observed_request_count;
+    Ok ()
+  in
+  match
+    Complete.complete
+      ~sw
+      ~net:env#net
+      ~request_wire_observer
+      ~config:(make_config "http://")
+      ~messages
+      ()
+  with
+  | Error (Http_client.NetworkError { kind = Http_client.Unknown; _ }) ->
+    check int "invalid URI produces no wire observation" 0 !observed_request_count
+  | Ok _ -> fail "invalid URI reached provider dispatch"
+  | Error _ -> fail "invalid URI returned the wrong typed error"
+;;
+
 let test_complete_stream_rechecks_limit_after_final_wire_injection () =
   Eio_main.run
   @@ fun env ->
@@ -3455,6 +3480,10 @@ let () =
             "wire observer sees exact sync body"
             `Quick
             test_complete_request_wire_observer_sees_exact_sync_body
+        ; test_case
+            "invalid URI rejects before wire observation"
+            `Quick
+            test_complete_invalid_uri_rejects_before_wire_observation
         ; test_case
             "stream body limit includes final wire injection"
             `Quick

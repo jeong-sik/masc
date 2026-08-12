@@ -19,22 +19,26 @@ let non_streaming_body_timeout timeout_s =
     }
 ;;
 
-let with_body_deadline body_deadline f =
+type 'a body_deadline_outcome =
+  | Body_completed of 'a
+  | Body_deadline_exceeded of float
+
+let run_with_body_deadline body_deadline f =
   match body_deadline with
-  | Http_client.Unbounded -> f ()
+  | Http_client.Unbounded -> Body_completed (f ())
   | Http_client.Bounded (clock, timeout_s) ->
     (match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (f ())) with
-     | Ok result -> result
-     | Error `Timeout -> Error (non_streaming_body_timeout timeout_s))
+     | Ok result -> Body_completed result
+     | Error `Timeout -> Body_deadline_exceeded timeout_s)
 ;;
 
-let%test "with_body_deadline does not relabel a nested timeout exception" =
+let%test "run_with_body_deadline does not relabel a nested timeout exception" =
   Eio_main.run
   @@ fun env ->
   let deadline = Http_client.Bounded (Eio.Stdenv.clock env, 1.0) in
-  match with_body_deadline deadline (fun () -> raise Eio.Time.Timeout) with
+  match run_with_body_deadline deadline (fun () -> raise Eio.Time.Timeout) with
   | exception Eio.Time.Timeout -> true
-  | (exception _) | Ok _ | Error _ -> false
+  | (exception _) | Body_completed _ | Body_deadline_exceeded _ -> false
 ;;
 
 let provider_parse_failure ?parser message =
@@ -136,8 +140,43 @@ let parse_sync_response ~http_codec ~provider_kind body =
          })
 ;;
 
+type resolved_sync_transport =
+  | Sync_response of Http_client.raw_sync_response
+  | Sync_failure_before_response of Http_client.http_error
+  | Sync_failure_after_response of
+      { status : int
+      ; error : Http_client.http_error
+      }
+
+let resolve_sync_transport = function
+  | Ok (receipt : Http_client.sync_transport_receipt) -> Sync_response receipt.response
+  | Error (Http_client.Before_dispatch_error error)
+  | Error (Http_client.Dispatch_started_error error) ->
+    Sync_failure_before_response error
+  | Error (Http_client.Response_received_error { status; error }) ->
+    Sync_failure_after_response { status; error }
+;;
+
+let%test "response-received transport failures retain their observed status" =
+  let error =
+    Http_client.ProviderFailure
+      { kind = Http_client.Response_body_too_large { limit_bytes = 16 }
+      ; message = "too large"
+      }
+  in
+  match
+    resolve_sync_transport
+      (Error (Http_client.Response_received_error { status = 200; error }))
+  with
+  | Sync_failure_after_response
+      { status = 200; error = Http_client.ProviderFailure _ } -> true
+  | Sync_response _
+  | Sync_failure_before_response _
+  | Sync_failure_after_response _ -> false
+;;
+
 let complete_http
-      ~sw
+      ~sw:_
       ~net
       ?clock
       ?(on_http_status :
@@ -264,62 +303,84 @@ let complete_http
                })
         , None ))
       else (
-        let provider_label = provider_name in
-        (match admitted_body with
-         | Some admitted_body ->
-           observe_pre_dispatch_serialization
-             ?request_wire_observer
-             (Prepared_completion_request.admitted_body_evidence admitted_body)
-         | None ->
-           observe_request_wire
-             ?request_wire_observer
-             ~capture_id
-             ~config
-             ~http_codec
-             ~stream:false
-             ~body:body_str
-             ());
-        Diag.debug
-          "complete"
-          "%s %s → %s (%d bytes)"
-          provider_label
-          config.model_id
-          url
-          body_len;
-        let latency_counter = start_latency_counter ?clock () in
-        let post_sync_call () =
-          Http_client.post_sync
-            ?cache:connection_cache
-            ~sw
-            ~net
-            ?clock
-            ~url
-            ~headers:(config.headers @ Provider_config.auth_headers_for_config config)
-            ~body:body_str
-            ()
+        let base_headers =
+          config.headers @ Provider_config.auth_headers_for_config config
         in
-        (* Body-level deadline (since 0.195.0): wraps the entire
-           [Http_client.post_sync] in [Eio.Time.with_timeout] so a slow
-           non-streaming provider (no progress on the wire, or progress
-           slower than caller can tolerate) cannot hang indefinitely.
-           Streaming calls deliberately use [stream_idle_timeout_s] instead
-           of a total body deadline.
+        let request_headers =
+          ("content-length", string_of_int body_len)
+          :: (match connection_cache with
+              | Some _ -> base_headers
+              | None -> ("connection", "close") :: base_headers)
+        in
+        match
+          Http_client.prepare_sync_request
+            ~url
+            ~headers:request_headers
+            ~body:body_str
+        with
+        | Error error -> Error error, None
+        | Ok request ->
+          let provider_label = provider_name in
+          (match admitted_body with
+           | Some admitted_body ->
+             observe_pre_dispatch_serialization
+               ?request_wire_observer
+               (Prepared_completion_request.admitted_body_evidence admitted_body)
+           | None ->
+             observe_request_wire
+               ?request_wire_observer
+               ~capture_id
+               ~config
+               ~http_codec
+               ~stream:false
+               ~body:body_str
+               ());
+          Diag.debug
+            "complete"
+            "%s %s → %s (%d bytes)"
+            provider_label
+            config.model_id
+            url
+            body_len;
+          let latency_counter = start_latency_counter ?clock () in
+          let post_sync_call () =
+            Http_client.dispatch_sync_request
+              ?cache:connection_cache
+              ~net
+              request
+              ()
+          in
+          (* Body-level deadline (since 0.195.0): wraps the entire validated
+             one-dispatch transport in [Eio.Time.with_timeout] so a slow
+             non-streaming provider (no progress on the wire, or progress
+             slower than caller can tolerate) cannot hang indefinitely.
+             Streaming calls deliberately use [stream_idle_timeout_s] instead
+             of a total body deadline.
 
-           No silent failure: on expiry we return a structured
+             No silent failure: on expiry we return a structured
              [TimeoutError { phase = Non_streaming_body }] whose message
              identifies the body deadline, so retry layers treat it
              as retryable with operator-visible attribution. *)
-        let post_response = with_body_deadline body_deadline post_sync_call in
+          let post_response =
+            match run_with_body_deadline body_deadline post_sync_call with
+            | Body_deadline_exceeded timeout_s ->
+              Error (non_streaming_body_timeout timeout_s)
+            | Body_completed transport_result ->
+              (match resolve_sync_transport transport_result with
+               | Sync_response response ->
+                 emit_status response.status;
+                 Ok response
+               | Sync_failure_before_response error -> Error error
+               | Sync_failure_after_response { status; error } ->
+                 emit_status status;
+                 Error error)
+          in
         let result =
           match post_response with
           | Error _ as e -> e
-          | Ok (code, body) ->
-            (* Emit status counter as soon as we have a raw HTTP code from
-           the provider, before any body-parse or retry decision. This
-           gives downstream metrics an accurate count of provider
-           responses (success and failure) without inflating from
-           internal retries or body-parse fallbacks. *)
-            emit_status code;
+          | Ok response ->
+            let code = response.status in
+            let body = response.body in
             if code >= 200 && code < 300
             then parse_sync_response ~http_codec ~provider_kind:config.kind body
             else (
@@ -374,7 +435,12 @@ let complete_http
               let body =
                 http_error_diagnostic_body ~provider_name ~config ~url ~code ~body
               in
-              Error (Http_client.HttpError { code; body; retry_after_header = None }))
+              Error
+                (Http_client.HttpError
+                   { code
+                   ; body
+                   ; retry_after_header = response.retry_after_header
+                   }))
         in
         let latency_ms = latency_ms_int latency_counter in
         result, latency_ms))

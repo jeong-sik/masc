@@ -26,7 +26,6 @@ import {
   optional,
   record,
   safeParse,
-  strictObject,
   string,
   union,
   unknown,
@@ -226,7 +225,15 @@ export const KeeperChatBlockSchema = union([
 
 export type KeeperChatBlock = InferOutput<typeof KeeperChatBlockSchema>
 
-export const KeeperChatHistoryStreamContractSchema = strictObject({
+// `object`, not `strictObject`: this row-level schema feeds a tolerant
+// per-row drop, so an unknown key here does not reject one field — it
+// silently deletes the whole message from the transcript. #28225 adding
+// `delivery_receipt` to the backend emission wiped every direct-conversation
+// row while only autonomous rows (no stream_contract) survived (#28407).
+// Additive backend fields must degrade to "ignored", never to "row dropped";
+// the deploy-window rationale documented on `role`/`speaker_authority`
+// applies to this nested object the same way.
+export const KeeperChatHistoryStreamContractSchema = object({
   source: string(),
   status: string(),
   event_name: optional(string()),
@@ -240,6 +247,11 @@ export const KeeperChatHistoryStreamContractSchema = strictObject({
   lifecycle_events: optional(array(string())),
   lifecycleEvents: optional(array(string())),
   reason: optional(string()),
+  // keeper_chat_store.ml stream_delivery_receipt_field (#28225): names how the
+  // persisted row relates to live delivery (e.g. "no_delivery_receipt",
+  // "server_lifecycle_replay_only"). Open string for the same deploy-window
+  // reason as `source`/`status`.
+  delivery_receipt: optional(string()),
 })
 
 export type KeeperChatHistoryStreamContract = InferOutput<typeof KeeperChatHistoryStreamContractSchema>

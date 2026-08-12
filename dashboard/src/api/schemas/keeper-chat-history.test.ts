@@ -194,18 +194,42 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     ).toBeNull()
   })
 
-  it('rejects the removed delivery receipt wire field', () => {
+  // #27962 hard-cut the old delivery receipt off the wire and this test used
+  // to pin the removal. #28225 re-introduced `delivery_receipt` as a stream
+  // replay-coverage label on every persisted row; keeping the rejection pin
+  // made the boundary drop every direct-conversation row while only
+  // autonomous rows (no stream_contract) survived (#28407).
+  it('passes the #28225 delivery_receipt coverage label through', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        stream_contract: {
+          source: 'backend_turn_trace',
+          status: 'backend_trace_join',
+          delivery_receipt: 'no_delivery_receipt',
+        },
+      }),
+    )
+    expect(out?.stream_contract?.delivery_receipt).toBe('no_delivery_receipt')
+  })
+
+  it('ignores unknown additive stream_contract fields instead of dropping the row', () => {
+    // The per-row safeParse drop means a rejected key here deletes the whole
+    // message from the transcript. An additive backend field must degrade to
+    // "ignored", never to "row dropped" (#28407).
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        stream_contract: {
+          source: 'backend_turn_trace',
+          status: 'backend_trace_join',
+          some_future_field: 'introduced ahead of the dashboard',
+        },
+      }),
+    )
+    expect(out).not.toBeNull()
+    expect(out?.stream_contract?.source).toBe('backend_turn_trace')
     expect(
-      safeParseKeeperChatHistoryMessage(
-        validMessage({
-          stream_contract: {
-            source: 'backend_turn_trace',
-            status: 'backend_trace_join',
-            delivery_receipt: 'no_delivery_receipt',
-          },
-        }),
-      ),
-    ).toBeNull()
+      (out?.stream_contract as Record<string, unknown> | undefined)?.some_future_field,
+    ).toBeUndefined()
   })
 
   it('leaves turn_ref undefined on legacy rows without dropping the message', () => {

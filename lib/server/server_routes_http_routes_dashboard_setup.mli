@@ -23,9 +23,13 @@ val agent_core_telemetry_limit_param : Httpun.Request.t -> int
 val agent_core_telemetry_provider_param : Httpun.Request.t -> string option
 
 (** Effective entry limit for /api/v1/dashboard/telemetry. Absent or
-    unparseable [n_param] -> bounded default (windowed vs not); explicit
-    n=0 preserved. Exposed for the freeze-guard test. *)
-val resolve_telemetry_n : has_time_window:bool -> n_param:string option -> int
+    unparseable [n_param] -> bounded default (windowed vs not). Returns a
+    {!Telemetry_unified.read_limit}, so no caller can express an unbounded
+    read: explicit n=0, once the #20659 all-in-window opt-out, now clamps to
+    [Telemetry_unified.max_read_entries] and reports [truncated] (RFC-0372).
+    Exposed for the freeze-guard test. *)
+val resolve_telemetry_limit :
+  has_time_window:bool -> n_param:string option -> Telemetry_unified.read_limit
 
 val handle_broadcast :
   Mcp_server.server_state -> string -> Httpun.Reqd.t -> string -> unit

@@ -391,6 +391,31 @@ let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t
    than reintroducing an unbounded scan. *)
 let unbounded_window_scan_cap = 50_000
 
+(* RFC-0372 — the per-REQUEST ceiling, as opposed to [unbounded_window_scan_cap]
+   above which is per STORE. The distinction is the defect: with nine sources,
+   three fanning out per keeper, a per-store cap lets one request materialise
+   ~30 x 50k entries, and adding a keeper raises that ceiling. A bound that
+   grows with the data it bounds is not a bound.
+
+   [read_limit] is abstract in the mli so "unbounded" cannot be constructed.
+   Phase 1 of RFC-0372 caps what a caller may ask for; Phase 2 makes the
+   allowance span stores instead of applying to each. *)
+let max_read_entries = 10_000
+
+let default_read_entries = 100
+
+type read_limit = int (* invariant: 1 <= v <= max_read_entries *)
+
+let read_limit_of_int n =
+  if n <= 0 then default_read_entries
+  else if n > max_read_entries then max_read_entries
+  else n
+;;
+
+let read_limit_to_int limit = limit
+
+let default_read_limit = default_read_entries
+
 (* Shared read path for directory-backed Dated_jsonl stores. Always routes
    through the tail-bounded readers ([read_recent] / [read_range_recent]) so a
    wide window or an "unlimited" ([n] <= 0) request cannot parse the whole
@@ -620,23 +645,25 @@ let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
 
 let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
     ?keeper_name ?session_id ?operation_id ?worker_run_id ?since_ts ?until_ts
-    ?(n = 100) ?(offset = 0) () : read_result =
-  let limited = n > 0 in
+    ?(limit = default_read_limit) ?(offset = 0) () : read_result =
+  (* [n] is positive by construction ([read_limit]), so the former
+     [limited = n > 0] branch — and with it the unbounded per_source = 0 path
+     that let one request scan every store to its own cap — is gone. *)
+  let n = read_limit_to_int limit in
   let has_filter =
     Option.is_some keeper_name || Option.is_some session_id
     || Option.is_some operation_id || Option.is_some worker_run_id
     || Option.is_some since_ts || Option.is_some until_ts
   in
   let per_source =
-    if not limited then 0
-    else if has_filter then max (n + offset) ((n + offset) * 2)
+    if has_filter then max (n + offset) ((n + offset) * 2)
     else n + offset + 1
   in
   let all_entries =
     List.concat_map (fun source ->
       match source with
       | Keeper_metric ->
-        if limited && Option.is_none keeper_name && not has_filter then
+        if Option.is_none keeper_name && not has_filter then
           read_keeper_metrics_fast_top ~masc_root ~n ()
         else
           read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts
@@ -685,16 +712,16 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
   let sorted = sort_newest_first filtered in
   let total_matching_entries = List.length sorted in
   let entries =
-    if not limited || total_matching_entries <= offset + n then sorted
+    if total_matching_entries <= offset + n then sorted
     else sorted |> List.drop offset |> take_first n
   in
-  { entries; total_matching_entries; truncated = limited && total_matching_entries > offset + n }
+  { entries; total_matching_entries; truncated = total_matching_entries > offset + n }
 
 let read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
-    ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ?offset () :
+    ?operation_id ?worker_run_id ?since_ts ?until_ts ?limit ?offset () :
     Yojson.Safe.t list =
   (read_unified_result ~base_path ~masc_root ?sources ?keeper_name ?session_id
-     ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ?offset ()).entries
+     ?operation_id ?worker_run_id ?since_ts ?until_ts ?limit ?offset ()).entries
 
 (* ── Summary ────────────────────────────────────────── *)
 

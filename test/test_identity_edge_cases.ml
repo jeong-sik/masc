@@ -96,7 +96,11 @@ let test_null_payload () =
      && String.sub identity.agent_name 0 6 = "agent-")
 
 let check_arguments label expected params =
-  let actual = Mcp_server_eio_call_tool.For_testing.arguments_of_params params in
+  let actual =
+    match Mcp_server_eio_call_request.decode (Some params) with
+    | Ok request -> Mcp_server_eio_call_request.arguments request
+    | Error _ -> `Null
+  in
   check string label (Yojson.Safe.to_string expected) (Yojson.Safe.to_string actual)
 ;;
 

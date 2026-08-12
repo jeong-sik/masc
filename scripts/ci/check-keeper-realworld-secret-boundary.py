@@ -36,6 +36,7 @@ workflow = WORKFLOW.read_text(encoding="utf-8")
 runner = RUNNER.read_text(encoding="utf-8")
 
 live_gate = indented_block(workflow, "pr-live-gate:", 2)
+changes = indented_block(workflow, "changes:", 2)
 acceptance = indented_block(workflow, "keeper-realworld-acceptance:", 2)
 product_gate = indented_block(workflow, "keeper-realworld-gate:", 2)
 package_step = indented_block(
@@ -55,18 +56,31 @@ for context, block in (
     require(block, "refs/heads/main", context)
     require(block, "ref_protected", context)
 
-require(acceptance, "github.event_name == 'workflow_dispatch'", "acceptance job")
+for trusted_event in ("push", "workflow_dispatch"):
+    require(
+        acceptance,
+        f"github.event_name == '{trusted_event}'",
+        "acceptance job",
+    )
 if "github.event_name == 'pull_request'" in acceptance:
     fail("acceptance job still admits pull_request refs")
 require(acceptance, "ZAI_API_KEY_SB: ${{ secrets.ZAI_API_KEY_SB }}", "acceptance job")
 if workflow.count("ZAI_API_KEY_SB: ${{ secrets.ZAI_API_KEY_SB }}") != 1:
     fail("CI workflow must expose ZAI_API_KEY_SB in exactly one guarded job")
 
+for main_push_guard in (
+    '${GITHUB_EVENT_NAME}" = "push"',
+    '${GITHUB_REF}" = "refs/heads/main"',
+    "keeper_realworld=true",
+):
+    require(changes, main_push_guard, "protected-main acceptance obligation")
+
 for context, block in (
     ("runtime package step", package_step),
     ("runtime upload step", upload_step),
 ):
-    require(block, "github.event_name == 'workflow_dispatch'", context)
+    for trusted_event in ("push", "workflow_dispatch"):
+        require(block, f"github.event_name == '{trusted_event}'", context)
     if "github.event_name == 'pull_request'" in block:
         fail(f"{context} still admits pull_request refs")
 
@@ -80,6 +94,8 @@ for field in (
     require(package_step, field, "runtime manifest")
 
 for evidence in (
+    '"$EVENT_NAME" = "push"',
+    '"$EVENT_NAME" = "workflow_dispatch"',
     "EVENT_REF_PROTECTED",
     "EVENT_WORKFLOW_REF",
     "EVENT_WORKFLOW_SHA",
@@ -87,11 +103,13 @@ for evidence in (
     require(product_gate, evidence, "product gate")
 
 for check in (
+    "KEEPER_ACCEPTANCE_EXPECTED_EVENT",
     "KEEPER_ACCEPTANCE_EXPECTED_REF",
     "KEEPER_ACCEPTANCE_EXPECTED_REF_PROTECTED",
     "KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_REF",
     "KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_SHA",
     "masc.keeper_acceptance_runtime.v2",
+    "manifest_event",
     "manifest_ref_protected",
     "manifest_workflow_ref",
     "manifest_workflow_sha",

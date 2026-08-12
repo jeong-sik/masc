@@ -11,6 +11,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BINARY="${KEEPER_ACCEPTANCE_BINARY:?KEEPER_ACCEPTANCE_BINARY is required}"
 MANIFEST="${KEEPER_ACCEPTANCE_MANIFEST:?KEEPER_ACCEPTANCE_MANIFEST is required}"
 OUTPUT_DIR="${KEEPER_ACCEPTANCE_OUTPUT_DIR:?KEEPER_ACCEPTANCE_OUTPUT_DIR is required}"
+EXPECTED_EVENT="${KEEPER_ACCEPTANCE_EXPECTED_EVENT:?KEEPER_ACCEPTANCE_EXPECTED_EVENT is required}"
 EXPECTED_SHA="${KEEPER_ACCEPTANCE_EXPECTED_SHA:?KEEPER_ACCEPTANCE_EXPECTED_SHA is required}"
 EXPECTED_REF="${KEEPER_ACCEPTANCE_EXPECTED_REF:?KEEPER_ACCEPTANCE_EXPECTED_REF is required}"
 EXPECTED_REF_PROTECTED="${KEEPER_ACCEPTANCE_EXPECTED_REF_PROTECTED:?KEEPER_ACCEPTANCE_EXPECTED_REF_PROTECTED is required}"
@@ -33,6 +34,10 @@ done
 
 [[ -f "$BINARY" ]] || fail "binary not found: $BINARY"
 [[ -f "$MANIFEST" ]] || fail "manifest not found: $MANIFEST"
+case "$EXPECTED_EVENT" in
+  push|workflow_dispatch) ;;
+  *) fail "expected event must be push or workflow_dispatch: $EXPECTED_EVENT" ;;
+esac
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] \
   || fail "expected source SHA must be a full 40-character lowercase SHA"
 [[ "$EXPECTED_REF" == "refs/heads/main" ]] \
@@ -59,8 +64,8 @@ manifest_binary_sha="$(jq -er '.binary_sha256' "$MANIFEST")"
 actual_binary_sha="$(sha256sum "$BINARY" | awk '{print $1}')"
 [[ "$manifest_schema" == "masc.keeper_acceptance_runtime.v2" ]] \
   || fail "manifest schema mismatch: $manifest_schema"
-[[ "$manifest_event" == "workflow_dispatch" ]] \
-  || fail "manifest event mismatch: $manifest_event"
+[[ "$manifest_event" == "$EXPECTED_EVENT" ]] \
+  || fail "manifest event mismatch: expected=$EXPECTED_EVENT actual=$manifest_event"
 [[ "$manifest_sha" == "$EXPECTED_SHA" ]] \
   || fail "manifest source mismatch: expected=$EXPECTED_SHA actual=$manifest_sha"
 [[ "$manifest_ref" == "$EXPECTED_REF" ]] \
@@ -75,7 +80,7 @@ actual_binary_sha="$(sha256sum "$BINARY" | awk '{print $1}')"
   || fail "binary digest mismatch: expected=$manifest_binary_sha actual=$actual_binary_sha"
 
 if [[ "$MODE" == "--verify-provenance-only" ]]; then
-  echo "keeper-realworld-acceptance: provenance PASS source=$EXPECTED_SHA ref=$EXPECTED_REF"
+  echo "keeper-realworld-acceptance: provenance PASS event=$EXPECTED_EVENT source=$EXPECTED_SHA ref=$EXPECTED_REF"
   exit 0
 fi
 
@@ -196,6 +201,7 @@ python3 "$ROOT_DIR/scripts/harness/workload/keeper_multi_collaboration_acceptanc
 jq -n \
   --arg schema "masc.keeper_realworld_gate.v1" \
   --arg status "passed" \
+  --arg event_name "$EXPECTED_EVENT" \
   --arg source_sha "$EXPECTED_SHA" \
   --arg source_ref "$EXPECTED_REF" \
   --arg workflow_ref "$EXPECTED_WORKFLOW_REF" \
@@ -208,6 +214,7 @@ jq -n \
   '{
     schema: $schema,
     status: $status,
+    event_name: $event_name,
     source_sha: $source_sha,
     source_ref: $source_ref,
     source_ref_protected: true,
@@ -220,4 +227,4 @@ jq -n \
     github_run_attempt: $run_attempt
   }' >"$OUTPUT_DIR/gate-result.json"
 
-echo "keeper-realworld-acceptance: PASS source=$EXPECTED_SHA evidence=$evidence_dir"
+echo "keeper-realworld-acceptance: PASS event=$EXPECTED_EVENT source=$EXPECTED_SHA evidence=$evidence_dir"

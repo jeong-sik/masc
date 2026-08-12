@@ -21,9 +21,6 @@ val strip_suffix : suffix:string -> string -> string
 
 (** [Some trimmed] when non-empty, else [None]. *)
 
-val split_csv_nonempty : string -> string list
-(** Comma-separated split with empty entries dropped. *)
-
 (** {1 Bind host / loopback classification} *)
 
 val configured_bind_host : unit -> string
@@ -180,9 +177,14 @@ val sanitized_dashboard_actor_for_request :
 
 (** {1 Origin / CORS} *)
 
-val allow_anonymous_mutations : unit -> bool
-(** Re-reads [MASC_ALLOW_ANONYMOUS_MUTATIONS] on each call.
-    When [true] non-loopback mutations skip auth (test fixtures only). *)
+type configure_error = Already_configured
+
+val configure : Server_auth_config.t -> (unit, configure_error) result
+(** Install the boot-resolved authorization policy before request handlers are
+    constructed. The policy is single-assignment for the process lifetime;
+    request handlers cannot turn it into a runtime control channel. *)
+
+val configure_error_to_string : configure_error -> string
 
 type browser_origin_admission =
   | Same_origin
@@ -456,4 +458,6 @@ module For_testing : sig
   val admin_token_equal : string -> string -> bool
   val snapshot_server_state : unit -> Mcp_server.server_state option
   val restore_server_state : Mcp_server.server_state option -> unit
+  val snapshot_auth_config : unit -> Server_auth_config.t option
+  val restore_auth_config : Server_auth_config.t option -> unit
 end

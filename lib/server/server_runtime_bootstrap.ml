@@ -1275,6 +1275,20 @@ let activate_owner_state
 
 let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler () =
+  let resolved_auth_config =
+    match Server_auth_config.resolve (Server_auth_config.read_env ()) with
+    | Ok config -> config
+    | Error error ->
+      raise
+        (Env_config_core.Config_error
+           (Server_auth_config.resolve_error_to_string error))
+  in
+  (match Server_auth.configure resolved_auth_config with
+   | Ok () -> ()
+   | Error error ->
+     raise
+       (Env_config_core.Config_error
+          (Server_auth.configure_error_to_string error)));
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in

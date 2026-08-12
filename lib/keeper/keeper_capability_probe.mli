@@ -63,3 +63,72 @@ val probe_surface : tool:string -> verdict
     Used to report what {e was} available when a probe asks for a name that is
     not, so the caller does not have to guess at a typo. *)
 val model_facing_names : unit -> string list
+
+(** {1 Invocation}
+
+    [probe_surface] answers whether MASC offers the tool. It cannot answer
+    whether the model picks it up, and the two diverge — see the header. This
+    is the other half, for the Agent Core (HTTP) lane. *)
+
+(** What one probe turn observed.
+
+    [Replied_no_tool] and [Provider_rejected] are kept apart because the audit
+    that motivated this module could not tell them apart: a turn that never
+    reached the provider and a turn the model answered in prose both showed up
+    as a zero. *)
+type invocation =
+  | Tool_invoked of
+      { tool : string
+      ; elapsed_s : float
+      }
+      (** The response carried a [ToolUse] block for the requested tool. *)
+  | Other_tool_invoked of
+      { requested : string
+      ; invoked : string list
+      ; elapsed_s : float
+      }
+      (** Tools were called, but not the one asked for. Distinct from silence:
+          the surface reached the model and the model used it. *)
+  | Replied_no_tool of
+      { reply_bytes : int
+      ; elapsed_s : float
+      }
+      (** The provider answered and the model called nothing. *)
+  | Provider_rejected of { detail : string }
+      (** The request never produced a response — quota, auth, transport. *)
+
+val invocation_to_string : invocation -> string
+
+(** Why a probe could not be attempted at all. *)
+type invocation_error =
+  | Not_on_surface of verdict
+      (** [probe_surface] already answers this one; no turn is worth spending. *)
+  | Unresolvable_runtime of string
+  | Not_agent_core_lane of string
+      (** The official-client lanes own a durable session keyed by keeper name,
+          so probing them needs the session isolation this function does not
+          implement. Reported rather than approximated. *)
+  | Tool_schema_rejected of string
+
+val invocation_error_to_string : invocation_error -> string
+
+(** Send one synthetic turn to [runtime_id] and report whether [tool] was
+    called.
+
+    Writes nothing. There is no keeper name, no session, and no checkpoint in
+    this path: the Agent Core lane is stateless per request, so isolation here
+    is the absence of a session rather than a separate one.
+
+    The turn goes through {!Keeper_provider_subcall.complete}, the same
+    boundary the vision tool uses, so it inherits the resolved provider
+    deadline instead of installing its own. *)
+val probe_invocation
+  :  sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> now:(unit -> float)
+  -> runtime_id:string
+  -> tool:string
+  -> prompt:string
+  -> unit
+  -> (invocation, invocation_error) result

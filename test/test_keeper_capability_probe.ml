@@ -125,6 +125,119 @@ let test_no_descriptor_is_withheld_by_a_schema_error () =
   check (list string) "no descriptor has schema errors" [] withheld
 ;;
 
+
+(* probe_invocation, offline. Every case below returns before any provider
+   call, which is the point: the errors that can be decided without spending a
+   turn must be decided without spending one. *)
+
+let dummy_now () = 0.0
+
+let invocation_error =
+  testable (Fmt.of_to_string Probe.invocation_error_to_string) ( = )
+
+let probe_offline ~runtime_id ~tool =
+  (* sw/net are never forced on these paths. Eio.Switch.run gives a real
+     switch; the net resource is only reached after the lane and surface
+     checks pass, and no case here passes both. *)
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Probe.probe_invocation
+        ~sw
+        ~net:(Eio.Stdenv.net env)
+        ~now:dummy_now
+        ~runtime_id
+        ~tool
+        ~prompt:"probe"
+        ()))
+;;
+
+let test_operator_only_costs_no_turn () =
+  match probe_offline ~runtime_id:"ollama_cloud.deepseek-v4-flash" ~tool:"masc_status" with
+  | Error (Probe.Not_on_surface Probe.Operator_only) -> ()
+  | Ok inv -> failf "expected a surface refusal, got: %s" (Probe.invocation_to_string inv)
+  | Error e -> failf "expected Not_on_surface Operator_only, got: %s" (Probe.invocation_error_to_string e)
+;;
+
+let test_unknown_runtime_is_named () =
+  match probe_offline ~runtime_id:"not.a.runtime" ~tool:"masc_board_list" with
+  | Error (Probe.Unresolvable_runtime _) -> ()
+  | Ok inv -> failf "expected an unresolvable runtime, got: %s" (Probe.invocation_to_string inv)
+  | Error e -> failf "expected Unresolvable_runtime, got: %s" (Probe.invocation_error_to_string e)
+;;
+
+(* The lane guard needs a producer, not just a constructor: without it an
+   official-client runtime would be probed over HTTP and the answer would
+   describe a path that runtime never takes.
+
+   The default unit-test environment pins MASC_BASE_PATH="" and resolves no
+   official-client runtime at all, so iterating the ambient fleet asserts
+   nothing -- an earlier draft of this test did exactly that and a mutation
+   removing the whole guard still passed. The fixture below loads a runtime
+   whose execution is an official-client lane, which is what makes the guard
+   reachable. *)
+let official_client_runtime_toml ~cli_path ~oauth_source =
+  Printf.sprintf
+    {|[providers.antigravity]
+protocol = "antigravity-cli"
+command = %S
+is-non-interactive = true
+timeout-s = 30.0
+
+[providers.antigravity.credentials]
+type = "file"
+path = %S
+
+[models.gemini]
+api-name = "gemini-fixture"
+max-context = 128000
+
+[antigravity.gemini]
+
+[runtime]
+default = "antigravity.gemini"
+|}
+    cli_path
+    oauth_source
+;;
+
+let write_file path contents =
+  let oc = open_out path in
+  output_string oc contents;
+  close_out oc
+;;
+
+let test_lane_guard_refuses_an_official_client_runtime () =
+  let base = Filename.temp_file "probe-lane" ".d" in
+  Sys.remove base;
+  Unix.mkdir base 0o700;
+  let cli_path = Filename.concat base "fake-cli" in
+  write_file cli_path "#!/bin/sh\nexit 0\n";
+  Unix.chmod cli_path 0o700;
+  let oauth_source = Filename.concat base "oauth-token" in
+  write_file oauth_source "operator-oauth-fixture";
+  Unix.chmod oauth_source 0o600;
+  let runtime_path = Filename.concat base "runtime.toml" in
+  write_file runtime_path (official_client_runtime_toml ~cli_path ~oauth_source);
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error e -> failf "fixture config rejected: %s" e);
+      (* Control: the fixture must actually produce an official-client lane,
+         or this test is back to asserting nothing. *)
+      (match Runtime.get_runtime_by_id "antigravity.gemini" with
+       | Some { execution = Runtime_execution.Antigravity_cli _; _ } -> ()
+       | Some rt ->
+         failf "fixture resolved the wrong lane: %s" (Runtime_execution.label rt.Runtime.execution)
+       | None -> fail "fixture runtime did not resolve");
+      match probe_offline ~runtime_id:"antigravity.gemini" ~tool:"masc_board_list" with
+      | Error (Probe.Not_agent_core_lane _) -> ()
+      | Ok inv -> failf "an official-client runtime was probed over HTTP: %s" (Probe.invocation_to_string inv)
+      | Error e -> failf "expected Not_agent_core_lane, got: %s" (Probe.invocation_error_to_string e))
+;;
+
 let () =
   run
     "keeper_capability_probe"
@@ -139,6 +252,11 @@ let () =
     ; ( "agreement with the surface"
       , [ test_case "round-trips every published name" `Quick test_agrees_with_the_surface_it_reports_on
         ; test_case "no schema-withheld descriptor" `Quick test_no_descriptor_is_withheld_by_a_schema_error
+        ] )
+    ; ( "probe_invocation (offline)"
+      , [ test_case "operator-only costs no turn" `Quick test_operator_only_costs_no_turn
+        ; test_case "unknown runtime is named" `Quick test_unknown_runtime_is_named
+        ; test_case "lane guard refuses an official-client runtime" `Quick test_lane_guard_refuses_an_official_client_runtime
         ] )
     ]
 ;;

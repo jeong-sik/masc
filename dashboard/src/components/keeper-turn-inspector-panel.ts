@@ -47,6 +47,16 @@ function formatBytes(value: number): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// A turn past the listing budget has no count yet. Saying so — and naming the
+// size that caused it — is more use to an operator hunting a runaway turn than
+// a number would be, because the size is the thing that flagged it. Opening
+// the turn reads the file in full and shows the real total.
+function censusLabel(census: RawTraceTurn['census']): string {
+  return census.state === 'whole_file'
+    ? `${census.records}건`
+    : `${formatBytes(census.budgetBytes)} 초과 · 열어서 집계`
+}
+
 // These records carry unix seconds; relativeTime reads ISO strings.
 function ago(unixSeconds: number): string {
   return relativeTime(new Date(unixSeconds * 1000).toISOString())
@@ -150,7 +160,7 @@ function RawTurns({ keeper }: { keeper: string }) {
               ? html`<span class="text-[var(--color-fg-disabled)]">trace 없음</span>`
               : html`<span class="min-w-0 truncate font-mono text-[var(--color-fg-muted)]" title=${turn.traceId}>${turn.traceId}</span>`}
             <span class="ml-auto tabular-nums text-[var(--color-fg-muted)]">
-              ${turn.records}건 · ${formatBytes(turn.bytes)} · ${ago(turn.modifiedAt)}
+              ${censusLabel(turn.census)} · ${formatBytes(turn.bytes)} · ${ago(turn.modifiedAt)}
             </span>
           </button>
         `)}

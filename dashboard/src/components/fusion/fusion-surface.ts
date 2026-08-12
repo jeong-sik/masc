@@ -1365,7 +1365,7 @@ export function FusionSurface() {
               : null}
             <span
               class="fus-list-truth"
-              title="보드 sink와 registry 관측을 표시합니다. live JoJ는 judges 패널 구성이 없으면 fail-closed 상태로 남습니다."
+              title="보드 sink · registry 관측 — judges 미구성 시 live JoJ는 fail-closed"
             >관측</span>
             <button
               type="button"
@@ -1418,7 +1418,7 @@ export function FusionSurface() {
                 <div class="fus-block">
                   <div class="fus-block-lbl">${boardError ? '보드 sink 확인 실패' : '보드 sink 대기'}</div>
                   <div class="fus-judge-wait">
-                    ${boardError ? '보드 심의 기록을 확인하지 못했습니다.' : '아직 기록된 보드 심의가 없습니다.'}
+                    ${boardError ? '보드 심의 기록을 확인하지 못했습니다.' : '아직 기록된 보드 심의 없음'}
                   </div>
                   <p class="fus-rec-rationale">
                     ${boardError

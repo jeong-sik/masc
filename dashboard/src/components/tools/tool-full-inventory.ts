@@ -198,7 +198,7 @@ export function FullInventoryView({
             getKey=${(item: DashboardToolInventoryItem) => item.name}
             className="flex flex-col gap-3"
           />`
-        : html`<${EmptyState} message="조건에 맞는 도구가 없습니다." compact />`}
+        : html`<${EmptyState} message="조건에 맞는 도구 없음" compact />`}
     </div>
 
     <button type="button"

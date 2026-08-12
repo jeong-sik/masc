@@ -203,7 +203,7 @@ function StaleFocus({ entries }: { entries: StaleEntry[] }) {
       count=${`${entries.length} stale`}
     >
       ${entries.length === 0 ? html`
-        <${EmptyFocus} message="현재 오래 점유된 태스크가 없습니다." />
+        <${EmptyFocus} message="현재 오래 점유된 태스크 없음" />
       ` : html`
         <ul class="grid gap-2" data-testid="planning-focus-stale">
           ${entries.slice(0, 8).map(entry => html`
@@ -252,7 +252,7 @@ function LedgerFocus({ rows }: { rows: AccountabilityRow[] }) {
       count=${`${rows.length} principals`}
     >
       ${rows.length === 0 ? html`
-        <${EmptyFocus} message="아직 책임자에 연결된 태스크가 없습니다." />
+        <${EmptyFocus} message="아직 책임자에 연결된 태스크 없음" />
       ` : html`
         <ul class="grid gap-2" data-testid="planning-focus-ledger">
           ${(activeRows.length > 0 ? activeRows : rows).slice(0, 8).map(row => html`
@@ -322,7 +322,7 @@ function MatrixFocus({ rows }: { rows: AccountabilityRow[] }) {
       count=${`${rows.length} rows`}
     >
       ${rows.length === 0 ? html`
-        <${EmptyFocus} message="매트릭스로 표시할 태스크가 없습니다." />
+        <${EmptyFocus} message="매트릭스로 표시할 태스크 없음" />
       ` : html`
         <div class="overflow-x-auto" data-testid="planning-focus-matrix">
           <table class="w-full min-w-[37.5rem] border-separate border-spacing-0 text-xs" aria-label="책임 매트릭스">

@@ -998,9 +998,9 @@ function CostDashboardContent({ view }: { view: CostView }) {
     const showLatency = modelLoadedState != null && latencyBuckets.length > 0 && (focus == null || focus === 'latency')
     const showTable = focus !== 'matrix' && focus !== 'latency'
     const focusedEmptyMessage = focus === 'matrix' && data.length === 0
-      ? '이 시간 창에서 기록된 Runtime 비용 매트릭스가 없습니다.'
+      ? '이 시간 창에서 기록된 Runtime 비용 매트릭스 없음'
       : focus === 'latency' && latencyBuckets.length === 0
-        ? '이 시간 창에서 기록된 Runtime 지연 분포가 없습니다.'
+        ? '이 시간 창에서 기록된 Runtime 지연 분포 없음'
         : null
 
     return html`

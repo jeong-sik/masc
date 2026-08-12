@@ -170,7 +170,7 @@ describe('heroTitle', () => {
       evaluator_status: 'idle',
       last_signal_at: null,
     })
-    expect(heroTitle(data)).toBe('아직 감시 기록이 없습니다.')
+    expect(heroTitle(data)).toBe('아직 감시 기록 없음')
   })
 
   it('returns healthy title when all are healthy/idle', () => {
@@ -300,27 +300,27 @@ describe('statusCardClass', () => {
 
 describe('emptyReasonText', () => {
   it('returns window_empty message', () => {
-    expect(emptyReasonText('window_empty')).toBe('선택된 범위에는 신호가 없습니다.')
+    expect(emptyReasonText('window_empty')).toBe('선택된 범위에는 신호 없음')
   })
 
   it('returns no_recent_events message', () => {
-    expect(emptyReasonText('no_recent_events')).toBe('기록은 있지만 최근 신호가 없습니다.')
+    expect(emptyReasonText('no_recent_events')).toBe('기록은 있지만 최근 신호 없음')
   })
 
   it('returns default message for no_runtime_activity', () => {
-    expect(emptyReasonText('no_runtime_activity')).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+    expect(emptyReasonText('no_runtime_activity')).toBe('아직 이 감시 채널을 통과한 실행 없음')
   })
 
   it('returns default message for null', () => {
-    expect(emptyReasonText(null)).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+    expect(emptyReasonText(null)).toBe('아직 이 감시 채널을 통과한 실행 없음')
   })
 
   it('returns default message for undefined', () => {
-    expect(emptyReasonText(undefined)).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+    expect(emptyReasonText(undefined)).toBe('아직 이 감시 채널을 통과한 실행 없음')
   })
 
   it('returns default message for unknown reason', () => {
-    expect(emptyReasonText('something_else')).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+    expect(emptyReasonText('something_else')).toBe('아직 이 감시 채널을 통과한 실행 없음')
   })
 })
 

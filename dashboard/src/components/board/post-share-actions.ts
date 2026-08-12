@@ -60,7 +60,7 @@ export function PostShareActions({ post, compact = false }: { post: BoardPost; c
   const isContextInferDisabled = contextPending || !targetKeeper
   const contextInferTooltip = targetKeeper
     ? `맥락 추론 요청 (${targetKeeper})`
-    : '맥락 추론을 실행할 등록된 keeper가 없습니다'
+    : '맥락 추론을 실행할 등록된 keeper 없음'
 
   return html`
     <span

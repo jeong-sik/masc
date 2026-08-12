@@ -144,7 +144,7 @@ function ToolTable({
   const hasQuery = query.trim() !== ''
   if (hasQuery && filtered.length === 0) {
     return html`
-      <div class="text-2xs text-[var(--color-fg-disabled)] py-2">조건에 맞는 도구가 없습니다.</div>
+      <div class="text-2xs text-[var(--color-fg-disabled)] py-2">조건에 맞는 도구 없음</div>
     `
   }
   return html`

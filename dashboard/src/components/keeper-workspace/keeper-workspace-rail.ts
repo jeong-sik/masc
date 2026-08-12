@@ -273,7 +273,7 @@ function RuntimeSection({
           ? html`<div
               class="rtc-drift"
               data-testid="runtime-drift"
-              title="저장된 런타임 지정은 키퍼가 다음 turn-up(재시작)할 때 적용됩니다. 현재 표시된 런타임은 지금 실제로 실행 중인 것입니다."
+              title="지정은 다음 turn-up에 적용 · 표시는 현재 실행 중인 런타임"
             >
               지정됨 <span class="mono">${pendingRuntime}</span> · 재시작 시 적용
             </div>`
@@ -490,7 +490,7 @@ function ContextSection({
             `
           : html`<div class="ctx-empty" data-missing="context-window"><strong>윈도우 사용률 미측정</strong><span>${ctxUnavailableReason
                 ? html`턴 레코드 기준 측정 불가: <span class="mono">${ctxUnavailableReason}</span>`
-                : '측정된 턴 레코드가 아직 없습니다.'}</span></div>`}
+                : '측정된 턴 레코드가 아직 없음'}</span></div>`}
         <div class="ctx-tok">
           <span class="mono">${tokens ?? '—'}</span>
           <span class="ctx-tok-sep">/</span>

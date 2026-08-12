@@ -232,8 +232,8 @@ export function summarizeOverviewTile(
       badge: '바인딩 필요',
       badgeClass: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]',
       detail: keeperCount > 0
-        ? '실행 중 · 아직 channel binding이 없습니다'
-        : '실행 중 · keeper 디렉토리가 비어 있습니다',
+        ? '실행 중 · 아직 channel binding 없음'
+        : '실행 중 · keeper 디렉토리가 비어 있음',
     }
   }
 

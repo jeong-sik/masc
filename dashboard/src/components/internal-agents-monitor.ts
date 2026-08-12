@@ -229,7 +229,7 @@ function LibrarianJournal({
           ? html`<span class="text-[var(--color-danger)]"> · 읽지 못한 줄 ${journal.undecodableLines}</span>`
           : null}
       </div>
-      <p class="text-xs text-[var(--color-fg-muted)]">정규화된 commit journal입니다. retained RAW는 같은 execution join 또는 Turn inspector에서 별도 출처로 확인합니다.</p>
+      <p class="text-xs text-[var(--color-fg-muted)]">정규화된 commit journal — RAW 원문은 Turn inspector에서</p>
       ${related.length === 0
         ? html`<p class="rounded border border-[var(--color-border-default)] p-3 text-xs text-[var(--color-fg-muted)]">정확히 조인되는 journal 행이 없습니다. trace만 같거나 시간상 가까운 행을 추정해서 붙이지 않았습니다.</p>`
         : null}
@@ -259,7 +259,7 @@ function LibrarianJournal({
               <${EvidenceBadge} kind="typed" />
               <strong>같은 trace · exact join 아님</strong>
             </div>
-            <p class="text-xs text-[var(--color-fg-muted)]">아래 행은 trace만 같습니다. source.kind가 다르거나 exact revision이 없어 이 Librarian pass의 산출물로 주장하지 않습니다.</p>
+            <p class="text-xs text-[var(--color-fg-muted)]">trace만 일치 — 이 pass의 산출물로 보장되지 않음</p>
             <ol class="grid gap-2">
               ${traceOnlyCommits.map((entry, index) => html`
                 <li key=${index} class="grid gap-2 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-3xs">
@@ -387,7 +387,7 @@ function Details({ row }: { row: Row }) {
             ${row.run.evaluatorRuntime ? html`<span>runtime <code>${row.run.evaluatorRuntime}</code></span>` : null}
           </div>
           ${row.run.cause ? html`<p class="text-xs text-[var(--color-danger)]">${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null}
-          <p class="text-3xs text-[var(--color-fg-muted)]">Review 본문 전체는 이 registry 계약에 저장되지 않습니다. 아래 도구 입력은 redaction/preview를 거친 typed 값이며 출력은 최대 1,024 bytes excerpt입니다.</p>
+          <p class="text-3xs text-[var(--color-fg-muted)]">Review 원문은 저장되지 않음 · 출력은 1,024B excerpt</p>
         </div>
         <div>
           <div class="text-3xs uppercase tracking-wide text-[var(--color-fg-muted)] mb-1">Internal tool agents (${tools.length})</div>
@@ -424,7 +424,7 @@ function Details({ row }: { row: Row }) {
       <div class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /><strong>Fusion registry summary</strong></div>
       <p>Preset <code>${row.run.preset}</code> · status <code>${row.run.status}</code></p>
       ${row.run.error ? html`<p class="mt-1 text-[var(--color-danger)]">${row.run.failureCode}: ${row.run.error}</p>` : null}
-      <p class="text-[var(--color-fg-muted)]">이 registry는 input/output을 보존하지 않습니다. participant·judge 구조와 결과는 Fusion SSOT에서 확인합니다.</p>
+      <p class="text-[var(--color-fg-muted)]">input/output 미보존 — 상세는 Fusion 화면에서</p>
       <a class="w-fit text-[var(--color-accent)] hover:underline" href=${fusionHref()}>Fusion evidence 열기 →</a>
     </div>
   `

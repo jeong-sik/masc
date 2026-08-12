@@ -116,7 +116,7 @@ export function ReactionBar({
         `
       })}
       <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        ${statusMessage || (supportedEmojiCatalog === null ? '리액션 종류를 불러오는 중입니다' : '')}
+        ${statusMessage || (supportedEmojiCatalog === null ? '불러오는 중…' : '')}
       </span>
     </div>
   `

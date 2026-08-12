@@ -194,7 +194,7 @@ export function VerificationSpecsPanel() {
         ${filtered.length === 0
           ? html`<${EmptyState} message=${categoryFilter.value === 'all' && !searchQuery.value
               ? 'TLA+ 스펙을 찾지 못했습니다 (MASC_SPECS_DIR 확인)'
-              : '조건에 맞는 스펙이 없습니다.'} />`
+              : '조건에 맞는 스펙 없음'} />`
           : html`<${SpecsTable} entries=${filtered} />`}
       <//>
 

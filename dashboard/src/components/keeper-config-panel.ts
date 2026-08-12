@@ -308,7 +308,7 @@ export type MaxContextOverrideDraftResult =
 export function parseMaxContextOverrideDraft(raw: string): MaxContextOverrideDraftResult {
   if (raw === '0') return { ok: true, value: null }
   if (!/^[1-9]\d*$/.test(raw)) {
-    return { ok: false, error: '컨텍스트 오버라이드는 양의 정수여야 합니다. 0은 설정을 지웁니다.' }
+    return { ok: false, error: '양의 정수만 허용 (0 = 해제)' }
   }
   const value = Number(raw)
   if (!Number.isSafeInteger(value)) {
@@ -1455,7 +1455,7 @@ function InlineContextOverrideRow({ value, onChange, error, dirty = false }: {
           <span class="text-xs text-text-dim w-5">tok</span>
         </div>
       </div>
-      ${error ? html`<div class="mt-1 text-2xs text-[var(--color-status-err)]" role="alert">${error}</div>` : html`<div class="mt-1 text-2xs text-text-dim">양의 정수만 허용됩니다. 0은 오버라이드를 지웁니다.</div>`}
+      ${error ? html`<div class="mt-1 text-2xs text-[var(--color-status-err)]" role="alert">${error}</div>` : html`<div class="mt-1 text-2xs text-text-dim">양의 정수만 허용 (0 = 해제)</div>`}
     </div>
   `
 }
@@ -1868,7 +1868,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ]} />
     </${KcfSec}>
 
-    <${KcfSec} title="소스 · 경로" desc="등록 상태와 매니페스트 경로는 읽기 전용입니다.">
+    <${KcfSec} title="소스 · 경로" desc="읽기 전용">
       <${KcfReadonlyText} label="라이브 메타 경로" text=${c.sources.live_meta_path} />
       ${c.sources.default_manifest_path ? html`<${KcfReadonlyText} label="기본 매니페스트 경로" text=${c.sources.default_manifest_path} />` : null}
       <div style="margin-top:14px;">
@@ -2067,7 +2067,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     ${runtimeWriteUnsupportedNotice}
     <${KcfSec}
       title="배정 목표"
-      desc=${runtimeCanEdit ? 'goal store 카탈로그에서 이 keeper가 소유할 goal을 고릅니다.' : '현재 배정된 goal-store 연결을 읽기 전용으로 표시합니다.'}
+      desc=${runtimeCanEdit ? 'goal store 카탈로그에서 이 keeper가 소유할 goal을 고릅니다.' : 'goal-store 연결 (읽기 전용)'}
       right=${html`<span class="kcf-goals-count mono">active_goal_ids · ${selectedActiveGoalIds.length} 배정</span>`}
     >
       <div class="kcf-goals">

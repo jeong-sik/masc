@@ -221,10 +221,10 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
   if (events.length === 0) {
     const isOffline = keeperStatus && isOfflineStatus(keeperStatus)
     const msg = isOffline
-      ? '키퍼가 오프라인입니다. 기동하면 활동이 기록됩니다.'
+      ? '오프라인 — 기동 시 기록 시작'
       : (keeperGeneration ?? 0) === 0
-        ? '아직 시작되지 않은 키퍼입니다. 활동 기록이 없습니다.'
-        : '현재 세대에서 기록된 활동이 없습니다.'
+        ? '미기동 — 활동 기록 없음'
+        : '현재 세대에서 기록된 활동 없음'
     return html`
       <div class="py-4">
         <${EmptyState} message=${msg} compact />

@@ -252,7 +252,7 @@ function NextPrompt({ keeper }: { keeper: string }) {
   if (error !== null) return html`<${Danger}>프롬프트를 읽지 못했습니다: ${error}<//>`
   if (capture === null) return html`<${Muted}>프롬프트 읽는 중…<//>`
   if (capture.blocks.length === 0) {
-    return html`<${Muted}>아직 캡처된 프롬프트가 없습니다. 이 keeper 가 한 턴을 돌면 생깁니다.<//>`
+    return html`<${Muted}>캡처된 프롬프트 없음<//>`
   }
 
   const total = capture.blocks.reduce((sum, block) => sum + block.bytes, 0)
@@ -406,7 +406,7 @@ export function KeeperTurnInspectorPanel({ keepers }: { keepers: readonly string
   if (keeper === null) {
     return html`
       <section class="grid gap-2" data-testid="keeper-turn-inspector">
-        <${Muted}>관측된 keeper 가 없습니다.<//>
+        <${Muted}>관측된 keeper 없음<//>
       </section>
     `
   }

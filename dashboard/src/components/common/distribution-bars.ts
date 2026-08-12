@@ -57,7 +57,7 @@ export function DistributionBars({
   title,
   subtitle,
   items,
-  emptyLabel = '표시할 데이터가 없습니다.',
+  emptyLabel = '표시할 데이터 없음',
   valueFormatter = value => String(value),
   limit = 6,
 }: {
@@ -140,7 +140,7 @@ export function SegmentedBar({
           `
         : null}
       ${total === 0
-        ? html`<div class="${title ? 'mt-3 ' : ''}text-2xs italic text-[var(--color-fg-muted)]">표시할 데이터가 없습니다.</div>`
+        ? html`<div class="${title ? 'mt-3 ' : ''}text-2xs italic text-[var(--color-fg-muted)]">표시할 데이터 없음</div>`
         : html`
             <div class="${title ? 'mt-3 ' : ''}flex flex-col gap-2.5">
               <div class="flex h-3 overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-elevated)]">

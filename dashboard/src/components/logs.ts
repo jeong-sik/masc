@@ -948,7 +948,7 @@ export function LogViewer() {
   const visibleEntries = kindFilter.value === ''
     ? logEntries
     : logEntries.filter(entry => logDisplayKind(entry) === kindFilter.value)
-  let emptyMessage = '조건에 맞는 로그가 없습니다.'
+  let emptyMessage = '조건에 맞는 로그 없음'
   if (logLoading) emptyMessage = '로그를 불러오는 중...'
   else if (kindFilter.value !== '') emptyMessage = '해당하는 이벤트 없음'
   return html`

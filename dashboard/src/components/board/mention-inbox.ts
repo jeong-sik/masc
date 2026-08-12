@@ -222,8 +222,8 @@ export function MentionInbox() {
         ? html`<${EmptyState} message="멘션 메시지가 없습니다" compact />`
         : html`
             <div class="grid gap-4 xl:grid-cols-2">
-              <${MentionLane} title="For me" rows=${model.forMe} emptyMessage="현재 actor 대상 멘션이 없습니다" />
-              <${MentionLane} title="Other mentions" rows=${model.others} emptyMessage="다른 대상 멘션이 없습니다" />
+              <${MentionLane} title="For me" rows=${model.forMe} emptyMessage="현재 actor 대상 멘션 없음" />
+              <${MentionLane} title="Other mentions" rows=${model.others} emptyMessage="다른 대상 멘션 없음" />
             </div>
           `}
     </section>
@@ -257,8 +257,8 @@ export function MentionInboxPanel() {
           <div class="v">${model.others.length}</div>
         </div>
       </div>
-      <${MentionLane} title="For me" rows=${model.forMe} emptyMessage="현재 actor 대상 멘션이 없습니다" />
-      <${MentionLane} title="Other mentions" rows=${model.others} emptyMessage="다른 대상 멘션이 없습니다" />
+      <${MentionLane} title="For me" rows=${model.forMe} emptyMessage="현재 actor 대상 멘션 없음" />
+      <${MentionLane} title="Other mentions" rows=${model.others} emptyMessage="다른 대상 멘션 없음" />
     </div>
   `
 }

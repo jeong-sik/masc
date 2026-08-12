@@ -1213,7 +1213,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           <span class="fl-gloss" title=${glossTitle}>${glossText}</span>
           ${row.bandActionHint ? html`<span class="fl-gloss">${row.bandActionHint}</span>` : null}
           ${exclusionLabel
-            ? html`<span class="fl-gloss" data-exclusion title="자동 부팅에서 제외됨 — 서버 시작 시 기동하지 않습니다. 기동 버튼으로 직접 켜세요.">${exclusionLabel}</span>`
+            ? html`<span class="fl-gloss" data-exclusion title="자동 부팅 제외 — 기동 버튼으로 켭니다">${exclusionLabel}</span>`
             : null}
         </div>
 
@@ -1348,8 +1348,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               <div class="px-6 py-10">
                 <${EmptyState}
                   message=${showExecutionFallbackState && expectedScopedCount > 0
-                      ? `${fallbackStateTitle}: ${scopeLabel}가 있지만, 현재 조건에 맞는 항목은 아직 없습니다.`
-                      : '조건에 맞는 runtime row가 없습니다.'}
+                      ? `${fallbackStateTitle}: ${scopeLabel}가 있지만, 현재 조건에 맞는 항목은 아직 없음`
+                      : '조건에 맞는 runtime row 없음'}
                   compact
                 />
               </div>
@@ -1427,7 +1427,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   ? html`<${KeeperPhaseBadge} phase=${selectedRow.fsmPhaseKey} compact />`
                   : html`<span class="fl-chip" data-tone=${selectedTone}>${selectedRow.band.label}</span>`}
                 ${selectedRow.fsmStageKey && selectedRow.fsmStageText ? html`
-                  <span class="inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-2xs font-medium ${stageBadgeClass(selectedRow.fsmStageKey)}" title=${selectedRow.monitoringEvidence?.stage?.description ?? '활동 단계 정보가 없습니다.'}>
+                  <span class="inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-2xs font-medium ${stageBadgeClass(selectedRow.fsmStageKey)}" title=${selectedRow.monitoringEvidence?.stage?.description ?? '활동 단계 정보 없음'}>
                     ${selectedRow.fsmStageText}
                   </span>
                 ` : null}
@@ -1542,7 +1542,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ` : null}
           ` : html`
             <div class="fl-as-sec">
-              <${EmptyState} message="선택할 keeper 또는 agent가 없습니다." compact />
+              <${EmptyState} message="선택할 keeper 또는 agent 없음" compact />
             </div>
           `}
         </aside>

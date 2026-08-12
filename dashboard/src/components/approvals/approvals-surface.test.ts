@@ -1063,7 +1063,7 @@ describe('ApprovalsSurface', () => {
     await flushUi()
 
     expect(container.querySelector('[data-testid="approvals-empty"]')).not.toBeNull()
-    expect(container.textContent).toContain('열린 Human 판단이 없습니다')
+    expect(container.textContent).toContain('열린 Human 판단 없음')
     expect(container.querySelector('[data-testid="approvals-queue"]')).toBeNull()
   })
 

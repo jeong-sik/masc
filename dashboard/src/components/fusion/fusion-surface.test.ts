@@ -656,7 +656,7 @@ describe('FusionSurface', () => {
     render(html`<${FusionSurface} />`, container)
 
     expect(container.querySelector('[data-testid="fusion-empty"]')).not.toBeNull()
-    expect(container.textContent).toContain('아직 기록된 보드 심의가 없습니다')
+    expect(container.textContent).toContain('아직 기록된 보드 심의 없음')
     expect(container.textContent).toContain('/api/v1/dashboard/fusion-runs')
   })
 
@@ -675,7 +675,7 @@ describe('FusionSurface', () => {
     const empty = container.querySelector('[data-testid="fusion-empty"]')
     expect(empty?.textContent).toContain('보드 심의 기록을 확인하지 못했습니다')
     expect(empty?.textContent).toContain('/api/v1/dashboard/board?sort_by=recent&limit=500')
-    expect(empty?.textContent).not.toContain('아직 기록된 보드 심의가 없습니다')
+    expect(empty?.textContent).not.toContain('아직 기록된 보드 심의 없음')
   })
 
   it('keeps cached board-sink detail visible while showing a refresh failure', () => {

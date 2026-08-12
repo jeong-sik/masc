@@ -568,7 +568,7 @@ function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
               </summary>
               <div class="p-4">
                 <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-                  <div class="text-2xs text-text-muted">SSE 세션 중 메시지 큐가 쌓여 있는 세션입니다. 큐 depth가 높으면 해당 클라이언트가 이벤트 처리를 따라가지 못하고 있습니다.</div>
+                  <div class="text-2xs text-text-muted">메시지 큐가 쌓인 SSE 세션 — depth가 높으면 클라이언트 처리 지연</div>
                   <${TextInput}
                     type="search"
                     class="min-w-45 flex-1 !py-1 !text-2xs"
@@ -616,7 +616,7 @@ function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
           <span class="ml-auto text-2xs font-normal text-text-muted">각 트랜스포트의 실제 연결 방법 레퍼런스</span>
         </summary>
         <div class="p-4">
-          <div class="text-2xs text-text-muted mb-3">5가지 트랜스포트(SSE, gRPC, WebSocket, WebRTC, HTTP)를 실제로 어떻게 연결하는지 보여주는 가이드입니다. 운영 데이터가 아닌 참조용 정보입니다.</div>
+          <div class="text-2xs text-text-muted mb-3">트랜스포트 연결 가이드 (참조용)</div>
           <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
             ${PRACTICAL_CASES.map((item) => html`<${CaseCard} item=${item} data=${data} />`)}
           </div>

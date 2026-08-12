@@ -73,7 +73,7 @@ function phaseMetaFromToken(key: string, token: KeeperPhaseToken): PhaseMeta {
 // `PHASE_LABEL_KO.running = '실행 중'` differed only by a space, and
 // `listening: '대기중'` against `수신 대기` differed outright.
 const PHASE_LABELS: Record<string, PhaseMeta> = {
-  Offline: { key: 'Offline', label: PHASE_LABEL_KO.offline, description: '런타임이 올라오지 않았거나 연결 정보가 없습니다.' },
+  Offline: { key: 'Offline', label: PHASE_LABEL_KO.offline, description: '런타임이 올라오지 않았거나 연결 정보 없음' },
   Running: phaseMetaFromToken('Running', 'running'),
   Failing: phaseMetaFromToken('Failing', 'failing'),
   Overflowed: phaseMetaFromToken('Overflowed', 'overflowed'),
@@ -101,7 +101,7 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
 // PipelineStage SSOT: `types/core.ts#PipelineStage` (11 values from
 // `Keeper_status_runtime.pipeline_stage_of_phase`).
 const STAGE_LABELS: Record<string, StageMeta> = {
-  idle: { key: 'idle', label: '활동 없음', description: '지금 진행 중인 세부 활동 단계가 없습니다.' },
+  idle: { key: 'idle', label: '활동 없음', description: '지금 진행 중인 세부 활동 단계 없음' },
   compacting: { key: 'compacting', label: '압축', description: '컨텍스트 압축 단계를 수행 중입니다.' },
   handoff: { key: 'handoff', label: '승계', description: '같은 keeper를 새 trace와 새 세대로 이어붙이는 중입니다.' },
   offline: { key: 'offline', label: '오프라인', description: '활동 정보를 확인하지 못했습니다.' },
@@ -111,7 +111,7 @@ const STAGE_LABELS: Record<string, StageMeta> = {
   paused: { key: 'paused', label: '일시정지', description: '활동 단계도 함께 정지된 상태입니다.' },
   crashed: { key: 'crashed', label: '중단', description: '파이프라인 실행이 비정상 종료되었습니다.' },
   restarting: { key: 'restarting', label: '재시작', description: '파이프라인을 다시 올리는 중입니다.' },
-  unknown: { key: 'unknown', label: '미상', description: '파이프라인 단계 정보가 없습니다.' },
+  unknown: { key: 'unknown', label: '미상', description: '파이프라인 단계 정보 없음' },
 }
 
 const DEFAULT_PHASE_BY_BAND: Partial<Record<RuntimeBand, string>> = {

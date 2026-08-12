@@ -1068,7 +1068,7 @@ describe('BoardSurface Component', () => {
 
     const button = screen.getByTestId('bd-context-infer-post-non-keeper') as HTMLButtonElement
     expect(button).toBeDisabled()
-    expect(button).toHaveAttribute('title', '맥락 추론을 실행할 등록된 keeper가 없습니다')
+    expect(button).toHaveAttribute('title', '맥락 추론을 실행할 등록된 keeper 없음')
   })
 
   it('enables context inference button for non-keeper authored posts and uses first keeper as fallback', async () => {

@@ -28,6 +28,11 @@ type t =
   ; dispatch_mutex : Eio.Mutex.t
   }
 
+type tool_response =
+  { outcome : Runtime_official_client_mcp.tool_result
+  ; after_response_sent : unit -> unit
+  }
+
 let max_body_bytes = 1024 * 1024
 
 let hex_of_cstruct bytes =
@@ -159,6 +164,7 @@ let dispatch t ~request ~tool_specs ~call_tool message =
     | Ok () ->
       let inventory_failure = ref None in
       let tool_failure = ref None in
+      let after_response_sent = ref None in
       let guarded_tool_specs () =
         try tool_specs () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -167,7 +173,13 @@ let dispatch t ~request ~tool_specs ~call_tool message =
           raise exn
       in
       let guarded_call_tool ~name ~call_id ~arguments =
-        try call_tool ~name ~call_id ~arguments with
+        try
+          match call_tool ~name ~call_id ~arguments with
+          | None -> None
+          | Some response ->
+            after_response_sent := Some response.after_response_sent;
+            Some response.outcome
+        with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
           tool_failure := Some (name, call_id, exn);
@@ -189,7 +201,7 @@ let dispatch t ~request ~tool_specs ~call_tool message =
           then
             Eio.Mutex.use_rw ~protect:true t.state_mutex (fun () ->
               t.state.tool_calls <- t.state.tool_calls + 1);
-          Ok result
+          Ok (result, !after_response_sent)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -309,10 +321,16 @@ let handle_message t ~request ~tool_specs ~call_tool body =
             id
             (-32603)
             "MCP tool outcome is unknown; do not retry this call id")
-     | Ok { response = None; _ } -> respond `Accepted ""
-     | Ok { response = Some response; _ } ->
+     | Ok ({ response = None; _ }, _) -> respond `Accepted ""
+     | Ok ({ response = Some response; _ }, after_response_sent) ->
        let protocol_version = (snapshot t).negotiated_protocol_version in
-       respond_json ?protocol_version `OK response)
+       let response = respond_json ?protocol_version `OK response in
+       (match after_response_sent with
+        | None -> response
+        | Some notify ->
+          fun writer ->
+            response writer;
+            notify ()))
 ;;
 
 let handle_post t ~tool_specs ~call_tool request body =

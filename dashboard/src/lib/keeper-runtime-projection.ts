@@ -23,6 +23,7 @@ export type KeeperRuntimeProjectionSignalKind =
   | 'runtime_trace'
   | 'runtime_warning'
   | 'fsm_raw_lanes'
+  | 'blocked_tasks'
 
 export type KeeperRuntimeProjectionSignalState =
   | 'ok'
@@ -115,6 +116,24 @@ interface DeriveKeeperRuntimeProjectionInput {
   readonly nowMs?: number
 }
 
+/** The attention axis of a keeper runtime projection.
+ *
+ *  Every fleet surface must answer "does this keeper need me" from this one
+ *  list. The keepers roster used to answer it from two flat record fields
+ *  (`needs_attention`, `blocked_task_count`) while the monitoring roster read
+ *  these signals, so the same keeper showed 주의 on one surface and 실행 중 on
+ *  the other — a stale heartbeat, a context breach or a dead fiber was
+ *  visible in monitoring and invisible in the roster. */
+export function keeperAttentionSignals(
+  projection: KeeperRuntimeProjection,
+): KeeperRuntimeProjectionSignal[] {
+  return projection.signals.filter(signal => signal.contributesToAttention)
+}
+
+export function keeperNeedsAttention(projection: KeeperRuntimeProjection): boolean {
+  return projection.signals.some(signal => signal.contributesToAttention)
+}
+
 export const KEEPER_RUNTIME_CONTEXT_ATTENTION_RATIO = 0.95
 
 export function compactToken(value: string | null | undefined, fallback = 'unknown'): string {
@@ -184,6 +203,7 @@ export function deriveKeeperRuntimeProjection({
     runtimeWarnings,
     fsmLanes,
     runtimeReason,
+    backlog: deriveBacklogAttention(keeper),
   })
   const attentionSignals = signals.filter(signal => signal.contributesToAttention)
   const headline =
@@ -270,6 +290,25 @@ function deriveHeartbeatProjection(keeper: Keeper, nowMs: number): KeeperHeartbe
     ageMs,
     thresholdMs,
   }
+}
+
+/** Blocked work the keeper is carrying, read from the execution row.
+ *
+ *  This is the fact the keepers roster used to answer 주의 with on its own,
+ *  while the monitoring roster answered from the runtime signals. Carrying it
+ *  as a signal makes it part of the one attention axis both surfaces read,
+ *  instead of a second definition living on one surface. */
+export interface KeeperBacklogAttention {
+  readonly blockedTasks: number
+  readonly flagged: boolean
+}
+
+function deriveBacklogAttention(keeper: Keeper): KeeperBacklogAttention {
+  const blockedTasks =
+    typeof keeper.blocked_task_count === 'number' && Number.isFinite(keeper.blocked_task_count)
+      ? Math.max(0, keeper.blocked_task_count)
+      : 0
+  return { blockedTasks, flagged: keeper.needs_attention === true }
 }
 
 function deriveContextProjection(keeper: Keeper): KeeperContextProjection {
@@ -370,6 +409,7 @@ function fsmLaneSummary(lanes: readonly KeeperRuntimeProjectionFsmLane[]): strin
 
 function buildProjectionSignals({
   opState,
+  backlog,
   heartbeat,
   context,
   fiberAlive,
@@ -388,6 +428,7 @@ function buildProjectionSignals({
   readonly runtimeWarnings: readonly string[]
   readonly fsmLanes: readonly KeeperRuntimeProjectionFsmLane[]
   readonly runtimeReason: string
+  readonly backlog: KeeperBacklogAttention
 }): KeeperRuntimeProjectionSignal[] {
   const blockerAttention = opState.kind === 'stuck' || opState.attention !== 'clean'
   const ksmAttention = fsmLanes.some(lane => lane.axis === 'KSM' && lane.contributesToAttention)
@@ -435,6 +476,29 @@ function buildProjectionSignals({
       state: context.breach ? 'attention' : context.ratio === null ? 'unknown' : 'ok',
       contributesToAttention: context.breach,
       hint: context.breach ? `컨텍스트 사용량이 ${contextValue}입니다.` : null,
+    },
+    {
+      kind: 'blocked_tasks',
+      label: 'blocked work',
+      value:
+        backlog.blockedTasks > 0
+          ? `${backlog.blockedTasks} blocked`
+          : backlog.flagged
+            ? 'flagged'
+            : 'clear',
+      detail:
+        backlog.blockedTasks > 0
+          ? `blocked_task_count ${backlog.blockedTasks}`
+          : 'blocked_task_count 0',
+      tone: backlog.blockedTasks > 0 || backlog.flagged ? 'warn' : 'neutral',
+      state: backlog.blockedTasks > 0 || backlog.flagged ? 'attention' : 'ok',
+      contributesToAttention: backlog.blockedTasks > 0 || backlog.flagged,
+      hint:
+        backlog.blockedTasks > 0
+          ? `차단된 작업이 ${backlog.blockedTasks}건 있습니다.`
+          : backlog.flagged
+            ? '주의 플래그가 설정되어 있습니다.'
+            : null,
     },
     {
       kind: 'fiber_alive',

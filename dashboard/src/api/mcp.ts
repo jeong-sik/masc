@@ -17,7 +17,10 @@ import {
   refreshDevTokenAfterAuthError,
   resetDevTokenBootstrap,
 } from './dev-token'
-import { reportToolHostFailure } from './tool-host-failure'
+import {
+  reportToolHostFailure,
+  type ToolHostFailureCauseCode,
+} from './tool-host-failure'
 import { showActionToast } from '../components/common/toast'
 import { errorToString } from '../lib/format-string'
 
@@ -37,6 +40,7 @@ async function bestEffortReportToolHostFailure(payload: {
   toolName: string
   message: string
   phase: string
+  causeCode: ToolHostFailureCauseCode
   requestId?: string
   timeoutMs?: number
 }) {
@@ -46,6 +50,7 @@ async function bestEffortReportToolHostFailure(payload: {
       tool_name: payload.toolName,
       transport: 'mcp_http',
       phase: payload.phase,
+      cause_code: payload.causeCode,
       message: payload.message,
       request_id: payload.requestId,
       timeout_ms: payload.timeoutMs,
@@ -55,25 +60,18 @@ async function bestEffortReportToolHostFailure(payload: {
   }
 }
 
-/* A tool-host failure means the request never reached a tool, so the transport
-   already knows: fetchWithTimeout converts an abort into ApiRequestError with
-   timeout set, and a fetch that cannot reach the host rejects with TypeError.
-   Both are answers this function can read off the thrown value.
+type ToolHostFailureObservation =
+  | { causeCode: 'tool_host_timeout'; timeoutMs: number }
+  | { causeCode: 'tool_host_transport_unavailable'; timeoutMs?: never }
 
-   It used to lowercase the message and look for six substrings, which decided
-   transport health from prose the transport does not own. That misclassifies
-   a normal MCP error whose tool message happens to contain "load failed", and
-   misses a network failure worded differently by another browser or locale.
-   Two of the six arms could never fire: "timed out awaiting tools/call" exists
-   only in an OCaml fixture describing the payload this file *sends*, and
-   "error decoding response body" appears nowhere in the tree at all. A string
-   classifier has no exhaustiveness, so nothing said so. */
-function shouldReportToolHostFailure(err: unknown): boolean {
-  if (err instanceof ApiRequestError) return err.timeout === true
-  // Browser fetch rejects with TypeError when the host is unreachable
-  // (connection refused, DNS failure, CORS preflight failure). The wording
-  // varies by engine; the class does not.
-  return err instanceof TypeError
+function toolHostFailureObservation(err: unknown): ToolHostFailureObservation | null {
+  if (err instanceof ApiRequestError && err.timeout) {
+    return { causeCode: 'tool_host_timeout', timeoutMs: DEFAULT_MCP_TIMEOUT_MS }
+  }
+  if (err instanceof TypeError) {
+    return { causeCode: 'tool_host_transport_unavailable' }
+  }
+  return null
 }
 
 function explicitToolActor(args: Record<string, unknown>): string | null {
@@ -317,13 +315,15 @@ async function callMcpToolInternal(
       return callMcpToolInternal(toolName, args, false)
     }
     const message = errorToString(err)
-    if (shouldReportToolHostFailure(err)) {
+    const failure = toolHostFailureObservation(err)
+    if (failure) {
       await bestEffortReportToolHostFailure({
         toolName,
         message,
         phase: 'tools/call',
+        causeCode: failure.causeCode,
         requestId,
-        timeoutMs: DEFAULT_MCP_TIMEOUT_MS,
+        timeoutMs: failure.timeoutMs,
       })
     }
     throw err

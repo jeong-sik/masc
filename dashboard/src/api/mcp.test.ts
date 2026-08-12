@@ -160,11 +160,11 @@ describe('MCP 2026-07-28 dashboard client', () => {
     getStoredTokenMeta.mockReturnValue({
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     })
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'test-stored-token', actor: 'dashboard', role: 'worker',
+        token: 'test-stored-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(okToolResponse())
     const { callMcpTool } = await import('./mcp')
@@ -408,7 +408,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
     getStoredTokenMeta.mockReturnValue(null)
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'loopback-dev-token', actor: 'dashboard', role: 'worker',
+        token: 'loopback-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(okToolResponse())
 
@@ -416,15 +416,38 @@ describe('MCP 2026-07-28 dashboard client', () => {
     await callMcpTool('masc_status', {})
 
     expect(setStoredToken).toHaveBeenCalledWith('loopback-dev-token', {
-      source: 'dev', actor: 'dashboard', role: 'worker',
+      source: 'dev', actor: 'dashboard', role: 'admin',
     })
     expect(fetchWithTimeout.mock.calls.map(call => call[0]))
       .toEqual(['/api/v1/dashboard/dev-token', '/mcp'])
   })
 
+  /* The loopback dev-token is Admin (#28354), and `ensureDevToken` refuses any
+     other role rather than storing a credential it cannot use. Until this case
+     existed the refusal branch had no test of its own — it was reached by
+     accident, because the fixtures above still served the pre-#28354 `worker`
+     role, which silently turned four tests that meant to exercise bootstrap,
+     identity binding, and token refresh into four assertions about a bootstrap
+     that never ran. Pin the refusal here so those tests can state their own
+     subject. */
+  it('refuses a dev-token payload that is not the Admin contract', async () => {
+    getStoredToken.mockReturnValue(null)
+    getStoredTokenMeta.mockReturnValue(null)
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'loopback-dev-token', actor: 'dashboard', role: 'worker',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(okToolResponse())
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    expect(setStoredToken).not.toHaveBeenCalled()
+  })
+
   it('binds identity to a bearer bootstrapped during the call', async () => {
     let token: string | null = null
-    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = null
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = null
     let revision = 0
     getStoredToken.mockImplementation(() => token)
     getStoredTokenMeta.mockImplementation(() => meta)
@@ -436,7 +459,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
     })
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'loopback-dev-token', actor: 'dashboard', role: 'worker',
+        token: 'loopback-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(okToolResponse())
 
@@ -495,8 +518,8 @@ describe('MCP 2026-07-28 dashboard client', () => {
 
   it('refreshes a managed token once on a typed MCP auth result', async () => {
     let token: string | null = 'stale-dev-token'
-    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = {
-      source: 'dev', actor: 'dashboard', role: 'worker',
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = {
+      source: 'dev', actor: 'dashboard', role: 'admin',
     }
     let revision = 0
     getStoredToken.mockImplementation(() => token)
@@ -514,7 +537,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
     })
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'stale-dev-token', actor: 'dashboard', role: 'worker',
+        token: 'stale-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(`data: ${JSON.stringify({
         result: {
@@ -524,7 +547,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
         },
       })}\n`, { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'fresh-dev-token', actor: 'dashboard', role: 'worker',
+        token: 'fresh-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(okToolResponse())
 
@@ -545,8 +568,8 @@ describe('MCP 2026-07-28 dashboard client', () => {
 
   it('refreshes a managed token once on a typed HTTP 401', async () => {
     let token: string | null = 'stale-dev-token'
-    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = {
-      source: 'dev', actor: 'dashboard', role: 'worker',
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = {
+      source: 'dev', actor: 'dashboard', role: 'admin',
     }
     let revision = 0
     getStoredToken.mockImplementation(() => token)
@@ -574,7 +597,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
     })
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'stale-dev-token', actor: 'dashboard', role: 'worker',
+        token: 'stale-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         jsonrpc: '2.0',
@@ -586,7 +609,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
         },
       }), { status: 401, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'fresh-dev-token', actor: 'dashboard', role: 'worker',
+        token: 'fresh-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(okToolResponse())
 

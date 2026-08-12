@@ -237,6 +237,7 @@
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
+  test_keeper_capability_probe
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_keeper_repo_mapping
@@ -532,6 +533,7 @@
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
+  test_keeper_capability_probe
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_keeper_repo_mapping

@@ -61,6 +61,7 @@ import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { ExpandableTextarea } from './common/expandable-textarea'
+import { KeeperGithubIdentityPanel } from './keeper-github-identity-panel'
 import { createAsyncResource } from '../lib/async-state'
 import {
   findRuntimeCatalogEntry,
@@ -164,6 +165,8 @@ export type KeeperConfigControlEndpoint =
   | '/api/v1/keepers/:name/directive'
   | '/api/v1/dashboard/goals'
   | '/api/v1/providers'
+  | '/api/v1/keepers/:name/github-identity'
+  | '/api/v1/keepers/:name/github-login'
 
 export type KeeperConfigBrowserStateKey =
   | 'promptPreviewTab'
@@ -682,6 +685,18 @@ export function keeperConfigControlInventory(
           source: `${configApiSource} effective_allowed_paths + workspace.bound_workspace_ids`,
           action: 'read-only computed access projection',
           contracts: configReadContracts(['effective_allowed_paths', 'workspace.bound_workspace_ids']),
+        },
+        {
+          id: 'kcf-access-github-identity',
+          tab,
+          label: 'GitHub CLI identity',
+          kind: 'live-write',
+          source: 'GET /api/v1/keepers/:name/github-identity stored/effective probes',
+          action: 'POST /api/v1/keepers/:name/github-login operator web login stream',
+          contracts: [
+            apiContract('GET', '/api/v1/keepers/:name/github-identity'),
+            apiContract('POST', '/api/v1/keepers/:name/github-login'),
+          ],
         },
       ]
     case 'goals':
@@ -2041,6 +2056,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${SectionHeader} size="xs" class="mb-1">참여 네임스페이스</${SectionHeader}>
       <${ModelList} models=${c.workspace.bound_workspace_ids} />
     </div>
+
+    <${KeeperGithubIdentityPanel} keeperName=${keeperName} />
 
   `
 

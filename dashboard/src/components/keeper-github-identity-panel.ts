@@ -104,38 +104,36 @@ export function KeeperGithubIdentityPanel({
   }
 
   return html`
-    <section class="rounded-xl border border-slate-200 bg-[linear-gradient(135deg,#fffdf7_0%,#f4f8ff_100%)] p-4 shadow-sm">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">GitHub CLI identity</p>
-          <h3 class="mt-1 font-semibold text-slate-900">Keeper 전용 GitHub 계정</h3>
-          <p class="mt-1 text-xs text-slate-500">저장 계정과 호스트에 투영된 자격 증명을 GitHub API로 각각 확인합니다.</p>
-        </div>
-        <div class="flex gap-2">
-          <button type="button" onClick=${() => void refresh()} class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">새로고침</button>
-          <button type="button" onClick=${() => void startLogin()} class="rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">GitHub 로그인</button>
+    <section class="kcf-sec">
+      <div class="kcf-sec-h">
+        <h3>GitHub CLI 계정</h3>
+        <div class="ml-auto flex gap-2">
+          <button type="button" onClick=${() => void refresh()} class="kcf-btn ghost">새로고침</button>
+          <button type="button" onClick=${() => void startLogin()} class="kcf-btn save">GitHub 로그인</button>
         </div>
       </div>
-
-      ${loadError && html`<p class="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">${loadError}</p>`}
-      ${observation && html`
-        <div class="mt-4 grid gap-3 sm:grid-cols-2">
-          <div class="rounded-lg border border-slate-200 bg-[var(--white-80)] p-3">
-            <span class="text-3xs font-semibold uppercase tracking-wider text-slate-400">Keeper 저장소</span>
-            <p class="mt-1 text-sm font-semibold text-slate-900">${authLabel(observation.stored.authenticated, observation.stored.login)}</p>
-            ${observation.stored.error && html`<p class="mt-1 text-3xs text-red-700">확인 실패: ${observation.stored.error}</p>`}
+      <p class="kcf-sec-desc">Keeper 전용으로 저장된 GitHub CLI 계정과 호스트에 투영된 자격 증명을 GitHub API로 각각 확인합니다.</p>
+      <div class="kcf-sec-body">
+        ${loadError && html`<p class="text-2xs text-[var(--color-status-err)]">${loadError}</p>`}
+        ${observation && html`
+          <div class="kcf-facts">
+            <div class="kcf-fact">
+              <span class="kcf-fact-k">Keeper 저장소</span>
+              <span class="kcf-fact-v mono">${authLabel(observation.stored.authenticated, observation.stored.login)}</span>
+              ${observation.stored.error && html`<span class="text-3xs text-[var(--color-status-err)]">확인 실패: ${observation.stored.error}</span>`}
+            </div>
+            <div class="kcf-fact">
+              <span class="kcf-fact-k">호스트 자격 증명 확인</span>
+              <span class="kcf-fact-v mono">${authLabel(observation.effective.authenticated, observation.effective.login)}</span>
+              <span class="text-3xs text-[var(--color-fg-muted)]">Docker 이미지의 gh·네트워크 동작을 증명하지 않습니다.</span>
+              ${observation.effective.error && html`<span class="text-3xs text-[var(--color-status-err)]">확인 실패: ${observation.effective.error}</span>`}
+              ${observation.projected_token_env_names.length > 0 && html`
+                <span class="text-3xs text-[var(--color-status-warn)]">투영된 토큰 변수: ${observation.projected_token_env_names.join(', ')}</span>
+              `}
+            </div>
           </div>
-          <div class="rounded-lg border border-slate-200 bg-[var(--white-80)] p-3">
-            <span class="text-3xs font-semibold uppercase tracking-wider text-slate-400">호스트 자격 증명 확인</span>
-            <p class="mt-1 text-sm font-semibold text-slate-900">${authLabel(observation.effective.authenticated, observation.effective.login)}</p>
-            <p class="mt-1 text-3xs text-slate-500">Docker 이미지의 gh·네트워크 동작을 증명하지 않습니다.</p>
-            ${observation.effective.error && html`<p class="mt-1 text-3xs text-red-700">확인 실패: ${observation.effective.error}</p>`}
-            ${observation.projected_token_env_names.length > 0 && html`
-              <p class="mt-1 text-3xs text-amber-700">투영된 토큰 변수: ${observation.projected_token_env_names.join(', ')}</p>
-            `}
-          </div>
-        </div>
-      `}
+        `}
+      </div>
 
       ${loginOpen && html`
         <div class="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4" role="dialog" aria-modal="true" aria-label="GitHub 로그인">
@@ -145,13 +143,13 @@ export function KeeperGithubIdentityPanel({
                 <p class="text-sm font-semibold text-white">${keeperName} GitHub 로그인</p>
                 <p class="text-xs text-slate-400">아래 코드와 URL은 gh가 직접 출력한 내용입니다.</p>
               </div>
-              <button type="button" onClick=${closeLogin} class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800">${loginRunning ? '취소' : '닫기'}</button>
+              <button type="button" onClick=${closeLogin} class="kcf-btn ghost">${loginRunning ? '취소' : '닫기'}</button>
             </div>
             <pre class="max-h-[52vh] min-h-48 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-6 text-emerald-300">${output || 'GitHub 웹 인증 응답을 기다리는 중...'}</pre>
             ${urls.length > 0 && html`
               <div class="flex flex-wrap gap-2 border-t border-slate-800 px-4 py-3">
                 ${urls.map(url => html`
-                  <a key=${url} href=${url} target="_blank" rel="noreferrer" class="rounded-lg bg-amber-300 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-amber-200">GitHub 페이지 열기</a>
+                  <a key=${url} href=${url} target="_blank" rel="noreferrer" class="kcf-btn save inline-block no-underline">GitHub 페이지 열기</a>
                 `)}
               </div>
             `}

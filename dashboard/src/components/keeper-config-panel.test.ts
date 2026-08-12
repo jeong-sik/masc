@@ -853,6 +853,26 @@ vi.mock('./common/toast', () => ({
   showToast: mocks.showToast,
 }))
 
+const githubIdentityMocks = vi.hoisted(() => ({
+  fetchKeeperGithubIdentity: vi.fn(async () => ({
+    ok: true as const,
+    keeper: 'keeper-sangsu',
+    hostname: 'github.com',
+    config_dir: '/tmp/base/.masc/keepers/keeper-sangsu/github-cli',
+    projected_token_env_names: [],
+    stored: { authenticated: true, login: 'masc-sangsu-bot', error: null },
+    effective: { authenticated: false, login: null, error: null },
+    effective_probe_scope: 'host_process_credential_only' as const,
+    checked_at_unix: 1786000000,
+  })),
+  streamKeeperGithubLogin: vi.fn(async () => undefined),
+}))
+
+vi.mock('../api/dashboard-keeper-github', () => ({
+  fetchKeeperGithubIdentity: githubIdentityMocks.fetchKeeperGithubIdentity,
+  streamKeeperGithubLogin: githubIdentityMocks.streamKeeperGithubLogin,
+}))
+
 import {
   KeeperConfigPanel,
   buildKcfAssemblySegments,
@@ -899,6 +919,8 @@ describe('KeeperConfigPanel', () => {
     mocks.pauseKeeper.mockClear()
     mocks.resumeKeeper.mockClear()
     mocks.wakeKeeper.mockClear()
+    githubIdentityMocks.fetchKeeperGithubIdentity.mockClear()
+    githubIdentityMocks.streamKeeperGithubLogin.mockClear()
   })
 
   afterEach(() => {
@@ -906,6 +928,31 @@ describe('KeeperConfigPanel', () => {
     container.remove()
     resetKeeperConfig()
     resetRuntimeCatalog()
+  })
+
+  it('exposes the keeper GitHub CLI identity under the 권한·샌드박스 tab', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    // The identity tab is active by default; the GitHub account card must not
+    // leak outside its owning tab.
+    expect(container.textContent).not.toContain('GitHub CLI 계정')
+
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    await flush()
+
+    expect(container.textContent).toContain('GitHub CLI 계정')
+    expect(container.textContent).toContain('호스트 자격 증명 확인')
+    expect(githubIdentityMocks.fetchKeeperGithubIdentity).toHaveBeenCalledWith(
+      'keeper-sangsu',
+      'github.com',
+      expect.any(AbortSignal),
+    )
+    await flush()
+    expect(container.textContent).toContain('@masc-sangsu-bot')
+    expect(container.textContent).toContain('연결 안 됨')
   })
 
   it('separates editable prompt controls from read-only runtime metadata', async () => {

@@ -58,6 +58,51 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
      | false, _ | _, None -> result)
 ;;
 
+(* Catalog-driven reasoning-effort clamp for the Codex app-server runtime.
+
+   [Runtime_inference.resolve_reasoning_effort] reads the operator-declared
+   per-model effort from runtime config; the official-client (codex_app_server)
+   runtime sits outside AGENT_CORE's request-validation layer, so a value the
+   selected model does not accept (e.g. [Max] on a model whose catalog row only
+   accepts up to [XHigh]) reaches the provider and fails the turn with a 400.
+
+   Snap the requested effort into the catalog's accepted set rather than fail
+   the turn: the requested effort when it is accepted, otherwise the nearest
+   accepted effort (highest below; lowest when every accepted effort is higher).
+   The catalog ([models.toml] [accepted_reasoning_efforts]) is the SSOT, so an
+   operator controls the effective effort by editing that row. *)
+let clamp_reasoning_effort_to_catalog
+    ~(model_id : string option)
+    ~(requested : Llm_provider.Reasoning_effort.t option)
+    : Llm_provider.Reasoning_effort.t option =
+  match requested, model_id with
+  | None, _ | _, None -> requested
+  | Some effort, Some model ->
+    (match Llm_provider.Capabilities.for_model_id_catalog model with
+     | None -> requested
+     | Some caps ->
+       (match caps.Llm_provider.Capabilities.accepted_reasoning_efforts with
+        | None -> requested
+        | Some accepted when List.mem effort accepted -> requested
+        | Some [] -> requested
+        | Some (first :: rest as accepted) ->
+          let below =
+            List.filter
+              (fun candidate ->
+                 Llm_provider.Reasoning_effort.compare candidate effort < 0)
+              accepted
+          in
+          let pick_max a b =
+            if Llm_provider.Reasoning_effort.compare a b >= 0 then a else b
+          in
+          let pick_min a b =
+            if Llm_provider.Reasoning_effort.compare a b <= 0 then a else b
+          in
+          match below with
+          | [] -> Some (List.fold_left pick_min first rest)
+          | b_first :: b_rest -> Some (List.fold_left pick_max b_first b_rest)))
+;;
+
 let project_messages messages =
   let rec loop developer history = function
     | [] -> Ok (List.rev developer, List.rev history)
@@ -424,6 +469,28 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~model_input_projection
         ~hooks:(Some hooks)
     in
+    (* Snap the operator-declared effort into the catalog's accepted set so a
+       per-model cap (e.g. [Max] unsupported on a model that tops out at
+       [XHigh]) does not fail the turn. The catalog is the SSOT; an operator
+       widens the accepted set by editing [models.toml]. The same value feeds
+       the raw_trace start record and the request so observation matches the
+       wire. *)
+    let effective_reasoning_effort =
+      clamp_reasoning_effort_to_catalog
+        ~model_id:config.model
+        ~requested:prepared.reasoning_effort
+    in
+    ( match prepared.reasoning_effort, effective_reasoning_effort with
+      | Some asked, Some effective
+        when Llm_provider.Reasoning_effort.compare asked effective <> 0 ->
+        Log.Keeper.info
+          ~keeper_name
+          "%s reasoning effort clamped to catalog: model=%s asked=%s effective=%s"
+          runtime_label
+          (Option.value config.model ~default:runtime_id)
+          (Llm_provider.Reasoning_effort.to_string asked)
+          (Llm_provider.Reasoning_effort.to_string effective)
+      | _ -> () );
     let* developer_messages, history = project_messages prepared.messages in
     let* prompt =
       match goal_blocks with
@@ -522,7 +589,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             ?reasoning_effort:
               (Option.map
                  Llm_provider.Reasoning_effort.to_string
-                 prepared.reasoning_effort)
+                 effective_reasoning_effort)
             ())
     in
     let* host_dynamic_tools =
@@ -657,7 +724,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
          ~dynamic_tools
-         ?reasoning_effort:prepared.reasoning_effort
+         ?reasoning_effort:effective_reasoning_effort
          ~thread_mode
          ~history
          ?on_stream_event
@@ -938,4 +1005,5 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 
 module For_testing = struct
   let codex_error_to_core_error = codex_error_to_core_error
+  let clamp_reasoning_effort_to_catalog = clamp_reasoning_effort_to_catalog
 end

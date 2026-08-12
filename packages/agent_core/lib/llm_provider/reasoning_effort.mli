@@ -15,6 +15,17 @@ type t =
   | Max
 
 val all : t list
+
+(** Ordinal position on the canonical effort ladder (None_ = 0 .. Max = 6).
+    Exposed so callers can order efforts for catalog-driven clamping without
+    re-deriving the ladder at every consumer. *)
+val rank : t -> int
+
+(** Total order following the effort ladder ([None_] < [Minimal] < ... < [Max]).
+    Used by catalog-driven clamping to pick the nearest accepted effort below a
+    requested one. *)
+val compare : t -> t -> int
+
 val to_string : t -> string
 val pp : Format.formatter -> t -> unit
 val show : t -> string

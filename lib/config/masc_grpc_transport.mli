@@ -22,4 +22,4 @@ val configure_from_env : unit -> t
 val to_string : t -> string
 
 (** Operator snapshot entry projected from the same typed process resolution. *)
-val snapshot_entry : Env_config_snapshot_core.entry
+val snapshot_entry : Env_config_snapshot_collector.t

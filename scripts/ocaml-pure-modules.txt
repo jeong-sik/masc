@@ -3,6 +3,7 @@
 # random, filesystem, Eio, mutation, or logging APIs.
 lib/keeper/keeper_runtime_trust_snapshot_core.ml
 lib/keeper_runtime/keeper_event_queue_state.ml
+lib/config/env_config_snapshot_core.ml
 lib/schedule/schedule_domain.ml
 lib/turn_fsm/turn_fsm.ml
 lib/types/masc_domain.ml

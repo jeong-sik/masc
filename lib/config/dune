@@ -16,6 +16,7 @@
   env_config_slack
   env_config_discord
   env_config_snapshot
+  env_config_snapshot_collector
   env_config_snapshot_core
   feature_flag_registry
   keeper_sandbox_config

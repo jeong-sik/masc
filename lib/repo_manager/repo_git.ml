@@ -190,8 +190,23 @@ let get_branches ~repository =
   | Ok lines -> Ok lines
   | Error msg -> Error msg
 
+(* Bounded and read-only, matching [worktree_root] below. Reading a remote URL
+   is a config lookup, but [run_git] defaults to no timeout, so a git index
+   lock held by another process — or a stalled filesystem — would block the
+   caller indefinitely. Both callers sit on request paths: repository checkout
+   inspection renders a dashboard response, and write attribution is about to
+   move onto the tool post-hook (RFC-keeper-workspace-root-only §5.1).
+
+   [read_only_git_env] adds GIT_OPTIONAL_LOCKS=0 so an inspection never takes
+   a lock that a keeper's own git command then waits on. *)
 let get_origin_url ~local_path =
-  match run_git ~cwd:local_path [ "remote"; "get-url"; "origin" ] with
+  match
+    run_git
+      ~cwd:local_path
+      ~env:read_only_git_env
+      ~timeout_sec:status_summary_timeout_sec
+      [ "remote"; "get-url"; "origin" ]
+  with
   | Ok (url :: _) -> Ok url
   | Ok [] -> Error "git remote get-url origin returned no output"
   | Error msg -> Error msg

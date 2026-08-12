@@ -1,7 +1,7 @@
 ---
 rfc: "0375"
 title: "Closed day-file projection cache — stop replaying the ledger per read"
-status: Draft
+status: Draft (not recommended as written — see §8)
 created: 2026-08-13
 updated: 2026-08-13
 author: vincent + claude
@@ -147,12 +147,64 @@ not change what a single cold read costs and should not be measured on it.
   the state RFC-0372's own history shows going stale. Phase 2 is not done until
   the old path is deleted.
 
+## §5.5 Measurement — which readers can benefit
+
+§7's gating question ("does any current surface actually span enough closed
+files to benefit?") was measured against the live `~/me/.masc` stores before
+any implementation. It changes the scope below.
+
+Keeper metric stores, 8 of them:
+
+| | value |
+|---|---|
+| day-files per store | min 1, median 16, max 17 |
+| rows in the newest day-file | min 188, median 310, max 619 |
+| `default_read_entries` | 100 |
+| `latest_ts_probe_rows` | 64 |
+| `max_read_entries` | 2 000 |
+
+The tail-bounded readers stop once `n` rows are collected, walking day-files
+newest-first. At the default window a store reads 101 rows against a newest
+file holding 310, and the probe reads 64 — **neither reaches a closed
+day-file at all.** A projection cache over closed files would have a 0 % hit
+rate on the default dashboard read. An earlier draft of this RFC proposed
+`latest_store_ts` as the smallest honest starting point; the measurement makes
+it the worst candidate rather than the best, and §6 is corrected accordingly.
+
+Only at `max_read_entries` (2 000, which a caller must ask for) does a store
+span roughly six closed files.
+
+So the premise "every request replays the ledger" is false for `read_recent`
+callers: they replay the *tail*, bounded by `n`, and `load_tail_lines` already
+reads only the bytes that tail needs.
+
+Where it is true is `Dated_jsonl.read_range`, which has **no row bound at all**:
+
+```ocaml
+val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
+```
+
+and `dashboard_harness_health.ml:181-183` fills a missing bound with
+`"2020-01-01"` / `"2099-12-31"`, so a dashboard request supplying only `since`
+scans every day-file in the store with no cap on rows. Six call sites use
+`read_range`; two are dashboard surfaces.
+
+That is a different defect from the one RFC-0372 §1 describes — there the bound
+existed but scaled with store count; here there is no bound — and it is the
+only place a closed-file projection cache would see a hit today.
+
 ## §6 Scope
 
-Surfaces whose aggregate is a monoid: counts, sums, max/min timestamps,
-histograms, top-N by a total order, set unions. `Telemetry_unified`'s
-`latest_store_ts` probe is the smallest honest starting point — max over a
-window, already isolated, already measured.
+Surfaces whose aggregate is a monoid **and** whose reads reach closed
+day-files. After §5.5 that is a much smaller set than it first appeared:
+
+- **In**: the `Dated_jsonl.read_range` callers, which scan a date range with no
+  row bound. `dashboard_harness_health` is the surface that matters; the other
+  four sites are eval and audit paths.
+- **Out**: every `read_recent` caller at its default window, including
+  `latest_store_ts` — measured at a 0 % closed-file hit rate. An earlier draft
+  of this RFC named `latest_store_ts` as the starting point; the measurement
+  says it is the one place this cannot help.
 
 Surfaces that are **not** in scope without a reformulation: anything order-
 dependent across the whole window (rate-limited logging over rows), anything
@@ -173,13 +225,26 @@ would have to include the filter, and the hit rate collapses).
 - Is `(path, size, mtime)` a sufficient boundary key? `count_entries` already
   bets that it is. Same-second rewrites preserving size are the failure mode;
   whether that is reachable here needs an answer, not an assumption.
-- Does any current surface actually span enough closed files to benefit? The
-  dashboard's default windows are recent. If most reads are satisfied by
-  today's file alone, Phase 3 is the whole value and Phases 1-2 are overhead —
-  this should be measured before Phase 1 is written, not after.
+- ~~Does any current surface actually span enough closed files to benefit?~~
+  **Answered in §5.5: not the tail-bounded ones.** The remaining question is
+  narrower — is `read_range`'s unbounded scan worth a projection cache, or
+  worth a row bound? A bound is a smaller change and removes the cost rather
+  than caching it. This RFC should not proceed until that is decided, because
+  if `read_range` gains a bound the way `read_recent` has one, its callers stop
+  reaching closed files too and nothing is left for this mechanism to do.
 
 ## §8 Status
 
-Draft. No implementation. §7's last question is a genuine gate on whether this
-RFC should proceed at all, and it is answerable with a day of measurement
-against real stores.
+Draft, and **not recommended for implementation as written**.
+
+§5.5's measurement removed the motivating case: the tail-bounded readers never
+reach a closed day-file at their default window, so the cache proposed here
+would have a 0 % hit rate on the path that prompted it. What survives is a
+single unbounded reader, `Dated_jsonl.read_range`, and the cheaper fix for that
+is a row bound rather than a cache — RFC-0372's Phase 1 applied to the reader
+it skipped.
+
+Kept as a Draft rather than withdrawn because the mechanism is sound and
+already proven here for `count_entries`; if a future surface does aggregate
+across many closed files, this is the shape it should take. Reopening it
+requires showing that surface exists first.

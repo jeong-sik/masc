@@ -33,4 +33,13 @@ module For_testing : sig
       [test_keeper_codex_error_carriage]. RFC-0370 §3.1. *)
   val codex_error_to_core_error :
     Runtime_codex_app_server.error -> Agent_core.Error.t
+
+  (** Snap a requested reasoning effort into the catalog's accepted set for
+      [model_id]: the requested effort when it is accepted, otherwise the
+      nearest accepted effort. Pure; pinned by
+      [test_keeper_codex_effort_clamp]. *)
+  val clamp_reasoning_effort_to_catalog :
+       model_id:string option
+    -> requested:Llm_provider.Reasoning_effort.t option
+    -> Llm_provider.Reasoning_effort.t option
 end

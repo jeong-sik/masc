@@ -57,16 +57,26 @@ let is_text_only (message : Agent_core.Types.message) =
        message.content
 ;;
 
-let has_tool_use (message : Agent_core.Types.message) =
-  List.exists
-    (function
-      | Agent_core.Types.ToolUse _ -> true
-      | _ -> false)
-    message.content
+let is_assistant (message : Agent_core.Types.message) =
+  match message.role with
+  | Agent_core.Types.Assistant -> true
+  | Agent_core.Types.User | Agent_core.Types.System | Agent_core.Types.Tool -> false
 ;;
 
 (* R2: remove unsigned reasoning blocks. Signed thinking and
-   [RedactedThinking] replay byte-exact on tool turns and are kept. *)
+   [RedactedThinking] replay byte-exact on tool turns and are kept — that
+   distinction lives in the match below, which is the whole safety argument.
+
+   R2 originally also skipped any assistant message carrying a ToolUse
+   (#25537). That outer guard had no rationale of its own: the commit message
+   justified it with "providers replay [signed thinking] byte-exact", which the
+   [signature = None] pattern already enforces per block. On an agentic keeper
+   the guard swallows nearly everything — measured on the sangsu checkpoint
+   after a full purge, 418 of 422 surviving unsigned Thinking blocks (490,370 B,
+   41.0% of the 1,196,574 B file) sat in messages that also carried a ToolUse.
+   Unsigned thinking additionally cannot be replayed to Anthropic in that
+   position at all: extended-thinking replay requires the signature, so these
+   blocks originate from non-Anthropic runtimes and are inert bulk on the wire. *)
 let strip_reasoning_blocks (message : Agent_core.Types.message) =
   let kept, stripped =
     List.fold_left
@@ -215,13 +225,7 @@ let purge_messages ~config messages =
         else (
           match item.unit_ with
           | Keeper_compaction_unit.Ordinary_message message ->
-            if config.strip_thinking
-               && (match message.role with
-                   | Agent_core.Types.Assistant -> true
-                   | Agent_core.Types.User
-                   | Agent_core.Types.System
-                   | Agent_core.Types.Tool -> false)
-               && not (has_tool_use message)
+            if config.strip_thinking && is_assistant message
             then (
               let stripped_message, stripped = strip_reasoning_blocks message in
               reasoning_blocks_stripped := !reasoning_blocks_stripped + stripped;
@@ -245,6 +249,33 @@ let purge_messages ~config messages =
                      in
                      tool_results_cleared := !tool_results_cleared + cleared;
                      cleared_message)
+                  cycle_messages
+              else cycle_messages
+            in
+            (* R2 inside the cycle. The assistant message that OPENS a tool
+               cycle is grouped here, never in [Ordinary_message], so before
+               this branch existed R2 could not reach it at all — the single
+               largest reason unsigned reasoning survived a full purge.
+               A cycle message is never dropped even if stripping empties it:
+               that would break the ToolUse/ToolResult pairing the cycle is
+               indivisible for, and [Keeper_compaction_unit.validate] would
+               reject the output. In practice the opening message always keeps
+               its ToolUse block, so the empty case is defensive only. *)
+            let cycle_messages =
+              if config.strip_thinking
+              then
+                List.map
+                  (fun message ->
+                     if not (is_assistant message)
+                     then message
+                     else (
+                       let stripped, count = strip_reasoning_blocks message in
+                       match stripped.Agent_core.Types.content with
+                       | [] -> message
+                       | _ :: _ ->
+                         reasoning_blocks_stripped
+                         := !reasoning_blocks_stripped + count;
+                         stripped))
                   cycle_messages
               else cycle_messages
             in

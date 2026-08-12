@@ -13,6 +13,10 @@ type attempt_outcome =
 
 let runtime_label = "Claude Code"
 
+let host_stop_turn_identity ~session_id ~turn_count =
+  Printf.sprintf "%s:host-stop:%d" session_id turn_count
+;;
+
 let bounded_probe_config ~fallback_timeout_s
   (config : Runtime_claude_code.config)
   =
@@ -23,6 +27,7 @@ let bounded_probe_config ~fallback_timeout_s
 
 module For_testing = struct
   let bounded_probe_config = bounded_probe_config
+  let host_stop_turn_identity = host_stop_turn_identity
 end
 
 let project_messages messages =
@@ -547,7 +552,28 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     let started_at = Time_compat.now () in
     let settle_host_stop stop =
       match (!session_state).Session_store.phase with
-      | Turn_inflight { session_id; turn_id = Some turn_id; _ } ->
+      | Turn_inflight { session_id; turn_id; _ } ->
+        let turn_id =
+          Option.value
+            turn_id
+            ~default:(host_stop_turn_identity ~session_id ~turn_count)
+        in
+        let* () =
+          match turn_id, (!session_state).phase with
+          | turn_id, Turn_inflight { turn_id = None; _ } ->
+            update_session "host-stop turn identity transition" (fun expected ->
+              Session_store.mark_turn_started
+                ~base_path
+                ~keeper_name
+                ~expected
+                ~session_id
+                ~turn_id
+                ~turn_count
+                ~updated_at:(Time_compat.now ()))
+            |> Result.map_error internal_error
+          | _, Turn_inflight { turn_id = Some _; _ } -> Ok ()
+          | _, _ -> assert false
+        in
         recovery_failure := Session_store.State_persistence_failed;
         (match
            Session_store.settle
@@ -571,8 +597,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                 ~turn_id
                 ~turns_used:turn_count
                 stop))
-      | Ready | Start _ | Active _ | Turn_inflight { turn_id = None; _ }
-      | Recovery_required _ | Settled _ ->
+      | Ready | Start _ | Active _ | Recovery_required _ | Settled _ ->
         Error
           (internal_error
              "Claude Code host stop arrived without an acknowledged provider turn")
@@ -625,7 +650,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         in
         (match client_result with
          | Error (Runtime_claude_code.Stopped_by_host stop) ->
-           settle_host_stop stop
+           recovery_failure := Session_store.Host_hook_failed;
+           (match !terminal_error with
+            | Some detail -> Error (internal_error detail)
+            | None -> settle_host_stop stop)
          | Error error ->
            context_overflow_retry_safe :=
              (match error with

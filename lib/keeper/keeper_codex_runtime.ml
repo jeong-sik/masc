@@ -691,7 +691,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
          ~prompt
      with
      | Error (Runtime_codex_app_server.Stopped_by_host stop) ->
-       settle_host_stop stop
+       recovery_failure := Keeper_official_client_session_store.Host_hook_failed;
+       (match !terminal_error with
+        | Some detail -> Error (internal_error detail)
+        | None -> settle_host_stop stop)
      | Error error ->
        recovery_failure := recovery_failure_of_client_error error;
        Error (codex_error_to_core_error error)

@@ -593,7 +593,11 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       try
         match run_client () with
         | Error error -> Error error
-        | Ok (`Stopped stop) -> settle_host_stop stop
+        | Ok (`Stopped stop) ->
+          recovery_failure := Session_store.Host_hook_failed;
+          (match !terminal_error with
+           | Some detail -> Error (internal_error detail)
+           | None -> settle_host_stop stop)
         | Ok (`Completed turn) ->
           recovery_failure := Session_store.Protocol_failed;
           let turn_id =

@@ -78,7 +78,8 @@ let codex_failure_status = function
   | Timeout _ -> "timeout"
   | Protocol_error _ | Rpc_error _ | Unsupported_server_request _ ->
     "protocol_error"
-  | Context_window_exceeded _ | Turn_failed _ | Turn_interrupted ->
+  | Context_window_exceeded _ | Turn_failed _ | Turn_interrupted
+  | Stopped_by_host _ ->
     "probe_contract_error"
 ;;
 
@@ -91,7 +92,8 @@ let claude_failure_status = function
   | Turn_transport_interrupted _
   | Context_window_exceeded _
   | Turn_failed _
-  | Quota_blocked _ ->
+  | Quota_blocked _
+  | Stopped_by_host _ ->
     "probe_contract_error"
 ;;
 

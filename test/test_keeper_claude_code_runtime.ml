@@ -47,9 +47,14 @@ let mcp_list =
   {|{"type":"control_request","request_id":"mcp-list-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}}}|}
 ;;
 
-let mcp_call =
-  {|{"type":"control_request","request_id":"mcp-call-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"masc_probe","arguments":{"marker":"from-claude"}}}}}|}
+let mcp_call_with_id id =
+  Printf.sprintf
+    {|{"type":"control_request","request_id":"mcp-call-%s","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":"call-%s","method":"tools/call","params":{"name":"masc_probe","arguments":{"marker":"from-claude"}}}}}|}
+    id
+    id
 ;;
+
+let mcp_call = mcp_call_with_id "1"
 
 type fixture_step =
   | Emit of string
@@ -1069,7 +1074,7 @@ let test_spawn_failure_releases_claim () =
          | _ -> fail "transient release evidence was not persisted"))
 ;;
 
-let run_direct_attempt ~base_path ~cli_path ~goal ~tools =
+let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -1104,7 +1109,7 @@ let run_direct_attempt ~base_path ~cli_path ~goal ~tools =
                     ~tools
                     ~initial_messages:[]
                     ~model_input_projection:None
-                    ~hooks:None
+                    ~hooks
                     ~context_injector:None
                       (* Dynamic tools require the Keeper shared context
                          ([Keeper_official_client_host.dynamic_tools] rejects
@@ -1180,6 +1185,98 @@ let test_unbounded_turn_keeps_subscription_probe_bounded () =
   | None -> fail "unbounded turn config leaked into the subscription probe"
 ;;
 
+let repeated_tool_fixture =
+  [ Emit_and_read mcp_initialize
+  ; Emit mcp_initialized_notification
+  ; Emit_and_read mcp_list
+  ; Emit_and_read (mcp_call_with_id "repeat-1")
+  ; Emit_and_read (mcp_call_with_id "repeat-2")
+  ; Emit_and_read (mcp_call_with_id "repeat-3")
+  ]
+;;
+
+let repeated_tool () =
+  Agent_core.Tool.create
+    ~name:"masc_probe"
+    ~description:"Return the same deterministic result"
+    ~parameters:
+      [ { Agent_core.Types.name = "marker"
+        ; description = "Fixture marker"
+        ; param_type = String
+        ; required = true
+        }
+      ]
+    (fun _ ->
+      Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+;;
+
+let test_repeated_tool_stop_records_pre_result_turn_identity () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture repeated_tool_fixture (fun cli_path ->
+         let attempt =
+           run_direct_attempt
+             ~base_path
+             ~cli_path
+             ~goal:"REPEAT_TOOL"
+             ~tools:[ repeated_tool () ]
+         in
+         (match attempt.result with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok result ->
+            (match result.stop_reason with
+             | Runtime_agent.Yielded_after_repeated_tool_call
+                 { tool_name; repeated_count; _ } ->
+               check string "repeated tool" "masc_probe" tool_name;
+               check int "repeat threshold" 3 repeated_count
+             | _ -> fail "repeated Claude tool call was not a checkpoint yield"));
+         match (load_state base_path).phase with
+         | Settled { session_id; turn_id; _ } ->
+           check
+             string
+             "deterministic pre-result turn identity"
+             (Keeper_claude_code_runtime.For_testing.host_stop_turn_identity
+                ~session_id
+                ~turn_count:1)
+             turn_id
+         | _ -> fail "repeated Claude tool call did not settle durable state"))
+;;
+
+let test_repeated_tool_stop_preserves_terminal_hook_failure () =
+  let base_path = temp_workspace () in
+  let hooks =
+    { Agent_core.Hooks.empty with
+      post_tool_use =
+        Some
+          (fun _ ->
+             raise (Failure "post-tool fixture terminal failure"))
+    }
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture repeated_tool_fixture (fun cli_path ->
+         let attempt =
+           run_direct_attempt
+             ~hooks
+             ~base_path
+             ~cli_path
+             ~goal:"REPEAT_FAILED_HOOK"
+             ~tools:[ repeated_tool () ]
+         in
+         match attempt.result with
+         | Ok _ -> fail "repeated host stop hid the terminal hook failure"
+         | Error error ->
+           check bool
+             "terminal hook detail survives"
+             true
+             (String_util.contains_substring
+                (Agent_core.Error.to_string error)
+                "post-tool fixture terminal failure")))
+;;
+
 let () =
   run
     "keeper_claude_code_runtime"
@@ -1231,6 +1328,14 @@ let () =
             "unbounded turn keeps subscription probe bounded"
             `Quick
             test_unbounded_turn_keeps_subscription_probe_bounded
+        ; test_case
+            "repeated tool stop records pre-result turn identity"
+            `Quick
+            test_repeated_tool_stop_records_pre_result_turn_identity
+        ; test_case
+            "repeated tool stop preserves terminal hook failure"
+            `Quick
+            test_repeated_tool_stop_preserves_terminal_hook_failure
         ] )
     ]
 ;;

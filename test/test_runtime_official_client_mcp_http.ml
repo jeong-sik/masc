@@ -138,6 +138,7 @@ let test_turn_scoped_capability_and_protocol () =
   Eio.Switch.run
   @@ fun sw ->
   let calls = ref [] in
+  let responses_sent = ref [] in
   let tool_specs () =
     [ `Assoc
         [ "name", `String "masc_probe"
@@ -149,8 +150,12 @@ let test_turn_scoped_capability_and_protocol () =
   let call_tool ~name ~call_id ~arguments =
     calls := (name, call_id, arguments) :: !calls;
     Some
-      { Runtime_official_client_mcp.success = true
-      ; content = "MASC_TOOL_OK"
+      { Runtime_official_client_mcp_http.outcome =
+          { Runtime_official_client_mcp.success = true
+          ; content = "MASC_TOOL_OK"
+          }
+      ; after_response_sent =
+          (fun () -> responses_sent := call_id :: !responses_sent)
       }
   in
   let bridge =
@@ -314,6 +319,7 @@ let test_turn_scoped_capability_and_protocol () =
       (json_request 5 "tools/call" call_params)
   in
   check int "tools/call" 200 called.status;
+  check (list string) "response acknowledgement" [ "5" ] !responses_sent;
   check string
     "tool result"
     "MASC_TOOL_OK"

@@ -7,6 +7,13 @@
 
 type t
 
+type tool_response =
+  { outcome : Runtime_official_client_mcp.tool_result
+  ; after_response_sent : unit -> unit
+  }
+(** A completed tool outcome and the acknowledgement to run only after its
+    HTTP response body has been written and flushed. *)
+
 val start :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
@@ -17,7 +24,7 @@ val start :
     (name:string ->
      call_id:string ->
      arguments:Yojson.Safe.t ->
-     Runtime_official_client_mcp.tool_result option) ->
+     tool_response option) ->
   unit ->
   t
 

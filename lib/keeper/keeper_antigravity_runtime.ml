@@ -513,12 +513,22 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                     ~finally:(fun () -> stream.on_tool_finished ~call_id)
                     (fun () ->
                       let result = tool.call ~call_id arguments in
-                      Option.iter
-                        (fun detail ->
-                           if Atomic.compare_and_set abort_turn_resolved false true
-                           then Eio.Promise.resolve resolve_abort_turn detail)
-                        result.abort_turn;
-                      tool_result result)))
+                      { Runtime_official_client_mcp_http.outcome = tool_result result
+                      ; after_response_sent =
+                          (fun () ->
+                             Option.iter
+                               (fun detail ->
+                                  if
+                                    Atomic.compare_and_set
+                                      abort_turn_resolved
+                                      false
+                                      true
+                                  then
+                                    Eio.Promise.resolve
+                                      resolve_abort_turn
+                                      detail)
+                               result.abort_turn)
+                      })))
               ()
           in
           let* () =

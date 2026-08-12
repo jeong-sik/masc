@@ -82,6 +82,14 @@ let resolved_timeout_s ~runtime_id ~default_timeout_s =
   | Some seconds -> Some seconds
 ;;
 
+let bounded_claude_probe_config ~fallback_timeout_s
+  (config : Runtime_claude_code.config)
+  =
+  match config.timeout_s with
+  | Some _ -> config
+  | None -> { config with timeout_s = Some fallback_timeout_s }
+;;
+
 let claude_config ~base_dir ~runtime_id ~system_prompt
   (execution : Runtime_execution.claude_code)
   : Runtime_claude_code.config
@@ -152,10 +160,36 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ~prompt =
          "runtime is Agent_core-owned; it belongs on the Async_agent path")
   | Runtime_execution.Claude_code execution ->
     let config = claude_config ~base_dir ~runtime_id ~system_prompt execution in
-    (match Runtime_claude_code.run_turn ~mgr ~clock ~cwd config ~prompt with
-     | Ok (result : Runtime_claude_code.turn_result) -> Ok result.text
+    let probe_config =
+      bounded_claude_probe_config
+        ~fallback_timeout_s:execution.timeout_s
+        config
+    in
+    (match
+       Runtime_claude_code.probe_subscription
+         ~mgr
+         ~clock
+         ~cwd
+         probe_config
+     with
      | Error error ->
-       Error (provider_error ~runtime_id (Runtime_claude_code.error_to_string error)))
+       Error (provider_error ~runtime_id (Runtime_claude_code.error_to_string error))
+     | Ok admitted_subscription ->
+       (match
+          Runtime_claude_code.run_turn
+            ~admitted_subscription
+            ~mgr
+            ~clock
+            ~cwd
+            config
+            ~prompt
+        with
+        | Ok (result : Runtime_claude_code.turn_result) -> Ok result.text
+        | Error error ->
+          Error
+            (provider_error
+               ~runtime_id
+               (Runtime_claude_code.error_to_string error))))
   | Runtime_execution.Codex_app_server execution ->
     let config = codex_config ~runtime_id ~system_prompt execution in
     (match Runtime_codex_app_server.run_turn ~mgr ~clock ~cwd config ~prompt with
@@ -180,4 +214,5 @@ module For_testing = struct
   (* TEL-OK: alias of a pure function; no behaviour of its own. *)
   let missing_handle_detail = missing_handle_detail
   let resolved_timeout_s = resolved_timeout_s
+  let bounded_claude_probe_config = bounded_claude_probe_config
 end

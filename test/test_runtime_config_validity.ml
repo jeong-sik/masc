@@ -860,7 +860,7 @@ let test_model_turn_timeout_admits_zero_and_rejects_negative () =
     Runtime_toml.parse_string
       (Printf.sprintf "[models.probe]\napi-name = \"probe\"\nturn-timeout-s = %s\n" value)
   in
-  (match parse "0.0" with
+  (match parse "0" with
    | Error _ -> fail "turn-timeout-s = 0 must parse: it declares no deadline"
    | Ok parsed ->
      (match parsed.Runtime_schema.models with

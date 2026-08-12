@@ -846,7 +846,7 @@ let reasoning_effort_opt_field ~(path : string) (tbl : Otoml.t)
 let turn_timeout_opt_field ~(path : string) (tbl : Otoml.t)
   : (float option, parse_error list) result
   =
-  match strict_float_find path tbl "turn-timeout-s" with
+  match number_opt_field ~path ~key:"turn-timeout-s" tbl with
   | Error _ as error -> error
   | Ok None -> Ok None
   | Ok (Some value) when value >= 0.0 && Float.is_finite value -> Ok (Some value)

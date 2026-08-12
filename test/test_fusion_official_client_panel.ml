@@ -45,9 +45,9 @@ api-name = "claude-sonnet-5"
 max-context = 1000000
 tools-support = true
 streaming = true
+turn-timeout-s = 0
 
 [claude_code."claude-sonnet-5"]
-turn-timeout-s = 0
 |}
     claude_cli
 ;;
@@ -120,6 +120,20 @@ let test_official_client_panel_honors_no_deadline () =
          (Masc.Fusion_official_client.For_testing.resolved_timeout_s
             ~runtime_id:official_client_runtime
             ~default_timeout_s:300.0)))
+;;
+
+let test_unbounded_claude_panel_keeps_login_probe_bounded () =
+  let turn_config =
+    { (Runtime_claude_code.default_config ~cwd:"/tmp") with timeout_s = None }
+  in
+  let probe_config =
+    Masc.Fusion_official_client.For_testing.bounded_claude_probe_config
+      ~fallback_timeout_s:17.0
+      turn_config
+  in
+  match probe_config.timeout_s with
+  | Some seconds -> check (float 0.0) "probe fallback" 17.0 seconds
+  | None -> fail "unbounded panel turn leaked into the Claude login probe"
 ;;
 
 let panel_group models : Fusion_policy.panel_group =
@@ -232,6 +246,10 @@ let () =
             "official-client panel honors no deadline"
             `Quick
             test_official_client_panel_honors_no_deadline
+        ; test_case
+            "unbounded Claude panel keeps login probe bounded"
+            `Quick
+            test_unbounded_claude_panel_keeps_login_probe_bounded
         ] )
     ; ( "eio context diagnostics"
       , [ test_case

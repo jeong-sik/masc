@@ -228,6 +228,10 @@ export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   skipped_rows: number
   memory_os: MemoryOsTurnRecordSnapshot
   entries: TurnRecordRow[]
+  /** Present when a turn is actively executing on this keeper. */
+  live_turn_in_progress?: boolean
+  live_turn_started_at_unix?: number | null
+  live_turn_last_progress_at_unix?: number | null
 }
 
 export type KeeperCompactionSnapshotLinks = {
@@ -309,11 +313,6 @@ export type KeeperCompactionSnapshotsResponse = {
   readonly items: KeeperCompactionSnapshot[]
 }
 
-function hasExactKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
-  const keys = Object.keys(raw)
-  return keys.length === allowed.length && keys.every(key => allowed.includes(key))
-}
-
 function hasNoUnknownKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
   return Object.keys(raw).every(key => allowed.includes(key))
 }
@@ -383,7 +382,7 @@ function decodeTurnPromptBlockId(raw: unknown): TurnPromptBlockId | null {
 }
 
 function decodeTurnBlock(raw: unknown): TurnBlock | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, ['block', 'bytes', 'digest'])) return null
+  if (!isRecord(raw) || !hasNoUnknownKeys(raw, ['block', 'bytes', 'digest'])) return null
   const block = decodeTurnPromptBlockId(raw.block)
   const digest = decodeExactNonEmptyString(raw.digest)
   const bytes = asNumber(raw.bytes)
@@ -433,7 +432,7 @@ function decodeTurnInputComponents(raw: unknown): TurnInputComponent[] | null {
   if (!Array.isArray(raw)) return null
   const components: TurnInputComponent[] = []
   for (const item of raw) {
-    if (!isRecord(item) || !hasExactKeys(item, ['component', 'bytes'])) return null
+    if (!isRecord(item) || !hasNoUnknownKeys(item, ['component', 'bytes'])) return null
     const component = decodeTurnInputComponentId(item.component)
     const bytes = decodeNonNegativeSafeInteger(item.bytes)
     if (component === null || bytes === null) {
@@ -451,7 +450,7 @@ function decodeTurnInputComponents(raw: unknown): TurnInputComponent[] | null {
 // fields, no optionals. A reference that names no run is written as null by the
 // producer, so a partial object is a producer defect and stays rejected.
 function decodeTurnRawTraceRunRef(raw: unknown): TurnRawTraceRunRef | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, [
+  if (!isRecord(raw) || !hasNoUnknownKeys(raw, [
     'worker_run_id',
     'path',
     'start_seq',
@@ -646,12 +645,12 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
 }
 
 function decodeTurnBlockDiff(raw: unknown): TurnBlockDiff | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, ['added', 'removed', 'changed'])) return null
+  if (!isRecord(raw) || !hasNoUnknownKeys(raw, ['added', 'removed', 'changed'])) return null
   const added = decodeTurnBlockList(raw.added)
   const removed = decodeTurnBlockList(raw.removed)
   if (added === null || removed === null || !Array.isArray(raw.changed)) return null
   const changed = raw.changed.map((pair) => {
-    if (!isRecord(pair) || !hasExactKeys(pair, ['prev', 'next'])) return null
+    if (!isRecord(pair) || !hasNoUnknownKeys(pair, ['prev', 'next'])) return null
     const prev = decodeTurnBlock(pair.prev)
     const next = decodeTurnBlock(pair.next)
     return prev && next ? { prev, next } : null
@@ -667,7 +666,7 @@ function decodeTurnBlockDiff(raw: unknown): TurnBlockDiff | null {
 }
 
 function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, ['record', 'diff_vs_prev'])) return null
+  if (!isRecord(raw) || !hasNoUnknownKeys(raw, ['record', 'diff_vs_prev'])) return null
   const record = decodeTurnRecordEntry(raw.record)
   const diff_vs_prev = raw.diff_vs_prev === null
     ? null
@@ -680,7 +679,7 @@ function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
 }
 
 function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, [
+  if (!isRecord(raw) || !hasNoUnknownKeys(raw, [
     'memory_id',
     'claim',
     'category',
@@ -713,7 +712,7 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
 }
 
 function decodeMemoryOsUpdateSource(raw: unknown): MemoryOsUpdateSource | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, ['kind', 'trace_id', 'generation'])) {
+  if (!isRecord(raw) || !hasNoUnknownKeys(raw, ['kind', 'trace_id', 'generation'])) {
     return null
   }
   const kind = decodeExactNonEmptyString(raw.kind)
@@ -733,7 +732,7 @@ function decodeMemoryOsCounts(raw: unknown): {
   shown: number
   current: number
 } | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, ['shown', 'current', 'items'])) {
+  if (!isRecord(raw) || !hasNoUnknownKeys(raw, ['shown', 'current', 'items'])) {
     return null
   }
   const shown = decodeNonNegativeSafeInteger(raw.shown)
@@ -746,7 +745,7 @@ function decodeMemoryOsCounts(raw: unknown): {
 }
 
 function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, [
+  if (!isRecord(raw) || !hasNoUnknownKeys(raw, [
     'keeper',
     'snapshot_store',
     'recall_enabled',
@@ -766,7 +765,7 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
     ? null
     : decodeMemoryOsUpdateSource(raw.update_source)
   const read_errors = decodeArray(raw.read_errors, (item) => {
-    if (!isRecord(item) || !hasExactKeys(item, ['scope', 'error'])) return null
+    if (!isRecord(item) || !hasNoUnknownKeys(item, ['scope', 'error'])) return null
     const scope = decodeExactNonEmptyString(item.scope)
     const error = decodeExactNonEmptyString(item.error)
     return scope === null || error === null ? null : { scope, error }
@@ -785,7 +784,7 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
     || !factsRaw
     || !changeRaw
     || !facts
-    || !hasExactKeys(changeRaw, ['added', 'removed', 'retained'])
+    || !hasNoUnknownKeys(changeRaw, ['added', 'removed', 'retained'])
   ) {
     return null
   }
@@ -837,7 +836,7 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
 }
 
 function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, [
+  if (!isRecord(raw) || !hasNoUnknownKeys(raw, [
     'keeper',
     'count',
     'skipped_rows',
@@ -853,6 +852,9 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     'stale_reason',
     'memory_os',
     'entries',
+    'live_turn_in_progress',
+    'live_turn_started_at_unix',
+    'live_turn_last_progress_at_unix',
   ])) return null
   const keeper = decodeExactNonEmptyString(raw.keeper)
   const count = decodeNonNegativeSafeInteger(raw.count)
@@ -883,6 +885,10 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     || raw.stale_reason === 'freshness_slo_exceeded'
       ? raw.stale_reason
       : undefined
+  const live_turn_in_progress = typeof raw.live_turn_in_progress === 'boolean'
+    ? raw.live_turn_in_progress : undefined
+  const live_turn_started_at_unix = asNumber(raw.live_turn_started_at_unix) ?? null
+  const live_turn_last_progress_at_unix = asNumber(raw.live_turn_last_progress_at_unix) ?? null
   const memory_os = decodeMemoryOsSnapshot(raw.memory_os)
   const entries = decodeArray(raw.entries, decodeTurnRecordRow)
   const latestRecordTs = entries === null || entries.length === 0
@@ -956,6 +962,9 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     skipped_rows,
     memory_os,
     entries,
+    live_turn_in_progress,
+    live_turn_started_at_unix,
+    live_turn_last_progress_at_unix,
   }
 }
 

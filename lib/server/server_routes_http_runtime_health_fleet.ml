@@ -249,6 +249,12 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
     let shutdown_fenced_backlog_count =
       queue_assoc_int "shutdown_fenced_backlog_count" fields
     in
+    let non_runnable_backlog_count =
+      recoverable_backlog_count
+      + retained_disabled_backlog_count
+      + paused_dead_backlog_count
+      + shutdown_fenced_backlog_count
+    in
     let runnable_oldest_age_seconds =
       queue_assoc_float_opt "runnable_oldest_age_seconds" fields
     in
@@ -271,17 +277,22 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
     let work_status, work_state =
       if source_unavailable || not counts_complete
       then "unavailable", "unknown"
-      else if runnable_backlog_count = 0
-      then "ok", "idle"
       else if backlog_stale
       then "degraded", "stalled"
-      else "warning", "backlogged"
+      else if runnable_backlog_count > 0
+      then "warning", "backlogged"
+      else if non_runnable_backlog_count > 0
+      then "warning", "blocked"
+      else "ok", "idle"
     in
     let source_action_required =
       queue_assoc_bool "operator_action_required" ~default:false fields
     in
+    let work_action_required =
+      backlog_stale || non_runnable_backlog_count > 0
+    in
     let operator_action_required =
-      source_action_required || storage_degraded || backlog_stale
+      source_action_required || storage_degraded || work_action_required
     in
     let status =
       Health_status.max_string
@@ -340,7 +351,10 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
          , `Bool
              (counts_complete
               && (not source_unavailable)
-              && runnable_backlog_count = 0) )
+              && read_error_count = 0
+              && transition_outbox_count = 0
+              && runnable_backlog_count = 0
+              && non_runnable_backlog_count = 0) )
        ; ( "storage_integrity"
          , `Assoc
              [ "schema", `String "masc.keeper_event_queue.storage_integrity.v1"
@@ -362,7 +376,7 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
                    ~some:(fun value -> `Float value)
                    runnable_oldest_age_seconds )
              ; "stale_after_seconds", `Float stale_after_sec
-             ; "operator_action_required", `Bool backlog_stale
+             ; "operator_action_required", `Bool work_action_required
              ] )
        ]
        @ fields)

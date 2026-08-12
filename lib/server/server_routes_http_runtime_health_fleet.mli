@@ -18,8 +18,9 @@ val keeper_event_queue_health_dimensions
   :  stale_after_sec:float
   -> Yojson.Safe.t
   -> Yojson.Safe.t
-(** Split durable storage integrity from runnable work liveness. A readable
-    queue with runnable backlog is never returned as backlog-clean [status=ok]. *)
+(** Split durable storage integrity from work liveness. A readable queue with
+    runnable or retained non-runnable backlog, read errors, or pending
+    transition projection is never returned as backlog-clean [status=ok]. *)
 
 val keeper_event_queue_health_json :
   execution_snapshot:Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot ->

@@ -1177,6 +1177,32 @@ let () =
     (match member "status_reasons" recoverable with
      | `List reasons -> List.mem (`String "recoverable_backlog") reasons
      | _ -> false);
+  check
+    "non-runnable actionable backlog is never backlog-clean"
+    (member "backlog_clean" recoverable = `Bool false);
+  check
+    "non-runnable actionable backlog reports blocked work"
+    (String.equal
+       (string_member "state" (member "work_liveness" recoverable))
+       "blocked"
+     && member "operator_action_required" (member "work_liveness" recoverable)
+        = `Bool true);
+  let projection_pending =
+    match queue ~count:0 ~oldest_age:`Null with
+    | `Assoc fields ->
+      `Assoc
+        (("transition_outbox_count", `Int 1)
+         :: List.remove_assoc "transition_outbox_count" fields)
+    | _ -> assert false
+  in
+  let projection_pending =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      projection_pending
+  in
+  check
+    "pending transition projection is never backlog-clean"
+    (member "backlog_clean" projection_pending = `Bool false);
   let immediate_backlog =
     Health_fleet.keeper_event_queue_health_dimensions
       ~stale_after_sec:0.0

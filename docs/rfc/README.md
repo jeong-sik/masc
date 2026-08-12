@@ -212,7 +212,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0333 | Deterministic cost↔success frontier join for the eval harness | Draft | - |
 | 0335 | TOML as the Single Settings Source | Draft | - |
 | 0338 | Lane-per-keeper durable persistence isolation | Draft | - |
-| 0340 | Loopback dashboard Worker credential | Active | - |
+| 0340 | Loopback dashboard token-only auth | Active | - |
 | 0341 | Keeper lifecycle projection SSOT | Draft | - |
 | 0342 | Capability catalog overlay, deployment capability declarations, and boot posture | Draft | - |
 | 0343 | Repo location SSOT (collapse dual-authority, attribute by git-remote) | Draft | - |
@@ -229,7 +229,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0361 | 완료 권한의 관측과 조회 | Draft | - |
 | 0362 | Goal owner and the intake contract | Draft | - |
 | 0363 | Historical tool-result demotion in the bounded transmission view | Draft | - |
-| 0364 | keeper 당 체크아웃 하나 (`repos/` 중간 디렉터리 폐기) | Draft | - |
 | 0365 | handoff_context must survive the ownership boundary | Draft | - |
 | 0366 | 운영자가 다음 턴의 컨텍스트에 한 문장을 넣는다 | Draft | - |
 | 0368 | 판단 없는 recovery는 keeper의 다음 claim이 스스로 해제한다 | Draft | - |
@@ -249,6 +248,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-keeper-memory-consolidation | Keeper durable memory consolidation — deprecate memory_bank into Memory OS | Implemented | - |
 | RFC-keeper-runtime-context-observation-phase0 | Keeper runtime context observation Phase 0 | Draft | - |
 | RFC-keeper-vision-delegation-tool | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | - |
+| RFC-keeper-workspace-root-only | 시스템은 workspace root 만 정한다 (레이아웃 규정 폐기) | Draft | - |
 | RFC-memory-os-bounded-context-and-librarian-curator | Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약 | Draft | - |
 | RFC-per-keeper-github-cli-identity | Keeper-specific GitHub CLI identity | Draft | - |
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |

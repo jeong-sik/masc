@@ -19,15 +19,16 @@ type config =
   ; model : string option
   ; developer_instructions : string option
   ; admission_timeout_s : float
-    (** Finite bound for process setup, subscription/account checks, thread
-        creation, history injection, and [turn/start] acknowledgement. *)
+    (** Finite bound for post-spawn subscription/account checks, thread
+        creation, history injection, and the complete [turn/start] write. *)
   ; timeout_s : float option
     (** Maximum silence between app-server protocol messages. Each received
         message resets the deadline; a progressing turn has no wall limit.
-        [None] removes the deadline after turn admission — the spawned client
-        decides when its own turn ends, which is the posture of running the CLI
-        directly. Setup remains bounded by [admission_timeout_s]. Declared as
-        [turn-timeout-s] in runtime config, where [0] selects [None]. *)
+        [None] removes the deadline after the complete [turn/start] dispatch —
+        the spawned client decides when its own turn ends, which is the posture
+        of running the CLI directly. Setup and dispatch remain bounded by
+        [admission_timeout_s]. Declared as [turn-timeout-s] in runtime config,
+        where [0] selects [None]. *)
   }
 
 val default_timeout_s : float
@@ -161,3 +162,7 @@ val run_turn :
   config ->
   prompt:string ->
   (turn_result, error) result
+(** [config.admission_timeout_s] finitely bounds initialization, account
+    admission, thread preparation, and the complete [turn/start] write. The
+    model's [config.timeout_s] takes authority only after that dispatch
+    succeeds. *)

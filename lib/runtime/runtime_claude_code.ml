@@ -19,11 +19,6 @@ let process_termination_grace_s = 2.0
 (* [None] installs no deadline. The vendor client owns when its own turn ends;
    a declared bound is the operator's optional liveness guard over a silent
    client, not a limit on how long legitimate work may take. *)
-let with_optional_timeout clock timeout_s f =
-  match timeout_s with
-  | None -> f ()
-  | Some seconds -> Eio.Time.with_timeout_exn clock seconds f
-;;
 let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 4096
 let max_wire_line_bytes = 8 * 1024 * 1024
@@ -228,13 +223,6 @@ open Shared_json
 
 let bounded_tail = Runtime_official_client_json.bounded_tail
 
-(* See {!Runtime_official_client_json.Make.no_turn_deadline_defect} for why the
-   [None] arm is unreachable and why it must not be dressed as a turn limit. *)
-let timeout_error = function
-  | Some seconds -> Error (Timeout seconds)
-  | None -> Error Shared_json.no_turn_deadline_defect
-;;
-
 let parse_json ~stage text =
   let parsed =
     try Ok (Yojson.Safe.from_string text) with
@@ -380,6 +368,8 @@ let send_control_response
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Idle_timeout _ as exn -> raise exn
+  | Eio.Time.Timeout as exn -> raise exn
   | exn ->
     let detail = Printexc.to_string exn in
     (match control_phase with
@@ -1001,6 +991,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
       Ok ()
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Idle_timeout _ as exn -> raise exn
     | Eio.Time.Timeout as exn -> raise exn
     | exn ->
       Error
@@ -1082,8 +1073,9 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       | End_of_file ->
         let detail = String.trim !stderr_tail in
         Error (Process_exited (if detail = "" then "stdout closed" else detail))
-      | Eio.Time.Timeout -> timeout_error timeout_s
+      | Idle_timeout seconds -> Error (Timeout seconds)
       | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Eio.Time.Timeout as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
     Fun.protect
@@ -1108,8 +1100,8 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           ~on_stream_event
           ~turn_admitted))
   with
-  | Eio.Time.Timeout ->
-    timeout_error (timeout_s_for_phase config ~turn_admitted:!turn_admitted)
+  | Idle_timeout seconds -> Error (Timeout seconds)
+  | Eio.Time.Timeout as exn -> raise exn
 ;;
 
 let validate_process_config config =
@@ -1172,6 +1164,15 @@ let validate_turn ?(dynamic_tools = []) ?(session_mode = Start) config ~prompt =
   validate_dynamic_tools dynamic_tools
 ;;
 
+let bounded_subscription_probe_config
+      ~fallback_timeout_s
+      (turn_config : config)
+  =
+  match turn_config.timeout_s with
+  | Some _ -> turn_config
+  | None -> { turn_config with timeout_s = Some fallback_timeout_s }
+;;
+
 let probe_subscription ~mgr ~clock ~cwd config =
   let* () = validate_process_config config in
   let timeout_s = Some config.admission_timeout_s in
@@ -1180,7 +1181,8 @@ let probe_subscription ~mgr ~clock ~cwd config =
       read_subscription ~mgr ~cwd config)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Eio.Time.Timeout -> timeout_error timeout_s
+  | Idle_timeout seconds -> Error (Timeout seconds)
+  | Eio.Time.Timeout as exn -> raise exn
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
@@ -1195,7 +1197,13 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     let* subscription =
       match admitted_subscription with
       | Some subscription -> Ok subscription
-      | None -> probe_subscription ~mgr ~clock ~cwd config
+      | None ->
+        let probe_config =
+          bounded_subscription_probe_config
+            ~fallback_timeout_s:default_timeout_s
+            config
+        in
+        probe_subscription ~mgr ~clock ~cwd probe_config
     in
     let session_id =
       match session_mode with
@@ -1224,7 +1232,8 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~on_stream_event
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Eio.Time.Timeout -> timeout_error config.timeout_s
+    | Idle_timeout seconds -> Error (Timeout seconds)
+    | Eio.Time.Timeout as exn -> raise exn
     | Runtime_error error -> Error error
     | exn ->
       Error

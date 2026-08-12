@@ -32,11 +32,6 @@ let process_termination_grace_s = 2.0
 (* [None] installs no deadline. The vendor client owns when its own turn ends;
    a declared bound is the operator's optional liveness guard over a silent
    client, not a limit on how long legitimate work may take. *)
-let with_optional_timeout clock timeout_s f =
-  match timeout_s with
-  | None -> f ()
-  | Some seconds -> Eio.Time.with_timeout_exn clock seconds f
-;;
 let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 8192
 let max_wire_line_bytes = 8 * 1024 * 1024
@@ -167,15 +162,6 @@ end)
 open Shared_json
 
 let bounded_tail = Runtime_official_client_json.bounded_tail
-
-(* See {!Runtime_official_client_json.Make.no_turn_deadline_defect} for why the
-   [None] arm is unreachable and why it must not be dressed as a turn limit. *)
-let timeout_or_defect = function
-  | Some seconds -> Timeout seconds
-  | None -> Shared_json.no_turn_deadline_defect
-;;
-
-let timeout_error timeout_s = Error (timeout_or_defect timeout_s)
 
 let required_string ?(nonempty = true) stage name fields =
   match List.assoc_opt name fields with
@@ -601,6 +587,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
         let callback_result =
           try on_conversation_ready ~conversation_id with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | Eio.Time.Timeout as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
         (match callback_result with
@@ -707,29 +694,21 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
            timeout_s_for_phase config ~turn_admitted:(Option.is_some !state.init)
          in
          let line =
-           try
-             with_optional_timeout clock timeout_s (fun () ->
-               Eio.Buf_read.line reader)
-           with
-           | Eio.Time.Timeout ->
-             abort_with_runtime_error (timeout_or_defect timeout_s)
+           with_optional_timeout clock timeout_s (fun () ->
+             Eio.Buf_read.line reader)
          in
          match parse_wire_line line with
          | Error error -> abort_with_runtime_error error
          | Ok event ->
            (match
-              try
-                with_optional_timeout clock timeout_s (fun () ->
-                  apply_event
-                    config
-                    ~conversation_mode
-                    ~on_conversation_ready
-                    ~on_stream_event
-                    !state
-                    event)
-              with
-              | Eio.Time.Timeout ->
-                abort_with_runtime_error (timeout_or_defect timeout_s)
+              with_optional_timeout clock timeout_s (fun () ->
+                apply_event
+                  config
+                  ~conversation_mode
+                  ~on_conversation_ready
+                  ~on_stream_event
+                  !state
+                  event)
             with
             | Error error -> abort_with_runtime_error error
             | Ok next -> state := next)
@@ -740,6 +719,9 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
        signal_spawned_process proc stdin_w;
        process_settled := true;
        raise exn
+     | Idle_timeout seconds ->
+       abort_with_runtime_error (Timeout seconds)
+     | Eio.Time.Timeout as exn -> raise exn
      | Runtime_error _ as exn -> raise exn
      | exn ->
        abort_with_runtime_error
@@ -777,7 +759,8 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ~mgr ~clock ~cwd
            ~on_conversation_ready
            ~on_stream_event)
     with
-    | Eio.Time.Timeout -> timeout_error config.timeout_s
+    | Idle_timeout seconds -> Error (Timeout seconds)
+    | Eio.Time.Timeout as exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Runtime_error error -> Error error
     | exn ->

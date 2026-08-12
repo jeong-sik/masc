@@ -17,6 +17,17 @@ module type Error = sig
 end
 
 module Make (E : Error) : sig
+  exception Idle_timeout of float
+
+  val with_optional_timeout
+    :  _ Eio.Time.clock
+    -> float option
+    -> (unit -> 'a)
+    -> 'a
+  (** Install the adapter's optional idle deadline. A deadline owned by this
+      wrapper raises [Idle_timeout seconds]; an [Eio.Time.Timeout] raised by
+      [f] keeps its original identity and remains caller-owned control flow. *)
+
   val validate_unique_object_keys :
     stage:string -> path:string -> Yojson.Safe.t -> (unit, E.t) result
   (** Reject duplicate keys anywhere in the tree. `Yojson` keeps every
@@ -42,19 +53,9 @@ module Make (E : Error) : sig
     stage:string -> (unit -> (unit, string) result) -> (unit, E.t) result
   (** Run a caller-supplied state callback and convert its failure into a
       protocol error at [stage]. A raised exception becomes the same error,
-      except for [Eio.Cancel.Cancelled] and [Eio.Time.Timeout], which are
-      re-raised so cancellation and deadlines stay control flow rather than
-      turning into a reported protocol failure. *)
-
-  val no_turn_deadline_defect : E.t
-  (** What to report when [Eio.Time.Timeout] arrives at a turn while the
-      runtime installed no deadline. Each runtime catches its own
-      process-termination grace window and reaps, so with no turn deadline
-      nothing arms a timer and this is unreachable; it exists so the handler
-      stays total. Reaching it means some path installed a deadline outside
-      that reasoning, which is a defect to locate — not a turn limit to name,
-      and not a process or provider failure to blame. Shared so the three
-      runtimes cannot drift into three different accounts of one state. *)
+      except for [Eio.Cancel.Cancelled], [Idle_timeout], and
+      [Eio.Time.Timeout], which are re-raised so cancellation and deadlines
+      stay control flow rather than turning into a reported protocol failure. *)
 end
 
 val bounded_tail : limit:int -> string -> string -> string

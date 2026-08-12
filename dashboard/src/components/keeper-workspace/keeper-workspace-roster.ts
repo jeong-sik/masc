@@ -24,7 +24,7 @@ import { persistentSignal } from '../../lib/persistent-signal'
 import { keeperActivityDisplay, keeperDisplayRuntime } from '../../lib/keeper-runtime-display'
 import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
-import { sortByRecency } from '../../lib/keeper-recency'
+import { compareByRecency, sortByRecency } from '../../lib/keeper-recency'
 import type { Keeper } from '../../types'
 import { KEEPER_ACTION_LABELS, runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { VirtualList } from '../common/virtual-list'
@@ -158,11 +158,19 @@ function keeperStatusRank(keeper: Keeper, bucketOf: BucketOf): number {
   return 3
 }
 
-function compareFleetRows(bucketOf: BucketOf): (a: Keeper, b: Keeper) => number {
+/** Bucket order first, then the same recency order the rows display.
+ *
+ *  The grouped view previously ordered within a bucket by context ratio
+ *  descending. That key is invisible on the row — the row shows a relative
+ *  activity time — and it moves on every turn as the window fills, so the
+ *  list reordered under the operator with no readable rule and a click could
+ *  land on whichever keeper had just taken that slot. Recency is the key the
+ *  row already prints, and it is the same SSOT the keepers page uses to pick
+ *  its default selection, so top-of-list and auto-selection agree. */
+function compareFleetRows(bucketOf: BucketOf, nowMs: number): (a: Keeper, b: Keeper) => number {
   return (a, b) =>
     keeperStatusRank(a, bucketOf) - keeperStatusRank(b, bucketOf)
-    || compareContextRatioDescending(a, b)
-    || a.name.localeCompare(b.name)
+    || compareByRecency(a, b, nowMs)
 }
 
 export function rosterFleetSummary(
@@ -615,7 +623,7 @@ export function KeeperWorkspaceRoster({
     for (const group of GROUP_ORDER) {
       const rows = visible
         .filter(k => bucketOf(k) === group.bucket)
-        .sort(compareFleetRows(bucketOf))
+        .sort(compareFleetRows(bucketOf, nowMs))
       if (rows.length === 0) continue
       items.push({ type: 'header', bucket: group.bucket, label: group.label, count: rows.length })
       for (const keeper of rows) items.push({ type: 'row', keeper })

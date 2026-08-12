@@ -167,10 +167,27 @@ export async function refreshDevTokenAfterAuthError(code: unknown): Promise<bool
   if (!getStoredToken()) return false
 
   const refresh = (async () => {
-    clearStoredToken()
+    // Re-fetch in place instead of clearing first. `clearStoredToken()` +
+    // `setStoredToken()` are two token-revision changes, and every change
+    // tears down and re-dials the dashboard websocket
+    // (`subscribeStoredTokenChanges` -> `reconnectAfterAuthTokenChange`), so
+    // one recovery produced two reconnects and two "서버 연결 복구됨"
+    // toasts. It also left a window where in-flight requests carried no
+    // Authorization header at all. `shouldRefreshDevToken()` already returns
+    // true for a stored `dev` token, so dropping the clear does not stop the
+    // re-fetch — and `ensureDevToken` only writes when the token differs.
+    const rejectedToken = getStoredToken()
     resetDevTokenBootstrap()
     await ensureDevToken()
-    return getStoredTokenMeta()?.source === 'dev' && getStoredToken() !== null
+    const refreshedToken = getStoredToken()
+    // Recovery means the caller now holds a *different* credential. Getting
+    // the same token back proves the token was not the reason the request
+    // was rejected; reporting success there makes the caller retry the
+    // identical request, fail identically, and refresh again — a loop that
+    // reconnects the websocket on every pass and never terminates.
+    return getStoredTokenMeta()?.source === 'dev'
+      && refreshedToken !== null
+      && refreshedToken !== rejectedToken
   })()
   devTokenRefreshPromise = refresh
   try {

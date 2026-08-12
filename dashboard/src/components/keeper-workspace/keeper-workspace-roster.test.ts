@@ -240,7 +240,55 @@ describe('KeeperWorkspaceRoster', () => {
     })
   })
 
-  it('sorts observed zero context ahead of unknown context', () => {
+  // The grouped view orders by the key the row prints. Context ratio is not
+  // on the row and moves every turn, so ordering by it reshuffled the list
+  // under the operator; recency is visible and is the same key the keepers
+  // page uses to pick its default selection.
+  it('orders a status group by the recency each row displays', () => {
+    keepers.value = [
+      mk({
+        name: 'a-stale-but-full',
+        status: 'running',
+        lifecycle_phase: 'Running',
+        context_ratio: 0.9,
+        last_activity_at: '2026-08-12T09:00:00Z',
+      }),
+      mk({
+        name: 'z-fresh-but-empty',
+        status: 'running',
+        lifecycle_phase: 'Running',
+        context_ratio: 0,
+        last_activity_at: '2026-08-12T09:30:00Z',
+      }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="a-stale-but-full" />`, host)
+
+    const rows = Array.from(host.querySelectorAll('.kw-kp-row'))
+    expect(rows.map(row => row.textContent)).toEqual([
+      expect.stringContaining('z-fresh-but-empty'),
+      expect.stringContaining('a-stale-but-full'),
+    ])
+  })
+
+  // Same-recency rows must not depend on arrival order in the store: the
+  // reported symptom was a list that reshuffled between snapshots.
+  it('breaks a recency tie by name so the grouped order is stable', () => {
+    const rowsFor = (order: readonly string[]) => {
+      keepers.value = order.map(name =>
+        mk({ name, status: 'running', lifecycle_phase: 'Running' }),
+      )
+      render(null, host)
+      render(html`<${KeeperWorkspaceRoster} activeName=${order[0]} />`, host)
+      return Array.from(host.querySelectorAll('.kw-kp-row')).map(row => row.textContent)
+    }
+
+    const forward = rowsFor(['alpha', 'bravo', 'charlie'])
+    const reversed = rowsFor(['charlie', 'bravo', 'alpha'])
+    expect(forward).toEqual(reversed)
+  })
+
+  it('sorts observed zero context ahead of unknown context under the 주의 sort', () => {
+    rosterSortPref.value = 'att'
     keepers.value = [
       mk({ name: 'a-unknown', status: 'running', lifecycle_phase: 'Running' }),
       mk({ name: 'z-observed-zero', status: 'running', lifecycle_phase: 'Running', context_ratio: 0 }),

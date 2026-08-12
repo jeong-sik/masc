@@ -77,17 +77,15 @@ else `Bad_gateway
 
 ### (b) 요청 경로의 env-as-bus
 
-`lib/server/server_auth.ml:563` — mutation 인가 게이트가 **요청마다** `MASC_ALLOW_ANONYMOUS_MUTATIONS` 를 재독. `lib/tool_workspace.ml:60` — 부팅 시 프로세스 자신이 `putenv` 로 써넣은 `MASC_INTERNAL_MCP_TOKEN`(auth_credential_base.ml:119)을 툴 호출마다 `getenv` 로 되읽는다. env 가 in-process mutable 채널이 됐다(쓰기 2곳, 읽기 3곳). `lib/keeper/keeper_tool_execute_runtime.ml:388` — 툴 실행마다 env 읽고 `<> Some "false"` permissive 파싱.
+`lib/tool_workspace.ml:60` — 부팅 시 프로세스 자신이 `putenv` 로 써넣은 `MASC_INTERNAL_MCP_TOKEN`(auth_credential_base.ml:119)을 툴 호출마다 `getenv` 로 되읽는다. env 가 in-process mutable 채널이 됐다. `lib/keeper/keeper_tool_execute_runtime.ml:388` — 툴 실행마다 env 읽고 `<> Some "false"` permissive 파싱.
 
 ### (c) 존재/meta 검증의 다층 반복
 
 `lib/keeper/keeper_turn.ml:439` — 직접 메시지 턴 1건에 keeper 존재 검증 4회(디스크 읽기 3회 + 레지스트리 1회). resolve 가 meta 를 버리고 이름만 반환하는 API shape 이 하류 재검증을 강제한다. `lib/keeper/keeper_tool_registered_runtime.ml:115` — `mint_token` + `guarded_dispatch` 를 이미 실행했는데 fallthrough 가 같은 디스패치를 다시 실행(pre-hook 2회, observer 2회, span 2-3회 — 텔레메트리 오염).
 
-### (d) 부분 타입이 강제하는 dead guard
+### (d) 생산자 0 dead guard
 
-`lib/keeper/keeper_board_attention_candidate.ml:1757` — `resumable_status` 가 Option 으로 정보를 버려서, 호출부가 같은 값을 재match 하며 1,600행 떨어진 불변식에 `assert false` 로 베팅한다. `lib/keeper/keeper_heartbeat_loop.ml:1205` — 3-생성자 `cycle_status` 를 bool 로 파생한 뒤 false 분기에서 재match(boolean blindness). 실사고 전례: keeper_registry.ml:721 sparse-match `Assert_failure`(2026-05-08), 닫힌 어휘 파스 실패 → keeper 정지 사슬(#27967, #28008).
-
-생산자 0 가드도 이 계열이다: `keeper_error_classify.ml:184` 의 `"empty completion (no thinking"` 은 저장소 전체에 생산자가 없고, 주석이 스스로 "no production producer" 를 자백한다. `server_dashboard_http_runtime_info.ml:709,719` 의 가드 2건도 생산자 0.
+`keeper_error_classify.ml:184` 의 `"empty completion (no thinking"` 은 저장소 전체에 생산자가 없고, 주석이 스스로 "no production producer" 를 자백한다. `server_dashboard_http_runtime_info.ml:709,719` 의 가드 2건도 생산자 0.
 
 ## 2. 원칙 (판정 기준)
 
@@ -95,7 +93,7 @@ else `Bad_gateway
 
 1. **Functional core / imperative shell** — env·FS·clock·예외 제어흐름을 그 값을 소유하는 경계 또는 orchestration 에 둔다. 판정 질문은 하나: *이 값이 무엇을 결정하고, 어느 계층이 그 결정을 소유하는가.* 파서/스토어/클라이언트 내부의 이펙트와 명시적으로 clock·cancel·resource lifecycle 을 소유하는 실행 계층은 그 모듈의 존재 이유이므로 위반이 아니다.
 2. **Parse, don't validate** — 경계에서 1회 파싱해 typed 값으로 내부 전달. validate-then-discard 금지.
-3. **Option/Result 의 정보를 버린 뒤 추측으로 복원하지 않는다** — 중간 계층 해소 자체를 금지하지 않는다. `failwith`/`Option.get`/wildcard fallback 으로 실패 의미를 없앤 뒤 bool·문구·재match 로 복원하는 경로가 대상이다.
+3. **Option/Result 의 정보를 버린 뒤 추측으로 복원하지 않는다** — 중간 계층 해소 자체를 금지하지 않는다. `failwith`/`Option.get`/wildcard fallback 으로 실패 의미를 없앤 뒤 bool·문구로 복원하는 경로가 대상이다.
 4. **In-process 계약은 typed** — 같은 프로세스 안에서 자기 타입을 렌더해 되읽는 채널 금지. 에러 메시지·env·description·브로드캐스트 본문은 제어 흐름 채널이 아니다.
 5. **존재/권위 검증은 소유 계층에서 1회** — 동시성 권위(레지스트리)가 최종 확인을 소유하고, resolve 결과는 typed handle 로 운반한다.
 
@@ -104,9 +102,9 @@ else `Bad_gateway
 아래 항목은 텍스트가 매치됐다는 이유만으로 reject 하지 않는다. 해당 PR이 새 implicit control channel 을 만들거나, 이미 보유한 typed 정보를 버린 뒤 문자열·환경·파일을 통해 재구성한다는 데이터 흐름 증거가 있을 때만 blocker 다. 외부 wire/프로세스 경계의 직렬화, 설정 로더의 env 읽기, store의 FS 접근, 명시적 오류 표시를 위한 문자열은 대상이 아니다.
 
 1. **typed→string→재파싱**: tool_input_validation:835, channel_gate:298/:323, proactive_refresh:36 → server_routes_http_runtime:311(`label=` 필드를 문자열에 박고 되꺼냄), failure_envelope:59-64(string→string→string 3단).
-2. **요청 경로에서 이미 주입된 값을 env 로 재조회**: server_auth:563, keeper_tool_execute_runtime:388, tool_workspace:60. 요청별 환경 정책을 명시적으로 소유하는 loader는 예외지만, `<> Some "false"` 같은 permissive 파싱으로 오타와 부재를 같은 값으로 합치는 경로는 허용하지 않는다.
-3. **결정 로직에서 owner API를 우회한 FS 접근·레이아웃 지식 이중화**: masc_grpc_service:246(생산자 0 필드 raw 프로브 — 이미 drift), :117 vs :365(.json 필터 불일치), mcp_server:342(writer 레이아웃 재구현). store/loader가 자기 레이아웃을 읽는 것은 대상이 아니다.
-4. **Option/Result 의미 붕괴 후 재추론**: keeper_board_attention_candidate:1757, keeper_heartbeat_loop:1205, dashboard_verification:160(Result→failwith 로 실패 브랜치가 타입에서 소멸). 경계에서 모든 분기를 명시적으로 처리하는 정상 해소는 대상이 아니다.
+2. **요청 경로에서 이미 주입된 값을 env 로 재조회**: keeper_tool_execute_runtime:388, tool_workspace:60. 요청별 환경 정책을 명시적으로 소유하는 loader는 예외지만, `<> Some "false"` 같은 permissive 파싱으로 오타와 부재를 같은 값으로 합치는 경로는 허용하지 않는다.
+3. **결정 로직에서 owner API를 우회한 FS 접근·레이아웃 지식 이중화**: mcp_server:342(writer 레이아웃 재구현). store/loader가 자기 레이아웃을 읽는 것은 대상이 아니다.
+4. **Option/Result 의미 붕괴 후 재추론**: dashboard_verification:160(Result→failwith 로 실패 브랜치가 타입에서 소멸). 경계에서 모든 분기를 명시적으로 처리하는 정상 해소는 대상이 아니다.
 5. **catch-all 의 Cancelled 삼킴**: otel_spans:107(Cancelled→false), keeper_compact_audit:232. 형제 6곳의 `Eio.Cancel.Cancelled _ as e -> raise e` 규율이 표준.
 6. **이름/prefix 관습 분류기**: tool_dispatch:107, tool_telemetry:39(주석이 스스로 탈출구를 인정), workspace_task_receipts:23(keeper↔agent 이름의 매직 오프셋 역파싱).
 7. **닫힌 세계에서 생산자 없는 가드**: keeper_error_classify:184, runtime_info 가드 2건, prompt_defaults:22, voice_runtime_overlay:168(then/else 동일 분기). 저장소 내부의 exhaustive typed producer만 입력한다는 증거와 회귀 테스트가 있을 때 삭제한다. 외부 입력·persisted data·version-skew가 도달 가능한 경로는 `rg` 0건만으로 dead라 판정하지 않는다. 미래 upstream 변화는 가능하면 typed variant와 exhaustive match로 잡고, 불가능한 wire 경계는 명시적 unknown/error 분기를 유지한다.

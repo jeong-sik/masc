@@ -541,9 +541,6 @@ let sanitized_dashboard_actor_for_request ~base_path request =
       if String.equal sanitized "" then None else Some sanitized
   | None -> None
 
-let split_csv_nonempty raw =
-  raw |> String.split_on_char ',' |> List.filter_map String_util.trim_nonempty
-
 type browser_origin_admission =
   | Same_origin
   | Allowed_dev_origin
@@ -558,42 +555,32 @@ type request_origin_admission =
   | Multiple_origins
   | Malformed_origin
 
-(* Boot-time snapshots (RFC-0371 B11). The previous spelling re-read both
-   env vars on every request "so they can be toggled without restarting" —
-   a toggle nothing performs: no setter exists in the repository, shell
-   config, deploy scripts, or the live server's process environment
-   (verified 2026-08-12, #28221). An authorization input read from ambient
-   env per request is a mutable channel into the auth gate; live policy
-   changes belong to the operator control plane, not putenv. *)
-let allow_anonymous_mutations_snapshot =
-  lazy
-    (match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
-     | Some ("1" | "true") -> true
-     | _ -> false)
+type configure_error = Already_configured
 
-let allow_anonymous_mutations () = Lazy.force allow_anonymous_mutations_snapshot
+type resolved_config_state =
+  | Unconfigured
+  | Configured of Server_auth_config.t
 
-let default_loopback_dev_mutation_origins =
-  Masc_network_defaults.vite_dev_default_origins
+let resolved_config = Atomic.make Unconfigured
 
-let loopback_dev_mutation_origins_snapshot =
-  lazy
-    (match Sys.getenv_opt "MASC_HTTP_DEV_MUTATION_ORIGINS" with
-     | Some raw -> split_csv_nonempty raw
-     | None -> default_loopback_dev_mutation_origins)
+let configure config =
+  let current = Atomic.get resolved_config in
+  match current with
+  | Configured _ -> Error Already_configured
+  | Unconfigured ->
+    if Atomic.compare_and_set resolved_config current (Configured config)
+    then Ok ()
+    else Error Already_configured
+;;
 
-let configured_loopback_dev_mutation_origins () =
-  Lazy.force loopback_dev_mutation_origins_snapshot
+let configure_error_to_string = function
+  | Already_configured -> "HTTP authorization policy is already configured"
+;;
 
-let parse_configured_dev_origins () =
-  let rec parse_all parsed = function
-    | [] -> Ok (List.rev parsed)
-    | raw :: rest ->
-      (match Server_request_authority.parse_serialized_origin raw with
-       | Ok origin -> parse_all (origin :: parsed) rest
-       | Error `Malformed -> Error raw)
-  in
-  parse_all [] (configured_loopback_dev_mutation_origins ())
+let current_resolved_config () =
+  match Atomic.get resolved_config with
+  | Configured config -> config
+  | Unconfigured -> Server_auth_config.fail_closed
 ;;
 
 let allowlisted_dev_origin_matches_request ~request_authority origin =
@@ -602,16 +589,8 @@ let allowlisted_dev_origin_matches_request ~request_authority origin =
   if not (is_loopback_host request_host && is_loopback_host origin_host)
   then false
   else
-    match parse_configured_dev_origins () with
-    | Ok configured ->
-      List.exists
-        (Server_request_authority.serialized_origin_equal origin)
-        configured
-    | Error malformed ->
-      Log.Auth.warn
-        "rejecting dev Origin because MASC_HTTP_DEV_MUTATION_ORIGINS contains a malformed serialized origin: %S"
-        malformed;
-      false
+    Server_auth_config.loopback_dev_mutation_origins (current_resolved_config ())
+    |> List.exists (Server_request_authority.serialized_origin_equal origin)
 ;;
 
 let admission_of_serialized_origin ~request_authority origin =
@@ -708,7 +687,9 @@ let ensure_same_origin_browser_request ~request_authority request :
        when referer_matches_request_authority ~request_authority referer ->
        Ok ()
      | [] | [ _ ] | _ :: _ :: _ ->
-       if allow_anonymous_mutations () then Ok ()
+       if
+         Server_auth_config.allow_anonymous_mutations (current_resolved_config ())
+       then Ok ()
        else
          Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
            { reason = Missing_token
@@ -1263,4 +1244,15 @@ module For_testing = struct
   let admin_token_equal = admin_token_equal
   let snapshot_server_state = current_server_state
   let restore_server_state state = Atomic.set server_state state
+
+  let snapshot_auth_config () =
+    match Atomic.get resolved_config with
+    | Unconfigured -> None
+    | Configured config -> Some config
+  ;;
+
+  let restore_auth_config = function
+    | None -> Atomic.set resolved_config Unconfigured
+    | Some config -> Atomic.set resolved_config (Configured config)
+  ;;
 end

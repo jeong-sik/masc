@@ -50,7 +50,6 @@ export interface ToolMetricsResponse extends TelemetryFreshnessMetadata {
   top_20: ToolMetricsTopEntry[]
   never_called_count: number
   tool_distribution?: { total: number; public: number; visible: number; hidden: number } | null
-  dispatch_v2_enabled: boolean
   registered_count: number
 }
 

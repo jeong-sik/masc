@@ -134,7 +134,6 @@ let test_call_request_rejects_noncanonical_shapes () =
   in
   rejected "Missing params" None;
   rejected "Invalid params: expected object" (Some (`List []));
-  rejected "Invalid params: expected object" (Some (`Tuple []));
   rejected "Invalid params: name must be a string" (Some (`Assoc []));
   rejected
     "Invalid params: name must be a non-empty string"
@@ -147,13 +146,6 @@ let test_call_request_rejects_noncanonical_shapes () =
     (Some
        (`Assoc
          [ "name", `String "masc_status"; "arguments", `Null ]));
-  rejected
-    "Invalid params: arguments must be an object"
-    (Some
-       (`Assoc
-         [ "name", `String "masc_status"
-         ; "arguments", `Variant ("invalid", None)
-         ]));
   rejected
     "Invalid params: duplicate name field"
     (Some

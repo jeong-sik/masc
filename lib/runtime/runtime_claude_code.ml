@@ -681,6 +681,7 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
   else
     let* turn_id = required_string stage "uuid" fields in
     let* api_error_status = optional_int stage "api_error_status" fields in
+    let* terminal_reason = optional_string stage "terminal_reason" fields in
     let result =
       match List.assoc_opt "result" fields with
       | None | Some `Null -> Ok None
@@ -690,11 +691,11 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
     let* result = result in
     (* The keeper side of this runtime hardcoded [usage = None] while the
        antigravity runtime fills the same slot from its CLI stream, which is why
-       official-client turns carry no input_tokens (#28023) and why a turn that
-       exceeds the window is only discoverable from the provider's prose
-       (#27427). Read leniently: a turn must not fail because its usage block is
-       absent or shaped differently than expected, and an absent value after
-       this lands means the CLI does not send one. *)
+       official-client turns carry no input_tokens (#28023) and why a window
+       overflow is discovered from the result frame's own verdict below rather
+       than from token counts (#27427). Read leniently: a turn must not fail
+       because its usage block is absent or shaped differently than expected,
+       and an absent value after this lands means the CLI does not send one. *)
     let usage =
       match List.assoc_opt "usage" fields with
       | None | Some `Null -> None
@@ -731,13 +732,25 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
          | Some _ | None -> "")
     in
     let provider_reported_context_window_exceeded =
-      Option.equal Int.equal api_error_status (Some 400)
-      && Option.exists
-           (fun detail ->
-              String.starts_with
-                ~prefix:"Prompt is too long"
-                (String.trim detail))
-           result
+      (* The CLI states why its query loop terminated as a typed enum on this
+         frame; [prompt_too_long] is the CLI's own promotion of every provider
+         context-window rejection ("Prompt is too long" / "Input is too long
+         for requested model", either status, or a 413 naming the window). A
+         frame that carries the verdict is authoritative in both directions,
+         like the codex lane's [codexErrorInfo]. Frames from CLIs that predate
+         the enum carry no [terminal_reason]; only those fall back to the
+         historical exact-prefix 400, unchanged in scope (RFC amendment
+         2026-08-12). *)
+      match terminal_reason with
+      | Some reason -> String.equal reason "prompt_too_long"
+      | None ->
+        Option.equal Int.equal api_error_status (Some 400)
+        && Option.exists
+             (fun detail ->
+                String.starts_with
+                  ~prefix:"Prompt is too long"
+                  (String.trim detail))
+             result
     in
     if structurally_quota_blocked
     then Error (Quota_blocked { api_error_status; rate_limit })
@@ -752,7 +765,8 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
     else if is_error
     then
       (* [result] is the one field on this frame that says why the turn failed.
-         The exact prompt-too-long 400 prefix above has its own typed path;
+         The prompt-too-long verdict above (typed [terminal_reason], or the
+         exact 400 prefix for pre-enum CLIs) has its own typed path;
          unrelated 400s and every other terminal rejection still retain the
          provider's sentence instead of collapsing to the status code
          (#28071). *)

@@ -408,10 +408,19 @@ let generic_400_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-generic","result":"request rejected; diagnostic mentioned Prompt is too long without the provider prefix","api_error_status":400}|}
 ;;
 
+let prompt_too_long_typed_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-413-1","result":"Input is too long for requested model","api_error_status":413,"terminal_reason":"prompt_too_long"}|}
+;;
+
+let non_overflow_reason_with_prefix_prose_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-misprose","result":"Prompt is too long · gateway relayed the sentence for an unrelated rejection","api_error_status":400,"terminal_reason":"api_error"}|}
+;;
+
 (* A live keeper reported Claude's explicit "prompt is too long" terminal as a
    generic 400, so the provider-bound history shrinker never saw the typed
-   ContextOverflow it consumes. The status and provider sentence together are
-   the admission evidence; unrelated 400s stay generic below. *)
+   ContextOverflow it consumes. This fixture carries no [terminal_reason], so
+   it now exercises the pre-enum fallback: the status and provider sentence
+   together are the admission evidence; unrelated 400s stay generic below. *)
 let test_terminal_prompt_too_long_is_typed () =
   with_fixture [ Emit prompt_too_long_result ] (fun path ->
     match run_fixture path with
@@ -443,6 +452,40 @@ let test_unrelated_400_remains_turn_failed () =
         (Astring.String.is_infix ~affix:"diagnostic mentioned" detail)
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "an unrelated 400 terminal was reported as completion")
+;;
+
+(* CLI 2.1.228+ states the loop outcome as [terminal_reason]; a live forced
+   overflow emitted "prompt_too_long" while the sentence and status took the
+   413 shape. The typed verdict must classify without the prefix-400 shape. *)
+let test_terminal_reason_prompt_too_long_is_typed () =
+  with_fixture [ Emit prompt_too_long_typed_result ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Context_window_exceeded
+          { message; tool_effect_attempted = false; response_emitted = false }) ->
+      check
+        bool
+        "provider sentence survives into the typed failure"
+        true
+        (Astring.String.is_infix ~affix:"Input is too long" message)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "a typed overflow terminal was reported as completion")
+;;
+
+(* When the frame carries a verdict it is authoritative in both directions: a
+   non-overflow reason stays generic even when the prose repeats the exact
+   overflow prefix. *)
+let test_non_overflow_reason_beats_prefix_prose () =
+  with_fixture [ Emit non_overflow_reason_with_prefix_prose_result ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Turn_failed detail) ->
+      check
+        bool
+        "generic rejection keeps the provider sentence"
+        true
+        (Astring.String.is_infix ~affix:"gateway relayed" detail)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "a non-overflow terminal was reported as completion")
 ;;
 
 let test_quota_is_structurally_classified () =
@@ -1199,6 +1242,14 @@ let () =
             "terminal prompt too long is typed"
             `Quick
             test_terminal_prompt_too_long_is_typed
+        ; test_case
+            "terminal_reason prompt_too_long is typed"
+            `Quick
+            test_terminal_reason_prompt_too_long_is_typed
+        ; test_case
+            "non-overflow terminal_reason beats prefix prose"
+            `Quick
+            test_non_overflow_reason_beats_prefix_prose
         ; test_case
             "unrelated 400 remains turn failed"
             `Quick

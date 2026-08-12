@@ -16,11 +16,19 @@
     worker exception handlers, so the crash count understates the reach.
 
     These cases run the interleaving directly: [Eio.Fiber.both] resumes the
-    second fiber precisely while the first is suspended inside the lock. *)
+    second fiber precisely while the first is suspended inside the lock.
+
+    The shared [Run_registry_core] is not the whole surface: a consumer that
+    wraps [Store.register] in its own raw mutex reproduces the same recursion
+    one layer up. [Exact_lane_run_registry] did, and the board attention
+    worker drove 231 of the measured occurrences through it, so every
+    instantiation is covered here rather than only the one the fatal
+    backtrace named. *)
 
 open Alcotest
 
 module R = Masc.Verification_run_registry
+module Ex = Masc.Exact_lane_run_registry
 
 let remove_if_exists path =
   try Sys.remove path with
@@ -132,6 +140,66 @@ let test_both_appends_reach_the_log () =
       check int "both registrations were appended" 2 (register_events_in path))
 ;;
 
+(* The board attention worker's path. It reaches the shared core through a
+   second lock of its own, which is why fixing only the core left this lane
+   raising in production. *)
+let register_exact t ~run_id =
+  Ex.register_running
+    t
+    ~run_id
+    ~lane:Ex.Board_attention
+    ~subject_id:("cand-" ^ run_id)
+    ~actor:"keeper-rondo-agent"
+    ~started_at:100.0
+    ~input:(Ex.Exact_input (`Assoc []))
+;;
+
+let exact_ids t =
+  Ex.list_runs t |> List.map (fun (run : Ex.run) -> run.run_id) |> List.sort String.compare
+;;
+
+let test_exact_lane_concurrent_registrations () =
+  let path = fresh_path ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> remove_if_exists path)
+    (fun () ->
+      let t = Ex.create ~path () in
+      Eio_main.run (fun _env ->
+        Eio.Fiber.both
+          (fun () -> register_exact t ~run_id:"exact-a")
+          (fun () -> register_exact t ~run_id:"exact-b"));
+      check
+        (list string)
+        "both exact-lane registrations are tracked"
+        [ "exact-a"; "exact-b" ]
+        (exact_ids t))
+;;
+
+let test_exact_lane_completion_against_registration () =
+  let path = fresh_path ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> remove_if_exists path)
+    (fun () ->
+      let t = Ex.create ~path () in
+      register_exact t ~run_id:"exact-first";
+      Eio_main.run (fun _env ->
+        Eio.Fiber.both
+          (fun () ->
+            ignore
+              (Ex.mark_completed
+                 t
+                 ~run_id:"exact-first"
+                 ~outcome:Ex.Succeeded
+                 ~elapsed_s:1.0
+                 ~output:(`Assoc [])))
+          (fun () -> register_exact t ~run_id:"exact-second"));
+      check
+        (list string)
+        "an exact-lane completion and registration interleave without loss"
+        [ "exact-first"; "exact-second" ]
+        (exact_ids t))
+;;
+
 let () =
   run
     "run_registry_concurrent_mutation"
@@ -148,5 +216,15 @@ let () =
             "both appends reach the log"
             `Quick
             test_both_appends_reach_the_log
+        ] )
+    ; ( "exact lane (own outer lock)"
+      , [ test_case
+            "two registrations"
+            `Quick
+            test_exact_lane_concurrent_registrations
+        ; test_case
+            "completion against registration"
+            `Quick
+            test_exact_lane_completion_against_registration
         ] )
     ]

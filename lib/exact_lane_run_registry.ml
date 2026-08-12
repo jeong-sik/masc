@@ -198,7 +198,7 @@ type t =
   { store : Store.t
   ; failed_completions : (string * failed_completion) list Atomic.t
   ; projection : run list Atomic.t
-  ; observation_mutex : Stdlib.Mutex.t
+  ; observation_mutex : Cross_context_mutex.t
   }
 
 type completion_error =
@@ -271,7 +271,7 @@ let make store =
     { store
     ; failed_completions = Atomic.make []
     ; projection = Atomic.make []
-    ; observation_mutex = Stdlib.Mutex.create ()
+    ; observation_mutex = Cross_context_mutex.create ()
     }
   in
   publish_projection t;
@@ -281,8 +281,21 @@ let make store =
 let create ?path () = make (Store.create ?path ())
 let replay path = make (Store.replay path)
 
+(* [Cross_context_mutex], not [Stdlib.Mutex]: this lock wraps
+   [Store.register] / [Store.complete], whose critical section performs a
+   durable JSONL append and therefore suspends the fiber. A raw pthread mutex
+   held across that suspension is still held by the *same OS thread* when the
+   scheduler runs the next fiber on this domain, so that fiber's acquisition
+   is recursive and pthreads rejects it with
+   [Sys_error "Mutex.lock: Resource deadlock avoided"].
+
+   #28391 fixed the same shape inside [Run_registry_core], which this module
+   wraps; the outer lock kept reproducing it. Measured on the live fleet: 231
+   occurrences reached this lane through the board attention worker
+   ("Board attention worker raised unexpectedly"), which swallows them, plus
+   10 through the librarian lane. *)
 let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
-  Stdlib.Mutex.protect t.observation_mutex (fun () ->
+  Cross_context_mutex.with_durable_lock t.observation_mutex (fun () ->
     Store.register
       t.store
       ~id:run_id
@@ -296,7 +309,7 @@ let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
 let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
   let completion = { Payload.outcome; elapsed_s; output } in
   let result =
-    Stdlib.Mutex.protect t.observation_mutex (fun () ->
+    Cross_context_mutex.with_durable_lock t.observation_mutex (fun () ->
       match Store.complete t.store ~id:run_id ~completion with
       | `Completed ->
         remove_failed_completion t run_id;

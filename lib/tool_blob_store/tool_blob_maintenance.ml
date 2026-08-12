@@ -4,16 +4,6 @@ type mode =
   | Observe_only
   | Delete_previous_candidates
 
-(* A scan that stops early must never reach the candidate snapshot. A partial
-   [live_references] set records still-referenced blobs as deletion
-   candidates, and two consecutive partial scans that miss the same durable
-   file intersect into a live blob. Budget exhaustion is therefore an [error]
-   like any other scan failure, so [run] short-circuits before
-   [save_candidate_snapshot]. *)
-type scan_budget =
-  | Unbounded
-  | Bounded_by of { deadline_epoch_seconds : float }
-
 type error =
   | Clustered_durable_roots_uncoordinated of
       { path : string
@@ -49,11 +39,6 @@ type error =
   | Candidate_snapshot_write_failed of
       { path : string
       ; detail : string
-      }
-  | Scan_budget_exhausted of
-      { elapsed_seconds : float
-      ; files_scanned : int
-      ; last_path : string
       }
   | Blob_listing_failed of Tool_blob_store.list_error
   | Blob_delete_failed of Tool_blob_store.delete_error
@@ -98,13 +83,6 @@ let error_to_string = function
       detail
   | Candidate_snapshot_write_failed { path; detail } ->
     Printf.sprintf "blob maintenance candidate snapshot write failed path=%s: %s" path detail
-  | Scan_budget_exhausted { elapsed_seconds; files_scanned; last_path } ->
-    Printf.sprintf
-      "durable scan budget exhausted after %.1fs and %d file(s) at path=%s; \
-       every blob is retained and no candidate snapshot was written"
-      elapsed_seconds
-      files_scanned
-      last_path
   | Blob_listing_failed error ->
     Printf.sprintf
       "blob listing failed path=%s: %s"
@@ -127,22 +105,30 @@ let candidate_snapshot_path ~base_path =
 ;;
 
 let add_references ~path ~line references text =
-  match Tool_output.artifact_refs_in_text text with
-  | Ok found ->
-    Ok
-      (List.fold_left
-         (fun acc reference ->
-            String_set.add reference.Tool_output.sha256 acc)
-         references
-         found)
-  | Error error ->
+  match Tool_output.decode_from_agent_core text with
+  | Tool_output.Not_marker -> Ok references
+  | Tool_output.Invalid_marker { detail } ->
     Error
       (Malformed_artifact_reference
          { path
          ; line
-         ; offset = error.offset
-         ; detail = error.detail
+         ; offset = 0
+         ; detail
          })
+  | Tool_output.Decoded reference ->
+    let canonical =
+      Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+    in
+    if String.equal text canonical
+    then Ok (String_set.add reference.Tool_output.sha256 references)
+    else
+      Error
+        (Malformed_artifact_reference
+           { path
+           ; line
+           ; offset = 0
+           ; detail = "artifact marker is not in canonical wire form"
+           })
 ;;
 
 let rec references_in_json ~path ~line references = function
@@ -242,7 +228,6 @@ let durable_consumer_basenames =
   ; "messages"
   ; "tool_calls"
   ; "traces"
-  ; Common.keeper_runtime_store_dirname Common.Keeper_trajectories
   (* The bounded diagnostic store owns every blob reference for as long as
      its dated JSONL row remains inside wire-capture retention. *)
   ; "wire-capture"
@@ -322,29 +307,7 @@ let reject_uncoordinated_cluster_roots ~base_path =
             }))
 ;;
 
-(* [files_scanned] rides along only so an exhausted budget can report how far
-   the traversal reached; it is dropped once the scan completes. *)
-type scan_progress =
-  { references : String_set.t
-  ; files_scanned : int
-  }
-
-let live_references ~base_path ~budget =
-  let started_at = Unix.gettimeofday () in
-  let within_budget () =
-    match budget with
-    | Unbounded -> true
-    | Bounded_by { deadline_epoch_seconds } ->
-      Unix.gettimeofday () <= deadline_epoch_seconds
-  in
-  let budget_exhausted path progress =
-    Error
-      (Scan_budget_exhausted
-         { elapsed_seconds = Unix.gettimeofday () -. started_at
-         ; files_scanned = progress.files_scanned
-         ; last_path = path
-         })
-  in
+let live_references ~base_path =
   let read_directory path =
     let inspect () =
       match
@@ -392,20 +355,14 @@ let live_references ~base_path ~budget =
                  Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
              })
   in
-  let rec scan_entry path progress =
-    if not (within_budget ())
-    then budget_exhausted path progress
-    else (
-      try
-        match (Unix.lstat path).Unix.st_kind with
-        | Unix.S_DIR -> scan_directory path progress
-        | Unix.S_REG ->
-          Result.map
-            (fun found ->
-               { references = String_set.union progress.references found
-               ; files_scanned = progress.files_scanned + 1
-               })
-            (references_in_file ~ownership_root:base_path path)
+  let rec scan_entry path references =
+    try
+      match (Unix.lstat path).Unix.st_kind with
+      | Unix.S_DIR -> scan_directory path references
+      | Unix.S_REG ->
+        Result.map
+          (String_set.union references)
+          (references_in_file ~ownership_root:base_path path)
         | Unix.S_LNK ->
           Error
             (Durable_source_stat_failed
@@ -416,21 +373,20 @@ let live_references ~base_path ~budget =
         | Unix.S_BLK
         | Unix.S_FIFO
         | Unix.S_SOCK ->
-          Ok progress
-      with
-      | Sys_error reason ->
-        Error (Durable_source_stat_failed { path; reason })
-      | Unix.Unix_error (code, fn, arg) ->
-        Error
-          (Durable_source_stat_failed
-             { path
-             ; reason =
-                 Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
-             }))
-  and scan_directory path progress =
+        Ok references
+    with
+    | Sys_error reason -> Error (Durable_source_stat_failed { path; reason })
+    | Unix.Unix_error (code, fn, arg) ->
+      Error
+        (Durable_source_stat_failed
+           { path
+           ; reason =
+               Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+           })
+  and scan_directory path references =
     match read_directory path with
     | Error _ as error -> error
-    | Ok None -> Ok progress
+    | Ok None -> Ok references
     | Ok (Some entries) ->
       entries
       |> Array.to_list
@@ -439,14 +395,13 @@ let live_references ~base_path ~budget =
            (fun result name ->
               Result.bind result (fun current ->
                 scan_entry (Filename.concat path name) current))
-           (Ok progress)
+           (Ok references)
   in
   durable_consumer_roots ~base_path
   |> List.fold_left
        (fun result root ->
           Result.bind result (fun progress -> scan_directory root progress))
-       (Ok { references = String_set.empty; files_scanned = 0 })
-  |> Result.map (fun progress -> progress.references)
+       (Ok String_set.empty)
 ;;
 
 let candidate_snapshot_to_json candidates =
@@ -573,11 +528,11 @@ let save_candidate_snapshot ~base_path candidates =
     Error (Candidate_snapshot_write_failed { path; detail })
 ;;
 
-let run ~base_path ~mode ~budget =
+let run ~base_path ~mode =
   let open Result.Syntax in
   let* () = reject_uncoordinated_cluster_roots ~base_path in
   let store = Tool_blob_store.create ~base_path in
-  let* live = live_references ~base_path ~budget in
+  let* live = live_references ~base_path in
   let* previous_candidates = load_candidate_snapshot ~base_path in
   let* blob_list =
     match Tool_blob_store.list_all_result store with

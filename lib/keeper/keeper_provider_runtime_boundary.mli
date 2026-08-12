@@ -46,8 +46,10 @@ type t =
 val classify_core_error : Agent_core.Error.t -> t
 
 val classify_provider_runtime_error_record
-  :  code:string
+  :  ?agent_core_timeout:Keeper_turn_terminal_code.agent_core_timeout
+  -> code:string
   -> detail:string
+  -> unit
   -> t
 (** Classify a persisted [Provider_runtime_error] catch-all record.  This is
     narrower than parsing arbitrary messages: it only recognizes the AGENT_CORE

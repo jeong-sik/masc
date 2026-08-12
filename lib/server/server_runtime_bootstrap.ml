@@ -898,6 +898,25 @@ let initialize_owner_state_blocking
   sync_admin_token_env state;
   sync_internal_keeper_token_env state;
   sync_bootable_keeper_credentials state;
+  (* Shutdown admission restore below is mailbox-linearized by the Keeper
+     Owner. Install the inventory before persistence preparation so a durable
+     shutdown fence can be restored on a real process restart. The operation
+     runner remains dormant until the corresponding Keeper registry entry is
+     healthy, so queued chat work cannot run across this pre-ready boundary. *)
+  let keeper_owner_count =
+    match
+      Keeper_owner_registry.install_from_store
+        ~sw
+        ~operation_runner:
+          (Some (Server_routes_http_keeper_stream.operation_runner ~state ~clock))
+        (Mcp_server.workspace_config state)
+    with
+    | Ok count -> count
+    | Error error -> raise (Keeper_owner_registry.Install_failed error)
+  in
+  Log.Keeper.info
+    "keeper_owner: installed %d single-owner actor(s) before persistence recovery"
+    keeper_owner_count;
   let prepared_keeper_persistence =
     match
       Server_bootstrap_loops.prepare_keeper_persistence

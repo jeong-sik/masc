@@ -37,16 +37,6 @@ let request_authority_exn request =
     fail "expected valid authority"
 ;;
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  if n_len = 0 then true else loop 0
-
 let has_repo_keeper_config root =
   let keepers_dir = Filename.concat root "config/keepers" in
   Sys.file_exists keepers_dir && Sys.is_directory keepers_dir
@@ -558,9 +548,9 @@ let test_profile_rejects_unknown_key () =
      | Ok _ -> fail "unknown Keeper field must fail closed"
      | Error detail ->
        check bool "generic unknown-key error" true
-         (contains_substring detail "unknown keeper TOML keys");
+         (String_util.contains_substring detail "unknown keeper TOML keys");
        check bool "names unknown key" true
-         (contains_substring detail "keeper.typo_field"))
+         (String_util.contains_substring detail "keeper.typo_field"))
 
 let test_profile_full () =
   let input = {|
@@ -600,9 +590,9 @@ autoboot_enabled = [true, false]
      | Ok _ -> fail "known scalar field must not silently use its default"
      | Error message ->
        check bool "names field" true
-         (contains_substring message "keeper.autoboot_enabled");
+         (String_util.contains_substring message "keeper.autoboot_enabled");
        check bool "names expected type" true
-         (contains_substring message "boolean"))
+         (String_util.contains_substring message "boolean"))
 
 let test_profile_rejects_invalid_max_context_override () =
   let input =
@@ -618,7 +608,7 @@ max_context_override = 0
      | Ok _ -> fail "expected invalid max_context_override error"
      | Error message ->
        check bool "names max_context_override" true
-         (contains_substring message "max_context_override"))
+         (String_util.contains_substring message "max_context_override"))
 
 let test_profile_parses_multimodal_policy () =
   let input = {|
@@ -646,9 +636,9 @@ multimodal_policy = "silent_default"
      | Ok _ -> fail "expected invalid multimodal_policy error"
      | Error msg ->
        check bool "mentions multimodal_policy" true
-         (contains_substring msg "invalid multimodal_policy");
+         (String_util.contains_substring msg "invalid multimodal_policy");
        check bool "mentions allowed values" true
-         (contains_substring msg "delegate"))
+         (String_util.contains_substring msg "delegate"))
 
 (* ================================================================ *)
 (* File loading tests                                                *)
@@ -886,7 +876,7 @@ AGENT_CORE_OPENAI_BASE_URL = "http://127.0.0.1:1"
     | Ok content -> content
   in
   check bool "comment survives" true
-    (contains_substring content "# operator comment");
+    (String_util.contains_substring content "# operator comment");
   match TL.parse_toml content with
   | Error error -> fail error
   | Ok doc ->
@@ -916,7 +906,7 @@ let test_keeper_toml_writer_rejects_table_assignment_shapes () =
       | Ok () -> failf "%s must not be rendered as a key assignment" label
       | Error message ->
         check bool (label ^ " error is explicit") true
-          (contains_substring message "cannot be rendered");
+          (String_util.contains_substring message "cannot be rendered");
         check bool (label ^ " file is not created") false (Sys.file_exists path))
     shapes
 
@@ -1046,7 +1036,7 @@ let test_invalid_child_profile_fails_closed_before_dispatch () =
          (Agent_core.Error.InvalidConfig { field; detail })) ->
     check string "typed agent-core config field" "keeper.profile" field;
     check bool "agent-core error retains failing path" true
-      (contains_substring detail keeper_path)
+      (String_util.contains_substring detail keeper_path)
   | Error err ->
     failf "expected typed InvalidConfig, got %s" (Agent_core.Error.to_string err)
 
@@ -1116,7 +1106,7 @@ let test_empty_keeper_agent_prompt_is_typed_profile_error () =
     check string "keeper TOML retains dependency owner" keeper_path error.keeper_path;
     check string "keeper instructions are the failing path" instructions_path error.failing_path;
     check bool "error reports profile dependency" true
-      (contains_substring
+      (String_util.contains_substring
          (KTP.keeper_toml_load_error_to_string error)
          "profile dependency")
 
@@ -1368,9 +1358,9 @@ let test_load_keeper_toml_rejects_unknown_keys () =
     Sys.remove tmp;
     check bool "profile error" true (error.kind = KTP.Profile_error);
     check bool "generic unknown-key error" true
-      (contains_substring error.detail "unknown keeper TOML keys");
+      (String_util.contains_substring error.detail "unknown keeper TOML keys");
     check bool "unknown key retained" true
-      (contains_substring error.detail "keeper.typo_field")
+      (String_util.contains_substring error.detail "keeper.typo_field")
 
 let test_keeper_toml_unknown_keys_in_dir_reports_files () =
   with_temp_dir "keeper-unknown-dir" @@ fun dir ->

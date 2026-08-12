@@ -385,6 +385,28 @@ let test_malformed_hosts_yaml_is_rejected () =
     Alcotest.fail "malformed hosts.yml was collapsed into unconfigured state"
 ;;
 
+let test_local_snapshot_cleanup_does_not_follow_replacement_symlink () =
+  with_temp_base @@ fun base_path config ->
+  let env, _state, cleanup =
+    match Github.runtime_env_for_tool ~config ~keeper_name:"cleanup-symlink" [||] with
+    | Error message -> Alcotest.fail message
+    | Ok projection -> projection
+  in
+  let snapshot = env_value "GH_CONFIG_DIR" env |> Option.get in
+  let target = Filename.concat base_path "cleanup-target" in
+  Unix.mkdir target 0o755;
+  Unix.chmod snapshot 0o700;
+  Unix.rmdir snapshot;
+  Unix.symlink target snapshot;
+  cleanup ();
+  Alcotest.(check int) "replacement target mode is unchanged" 0o755
+    ((Unix.stat target).Unix.st_perm land 0o777);
+  Alcotest.(check bool) "replacement symlink is removed" false
+    (match Unix.lstat snapshot with
+     | _ -> true
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false)
+;;
+
 let test_observe_does_not_provision_missing_identity () =
   with_temp_base @@ fun base_path config ->
   let keeper_name = "observe-missing-identity" in
@@ -558,6 +580,10 @@ let () =
             "malformed hosts yaml is rejected"
             `Quick
             test_malformed_hosts_yaml_is_rejected
+        ; Alcotest.test_case
+            "local snapshot cleanup does not follow replacement symlink"
+            `Quick
+            test_local_snapshot_cleanup_does_not_follow_replacement_symlink
         ; Alcotest.test_case
             "observation does not provision missing identity"
             `Quick

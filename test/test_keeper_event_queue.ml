@@ -109,15 +109,6 @@ let remove_payload_field ~kind ~field =
     (fun fields ->
        if List.mem_assoc field fields then List.remove_assoc field fields else fields)
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec scan offset =
-    offset + needle_len <= haystack_len
-    && (String.equal (String.sub haystack offset needle_len) needle || scan (offset + 1))
-  in
-  String.equal needle "" || scan 0
-
 let event_queue_test_meta keeper_name trace_id =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -674,7 +665,7 @@ let () =
     | Masc.Keeper_world_observation.Goal_reconciliation_ready -> true
     | _ -> false);
   assert (
-    contains_substring
+    String_util.string_contains_substring
       ~needle:"Re-read Goal and Task SSOT"
       prompt_event.preview);
   (* The Board-activity partition decides which prompt section renders this
@@ -769,7 +760,7 @@ let () =
       decoded = rejection
     | _ -> false);
   assert (String.equal rejection_event.post_id rejection_stimulus.post_id);
-  assert (contains_substring ~needle:rejection.car_reason rejection_event.preview);
+  assert (String_util.string_contains_substring ~needle:rejection.car_reason rejection_event.preview);
   assert (
     not (Masc.Keeper_world_observation.is_board_activity_event rejection_event));
   assert (
@@ -1627,14 +1618,14 @@ let () =
            Alcotest.(check bool)
              (label ^ " error requires reset")
              true
-             (contains_substring ~needle:"reset required" detail);
+             (String_util.string_contains_substring ~needle:"reset required" detail);
            (match expected_detail with
             | None -> ()
             | Some expected ->
               Alcotest.(check bool)
                 (label ^ " error preserves decoder detail")
                 true
-                (contains_substring ~needle:expected detail)));
+                (String_util.string_contains_substring ~needle:expected detail)));
         Alcotest.(check string)
           (label ^ " evidence is not rewritten")
           malformed

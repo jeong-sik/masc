@@ -57,19 +57,6 @@ let get_string_field json field =
   | _ -> fail (field ^ " missing")
 ;;
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if n_len = 0
-    then true
-    else if i + n_len > s_len
-    then false
-    else if String.sub s i n_len = needle
-    then true
-    else loop (i + 1)
-  in
-  loop 0
 ;;
 
 let expect_error (result : Tool_result.result option) =
@@ -236,7 +223,7 @@ let test_goal_list_rejects_status_filter () =
     bool
     "error points to removed status"
     true
-    (contains_substring (Yojson.Safe.to_string error_json) "status filter was removed");
+    (String_util.contains_substring (Yojson.Safe.to_string error_json) "status filter was removed");
   let field_errors =
     Yojson.Safe.Util.member "field_errors" error_json |> Yojson.Safe.Util.to_list
   in
@@ -265,7 +252,7 @@ let test_goal_upsert_rejects_lifecycle_fields () =
     bool
     "phase error points at transition"
     true
-    (contains_substring (Yojson.Safe.to_string phase_error) "masc_goal_transition");
+    (String_util.contains_substring (Yojson.Safe.to_string phase_error) "masc_goal_transition");
   let goal, _kind =
     match Goal_store.upsert_goal config ~title:"Existing goal" () with
     | Ok payload -> payload

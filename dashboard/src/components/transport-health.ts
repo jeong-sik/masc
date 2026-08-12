@@ -1,19 +1,22 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
+import { Option } from 'effect'
 import { lastEvent } from '../sse'
 import type { SSEEvent } from '../types'
 import { FetchScheduler } from '../lib/fetch-scheduler'
 import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
+import { createEffectResource } from '../lib/effect-resource'
 import {
+  decodeTransportHealthData,
   fetchTransportHealth,
   isTransportHealthReady,
-  parseTransportHealthData,
   type HotSession,
   type TransportHealthData,
+  type TransportHealthError,
   type TransportHealthSnapshot,
 } from '../api/transport-health'
-import { createManagedAsyncResource } from '../lib/async-state'
+import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
 import { TextInput } from './common/input'
 import { StatusDot } from './common/status-dot'
 import { CopyIdButton } from './common/copy-id-button'
@@ -36,9 +39,11 @@ type PracticalCase = {
   live: (data: TransportHealthData) => string
 }
 
-const transportHealthResource = createManagedAsyncResource<TransportHealthSnapshot>()
-const transportHealthWireError = signal<string | null>(null)
-let inflightTransportHealthRefresh: Promise<void> | null = null
+const transportHealthResource = createEffectResource<
+  DashboardHttp,
+  TransportHealthError,
+  TransportHealthSnapshot
+>(dashboardRuntime)
 
 // Module-scoped search state for the hot-sessions list (stale-filter-carryover
 // bug guard: must be cleared in resetTransportHealthState).
@@ -67,23 +72,13 @@ export function filterHotSessions(
 }
 
 export function resetTransportHealthState(): void {
-  inflightTransportHealthRefresh = null
   hotSessionsSearchQuery.value = ''
-  transportHealthWireError.value = null
   transportHealthResource.reset()
 }
 
 /** Hydrate transport health from a server-push payload — zero HTTP fetch. */
 export function hydrateTransportHealthFromSSE(data: unknown): void {
-  try {
-    const decoded = parseTransportHealthData(data)
-    transportHealthWireError.value = null
-    transportHealthResource.reset(decoded)
-  } catch (error) {
-    transportHealthResource.reset()
-    transportHealthWireError.value =
-      error instanceof Error ? error.message : String(error)
-  }
+  void transportHealthResource.load(decodeTransportHealthData(data))
 }
 
 const PRACTICAL_CASES: PracticalCase[] = [
@@ -129,25 +124,8 @@ const PRACTICAL_CASES: PracticalCase[] = [
   },
 ]
 
-async function refreshTransportHealth(): Promise<void> {
-  if (inflightTransportHealthRefresh) return inflightTransportHealthRefresh
-  inflightTransportHealthRefresh = transportHealthResource
-    .load((signal) => fetchTransportHealth({ signal }))
-    .then((data) => {
-      if (data) {
-        transportHealthWireError.value = null
-        return
-      }
-      const refreshError = transportHealthResource.state.value.error
-      if (refreshError) {
-        transportHealthResource.reset()
-        transportHealthWireError.value = refreshError
-      }
-    })
-    .finally(() => {
-      inflightTransportHealthRefresh = null
-    })
-  return inflightTransportHealthRefresh
+function refreshTransportHealth(): Promise<void> {
+  return transportHealthResource.load(fetchTransportHealth())
 }
 
 export function shouldRefreshFromEvent(event: SSEEvent): boolean {
@@ -321,12 +299,14 @@ export function transportTruthLine(data: TransportHealthData): string {
     diagnostics.source,
     `cache ${diagnostics.cache_state}`,
   ]
-  if (diagnostics.stale_age_ms !== null) {
-    parts.push(`stale ${diagnostics.stale_age_ms}ms`)
-  } else if (diagnostics.last_success_at) {
-    parts.push(`last ok ${diagnostics.last_success_at}`)
-  }
-  return parts.join(' · ')
+  const freshness = Option.orElse(
+    Option.map(diagnostics.stale_age_ms, staleAgeMs => `stale ${staleAgeMs}ms`),
+    () => Option.map(diagnostics.last_success_at, lastSuccessAt => `last ok ${lastSuccessAt}`),
+  )
+  return Option.match(freshness, {
+    onSome: value => [...parts, value].join(' · '),
+    onNone: () => parts.join(' · '),
+  })
 }
 
 function MetricRow({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -392,25 +372,38 @@ export function TransportHealthPanel() {
       clearInterval(interval)
       unsubscribe()
       sseRefreshScheduler.dispose()
+      transportHealthResource.cancel()
     }
   }, [])
 
-  const { data, loading, error } = transportHealthResource.state.value
-  const wireError = transportHealthWireError.value
-
-  if (wireError || error) {
-    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${wireError ?? error}</div>`
+  const state = transportHealthResource.state.value
+  switch (state._tag) {
+    case 'Initial':
+      return null
+    case 'Failure':
+      return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${state.error.message}</div>`
+    case 'Loading':
+      return Option.match(state.previous, {
+        onNone: () =>
+          html`<div class="p-6 text-center text-text-muted text-sm" role="status">트랜스포트 상태 로딩 중...</div>`,
+        onSome: data => html`<${TransportHealthContent} data=${data} />`,
+      })
+    case 'Success':
+      return html`<${TransportHealthContent} data=${state.value} />`
   }
+}
 
-  if (loading && !data) {
-    return html`<div class="p-6 text-center text-text-muted text-sm" role="status">트랜스포트 상태 로딩 중...</div>`
-  }
-
-  if (!data) return null
-  const producerError = data.projection_diagnostics.stale_reason
-  if (producerError) {
-    const errorAt = data.projection_diagnostics.last_error_at
-    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${producerError}${errorAt ? ` · ${errorAt}` : ''}</div>`
+function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
+  const producerFailure = Option.map(
+    data.projection_diagnostics.stale_reason,
+    reason =>
+      Option.match(data.projection_diagnostics.last_error_at, {
+        onNone: () => reason,
+        onSome: errorAt => `${reason} · ${errorAt}`,
+      }),
+  )
+  if (Option.isSome(producerFailure)) {
+    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${producerFailure.value}</div>`
   }
   if (!isTransportHealthReady(data)) {
     return html`<div class="p-6 text-center text-text-muted text-sm" role="status">${data.message}</div>`

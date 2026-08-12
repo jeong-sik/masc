@@ -1016,6 +1016,7 @@ let () =
       ; provider_id = Some "kimi_code"
       ; http_status = None
       ; runtime_id = Some "kimi_code.kimi-for-coding"
+      ; agent_core_timeout = None
       ; reason = None
       }
   in

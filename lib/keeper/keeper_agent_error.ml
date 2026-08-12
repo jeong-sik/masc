@@ -121,7 +121,7 @@ let core_termination_semantics = function
   | Agent_core.Error.Serialization _ -> Core_error_failure
   | Agent_core.Error.Io _ -> Core_error_failure
   | Agent_core.Error.Orchestration _ -> Core_error_failure
-  | Agent_core.Error.Internal _ -> Core_error_failure
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> Core_error_failure
 ;;
 
 let core_termination_semantics_to_string = function
@@ -261,8 +261,11 @@ let terminal_reason_code_of_core_error = function
   | Agent_core.Error.Serialization _ -> "serialization_error"
   | Agent_core.Error.Io _ -> "io_error"
   | Agent_core.Error.Orchestration _ -> "orchestration_error"
-  | Agent_core.Error.Internal msg -> (
-    match Keeper_internal_error.classify_masc_internal_error_of_string msg with
+  | (Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _) as err -> (
+    (* Typed carrier first; the string parse survives inside
+       classify_masc_internal_error for pre-carrier producers
+       (RFC-0371 B12). *)
+    match Keeper_internal_error.classify_masc_internal_error err with
     | Some err -> Keeper_internal_error.kind_of_masc_internal_error err
     | None -> "internal_error")
 ;;
@@ -274,8 +277,30 @@ let terminal_reason_code_of_core_error = function
    and uses these typed accessors at every emit site. RFC §5.2 defers the
    sub-sum split (per-variant constructors for Agent errors) to
    a follow-up RFC. *)
+(* The typed timeout observation is derived here — the one site that still
+   holds the original error — and rides the terminal code next to the
+   verbatim wire (RFC-0371 §6.1(3)). Consumers stop re-parsing
+   "provider_error_timeout:*" out of the wire for live values; the string
+   classifier remains only for wire rehydrated from persistence. *)
+let agent_core_timeout_observation :
+      Agent_core.Error.t -> Keeper_turn_terminal_code.agent_core_timeout option
+  = function
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout { timeout_phase; _ }) ->
+    Some { Keeper_turn_terminal_code.phase = timeout_phase }
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError { timeout_phase = Some phase; _ }) ->
+    Some { Keeper_turn_terminal_code.phase = Some phase }
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError
+         { kind = Llm_provider.Http_client.Timeout; timeout_phase = None; _ }) ->
+    Some { Keeper_turn_terminal_code.phase = None }
+  | _ -> None
+;;
+
 let terminal_reason_code_of_core_error_typed err =
-  Keeper_turn_terminal_code.of_core_error_wire (terminal_reason_code_of_core_error err)
+  Keeper_turn_terminal_code.of_core_error
+    ~wire:(terminal_reason_code_of_core_error err)
+    ~timeout:(agent_core_timeout_observation err)
 ;;
 
 let api_error_terminal_reason_code_typed err =

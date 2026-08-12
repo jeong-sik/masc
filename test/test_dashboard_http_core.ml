@@ -40,15 +40,6 @@ let invalid_utf8_byte_count s =
   in
   loop 0 0
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop i =
-    i + needle_len <= haystack_len
-    && (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
-  in
-  needle_len = 0 || loop 0
-
 let nested_path_string_present_or_null json key =
   let open Yojson.Safe.Util in
   match json |> member key with
@@ -256,7 +247,7 @@ let test_event_queue_operator_routes_are_exact () =
     "board_signal"
     (pending_json |> member "payload_kind" |> to_string);
   check bool "event pending projection omits raw payload content" false
-    (contains_substring (Yojson.Safe.to_string pending_json) sensitive_content);
+    (String_util.contains_substring (Yojson.Safe.to_string pending_json) sensitive_content);
   check bool "event pending projection has no raw source object" true
     (pending_json |> member "source" = `Null);
   let same_post_id_source : Keeper_event_queue.stimulus =
@@ -403,7 +394,7 @@ let test_event_pending_projection_omits_non_rejection_payloads () =
   let open Yojson.Safe.Util in
   check bool "board content still omitted after the rejection field landed"
     false
-    (contains_substring (Yojson.Safe.to_string pending_json) sensitive);
+    (String_util.contains_substring (Yojson.Safe.to_string pending_json) sensitive);
   check bool "no rejection field on a non-rejection payload" true
     (pending_json |> member "rejection_reason" = `Null)
 ;;
@@ -1471,9 +1462,9 @@ let test_dashboard_proof_route_registered_in_http_routers () =
   let http1 = read_file "lib/server/server_routes_http_routes_dashboard.ml" in
   let h2 = read_file "lib/server/server_h2_gateway.ml" in
   check bool "HTTP/1 dashboard proof route registered" true
-    (contains_substring http1 "\"/api/v1/dashboard/proof\"");
+    (String_util.contains_substring http1 "\"/api/v1/dashboard/proof\"");
   check bool "HTTP/2 dashboard proof route registered" true
-    (contains_substring h2 "\"/api/v1/dashboard/proof\"")
+    (String_util.contains_substring h2 "\"/api/v1/dashboard/proof\"")
 
 let config_sync_runtime_toml =
   {|[runtime]
@@ -1595,7 +1586,7 @@ let test_execution_trust_does_not_call_full_keeper_projection () =
   check bool
     "execution-trust refresh cannot reintroduce the full compact projection"
     false
-    (contains_substring
+    (String_util.contains_substring
        source
        "keepers_dashboard_json ~compact:true")
 
@@ -2242,7 +2233,7 @@ let test_offline_keeper_composite_exposes_secret_projection () =
   Alcotest.(check bool)
     "offline composite redacts secret values"
     false
-    (contains_substring (Yojson.Safe.to_string json) sentinel)
+    (String_util.contains_substring (Yojson.Safe.to_string json) sentinel)
 
 let keeper_state_diagram_meta ?last_runtime_attempt_provider name =
   let runtime_attempt_fields =
@@ -2303,7 +2294,7 @@ let test_state_diagram_runtime_projection_redacts_live_runtime_evidence () =
   Alcotest.(check bool)
     "projection JSON does not leak raw provider id"
     false
-    (contains_substring json raw_provider);
+    (String_util.contains_substring json raw_provider);
   let mermaid =
     Server_dashboard_http_keeper_api.state_diagram_runtime_fsm_mermaid
       projection
@@ -2311,15 +2302,15 @@ let test_state_diagram_runtime_projection_redacts_live_runtime_evidence () =
   Alcotest.(check bool)
     "runtime FSM contains the redacted runtime node"
     true
-    (contains_substring mermaid {|state "runtime" as P0|});
+    (String_util.contains_substring mermaid {|state "runtime" as P0|});
   Alcotest.(check bool)
     "runtime FSM no longer renders fake candidate node"
     false
-    (contains_substring mermaid "candidate");
+    (String_util.contains_substring mermaid "candidate");
   Alcotest.(check bool)
     "runtime FSM does not leak raw provider id"
     false
-    (contains_substring mermaid raw_provider)
+    (String_util.contains_substring mermaid raw_provider)
 
 let test_state_diagram_runtime_projection_missing_meta_stays_empty () =
   let projection =
@@ -2344,11 +2335,11 @@ let test_state_diagram_runtime_projection_missing_meta_stays_empty () =
   Alcotest.(check bool)
     "missing meta FSM reports zero models"
     true
-    (contains_substring mermaid "Models: 0");
+    (String_util.contains_substring mermaid "Models: 0");
   Alcotest.(check bool)
     "missing meta FSM has no fake candidate node"
     false
-    (contains_substring mermaid "candidate")
+    (String_util.contains_substring mermaid "candidate")
 
 let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -3012,6 +3003,18 @@ let test_keeper_github_login_stream_headers_include_cors () =
     (Httpun.Headers.get headers "access-control-allow-credentials")
 ;;
 
+let test_keeper_github_login_stream_flushes_each_event () =
+  let actions = ref [] in
+  Keeper_config_post.For_testing.github_login_stream_send_with
+    ~write:(fun frame -> actions := !actions @ [ "write:" ^ frame ])
+    ~flush:(fun () -> actions := !actions @ [ "flush" ])
+    "device_code"
+    (`Assoc [ "code", `String "ABCD-EFGH" ]);
+  Alcotest.(check (list string)) "frame is written before it is flushed"
+    [ "write:event: device_code\ndata: {\"code\":\"ABCD-EFGH\"}\n\n"; "flush" ]
+    !actions
+;;
+
 let shrink_base_meta () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -3195,7 +3198,7 @@ let test_catchup_judge_prompt_failure_is_server_error () =
       check bool
         "response identifies the unavailable prompt"
         true
-        (contains_substring raw "judge.catchup prompt unavailable"))
+        (String_util.contains_substring raw "judge.catchup prompt unavailable"))
 ;;
 
 let test_config_post_restarts_from_atomic_toml () =
@@ -3510,6 +3513,8 @@ let () =
       ( "dashboard behavior contracts",
         [ test_case "GitHub login stream includes CORS" `Quick
             test_keeper_github_login_stream_headers_include_cors;
+          test_case "GitHub login stream flushes each event" `Quick
+            test_keeper_github_login_stream_flushes_each_event;
           test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
           test_case "operator snapshot error clears previous success" `Quick

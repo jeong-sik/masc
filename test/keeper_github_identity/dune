@@ -13,4 +13,4 @@
   time_compat
   keeper_github_identity
   test_keeper_github_identity)
- (libraries alcotest eio masc.fs_compat masc.masc_eio_context yojson unix))
+ (libraries alcotest digestif eio masc.fs_compat masc.masc_eio_context yojson unix))

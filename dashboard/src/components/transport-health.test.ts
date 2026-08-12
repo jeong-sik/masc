@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
+import { Effect, Option } from 'effect'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   filterHotSessions,
@@ -28,7 +29,12 @@ import {
   webrtcEyebrow,
   type StatusTone,
 } from './transport-health'
-import type { HotSession, TransportHealthData } from '../api/transport-health'
+import {
+  decodeTransportHealthData,
+  isTransportHealthReady,
+  type HotSession,
+  type TransportHealthData,
+} from '../api/transport-health'
 import type * as TransportHealthApi from '../api/transport-health'
 import type { SSEEvent } from '../types'
 
@@ -136,10 +142,18 @@ async function loadComponentWithApi(api: {
   lastEvent: { value: unknown }
 }) {
   vi.resetModules()
-  vi.doMock('../api/transport-health', async (importOriginal) => ({
-    ...(await importOriginal<typeof TransportHealthApi>()),
-    fetchTransportHealth: api.fetchTransportHealth,
-  }))
+  vi.doMock('../api/transport-health', async (importOriginal) => {
+    const original = await importOriginal<typeof TransportHealthApi>()
+    return {
+      ...original,
+      fetchTransportHealth: () =>
+        Effect.tryPromise({
+          try: () => api.fetchTransportHealth(),
+          catch: error =>
+            error instanceof Error ? error : new Error(String(error)),
+        }).pipe(Effect.flatMap(original.decodeTransportHealthData)),
+    }
+  })
   vi.doMock('../sse', () => ({
     lastEvent: api.lastEvent,
   }))
@@ -417,7 +431,10 @@ describe('TransportHealthPanel', () => {
     const fetchTransportHealth = vi
       .fn<() => Promise<unknown>>()
       .mockResolvedValueOnce(sampleResponse())
-      .mockRejectedValueOnce(new Error('transport-health schema drift: invalid http2 mode'))
+      .mockResolvedValueOnce({
+        ...sampleResponse(),
+        http2: { listener_mode: 'h2c', multiplex_ready: true },
+      })
     const { TransportHealthPanel } = await loadComponentWithApi({
       fetchTransportHealth,
       lastEvent,
@@ -431,9 +448,9 @@ describe('TransportHealthPanel', () => {
     lastEvent.value = { type: 'agent_bound' }
     await vi.advanceTimersByTimeAsync(1_200)
 
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      'transport-health schema drift: invalid http2 mode',
-    )
+    const alertText = container.querySelector('[role="alert"]')?.textContent
+    expect(alertText).toContain('transport-health schema drift')
+    expect(alertText).toContain('h2c')
     expect(container.querySelector('.v2-monitoring-surface')).toBeNull()
   })
 
@@ -713,95 +730,11 @@ describe('transportEyebrow', () => {
 })
 
 function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData {
-  return {
-    summary: {
-      primary_path: 'streamable_http',
-      queue_pressure: 'steady',
-      external_fanout_targets: 0,
-    },
-    sse: {
-      sessions_observer: 1,
-      sessions_agent_stream: 0,
-      sessions_presence: 0,
-      sessions_total: 1,
-      external_subscribers: 0,
-      broadcast_avg_seconds: 0.01,
-      broadcast_count: 2,
-      queue_avg_depth: 0,
-      queue_max_depth: 1,
-      relay_queue_depth: 0,
-      relay_retry_total: 0,
-      relay_retry_append: 0,
-      relay_retry_broadcast: 0,
-      relay_drop_total: 0,
-      relay_drop_queue: 0,
-      relay_drop_append: 0,
-      relay_drop_broadcast: 0,
-      hot_sessions: [],
-    },
-    grpc: {
-      configured: true,
-      listening: true,
-      port: 50052,
-      active_streams: 0,
-      subscribers: 0,
-      heartbeat_avg_seconds: 0,
-      events_delivered: 0,
-      events_dropped: 0,
-    },
-    websocket: {
-      configured: true,
-      listening: true,
-      mode: 'standalone',
-      port: 8936,
-      sessions: 0,
-      relay_source: 'sse_external_subscriber',
-      delivery: {
-        bytes_cache_hits: 0,
-        bytes_cache_misses: 0,
-        client_acks: 0,
-        throttled_deliveries: 0,
-        client_buffered_bytes_sum: 0,
-        client_buffered_bytes_count: 0,
-      },
-    },
-    webrtc: {
-      configured: true,
-      signaling_available: true,
-      signaling_mode: 'shared_http',
-      pending_offers: 0,
-      active_peers: 0,
-      live_connections: 0,
-      connected_channels: 0,
-      ice_server_count: 2,
-    },
-    streamable_http: {
-      endpoint: '/mcp',
-      observer_stream: '/mcp?sse_kind=observer',
-      presence_stream: '/events/presence',
-      supports_post: true,
-      supports_sse_upgrade: true,
-    },
-    http2: {
-      listener_mode: 'h2_only',
-      multiplex_ready: true,
-    },
-    agent_health: {
-      stale_total: 0,
-      lifecycle_dispatch_rejections_total: 0,
-    },
-    generated_at: '2026-04-02T00:00:00Z',
-    projection_diagnostics: {
-      source: 'cached_surface',
-      cache_state: 'fresh',
-      last_success_at: '2026-04-02T00:00:00Z',
-      last_attempt_at: null,
-      last_error_at: null,
-      stale_reason: null,
-      stale_age_ms: null,
-    },
-    ...overrides,
-  } as unknown as TransportHealthData
+  const snapshot = Effect.runSync(decodeTransportHealthData(sampleResponse()))
+  if (!isTransportHealthReady(snapshot)) {
+    throw new Error('expected ready transport-health test fixture')
+  }
+  return { ...snapshot, ...overrides }
 }
 
 describe('sseTone', () => {
@@ -908,11 +841,11 @@ describe('transportTruthLine', () => {
       projection_diagnostics: {
         source: 'cached_surface',
         cache_state: 'fresh',
-        last_success_at: '2026-04-15T10:00:00Z',
-        last_attempt_at: '2026-04-15T10:00:01Z',
-        last_error_at: null,
-        stale_reason: null,
-        stale_age_ms: null,
+        last_success_at: Option.some('2026-04-15T10:00:00Z'),
+        last_attempt_at: Option.some('2026-04-15T10:00:01Z'),
+        last_error_at: Option.none(),
+        stale_reason: Option.none(),
+        stale_age_ms: Option.none(),
       },
     })
     expect(transportTruthLine(data)).toBe('cached_surface · cache fresh · last ok 2026-04-15T10:00:00Z')
@@ -922,11 +855,11 @@ describe('transportTruthLine', () => {
       projection_diagnostics: {
         source: 'cached_surface',
         cache_state: 'stale',
-        last_success_at: '2026-04-15T10:00:00Z',
-        last_attempt_at: '2026-04-15T10:00:01Z',
-        last_error_at: null,
-        stale_reason: null,
-        stale_age_ms: 1234,
+        last_success_at: Option.some('2026-04-15T10:00:00Z'),
+        last_attempt_at: Option.some('2026-04-15T10:00:01Z'),
+        last_error_at: Option.none(),
+        stale_reason: Option.none(),
+        stale_age_ms: Option.some(1234),
       },
     })
     expect(transportTruthLine(data)).toBe('cached_surface · cache stale · stale 1234ms')

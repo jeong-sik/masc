@@ -122,7 +122,7 @@ let core_error_detail (e : Agent_core.Error.t) : string =
     Llm_provider.Error.to_string provider_error
   | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
   | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _ ->
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
     Agent_core.Error.to_string e
 
 (* [Agent_core.Error.t]를 typed {!judge_failure}로 변환한다. 두 타임아웃 variant를

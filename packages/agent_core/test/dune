@@ -4,6 +4,7 @@
  (wrapped false)
  (libraries
   (re_export agent_core)
+  (re_export agent_core_strings)
   (re_export llm_provider)
   (re_export eio)
   (re_export eio.unix)

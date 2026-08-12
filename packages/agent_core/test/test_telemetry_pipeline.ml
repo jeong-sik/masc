@@ -18,20 +18,6 @@ let local_provider_config ~base_url ~model_id =
     ()
 ;;
 
-let contains_substring ~sub text =
-  let sub_len = String.length sub in
-  let text_len = String.length text in
-  let rec loop index =
-    if sub_len = 0
-    then true
-    else if index + sub_len > text_len
-    then false
-    else if String.sub text index sub_len = sub
-    then true
-    else loop (index + 1)
-  in
-  loop 0
-;;
 
 let make_mock_transport () : Llm_provider.Llm_transport.t =
   let response : Types.api_response =
@@ -418,7 +404,7 @@ let test_checkpoint_sink_failure_fails_turn () =
     Alcotest.(check bool)
       "error mentions checkpoint sink"
       true
-      (contains_substring ~sub:"checkpoint sink failed" (Error.to_string err));
+      (Agent_core_strings.contains_substring ~needle:"checkpoint sink failed" ~haystack:(Error.to_string err));
     let event_payloads =
       Event_bus.drain event_sub |> List.map (fun event -> event.Event_bus.payload)
     in
@@ -552,7 +538,7 @@ let test_post_hook_failure_commits_tool_result_before_surface () =
      Alcotest.(check bool)
        "hook detail retained"
        true
-       (contains_substring ~sub:"post hook failed" detail)
+       (Agent_core_strings.contains_substring ~needle:"post hook failed" ~haystack:detail)
    | Ok _ -> Alcotest.fail "expected typed post-hook failure"
    | Error error -> Alcotest.fail ("unexpected post-hook error: " ^ Error.to_string error));
   Alcotest.(check int) "tool ran once before hook failure" 1 !tool_runs;
@@ -633,7 +619,7 @@ let test_context_injection_failure_keeps_base_tool_result () =
      Alcotest.(check bool)
        "context error retained"
        true
-       (contains_substring ~sub:"context projection failed" detail)
+       (Agent_core_strings.contains_substring ~needle:"context projection failed" ~haystack:detail)
    | Ok _ -> Alcotest.fail "expected context injection failure"
    | Error error ->
      Alcotest.fail ("unexpected context injection error: " ^ Error.to_string error));

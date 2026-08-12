@@ -30,7 +30,9 @@ let normalize_link_set links =
     (fun (goal_id, task_ids) ->
        let goal_id = String.trim goal_id in
        if not (String.equal goal_id "") then (
-         let existing = try Hashtbl.find tbl goal_id with Not_found -> [] in
+         (* DET-OK: an absent bucket means no accumulated links; this is the
+            same [] returned by the replaced [Not_found] handler. *)
+         let existing = Option.value (Hashtbl.find_opt tbl goal_id) ~default:[] in
          let merged =
            List.fold_left
              (fun acc task_id ->
@@ -412,7 +414,7 @@ let build_goal_task_index
        let linked_tasks =
          List.filter_map
            (fun task_id ->
-              try Some (Hashtbl.find task_by_id task_id) with Not_found -> None)
+              Hashtbl.find_opt task_by_id task_id)
            task_ids
        in
        Hashtbl.replace tbl goal_id linked_tasks)
@@ -423,7 +425,9 @@ let build_goal_task_index
 (** Find all tasks linked to a specific goal.
     Returns [[]] when no tasks are linked to the given [goal_id]. *)
 let tasks_for_goal (index : (string, task list) Hashtbl.t) ~goal_id : task list =
-  try Hashtbl.find index goal_id with Not_found -> []
+  (* DET-OK: an absent bucket is the documented no-linked-tasks result; this
+     is the same [] returned by the replaced [Not_found] handler. *)
+  Option.value (Hashtbl.find_opt index goal_id) ~default:[]
 ;;
 
 (** Count open (non-terminal) tasks for a goal using a pre-built index.
@@ -457,7 +461,8 @@ let build_task_goal_index
     (fun (goal_id, task_ids) ->
        List.iter
          (fun task_id ->
-            let existing = try Hashtbl.find tbl task_id with Not_found -> [] in
+            (* DET-OK: absent means no accumulated goal ids, the prior [] result. *)
+            let existing = Option.value (Hashtbl.find_opt tbl task_id) ~default:[] in
             (* Preserve registry order for consumers that need a canonical
                first-linked goal for a task. Multi-goal task links are legacy
                invariant violations, but the projection must still be stable

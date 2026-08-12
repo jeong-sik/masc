@@ -371,6 +371,51 @@ let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
   | Ok _ -> fail "expected image then text AGENT_CORE blocks"
   | Error err -> fail ("expected AGENT_CORE block conversion: " ^ err)
 
+(* RFC-0371 B1 regression: each media kind string must select its own
+   constructor. The parser used to pick the constructor by re-matching a
+   string behind an unreachable arm; a wildcard rewrite there could have
+   silently mapped a new kind onto the wrong constructor, which is exactly
+   what this pins. *)
+let test_keeper_multimodal_parse_maps_each_kind_to_its_constructor () =
+  let block kind =
+    `Assoc
+      [
+        ("type", `String kind);
+        ("attachment_id", `String ("att-" ^ kind));
+        ("name", `String (kind ^ ".bin"));
+        ("mime_type", `String ("application/" ^ kind));
+      ]
+  in
+  let request =
+    `Assoc [ ("user_blocks", `List [ block "image"; block "document"; block "audio" ]) ]
+  in
+  match Keeper_multimodal_input.parse_user_blocks request with
+  | Ok
+      [
+        Keeper_multimodal_input.User_image image;
+        Keeper_multimodal_input.User_document document;
+        Keeper_multimodal_input.User_audio audio;
+      ] ->
+      check string "image attachment" "att-image" image.Keeper_multimodal_input.attachment_id;
+      check string "document attachment" "att-document"
+        document.Keeper_multimodal_input.attachment_id;
+      check string "audio attachment" "att-audio" audio.Keeper_multimodal_input.attachment_id
+  | Ok _ -> fail "expected image, document, audio constructors in order"
+  | Error err -> fail ("expected media blocks to parse: " ^ err)
+
+let test_keeper_multimodal_parse_rejects_unknown_kind () =
+  let request =
+    `Assoc
+      [
+        ("user_blocks", `List [ `Assoc [ ("type", `String "video") ] ]);
+      ]
+  in
+  match Keeper_multimodal_input.parse_user_blocks request with
+  | Ok _ -> fail "unknown media kind must not parse"
+  | Error err ->
+      check bool "error names the unsupported kind" true
+        (String_util.contains_substring err "video")
+
 let document_input ~mime_type ~payload =
   let attachment_id = "att-doc" in
   let name = "notes.md" in
@@ -2725,6 +2770,10 @@ let () =
             test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type;
           test_case "multimodal input converts user blocks to AGENT_CORE blocks" `Quick
             test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks;
+          test_case "multimodal parse maps each kind to its constructor" `Quick
+            test_keeper_multimodal_parse_maps_each_kind_to_its_constructor;
+          test_case "multimodal parse rejects an unknown kind" `Quick
+            test_keeper_multimodal_parse_rejects_unknown_kind;
           test_case "multimodal input projects text documents as text" `Quick
             test_keeper_multimodal_input_projects_text_documents_as_text;
           test_case "multimodal input preserves binary documents" `Quick

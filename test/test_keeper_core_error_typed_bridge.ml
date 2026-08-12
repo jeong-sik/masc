@@ -197,6 +197,29 @@ let test_sdk_typed_wire () =
     core_error_cases
 ;;
 
+let test_phased_network_error_preserves_typed_timeout () =
+  let error =
+    CoreError.Provider
+      (Llm_provider.Error.NetworkError
+         { provider = "provider"
+         ; kind = Http.Dns_failure
+         ; timeout_phase = Some Http.First_token
+         ; detail = "resolver timed out during first-token wait"
+         })
+  in
+  match AE.terminal_reason_code_of_core_error_typed error with
+  | Code.Agent_core_error
+      { wire; timeout = Some { phase = Some Http.First_token } } ->
+    Alcotest.(check string)
+      "wire remains byte-compatible"
+      "provider_error_network:dns_failure:first_token"
+      wire
+  | code ->
+    Alcotest.failf
+      "phased network error lost typed timeout: %s"
+      (Code.to_wire code)
+;;
+
 let test_terminal_tool_error_semantics () =
   List.iter
     (fun (label, error) ->
@@ -818,6 +841,10 @@ let () =
             "terminal tool errors preserve typed conservative semantics"
             `Quick
             test_terminal_tool_error_semantics
+        ; Alcotest.test_case
+            "phased network errors preserve typed timeout regardless of kind"
+            `Quick
+            test_phased_network_error_preserves_typed_timeout
         ] )
     ; ( "server parse rejection split"
       , [ Alcotest.test_case

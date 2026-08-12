@@ -1,11 +1,15 @@
 (** See [keeper_raw_trace_reader.mli]. *)
 
+type record_census =
+  | Whole_file of { records : int }
+  | Prefix_only of { budget_bytes : int }
+
 type turn_summary =
   { file : string
   ; trace_id : string option
   ; bytes : int
   ; modified_at : float
-  ; records : int
+  ; census : record_census
   }
 
 type turn_record =
@@ -92,6 +96,43 @@ let trace_id_of_line ~file ~line_number line =
   | exception Yojson.Json_error detail -> invalid detail
 ;;
 
+(* How much of one turn file the listing may read.
+
+   Before this, listing read every file whole and JSON-parsed every line just
+   to report a record count, so the cost was O(total bytes in the directory)
+   for a page of at most [limit] entries. Measured 2026-08-12 over the 1,229
+   retained traces on this host: p50 3.7 KB, p90 60 KB, p95 218 KB — and one
+   runaway turn of 372.5 MB (16,801 tool executions in a single turn) holding
+   84% of the corpus. That one file made the listing take 3.35 s for [sangsu]
+   while another keeper with *more* files but less data answered in 0.039 s.
+
+   With a per-file budget the listing costs O(entries x budget) no matter what
+   any single turn wrote, and the bound is a property of each file alone —
+   whether a file is counted never depends on its neighbours. RFC-0228 §2
+   principle 3 states the same rule for the keeper-facing lane pull: paging
+   must not reintroduce full-file scans.
+
+   256 KiB was chosen by replaying the same corpus at several budgets: it
+   counts 95.2% of turns exactly while the slowest keeper's whole listing costs
+   0.092 s. Doubling it buys 2 more points of coverage for 50% more read, and
+   the turns it would newly cover are the ones an operator opens anyway. *)
+let listing_census_budget_bytes = 256 * 1024
+
+(* A prefix that stopped at the budget ends mid-record. Dropping that partial
+   tail keeps the listing from reporting a *torn* line, which would say the
+   file is damaged when it is only longer than the budget. *)
+let complete_nonblank_lines ~truncated contents =
+  let lines = String.split_on_char '\n' contents in
+  let lines =
+    if not truncated
+    then lines
+    else (
+      match List.rev lines with
+      | _partial :: earlier -> List.rev earlier
+      | [] -> [])
+  in
+  List.filter (fun line -> not (String.equal (String.trim line) "")) lines
+
 let summarize_records ~file contents =
   let lines = nonblank_lines contents in
   let rec loop line_number expected = function
@@ -148,35 +189,70 @@ let list_turns ~config ~keeper ~limit =
           with
           | Sys_error detail -> Error (Read_failed { file = dir; detail })
         in
+        (* A file the budget covered whole is summarized exactly as before:
+           the count is the record count and every record carried one identity.
+           A file past the budget reports the identity of its first record and
+           says the count was not established here — [read_turn] reads the file
+           in full and returns [total_records]. Reporting a prefix's line count
+           as the file's would be a wrong number, which is worse than an
+           absent one. *)
+        let summary_of_prefix ~file (prefix : Fs_compat.owned_regular_file_prefix) =
+          if not prefix.truncated
+          then
+            Result.map
+              (fun (records, trace_id) ->
+                 { file
+                 ; trace_id
+                 ; bytes = prefix.file_size
+                 ; modified_at = prefix.modified_at
+                 ; census = Whole_file { records }
+                 })
+              (summarize_records ~file prefix.content)
+          else (
+            let lines = complete_nonblank_lines ~truncated:true prefix.content in
+            let first_identity =
+              match lines with
+              | [] -> Ok None
+              | line :: _ ->
+                Result.map
+                  (fun trace_id -> Some (Keeper_id.Trace_id.to_string trace_id))
+                  (trace_id_of_line ~file ~line_number:1 line)
+            in
+            Result.map
+              (fun trace_id ->
+                 { file
+                 ; trace_id
+                 ; bytes = prefix.file_size
+                 ; modified_at = prefix.modified_at
+                 ; census = Prefix_only { budget_bytes = listing_census_budget_bytes }
+                 })
+              first_identity)
+        in
+        let open_prefix ~file ~max_bytes =
+          match
+            Fs_compat.load_owned_regular_file_prefix
+              ~ownership_root:config.base_path
+              ~max_bytes
+              (Filename.concat dir file)
+          with
+          | Error error ->
+            Error
+              (Read_failed
+                 { file
+                 ; detail = Fs_compat.owned_regular_file_read_error_to_string error
+                 })
+          | Ok None -> Error (Read_failed { file; detail = "file disappeared during listing" })
+          | Ok (Some prefix) -> Ok prefix
+        in
         let rec read_summaries acc = function
           | [] -> Ok (List.rev acc)
           | file :: rest ->
-            let path = Filename.concat dir file in
-            (match
-               Fs_compat.load_owned_regular_file_with_snapshot
-                 ~ownership_root:config.base_path
-                 path
-             with
-             | Error error ->
-               Error
-                 (Read_failed
-                    { file
-                    ; detail = Fs_compat.owned_regular_file_read_error_to_string error
-                    })
-             | Ok None -> Error (Read_failed { file; detail = "file disappeared during listing" })
-             | Ok (Some contents) ->
-               (match summarize_records ~file contents.content with
+            (match open_prefix ~file ~max_bytes:listing_census_budget_bytes with
+             | Error _ as error -> error
+             | Ok prefix ->
+               (match summary_of_prefix ~file prefix with
                 | Error _ as error -> error
-                | Ok (records, trace_id) ->
-                  read_summaries
-                    ({ file
-                     ; trace_id
-                     ; bytes = contents.snapshot.file_size
-                     ; modified_at = contents.snapshot.modified_at
-                     ; records
-                     }
-                     :: acc)
-                    rest))
+                | Ok summary -> read_summaries (summary :: acc) rest))
         in
         (match entries with
          | Error _ as error -> error
@@ -233,13 +309,22 @@ let read_turn ~config ~keeper ~file ~offset ~limit =
           Ok { file; total_records; offset; records }))
 ;;
 
+(* The census is a sum on the wire, not a nullable count, so a reader has to
+   decide what it does about an uncounted turn instead of defaulting one in. *)
+let record_census_to_json = function
+  | Whole_file { records } ->
+    `Assoc [ "state", `String "whole_file"; "records", `Int records ]
+  | Prefix_only { budget_bytes } ->
+    `Assoc [ "state", `String "prefix_only"; "budget_bytes", `Int budget_bytes ]
+;;
+
 let turn_summary_to_json (summary : turn_summary) =
   `Assoc
     [ "file", `String summary.file
     ; "trace_id", Json_util.string_opt_to_json summary.trace_id
     ; "bytes", `Int summary.bytes
     ; "modified_at", `Float summary.modified_at
-    ; "records", `Int summary.records
+    ; "census", record_census_to_json summary.census
     ]
 ;;
 

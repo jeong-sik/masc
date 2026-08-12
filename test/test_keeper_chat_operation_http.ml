@@ -3,6 +3,17 @@ open Masc
 
 module Api = Server_dashboard_http_keeper_chat_operations
 
+let test_dashboard_worker_permissions () =
+  check bool
+    "operation reads use read-state authority"
+    true
+    (Api.read_permission = Masc_domain.CanReadState);
+  check bool
+    "queued mutations use chat broadcast authority"
+    true
+    (Api.mutation_permission = Masc_domain.CanBroadcast)
+;;
+
 let test_exact_routes () =
   (match Api.get_route "/api/v1/keepers/sangsu/chat/operations" with
    | Some (Api.Operation_list { keeper_name }) ->
@@ -85,7 +96,11 @@ let () =
   run
     "keeper chat operation http"
     [ ( "routes"
-      , [ test_case "exact operation routes" `Quick test_exact_routes
+      , [ test_case
+            "dashboard Worker permissions"
+            `Quick
+            test_dashboard_worker_permissions
+        ; test_case "exact operation routes" `Quick test_exact_routes
         ; test_case "unknown routes do not match" `Quick test_unknown_routes_do_not_match
         ; test_case "mutation bodies are closed" `Quick test_mutation_bodies_are_closed
         ] )

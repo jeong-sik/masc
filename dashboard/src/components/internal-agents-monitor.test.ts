@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { html } from 'htm/preact'
 
 const api = vi.hoisted(() => ({
+  fetchExactLaneRun: vi.fn(),
   fetchExactLaneRuns: vi.fn(),
   fetchVerificationRuns: vi.fn(),
   fetchFusionRuns: vi.fn(),
@@ -37,7 +38,7 @@ describe('InternalAgentsMonitor', () => {
   })
 
   it('keeps paused keepers with zero observed runs in the owner matrix', async () => {
-    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
     api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
     api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
     shellRuntimeResolution.value = {
@@ -54,7 +55,7 @@ describe('InternalAgentsMonitor', () => {
   })
 
   it('expands a verification run and shows its ordered tool evidence', async () => {
-    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
     api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
     api.fetchVerificationRuns.mockResolvedValue({
       count: 1,
@@ -97,6 +98,8 @@ describe('InternalAgentsMonitor', () => {
     api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
     api.fetchExactLaneRuns.mockResolvedValue({
       count: 2,
+      total: 2,
+      hasMore: false,
       generatedAt: 'now',
       runs: [
         {
@@ -145,6 +148,8 @@ describe('InternalAgentsMonitor', () => {
     api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
     api.fetchExactLaneRuns.mockResolvedValue({
       count: 1,
+      total: 1,
+      hasMore: false,
       generatedAt: 'now',
       runs: [{
         runId: 'exact-lib-1',
@@ -152,21 +157,31 @@ describe('InternalAgentsMonitor', () => {
         subjectId: 'trace-1',
         actor: 'kidsnote',
         startedAt: 1786000000,
-        input: {
-          kind: 'exact',
-          payload: { current_fact_count: 1, message_count: 5 },
-        },
         status: 'succeeded',
         elapsedSeconds: 2,
-        output: {
-          before: { present: true, fact_count: 1 },
-          after: {
-            revision: 42,
-            fact_count: 1,
-            change: { added_count: 1, removed_count: 1, retained: 0 },
-          },
-        },
       }],
+    })
+    // The listing carries no payloads; opening the row is what fetches them.
+    api.fetchExactLaneRun.mockResolvedValue({
+      runId: 'exact-lib-1',
+      lane: 'librarian_exact',
+      subjectId: 'trace-1',
+      actor: 'kidsnote',
+      startedAt: 1786000000,
+      status: 'succeeded',
+      elapsedSeconds: 2,
+      input: {
+        kind: 'exact',
+        payload: { current_fact_count: 1, message_count: 5 },
+      },
+      output: {
+        before: { present: true, fact_count: 1 },
+        after: {
+          revision: 42,
+          fact_count: 1,
+          change: { added_count: 1, removed_count: 1, retained: 0 },
+        },
+      },
     })
     memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
       keeper: 'kidsnote',
@@ -209,6 +224,8 @@ describe('InternalAgentsMonitor', () => {
     api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
     api.fetchExactLaneRuns.mockResolvedValue({
       count: 1,
+      total: 1,
+      hasMore: false,
       generatedAt: 'now',
       runs: [{
         runId: 'exact-lib-running',
@@ -216,9 +233,17 @@ describe('InternalAgentsMonitor', () => {
         subjectId: 'trace-shared',
         actor: 'full-cycle-probe',
         startedAt: 1786200000,
-        input: { kind: 'exact', payload: { current_fact_count: 2 } },
         status: 'running',
       }],
+    })
+    api.fetchExactLaneRun.mockResolvedValue({
+      runId: 'exact-lib-running',
+      lane: 'librarian_exact',
+      subjectId: 'trace-shared',
+      actor: 'full-cycle-probe',
+      startedAt: 1786200000,
+      status: 'running',
+      input: { kind: 'exact', payload: { current_fact_count: 2 } },
     })
     memoryApi.fetchKeeperMemoryJournal.mockResolvedValue({
       keeper: 'full-cycle-probe',

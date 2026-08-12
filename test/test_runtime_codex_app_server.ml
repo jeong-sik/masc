@@ -1512,14 +1512,31 @@ let test_keeper_shrinks_lopsided_history_at_atom_boundary () =
        in
        match injected_item_texts with
        | [ [ first_oldest; first_newest ]; [ retry_newest ] ] ->
-         check string "first attempt keeps oldest atom" oldest first_oldest;
-         check string "first attempt keeps newest atom" newest first_newest;
-         check string "retry keeps the indivisible newest atom" newest retry_newest;
+         let encoded_oldest =
+           Keeper_official_client_host.encode_history_message
+             (Agent_core.Types.user_msg oldest)
+         in
+         let encoded_newest =
+           Keeper_official_client_host.encode_history_message
+             (Agent_core.Types.user_msg newest)
+         in
+         check string
+           "first attempt keeps oldest atom"
+           encoded_oldest
+           first_oldest;
+         check string
+           "first attempt keeps newest atom"
+           encoded_newest
+           first_newest;
+         check string
+           "retry keeps the indivisible newest atom"
+           encoded_newest
+           retry_newest;
          check bool "rejected history exceeds the fixture provider cap" true
-           (String.length first_oldest + String.length first_newest
+           (String.length encoded_oldest + String.length encoded_newest
             > provider_capacity_bytes);
          check bool "atom-boundary retry fits the fixture provider cap" true
-           (String.length retry_newest <= provider_capacity_bytes)
+           (String.length encoded_newest <= provider_capacity_bytes)
        | attempts ->
          failf
            "expected [400B+600B; 600B] history injections, got item counts=[%s]"
@@ -1685,7 +1702,8 @@ let test_keeper_preserves_typed_history_on_codex_wire () =
             in
             check string
               "canonical history message"
-              (Keeper_context_core.message_to_json expected |> Yojson.Safe.to_string)
+              (Keeper_official_client_context_codec.message_to_json expected
+               |> Yojson.Safe.to_string)
               (Yojson.Safe.to_string encoded))
          [ assistant_message; tool_message ]
          items)
@@ -2325,10 +2343,34 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          "start and resume receive identical developer instructions"
          start_instructions
          resume_instructions;
+       let context_envelope = Yojson.Safe.from_string start_instructions in
+       let open Yojson.Safe.Util in
        check string
-         "dynamic context is verbatim on the instruction channel"
+         "dynamic context envelope schema"
+         Keeper_official_client_context_codec.schema
+         (context_envelope |> member "schema" |> to_string);
+       let context_message = context_envelope |> member "message" in
+       check string
+         "dynamic context keeps System role"
+         "system"
+         (context_message |> member "role" |> to_string);
+       check string
+         "dynamic context stays exact in the instruction envelope"
          dynamic_context
-         start_instructions;
+         (context_message
+          |> member "content_blocks"
+          |> index 0
+          |> member "text"
+          |> to_string);
+       (match
+          context_message
+          |> member "metadata"
+          |> to_assoc
+          |> Agent_core.Types.Extra_system_context_provenance.classify
+        with
+        | Agent_core.Types.Extra_system_context_provenance.Present -> ()
+        | Absent | Invalid | Duplicate ->
+          fail "dynamic context lost its typed provenance");
        check string "start prompt stays exact" goal (turn_prompt start_capture);
        check string "resume prompt stays exact" goal (turn_prompt resume_capture))
 ;;

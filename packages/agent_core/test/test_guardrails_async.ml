@@ -41,24 +41,6 @@ let fail_output reason : Guardrails_async.output_validator =
   { name = "fail_out"; validate = (fun _ -> Error reason) }
 ;;
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec matches_at haystack_pos needle_pos =
-    needle_pos = needle_len
-    ||
-    let haystack_idx = haystack_pos + needle_pos in
-    haystack_idx < haystack_len
-    && String.get haystack haystack_idx = String.get needle needle_pos
-    && matches_at haystack_pos (needle_pos + 1)
-  in
-  let rec search haystack_pos =
-    haystack_pos + needle_len <= haystack_len
-    && (matches_at haystack_pos 0 || search (haystack_pos + 1))
-  in
-  needle_len = 0 || search 0
-;;
-
 (* ── Input validators ─────────────────────────────── *)
 
 let test_input_empty () =
@@ -115,7 +97,7 @@ let test_input_exception_is_local_failure () =
   match result with
   | Fail { validator_name = "raise_in"; reason } ->
     check string "reason says raised" "validator raised" reason;
-    check bool "reason redacts exception detail" false (contains_substring reason "boom")
+    check bool "reason redacts exception detail" false (Agent_core_strings.contains_substring ~haystack:reason ~needle:"boom")
   | Fail _ -> fail "wrong failure info"
   | Pass -> fail "should have failed"
 ;;

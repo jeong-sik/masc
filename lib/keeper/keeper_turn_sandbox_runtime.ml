@@ -9,8 +9,16 @@ type state =
 type github_identity_snapshot =
   { args : string list
   ; host_dir : string
+  ; revision : string
   ; cleanup : unit -> unit
   }
+
+type github_identity_snapshots =
+  { current : github_identity_snapshot option
+  ; retired : github_identity_snapshot list
+  }
+
+let no_github_identity_snapshots = { current = None; retired = [] }
 
 type t =
   { config : Workspace.config
@@ -23,20 +31,33 @@ type t =
   ; gid : int
   ; network_mode : network_mode
   ; state : state Atomic.t
-  ; github_identity_snapshot : github_identity_snapshot option Atomic.t
+  ; github_identity_snapshots : github_identity_snapshots Atomic.t
   }
 
 let get_state t = Atomic.get t.state
 let set_state t state = Atomic.set t.state state
 
-let release_github_identity_snapshot t =
-  match Atomic.exchange t.github_identity_snapshot None with
-  | None -> ()
-  | Some snapshot -> snapshot.cleanup ()
+let rec update_github_identity_snapshots t update =
+  let current = Atomic.get t.github_identity_snapshots in
+  let updated = update current in
+  if not (Atomic.compare_and_set t.github_identity_snapshots current updated)
+  then update_github_identity_snapshots t update
 ;;
 
-let github_identity_snapshot_dir t =
-  Option.map (fun snapshot -> snapshot.host_dir) (Atomic.get t.github_identity_snapshot)
+let release_github_identity_snapshot t =
+  let snapshots = Atomic.exchange t.github_identity_snapshots no_github_identity_snapshots in
+  Option.iter (fun snapshot -> snapshot.cleanup ()) snapshots.current;
+  List.iter (fun snapshot -> snapshot.cleanup ()) snapshots.retired
+;;
+
+let github_identity_secret_files t =
+  let snapshots = Atomic.get t.github_identity_snapshots in
+  let snapshots =
+    match snapshots.current with
+    | None -> snapshots.retired
+    | Some current -> current :: snapshots.retired
+  in
+  List.map (fun snapshot -> Filename.concat snapshot.host_dir "hosts.yml") snapshots
 ;;
 
 module For_testing = struct
@@ -51,7 +72,7 @@ module For_testing = struct
     ; gid = 0
     ; network_mode = Network_none
     ; state = Atomic.make state
-    ; github_identity_snapshot = Atomic.make None
+    ; github_identity_snapshots = Atomic.make no_github_identity_snapshots
     }
   ;;
 
@@ -86,7 +107,7 @@ let create
   ; gid = Unix.getgid ()
   ; network_mode
   ; state = Atomic.make Not_started
-  ; github_identity_snapshot = Atomic.make None
+  ; github_identity_snapshots = Atomic.make no_github_identity_snapshots
   }
 ;;
 
@@ -391,7 +412,7 @@ let start_container ?timeout_sec (t : t) =
         | Error err -> Error ("docker_container_start_failed: secret_projection: " ^ err)
         | Ok secret_projection ->
          let github_identity_result =
-           match Atomic.get t.github_identity_snapshot with
+           match (Atomic.get t.github_identity_snapshots).current with
           | Some snapshot -> Ok (snapshot, false)
           | None ->
             (match
@@ -407,6 +428,7 @@ let start_container ?timeout_sec (t : t) =
                Ok
                  ( { args = projection.args
                    ; host_dir = projection.host_snapshot_dir
+                   ; revision = projection.revision
                    ; cleanup = projection.cleanup
                    }
                  , true ))
@@ -484,7 +506,9 @@ let start_container ?timeout_sec (t : t) =
              with
              | Ok () ->
                if github_identity_is_new
-               then Atomic.set t.github_identity_snapshot (Some github_identity);
+               then
+                 update_github_identity_snapshots t (fun snapshots ->
+                   { snapshots with current = Some github_identity });
                keep_github_identity_snapshot := true;
                set_state t (Running { container_name });
                Ok container_name
@@ -548,13 +572,78 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
   | Not_started -> start_container ?timeout_sec t
 ;;
 
-let prepare_github_identity_snapshot ?timeout_sec t =
-  match ensure_started ?timeout_sec t with
+let retire_current_github_identity_snapshot t =
+  update_github_identity_snapshots t (fun snapshots ->
+    match snapshots.current with
+    | None -> snapshots
+    | Some current ->
+      { current = None; retired = current :: snapshots.retired })
+;;
+
+let stop_container_for_github_identity_refresh ?timeout_sec t =
+  let retire () =
+    set_state t Not_started;
+    retire_current_github_identity_snapshot t;
+    Ok ()
+  in
+  match get_state t with
+  | Not_started -> retire ()
+  | Running { container_name } ->
+    let timeout_sec =
+      Option.value
+        timeout_sec
+        ~default:
+          (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
+    in
+    let argv =
+      Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ]
+    in
+    let status, output = run_argv_with_status ~timeout_sec argv in
+    (match status with
+     | Unix.WEXITED 0 -> retire ()
+     | _ ->
+       (match
+          Keeper_sandbox_runtime.probe_container_state_optional
+            ~container_name
+            ~timeout_sec
+            ()
+        with
+        | Ok Keeper_sandbox_runtime.Docker_container_absent -> retire ()
+        | Ok Keeper_sandbox_runtime.Docker_container_running
+        | Ok Keeper_sandbox_runtime.Docker_container_stopped
+        | Error _ ->
+          Error
+            (Printf.sprintf
+               "cannot refresh GitHub identity while turn container %s remains: status=%s output=%s"
+               container_name
+               (Keeper_sandbox_exec_failure.status_label status)
+               (Exec_policy.truncate_for_log output))))
+;;
+
+let prepare_github_identity_secret_files ?timeout_sec t =
+  let ensure_bound () =
+    match ensure_started ?timeout_sec t with
+    | Error _ as error -> error
+    | Ok _container_name ->
+      (match (Atomic.get t.github_identity_snapshots).current with
+       | None -> Error "running container has no GitHub identity snapshot"
+       | Some _ -> Ok (github_identity_secret_files t))
+  in
+  match
+    Keeper_github_identity.current_tool_identity_revision
+      ~config:t.config
+      ~keeper_name:t.meta.name
+  with
   | Error _ as error -> error
-  | Ok _container_name ->
-    (match github_identity_snapshot_dir t with
-     | Some path -> Ok path
-     | None -> Error "running container has no GitHub identity snapshot")
+  | Ok central_revision ->
+    (match (Atomic.get t.github_identity_snapshots).current with
+     | None -> ensure_bound ()
+     | Some snapshot when String.equal snapshot.revision central_revision ->
+       ensure_bound ()
+     | Some _ ->
+       (match stop_container_for_github_identity_refresh ?timeout_sec t with
+        | Error _ as error -> error
+        | Ok () -> ensure_bound ()))
 ;;
 
 let run_exec_with_status_split_once

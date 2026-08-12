@@ -264,20 +264,6 @@ let starts_with ~prefix s =
   String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
 ;;
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop idx =
-    if needle_len = 0
-    then true
-    else if idx + needle_len > haystack_len
-    then false
-    else if String.sub haystack idx needle_len = needle
-    then true
-    else loop (idx + 1)
-  in
-  loop 0
-;;
 
 let message_text_exn (msg : Types.message) =
   match msg.content with

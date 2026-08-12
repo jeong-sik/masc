@@ -427,12 +427,6 @@ let test_invoke_validated_legal () =
   check bool "validated Block at pre_tool_use passes" true (result = Hooks.Block "blocked")
 ;;
 
-let contains_substring ~needle haystack =
-  let n = String.length needle in
-  let h = String.length haystack in
-  let rec loop i = i + n <= h && (String.sub haystack i n = needle || loop (i + 1)) in
-  n = 0 || loop 0
-;;
 
 let capture_traceln f =
   Eio_main.run
@@ -520,7 +514,7 @@ let test_invoke_validated_illegal_returns_hook_failed () =
   (match result with
    | Hooks.HookFailed { stage; detail } ->
      check bool "stage" true (stage = Hooks.Before_turn);
-     check bool "detail names Block" true (contains_substring ~needle:"Block" detail)
+     check bool "detail names Block" true (Agent_core_strings.contains_substring ~needle:"Block" ~haystack:detail)
    | _ -> fail "expected HookFailed");
   check bool "on_illegal was called" true !called
 ;;
@@ -555,7 +549,7 @@ let test_invoke_validated_pre_tool_use_fail_closed_pinned () =
          true
          (match result with
           | Hooks.HookFailed { stage; detail } ->
-            stage = Hooks.Pre_tool_use && contains_substring ~needle:kind_name detail
+            stage = Hooks.Pre_tool_use && Agent_core_strings.contains_substring ~needle:kind_name ~haystack:detail
           | _ -> false);
        match !seen with
        | None -> fail (Printf.sprintf "on_illegal not called for %s" kind_name)
@@ -570,7 +564,7 @@ let test_invoke_validated_pre_tool_use_fail_closed_pinned () =
            bool
            (Printf.sprintf "msg names %s" kind_name)
            true
-           (contains_substring ~needle:kind_name msg))
+           (Agent_core_strings.contains_substring ~needle:kind_name ~haystack:msg))
     illegal
 ;;
 
@@ -584,7 +578,7 @@ let test_invoke_validated_fail_closed_without_hook_name () =
     true
     (match result with
      | Hooks.HookFailed { stage = Hooks.Pre_tool_use; detail } ->
-       contains_substring ~needle:"Nudge" detail
+       Agent_core_strings.contains_substring ~needle:"Nudge" ~haystack:detail
      | _ -> false)
 ;;
 

@@ -43,8 +43,14 @@ type docker_tool_projection =
   { args : string list
   ; identity_state : tool_identity_state
   ; host_snapshot_dir : string
+  ; revision : string
   ; cleanup : unit -> unit
   }
+
+val current_tool_identity_revision :
+  config:Workspace.config -> keeper_name:string -> (string, string) result
+(** SHA-256 identity of the exact files a new tool snapshot would receive.
+    The digest is comparison authority only and never exposes token bytes. *)
 
 (** Projects the deterministic Keeper path without provisioning it. Missing
     state and a safe directory without a stored token in [hosts.yml] are

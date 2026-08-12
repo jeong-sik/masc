@@ -13,15 +13,6 @@ let source_root () =
 let script_path () =
   Filename.concat (source_root ()) "scripts/ci-run-tests.sh"
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -128,7 +119,7 @@ let test_dune_command_is_observed_once_and_sanitized () =
       check string "DUNE_RPC removed" "unset" (read_file rpc_log);
       let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
       check bool "success reported" true
-        (contains_substring observed "tests completed successfully"))
+        (String_util.contains_substring observed "tests completed successfully"))
 
 let test_failure_is_not_retried () =
   with_temp_dir "ci-run-tests-failure" (fun dir ->
@@ -149,9 +140,9 @@ let test_failure_is_not_retried () =
       check int "one attempt" 1 (count_lines count_log);
       let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
       check bool "failure diagnostics" true
-        (contains_substring observed "[ci-diag] reason=nonzero_exit_7");
+        (String_util.contains_substring observed "[ci-diag] reason=nonzero_exit_7");
       check bool "failure reported" true
-        (contains_substring observed "test command failed with exit=7"))
+        (String_util.contains_substring observed "test command failed with exit=7"))
 
 let test_deadline_terminates_command_once () =
   with_temp_dir "ci-run-tests-deadline" (fun dir ->
@@ -171,9 +162,10 @@ let test_deadline_terminates_command_once () =
       check bool "timed-out command did not complete" false (Sys.file_exists done_log);
       let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
       check bool "active process diagnostics" true
-        (contains_substring observed "[ci-diag] reason=timeout_1s");
+        (String_util.contains_substring observed "[ci-diag] reason=timeout_1s");
       check bool "timeout reported" true
-        (contains_substring observed "test command timed out after 1s"))
+        (String_util.contains_substring observed
+           "test command timed out after 1s"))
 
 let test_deadline_kills_reparented_term_ignoring_child () =
   with_temp_dir "ci-run-tests-descendant" (fun dir ->
@@ -217,14 +209,14 @@ let test_contract_harness_runs_once () =
       check int "one contract attempt" 1 (count_lines count_log);
       let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
       check bool "contract success reported" true
-        (contains_substring observed "contract harness completed successfully"))
+        (String_util.contains_substring observed "contract harness completed successfully"))
 
 let test_retry_layers_are_absent () =
   let script = read_file (script_path ()) in
   List.iter
     (fun forbidden ->
       check bool ("absent: " ^ forbidden) false
-        (contains_substring script forbidden))
+        (String_util.contains_substring script forbidden))
     [
       "CI_TEST_ALLOW_FLAKY_RETRY";
       "CI_TEST_ALLOW_RPC_RETRY";

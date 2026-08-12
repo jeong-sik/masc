@@ -56,6 +56,7 @@ type config = {
   event_bus : Agent_core.Event_bus.t option;
   session_id : string option;
   description : string option;
+  runtime_id : string option;
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
   pre_dispatch_serialization_observer :

@@ -106,11 +106,70 @@ let test_lists_turns_newest_first () =
          Alcotest.(check int)
            "record count is non-blank lines"
            2
-           (match turns with t :: _ -> t.records | [] -> -1);
+           (match turns with
+            | { census = Reader.Whole_file { records }; _ } :: _ -> records
+            | { census = Reader.Prefix_only _; _ } :: _ ->
+              Alcotest.fail "a two-line turn fits the listing budget"
+            | [] -> -1);
          Alcotest.(check (option string))
            "listing carries the exact retained session id"
            (Some "trace-300")
            (match turns with t :: _ -> t.trace_id | [] -> None))
+;;
+
+(* A turn far larger than the listing budget. The tail carries a *different*
+   session id, which the whole-file listing rejected as a mixed identity — so
+   this listing succeeding is behavioural proof that the bytes past the budget
+   were never read, not just that a constant changed. One runaway turn on the
+   author's host reached 372.5 MB and made this call take 3.35 s for every
+   operator who opened the panel. *)
+let test_listing_does_not_read_past_the_budget () =
+  let padding_line seq =
+    Printf.sprintf
+      {|{"seq":%d,"record_type":"pad","session_id":"trace-big","pad":"%s"}|}
+      seq
+      (String.make 4096 'x')
+  in
+  let head = line ~session_id:"trace-big" 1 "run_started" in
+  let padding = List.init 160 (fun index -> padding_line (index + 2)) in
+  let tail_from_another_turn = line ~session_id:"trace-other" 999 "run_finished" in
+  with_traces
+    [ ( "turn-runaway" ^ Support.raw_trace_file_extension
+      , (head :: padding) @ [ tail_from_another_turn ] )
+    ]
+    (fun config trace_dir ->
+       let path =
+         Filename.concat trace_dir ("turn-runaway" ^ Support.raw_trace_file_extension)
+       in
+       let size = (Unix.stat path).st_size in
+       Alcotest.(check bool)
+         "fixture must exceed the listing budget for this test to mean anything"
+         true
+         (size > 256 * 1024);
+       match Reader.list_turns ~config ~keeper ~limit:10 with
+       | Error error ->
+         Alcotest.failf
+           "a turn larger than the budget must still list: %s"
+           (Reader.read_error_to_string error)
+       | Ok [ turn ] ->
+         (match turn.census with
+          | Reader.Whole_file { records } ->
+            Alcotest.failf "expected an uncounted census, got %d records" records
+          | Reader.Prefix_only { budget_bytes } ->
+            Alcotest.(check int) "census names the budget it stopped at" (256 * 1024) budget_bytes);
+         Alcotest.(check int) "bytes is the whole-file size, not the prefix" size turn.bytes;
+         Alcotest.(check (option string))
+           "identity comes from the first record"
+           (Some "trace-big")
+           turn.trace_id;
+         (* The count the listing declined to take is still available from the
+            read path, which reads the file in full. *)
+         (match Reader.read_turn ~config ~keeper ~file:turn.file ~offset:0 ~limit:1 with
+          | Error error ->
+            Alcotest.failf "read_turn must serve it: %s" (Reader.read_error_to_string error)
+          | Ok page ->
+            Alcotest.(check int) "read_turn counts every record" 162 page.total_records)
+       | Ok turns -> Alcotest.failf "expected one turn, got %d" (List.length turns))
 ;;
 
 let test_absent_keeper_directory_is_empty_not_error () =
@@ -384,6 +443,8 @@ let () =
     ; ( "listing"
       , [ Alcotest.test_case "lists turns newest first" `Quick
             test_lists_turns_newest_first
+        ; Alcotest.test_case "listing does not read past the prefix budget" `Quick
+            test_listing_does_not_read_past_the_budget
         ; Alcotest.test_case "absent keeper directory is empty, not error" `Quick
             test_absent_keeper_directory_is_empty_not_error
         ; Alcotest.test_case "mixed session ids reject the listing" `Quick

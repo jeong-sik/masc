@@ -103,12 +103,6 @@ let make_keeper_meta ?(name = "judge-keeper") () : Keeper_meta_contract.keeper_m
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_keeper_meta failed: %s" e)
 
-let contains_substring haystack needle =
-  try
-    ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
-    true
-  with Not_found -> false
-
 let source_text rel = Masc_test_deps.read_file (Masc_test_deps.source_path rel)
 
 let slice_between text ~start_marker ~end_marker =
@@ -137,15 +131,15 @@ let test_moderation_http_identity_bound_to_auth_source () =
       ~start_marker:{|Http.Router.post "/api/v1/dashboard/board/moderation/action"|}
   in
   Alcotest.(check bool) "flag route binds authenticated agent" true
-    (contains_substring flag_route "(fun _state agent_name req reqd ->");
+    (String_util.contains_substring flag_route "(fun _state agent_name req reqd ->");
   Alcotest.(check bool) "flag reporter uses authenticated agent" true
-    (contains_substring flag_route "let reporter = agent_name");
+    (String_util.contains_substring flag_route "let reporter = agent_name");
   Alcotest.(check bool) "flag route ignores body reporter" false
-    (contains_substring flag_route {|json_string_opt "reporter"|});
+    (String_util.contains_substring flag_route {|json_string_opt "reporter"|});
   Alcotest.(check bool) "action actor uses authenticated agent" true
-    (contains_substring action_route "let actor = agent_name");
+    (String_util.contains_substring action_route "let actor = agent_name");
   Alcotest.(check bool) "action route ignores body actor" false
-    (contains_substring action_route {|json_string_opt "actor"|})
+    (String_util.contains_substring action_route {|json_string_opt "actor"|})
 
 (** {2 Group 1: Helper / Formatting Functions} *)
 
@@ -812,9 +806,9 @@ let test_post_create_sources_footer_and_meta () =
   let json = parse_create_response_json body in
   let content = Yojson.Safe.Util.(json |> member "content" |> to_string) in
   Alcotest.(check bool) "sources footer appended" true
-    (contains_substring content "## Sources");
+    (String_util.contains_substring content "## Sources");
   Alcotest.(check bool) "source url rendered" true
-    (contains_substring content "<https://example.com/docs>");
+    (String_util.contains_substring content "<https://example.com/docs>");
   Alcotest.(check string) "source url persisted" "https://example.com/docs"
     Yojson.Safe.Util.(
       json |> member "meta" |> member "sources" |> index 0 |> member "url"
@@ -877,7 +871,7 @@ let test_keeper_board_sub_board_owner_is_runtime_bound () =
            ])
   in
   Alcotest.(check bool) "sub-board create succeeds" false
-    (contains_substring created "error");
+    (String_util.contains_substring created "error");
   let fetched =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
@@ -885,9 +879,9 @@ let test_keeper_board_sub_board_owner_is_runtime_bound () =
       ~args:(make_args [ "sub_board_id", `String slug ])
   in
   Alcotest.(check bool) "owner is keeper identity" true
-    (contains_substring fetched "Owner: sub-board-keeper");
+    (String_util.contains_substring fetched "Owner: sub-board-keeper");
   Alcotest.(check bool) "spoofed owner is absent" false
-    (contains_substring fetched "spoofed-owner")
+    (String_util.contains_substring fetched "spoofed-owner")
 
 let test_direct_board_reaction_binds_keeper_identity () =
   with_eio @@ fun env ->
@@ -962,7 +956,7 @@ let test_model_visible_board_maintenance_dispatches_in_process () =
            [ "post_id", `String post_id; "author", `String "spoofed-author" ])
   in
   Alcotest.(check bool) "delete reaches its Board handler" true
-    (contains_substring delete_result post_id);
+    (String_util.contains_substring delete_result post_id);
   match Board_dispatch.get_post ~post_id with
   | Ok _ -> Alcotest.fail "model-visible in-process delete left the post behind"
   | Error _ -> ()
@@ -979,7 +973,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
       ~args:(make_args [])
   in
   Alcotest.(check bool) "fake board name rejected" true
-    (contains_substring fake "unknown_board_tool");
+    (String_util.contains_substring fake "unknown_board_tool");
   let comment_vote =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
@@ -987,9 +981,9 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
       ~args:(make_args [ ("comment_id", `String "") ])
   in
   Alcotest.(check bool) "typed comment vote reaches board handler" true
-    (contains_substring comment_vote "comment_id required");
+    (String_util.contains_substring comment_vote "comment_id required");
   Alcotest.(check bool) "typed comment vote is not unknown" false
-    (contains_substring comment_vote "unknown_board_tool");
+    (String_util.contains_substring comment_vote "unknown_board_tool");
   let curation =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
@@ -998,7 +992,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   in
   Alcotest.(check string) "typed curation read reaches board handler" "null" curation;
   Alcotest.(check bool) "typed curation read is not unknown" false
-    (contains_substring curation "unknown_board_tool");
+    (String_util.contains_substring curation "unknown_board_tool");
   let curation_submit =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
@@ -1035,7 +1029,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
            ])
   in
   Alcotest.(check bool) "typed curation submit is not unknown" false
-    (contains_substring curation_submit "unknown_board_tool");
+    (String_util.contains_substring curation_submit "unknown_board_tool");
   let submit_json = Yojson.Safe.from_string curation_submit in
   Alcotest.(check string) "keeper source injected for curation" "typed-keeper"
     Yojson.Safe.Util.(submit_json |> member "submitted_by" |> to_string);
@@ -1074,7 +1068,7 @@ let test_board_curation_submit_roundtrips_to_read () =
   Alcotest.(check bool) "raw submit rejects non-object provenance" false
     invalid_provenance_ok;
   Alcotest.(check bool) "invalid provenance error mentions object" true
-    (contains_substring invalid_provenance_body "object");
+    (String_util.contains_substring invalid_provenance_body "object");
   let ok, body =
     dispatch "masc_board_curation_submit"
       (make_args
@@ -1213,7 +1207,7 @@ let test_post_create_accepts_automation_rejects_system () =
   in
   Alcotest.(check bool) "system rejected" false ok_sys;
   Alcotest.(check bool) "error mentions reserved" true
-    (contains_substring body_sys "reserved")
+    (String_util.contains_substring body_sys "reserved")
 
 let test_post_create_empty_content () =
   with_eio @@ fun env ->
@@ -1237,7 +1231,7 @@ let test_post_create_empty_title_rejected () =
          ("author", `String "tester") ]) in
   Alcotest.(check bool) "empty title rejected" false ok;
   Alcotest.(check bool) "error mentions title" true
-    (contains_substring body "title" || contains_substring body "Title")
+    (String_util.contains_substring body "title" || String_util.contains_substring body "Title")
 
 let test_post_create_missing_author_rejected () =
   with_eio @@ fun env ->
@@ -1247,7 +1241,7 @@ let test_post_create_missing_author_rejected () =
     (make_args [("content", `String "Hello board")]) in
   Alcotest.(check bool) "missing author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
-    (contains_substring body "author")
+    (String_util.contains_substring body "author")
 
 let test_post_create_anonymous_author_rejected () =
   with_eio @@ fun env ->
@@ -1257,7 +1251,7 @@ let test_post_create_anonymous_author_rejected () =
     (make_args [("content", `String "Hello board"); ("author", `String "anonymous")]) in
   Alcotest.(check bool) "anonymous author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
-    (contains_substring body "author")
+    (String_util.contains_substring body "author")
 
 let test_post_list_empty () =
   with_eio @@ fun env ->
@@ -1281,7 +1275,7 @@ let test_cleanup_clears_persisted_jsonl () =
   let ok2, body = dispatch "masc_board_list" (make_args []) in
   Alcotest.(check bool) "list ok after cleanup" true ok2;
   Alcotest.(check bool) "persisted content removed" false
-    (contains_substring body "persist me")
+    (String_util.contains_substring body "persist me")
 
 let test_post_list_with_posts () =
   with_eio @@ fun env ->
@@ -1338,7 +1332,7 @@ let test_post_list_invalid_sort_rejected () =
     (make_args [("sort", `String "invalid_xyz")]) in
   Alcotest.(check bool) "invalid sort rejected" false ok;
   Alcotest.(check bool) "error mentions valid sorts" true
-    (contains_substring body "invalid sort. Valid: hot, trending, recent, updated, discussed")
+    (String_util.contains_substring body "invalid sort. Valid: hot, trending, recent, updated, discussed")
 
 let test_post_list_filter_combinations () =
   with_eio @@ fun env ->
@@ -1364,21 +1358,21 @@ let test_post_list_filter_combinations () =
   Alcotest.(check bool) "exclude_automation ok" true ok2;
   Alcotest.(check bool) "exclude both ok" true ok3;
   Alcotest.(check bool) "exclude_system hides system" false
-    (contains_substring body1 "keeper-alert-bot");
+    (String_util.contains_substring body1 "keeper-alert-bot");
   Alcotest.(check bool) "exclude_system keeps keeper" true
-    (contains_substring body1 "dm-keeper");
+    (String_util.contains_substring body1 "dm-keeper");
   Alcotest.(check bool) "exclude_automation keeps system" true
-    (contains_substring body2 "keeper-alert-bot");
+    (String_util.contains_substring body2 "keeper-alert-bot");
   Alcotest.(check bool) "exclude_automation hides keeper" false
-    (contains_substring body2 "dm-keeper");
+    (String_util.contains_substring body2 "dm-keeper");
   Alcotest.(check bool) "exclude_automation hides harness" false
-    (contains_substring body2 "dashboard-harness-bot");
+    (String_util.contains_substring body2 "dashboard-harness-bot");
   Alcotest.(check bool) "exclude both keeps human" true
-    (contains_substring body3 "human-author");
+    (String_util.contains_substring body3 "human-author");
   Alcotest.(check bool) "exclude both hides keeper" false
-    (contains_substring body3 "dm-keeper");
+    (String_util.contains_substring body3 "dm-keeper");
   Alcotest.(check bool) "exclude both hides harness" false
-    (contains_substring body3 "dashboard-harness-bot")
+    (String_util.contains_substring body3 "dashboard-harness-bot")
 
 let test_dispatch_delete_success () =
   with_eio @@ fun env ->
@@ -1398,7 +1392,7 @@ let test_dispatch_delete_success () =
   in
   Alcotest.(check bool) "delete ok" true ok_del;
   Alcotest.(check bool) "delete msg contains id" true
-    (contains_substring msg_del post_id)
+    (String_util.contains_substring msg_del post_id)
 
 let test_dispatch_delete_not_found () =
   with_eio @@ fun env ->
@@ -1411,7 +1405,7 @@ let test_dispatch_delete_not_found () =
   in
   Alcotest.(check bool) "delete not found" false ok;
   Alcotest.(check bool) "error message present" true
-    (contains_substring body "Post not found" || contains_substring body "nonexistent-id")
+    (String_util.contains_substring body "Post not found" || String_util.contains_substring body "nonexistent-id")
 
 let test_dispatch_delete_empty_id () =
   with_eio @@ fun env ->
@@ -1421,7 +1415,7 @@ let test_dispatch_delete_empty_id () =
     (make_args [("post_id", `String "")]) in
   Alcotest.(check bool) "empty id rejected" false ok;
   Alcotest.(check bool) "error mentions required" true
-    (contains_substring body "required")
+    (String_util.contains_substring body "required")
 
 let test_dispatch_post_update_success () =
   with_eio @@ fun env ->
@@ -1449,7 +1443,7 @@ let test_dispatch_post_update_success () =
   in
   Alcotest.(check bool) "edit ok" true ok_edit;
   Alcotest.(check bool) "edit msg contains new body" true
-    (contains_substring msg_edit "edited tool body");
+    (String_util.contains_substring msg_edit "edited tool body");
   (match Board_dispatch.get_post ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post -> Alcotest.(check string) "edit persisted" "edited tool body" post.content)
@@ -1511,7 +1505,7 @@ let test_dispatch_post_update_transfers_author () =
   in
   Alcotest.(check bool) "transfer edit ok" true ok_edit;
   Alcotest.(check bool) "edit msg contains new author" true
-    (contains_substring msg_edit "tool-transfer-next");
+    (String_util.contains_substring msg_edit "tool-transfer-next");
   match Board_dispatch.get_post ~post_id with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
@@ -1530,7 +1524,7 @@ let test_dispatch_post_update_missing_id () =
       (make_args [ ("author", `String "x"); ("content", `String "y") ])
   in
   Alcotest.(check bool) "missing post_id rejected" false ok;
-  Alcotest.(check bool) "error mentions required" true (contains_substring body "required")
+  Alcotest.(check bool) "error mentions required" true (String_util.contains_substring body "required")
 
 let test_post_get_success () =
   with_eio @@ fun env ->
@@ -1584,7 +1578,7 @@ let check_get_footer ~label post_id args expected =
     dispatch "masc_board_post_get" (make_args (("post_id", `String post_id) :: args))
   in
   Alcotest.(check bool) (label ^ " get ok") true ok;
-  Alcotest.(check bool) label true (contains_substring body expected)
+  Alcotest.(check bool) label true (String_util.contains_substring body expected)
 
 let test_post_get_comment_pagination_clamps_and_advances () =
   with_eio @@ fun env ->
@@ -1736,7 +1730,7 @@ let test_comment_add_missing_author_rejected () =
     (make_args [("post_id", `String "missing"); ("content", `String "hi")]) in
   Alcotest.(check bool) "missing author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
-    (contains_substring body "author")
+    (String_util.contains_substring body "author")
 
 let test_comment_add_anonymous_author_rejected () =
   with_eio @@ fun env ->
@@ -1747,7 +1741,7 @@ let test_comment_add_anonymous_author_rejected () =
        [("post_id", `String "missing"); ("content", `String "hi"); ("author", `String "anonymous")]) in
   Alcotest.(check bool) "anonymous author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
-    (contains_substring body "author")
+    (String_util.contains_substring body "author")
 
 let test_comment_vote_missing () =
   with_eio @@ fun env ->

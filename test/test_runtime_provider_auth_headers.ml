@@ -1295,7 +1295,7 @@ let test_runtime_agent_terminal_observation_uses_runtime_identity () =
       ~tools:[]
   in
   let config =
-    { config with description = Some "runtime:runpod_mtp.qwen/runtime" }
+    { config with runtime_id = Some "runpod_mtp.qwen" }
   in
   let observation =
     Runtime_agent.For_testing.runtime_observation_for_completed_config
@@ -1318,7 +1318,7 @@ let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
       ~tools:[]
   in
   let config =
-    { config with description = Some "runtime:runpod_mtp.qwen/runtime" }
+    { config with runtime_id = Some "runpod_mtp.qwen" }
   in
   let error = "Not found: OpenAI-compatible endpoint returned 404" in
   let observation =

@@ -154,6 +154,20 @@ let with_env key value f =
   result
 ;;
 
+let test_mixed_keeper_alias_keeps_canonical_and_loose_receipt_candidates () =
+  with_test_env (fun config ->
+    let candidates =
+      Workspace_task_schedule.keeper_receipt_candidate_names
+        config
+        ~agent_name:"keeper_foo-agent"
+    in
+    Alcotest.(check bool) "canonical keeper candidate" true (List.mem "foo" candidates);
+    Alcotest.(check bool)
+      "historical loose keeper candidate"
+      true
+      (List.mem "keeper_foo" candidates))
+;;
+
 let latest_ring_seq () =
   match Log.Ring.recent ~limit:1 () with
   | entry :: _ -> entry.seq
@@ -3048,6 +3062,12 @@ let () =
             "preserves priorities"
             `Quick
             test_batch_add_preserves_priorities
+        ] )
+    ; ( "receipt candidates"
+      , [ Alcotest.test_case
+            "mixed alias keeps canonical and loose candidates"
+            `Quick
+            test_mixed_keeper_alias_keeps_canonical_and_loose_receipt_candidates
         ] )
     ; (* === Status === *)
       ( "status"

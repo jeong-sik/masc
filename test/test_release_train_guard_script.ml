@@ -8,15 +8,6 @@ let source_root () =
 let script_path () =
   Filename.concat (source_root ()) "scripts/check-release-train-guard.sh"
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -137,7 +128,7 @@ let test_cross_major_reset_ignores_legacy_2x_tags () =
       if code <> 0 then
         failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "uses base major tag lineage" true
-        (contains_substring stdout
+        (String_util.contains_substring stdout
            "Release train guard OK: base=2.263.0 head=0.2.0 latest_tag_ref=v2.263.0 latest_tag_version=2.263.0"))
 
 let test_cross_major_reset_rejects_older_head_series_version () =
@@ -153,7 +144,7 @@ let test_cross_major_reset_rejects_older_head_series_version () =
       in
       check bool "command fails" true (code <> 0);
       check bool "mentions older head series tag" true
-        (contains_substring stderr
+        (String_util.contains_substring stderr
            "older than latest tag v0.1.1 in major 0"))
 
 let test_train_build_suffix_tag_matches_package_version () =
@@ -172,7 +163,7 @@ let test_train_build_suffix_tag_matches_package_version () =
       if code <> 0 then
         failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "normalizes train build tag suffix" true
-        (contains_substring stdout
+        (String_util.contains_substring stdout
            "Release train guard OK: base=0.19.10 head=0.19.10 latest_tag_ref=v0.19.10-505 latest_tag_version=0.19.10"))
 
 let test_no_base_logs_raw_suffixed_tag_ref () =
@@ -190,7 +181,7 @@ let test_no_base_logs_raw_suffixed_tag_ref () =
       if code <> 0 then
         failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "prints raw tag ref and normalized version" true
-        (contains_substring stdout
+        (String_util.contains_substring stdout
            "Release train guard OK: no base ref provided, head=0.19.10 latest_tag_ref=v0.19.10-505 latest_tag_version=0.19.10"))
 
 let test_pending_bootstrap_series_warns_without_blocking_same_version () =
@@ -207,7 +198,7 @@ let test_pending_bootstrap_series_warns_without_blocking_same_version () =
       if code <> 0 then
         failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "warns for pending tag" true
-        (contains_substring stdout
+        (String_util.contains_substring stdout
            "Release train guard OK (warn): base=0.2.0 head=0.2.0 latest_tag_ref=v0.1.1 latest_tag_version=0.1.1 (pending release)"))
 
 let test_pending_bootstrap_series_blocks_next_train_until_tagged () =
@@ -226,7 +217,7 @@ let test_pending_bootstrap_series_blocks_next_train_until_tagged () =
       in
       check bool "command fails" true (code <> 0);
       check bool "requires pending tag first" true
-        (contains_substring stderr
+        (String_util.contains_substring stderr
            "publish/tag v0.2.0 before widening the release train"))
 
 let () =

@@ -1,23 +1,38 @@
-import { get, type AbortableRequestOptions } from './core'
+import { Effect } from 'effect'
+
 import {
-  parseTransportHealthData,
+  DashboardHttp,
+  type DashboardTransportError,
+} from './effect-http'
+import {
+  decodeTransportHealthData,
   type HotSession,
   type TransportHealthData,
   type TransportHealthSnapshot,
+  type TransportHealthSchemaDriftError,
 } from './schemas/transport-health'
 
 export type { HotSession, TransportHealthData, TransportHealthSnapshot }
 export {
+  decodeTransportHealthData,
   isTransportHealthReady,
-  parseTransportHealthData,
   TransportHealthSchemaDriftError,
 } from './schemas/transport-health'
 
-export async function fetchTransportHealth(
-  opts?: AbortableRequestOptions,
-): Promise<TransportHealthSnapshot> {
-  const raw = await get<unknown>('/api/v1/dashboard/transport-health', {
-    signal: opts?.signal,
+export type TransportHealthError =
+  | DashboardTransportError
+  | TransportHealthSchemaDriftError
+
+const TRANSPORT_HEALTH_PATH = '/api/v1/dashboard/transport-health'
+
+export function fetchTransportHealth(): Effect.Effect<
+  TransportHealthSnapshot,
+  TransportHealthError,
+  DashboardHttp
+> {
+  return Effect.gen(function*() {
+    const http = yield* DashboardHttp
+    const raw = yield* http.getUnknown(TRANSPORT_HEALTH_PATH)
+    return yield* decodeTransportHealthData(raw)
   })
-  return parseTransportHealthData(raw)
 }

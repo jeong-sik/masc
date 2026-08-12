@@ -107,7 +107,7 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   | Keeper_meta_contract.Receipt_persistence_failed
   | Keeper_meta_contract.Gate_replay_repair_required ->
     Keeper_turn_disposition.Provider_error
-      (Keeper_turn_terminal_code.Agent_core_error raw_blocker_class)
+      (Keeper_turn_terminal_code.of_core_error_wire raw_blocker_class)
 
 let disposition_of_runtime_blocker_class raw_blocker_class =
   match Keeper_meta_contract.blocker_class_of_serialized_string raw_blocker_class with

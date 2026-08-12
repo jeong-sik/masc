@@ -89,21 +89,6 @@ let local_runtime_toml = "# local runtime seed\n"
 let repo_model_catalog_overlay_toml =
   "[[models]]\nid_prefix = \"repo-runtime\"\nprovider_name = \"repo-provider\"\n"
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    if needle_len = 0 then
-      true
-    else if idx + needle_len > haystack_len then
-      false
-    else if String.sub haystack idx needle_len = needle then
-      true
-    else
-      loop (idx + 1)
-  in
-  loop 0
-
 let test_grpc_tool_arguments_fail_closed_before_dispatch () =
   let dispatch_calls = ref 0 in
   let dispatch _arguments =
@@ -331,7 +316,7 @@ let test_model_catalog_overlay_invalid_fails_loud () =
       Alcotest.(check bool)
         "error names overlay path"
         true
-        (contains_substring message "agent-core-models-overlay.toml");
+        (String_util.contains_substring message "agent-core-models-overlay.toml");
       Alcotest.(check int) "no install" 0 !set_overlay_calls)
 
 let test_explicit_model_catalog_replacement_precedes_overlay () =
@@ -1333,6 +1318,7 @@ let mark_keeper_dead_with_registry_cause config
             provider_id = Some "runpod";
             http_status = Some 500;
             runtime_id = Some "runtime-a";
+            agent_core_timeout = None;
             reason = None;
           }));
   Keeper_registry.set_last_error_entry ~base_path ~name:meta.name
@@ -2460,7 +2446,7 @@ let test_health_json_degrades_recovery_backed_owner_scan () =
            |> List.hd
            |> member "error"
            |> to_string
-           |> fun error -> contains_substring error "observing recovery snapshot")))
+           |> fun error -> String_util.contains_substring error "observing recovery snapshot")))
 
 let test_health_json_reuses_canonical_owner_execution_snapshot () =
   with_temp_dir "health-canonical-owner-execution-snapshot" (fun dir ->
@@ -3228,26 +3214,26 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
             detail |> member "last_failure_reason" |> to_string
           in
           Alcotest.(check bool) "health preserves failure reason class" true
-            (contains_substring last_failure_reason "provider_runtime_error");
+            (String_util.contains_substring last_failure_reason "provider_runtime_error");
           Alcotest.(check bool) "health redacts failure reason token" false
-            (contains_substring last_failure_reason "sk-testsecret");
+            (String_util.contains_substring last_failure_reason "sk-testsecret");
           Alcotest.(check bool) "health redacts failure reason base path" false
-            (contains_substring last_failure_reason config.Workspace.base_path);
+            (String_util.contains_substring last_failure_reason config.Workspace.base_path);
           Alcotest.(check bool) "health marks redacted failure reason" true
-            (contains_substring last_failure_reason "[REDACTED]");
+            (String_util.contains_substring last_failure_reason "[REDACTED]");
           Alcotest.(check bool) "health marks redacted failure reason path" true
-            (contains_substring last_failure_reason "[REDACTED_PATH]");
+            (String_util.contains_substring last_failure_reason "[REDACTED_PATH]");
           let last_error = detail |> member "last_error" |> to_string in
           Alcotest.(check bool) "health preserves last error class" true
-            (contains_substring last_error "synthetic cancelled by parent");
+            (String_util.contains_substring last_error "synthetic cancelled by parent");
           Alcotest.(check bool) "health redacts last error token" false
-            (contains_substring last_error "sk-testsecret");
+            (String_util.contains_substring last_error "sk-testsecret");
           Alcotest.(check bool) "health redacts last error base path" false
-            (contains_substring last_error config.Workspace.base_path);
+            (String_util.contains_substring last_error config.Workspace.base_path);
           Alcotest.(check bool) "health marks redacted last error" true
-            (contains_substring last_error "[REDACTED]");
+            (String_util.contains_substring last_error "[REDACTED]");
           Alcotest.(check bool) "health marks redacted last error path" true
-            (contains_substring last_error "[REDACTED_PATH]");
+            (String_util.contains_substring last_error "[REDACTED_PATH]");
           Alcotest.(check int) "health surfaces registry restart count" 2
             (detail |> member "restart_count" |> to_int);
           Alcotest.(check (option (float 0.0001)))
@@ -3260,15 +3246,15 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
             detail |> member "latest_crash_reason" |> to_string
           in
           Alcotest.(check bool) "health preserves crash reason class" true
-            (contains_substring latest_crash_reason "synthetic crash record");
+            (String_util.contains_substring latest_crash_reason "synthetic crash record");
           Alcotest.(check bool) "health redacts crash reason token" false
-            (contains_substring latest_crash_reason "github_pat_secret");
+            (String_util.contains_substring latest_crash_reason "github_pat_secret");
           Alcotest.(check bool) "health redacts crash reason base path" false
-            (contains_substring latest_crash_reason config.Workspace.base_path);
+            (String_util.contains_substring latest_crash_reason config.Workspace.base_path);
           Alcotest.(check bool) "health marks redacted crash reason" true
-            (contains_substring latest_crash_reason "[REDACTED]");
+            (String_util.contains_substring latest_crash_reason "[REDACTED]");
           Alcotest.(check bool) "health marks redacted crash reason path" true
-            (contains_substring latest_crash_reason "[REDACTED_PATH]"))))
+            (String_util.contains_substring latest_crash_reason "[REDACTED_PATH]"))))
 
 let test_health_json_explains_terminal_capacity_blocker
     ~dir_name
@@ -3515,6 +3501,7 @@ let test_health_json_redacts_registry_failure_reason () =
                     provider_id = Some "provider-internal";
                     http_status = Some 500;
                     runtime_id = Some "runtime-internal";
+                    agent_core_timeout = None;
                     reason = None;
                   }));
           terminate_keeper_fiber config failing;
@@ -3535,15 +3522,15 @@ let test_health_json_redacts_registry_failure_reason () =
           | Some row ->
               let reason = row |> member "last_failure_reason" |> to_string in
               Alcotest.(check bool) "redacts bearer token" false
-                (contains_substring reason "ghp_healthsecret");
+                (String_util.contains_substring reason "ghp_healthsecret");
               Alcotest.(check bool) "redacts exact keeper secret" false
-                (contains_substring reason keeper_secret);
+                (String_util.contains_substring reason keeper_secret);
               Alcotest.(check bool) "redacts workspace base path" false
-                (contains_substring reason base_path);
+                (String_util.contains_substring reason base_path);
               Alcotest.(check bool) "retains explicit redaction marker" true
-                (contains_substring reason "[REDACTED]");
+                (String_util.contains_substring reason "[REDACTED]");
               Alcotest.(check bool) "retains workspace path redaction marker" true
-                (contains_substring reason "[REDACTED_PATH]"))))
+                (String_util.contains_substring reason "[REDACTED_PATH]"))))
 
 let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
   with_temp_dir "health-restored-crash-log-keeper" (fun dir ->
@@ -3741,7 +3728,7 @@ let test_health_json_surfaces_internal_mcp_auth_diagnostics () =
   Alcotest.(check string) "ready operator next action" "none"
     (ready |> member "operator_next_action" |> to_string);
   Alcotest.(check bool) "raw token not exposed" false
-    (contains_substring (Yojson.Safe.to_string ready) raw_token);
+    (String_util.contains_substring (Yojson.Safe.to_string ready) raw_token);
   let hash_file = Auth.internal_keeper_token_hash_file dir in
   write_file hash_file " \n";
   let empty_hash =
@@ -4891,9 +4878,9 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
               (read_file secondary_log);
           let secondary_text = read_file secondary_log in
           Alcotest.(check bool) "secondary log mentions base-path owner" true
-            (contains_substring secondary_text "already owns base path");
+            (String_util.contains_substring secondary_text "already owns base path");
           Alcotest.(check bool) "secondary log mentions primary pid" true
-            (contains_substring secondary_text (string_of_int primary_pid));
+            (String_util.contains_substring secondary_text (string_of_int primary_pid));
           Alcotest.(check bool) "primary server stays healthy" true
             (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0)))
 
@@ -5121,7 +5108,7 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
           Alcotest.(check bool) "last error includes default-profile failure" true
             (List.exists
                (fun error ->
-                  contains_substring error "required default profile")
+                  String_util.contains_substring error "required default profile")
                rejection_errors)))
 
 let test_transition_projection_cursor_commits_before_isolated_owner_recovery () =

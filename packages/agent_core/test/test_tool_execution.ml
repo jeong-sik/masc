@@ -10,20 +10,6 @@ let result_id (result : Agent_tools.tool_execution_result) =
   Tool_contract.Invocation.tool_use_id result.invocation
 ;;
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop idx =
-    if needle_len = 0
-    then true
-    else if idx + needle_len > haystack_len
-    then false
-    else if String.sub haystack idx needle_len = needle
-    then true
-    else loop (idx + 1)
-  in
-  loop 0
-;;
 
 (** Helper: create a simple tool that echoes its input as JSON string *)
 let make_echo_tool ?descriptor name =
@@ -294,7 +280,7 @@ let test_pre_tool_approval_callback_failure_is_typed () =
       bool
       "callback failure detail is retained"
       true
-      (contains_substring ~needle:"approval unavailable" detail)
+      (Agent_core_strings.contains_substring ~needle:"approval unavailable" ~haystack:detail)
   | Error _ -> fail "callback failure returned the wrong typed error"
   | Ok _ -> fail "callback failure did not fail closed"
 ;;
@@ -529,7 +515,7 @@ let test_post_hook_failure_is_typed_agent_error () =
        bool
        "hook exception detail retained"
        true
-       (contains_substring ~needle:"post hook boom" detail);
+       (Agent_core_strings.contains_substring ~needle:"post hook boom" ~haystack:detail);
      check string "completed result retained" "done" completed.content
    | Ok _ -> fail "post hook failure was returned as successful tool results"
    | Error _ -> fail "unexpected hook execution error payload");
@@ -1214,7 +1200,7 @@ let test_tool_exception_still_publishes_tool_completed () =
        bool
        "tool result reports exception"
        true
-       (contains_substring ~needle:"Tool 'boom' raised" result.content)
+       (Agent_core_strings.contains_substring ~needle:"Tool 'boom' raised" ~haystack:result.content)
    | _ -> fail "expected exactly one result");
   match
     List.map
@@ -1233,7 +1219,7 @@ let test_tool_exception_still_publishes_tool_completed () =
       bool
       "completion event reports exception"
       true
-      (contains_substring ~needle:"Tool 'boom' raised" message);
+      (Agent_core_strings.contains_substring ~needle:"Tool 'boom' raised" ~haystack:message);
     (* Both events carry the same exact occurrence, while the provider ID
        remains available as a boundary projection. *)
     check

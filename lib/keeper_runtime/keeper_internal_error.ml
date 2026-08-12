@@ -732,9 +732,20 @@ let accept_rejection_has_no_progress_retry_hint err =
     true
   | None -> false
 
+(* The typed value rides the carrier (RFC-0371 B12 §6.1(1)); the message
+   keeps the exact prefixed-JSON spelling so anything that only stringifies
+   — logs, receipts, persisted turn state — sees the same wire text as
+   before the carrier existed. *)
+type Agent_core.Error.carrier += Masc_internal of masc_internal_error
+
 let core_error_of_masc_internal_error err =
-  Agent_core.Error.Internal
-    (masc_internal_error_prefix ^ Yojson.Safe.to_string (masc_internal_error_to_json err))
+  Agent_core.Error.Internal_carried
+    { message =
+        masc_internal_error_prefix
+        ^ Yojson.Safe.to_string (masc_internal_error_to_json err)
+    ; carrier = Masc_internal err
+    }
+
 
 (* ------------------------------------------------------------------ *)
 (* Reverse direction: agent-core envelope -> typed variant.                  *)
@@ -981,5 +992,11 @@ let classify_masc_internal_error_of_string (raw : string) :
 let classify_masc_internal_error (err : Agent_core.Error.t) :
     masc_internal_error option =
   match err with
+  (* Live values carry the typed payload (RFC-0371 B12); the string parse
+     below stays as the boundary for persisted strings and for [Internal]
+     values from producers that predate the carrier. *)
+  | Agent_core.Error.Internal_carried { carrier = Masc_internal err; _ } -> Some err
+  | Agent_core.Error.Internal_carried { message; _ } ->
+    classify_masc_internal_error_of_string message
   | Agent_core.Error.Internal msg -> classify_masc_internal_error_of_string msg
   | _ -> None

@@ -307,6 +307,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
       tool_name: 'masc_keeper_msg',
       transport: 'mcp_http',
       phase: 'tools/call',
+      cause_code: 'tool_host_timeout',
       timeout_ms: 30000,
     }))
     expect(reportToolHostFailure.mock.calls[0]![0].session_id).toBeUndefined()
@@ -323,7 +324,9 @@ describe('MCP 2026-07-28 dashboard client', () => {
     expect(reportToolHostFailure).toHaveBeenCalledWith(expect.objectContaining({
       tool_name: 'masc_keeper_msg',
       phase: 'tools/call',
+      cause_code: 'tool_host_transport_unavailable',
     }))
+    expect(reportToolHostFailure.mock.calls[0]![0].timeout_ms).toBeUndefined()
   })
 
   it('does not report a non-timeout ApiRequestError', async () => {

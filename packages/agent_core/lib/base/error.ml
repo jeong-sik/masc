@@ -119,6 +119,15 @@ type orchestration_error =
       ; detail : string
       }
 
+(** Open extension point for host-typed internal payloads (RFC-0371 B12).
+    agent-core never constructs or inspects extensions: a host (e.g. MASC)
+    extends this type with its own constructor, carries its typed error
+    through {!Internal_carried}, and downcasts by matching its own
+    constructor back out. This replaces the pattern of rendering a host
+    error to JSON, embedding it in the {!Internal} message string, and
+    re-parsing it downstream in the same process. *)
+type carrier = ..
+
 (** Top-level agent-core error. *)
 type t =
   | Api of api_error
@@ -130,6 +139,13 @@ type t =
   | Io of io_error
   | Orchestration of orchestration_error
   | Internal of string
+  | Internal_carried of
+      { message : string
+          (** Rendered form for display and for consumers that only
+              stringify; identical wire text to what {!Internal} carried
+              before the payload existed. *)
+      ; carrier : carrier
+      }
 
 type category =
   | Api_category
@@ -151,7 +167,7 @@ let category : t -> category = function
   | Serialization _ -> Serialization_category
   | Io _ -> Io_category
   | Orchestration _ -> Orchestration_category
-  | Internal _ -> Internal_category
+  | Internal _ | Internal_carried _ -> Internal_category
 ;;
 
 let category_label : category -> string = function
@@ -260,7 +276,8 @@ let to_string = function
   | Serialization err -> serialization_error_to_string err
   | Io err -> io_error_to_string err
   | Orchestration err -> orchestration_error_to_string err
-  | Internal msg -> Printf.sprintf "Internal error: %s" msg
+  | Internal msg | Internal_carried { message = msg; _ } ->
+    Printf.sprintf "Internal error: %s" msg
 ;;
 
 (* ── Retryability ─────────────────────────────────────────────────── *)
@@ -271,5 +288,6 @@ let is_retryable = function
   | Mcp (InitializeFailed _ | ToolListFailed _ | ToolCallFailed _ | HttpTransportFailed _)
     -> true
   | Mcp _ -> false
-  | Agent _ | Config _ | Serialization _ | Io _ | Orchestration _ | Internal _ -> false
+  | Agent _ | Config _ | Serialization _ | Io _ | Orchestration _ | Internal _
+  | Internal_carried _ -> false
 ;;

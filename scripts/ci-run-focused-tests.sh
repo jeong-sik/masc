@@ -70,6 +70,9 @@ normal_targets=(
   @test/runtest-test_schedule_store
   @test/runtest-test_schedule_consumer_dispatch
   @test/runtest-test_keeper_registry_hardening
+  @test/runtest-test_keeper_reaction_ledger
+  @test/runtest-test_exact_lane_run_registry
+  @test/runtest-test_ci_run_tests_script
   @test/runtest-test_keeper_unified_verification_surface
   @test/runtest-test_schedule_tool_wiring
   @test/runtest-test_keeper_system_prompt_bytes

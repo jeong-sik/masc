@@ -80,16 +80,6 @@ let test_build_typing_request_authorization_uses_bot_scheme () =
     (String.length ua >= 10
      && String.sub ua 0 10 = "DiscordBot")
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop offset =
-    if offset + needle_len > haystack_len then false
-    else if String.sub haystack offset needle_len = needle then true
-    else loop (offset + 1)
-  in
-  needle_len = 0 || loop 0
-
 let test_snowflake_decoder_rejects_non_decimal_ids () =
   List.iter
     (fun value ->
@@ -105,9 +95,9 @@ let test_error_rendering_does_not_disclose_response_body () =
   | Error error ->
     let rendered = Format.asprintf "%a" R.pp_error error in
     check bool "raw response is not rendered" false
-      (contains_substring ~needle:secret rendered);
+      (String_util.string_contains_substring ~needle:secret rendered);
     check bool "request correlation is rendered" true
-      (contains_substring ~needle:"req-1" rendered)
+      (String_util.string_contains_substring ~needle:"req-1" rendered)
 
 let test_build_channel_read_request_url () =
   let url, headers, body =
@@ -125,11 +115,11 @@ let test_build_messages_read_request_query () =
       ~limit:25 ~before:(sf "456") ()
   in
   check bool "messages read path"
-    true (contains_substring ~needle:"/channels/123/messages?" url);
+    true (String_util.string_contains_substring ~needle:"/channels/123/messages?" url);
   check bool "messages limit" true
-    (contains_substring ~needle:"limit=25" url);
+    (String_util.string_contains_substring ~needle:"limit=25" url);
   check bool "messages before" true
-    (contains_substring ~needle:"before=456" url);
+    (String_util.string_contains_substring ~needle:"before=456" url);
   check string "GET body" "" body
 
 let test_build_member_search_request_escapes_query () =
@@ -138,11 +128,11 @@ let test_build_member_search_request_escapes_query () =
       ~query:"min su" ~limit:10 ()
   in
   check bool "member search path" true
-    (contains_substring ~needle:"/guilds/123/members/search?" url);
+    (String_util.string_contains_substring ~needle:"/guilds/123/members/search?" url);
   check bool "member search query" true
-    (contains_substring ~needle:"query=min%20su" url);
+    (String_util.string_contains_substring ~needle:"query=min%20su" url);
   check bool "member search limit" true
-    (contains_substring ~needle:"limit=10" url)
+    (String_util.string_contains_substring ~needle:"limit=10" url)
 
 let test_build_member_request_url () =
   let url, _, _ =
@@ -248,7 +238,7 @@ let test_parse_response_rejects_duplicate_id () =
   match R.parse_response ~status:200 ~body () with
   | Error (R.Other { reason; _ }) ->
     check bool "duplicate id is named" true
-      (contains_substring ~needle:"duplicate response field \"id\"" reason)
+      (String_util.string_contains_substring ~needle:"duplicate response field \"id\"" reason)
   | Ok _ -> fail "duplicate response id must not be selected"
   | Error error ->
     failf "expected duplicate id rejection, got %s"

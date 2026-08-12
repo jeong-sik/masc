@@ -263,7 +263,8 @@ let rejected_body_bytes = function
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Internal _ ->
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ ->
     None
 ;;
 
@@ -553,6 +554,7 @@ let run_try_provider
           ; hooks = ctx.hooks
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
+          ; runtime_id = Some ctx.runtime_id
           ; transport = ctx.transport_resolved
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
           ; session_id = ctx.session_id

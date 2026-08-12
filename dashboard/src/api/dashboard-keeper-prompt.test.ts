@@ -83,12 +83,59 @@ describe('raw traces', () => {
   it('decodes the turn listing', async () => {
     stubFetch({
       keeper: 'kidsnote',
-      turns: [{ file: 'turn-1.jsonl', trace_id: 'trace-kidsnote-1', bytes: 2048, records: 218, modified_at: 1786000000 }],
+      turns: [
+        {
+          file: 'turn-1.jsonl',
+          trace_id: 'trace-kidsnote-1',
+          bytes: 2048,
+          census: { state: 'whole_file', records: 218 },
+          modified_at: 1786000000,
+        },
+      ],
     })
     const turns = await fetchKeeperRawTraces('kidsnote', 25)
     expect(turns).toHaveLength(1)
-    expect(turns[0]?.records).toBe(218)
+    expect(turns[0]?.census).toEqual({ state: 'whole_file', records: 218 })
     expect(turns[0]?.traceId).toBe('trace-kidsnote-1')
+  })
+
+  // A turn past the listing budget arrives without a count. The decoder has to
+  // carry that state through rather than substitute a number, otherwise the
+  // panel cannot tell "no records" from "not counted".
+  it('decodes an uncounted turn without inventing a record count', async () => {
+    stubFetch({
+      keeper: 'sangsu',
+      turns: [
+        {
+          file: 'turn-runaway.jsonl',
+          trace_id: 'trace-sangsu-9',
+          bytes: 390_000_000,
+          census: { state: 'prefix_only', budget_bytes: 131072 },
+          modified_at: 1786000000,
+        },
+      ],
+    })
+    const turns = await fetchKeeperRawTraces('sangsu', 25)
+    expect(turns[0]?.census).toEqual({ state: 'prefix_only', budgetBytes: 131072 })
+    expect(turns[0]?.bytes).toBe(390_000_000)
+  })
+
+  it('rejects a census state this build does not know', async () => {
+    stubFetch({
+      keeper: 'kidsnote',
+      turns: [
+        {
+          file: 'turn-1.jsonl',
+          trace_id: 'trace-kidsnote-1',
+          bytes: 2048,
+          census: { state: 'sampled', records: 12 },
+          modified_at: 1786000000,
+        },
+      ],
+    })
+    await expect(fetchKeeperRawTraces('kidsnote', 25)).rejects.toThrow(
+      '유효하지 않은 raw trace 목록 payload',
+    )
   })
 
   // A torn line occupies its own position. Dropping it would make a damaged

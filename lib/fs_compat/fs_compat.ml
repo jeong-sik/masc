@@ -946,6 +946,7 @@ let load_owned_regular_file ~ownership_root path =
 type owned_regular_file_prefix =
   { content : string
   ; file_size : int
+  ; modified_at : float
   ; truncated : bool
   }
 
@@ -968,6 +969,7 @@ let load_owned_regular_file_prefix_blocking
           Ok
             { content
             ; file_size = descriptor.Unix.st_size
+            ; modified_at = descriptor.Unix.st_mtime
             ; truncated = descriptor.Unix.st_size > length
             })
       path

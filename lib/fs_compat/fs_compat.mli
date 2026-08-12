@@ -255,6 +255,10 @@ val load_owned_regular_file_with_snapshot
 type owned_regular_file_prefix =
   { content : string
   ; file_size : int
+  ; modified_at : float
+        (** From the same validated descriptor as [file_size], so a caller
+            listing a directory can order by modification time without a
+            second stat and without reading past [max_bytes]. *)
   ; truncated : bool
   }
 

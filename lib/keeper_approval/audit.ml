@@ -582,11 +582,16 @@ let required_nonblank_string ~surface key fields =
 
 let required_nullable_string ~surface key fields =
   match List.assoc_opt key fields with
-  | Some `Null -> Ok `Null
-  | Some (`String value) when String.trim value <> "" -> Ok (`String value)
+  | Some `Null -> Ok None
+  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
   | Some (`String _) -> Error (Printf.sprintf "%s.%s must be non-blank" surface key)
   | Some _ -> Error (Printf.sprintf "%s.%s must be a string or null" surface key)
   | None -> Error (Printf.sprintf "%s.%s is required" surface key)
+;;
+
+let nullable_string_json = function
+  | Some value -> `String value
+  | None -> `Null
 ;;
 
 let required_nullable_nonnegative_int ~surface key fields =
@@ -648,15 +653,13 @@ let resolved_approval_json_of_audit_event json =
       match decision_kind with
       | Decision_approve ->
         (match decision_reason with
-         | `Null -> Ok ()
-         | `String _ ->
-           Error (Printf.sprintf "%s.approve decision cannot carry a reason" surface)
-         | _ -> assert false)
+         | None -> Ok ()
+         | Some _ ->
+           Error (Printf.sprintf "%s.approve decision cannot carry a reason" surface))
       | Decision_reject ->
         (match decision_reason with
-         | `String _ -> Ok ()
-         | `Null -> Error (Printf.sprintf "%s.reject decision requires a reason" surface)
-         | _ -> assert false)
+         | Some _ -> Ok ()
+         | None -> Error (Printf.sprintf "%s.reject decision requires a reason" surface))
     in
     let* resolved_at = required_finite_timestamp ~surface "ts" fields in
     let* turn_id = required_nullable_nonnegative_int ~surface "turn_id" fields in
@@ -693,13 +696,13 @@ let resolved_approval_json_of_audit_event json =
           ; "tool_name", `String tool_name
           ; "decision", `String decision
           ; "decision_kind", `String (decision_kind_to_string decision_kind)
-          ; "decision_reason", decision_reason
+          ; "decision_reason", nullable_string_json decision_reason
           ; "resolved_at", `Float resolved_at
           ; "turn_id", turn_id
-          ; "task_id", task_id
-          ; "goal_id", goal_id
+          ; "task_id", nullable_string_json task_id
+          ; "goal_id", nullable_string_json goal_id
           ; "goal_ids", goal_ids
-          ; "actor", actor
+          ; "actor", nullable_string_json actor
           ; "decision_source", `String decision_source_raw
           ; "summary_status", summary_status
           ; "exact_attempt", exact_attempt

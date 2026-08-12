@@ -46,12 +46,6 @@ let () =
     let assets = Filename.concat (project_root ()) "assets" in
     if Sys.file_exists assets then Unix.putenv "MASC_ASSETS_DIR" assets
 
-let contains_substr sub s =
-  try
-    let _ = Str.search_forward (Str.regexp_string sub) s 0 in
-    true
-  with Not_found -> false
-
 let contains_re re s =
   try
     let _ = Str.search_forward (Str.regexp re) s 0 in
@@ -122,37 +116,37 @@ let test_html_starts_with_doctype () =
       (String.length html >= 15 && String.sub html 0 15 = "<!DOCTYPE html>")
   else
     check bool "fallback contains error" true
-      (contains_substr "Dashboard build not found" html)
+      (String_util.contains_substring html "Dashboard build not found")
 
 let test_html_contains_head () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
-    check bool "has head" true (contains_substr "<head>" html)
+    check bool "has head" true (String_util.contains_substring html "<head>")
   else
     check bool "fallback is non-empty" true (String.length html > 0)
 
 let test_html_contains_body () =
   let html = Web_dashboard.html () in
-  check bool "has body" true (contains_substr "<body>" html)
+  check bool "has body" true (String_util.contains_substring html "<body>")
 
 let test_html_contains_title () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
-    check bool "has MASC title" true (contains_substr "MASC Dashboard" html)
+    check bool "has MASC title" true (String_util.contains_substring html "MASC Dashboard")
   else
     check bool "fallback mentions dashboard" true
-      (contains_substr "Dashboard" html)
+      (String_util.contains_substring html "Dashboard")
 
 let test_html_contains_stylesheet () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
     check bool "has stylesheet link" true
       (contains_re "rel=\"stylesheet\"" html
-       || contains_substr "<style>" html)
+       || String_util.contains_substring html "<style>")
   else
     check bool "fallback has no stylesheet" true
       (not (contains_re "rel=\"stylesheet\"" html)
-       && not (contains_substr "<style>" html))
+       && not (String_util.contains_substring html "<style>"))
 
 let test_html_contains_script () =
   let html = Web_dashboard.html () in
@@ -165,10 +159,10 @@ let test_html_contains_script () =
 let test_html_contains_app_mount () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
-    check bool "has app mount div" true (contains_substr "id=\"app\"" html)
+    check bool "has app mount div" true (String_util.contains_substring html "id=\"app\"")
   else
     check bool "fallback has no app mount" true
-      (not (contains_substr "id=\"app\"" html))
+      (not (String_util.contains_substring html "id=\"app\""))
 
 let test_html_ends_with_html_tag () =
   let html = Web_dashboard.html () in
@@ -181,10 +175,10 @@ let test_html_references_dashboard_assets () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
     check bool "references dashboard assets" true
-      (contains_substr "/dashboard/assets/" html)
+      (String_util.contains_substring html "/dashboard/assets/")
   else
     check bool "fallback does not reference assets" false
-      (contains_substr "/dashboard/assets/" html)
+      (String_util.contains_substring html "/dashboard/assets/")
 
 
 (* ============================================================
@@ -223,7 +217,7 @@ let test_fallback_on_missing_asset () =
           let html = Web_dashboard.html () in
           let etag = Web_dashboard.etag () in
           check bool "fallback html contains error message" true
-            (contains_substr "Dashboard build not found" html);
+            (String_util.contains_substring html "Dashboard build not found");
           check string "fallback etag is none" "none" etag))
     ~finally:(fun () -> Unix.rmdir missing_assets_root)
 
@@ -239,7 +233,7 @@ let test_html_ignores_invalid_explicit_assets_dir () =
         (fun () ->
           let html = Web_dashboard.html () in
           check bool "does not fall back to base_path assets" false
-            (contains_substr "dashboard-from-base-path" html)))
+            (String_util.contains_substring html "dashboard-from-base-path")))
     ~finally:(fun () -> cleanup_temp_dashboard_root base_root)
 
 let test_html_ignores_base_path_assets () =
@@ -254,7 +248,7 @@ let test_html_ignores_base_path_assets () =
         (fun () ->
           let html = Web_dashboard.html () in
           check bool "ignores base_path assets" false
-            (contains_substr "dashboard-from-base-path" html)))
+            (String_util.contains_substring html "dashboard-from-base-path")))
     ~finally:(fun () ->
       cleanup_temp_dashboard_root base_root)
 
@@ -342,7 +336,9 @@ let test_bundle_freshness_fresh_when_stamp_after_binary () =
 let test_bundle_freshness_build_stamp_path_under_dashboard_assets () =
   with_temp_dashboard_root (fun () ->
     check bool "build_stamp_path lives under assets/dashboard/" true
-      (contains_substr "/dashboard/.build-stamp" (Web_dashboard.build_stamp_path ())))
+      (String_util.contains_substring
+         (Web_dashboard.build_stamp_path ())
+         "/dashboard/.build-stamp"))
 
 (* log_bundle_freshness_warning has no return value to assert on (there is no
    existing Log capture harness in this suite) — these are smoke tests

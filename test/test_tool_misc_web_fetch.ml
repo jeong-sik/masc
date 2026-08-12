@@ -1,18 +1,5 @@
 open Alcotest
 
-let contains_substring text needle =
-  let len_text = String.length text in
-  let len_needle = String.length needle in
-  if len_needle = 0 then true
-  else if len_needle > len_text then false
-  else
-    let rec loop idx =
-      if idx > len_text - len_needle then false
-      else if String.equal (String.sub text idx len_needle) needle then true
-      else loop (idx + 1)
-    in
-    loop 0
-
 let handle ?(extract_mode = "markdown") ?(max_chars = 5_000) url =
   Eio_main.run @@ fun _env ->
   Masc.Tool_misc_web_fetch.handle ~tool_name:"masc_web_fetch"
@@ -75,10 +62,10 @@ let test_html_metadata_and_article_extraction () =
       check int "downloaded bytes" (String.length html)
         (json |> member "downloaded_bytes" |> to_int);
       let text = json |> member "text" |> to_string in
-      check bool "heading rendered" true (contains_substring text "# Primary Article");
+      check bool "heading rendered" true (String_util.contains_substring text "# Primary Article");
       check bool "link rendered" true
-        (contains_substring text "[ref](https://example.com/ref)");
-      check bool "nav dropped" false (contains_substring text "drop me"))
+        (String_util.contains_substring text "[ref](https://example.com/ref)");
+      check bool "nav dropped" false (String_util.contains_substring text "drop me"))
 
 let test_plain_text_preserves_angle_brackets () =
   let body = "Keep <literal> tokens\nand second line." in
@@ -100,7 +87,7 @@ let test_plain_text_preserves_angle_brackets () =
         (json |> member "extraction_source" |> to_string);
       let text = json |> member "text" |> to_string in
       check bool "literal brackets preserved" true
-        (contains_substring text "<literal>"))
+        (String_util.contains_substring text "<literal>"))
 
 let test_invalid_redirect_is_workflow_rejection () =
   Masc.Tool_misc_web_fetch.with_http_fetch_for_test
@@ -118,7 +105,7 @@ let test_invalid_redirect_is_workflow_rejection () =
         (Tool_result.failure_class result
         |> Option.map Tool_result.tool_failure_class_to_string);
       check bool "message" true
-        (contains_substring (Tool_result.message result) "invalid redirect"))
+        (String_util.contains_substring (Tool_result.message result) "invalid redirect"))
 
 let () =
   run "tool_misc_web_fetch"

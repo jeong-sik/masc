@@ -30,10 +30,15 @@ let github_login_stream_headers origin =
      @ Server_auth.cors_headers origin)
 ;;
 
-let github_login_stream_send writer event json =
-  Httpun.Body.Writer.write_string
-    writer
-    (Printf.sprintf "event: %s\ndata: %s\n\n" event (Yojson.Safe.to_string json))
+let github_login_stream_send_with ~write ~flush event json =
+  write (Printf.sprintf "event: %s\ndata: %s\n\n" event (Yojson.Safe.to_string json));
+  flush ()
+;;
+
+let github_login_stream_send writer =
+  github_login_stream_send_with
+    ~write:(Httpun.Body.Writer.write_string writer)
+    ~flush:(fun () -> Httpun.Body.Writer.flush writer (fun _ -> ()))
 ;;
 
 let handle_keeper_github_login_post state req reqd =
@@ -1184,6 +1189,7 @@ let parse_bulk_directive_json json =
 
 module For_testing = struct
   let github_login_stream_headers = github_login_stream_headers
+  let github_login_stream_send_with = github_login_stream_send_with
 
   let parse_resume_request json =
     match parse_keeper_directive_json json with

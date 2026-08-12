@@ -18,6 +18,9 @@ type mutation_route =
   ; mutation : mutation
   }
 
+val read_permission : Masc_domain.permission
+val mutation_permission : Masc_domain.permission
+
 val get_route : string -> get_route option
 val mutation_route : string -> mutation_route option
 

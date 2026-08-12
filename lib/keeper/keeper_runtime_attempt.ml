@@ -174,4 +174,4 @@ let core_error_to_runtime_outcome err =
      | Agent_core.Error.Serialization _
      | Agent_core.Error.Io _
      | Agent_core.Error.Orchestration _
-     | Agent_core.Error.Internal _ -> None)
+     | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None)

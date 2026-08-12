@@ -1,11 +1,16 @@
 import { post } from './core'
 
+export type ToolHostFailureCauseCode =
+  | 'tool_host_timeout'
+  | 'tool_host_transport_unavailable'
+
 interface ToolHostFailureReport {
   agent_name?: string
   client_name?: string
   tool_name: string
   transport?: string
   phase?: string
+  cause_code: ToolHostFailureCauseCode
   message: string
   request_id?: string
   session_id?: string

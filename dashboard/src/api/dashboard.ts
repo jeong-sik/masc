@@ -36,8 +36,23 @@ export type {
 export { fetchDashboardGoalsTree, fetchDashboardGoalDetail } from './dashboard-goals'
 export { reportToolHostFailure } from './tool-host-failure'
 export { fetchDashboardBootstrap, fetchDashboardShell } from './dashboard-hot'
-export type { FusionRunStatusLabel, FusionRunRecord, DashboardFusionRunsResponse } from './dashboard-fusion'
-export { parseFusionRunsResponse, fetchFusionRuns } from './dashboard-fusion'
+export type {
+  FusionRunStatusLabel,
+  FusionTopologyLabel,
+  FusionRunRecord,
+  DashboardFusionRunsResponse,
+  FusionConfigView,
+  FusionPresetConfigView,
+  FusionPanelGroupView,
+  FusionJudgeSpecView,
+} from './dashboard-fusion'
+export {
+  parseFusionRunsResponse,
+  fetchFusionRuns,
+  parseFusionConfigResponse,
+  fetchFusionConfig,
+  runnableTopologies,
+} from './dashboard-fusion'
 export type {
   VerificationRunStatusLabel,
   VerificationRunRecord,

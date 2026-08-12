@@ -895,6 +895,9 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
   | Ok (`Busy block) ->
     { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
+  | Error
+      (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping) ->
+    { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
   | Error error ->
     Log.Keeper.error
       ~keeper_name:meta_after_triage.name

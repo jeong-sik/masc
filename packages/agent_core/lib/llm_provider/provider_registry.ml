@@ -2,14 +2,14 @@
 
     @since 0.69.0 *)
 
-type provider_defaults =
+type provider_defaults = Provider_registry_state.provider_defaults =
   { kind : Provider_config.provider_kind
   ; base_url : string
   ; api_key_env : string
   ; request_path : string
   }
 
-type entry =
+type entry = Provider_registry_state.entry =
   { name : string
   ; defaults : provider_defaults
   ; max_context : int option
@@ -17,31 +17,20 @@ type entry =
   ; is_available : unit -> bool
   }
 
-type mutex =
-  | Stdlib_mu of Mutex.t
-  | Eio_mu of Eio.Mutex.t
+type t = Provider_registry_state.t Atomic.t
 
-type t =
-  { mu : mutex
-  ; entries : (string, entry) Hashtbl.t
-  }
+let create () = Atomic.make_contended Provider_registry_state.empty
 
-let create () = { mu = Eio_mu (Eio.Mutex.create ()); entries = Hashtbl.create 8 }
-let create_sync () = { mu = Stdlib_mu (Mutex.create ()); entries = Hashtbl.create 8 }
-
-let with_lock t f =
-  match t.mu with
-  | Stdlib_mu mu ->
-    Mutex.lock mu;
-    Fun.protect f ~finally:(fun () -> Mutex.unlock mu)
-  | Eio_mu mu -> Eio.Mutex.use_rw ~protect:true mu f
+let rec apply t event =
+  let current = Atomic.get t in
+  let next = Provider_registry_state.apply current event in
+  if not (Atomic.compare_and_set t current next) then apply t event
 ;;
 
-let register' t entry = Hashtbl.replace t.entries entry.name entry
-let register t entry = with_lock t (fun () -> register' t entry)
-let unregister t name = with_lock t (fun () -> Hashtbl.remove t.entries name)
-let find t name = with_lock t (fun () -> Hashtbl.find_opt t.entries name)
-let all t = with_lock t (fun () -> Hashtbl.fold (fun _k v acc -> v :: acc) t.entries [])
+let register t entry = apply t (Provider_registry_state.Register entry)
+let unregister t name = apply t (Provider_registry_state.Unregister name)
+let find t name = Provider_registry_state.find name (Atomic.get t)
+let all t = Provider_registry_state.all (Atomic.get t)
 let available t = all t |> List.filter (fun e -> e.is_available ())
 let find_capable t pred = all t |> List.filter (fun e -> pred e.capabilities)
 
@@ -97,31 +86,29 @@ let catalog_auth_available (entry : Provider_catalog.entry) =
 let catalog_entry_available = catalog_auth_available
 
 let register_catalog_entry t (entry : Provider_catalog.entry) =
-  with_lock t (fun () ->
-    let max_context =
-      match entry.max_context with
-      | Some _ as declared -> declared
-      | None -> entry.capabilities.Capabilities.max_context_tokens
-    in
-    let defaults : provider_defaults =
-      { kind = entry.kind
-      ; base_url = entry.base_url
-      ; api_key_env = entry.api_key_env
-      ; request_path = entry.request_path
+  let max_context =
+    match entry.max_context with
+    | Some _ as declared -> declared
+    | None -> entry.capabilities.Capabilities.max_context_tokens
+  in
+  let defaults : provider_defaults =
+    { kind = entry.kind
+    ; base_url = entry.base_url
+    ; api_key_env = entry.api_key_env
+    ; request_path = entry.request_path
+    }
+  in
+  if String.trim entry.id = ""
+  then invalid_arg "Provider_registry.register_catalog_entry: empty provider id"
+  else
+    register
+      t
+      { name = entry.id
+      ; defaults
+      ; max_context
+      ; capabilities = entry.capabilities
+      ; is_available = (fun () -> catalog_entry_available entry)
       }
-    in
-    if String.trim entry.id = ""
-    then invalid_arg "Provider_registry.register_catalog_entry: empty provider id"
-    else
-      Hashtbl.replace
-        t.entries
-        entry.id
-        { name = entry.id
-        ; defaults
-        ; max_context
-        ; capabilities = entry.capabilities
-        ; is_available = (fun () -> catalog_entry_available entry)
-        })
 ;;
 
 let overlay_provider_catalog t =
@@ -206,10 +193,7 @@ let discovered_endpoint_max_context (url : string) =
 ;;
 
 let default () =
-  (* The default registry uses Stdlib.Mutex because its guarded sections are
-     short Hashtbl operations and the returned value still exposes the mutable
-     registry API. *)
-  let t = create_sync () in
+  let t = create () in
   let capabilities_for_registered_label label =
     match Capabilities.capabilities_for_provider_label label with
     | Some caps -> caps

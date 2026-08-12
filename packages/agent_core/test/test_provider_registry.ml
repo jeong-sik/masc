@@ -17,13 +17,13 @@ let with_env key value f =
 (* ── Registry CRUD ──────────────────────────────────── *)
 
 let test_empty_registry () =
-  let reg = Provider_registry.create_sync () in
+  let reg = Provider_registry.create () in
   check int "empty has 0 entries" 0 (List.length (Provider_registry.all reg));
   check (option reject) "find on empty is None" None (Provider_registry.find reg "nope")
 ;;
 
 let test_register_and_find () =
-  let reg = Provider_registry.create_sync () in
+  let reg = Provider_registry.create () in
   let entry : Provider_registry.entry =
     { name = "test-provider"
     ; defaults =
@@ -45,7 +45,7 @@ let test_register_and_find () =
 ;;
 
 let test_overwrite () =
-  let reg = Provider_registry.create_sync () in
+  let reg = Provider_registry.create () in
   let mk url : Provider_registry.entry =
     { name = "p"
     ; defaults =
@@ -68,7 +68,7 @@ let test_overwrite () =
 ;;
 
 let test_unregister () =
-  let reg = Provider_registry.create_sync () in
+  let reg = Provider_registry.create () in
   let entry : Provider_registry.entry =
     { name = "temp"
     ; defaults =
@@ -86,6 +86,36 @@ let test_unregister () =
   Provider_registry.unregister reg "temp";
   check (option reject) "gone" None (Provider_registry.find reg "temp");
   check int "0 entries" 0 (List.length (Provider_registry.all reg))
+;;
+
+let test_concurrent_register_keeps_every_snapshot_update () =
+  let reg = Provider_registry.create () in
+  let register worker index =
+    let name = Printf.sprintf "worker-%d-provider-%d" worker index in
+    let entry : Provider_registry.entry =
+      { name
+      ; defaults =
+          { kind = OpenAI_compat
+          ; base_url = "http://localhost"
+          ; api_key_env = ""
+          ; request_path = "/v1/chat/completions"
+          }
+      ; max_context = Some 128_000
+      ; capabilities = Capabilities.default_capabilities
+      ; is_available = (fun () -> true)
+      }
+    in
+    Provider_registry.register reg entry
+  in
+  let workers =
+    Array.init 4 (fun worker ->
+      Domain.spawn (fun () ->
+        for index = 0 to 49 do
+          register worker index
+        done))
+  in
+  Array.iter Domain.join workers;
+  check int "all CAS updates retained" 200 (List.length (Provider_registry.all reg))
 ;;
 
 let test_refresh_rejects_missing_endpoint_declarations () =
@@ -113,7 +143,7 @@ let test_refresh_rejects_missing_endpoint_declarations () =
 (* ── Availability ───────────────────────────────────── *)
 
 let test_available_filter () =
-  let reg = Provider_registry.create_sync () in
+  let reg = Provider_registry.create () in
   let mk name avail : Provider_registry.entry =
     { name
     ; defaults =
@@ -176,7 +206,7 @@ let test_command_in_path_misses_unknown_binary () =
 (* ── Capability queries ─────────────────────────────── *)
 
 let test_find_capable_tools () =
-  let reg = Provider_registry.create_sync () in
+  let reg = Provider_registry.create () in
   let mk name caps : Provider_registry.entry =
     { name
     ; defaults =
@@ -202,7 +232,7 @@ let test_find_capable_tools () =
 ;;
 
 let test_find_capable_composite () =
-  let reg = Provider_registry.create_sync () in
+  let reg = Provider_registry.create () in
   let mk name caps : Provider_registry.entry =
     { name
     ; defaults =
@@ -1086,6 +1116,10 @@ let () =
         ; test_case "register and find" `Quick test_register_and_find
         ; test_case "overwrite" `Quick test_overwrite
         ; test_case "unregister" `Quick test_unregister
+        ; test_case
+            "concurrent register retains every update"
+            `Quick
+            test_concurrent_register_keeps_every_snapshot_update
         ] )
     ; ( "endpoint_refresh"
       , [ test_case

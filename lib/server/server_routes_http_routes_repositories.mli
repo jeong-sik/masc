@@ -11,7 +11,14 @@
     The repository JSON projection is shared so adjacent read-only dashboard
     surfaces cannot drift from the public repository API shape. *)
 
+(** Registry facts only. Deriving none of it runs a subprocess, so a list of
+    repositories costs what reading the registry costs. *)
 val repository_json :
+  base_path:string -> Repo_manager_types.repository -> Yojson.Safe.t
+
+(** {!repository_json} plus [git_status] and [sync_currency], each of which is
+    a git subprocess against the working tree. For one repository at a time. *)
+val repository_observation_json :
   base_path:string -> Repo_manager_types.repository -> Yojson.Safe.t
 
 val add_routes :

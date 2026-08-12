@@ -1,5 +1,10 @@
 (** Judge wave helpers for {!Fusion_orchestrator}. *)
 
+(** One first-pass judge run: its spec, derived identity, result, and elapsed
+    seconds since the wave clock started. Timeout classification is not carried
+    here — {!Fusion_types.judge_failure_is_timeout} derives it from the typed
+    failure wherever it is needed (the sink does exactly that), so a second
+    boolean copy would be a duplicate of the same fact. *)
 type judge_run =
   Fusion_policy.judge_spec
   * string
@@ -7,7 +12,6 @@ type judge_run =
     , Fusion_types.judge_failure * Fusion_types.usage )
     result
   * float option
-  * bool
 
 type clock
 
@@ -21,6 +25,31 @@ val make_runtime_clock : unit -> clock
 
 val elapsed_since_t0 : clock -> float option
 
+(** Output-token budget for one first-pass judge: its own [jmax_output_tokens]
+    when set, otherwise the preset's [judge_max_output_tokens] (the budget the
+    single/refine/meta judges already use). Pure. *)
+val first_judge_max_tokens
+  :  preset:Fusion_policy.preset
+  -> Fusion_policy.judge_spec
+  -> int option
+
+(** Whether one first-pass judge gets web tools: the union of the
+    request/panel-derived [judge_web_tools] and the judge's own [jweb_tools].
+    Pure. *)
+val first_judge_web_tools
+  :  judge_web_tools:bool
+  -> Fusion_policy.judge_spec
+  -> bool
+
+(** Run every first-pass judge concurrently over the same panel.
+
+    [judge_web_tools] is the request/panel-derived setting
+    ({!Fusion_policy.judge_web_tools_of}); each judge's own [jweb_tools] is
+    unioned with it, so a request that asks for web tools reaches the first
+    judges exactly as it reaches the single and meta judges.
+
+    Output budget per judge is the judge's own [jmax_output_tokens] when set,
+    otherwise the preset's [judge_max_output_tokens]. *)
 val run_first_judges
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

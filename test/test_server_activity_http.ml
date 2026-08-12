@@ -115,6 +115,84 @@ let test_count_and_limit_updated () =
   check (option int) "count updated" (Some 2) (get_int_field "count" got);
   check (option int) "limit updated" (Some 2) (get_int_field "limit" got)
 
+let prompt_request_error expected body =
+  match Server_prompt_override_request.decode body with
+  | Error error ->
+    check
+      string
+      expected
+      expected
+      (Server_prompt_override_request.error_message error)
+  | Ok _ -> fail ("accepted invalid prompt override request: " ^ body)
+;;
+
+let test_prompt_override_request_decodes_once () =
+  (match
+     Server_prompt_override_request.decode
+       {|{"action":"set","key":"keeper","value":"custom"}|}
+   with
+   | Ok (Server_prompt_override_request.Set { key; value }) ->
+     check string "set key" "keeper" key;
+     check string "set value" "custom" value
+   | Ok (Server_prompt_override_request.Clear _) -> fail "decoded set as clear"
+   | Error error -> fail (Server_prompt_override_request.error_message error));
+  (match
+     Server_prompt_override_request.decode
+       {|{"action":"clear","key":"keeper"}|}
+   with
+   | Ok (Server_prompt_override_request.Clear { key }) ->
+     check string "clear key" "keeper" key
+   | Ok (Server_prompt_override_request.Set _) -> fail "decoded clear as set"
+   | Error error -> fail (Server_prompt_override_request.error_message error));
+  match
+    Server_prompt_override_request.decode
+      {|{"action":"set","key":"keeper","value":""}|}
+  with
+  | Ok (Server_prompt_override_request.Set { value; _ }) ->
+    check string "content validation stays in prompt registry" "" value
+  | Ok (Server_prompt_override_request.Clear _) -> fail "decoded set as clear"
+  | Error error -> fail (Server_prompt_override_request.error_message error)
+;;
+
+let test_prompt_override_request_rejects_noncanonical_shapes () =
+  (match Server_prompt_override_request.decode "{" with
+   | Error _ -> ()
+   | Ok _ -> fail "accepted malformed JSON");
+  prompt_request_error "request body must be an object" "[]";
+  prompt_request_error "key is required" {|{"action":"clear"}|};
+  prompt_request_error
+    "key must be a string"
+    {|{"action":"clear","key":1}|};
+  prompt_request_error
+    "key is required"
+    {|{"action":"clear","key":" "}|};
+  prompt_request_error
+    "key must not contain surrounding whitespace"
+    {|{"action":"clear","key":" keeper"}|};
+  prompt_request_error
+    "duplicate key field"
+    {|{"action":"clear","key":"keeper","key":"keeper"}|};
+  prompt_request_error "action is required" {|{"key":"keeper"}|};
+  prompt_request_error
+    "action must be a string"
+    {|{"action":false,"key":"keeper"}|};
+  prompt_request_error
+    "duplicate action field"
+    {|{"action":"clear","action":"clear","key":"keeper"}|};
+  prompt_request_error
+    "unsupported action: reset"
+    {|{"action":"reset","key":"keeper"}|};
+  prompt_request_error
+    "value is required for set"
+    {|{"action":"set","key":"keeper"}|};
+  prompt_request_error
+    "value must be a string"
+    {|{"action":"set","key":"keeper","value":null}|};
+  prompt_request_error
+    "duplicate value field"
+    {|{"action":"set","key":"keeper","value":"a","value":"b"}|}
+;;
+
 let () =
   run "Server_activity_http"
     [ ( "slice_default_events_to_limit"
@@ -125,5 +203,11 @@ let () =
         ; test_case "missing seq fallback" `Quick test_missing_seq
         ; test_case "non-Assoc passthrough" `Quick test_non_assoc_passthrough
         ; test_case "count and limit updated" `Quick test_count_and_limit_updated
+        ] )
+    ; ( "prompt_override_request"
+      , [ test_case "decodes current request once" `Quick
+            test_prompt_override_request_decodes_once
+        ; test_case "rejects noncanonical request shapes" `Quick
+            test_prompt_override_request_rejects_noncanonical_shapes
         ] )
     ]

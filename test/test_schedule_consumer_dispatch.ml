@@ -812,6 +812,24 @@ let test_routed_schedule_carries_occurrence_destination_to_keeper () =
      |> member "result_delivery"
      |> member "inventory_warning"
      |> to_string);
+  let public_failures =
+    pending_row
+    |> member "result_delivery"
+    |> member "record_failures"
+    |> to_list
+  in
+  check int "malformed public record remains observable" 1
+    (List.length public_failures);
+  let public_failure_path =
+    List.hd public_failures |> member "path" |> to_string
+  in
+  check string "public malformed record exposes basename only"
+    "unrelated-corrupt-peer"
+    public_failure_path;
+  check bool "public malformed record omits absolute store path" false
+    (String_util.contains_substring
+       (pending_row |> member "result_delivery" |> Yojson.Safe.to_string)
+       active_delivery_dir);
   let attempting =
     match
       Keeper_continuation_delivery_intent.start_attempt

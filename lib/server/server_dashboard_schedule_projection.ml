@@ -693,7 +693,7 @@ let result_delivery_record_failures_json failures =
     (List.map
        (fun (failure : Keeper_continuation_delivery_store.record_failure) ->
           `Assoc
-            [ "path", `String failure.path
+            [ "path", `String (Filename.basename failure.path)
             ; "detail", `String failure.detail
             ])
        failures)

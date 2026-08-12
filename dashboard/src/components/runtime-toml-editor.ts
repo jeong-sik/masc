@@ -666,7 +666,13 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                             <div class="text-[var(--color-fg-muted)]">${setting.env}</div>
                           </td>
                           <td class="p-2 font-mono">
-                            ${setting.configured_value ?? '—'} → ${setting.effective_value}
+                            ${setting.configured_value ?? '—'} → ${setting.effective_value ?? '—'}
+                            ${setting.effective_error ? html`
+                              <div
+                                class="mt-1 text-[var(--color-status-error)]"
+                                data-testid=${`runtime-keeper-setting-error-${setting.env}`}
+                              >${setting.effective_error}</div>
+                            ` : null}
                           </td>
                           <td class="p-2">
                             <div>${setting.source}</div>

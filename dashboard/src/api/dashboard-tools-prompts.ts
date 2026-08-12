@@ -591,7 +591,7 @@ export interface DashboardKeeperQueueStorageIntegrity {
 export interface DashboardKeeperQueueWorkLiveness {
   schema?: string
   status: string
-  state: 'idle' | 'backlogged' | 'stalled' | 'unknown'
+  state: 'idle' | 'backlogged' | 'blocked' | 'stalled' | 'unknown'
   runnable_backlog_count: number
   runnable_oldest_age_seconds: number | null
   stale_after_seconds: number | null
@@ -855,7 +855,10 @@ function normalizeKeeperEventQueueHealth(raw: unknown): DashboardKeeperEventQueu
   const work = asRecord(record.work_liveness)
   const workState = work?.state
   const normalizedWorkState: DashboardKeeperQueueWorkLiveness['state'] =
-    workState === 'idle' || workState === 'backlogged' || workState === 'stalled'
+    workState === 'idle'
+      || workState === 'backlogged'
+      || workState === 'blocked'
+      || workState === 'stalled'
       ? workState
       : 'unknown'
   return {

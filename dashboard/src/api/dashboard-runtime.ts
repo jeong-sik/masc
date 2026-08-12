@@ -1080,7 +1080,8 @@ export interface RuntimeKeeperSetting {
   env: string
   configured_value: string | null
   source: string
-  effective_value: string
+  effective_value: string | null
+  effective_error: string | null
   applied_at: number | null
   reload_class: string
   requires_restart: boolean
@@ -1763,7 +1764,8 @@ function normalizeRuntimeKeeperSettings(raw: unknown): RuntimeKeeperSetting[] | 
       env: asString(value.env) ?? '',
       configured_value: asNullableString(value.configured_value),
       source: asString(value.source) ?? 'unknown',
-      effective_value: asString(value.effective_value) ?? '',
+      effective_value: asNullableString(value.effective_value),
+      effective_error: asNullableString(value.effective_error),
       applied_at: asNumber(value.applied_at) ?? null,
       reload_class: asString(value.reload_class) ?? 'unknown',
       requires_restart: asBoolean(value.requires_restart) ?? false,

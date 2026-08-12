@@ -211,6 +211,35 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('.v2-monitoring-toolbar')).not.toBeNull()
   })
 
+  it('renders a typed Keeper effective-value error instead of a blank value', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({
+      ...baseConfig,
+      keeper_settings: [{
+        key: 'memory_os.librarian_enabled',
+        env: 'MASC_KEEPER_MEMORY_OS_LIBRARIAN',
+        configured_value: 'invalid',
+        source: 'env',
+        effective_value: null,
+        effective_error: 'expected a boolean',
+        applied_at: null,
+        reload_class: 'restart',
+        requires_restart: false,
+        application_status: 'invalid',
+        consumers: ['Keeper_memory_os'],
+      }],
+    })
+
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector(
+        '[data-testid="runtime-keeper-setting-error-MASC_KEEPER_MEMORY_OS_LIBRARIAN"]',
+      )?.textContent).toContain('expected a boolean')
+    })
+    expect(container.querySelector('[data-testid="runtime-keeper-setting-matrix"]')?.textContent)
+      .toContain('invalid → —')
+  })
+
   it('saves the edited TOML source and clears the dirty state', async () => {
     render(html`<${RuntimeTomlEditor} />`, container)
 

@@ -1296,6 +1296,35 @@ describe('fetchDashboardFullHealth', () => {
     })
   })
 
+  it('preserves the backend blocked queue liveness state', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        keeper_event_queue: {
+          status: 'warning',
+          operator_action_required: false,
+          status_reasons: ['non_runnable_backlog'],
+          backlog_clean: false,
+          work_liveness: {
+            status: 'warning',
+            state: 'blocked',
+            runnable_backlog_count: 0,
+            runnable_oldest_age_seconds: null,
+            stale_after_seconds: 300,
+            operator_action_required: false,
+          },
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    const result = await fetchDashboardFullHealth()
+
+    expect(result.keeper_event_queue?.work_liveness?.state).toBe('blocked')
+    expect(result.keeper_event_queue?.work_liveness?.runnable_backlog_count).toBe(0)
+  })
+
   it('normalizes invalid schedule_runner values safely', async () => {
     const rawResponse = {
       health_detail: 'full',
@@ -3171,6 +3200,19 @@ describe('runtime.toml raw config API', () => {
             preempted_keys: [],
           },
         },
+        keeper_settings: [{
+          key: 'memory_os.librarian_enabled',
+          env: 'MASC_KEEPER_MEMORY_OS_LIBRARIAN',
+          configured_value: 'invalid',
+          source: 'env',
+          effective_value: null,
+          effective_error: 'expected a boolean',
+          applied_at: null,
+          reload_class: 'restart',
+          requires_restart: false,
+          application_status: 'invalid',
+          consumers: ['Keeper_memory_os'],
+        }],
         provider_protocols: providerProtocols,
       }), {
         status: 200,
@@ -3191,6 +3233,10 @@ describe('runtime.toml raw config API', () => {
     expect(result.source_text).toContain('[runtime]')
     expect(result.application?.routing.status).toBe('active')
     expect(result.application?.keeper_overlay.requires_restart).toBe(false)
+    expect(result.keeper_settings?.[0]).toMatchObject({
+      effective_value: null,
+      effective_error: 'expected a boolean',
+    })
     expect(result.provider_protocols).toEqual(providerProtocols)
   })
 

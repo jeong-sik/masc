@@ -1,10 +1,10 @@
 (** Producer-side durable obligation store for autonomous continuation replies.
 
-    The chat queue remains the chat-delivery SSOT.  This store covers the
+    The Keeper chat operation store remains the chat-delivery SSOT. This store covers the
     different authority boundary where a generic Keeper event source has
     already produced a reply but its final surface projection is not terminal.
     One file owns one deterministic intent id; there is no second copy of a
-    chat receipt. *)
+    chat operation. *)
 
 type publication =
   | Not_published

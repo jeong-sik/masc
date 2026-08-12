@@ -27,7 +27,7 @@ const TOKEN_STORAGE_KEY = 'masc_bearer_token'
 const TOKEN_META_STORAGE_KEY = 'masc_bearer_token_meta'
 
 export type StoredTokenMeta =
-  | { source: 'dev'; actor: 'dashboard'; role: 'worker' }
+  | { source: 'dev'; actor: 'dashboard'; role: 'admin' }
   | { source: 'manual' }
   | { source: 'url' }
 
@@ -73,10 +73,13 @@ function normalizeStoredTokenMeta(value: unknown): StoredTokenMeta | null {
   if (
     record.source === 'dev'
     && record.actor === 'dashboard'
-    && record.role === 'worker'
+    && record.role === 'admin'
   ) {
-    return { source: 'dev', actor: 'dashboard', role: 'worker' }
+    return { source: 'dev', actor: 'dashboard', role: 'admin' }
   }
+  // A stored 'worker' dev meta from an older build parses as null, which
+  // shouldRefreshDevToken treats as "re-bootstrap" — the migration is a
+  // single silent re-fetch.
   return null
 }
 

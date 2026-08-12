@@ -41,14 +41,14 @@ describe('stored token metadata', () => {
     setStoredToken('loopback-dev-token', {
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     })
 
     expect(getStoredToken()).toBe('loopback-dev-token')
     expect(getStoredTokenMeta()).toEqual({
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     })
     expect(currentDashboardActor()).toBe('dashboard')
     expect(authHeaders()).toMatchObject({
@@ -75,7 +75,7 @@ describe('stored token metadata', () => {
     setStoredToken('manual-token', {
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     })
     clearStoredToken()
     clearStoredToken()
@@ -89,7 +89,7 @@ describe('stored token metadata', () => {
     })
     expect(listener).toHaveBeenNthCalledWith(2, {
       token: 'manual-token',
-      meta: { source: 'dev', actor: 'dashboard', role: 'worker' },
+      meta: { source: 'dev', actor: 'dashboard', role: 'admin' },
     })
     expect(listener).toHaveBeenNthCalledWith(3, {
       token: null,

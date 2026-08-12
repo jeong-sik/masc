@@ -104,20 +104,20 @@ let create_persisted_dashboard_token base_path role =
     raw
 ;;
 
-let test_existing_admin_token_rotates_to_worker () =
+let test_existing_worker_token_rotates_to_admin () =
   with_temp_base "masc-dev-token-role-" (fun base_path ->
-    let admin_raw = create_persisted_dashboard_token base_path Masc_domain.Admin in
+    let worker_raw = create_persisted_dashboard_token base_path Masc_domain.Worker in
     match Dev_token.ensure_dashboard_dev_token base_path with
     | Error error -> fail (Dev_token.token_error_to_string error)
     | Ok token ->
-      check bool "admin bearer rotated" true (not (String.equal admin_raw token.raw));
+      check bool "worker bearer rotated" true (not (String.equal worker_raw token.raw));
       check string "canonical actor" "dashboard" token.actor;
-      check string "declared role" "worker"
+      check string "declared role" "admin"
         (Masc_domain.agent_role_to_string token.role);
       (match Auth.find_credential_by_token base_path ~token:token.raw with
        | Error err -> fail (Masc_domain.masc_error_to_string err)
        | Ok credential ->
-         check string "persisted credential role" "worker"
+         check string "persisted credential role" "admin"
            (Masc_domain.agent_role_to_string credential.role));
       (match
          Auth.check_permission
@@ -126,23 +126,10 @@ let test_existing_admin_token_rotates_to_worker () =
            ~token:(Some token.raw)
            ~permission:Masc_domain.CanAdmin
        with
-       | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
-       | Error err ->
-         failf
-           "Worker CanAdmin denial had wrong reason: %s"
-           (Masc_domain.masc_error_to_string err)
-       | Ok () -> fail "dashboard Worker token retained CanAdmin");
-      (match
-         Auth.check_permission
-           base_path
-           ~agent_name:"dashboard"
-           ~token:(Some token.raw)
-           ~permission:Masc_domain.CanVote
-       with
        | Ok () -> ()
        | Error err ->
          failf
-           "dashboard Worker token lost CanVote: %s"
+           "dashboard Admin token denied CanAdmin: %s"
            (Masc_domain.masc_error_to_string err));
       check
         int
@@ -150,21 +137,21 @@ let test_existing_admin_token_rotates_to_worker () =
         0o600
         ((Unix.stat (Dev_token.dashboard_dev_token_path base_path)).Unix.st_perm
          land 0o777);
-      (match Auth.find_credential_by_token base_path ~token:admin_raw with
+      (match Auth.find_credential_by_token base_path ~token:worker_raw with
        | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) -> ()
        | Error err ->
          failf
-           "old admin token failed with wrong reason: %s"
+           "old worker token failed with wrong reason: %s"
            (Masc_domain.masc_error_to_string err)
-       | Ok _ -> fail "old admin token remains valid after rotation"))
+       | Ok _ -> fail "old worker token remains valid after rotation"))
 ;;
 
-let test_existing_worker_token_is_reused () =
+let test_existing_admin_token_is_reused () =
   with_temp_base "masc-dev-token-reuse-" (fun base_path ->
-    let worker_raw = create_persisted_dashboard_token base_path Masc_domain.Worker in
+    let admin_raw = create_persisted_dashboard_token base_path Masc_domain.Admin in
     match Dev_token.ensure_dashboard_dev_token base_path with
     | Error error -> fail (Dev_token.token_error_to_string error)
-    | Ok token -> check string "worker bearer reused" worker_raw token.raw)
+    | Ok token -> check string "admin bearer reused" admin_raw token.raw)
 ;;
 
 let test_invalid_pending_token_fails_closed () =
@@ -183,7 +170,7 @@ let test_invalid_pending_token_fails_closed () =
 
 let test_rotation_write_failure_reuses_pending_token () =
   with_temp_base "masc-dev-token-pending-" (fun base_path ->
-    let admin_raw = create_persisted_dashboard_token base_path Masc_domain.Admin in
+    let stale_raw = create_persisted_dashboard_token base_path Masc_domain.Worker in
     let token_path = Dev_token.dashboard_dev_token_path base_path in
     let write path raw =
       if String.equal path token_path
@@ -200,18 +187,43 @@ let test_rotation_write_failure_reuses_pending_token () =
     let pending_path = Dev_token.dashboard_dev_token_pending_path base_path in
     check bool "pending token retained" true (Sys.file_exists pending_path);
     let pending_raw = String.trim (Fs_compat.load_file pending_path) in
-    (match Auth.find_credential_by_token base_path ~token:admin_raw with
+    (match Auth.find_credential_by_token base_path ~token:stale_raw with
      | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) -> ()
      | Error err ->
        failf
-         "old admin token failed with wrong reason: %s"
+         "old worker token failed with wrong reason: %s"
          (Masc_domain.masc_error_to_string err)
-     | Ok _ -> fail "old admin token reactivated after partial rotation");
+     | Ok _ -> fail "old worker token reactivated after partial rotation");
     match Dev_token.ensure_dashboard_dev_token base_path with
     | Error error -> fail (Dev_token.token_error_to_string error)
     | Ok token ->
       check string "exact pending token published" pending_raw token.raw;
       check bool "pending token cleared" false (Sys.file_exists pending_path))
+;;
+
+let test_fresh_issuance_grants_admin () =
+  with_temp_base "masc-dev-token-fresh-" (fun base_path ->
+    match Dev_token.ensure_dashboard_dev_token base_path with
+    | Error error -> fail (Dev_token.token_error_to_string error)
+    | Ok token ->
+      check string "canonical actor" "dashboard" token.actor;
+      check string "declared role" "admin"
+        (Masc_domain.agent_role_to_string token.role);
+      (match
+         Auth.check_permission
+           base_path
+           ~agent_name:"dashboard"
+           ~token:(Some token.raw)
+           ~permission:Masc_domain.CanAdmin
+       with
+       | Ok () -> ()
+       | Error err ->
+         failf
+           "fresh dev token denied CanAdmin: %s"
+           (Masc_domain.masc_error_to_string err));
+      (match Dev_token.ensure_dashboard_dev_token base_path with
+       | Error error -> fail (Dev_token.token_error_to_string error)
+       | Ok reissued -> check string "admin bearer reused" token.raw reissued.raw))
 ;;
 
 let () =
@@ -228,13 +240,13 @@ let () =
             `Quick
             test_read_failure_does_not_mint_credential
         ; test_case
-            "existing admin token rotates to worker"
+            "existing worker token rotates to admin"
             `Quick
-            test_existing_admin_token_rotates_to_worker
+            test_existing_worker_token_rotates_to_admin
         ; test_case
-            "existing worker token is reused"
+            "existing admin token is reused"
             `Quick
-            test_existing_worker_token_is_reused
+            test_existing_admin_token_is_reused
         ; test_case
             "invalid pending token fails closed"
             `Quick
@@ -243,6 +255,12 @@ let () =
             "rotation write failure reuses pending token"
             `Quick
             test_rotation_write_failure_reuses_pending_token
+        ] )
+    ; ( "loopback admin issuance"
+      , [ test_case
+            "fresh issuance grants admin"
+            `Quick
+            test_fresh_issuance_grants_admin
         ] )
     ]
 ;;

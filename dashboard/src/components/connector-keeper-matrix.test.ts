@@ -11,7 +11,7 @@ import {
   type MatrixRow,
 } from './connector-keeper-matrix'
 import type { GateConnectorInfo } from '../api/gate'
-import type { GateKeeperInfo } from '../api/schemas/gate-keepers'
+import type { GateKeeper } from '../api/gate-keepers'
 
 const mkConnector = (id: string, overrides: Partial<GateConnectorInfo> = {}): GateConnectorInfo => ({
   connector_id: id,
@@ -24,8 +24,11 @@ const mkConnector = (id: string, overrides: Partial<GateConnectorInfo> = {}): Ga
   ...(overrides as object),
 }) as GateConnectorInfo
 
-const mkKeeper = (name: string): GateKeeperInfo =>
-  ({ name }) as GateKeeperInfo
+const mkKeeper = (name: string): GateKeeper => ({
+  name,
+  runtimeLabel: '',
+  status: 'idle',
+})
 
 describe('deriveMatrix', () => {
   it('returns 4 columns in known order', () => {

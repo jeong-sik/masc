@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
+import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // 90s window absorbs cold-build transform overhead (observed 60-140s on
@@ -163,23 +164,19 @@ function sampleConnectorsResponse(overrides?: Partial<Record<string, unknown>>) 
 
 function sampleKeepersResponse(overrides?: Partial<Record<string, unknown>>) {
   return {
-    count: 2,
     keepers: [
       {
         name: 'luna',
-        agent_name: 'keeper-luna-agent',
+        runtimeLabel: 'keeper-luna-agent',
         status: 'idle',
-        model: 'glm-5',
-        keepalive_running: true,
       },
       {
         name: 'nova',
-        agent_name: 'keeper-nova-agent',
+        runtimeLabel: 'keeper-nova-agent',
         status: 'busy',
-        model: 'gemini-3-flash-preview',
-        keepalive_running: true,
       },
     ],
+    directoryIssues: [],
     ...overrides,
   }
 }
@@ -206,7 +203,9 @@ async function loadComponentWithApi(api: {
   vi.doMock('../api/gate', () => ({
     fetchGateStatus: api.fetchGateStatus,
     fetchGateConnectors: api.fetchGateConnectors,
-    fetchGateKeepers: api.fetchGateKeepers,
+  }))
+  vi.doMock('../api/gate-keepers', () => ({
+    fetchGateKeepers: () => Effect.promise(api.fetchGateKeepers),
   }))
   vi.doMock('../sse', () => ({
     lastEvent: api.lastEvent,
@@ -242,6 +241,7 @@ describe('ConnectorStatusPanel', () => {
     vi.clearAllMocks()
     vi.doUnmock('../api/core')
     vi.doUnmock('../api/gate')
+    vi.doUnmock('../api/gate-keepers')
     vi.doUnmock('../sse')
     vi.doUnmock('./common/toast')
   })
@@ -501,8 +501,8 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('stale')
     expect(text).toContain('메트릭 없음')
     expect(text).toContain('connector runtime은 등록됐으나 게이트가 관찰한 트래픽은 아직 없습니다')
-    expect(text).toContain('keeper 디렉토리 사용 불가, 수동 입력만 가능')
-    expect(text).toContain('Next: 지금은 수동 입력으로 진행')
+    expect(text).toContain('GET /api/v1/gate/keepers: 401 Unauthorized')
+    expect(text).toContain('Next: 정상 keeper만 사용')
     expect(text).toContain('config/keepers/')
     expect(text).toContain('/api/v1/gate/keepers')
 
@@ -516,7 +516,33 @@ describe('ConnectorStatusPanel', () => {
     expect(dirPanel!.className).toContain('border-l-[var(--color-warn)]')
     // Named chip: "Directory error" is what AT hears.
     const dirChip = dirPanel!.querySelector('[aria-label]')
-    expect(dirChip?.getAttribute('aria-label')).toContain('사용 불가')
+    expect(dirChip?.getAttribute('aria-label')).toContain('오류 감지')
+  })
+
+  it('surfaces directory issues without mixing broken rows into usable keepers', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse({
+      directoryIssues: [{
+        keeperName: 'broken',
+        message: 'invalid keeper config',
+      }],
+    }))
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    expect(text).toContain('broken: invalid keeper config')
+    expect(container.querySelector('[data-keeper="broken"]')).toBeNull()
+    expect(container.querySelector('[data-keeper="luna"]')).not.toBeNull()
   })
 
   it('pairs connector API failures with a browser/server next action', async () => {
@@ -941,7 +967,10 @@ describe('ConnectorStatusPanel', () => {
         configured_bindings: [],
       }],
     }))
-    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue({ count: 0, keepers: [] })
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue({
+      keepers: [],
+      directoryIssues: [],
+    })
 
     const { ConnectorStatusPanel } = await loadComponentWithApi({
       fetchGateStatus,
@@ -1018,8 +1047,6 @@ describe('ConnectorStatusPanel', () => {
     expect(novaGroup).not.toBeNull()
     const novaText = novaGroup!.textContent ?? ''
     expect(novaText).toContain('status busy')
-    expect(novaText).not.toContain('gemini-3-flash-preview')
-    expect(novaText).not.toContain('model ')
     expect(novaText).toContain('runtime keeper-nova-agent')
   })
 
@@ -1045,16 +1072,14 @@ describe('ConnectorStatusPanel', () => {
 
 describe('filterKeeperGroups', () => {
   // Shape-compatible sample. `filterKeeperGroups` only reads `name` and
-  // `keeper.agent_name` so bindings
+  // `keeper.runtimeLabel` so bindings
   // are allowed to be empty and `unknown` never matters.
   type GroupLike = {
     name: string
     keeper: {
       name: string
-      active_model?: string
-      model?: string
-      primary_model?: string
-      agent_name?: string
+      runtimeLabel: string
+      status: string
     } | null
     bindings: Array<{ channel_id: string; keeper_name: string }>
     unknown: boolean
@@ -1062,7 +1087,11 @@ describe('filterKeeperGroups', () => {
 
   function group(
     name: string,
-    keeper: GroupLike['keeper'] = { name },
+    keeper: GroupLike['keeper'] = {
+      name,
+      runtimeLabel: '',
+      status: 'idle',
+    },
   ): GroupLike {
     return { name, keeper, bindings: [], unknown: false }
   }
@@ -1098,44 +1127,20 @@ describe('filterKeeperGroups', () => {
     expect(filtered[0]!.name).toBe('Nova')
   })
 
-  it('does not match on active_model via substring', async () => {
+  it('matches on the resolved runtime label', async () => {
     const filterKeeperGroups = await loadFilter()
     const rows = [
-      group('nova', { name: 'nova', active_model: 'gemini-3-flash-preview' }),
-      group('luna', { name: 'luna', active_model: 'claude-opus' }),
-    ]
-    const filtered = filterKeeperGroups(rows, 'gemini')
-    expect(filtered).toHaveLength(0)
-  })
-
-  it('does not fall back from active_model to model', async () => {
-    const filterKeeperGroups = await loadFilter()
-    const rows = [
-      group('nova', { name: 'nova', active_model: '   ', model: 'gemini-flash' }),
-    ]
-    const filtered = filterKeeperGroups(rows, 'gemini')
-    expect(filtered).toHaveLength(0)
-  })
-
-  it('matches on agent_name runtime label when distinct from keeper name', async () => {
-    const filterKeeperGroups = await loadFilter()
-    const rows = [
-      group('nova', { name: 'nova', agent_name: 'keeper-nova-agent' }),
+      group('nova', { name: 'nova', runtimeLabel: 'keeper-nova-agent', status: 'idle' }),
     ]
     expect(filterKeeperGroups(rows, 'keeper-nova-agent')).toHaveLength(1)
   })
 
-  it('does not match agent_name when it equals the keeper name', async () => {
-    // Runtime label helper returns '' when agent_name === name, so the
-    // query should not match via the runtime field. It still matches on
-    // the name field itself.
+  it('does not reopen the wire identity after the runtime label is resolved', async () => {
     const filterKeeperGroups = await loadFilter()
-    const rows = [group('nova', { name: 'nova', agent_name: 'nova' })]
+    const rows = [group('nova', { name: 'nova', runtimeLabel: '', status: 'idle' })]
     expect(filterKeeperGroups(rows, 'nova')).toHaveLength(1)
-    // But a query targeting only the runtime label must miss when no
-    // fields contain it.
     const onlyRuntime = [
-      group('nova', { name: 'nova', agent_name: 'nova' }),
+      group('nova', { name: 'nova', runtimeLabel: '', status: 'idle' }),
     ]
     expect(filterKeeperGroups(onlyRuntime, 'keeper-nova-agent')).toEqual([])
   })
@@ -1183,6 +1188,7 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     vi.clearAllMocks()
     vi.doUnmock('../api/core')
     vi.doUnmock('../api/gate')
+    vi.doUnmock('../api/gate-keepers')
     vi.doUnmock('../sse')
     vi.doUnmock('./common/toast')
   })

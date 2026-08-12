@@ -10,7 +10,6 @@ import { post } from '../api/core'
 import { DEFAULT_MASC_ORIGIN } from '../config/constants'
 import {
   fetchGateConnectors,
-  fetchGateKeepers,
   fetchGateStatus,
   type BindingInfo,
   type ChannelInfo,
@@ -19,9 +18,13 @@ import {
   type GateConnectorInfo,
   type GateConnectorsData,
   type GateEventInfo,
-  type GateKeeperInfo,
   type GateStatusData,
 } from '../api/gate'
+import {
+  fetchGateKeepers,
+  type GateKeeper,
+} from '../api/gate-keepers'
+import { dashboardRuntime } from '../api/effect-http'
 import {
   KNOWN_CONNECTOR_IDS,
   IN_PROCESS_CONNECTOR_ENV,
@@ -158,7 +161,7 @@ function patchConnectorUiState(connectorId: string, patch: Partial<ConnectorUiSt
  * Pure filter for keeper groups rendered in the "Keeper-first" panel.
  *
  * Case-insensitive substring match on `group.name` and the keeper's
- * resolved runtime label (agent_name when distinct from
+ * resolved runtime label when distinct from
  * name). Operators on a crowded connector can locate a keeper by
  * partial name or by its runtime agent.
  *
@@ -177,7 +180,7 @@ export function filterKeeperGroups(
   if (needle === '') return groups
   return groups.filter(group => {
     if (group.name.toLowerCase().includes(needle)) return true
-    const runtime = runtimeLabelForKeeper(group.keeper).toLowerCase()
+    const runtime = group.keeper?.runtimeLabel.toLowerCase() ?? ''
     if (runtime !== '' && runtime.includes(needle)) return true
     return false
   })
@@ -186,7 +189,7 @@ export function filterKeeperGroups(
 type ConnectorStatusSnapshot = {
   gate: GateStatusData | null
   connectors: GateConnectorsData | null
-  keepers: GateKeeperInfo[]
+  keepers: readonly GateKeeper[]
   gateError: string | null
   connectorError: string | null
   keeperError: string | null
@@ -217,7 +220,7 @@ async function refresh() {
     const [gateResult, connResult, keeperResult] = await Promise.allSettled([
       fetchGateStatus(signal),
       fetchGateConnectors(signal),
-      fetchGateKeepers(signal),
+      dashboardRuntime.runPromise(fetchGateKeepers(), { signal }),
     ])
 
     if (gateResult.status === 'fulfilled') {
@@ -233,7 +236,12 @@ async function refresh() {
     }
 
     if (keeperResult.status === 'fulfilled') {
-      next.keepers = keeperResult.value.keepers ?? []
+      next.keepers = keeperResult.value.keepers
+      next.keeperError = keeperResult.value.directoryIssues.length === 0
+        ? null
+        : keeperResult.value.directoryIssues
+            .map(issue => `${issue.keeperName}: ${issue.message}`)
+            .join('; ')
     } else {
       next.keepers = []
       next.keeperError = keeperResult.reason instanceof Error ? keeperResult.reason.message : 'fetch failed'
@@ -334,12 +342,6 @@ function uniqueStrings(values: string[]): string[] {
     ordered.push(trimmed)
   })
   return ordered
-}
-
-function runtimeLabelForKeeper(keeper: GateKeeperInfo | null | undefined): string {
-  const runtime = keeper?.agent_name?.trim()
-  if (!runtime || runtime === keeper?.name) return ''
-  return runtime
 }
 
 function findKnownConnector(connectors: GateConnectorInfo[], connectorId: KnownConnectorId): GateConnectorInfo | null {
@@ -590,7 +592,7 @@ async function unbindConnector(connectorId: string, channelId: string) {
 
 type KeeperGroup = {
   name: string
-  keeper: GateKeeperInfo | null
+  keeper: GateKeeper | null
   bindings: Array<{ channel_id: string; keeper_name: string }>
   unknown: boolean
 }
@@ -607,7 +609,7 @@ function ConnectorLivePanel({
 }: {
   connector: GateConnectorInfo | null
   gate: GateStatusData | null
-  keepers: GateKeeperInfo[]
+  keepers: readonly GateKeeper[]
   connectorError: string | null
   keeperDirectoryError: string | null
   loading: boolean
@@ -916,7 +918,7 @@ function ConnectorLivePanel({
         : null}
       <${ConnectorConfigForm} connectorId=${connectorId} />
 
-      ${keeperDirectoryError && keepers.length === 0
+      ${keeperDirectoryError
         ? html`
             <${SurfaceCard}
               class="mt-3 !border-[var(--warn-20)] !border-l-4 !border-l-[var(--color-warn)] !bg-[var(--warn-10)] !px-3 !py-2 text-2xs text-[var(--color-status-warn)]"
@@ -924,7 +926,7 @@ function ConnectorLivePanel({
             >
               <span
                 class="mr-2 inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
-                aria-label="키퍼 디렉토리 상태: 사용 불가"
+                aria-label="키퍼 디렉토리 상태: 오류 감지"
               >
                 <span aria-hidden="true">⚠</span>
                 <span>디렉토리 오류</span>
@@ -933,10 +935,10 @@ function ConnectorLivePanel({
                 ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">checked ${timeAgo(connector.gate_health_checked_at)}</span>`
                 : null}
               <div class="mt-1">
-                <${BoldLabel}>Cause: </${BoldLabel}> keeper 디렉토리 사용 불가, 수동 입력만 가능.
+                <${BoldLabel}>Cause: </${BoldLabel}> ${keeperDirectoryError}
               </div>
               <div class="mt-1">
-                <${BoldLabel}>Next: </${BoldLabel}> 지금은 수동 입력으로 진행, 이후 <${Tk}>config/keepers/<//> 복원 또는 <${Tk}>/api/v1/gate/keepers<//> 수정 후 디렉토리 추천에 의존하세요.
+                <${BoldLabel}>Next: </${BoldLabel}> 정상 keeper만 사용하고 <${Tk}>config/keepers/<//> 또는 <${Tk}>/api/v1/gate/keepers<//> 계약 오류를 수정하세요.
               </div>
             </${SurfaceCard}>
           `
@@ -1129,7 +1131,7 @@ function ConnectorLivePanel({
                         ? html`
                             <div class="text-3xs text-[var(--color-fg-disabled)]">
                               status ${keeper.status || 'unknown'}
-                              ${runtimeLabelForKeeper(keeper) ? ` · runtime ${runtimeLabelForKeeper(keeper)}` : ''}
+                              ${keeper.runtimeLabel === '' ? '' : ` · runtime ${keeper.runtimeLabel}`}
                             </div>
                           `
                         : null}

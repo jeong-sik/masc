@@ -18,7 +18,7 @@
 
 import { html } from 'htm/preact'
 import type { GateConnectorInfo } from '../api/gate'
-import type { GateKeeperInfo } from '../api/schemas/gate-keepers'
+import type { GateKeeper } from '../api/gate-keepers'
 import {
   CONNECTOR_DISPLAY_NAMES,
   KNOWN_CONNECTOR_IDS,
@@ -94,7 +94,7 @@ function findConnector(connectors: GateConnectorInfo[], id: string): GateConnect
 /** Derive the matrix from connectors + keepers. Pure, unit-testable. */
 export function deriveMatrix(
   connectors: GateConnectorInfo[],
-  keepers: GateKeeperInfo[],
+  keepers: readonly GateKeeper[],
 ): MatrixData {
   const columns: KnownConnectorId[] = [...KNOWN_CONNECTOR_IDS]
   const knownKeeperNames = new Set(keepers.map(k => k.name))

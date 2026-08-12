@@ -7,9 +7,13 @@ import {
   resetQuickBindState,
   channelIdPlaceholder,
 } from './connector-quick-bind'
-import type { GateKeeperInfo } from '../api/gate'
+import type { GateKeeper } from '../api/gate-keepers'
 
-const mkKeeper = (name: string): GateKeeperInfo => ({ name } as GateKeeperInfo)
+const mkKeeper = (name: string): GateKeeper => ({
+  name,
+  runtimeLabel: '',
+  status: 'idle',
+})
 
 const flushUi = async () => {
   for (let i = 0; i < 4; i++) await Promise.resolve()

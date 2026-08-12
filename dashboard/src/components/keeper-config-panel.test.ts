@@ -966,7 +966,6 @@ describe('KeeperConfigPanel', () => {
 
     // identity tab (default): edit-scope callout + source provenance.
     expect(container.textContent).toContain('편집 가능 범위')
-    expect(container.textContent).toContain('runtime.toml')
     expect(container.textContent).toContain('[runtime.assignments]')
     expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
     expect(container.textContent).toContain('/tmp/.masc/keepers/keeper-sangsu/live.json')

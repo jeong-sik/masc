@@ -1861,7 +1861,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   // ── Tab content (the live fields, regrouped under the 8 prototype tabs) ──
   // identity ◈ — source provenance
   const identityTab = html`
-    <${KcfSec} title="편집 가능 범위" desc="여기서 저장되는 값은 keeper 프롬프트, live override 계층, runtime.toml의 [runtime.assignments]입니다.">
+    <${KcfSec} title="편집 가능 범위" desc="keeper 프롬프트 · live override · [runtime.assignments]">
       <${KcfFacts} rows=${[
         ['기본 소스', c.sources.default_source_kind],
         ['라이브 오버라이드', c.sources.has_live_override ? 'ON' : 'OFF'],
@@ -1889,7 +1889,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     ${promptSection}
     <${KcfSec}
       title="조립 추적"
-      desc="이 keeper의 시스템 프롬프트가 어느 레이어에서 조립됐는지 — 공유 베이스 위에 매니페스트/live override가 쌓이고, override_fields에 오른 필드가 매니페스트를 덮어씁니다.">
+      desc="베이스 → 매니페스트 → live override 순으로 조립. override_fields가 우선합니다.">
       <${KcfAssemblyTrace} config=${c} />
     </${KcfSec}>
   `
@@ -1917,13 +1917,13 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
     ${selectedRuntimeCatalogRows.length > 0
       ? html`
-        <${KcfSec} title="Runtime catalog spec" desc="선택 runtime 의 /api/v1/providers Provider × Model projection입니다. 요청 파라미터와 effective capability는 여기서 읽기 전용으로 확인합니다.">
+        <${KcfSec} title="Runtime catalog spec" desc="Provider × Model 스펙 (읽기 전용)">
           <${KcfFacts} rows=${selectedRuntimeCatalogRows} />
         </${KcfSec}>
       `
       : null}
 
-    <${KcfSec} title="실행" desc="런타임 후보는 읽기 전용입니다. fallback 은 마지막 runtime 을 제외한 항목에 순서대로 적용됩니다.">
+    <${KcfSec} title="실행" desc="읽기 전용 · fallback은 위에서부터 순서대로">
       <${KcfFacts} rows=${[
         ['활성 런타임', c.execution.active_model ? 'runtime' : null],
       ]} />

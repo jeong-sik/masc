@@ -141,7 +141,7 @@ describe('KeeperLaneStrip', () => {
     `)
     const text = el.textContent ?? ''
     expect(text).toContain('작업 대기열')
-    expect(text).toContain('외부 완료 대기 중')
+    expect(text).toContain('외부 응답 대기')
     expect(text).toContain('owner_fifo')
     expect(text).toContain('keeper_turn')
     expect(text).toContain('keeper finish in flight turn')
@@ -206,8 +206,10 @@ describe('KeeperLaneStrip', () => {
       '2026-08-08T06:39:09Z',
       '2026-08-06T03:59:42Z',
     ])
-    expect(el.textContent ?? '').toContain('최신 관측 → 오래된 관측')
-    expect(el.textContent ?? '').toContain('처리 우선순위를 뜻하지 않습니다')
+    expect(el.textContent ?? '').toContain('최신 → 오래된')
+    // The lane legend stays a compact time-order marker; the old prose
+    // disclaimer ("처리 우선순위를 뜻하지 않습니다") was removed for layout room.
+    expect(el.textContent ?? '').not.toContain('처리 우선순위')
     expect(el.textContent ?? '').toContain('실행 예정')
     expect(el.textContent ?? '').toContain('7시간 후')
     expect(el.textContent ?? '').not.toContain('실행 예정 · 지금')
@@ -295,7 +297,10 @@ describe('KeeperLaneStrip', () => {
     expect(el.querySelector('[data-testid="keeper-lane-truncation"]')).toBeNull()
   })
 
-  it('shows push delivery beside the snapshot time when WS is ready', () => {
+  it('renders no transport/freshness caption row', () => {
+    // The strip used to append "서버 기준 <시각> · WS 즉시 반영" under every
+    // queue. That caption described the transport, not the queue, and was
+    // removed for layout room — the data itself is the freshness signal.
     const el = mount(html`
       <${KeeperLaneStrip}
         keeper=${keeperFixture()}
@@ -303,27 +308,12 @@ describe('KeeperLaneStrip', () => {
         ready=${true}
         loading=${false}
         error=${null}
-        pushReady=${true}
       />
     `)
     const text = el.textContent ?? ''
-    expect(text).toContain('서버 기준')
-    expect(text).toContain('WS 즉시 반영')
-    expect(text).not.toContain('초마다')
-  })
-
-  it('omits the push label while WS is unavailable', () => {
-    const el = mount(html`
-      <${KeeperLaneStrip}
-        keeper=${keeperFixture()}
-        inventory=${inventoryFixture()}
-        ready=${true}
-        loading=${false}
-        error=${null}
-      />
-    `)
-    expect(el.textContent ?? '').not.toContain('WS 즉시 반영')
-    expect(el.textContent ?? '').not.toContain('재조회')
+    expect(text).not.toContain('서버 기준')
+    expect(text).not.toContain('WS 즉시 반영')
+    expect(text).not.toContain('기다리는 작업이 없습니다')
   })
 
   it('renders an explicit gap when the keeper is absent from the inventory', () => {

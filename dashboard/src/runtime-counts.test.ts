@@ -593,4 +593,17 @@ describe('shouldShowExecutionFallbackState', () => {
       expectedCount: 5,
     })).toBe(false)
   })
+
+  it('hides the fallback state after load even when counts are partial', () => {
+    // A loaded-but-partial roster is described by the roster rows and health
+    // counts themselves; the permanent "일부만 불러왔습니다" diagnostic banner
+    // was removed for layout room.
+    expect(shouldShowExecutionFallbackState({
+      executionLoaded: true,
+      executionLoading: false,
+      executionError: null,
+      loadedCount: 3,
+      expectedCount: 5,
+    })).toBe(false)
+  })
 })

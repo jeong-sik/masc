@@ -3,13 +3,8 @@ import type { VNode } from 'preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-preact'
-import { fetchLogs, fetchProviderLogsCatalog, fetchProviderLogTail } from '../api/dashboard.js'
-import type {
-  LogEntry,
-  ProviderLogCatalogEntry,
-  ProviderLogsCatalogResponse,
-  ProviderLogTailResponse,
-} from '../api/dashboard.js'
+import { fetchLogs } from '../api/dashboard.js'
+import type { LogEntry } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
 import { asRecord, asNullableString, mergeRouteRecord, hasRouteContext, type MutableRouteContext } from './common/normalize'
 import { TextInput } from './common/input'
@@ -55,16 +50,12 @@ export interface LogWindowSummary {
 }
 
 const logResource = createAsyncResource<LogData>()
-const providerLogCatalogResource = createAsyncResource<ProviderLogsCatalogResponse>()
-const providerLogTailResource = createAsyncResource<ProviderLogTailResponse>()
 const levelFilter = signal('INFO')
 const moduleInput = signal('')
 const appliedModuleFilter = signal('')
 const autoRefresh = signal(true)
 const DEFAULT_LOG_LIMIT = 200
 const logLimit = signal(DEFAULT_LOG_LIMIT)
-const providerLogProvider = signal('')
-const providerLogLines = signal(200)
 const latestSeq = signal<number | null>(null)
 const categoryFilter = signal('')
 // Client-side display-kind filter for the primary toolbar chips
@@ -135,9 +126,8 @@ const LOG_KIND_FILTERS: readonly { value: LogDisplayKind | ''; label: string }[]
   { value: 'approval', label: 'Approval' },
   { value: 'broadcast', label: 'Broadcast' },
 ]
-// Backend log category, surfaced in the advanced (details) menu so the
-// provider-log category filter is preserved while the primary toolbar uses
-// the client-side display-kind chips above.
+// Backend log category, surfaced in the advanced (details) menu while the
+// primary toolbar uses the client-side display-kind chips above.
 const LOG_CATEGORY_OPTIONS: readonly { value: string; label: string }[] = [
   { value: '', label: '전체 카테고리' },
   { value: 'tool', label: 'tool' },
@@ -450,19 +440,6 @@ function sourceTone(source: string): string {
   }
 }
 
-function selectableProviderLogs(
-  catalog: ProviderLogsCatalogResponse | undefined,
-): ProviderLogCatalogEntry[] {
-  return (catalog?.providers ?? []).filter(provider =>
-    provider.enabled && typeof provider.path === 'string' && provider.path.trim() !== '',
-  )
-}
-
-function providerLogOptionLabel(provider: ProviderLogCatalogEntry): string {
-  const pathLabel = lastPathSegment(provider.path ?? undefined)
-  return pathLabel ? `${provider.display_name} - ${pathLabel}` : provider.display_name
-}
-
 async function loadLogs(mode: LoadMode = 'reset') {
   const requestId = ++latestRequestId
 
@@ -574,29 +551,6 @@ export async function loadOlder() {
   } finally {
     olderLoading.value = false
   }
-}
-
-async function loadProviderLogCatalog() {
-  return providerLogCatalogResource.load(async () => {
-    const resp = await fetchProviderLogsCatalog()
-    const selectable = selectableProviderLogs(resp)
-    const stillSelected = selectable.some(provider => provider.id === providerLogProvider.value)
-    if (!stillSelected) {
-      providerLogProvider.value = selectable[0]?.id ?? ''
-    }
-    return resp
-  })
-}
-
-async function loadSelectedProviderLog() {
-  const provider = providerLogProvider.value
-  if (!provider) {
-    providerLogTailResource.reset()
-    return
-  }
-  return providerLogTailResource.load(() =>
-    fetchProviderLogTail(provider, { lines: providerLogLines.value }),
-  )
 }
 
 // Pretty-print a nested details value as a JSON code block body, matching the
@@ -916,100 +870,6 @@ function renderLogProvenance(data: LogData | undefined) {
   `
 }
 
-function renderProviderLogPanel() {
-  const catalogState = providerLogCatalogResource.state.value
-  const catalog = catalogState.status === 'loaded' ? catalogState.data : undefined
-  const configuredProviders = catalog?.providers ?? []
-  const selectableProviders = selectableProviderLogs(catalog)
-  const selectedProvider =
-    selectableProviders.find(provider => provider.id === providerLogProvider.value) ?? null
-  const tailState = providerLogTailResource.state.value
-  const tail = tailState.status === 'loaded' ? tailState.data : undefined
-  const tailText = tail?.entries.map(entry => entry.text).join('\n') ?? ''
-  const disabledCount = configuredProviders.filter(provider => !provider.enabled).length
-
-  if (
-    catalogState.status === 'idle'
-    || (configuredProviders.length === 0 && catalogState.status !== 'error')
-  ) {
-    return null
-  }
-
-  return html`
-    <div class="v2-logs-provider-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
-      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-divider)] px-3 py-2">
-        <div class="flex flex-wrap items-center gap-2 text-2xs">
-          <${StatusChip} tone="info" uppercase=${false}>provider logs</${StatusChip}>
-          ${selectedProvider
-            ? html`<${StatusChip} tone="neutral" uppercase=${false}>${selectedProvider.protocol}</${StatusChip}>`
-            : null}
-          ${selectedProvider?.path
-            ? html`<${StatusChip} tone="neutral" uppercase=${false}>${lastPathSegment(selectedProvider.path)}</${StatusChip}>`
-            : null}
-          ${disabledCount > 0
-            ? html`<${StatusChip} tone="warn" uppercase=${false}>disabled ${disabledCount}</${StatusChip}>`
-            : null}
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          ${selectableProviders.length > 0
-            ? html`
-              <${Select}
-                class="logs-select px-3 py-2 text-xs"
-                name="provider-log-provider"
-                ariaLabel="Provider log"
-                value=${providerLogProvider.value}
-                options=${selectableProviders.map(provider => ({
-                  value: provider.id,
-                  label: providerLogOptionLabel(provider),
-                }))}
-                onInput=${(value: string) => { providerLogProvider.value = value }}
-              />
-              <${Select}
-                class="logs-select px-3 py-2 text-xs"
-                name="provider-log-lines"
-                ariaLabel="Provider log lines"
-                value=${String(providerLogLines.value)}
-                options=${['50', '100', '200', '500', '1000', '3000']}
-                onInput=${(value: string) => { providerLogLines.value = parseInt(value, 10) }}
-              />
-              <button
-                type="button"
-                class="logs-refresh-btn rounded-[var(--r-1)] border border-[var(--accent-22)] bg-[var(--accent-10)] px-3 py-2 text-2xs font-medium text-[var(--color-accent-fg)]"
-                onClick=${() => { void loadSelectedProviderLog() }}
-                disabled=${tailState.status === 'loading'}
-              >
-                ${tailState.status === 'loading' ? '...' : 'tail'}
-              </button>
-            `
-            : null}
-        </div>
-      </div>
-
-      ${catalogState.status === 'error'
-        ? html`<div class="px-3 py-3 text-xs text-[var(--err-fg)]">${catalogState.message}</div>`
-        : null}
-      ${catalog?.error
-        ? html`<div class="px-3 py-3 text-xs text-[var(--err-fg)]">${catalog.error}</div>`
-        : null}
-      ${selectableProviders.length === 0 && catalogState.status === 'loaded'
-        ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)]">runtime.toml provider log tail is disabled.</div>`
-        : null}
-      ${tailState.status === 'error'
-        ? html`<div class="px-3 py-3 text-xs text-[var(--err-fg)]">${tailState.message}</div>`
-        : null}
-      ${selectedProvider && tailState.status !== 'error'
-        ? html`
-          <pre
-            class="m-0 max-h-72 min-h-32 overflow-auto whitespace-pre-wrap break-words px-3 py-3 font-mono text-2xs leading-relaxed text-[var(--color-fg-primary)]"
-            data-testid="provider-log-tail"
-          >${tailState.status === 'loading' && !tail ? 'loading...' : tailText}</pre>
-        `
-        : null}
-    </div>
-  `
-}
-
 export function LogViewer() {
   useEffect(() => {
     let pollId: ReturnType<typeof setInterval> | null = null
@@ -1057,44 +917,6 @@ export function LogViewer() {
     }
   }, [])
 
-  useEffect(() => {
-    providerLogCatalogResource.reset()
-    providerLogTailResource.reset()
-    void loadProviderLogCatalog()
-  }, [])
-
-  useEffect(() => {
-    let pollId: ReturnType<typeof setInterval> | null = null
-
-    const restart = () => {
-      if (pollId) {
-        clearInterval(pollId)
-        pollId = null
-      }
-      providerLogTailResource.reset()
-      void loadSelectedProviderLog()
-      if (!autoRefresh.value || !providerLogProvider.value) return
-      pollId = setInterval(() => {
-        void loadSelectedProviderLog()
-      }, POLL_INTERVAL_MS)
-    }
-
-    restart()
-
-    const unsubscribeProvider = providerLogProvider.subscribe(restart)
-    const unsubscribeLines = providerLogLines.subscribe(restart)
-    const unsubscribeAutoRefresh = autoRefresh.subscribe(restart)
-
-    return () => {
-      if (pollId) {
-        clearInterval(pollId)
-      }
-      unsubscribeProvider()
-      unsubscribeLines()
-      unsubscribeAutoRefresh()
-    }
-  }, [])
-
   const s = logResource.state.value
   const logData = s.status === 'loaded' ? s.data : undefined
   const logEntries = logData?.entries ?? EMPTY_LOG_ENTRIES
@@ -1126,8 +948,6 @@ export function LogViewer() {
   let emptyMessage = '조건에 맞는 로그가 없습니다.'
   if (logLoading) emptyMessage = '로그를 불러오는 중...'
   else if (kindFilter.value !== '') emptyMessage = '해당하는 이벤트 없음'
-  const providerDiagnostics = renderProviderLogPanel()
-
   return html`
     <div class="logs-viewer v2-logs-surface lg">
       <section class="v2-logs-panel" aria-label="로그 뷰어">
@@ -1261,8 +1081,6 @@ export function LogViewer() {
                 latestSeq.value = null
                 logResource.reset()
                 void loadLogs('reset')
-                void loadProviderLogCatalog()
-                void loadSelectedProviderLog()
               }}
               disabled=${logLoading}
             >
@@ -1285,19 +1103,6 @@ export function LogViewer() {
               ${renderLogSummary(summary)}
             </div>
           </details>
-          ${providerDiagnostics
-            ? html`
-              <details class="v2-logs-diagnostics" data-testid="logs-provider-diagnostics">
-                <summary>
-                  <span>Provider diagnostics</span>
-                  <span class="mono">runtime.toml log tail</span>
-                </summary>
-                <div class="v2-logs-diagnostics-body">
-                  ${providerDiagnostics}
-                </div>
-              </details>
-            `
-            : null}
         </div>
 
         <div class="v2-logs-table-header lg-colhd">

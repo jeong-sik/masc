@@ -108,6 +108,43 @@ let test_read_recent_keeper_filter () =
 (* The dashboard /tool-calls handler derives each keeper's slice from one
    shared fleet read instead of per-keeper [read_recent] calls. The
    derivation must be observationally equal to [read_recent]. *)
+(* The unfiltered read stops at [n]; the keeper-filtered one still scans past
+   it to find [n] matches. Both have to hold at once — dropping the over-scan
+   everywhere would silently shorten per-keeper answers, and keeping it
+   everywhere reads five times the store for a fleet answer that cannot
+   change. *)
+let test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n () =
+  with_tmp_log (fun () ->
+    List.iter
+      (fun (keeper, tool) ->
+        Keeper_tool_call_log.log_call
+          ~keeper_name:keeper ~tool_name:tool
+          ~input:(`Assoc []) ~output_text:"out"
+          ~success:true ~duration_ms:1.0 ())
+      [ ("alice", "t1"); ("bob", "t2"); ("bob", "t3"); ("bob", "t4")
+      ; ("bob", "t5"); ("bob", "t6"); ("bob", "t7"); ("bob", "t8")
+      ; ("bob", "t9"); ("alice", "t10")
+      ];
+    let tools rows =
+      List.map
+        (fun json ->
+          match Safe_ops.json_string_opt "tool" json with
+          | Some tool -> tool
+          | None -> "?")
+        rows
+    in
+    Alcotest.(check (list string))
+      "unfiltered read returns exactly the newest n"
+      [ "t9"; "t10" ]
+      (tools (Keeper_tool_call_log.read_recent ~n:2 ()));
+    (* alice's two rows sit at opposite ends of the store, so finding both
+       requires reading well past n — this is what the over-scan buys. *)
+    Alcotest.(check (list string))
+      "keeper-filtered read still scans past n to find n matches"
+      [ "t1"; "t10" ]
+      (tools (Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:2 ())))
+;;
+
 let test_fleet_rows_derivation_matches_read_recent () =
   with_tmp_log (fun () ->
     List.iter
@@ -1299,6 +1336,8 @@ let () =
         ; eio_test "keeper filter" test_read_recent_keeper_filter
         ; eio_test "fleet-row derivation equals read_recent"
             test_fleet_rows_derivation_matches_read_recent
+        ; eio_test "unfiltered read is exactly n; filtered still finds n"
+            test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n
         ; eio_test "exact AGENT_CORE occurrence" test_exact_agent_core_occurrence_persisted
         ] )
     ; ( "redaction",

@@ -1,0 +1,15 @@
+(library
+ (name ocaml_boundary_audit_lib)
+ (wrapped false)
+ (modules ocaml_boundary_audit)
+ (libraries compiler-libs.common unix yojson))
+
+(executable
+ (name main)
+ (modules main)
+ (libraries ocaml_boundary_audit_lib unix))
+
+(test
+ (name test_ocaml_boundary_audit)
+ (modules test_ocaml_boundary_audit)
+ (libraries alcotest ocaml_boundary_audit_lib unix))

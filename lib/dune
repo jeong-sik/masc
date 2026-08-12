@@ -4,7 +4,8 @@
  (flags :standard)
  (public_name masc)
  (private_modules
-  keeper_fs_durable_directory)
+  keeper_fs_durable_directory
+  keeper_runtime_trust_snapshot_core)
  (libraries
   mcp_protocol
   mcp_protocol.eio

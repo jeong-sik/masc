@@ -121,6 +121,50 @@ let test_file_uri_resolution_rejects_symlink_escape () =
          (Lsp.resolve_relative ~base ("file://" ^ link)))
 ;;
 
+let document_params ~uri line =
+  `Assoc
+    [ "textDocument", `Assoc [ "uri", `String uri ]
+    ; "position", `Assoc [ "line", line ]
+    ]
+;;
+
+let test_document_request_is_resolved_once () =
+  let base = "/workspace/masc" in
+  let uri = "file:///workspace/masc/lib/server.ml" in
+  match Lsp.resolve_document_request ~base (document_params ~uri (`Int 7)) with
+  | Error _ -> fail "expected an in-workspace document request"
+  | Ok request ->
+    check string "URI retained" uri request.uri;
+    check string "relative path resolved" "lib/server.ml" request.relative_path;
+    check (option int) "line resolved" (Some 7) request.line;
+    (match request.language with
+     | Lsp.Known_lang "ocaml" -> ()
+     | Lsp.Known_lang language -> failf "unexpected language: %s" language
+     | Lsp.Unknown_lang -> fail "expected the .ml language to resolve")
+;;
+
+let test_document_request_keeps_decode_failures_typed () =
+  let base = "/workspace/masc" in
+  let missing_uri = `Assoc [ "position", `Assoc [ "line", `Int 1 ] ] in
+  (match Lsp.resolve_document_request ~base missing_uri with
+   | Error Lsp.Missing_document_uri -> ()
+   | Error Lsp.Document_uri_outside_workspace ->
+     fail "missing URI must not be classified as an out-of-workspace path"
+   | Ok _ -> fail "missing URI must fail decoding");
+  let outside_uri = "file:///tmp/outside.ml" in
+  (match
+     Lsp.resolve_document_request ~base (document_params ~uri:outside_uri (`Int 1))
+   with
+   | Error Lsp.Document_uri_outside_workspace -> ()
+   | Error Lsp.Missing_document_uri ->
+     fail "outside URI must not be classified as missing"
+   | Ok _ -> fail "outside URI must fail decoding");
+  let inside_uri = "file:///workspace/masc/lib/server.ml" in
+  match Lsp.resolve_document_request ~base (document_params ~uri:inside_uri (`Int (-1))) with
+  | Error _ -> fail "negative line must not invalidate a document path"
+  | Ok request -> check (option int) "negative line is absent" None request.line
+;;
+
 let test_dispatch_workers_are_parallelized () =
   check
     bool
@@ -401,6 +445,10 @@ let () =
             test_file_uri_resolution_is_workspace_scoped
         ; test_case "file uri resolution rejects symlink escape" `Quick
             test_file_uri_resolution_rejects_symlink_escape
+        ; test_case "document request resolves once" `Quick
+            test_document_request_is_resolved_once
+        ; test_case "document request decode failures stay typed" `Quick
+            test_document_request_keeps_decode_failures_typed
         ; test_case "dispatch workers are parallelized" `Quick
             test_dispatch_workers_are_parallelized
         ; test_case "/api/v1/ide/lsp is a Ws upgrade route" `Quick

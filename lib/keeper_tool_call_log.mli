@@ -189,13 +189,20 @@ val read_recent :
   unit ->
   Yojson.Safe.t list
 (** [read_recent ?keeper_name ?n ()] returns the [n] most recent entries,
-    optionally filtered by keeper name. Default [n=100]. *)
+    optionally filtered by keeper name. Default [n=100]. Reads the store tail
+    only far enough to answer: [n] rows unfiltered, [n *
+    {!read_over_scan_factor}] when filtering by keeper. *)
 
 val read_over_scan_factor : int
-(** Scan multiplier [read_recent] applies before its keeper filter: it
-    reads [n * read_over_scan_factor] fleet rows to find [n] matching
-    entries. Callers sharing one fleet read ({!read_recent_rows}) size
-    their window with this to reproduce [read_recent]'s coverage. *)
+(** Scan multiplier [read_recent] applies before its keeper filter: to end up
+    with [n] rows from one keeper it reads [n * read_over_scan_factor] fleet
+    rows. Callers sharing one fleet read ({!read_recent_rows}) size their
+    window with this to reproduce a per-keeper [read_recent]'s coverage.
+
+    It applies only when [keeper_name] is given. Without one the filter keeps
+    every row, so reading past [n] would parse rows that {!read_recent} then
+    discards — on a store averaging 6.8 KB per row that was 165 MB read for an
+    answer 33 MB contains. *)
 
 val read_recent_rows : n:int -> unit -> Yojson.Safe.t list
 (** [read_recent_rows ~n ()] returns the [n] most recent fleet-wide rows

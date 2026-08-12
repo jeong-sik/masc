@@ -764,7 +764,7 @@ let test_stopping_cancels_and_joins_autonomous_child () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let child_started, resolve_child_started = Eio.Promise.create () in
-  let caller_done, resolve_caller_done = Eio.Promise.create () in
+  let caller_result = Eio.Stream.create 1 in
   let never, _resolve_never = Eio.Promise.create () in
   let owner =
     owner_ok
@@ -775,17 +775,19 @@ let test_stopping_cancels_and_joins_autonomous_child () =
          ~initial_meta:(Some (make_meta "stopping-autonomous-child")))
   in
   Eio.Fiber.fork ~sw (fun () ->
-    (try
-       ignore
-         (Owner.run_autonomous_if_idle owner (fun () ->
-            Eio.Promise.resolve resolve_child_started ();
-            Eio.Promise.await never))
-     with
-     | _ -> ());
-    Eio.Promise.resolve resolve_caller_done ());
+    let result =
+      Owner.run_autonomous_if_idle owner (fun () ->
+        Eio.Promise.resolve resolve_child_started ();
+        Eio.Promise.await never)
+    in
+    Eio.Stream.add caller_result result);
   Eio.Promise.await child_started;
   ignore (owner_ok (Owner.begin_stopping owner));
-  Eio.Promise.await caller_done;
+  (match Eio.Stream.take caller_result with
+   | Error Owner.Owner_stopping -> ()
+   | Error error -> fail ("wrong stopped-child error: " ^ Owner.error_to_string error)
+   | Ok (`Ran _) -> fail "stopped autonomous child reported success"
+   | Ok (`Busy _) -> fail "admitted autonomous child became busy");
   check bool
     "stopping clears autonomous projection"
     true

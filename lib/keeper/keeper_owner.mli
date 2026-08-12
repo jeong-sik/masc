@@ -146,7 +146,9 @@ val run_autonomous_if_idle
 (** Mailbox-linearized autonomous admission. The callback runs in the Owner's
     child switch, while the actor remains responsive. An already-started child
     returns [`Busy] without consuming turn input. A Queued chat whose runner is
-    not ready does not block autonomous admission. *)
+    not ready does not block autonomous admission. Owner-directed cancellation
+    returns [Error Owner_stopping]; its private child-stop signal never escapes
+    this boundary. *)
 
 val run_maintenance_if_idle
   :  t

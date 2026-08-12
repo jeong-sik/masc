@@ -54,7 +54,7 @@ import { keepers } from '../../store'
 import { dashboardBearerToken } from '../../api/core'
 import { devTokenBootstrapStatus } from '../../api/dev-token'
 import { dashboardWsReady } from '../../dashboard-ws-state'
-import type { Repository } from '../../api/repositories'
+import { fetchRepositoryObservation, type Repository } from '../../api/repositories'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import { KeeperBadge } from '../keeper-badge'
 import type { WorkspaceFetchIssue } from './ide-data-workspace-store'
@@ -802,8 +802,34 @@ function IdeCursorRailRow({ cursor }: { readonly cursor: KeeperCursor }) {
  * keeper-v2 `.ide-repo` / `.ide-remote` / `.ide-web` / `.br` skin classes.
  *
  */
-function repositoryGitStatusView(repository: Repository) {
-  const status = repository.git_status
+// The repository list carries no git state — deriving it is two subprocesses
+// per repository — so the status bar asks for the one repository it shows.
+// Nothing is spent on the four repositories nobody is looking at.
+function RepositoryGitStatus({ repositoryId }: { readonly repositoryId: string }) {
+  const [status, setStatus] = useState<Repository['git_status']>(undefined)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setStatus(undefined)
+    fetchRepositoryObservation(repositoryId, { signal: controller.signal })
+      .then(repository => {
+        if (controller.signal.aborted) return
+        setStatus(repository?.git_status ?? null)
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return
+        setStatus(null)
+      })
+    return () => controller.abort()
+  }, [repositoryId])
+
+  if (status === undefined) {
+    return html`<span data-state="loading" title="git status --porcelain=v1 조회 중">변경 확인 중</span>`
+  }
+  return repositoryGitStatusView(status)
+}
+
+function repositoryGitStatusView(status: Repository['git_status']) {
   if (!status) {
     return html`<span data-state="missing" title="repository git_status 필드 미수신">변경 상태 없음</span>`
   }
@@ -875,7 +901,7 @@ function IdeRepoOrigin({
         : null}
       ${branch ? html`<span class="br" title="기본 브랜치 (default_branch)">${branch}</span>` : null}
       ${' · '}
-      ${repositoryGitStatusView(repository)}
+      <${RepositoryGitStatus} repositoryId=${repository.id} />
     </span>
   `
 }

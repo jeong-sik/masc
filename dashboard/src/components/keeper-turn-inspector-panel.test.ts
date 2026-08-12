@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { html } from 'htm/preact'
+import type { RawTraceTurn } from '../api/dashboard-keeper-prompt'
 
 const api = vi.hoisted(() => ({
   fetchKeeperRawTraces: vi.fn(),
@@ -27,9 +28,14 @@ function noTurns() {
 
 describe('KeeperTurnInspectorPanel', () => {
   it('lists a keeper\'s turn files and opens the one that is clicked', async () => {
-    api.fetchKeeperRawTraces.mockResolvedValue([
-      { file: 'turn-0007.jsonl', traceId: 'trace-0007', bytes: 2048, records: 4, modifiedAt: 1786000000 },
-    ])
+    const turn = {
+      file: 'turn-0007.jsonl',
+      traceId: 'trace-0007',
+      bytes: 390_000_000,
+      census: { state: 'prefix_only', budgetBytes: 262_144 },
+      modifiedAt: 1786000000,
+    } satisfies RawTraceTurn
+    api.fetchKeeperRawTraces.mockResolvedValue([turn])
     const raw = '{"kind":"request","model":"qwen3-6-35b"}'
     api.fetchKeeperRawTrace.mockResolvedValue({
       file: 'turn-0007.jsonl',
@@ -39,6 +45,7 @@ describe('KeeperTurnInspectorPanel', () => {
     })
 
     render(html`<${KeeperTurnInspectorPanel} keepers=${KEEPERS} />`)
+    expect(await screen.findByText(/256\.0 KB 초과 · 열어서 집계/)).toBeTruthy()
     fireEvent.click(await screen.findByText('turn-0007.jsonl'))
 
     // Literal JSONL is the default. A RAW badge must not hide it behind a
@@ -56,9 +63,14 @@ describe('KeeperTurnInspectorPanel', () => {
   // A damaged trace must not read as a shorter one: the record that failed to
   // decode holds its position and says why, rather than being dropped.
   it('keeps an undecodable record in place with its reason', async () => {
-    api.fetchKeeperRawTraces.mockResolvedValue([
-      { file: 'turn-0008.jsonl', traceId: 'trace-0008', bytes: 10, records: 2, modifiedAt: 1786000000 },
-    ])
+    const turn = {
+      file: 'turn-0008.jsonl',
+      traceId: 'trace-0008',
+      bytes: 10,
+      census: { state: 'whole_file', records: 2 },
+      modifiedAt: 1786000000,
+    } satisfies RawTraceTurn
+    api.fetchKeeperRawTraces.mockResolvedValue([turn])
     api.fetchKeeperRawTrace.mockResolvedValue({
       file: 'turn-0008.jsonl',
       totalRecords: 2,
@@ -70,6 +82,7 @@ describe('KeeperTurnInspectorPanel', () => {
     })
 
     render(html`<${KeeperTurnInspectorPanel} keepers=${KEEPERS} />`)
+    expect(await screen.findByText(/2건/)).toBeTruthy()
     fireEvent.click(await screen.findByText('turn-0008.jsonl'))
 
     expect(await screen.findByText(/레코드 2 를 읽지 못했습니다: not valid JSON/)).toBeTruthy()

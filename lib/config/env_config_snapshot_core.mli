@@ -1,20 +1,22 @@
-(** Core entry/provenance helpers for {!Env_config_snapshot}. *)
+(** Pure config-snapshot projection for {!Env_config_snapshot}.
 
-type entry
+    This module consumes already-collected observations. It neither reads the
+    environment nor retains reader closures. *)
+
+type spec
 
 type effective_source =
   | Default
   | Environment
 
-val entry :
-  ?sensitive:bool -> default:string -> string -> string -> entry
+type observation =
+  | Raw_environment of string option
+  | Applied_value of
+      { value : string
+      ; source : effective_source
+      }
 
-val effective_entry :
-  ?sensitive:bool ->
-  default:string ->
-  read:(unit -> string * effective_source) ->
-  string ->
-  string ->
-  entry
+val make_spec :
+  ?sensitive:bool -> default:string -> string -> string -> spec
 
-val category : string -> entry list -> string * Yojson.Safe.t
+val to_json : spec -> observation -> Yojson.Safe.t

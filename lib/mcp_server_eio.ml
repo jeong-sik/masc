@@ -139,7 +139,7 @@ let handle_request
         ~internal_keeper_runtime
         state
         id
-        params ->
+        call ->
       Mcp_server_eio_call_tool.handle_call_tool_eio
         ~execute_tool_eio
         ~maybe_emit_resource_notifications:
@@ -153,7 +153,7 @@ let handle_request
         ~internal_keeper_runtime
         state
         id
-        params)
+        call)
     ~handle_read_resource_eio:Mcp_server_eio_resource.handle_read_resource_eio
     ~clock
     ~sw

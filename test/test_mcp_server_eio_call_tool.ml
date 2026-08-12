@@ -98,6 +98,127 @@ let with_call_tool_state f =
       f env sw state)
 ;;
 
+let admit_call params =
+  match Masc.Mcp_server_eio_call_request.decode (Some params) with
+  | Ok request -> request
+  | Error error ->
+    fail
+      ("test supplied invalid tools/call params: "
+       ^ Masc.Mcp_server_eio_call_request.error_message error)
+;;
+
+let test_call_request_decodes_current_shape_once () =
+  let module Call = Masc.Mcp_server_eio_call_request in
+  let arguments = `Assoc [ "query", `String "status" ] in
+  (match
+     Call.decode
+       (Some
+          (`Assoc
+            [ "name", `String "masc_status"; "arguments", arguments ]))
+   with
+   | Ok request ->
+     check string "typed name" "masc_status" (Call.requested_name request);
+     check yojson "typed arguments" arguments (Call.arguments request)
+   | Error error -> fail (Call.error_message error));
+  (match Call.decode (Some (`Assoc [ "name", `String "masc_status" ])) with
+   | Ok request -> check yojson "absent arguments mean empty object" (`Assoc []) (Call.arguments request)
+   | Error error -> fail (Call.error_message error))
+;;
+
+let test_call_request_rejects_noncanonical_shapes () =
+  let module Call = Masc.Mcp_server_eio_call_request in
+  let rejected expected params =
+    match Call.decode params with
+    | Error error -> check string expected expected (Call.error_message error)
+    | Ok _ -> fail ("accepted invalid tools/call params: " ^ expected)
+  in
+  rejected "Missing params" None;
+  rejected "Invalid params: expected object" (Some (`List []));
+  rejected "Invalid params: expected object" (Some (`Tuple []));
+  rejected "Invalid params: name must be a string" (Some (`Assoc []));
+  rejected
+    "Invalid params: name must be a non-empty string"
+    (Some (`Assoc [ "name", `String "  " ]));
+  rejected
+    "Invalid params: name must not contain surrounding whitespace"
+    (Some (`Assoc [ "name", `String " masc_status" ]));
+  rejected
+    "Invalid params: arguments must be an object"
+    (Some
+       (`Assoc
+         [ "name", `String "masc_status"; "arguments", `Null ]));
+  rejected
+    "Invalid params: arguments must be an object"
+    (Some
+       (`Assoc
+         [ "name", `String "masc_status"
+         ; "arguments", `Variant ("invalid", None)
+         ]));
+  rejected
+    "Invalid params: duplicate name field"
+    (Some
+       (`Assoc
+         [ "name", `String "masc_status"; "name", `String "masc_status" ]));
+  rejected
+    "Invalid params: duplicate arguments field"
+    (Some
+       (`Assoc
+         [ "name", `String "masc_status"
+         ; "arguments", `Assoc []
+         ; "arguments", `Assoc []
+         ]))
+;;
+
+let test_invalid_call_params_do_not_reach_dispatch_handler () =
+  with_call_tool_state (fun env sw state ->
+    Auth.disable_auth (Masc.Mcp_server.workspace_config state).base_path;
+    let handler_calls = ref 0 in
+    let handle_call_tool_eio
+          ~sw:_
+          ~clock:_
+          ~profile:_
+          ?mcp_session_id:_
+          ?auth_token:_
+          ~internal_keeper_runtime:_
+          _state
+          _id
+          _request
+      =
+      incr handler_calls;
+      `Assoc []
+    in
+    let request params =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "jsonrpc", `String "2.0"
+          ; "id", `Int 1
+          ; "method", `String "tools/call"
+          ; "params", params
+          ])
+    in
+    List.iter
+      (fun params ->
+         let response =
+           Masc.Mcp_server_eio_protocol.handle_request
+             ~handle_call_tool_eio
+             ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+             ~clock:(Eio.Stdenv.clock env)
+             ~sw
+             state
+             (request params)
+         in
+         check
+           int
+           "wire error is Invalid_params"
+           (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_params)
+           U.(response |> member "error" |> member "code" |> to_int))
+      [ `Assoc [ "name", `String "masc_status"; "arguments", `Null ]
+      ; `Assoc [ "name", `String " " ]
+      ; `Assoc [ "name", `String "masc_status"; "name", `String "masc_status" ]
+      ];
+    check int "invalid calls never reach dispatch" 0 !handler_calls)
+;;
+
 let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
   Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
     ~execute_tool_eio:
@@ -122,10 +243,11 @@ let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
     ?mcp_session_id
     state
     (`Int 1)
-    (`Assoc
-      [ "name", `String "masc_status"
-      ; "arguments", `Assoc [ "_agent_name", `String "projection-test" ]
-      ])
+    (admit_call
+       (`Assoc
+         [ "name", `String "masc_status"
+         ; "arguments", `Assoc [ "_agent_name", `String "projection-test" ]
+         ]))
 ;;
 
 let test_threads_exact_mcp_invocation_identity () =
@@ -308,10 +430,11 @@ let test_handle_call_executes_transient_failure_once () =
           ~clock:(Eio.Stdenv.clock env)
           state
           (`Int 1)
-          (`Assoc
-            [ "name", `String "masc_status"
-            ; "arguments", `Assoc [ "_agent_name", `String "single-call-test" ]
-            ])
+          (admit_call
+             (`Assoc
+               [ "name", `String "masc_status"
+               ; "arguments", `Assoc [ "_agent_name", `String "single-call-test" ]
+               ]))
       in
       check int "transient tool invoked once" 1 !calls;
       check int
@@ -385,11 +508,12 @@ let test_call_captures_admission_scope_across_workspace_switch () =
           ~clock:(Eio.Stdenv.clock env)
           state
           (`Int 41)
-          (`Assoc
-            [ "name", `String "masc_status"
-            ; ( "arguments"
-              , `Assoc [ "_agent_name", `String "scope-admission-test" ] )
-            ])
+          (admit_call
+             (`Assoc
+               [ "name", `String "masc_status"
+               ; ( "arguments"
+                 , `Assoc [ "_agent_name", `String "scope-admission-test" ] )
+               ]))
       in
       check string "tool call succeeds" "ok"
         (result_envelope response |> U.member "status" |> U.to_string);
@@ -790,6 +914,12 @@ let () =
         [
           test_case "free-form text does not control response" `Quick
             test_free_form_failure_text_does_not_control_response;
+          test_case "call request decodes current shape once" `Quick
+            test_call_request_decodes_current_shape_once;
+          test_case "call request rejects noncanonical shapes" `Quick
+            test_call_request_rejects_noncanonical_shapes;
+          test_case "invalid call params stop before dispatch" `Quick
+            test_invalid_call_params_do_not_reach_dispatch_handler;
           test_case "typed outcome alone controls projection" `Quick
             test_typed_outcome_alone_controls_projection;
           test_case "transient failure executes once" `Quick

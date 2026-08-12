@@ -120,7 +120,7 @@ val handle_request :
      internal_keeper_runtime:bool ->
      Mcp_server.server_state ->
      Yojson.Safe.t ->
-     Yojson.Safe.t ->
+     Mcp_server_eio_call_request.t ->
      Yojson.Safe.t) ->
   handle_read_resource_eio:
     (Mcp_server.server_state ->

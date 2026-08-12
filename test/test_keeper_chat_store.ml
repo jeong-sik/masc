@@ -1296,7 +1296,8 @@ let test_append_turn_redacts_all_supplied_block_strings () =
               ; caption = Some ("flow " ^ secret)
               }
           ; B.Trace
-              { trace =
+              { omitted = 0
+              ; trace =
                   [ B.Trace_think
                       { text = "thinking " ^ secret
                       ; content_withheld = false
@@ -1578,6 +1579,7 @@ let test_to_json_array_appends_trace_block_to_assistant_turn () =
           Some
             (B.Trace
                {
+                 omitted = 0;
                  trace =
                    [
                      B.Trace_think
@@ -1681,7 +1683,8 @@ let test_to_json_array_stream_contract_trace_join () =
         if Ids.Turn_ref.equal turn_ref tref then
           Some
             (B.Trace
-               { trace =
+               { omitted = 0
+               ; trace =
                    [ B.Trace_think
                        { text = "thinking";
                          content_withheld = false;
@@ -1801,7 +1804,8 @@ let test_to_json_array_stream_contract_lifecycle_replay () =
         if Ids.Turn_ref.equal turn_ref tref then
           Some
             (B.Trace
-               { trace =
+               { omitted = 0
+               ; trace =
                    [ B.Trace_think
                        { text = "retained trace";
                          content_withheld = false;

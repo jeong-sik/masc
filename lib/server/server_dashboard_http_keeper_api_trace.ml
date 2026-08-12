@@ -194,6 +194,20 @@ let allowed_trace_id_set trace_ids =
     trace_ids
 ;;
 
+(* How many of one turn's trace steps the chat transcript carries.
+
+   A trace block is one turn's steps, and the transcript embeds every block.
+   Measured on this host: one keeper's transcript held 22,296 steps across 162
+   blocks, of which a single runaway turn held 16,882 — 1.65 MB of the 2.29 MB
+   that trace blocks contributed to a 2.51 MB response, against 0.02 MB of
+   actual conversation prose. The median block held 17 steps and the
+   second-largest 175, so this cap leaves every ordinary turn whole and abridges
+   only the pathological one.
+
+   The block reports how many steps it dropped rather than just being shorter,
+   and the turn's steps stay available in full from the raw-trace surface. *)
+let chat_trace_steps_per_turn = 200
+
 let chat_trace_block_by_turn_ref ~max_lines ~max_internal_lines
     ~(config : Workspace.config)
     ~(keeper_name : string)
@@ -236,5 +250,15 @@ let chat_trace_block_by_turn_ref ~max_lines ~max_internal_lines
       in
       (match trace with
        | [] -> None
-       | trace -> Some (Keeper_chat_blocks.Trace { trace }))
+       | trace ->
+         (* Newest steps are the ones an operator is reading toward, so the
+            tail is what survives the cap. *)
+         let total = List.length trace in
+         let omitted = max 0 (total - chat_trace_steps_per_turn) in
+         let trace =
+           if omitted = 0
+           then trace
+           else List.filteri (fun index _ -> index >= omitted) trace
+         in
+         Some (Keeper_chat_blocks.Trace { trace; omitted }))
 ;;

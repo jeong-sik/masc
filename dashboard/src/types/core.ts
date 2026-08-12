@@ -806,7 +806,10 @@ export type ChatTraceToolStep = {
   agentCoreBlockIndex?: number
 }
 export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceProgressStep | ChatTraceToolStep
-export type ChatTraceBlock = { t: 'trace'; trace: ChatTraceStep[] }
+// `omitted` counts steps this surface did not carry (absent or 0 when whole).
+// A shorter `trace` with no count would read as a shorter turn, which is a
+// different fact from a turn whose trace was abridged for transport.
+export type ChatTraceBlock = { t: 'trace'; trace: ChatTraceStep[]; omitted?: number }
 export type ChatThinkingBlock = { t: 'thinking'; content: string; redacted: boolean }
 
 export type ChatLinkBlock = { t: 'link'; url: string; title: string; desc?: string; meta?: string; fav?: string; kind?: string }

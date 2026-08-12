@@ -146,7 +146,10 @@ type trace_step =
       agent_core_block_index : int option;
     }
 
-type trace_block = { trace : trace_step list }
+type trace_block =
+  { trace : trace_step list
+  ; omitted : int
+  }
 
 type thinking_block = {
   content : string;
@@ -586,11 +589,15 @@ let block_to_yojson = function
       [ ("t", `String "status")
       ; ("kind", `String (status_kind_to_label kind))
       ]
-  | Trace { trace } ->
+  | Trace { trace; omitted } ->
+    (* [omitted] is emitted only when non-zero, so a normal turn's wire shape
+       is unchanged. It states how many steps this surface did not carry — a
+       shorter [trace] with no count would read as a shorter turn. *)
     `Assoc
-      [ ("t", `String "trace")
-      ; ("trace", `List (List.map trace_step_to_yojson trace))
-      ]
+      ([ ("t", `String "trace")
+       ; ("trace", `List (List.map trace_step_to_yojson trace))
+       ]
+       @ (if omitted > 0 then [ ("omitted", `Int omitted) ] else []))
   | Thinking { content; redacted } ->
     (* redacted defaults to false (omitted); only emit when true so the
        common non-redacted case stays minimal and legacy decoders that do
@@ -789,7 +796,15 @@ let block_of_yojson json : chat_block option =
      | Some "trace" ->
        Option.bind (List.assoc_opt "trace" fields) (fun trace_json ->
          Option.bind (trace_steps_of_yojson trace_json) (fun trace ->
-           if trace = [] then None else Some (Trace { trace })))
+           if trace = []
+           then None
+           else (
+             let omitted =
+               match List.assoc_opt "omitted" fields with
+               | Some (`Int n) when n > 0 -> n
+               | _ -> 0
+             in
+             Some (Trace { trace; omitted }))))
      | Some "thinking" ->
        (* content is required (empty string for signature-only redacted thinking);
           redacted defaults to false and is only honoured when explicitly

@@ -229,11 +229,7 @@ let handle_gate_connectors _state request reqd =
     int_query_param request "audit_limit" ~default:10
     |> fun value -> max 1 (min 50 value)
   in
-  let gate_status = Channel_gate_metrics.snapshot_json () in
-  let json =
-    Channel_gate_connector.connectors_json ~gate_status_json:gate_status
-      ~audit_limit ()
-  in
+  let json = Channel_gate_connector.connectors_json ~audit_limit () in
   respond_public_read_json_value ~status:`OK request reqd json
 
 (** GET /api/v1/gate/connector/status?name=<connector>&audit_limit=<n>

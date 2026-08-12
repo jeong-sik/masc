@@ -10,6 +10,7 @@
    typing indicator (Slack's is a separate Web API we don't surface yet). *)
 
 module Store = Channel_gate_binding_store
+module U = Yojson.Safe.Util
 
 type binding = Store.binding = {
   channel_id : string;
@@ -64,6 +65,12 @@ let set_trigger_policy (p : Slack_gateway_state.trigger_policy) =
   trigger_policy_ref := Some p
 
 let get_trigger_policy () = !trigger_policy_ref
+
+let trigger_policy_json () =
+  match get_trigger_policy () with
+  | None -> `Null
+  | Some policy ->
+    `String (Slack_gateway_state.trigger_policy_to_string policy)
 
 (* Outbound REST uses the bot token (xoxb-...). The app token (xapp-...) is read
    only by {!Slack_socket_client} for apps.connections.open. Both resolve
@@ -141,6 +148,7 @@ let status_json ?(audit_limit = 10) () =
   `Assoc
     [ ("channel", `String channel)
     ; ("capabilities", Channel_gate_connector_capability.all_json)
+    ; ("trigger_policy", trigger_policy_json ())
     ; ("available", `Bool available)
     ; ("connected", `Bool connected)
     ; ("stale", `Bool stale)
@@ -161,8 +169,6 @@ let status_json ?(audit_limit = 10) () =
     ; ("runtime_bindings_count", `Int (List.length configured_bindings))
     ; ("configured_bindings", `List configured_binding_json)
     ; ("recent_audit", `List recent_audit)
-    ; ("bindings", `List configured_binding_json)
-    ; ("audit", `List recent_audit)
     ; ("bot_token_present", `Bool bot_present)
     ; ("app_token_present", `Bool app_present)
     ; ("updated_at", `String updated_at)
@@ -178,39 +184,38 @@ let status_json ?(audit_limit = 10) () =
            | None -> "") )
     ]
 
-let connector_json ?gate_status_json ?(audit_limit = 10) () =
+let connector_json ?(audit_limit = 10) () =
   let status = status_json ~audit_limit () in
-  let base =
-    match gate_status_json with
-    | None -> status
-    | Some extra ->
-      `Assoc
-        (match (status, extra) with
-         | `Assoc s, `Assoc e -> s @ e
-         | _ -> [ ("status", status); ("gate_status", extra) ])
+  let fields =
+    [ "channel"
+    ; "capabilities"
+    ; "trigger_policy"
+    ; "available"
+    ; "connected"
+    ; "stale"
+    ; "stale_after_sec"
+    ; "status"
+    ; "error"
+    ; "status_source"
+    ; "gateway_state"
+    ; "status_path"
+    ; "binding_store_path"
+    ; "audit_path"
+    ; "binding_source"
+    ; "binding_store_read_ok"
+    ; "binding_store_error"
+    ; "runtime_bindings_count"
+    ; "configured_bindings"
+    ; "recent_audit"
+    ; "updated_at"
+    ; "last_ready_at"
+    ; "bot_user_id"
+    ]
   in
-  (* The dashboard connectors endpoint
-     ([Channel_gate_connector.connectors_json]) matches each connector to its
-     tile by [connector_id]; the dashboard's [findConnector(connectors,
-     "slack")] returns null without it, so a connected Slack gateway rendered
-     as an unstarted "설정 필요" placeholder. Mirror Discord/Telegram
-     [connector_json], which carry both identity fields at the top level.
-     Prepend (with a dedupe filter) so the identity is authoritative even if a
-     merged [gate_status_json] also supplied the keys. *)
-  match base with
-  | `Assoc fields ->
-    let without_identity =
-      List.filter
-        (fun (k, _) ->
-          not
-            (String.equal k "connector_id" || String.equal k "display_name"))
-        fields
-    in
-    `Assoc
-      (("connector_id", `String connector_id)
-      :: ("display_name", `String display_name)
-      :: without_identity)
-  | other -> other
+  `Assoc
+    (("connector_id", `String connector_id)
+     :: ("display_name", `String display_name)
+     :: List.map (fun field -> field, status |> U.member field) fields)
 
 let bind ~channel_id ~keeper_name ~actor_name =
   let channel_id = String.trim channel_id in

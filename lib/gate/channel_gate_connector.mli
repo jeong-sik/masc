@@ -34,7 +34,6 @@ module type S = sig
   (** Runtime status snapshot for this connector. *)
 
   val connector_json :
-    ?gate_status_json:Yojson.Safe.t ->
     ?audit_limit:int ->
     unit ->
     Yojson.Safe.t
@@ -91,6 +90,6 @@ val find : string -> (module S) option
 val all : unit -> (module S) list
 (** Snapshot of all registered connectors, in unspecified order. *)
 
-val connectors_json : ?gate_status_json:Yojson.Safe.t -> ?audit_limit:int -> unit -> Yojson.Safe.t
+val connectors_json : ?audit_limit:int -> unit -> Yojson.Safe.t
 (** Aggregate descriptor for all registered connectors.
     Returns [{connectors: [...], total: N, active_count: N, generated_at: "..."}]. *)

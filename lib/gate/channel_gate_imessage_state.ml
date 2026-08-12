@@ -168,26 +168,8 @@ let status_json ?(audit_limit = 10) () =
       ("recent_audit", `List recent_audit);
     ]
 
-let list_assoc_field key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-
-let connector_json ?gate_status_json ?(audit_limit = 10) () =
+let connector_json ?(audit_limit = 10) () =
   let status = status_json ~audit_limit () in
-  let observed_channel =
-    match gate_status_json with
-    | None -> `Null
-    | Some json -> (
-        match list_assoc_field "channels" json with
-        | Some channels -> (
-            match
-              Json_util.find_assoc_row_by_string_field ~field:"channel"
-                ~value:channel channels
-            with
-            | Some row -> row
-            | None -> `Null)
-        | None -> `Null)
-  in
   `Assoc
     [
       ("connector_id", `String connector_id);
@@ -220,7 +202,6 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("pid", `Int (int_member status "pid"));
       ("configured_bindings", status |> U.member "configured_bindings");
       ("recent_audit", status |> U.member "recent_audit");
-      ("observed_channel", observed_channel);
     ]
 
 let bind ~channel_id ~keeper_name ~actor_name =

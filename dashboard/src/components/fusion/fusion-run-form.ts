@@ -186,8 +186,14 @@ export function FusionRunForm() {
                   option,
                 )
               : null
+            // Label built outside the template: htm parses the tagged
+            // template, and a nested backtick inside an interpolation does not
+            // survive that pass.
+            const label = reason
+              ? `${option.replace(/_/g, ' ')} — ${reason}`
+              : option.replace(/_/g, ' ')
             return html`<option value=${option} disabled=${!allowed.includes(option)}>
-              ${option.replace(/_/g, ' ')}${reason ? ` — ${reason}` : ''}
+              ${label}
             </option>`
           })}
         </select>
@@ -205,7 +211,7 @@ export function FusionRunForm() {
         ></textarea>
       </label>
 
-      <label>
+      <label class="v2-mobile-operator-target">
         <input
           type="checkbox"
           data-testid="fusion-run-web-tools"

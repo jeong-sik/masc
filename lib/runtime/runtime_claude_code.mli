@@ -66,10 +66,16 @@ type turn_result =
   ; usage : turn_usage option
   }
 
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
-  ; abort_turn : string option
+  ; abort_turn : host_stop option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -117,6 +123,7 @@ type error =
       ; response_emitted : bool
       }
   | Turn_failed of string
+  | Stopped_by_host of host_stop
   | Quota_blocked of
       { api_error_status : int option
       ; rate_limit : rate_limit option

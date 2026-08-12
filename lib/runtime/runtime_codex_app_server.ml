@@ -61,10 +61,16 @@ type turn_result =
   ; resumed : bool
   }
 
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
-  ; abort_turn : string option
+  ; abort_turn : host_stop option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -133,6 +139,7 @@ type error =
       ; tool_effect_attempted : bool
       }
   | Turn_failed of string
+  | Stopped_by_host of host_stop
   | Turn_interrupted
   | Process_exited of string
   | Timeout of
@@ -158,6 +165,11 @@ let error_to_string = function
       tool_effect_attempted
       message
   | Turn_failed detail -> "Codex app-server turn failed: " ^ detail
+  | Stopped_by_host (Repeated_tool_call { tool_name; repeated_count }) ->
+    Printf.sprintf
+      "Codex app-server stopped after repeated tool call: tool=%s count=%d"
+      tool_name
+      repeated_count
   | Turn_interrupted -> "Codex app-server turn was interrupted"
   | Process_exited detail -> "Codex app-server exited before completion: " ^ detail
   | Timeout { seconds; turn_accepted } ->
@@ -178,6 +190,7 @@ let error_kind = function
   | Unsupported_server_request _ -> "unsupported_server_request"
   | Context_window_exceeded _ -> "context_window_exceeded"
   | Turn_failed _ -> "turn_failed"
+  | Stopped_by_host _ -> "stopped_by_host"
   | Turn_interrupted -> "turn_interrupted"
   | Process_exited _ -> "process_exited"
   | Timeout _ -> "timeout"
@@ -368,7 +381,7 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
       send_dynamic_tool_response io ~id result;
       (match result.abort_turn with
        | None -> Ok ()
-       | Some detail -> Error (Turn_failed detail))
+       | Some stop -> Error (Stopped_by_host stop))
 ;;
 
 let rec await_response io ~id ~method_ =

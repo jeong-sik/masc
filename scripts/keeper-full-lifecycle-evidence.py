@@ -268,6 +268,27 @@ def write_bundle(output_dir: pathlib.Path, sha: str, results: list[dict]) -> dic
     return bundle
 
 
+def print_failure_summary(output_dir: pathlib.Path, results: list[dict]) -> None:
+    failed = [row for row in results if row["status"] != "passed"]
+    if not failed:
+        return
+    print(
+        f"keeper-full-lifecycle-evidence: {len(failed)} failed scenario(s)",
+        file=sys.stderr,
+    )
+    for row in failed:
+        log_path = output_dir / row["log"]
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+        print(
+            f"--- {row['id']} {row['name']} exit={row['exit_code']} "
+            f"log={row['log']} ---",
+            file=sys.stderr,
+        )
+        print("command: " + " ".join(row["command"]), file=sys.stderr)
+        for line in lines[-80:]:
+            print(line, file=sys.stderr)
+
+
 def run_bundle(repo: pathlib.Path, output_dir: pathlib.Path) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     sha = source_sha(repo)
@@ -312,6 +333,7 @@ def run_bundle(repo: pathlib.Path, output_dir: pathlib.Path) -> int:
             }
         )
     bundle = write_bundle(output_dir, sha, results)
+    print_failure_summary(output_dir, results)
     print(
         f"keeper-full-lifecycle-evidence: {bundle['status']} "
         f"{bundle['passed_count']}/{bundle['scenario_count']} bundle={bundle['bundle_id']}"

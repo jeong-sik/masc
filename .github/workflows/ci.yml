@@ -1327,6 +1327,7 @@ jobs:
         with:
           name: release-evidence-pr-${{ github.event.pull_request.number }}
           path: .release-evidence/
+          include-hidden-files: true
 
       - name: Upload main release evidence
         if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.build_step.outcome == 'success' }}
@@ -1334,6 +1335,7 @@ jobs:
         with:
           name: release-evidence-main
           path: .release-evidence/
+          include-hidden-files: true
 
       - name: Config diagnostic drift report
         if: ${{ always() && steps.build_step.outcome == 'success' }}

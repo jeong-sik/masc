@@ -24,9 +24,14 @@ let handle_repository_observation_snapshot ~sw:_ ~clock request reqd =
         (`Assoc [ "ok", `Bool false; "error", `String error ])
         inner_reqd
     | Ok repos ->
+      (* Each repository's observation is two git subprocesses, and they do not
+         depend on one another, so the snapshot costs the slowest repository
+         rather than the sum of all of them. Sequentially this was 1.4-2.2 s for
+         2.9 KB. *)
       let repo_list =
-        List.map
-          (Server_routes_http_routes_repositories.repository_json ~base_path)
+        Eio.Fiber.List.map
+          (Server_routes_http_routes_repositories.repository_observation_json
+             ~base_path)
           repos
       in
       let snapshot =

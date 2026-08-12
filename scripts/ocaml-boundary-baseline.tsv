@@ -5,4 +5,3 @@ partial_extraction	packages/agent_core/lib/llm_provider/exact_output_measurement
 partial_extraction	packages/agent_core/lib/llm_provider/exact_output_measurement_transport.ml	resolve_origin/host	Stdlib.Option.get	1
 partial_extraction	packages/agent_core/lib/llm_provider/exact_output_plan.ml	preflight	Stdlib.Option.get	2
 partial_extraction	packages/agent_core/lib/llm_provider/http_client.ml	post_sync_once_after_validation	Stdlib.Option.get	1
-failure_erasure	lib/runtime/runtime.ml	of_binding	Stdlib.Result.to_option	1

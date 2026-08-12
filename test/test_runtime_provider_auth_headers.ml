@@ -1170,8 +1170,27 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     }
   in
   match Runtime.of_binding cfg runpod_binding with
-  | Some runtime -> runtime
-  | None -> fail "expected runtime binding to materialize"
+  | Ok runtime -> runtime
+  | Error reason -> failf "expected runtime binding to materialize: %s" reason
+
+let test_runtime_of_binding_preserves_failure_reason () =
+  let cfg =
+    { Runtime_schema.providers = [ runpod_provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; cross_verifier_runtime_id = None
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    }
+  in
+  match Runtime.of_binding cfg { runpod_binding with enabled = false } with
+  | Ok _ -> fail "expected disabled binding materialization to fail"
+  | Error reason ->
+    check string "disabled binding reason"
+      "binding is disabled by runtime.toml" reason
 
 let with_dashboard_probe_http_get hook f =
   Server_dashboard_http_runtime_info.set_dashboard_runtime_provider_http_get_for_tests
@@ -1923,6 +1942,10 @@ let () =
         ] )
     ; ( "provider_config"
       , [ test_case
+            "runtime binding materialization preserves failure reason"
+            `Quick
+            test_runtime_of_binding_preserves_failure_reason
+        ; test_case
             "adapter stamps declared provider id"
             `Quick
             test_adapter_stamps_declared_provider_id

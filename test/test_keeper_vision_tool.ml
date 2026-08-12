@@ -143,6 +143,7 @@ let complete_should_not_run
     ?clock:_
     ~config:_
     ~messages:_
+    ?tools:_
     () =
   failwith "vision provider complete should not run"
 
@@ -578,7 +579,7 @@ let test_provider_for_vision_uses_runtime_temperature () =
 let test_uncapped_vision_fallback_rejects_before_provider_call () =
   with_temp_runtime_toml uncapped_vision_fallback_runtime_toml (fun () ->
     let provider_calls = ref 0 in
-    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
       incr provider_calls;
       Ok (ok_response "provider call must not happen")
     in
@@ -642,7 +643,7 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
     with_temp_base (fun _ ->
       let meta = make_meta "vision-invalid-structured-response" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
         Ok (text_response "not-json")
       in
       let raw =
@@ -667,7 +668,7 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
 
 let test_run_vision_invalid_structured_response_is_typed () =
   with_temp_runtime_toml single_vision_runtime_toml (fun () ->
-    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
       Ok (text_response "not-json")
     in
     let outcome =
@@ -714,7 +715,7 @@ let test_retryable_provider_error_tries_next_runtime () =
       in
       let calls = ref 0 in
       let models = ref [] in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
         if !calls = 1 then
@@ -756,7 +757,7 @@ let test_candidate_failover_is_not_cut_off_by_local_deadline () =
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
       let calls = ref 0 in
       let models = ref [] in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
         Error
@@ -788,7 +789,7 @@ let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
       let calls = ref 0 in
       let models = ref [] in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
         Error
@@ -820,7 +821,7 @@ let test_accept_rejected_is_policy_rejection_without_failover () =
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
       let calls = ref 0 in
       let models = ref [] in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ ?tools:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
         Error

@@ -64,6 +64,7 @@ type turn_result =
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
+  ; abort_turn : string option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -357,12 +358,17 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
             "Codex dynamic tool handler raised (tool=%s error=%s)"
             tool_name
             (Printexc.to_string exn);
-          { success = false; content = "dynamic tool handler raised" }
+          { success = false
+          ; content = "dynamic tool handler raised"
+          ; abort_turn = None
+          }
       in
       incr tool_call_count;
       emit_stream_event on_stream_event (Dynamic_tool_finished { call_id });
       send_dynamic_tool_response io ~id result;
-      Ok ()
+      (match result.abort_turn with
+       | None -> Ok ()
+       | Some detail -> Error (Turn_failed detail))
 ;;
 
 let rec await_response io ~id ~method_ =

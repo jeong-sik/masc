@@ -222,7 +222,7 @@ safe overflow 뒤 더 작은 view가 존재할 때만 현재 process가 exact re
 
 - error가 typed Claude context overflow다.
 - `tool_effect_attempted = false`
-- `response_started = false`
+- `response_emitted = false`
 - next view가 current view보다 strictly smaller다.
 - retry budget 안이다.
 
@@ -238,7 +238,7 @@ Claude process spawn 자체는 outer lane에서 계속
 다음 중 하나라도 참이면 automatic retry는 같은 run과 다음 cycle 모두 금지한다.
 
 - dynamic tool handler가 실행됨
-- assistant response stream이 시작됨
+- non-empty assistant text가 외부로 방출됨
 - terminal observation이 완전하지 않음
 
 이 경우 session state는 `Input_rejected Effect_fenced` 또는 기존 ambiguous recovery로

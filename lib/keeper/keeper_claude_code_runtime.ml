@@ -224,7 +224,7 @@ let claude_error_to_core_error = function
          ; detail = Runtime_claude_code.error_to_string error
          })
   | Runtime_claude_code.Context_window_exceeded
-      { message; tool_effect_attempted = false; response_started = false } ->
+      { message; tool_effect_attempted = false; response_emitted = false } ->
     Agent_core.Error.Api
       (Llm_provider.Retry.ContextOverflow { message; limit = None })
   | Runtime_claude_code.Context_window_exceeded _ as error ->
@@ -592,7 +592,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
            context_overflow_retry_safe :=
              (match error with
               | Runtime_claude_code.Context_window_exceeded
-                  { tool_effect_attempted = false; response_started = false; _ } ->
+                  { tool_effect_attempted = false; response_emitted = false; _ } ->
                 true
               | _ -> false);
            if not !state_persistence_failed

@@ -13,6 +13,10 @@ let assistant =
   {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-fixture-1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_OK"}]}}|}
 ;;
 
+let empty_assistant =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-empty-1","message":{"role":"assistant","model":"claude-fixture","content":[]}}|}
+;;
+
 let result =
   {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-fixture-1","result":"MASC_CLAUDE_OK","api_error_status":null}|}
 ;;
@@ -309,7 +313,9 @@ let test_dynamic_tool_bytes_counts_every_field () =
     { Runtime_claude_code.name = "ab"
     ; description = "cde"
     ; input_schema = `Assoc [ "f", `String "g" ]
-    ; call = (fun ~call_id:_ _ -> { Runtime_claude_code.success = true; content = "" })
+    ; call =
+        (fun ~call_id:_ _ ->
+          { Runtime_claude_code.success = true; content = ""; abort_turn = None })
     }
   in
   let schema_bytes = String.length (Yojson.Safe.to_string tool.Runtime_claude_code.input_schema) in
@@ -411,7 +417,7 @@ let test_terminal_prompt_too_long_is_typed () =
     match run_fixture path with
     | Error
         (Runtime_claude_code.Context_window_exceeded
-          { message; tool_effect_attempted = false; response_started = false }) ->
+          { message; tool_effect_attempted = false; response_emitted = false }) ->
       check
         bool
         "provider reason survives into the typed failure"
@@ -490,7 +496,7 @@ let probe_tool call_count : Runtime_claude_code.dynamic_tool =
   ; call =
       (fun ~call_id:_ _ ->
         incr call_count;
-        { success = true; content = "MASC_TOOL_RESULT" })
+        { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None })
   }
 ;;
 
@@ -543,7 +549,7 @@ let test_context_overflow_after_tool_records_effect () =
       match run_fixture ~dynamic_tools:[ probe_tool call_count ] path with
       | Error
           (Runtime_claude_code.Context_window_exceeded
-            { tool_effect_attempted = true; response_started = false; _ }) ->
+            { tool_effect_attempted = true; response_emitted = false; _ }) ->
         check int "tool effect count" 1 !call_count
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok _ -> fail "post-effect context overflow completed the turn")
@@ -554,10 +560,49 @@ let test_context_overflow_after_response_records_activity () =
     match run_fixture path with
     | Error
         (Runtime_claude_code.Context_window_exceeded
-          { tool_effect_attempted = false; response_started = true; _ }) ->
+          { tool_effect_attempted = false; response_emitted = true; _ }) ->
       ()
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "post-response context overflow completed the turn")
+;;
+
+let test_context_overflow_after_empty_assistant_remains_retry_safe () =
+  with_fixture [ Emit empty_assistant; Emit prompt_too_long_result ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Context_window_exceeded
+          { tool_effect_attempted = false; response_emitted = false; _ }) ->
+      ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "empty assistant frame made context overflow complete")
+;;
+
+let test_dynamic_tool_abort_stops_the_provider_loop () =
+  let tool : Runtime_claude_code.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "Abort a repeated provider loop"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = false
+          ; content = "same deterministic failure"
+          ; abort_turn = Some "repeated exact dynamic tool call detected"
+          })
+    }
+  in
+  with_fixture
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read mcp_call
+    ]
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ tool ] path with
+      | Error (Runtime_claude_code.Turn_failed detail) ->
+        check bool "abort cause" true
+          (Astring.String.is_infix ~affix:"repeated exact" detail)
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
 ;;
 
 let test_dynamic_tool_callback () =
@@ -575,7 +620,7 @@ let test_dynamic_tool_callback () =
         (fun ~call_id input ->
           observed_call_id := Some call_id;
           observed_input := input;
-          { success = true; content = "MASC_TOOL_RESULT" })
+          { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None })
     }
   in
   with_fixture
@@ -606,7 +651,7 @@ let test_stream_events_preserve_text_and_tool_identity () =
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; call =
         (fun ~call_id:_ _ ->
-          { success = true; content = "MASC_TOOL_RESULT" })
+          { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None })
     }
   in
   with_fixture
@@ -1035,7 +1080,9 @@ let test_allowed_tools_tokenizer_chars_are_validated () =
     { name = "bad,tool"
     ; description = "invalid fixture"
     ; input_schema = `Assoc []
-    ; call = (fun ~call_id:_ _ -> { success = true; content = "unused" })
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = true; content = "unused"; abort_turn = None })
     }
   in
   let config = Runtime_claude_code.default_config ~cwd:"/tmp" in
@@ -1182,6 +1229,14 @@ let () =
             "context overflow after response records activity"
             `Quick
             test_context_overflow_after_response_records_activity
+        ; test_case
+            "empty assistant keeps context overflow retry safe"
+            `Quick
+            test_context_overflow_after_empty_assistant_remains_retry_safe
+        ; test_case
+            "dynamic tool abort stops provider loop"
+            `Quick
+            test_dynamic_tool_abort_stops_the_provider_loop
         ; test_case
             "shared bridge owns exact dispatch"
             `Quick

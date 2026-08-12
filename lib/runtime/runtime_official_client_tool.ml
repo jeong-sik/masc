@@ -1,6 +1,7 @@
 type dynamic_tool_result =
   { success : bool
   ; content : string
+  ; abort_turn : string option
   }
 
 type dynamic_tool =

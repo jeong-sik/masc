@@ -23,6 +23,7 @@ type prepared_turn =
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
+  ; abort_turn : string option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -158,6 +159,11 @@ val dynamic_tools :
   terminal_error:string option ref ->
   raw_trace_run:Agent_core.Raw_trace.active_run option ->
   (dynamic_tool list, Agent_core.Error.t) result
+(** Project Agent Core tools onto one official-client turn. Three consecutive
+    calls with the same tool, canonical input, disposition, and output produce
+    [abort_turn]; this is the official-client equivalent of Agent Core's
+    repeated exact tool boundary and prevents a vendor-owned loop from holding
+    one Keeper and host resources indefinitely. *)
 
 val with_run_lifecycle_events :
   event_bus:Agent_core.Event_bus.t option ->

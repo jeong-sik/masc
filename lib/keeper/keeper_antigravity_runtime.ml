@@ -443,6 +443,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       let cleanup_error = ref None in
       let turn_result =
         Eio.Switch.run (fun sw ->
+          let abort_turn, resolve_abort_turn = Eio.Promise.create () in
+          let abort_turn_resolved = Atomic.make false in
           Eio.Switch.on_release sw (fun () ->
             match Eio.Cancel.protect (fun () -> Runtime_antigravity_home.clear_mcp_config home) with
             | Ok () -> ()
@@ -460,7 +462,14 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                   stream.on_tool_started ~call_id ~tool_name:name ~arguments;
                   Fun.protect
                     ~finally:(fun () -> stream.on_tool_finished ~call_id)
-                    (fun () -> tool.call ~call_id arguments |> tool_result)))
+                    (fun () ->
+                      let result = tool.call ~call_id arguments in
+                      Option.iter
+                        (fun detail ->
+                           if Atomic.compare_and_set abort_turn_resolved false true
+                           then Eio.Promise.resolve resolve_abort_turn detail)
+                        result.abort_turn;
+                      tool_result result)))
               ()
           in
           let* () =
@@ -471,43 +480,51 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
               recovery_failure := Session_store.State_persistence_failed;
               home_error_to_core_error error)
           in
-          let client_result =
-            Runtime_antigravity.run_turn
-              ~conversation_mode
-              ~home_dir:(Runtime_antigravity_home.home_dir home)
-              ~on_spawned:(fun () ->
-                Atomic.set
-                  effect_disposition
-                  Keeper_provider_attempt_effect.Observation_unavailable)
-              ~mgr:process_mgr
-              ~clock
-              ~cwd:process_cwd
-              ~on_conversation_ready:(fun ~conversation_id ->
-                let* () =
-                  update_session "active transition" (fun expected ->
-                    Session_store.mark_active
-                      ~base_path
-                      ~keeper_name
-                      ~expected
-                      ~session_id:conversation_id
-                      ~updated_at:(Time_compat.now ()))
-                in
-                update_session "turn-starting transition" (fun expected ->
-                  Session_store.mark_turn_starting
-                    ~base_path
-                    ~keeper_name
-                    ~expected
-                    ~session_id:conversation_id
-                    ~updated_at:(Time_compat.now ())))
-              ~on_stream_event:stream.on_runtime_event
-              client_config
-              ~prompt
-          in
-          Result.map_error
-            (fun error ->
-               recovery_failure := recovery_failure_of_runtime_error error;
-               runtime_error_to_core_error error)
-            client_result)
+          match
+            Eio.Fiber.first
+              (fun () ->
+                 `Runtime
+                   (Runtime_antigravity.run_turn
+                      ~conversation_mode
+                      ~home_dir:(Runtime_antigravity_home.home_dir home)
+                      ~on_spawned:(fun () ->
+                        Atomic.set
+                          effect_disposition
+                          Keeper_provider_attempt_effect.Observation_unavailable)
+                      ~mgr:process_mgr
+                      ~clock
+                      ~cwd:process_cwd
+                      ~on_conversation_ready:(fun ~conversation_id ->
+                        let* () =
+                          update_session "active transition" (fun expected ->
+                            Session_store.mark_active
+                              ~base_path
+                              ~keeper_name
+                              ~expected
+                              ~session_id:conversation_id
+                              ~updated_at:(Time_compat.now ()))
+                        in
+                        update_session "turn-starting transition" (fun expected ->
+                          Session_store.mark_turn_starting
+                            ~base_path
+                            ~keeper_name
+                            ~expected
+                            ~session_id:conversation_id
+                            ~updated_at:(Time_compat.now ())))
+                      ~on_stream_event:stream.on_runtime_event
+                      client_config
+                      ~prompt))
+              (fun () -> `Abort (Eio.Promise.await abort_turn))
+          with
+          | `Runtime client_result ->
+            Result.map_error
+              (fun error ->
+                 recovery_failure := recovery_failure_of_runtime_error error;
+                 runtime_error_to_core_error error)
+              client_result
+          | `Abort detail ->
+            recovery_failure := Session_store.Protocol_failed;
+            Error (internal_error detail))
       in
       match !cleanup_error with
       | None -> turn_result

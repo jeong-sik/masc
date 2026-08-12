@@ -13,6 +13,10 @@
 type dynamic_tool_result =
   { success : bool
   ; content : string
+  ; abort_turn : string option
+    (** Host-owned terminal reason. The transport returns the current tool
+        outcome, then stops the provider loop instead of admitting another
+        tool call. *)
   }
 
 type dynamic_tool =

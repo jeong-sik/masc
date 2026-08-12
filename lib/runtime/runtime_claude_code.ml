@@ -83,6 +83,7 @@ type turn_result =
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
+  ; abort_turn : string option
   }
 
 type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
@@ -137,7 +138,7 @@ type error =
   | Context_window_exceeded of
       { message : string
       ; tool_effect_attempted : bool
-      ; response_started : bool
+      ; response_emitted : bool
       }
   | Turn_failed of string
   | Quota_blocked of
@@ -165,11 +166,11 @@ let error_to_string = function
       tool_effect_attempted
       detail
   | Context_window_exceeded
-      { message; tool_effect_attempted; response_started } ->
+      { message; tool_effect_attempted; response_emitted } ->
     Printf.sprintf
-      "Claude Code context window exceeded (tool_effect_attempted=%b response_started=%b): %s"
+      "Claude Code context window exceeded (tool_effect_attempted=%b response_emitted=%b): %s"
       tool_effect_attempted
-      response_started
+      response_emitted
       message
   | Turn_failed detail -> "Claude Code turn failed: " ^ detail
   | Quota_blocked { api_error_status; rate_limit } ->
@@ -412,6 +413,7 @@ let handle_control_request
     else
       let* message = required_member stage "message" request_fields in
       let tool_specs () = List.map dynamic_tool_spec tools in
+      let abort_turn = ref None in
       let call_tool ~name ~call_id ~arguments =
         match find_dynamic_tool tools name with
         | None -> None
@@ -427,8 +429,12 @@ let handle_control_request
                 "Claude Code MCP tool handler raised (tool=%s error=%s)"
                 name
                 (Printexc.to_string exn);
-              { success = false; content = "MASC tool handler raised" }
+              { success = false
+              ; content = "MASC tool handler raised"
+              ; abort_turn = None
+              }
           in
+          abort_turn := result.abort_turn;
           emit_stream_event on_stream_event (Dynamic_tool_finished { call_id });
           Some
             { Runtime_official_client_mcp.success = result.success
@@ -468,12 +474,17 @@ let handle_control_request
         | Some mcp_response -> `Assoc [ "mcp_response", mcp_response ]
         | None -> `Assoc []
       in
-      send_control_response
-        io
-        ~control_phase
-        ~stage:"control success response"
-        ~tool_effect_attempted:dispatch.tool_called
-        (fun () -> send_control_success io ~request_id control_payload)
+      let* () =
+        send_control_response
+          io
+          ~control_phase
+          ~stage:"control success response"
+          ~tool_effect_attempted:dispatch.tool_called
+          (fun () -> send_control_success io ~request_id control_payload)
+      in
+      (match !abort_turn with
+       | None -> Ok ()
+       | Some detail -> Error (Turn_failed detail))
   | unsupported ->
     let* () =
       send_control_response
@@ -647,7 +658,7 @@ let parse_assistant ~expected_session_id fields =
 ;;
 
 let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
-    ~response_started fields =
+    ~response_emitted fields =
   let stage = "result message" in
   let* subtype = required_string stage "subtype" fields in
   let* is_error = required_bool stage "is_error" fields in
@@ -723,7 +734,7 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
         (Context_window_exceeded
            { message = terminal_failure_detail ()
            ; tool_effect_attempted
-           ; response_started
+           ; response_emitted
            })
     else if is_error
     then
@@ -742,7 +753,7 @@ let max_ignored_messages = 256
 
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
-    ~on_turn_started ~on_stream_event ~stream_started ~ignored =
+    ~on_turn_started ~on_stream_event ~stream_started ~response_emitted ~ignored =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -760,7 +771,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started ~ignored
-      ~on_stream_event ~stream_started
+      ~on_stream_event ~stream_started ~response_emitted
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "assistant" ->
@@ -769,6 +780,8 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
     then (
       stream_started := true;
       emit_stream_event on_stream_event (Turn_started { turn_id = uuid; model }));
+    if List.exists (fun text -> String.length text > 0) texts
+    then response_emitted := true;
     List.iter
       (fun text -> emit_stream_event on_stream_event (Text_delta text))
       texts;
@@ -776,20 +789,20 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model:(Some model)
       ~assistant_texts:(assistant_texts @ texts)
-      ~on_turn_started ~on_stream_event ~stream_started ~ignored
+      ~on_turn_started ~on_stream_event ~stream_started ~response_emitted ~ignored
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
-      ~on_turn_started ~on_stream_event ~stream_started ~ignored
+      ~on_turn_started ~on_stream_event ~stream_started ~response_emitted ~ignored
   | "result" ->
     let* turn_id, result, usage =
       parse_result
         ~expected_session_id
         ~rate_limit
         ~tool_effect_attempted:(!tool_call_count > 0)
-        ~response_started:!stream_started
+        ~response_emitted:!response_emitted
         fields
     in
     let* () =
@@ -831,7 +844,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~on_stream_event ~stream_started
+      ~on_stream_event ~stream_started ~response_emitted
       ~ignored:(ignored + 1)
   | other ->
     protocol_error
@@ -1018,6 +1031,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~on_turn_started
     ~on_stream_event
     ~stream_started:(ref false)
+    ~response_emitted:(ref false)
     ~ignored:0
 ;;
 

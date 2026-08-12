@@ -1337,10 +1337,20 @@ jobs:
             _build/default/bin/main_eio.exe \
             .release-evidence/main-release-evidence.md
 
+      - name: Generate trusted-dispatch release evidence bundle
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          chmod +x scripts/release-evidence.sh
+          mkdir -p .release-evidence
+          scripts/release-evidence.sh \
+            _build/default/bin/main_eio.exe \
+            .release-evidence/trusted-dispatch-release-evidence.md
+
       - name: Verify Keeper full-lifecycle evidence bundle
         if: >-
           (github.event_name == 'pull_request') ||
-          (github.event_name == 'push' && github.ref == 'refs/heads/main')
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'workflow_dispatch')
         run: |
           python3 scripts/keeper-full-lifecycle-evidence.py \
             --verify \
@@ -1413,6 +1423,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-evidence-main
+          path: .release-evidence/
+          include-hidden-files: true
+
+      - name: Upload trusted-dispatch release evidence
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && steps.build_step.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-evidence-dispatch-${{ github.run_id }}-${{ github.run_attempt }}
           path: .release-evidence/
           include-hidden-files: true
 

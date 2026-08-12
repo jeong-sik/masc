@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
+import { Effect } from 'effect'
 import {
   SettingsSurface,
   mcpExposedToolNames,
@@ -12,15 +13,14 @@ import {
   settingsControlInventory,
 } from './settings-surface'
 import type {
-  ConfigEntry,
-  DashboardConfigResponse,
   DashboardRuntimeProviderSnapshot,
   DashboardRuntimeProvidersResponse,
   DashboardToolInventoryItem,
-  LogEntry,
   RuntimeDefaultsResponse,
   RuntimeResolvedResponse,
 } from '../api/dashboard'
+import type { ConfigEntry, DashboardConfig } from '../api/dashboard-config'
+import type { LogEntry, LogsData } from '../api/dashboard-logs'
 import { DashboardMain } from './dashboard-shell'
 import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
 import { route } from '../router'
@@ -94,8 +94,6 @@ vi.mock('../api/dashboard.js', async () => {
   const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
   return {
     ...actual,
-    fetchDashboardConfig: apiMock.fetchDashboardConfig,
-    fetchLogs: apiMock.fetchLogs,
     fetchDashboardTools: apiMock.fetchDashboardTools,
     fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
     fetchRuntimeResolved: apiMock.fetchRuntimeResolved,
@@ -106,6 +104,14 @@ vi.mock('../api/dashboard.js', async () => {
     saveRuntimeTomlConfig: apiMock.saveRuntimeTomlConfig,
   }
 })
+
+vi.mock('../api/dashboard-config', () => ({
+  fetchDashboardConfig: apiMock.fetchDashboardConfig,
+}))
+
+vi.mock('../api/dashboard-logs', () => ({
+  fetchLogs: apiMock.fetchLogs,
+}))
 
 vi.mock('../lib/runtime-config-refresh', () => ({
   refreshRuntimeConfigConsumers: runtimeRefreshMock.refreshRuntimeConfigConsumers,
@@ -128,16 +134,30 @@ vi.mock('../api', async () => {
 function makeLogEntry(overrides: Partial<LogEntry> = {}): LogEntry {
   return {
     seq: 1,
-    ts: '2026-06-21T16:24:51Z',
+    timestamp: '2026-06-21T16:24:51Z',
     level: 'INFO',
     source: 'structured',
     module: 'Keeper',
     message: 'booted',
-    keeper_name: null,
-    turn_id: null,
-    category: null,
-    details: null,
+    keeperName: 'system',
+    hasTurn: false,
+    category: 'uncategorized',
+    hasExplicitCategory: false,
+    details: {},
     ...overrides,
+  }
+}
+
+function makeLogsData(entries: readonly LogEntry[]): LogsData {
+  return {
+    generatedAt: '2026-06-21T16:24:51Z',
+    source: 'masc_log_ring',
+    retention: {
+      scope: 'dashboard_logs',
+      durableStore: '/workspace/.masc/logs/system_log_2026-06-21.jsonl',
+    },
+    total: entries.length,
+    entries,
   }
 }
 
@@ -295,44 +315,38 @@ function makeConfigEntry(overrides: Partial<ConfigEntry> = {}): ConfigEntry {
   return {
     env: 'MASC_BASE_PATH',
     description: 'Base storage directory',
-    value: null,
-    default: '(cwd)',
+    displayValue: '(cwd)',
+    defaultValue: '(cwd)',
     source: 'runtime',
-    source_detail: 'resolved from runtime',
-    provenance: {
-      kind: 'runtime',
-      detail: 'resolved from runtime',
-    },
+    sourceDetail: 'resolved from runtime',
     sensitive: false,
     ...overrides,
   }
 }
 
-function makeDashboardConfig(overrides: Partial<DashboardConfigResponse> = {}): DashboardConfigResponse {
+function makeDashboardConfig(overrides: Partial<DashboardConfig> = {}): DashboardConfig {
   return {
-    generated_at: '2026-06-21T00:00:00Z',
     server: {
       version: 'test',
-      git_commit: null,
-      ocaml_version: '5.4.0',
-      uptime_seconds: 12,
+      ocamlVersion: '5.4.0',
+      uptimeSeconds: 12,
       pid: 123,
     },
     categories: {
       server: [
-        makeConfigEntry({ env: 'MASC_URL', description: 'MCP URL', value: 'http://127.0.0.1:8935/mcp', default: '(derived)', source: 'env', source_detail: 'environment variable MASC_URL' }),
-        makeConfigEntry({ env: 'MASC_HTTP_BASE_URL', description: 'HTTP base URL', value: 'http://127.0.0.1:8935', default: '(derived)', source: 'env', source_detail: 'environment variable MASC_HTTP_BASE_URL' }),
-        makeConfigEntry({ env: 'MASC_BASE_PATH', description: 'Base storage directory', value: '/workspace', default: '(cwd)', source: 'env', source_detail: 'environment variable MASC_BASE_PATH' }),
+        makeConfigEntry({ env: 'MASC_URL', description: 'MCP URL', displayValue: 'http://127.0.0.1:8935/mcp', defaultValue: '(derived)', source: 'env', sourceDetail: 'environment variable MASC_URL' }),
+        makeConfigEntry({ env: 'MASC_HTTP_BASE_URL', description: 'HTTP base URL', displayValue: 'http://127.0.0.1:8935', defaultValue: '(derived)', source: 'env', sourceDetail: 'environment variable MASC_HTTP_BASE_URL' }),
+        makeConfigEntry({ env: 'MASC_BASE_PATH', description: 'Base storage directory', displayValue: '/workspace', defaultValue: '(cwd)', source: 'env', sourceDetail: 'environment variable MASC_BASE_PATH' }),
       ],
       path: [
-        makeConfigEntry({ env: 'MASC_CONFIG_DIR', description: 'Config directory override', value: null, default: '(none)', source: 'default', source_detail: 'compiled default value' }),
-        makeConfigEntry({ env: 'MASC_DATA_DIR', description: 'Data directory override', value: null, default: '(none)', source: 'default', source_detail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_CONFIG_DIR', description: 'Config directory override', displayValue: '(none)', defaultValue: '(none)', source: 'default', sourceDetail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_DATA_DIR', description: 'Data directory override', displayValue: '(none)', defaultValue: '(none)', source: 'default', sourceDetail: 'compiled default value' }),
       ],
       dashboard: [
-        makeConfigEntry({ env: 'MASC_DASHBOARD_CTX_PREPARING', description: 'Context preparing', value: '0.70', default: '0.70', source: 'default', source_detail: 'compiled default value' }),
-        makeConfigEntry({ env: 'MASC_DASHBOARD_CTX_HANDOFF_IMMINENT', description: 'Context imminent', value: '0.85', default: '0.85', source: 'default', source_detail: 'compiled default value' }),
-        makeConfigEntry({ env: 'MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO', description: 'Runtime warning', value: '0.95', default: '0.95', source: 'default', source_detail: 'compiled default value' }),
-        makeConfigEntry({ env: 'MASC_DASHBOARD_SIGNAL_STALE_SEC', description: 'Signal stale', value: '1200.0', default: '1200.0', source: 'default', source_detail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_DASHBOARD_CTX_PREPARING', description: 'Context preparing', displayValue: '0.70', defaultValue: '0.70', source: 'default', sourceDetail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_DASHBOARD_CTX_HANDOFF_IMMINENT', description: 'Context imminent', displayValue: '0.85', defaultValue: '0.85', source: 'default', sourceDetail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO', description: 'Runtime warning', displayValue: '0.95', defaultValue: '0.95', source: 'default', sourceDetail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_DASHBOARD_SIGNAL_STALE_SEC', description: 'Signal stale', displayValue: '1200.0', defaultValue: '1200.0', source: 'default', sourceDetail: 'compiled default value' }),
       ],
     },
     ...overrides,
@@ -348,8 +362,8 @@ function stubRuntimeResolved(value: RuntimeResolvedResponse = makeRuntimeResolve
 }
 
 function stubEmptyApi() {
-  apiMock.fetchDashboardConfig.mockResolvedValue(makeDashboardConfig())
-  apiMock.fetchLogs.mockResolvedValue({ total: 0, entries: [] })
+  apiMock.fetchDashboardConfig.mockReturnValue(Effect.succeed(makeDashboardConfig()))
+  apiMock.fetchLogs.mockReturnValue(Effect.succeed(makeLogsData([])))
   apiMock.fetchDashboardTools.mockResolvedValue({ tool_inventory: { count: 0, tools: [] } })
   stubRuntimeDefaults()
   stubRuntimeResolved()
@@ -787,7 +801,9 @@ describe('SettingsSurface', () => {
   it('paths page does not fabricate unknown rows when path resolution is unavailable', async () => {
     shellRuntimeResolution.value = null
     shellConfigResolution.value = null
-    apiMock.fetchDashboardConfig.mockRejectedValueOnce(new Error('config unavailable'))
+    apiMock.fetchDashboardConfig.mockReturnValueOnce(
+      Effect.fail(new Error('config unavailable')),
+    )
     stubRuntimeDefaults(makeRuntimeDefaults({ config_path: null }))
     stubRuntimeResolved(makeRuntimeResolved({ config_path: null }))
     apiMock.fetchRuntimeProviders.mockResolvedValueOnce(makeRuntimeProviders({ config_path: null }))
@@ -808,7 +824,9 @@ describe('SettingsSurface', () => {
   it('paths page labels provider-only path data as partial resolution', async () => {
     shellRuntimeResolution.value = null
     shellConfigResolution.value = null
-    apiMock.fetchDashboardConfig.mockRejectedValueOnce(new Error('config unavailable'))
+    apiMock.fetchDashboardConfig.mockReturnValueOnce(
+      Effect.fail(new Error('config unavailable')),
+    )
 
     render(html`<${SettingsSurface} />`, container)
 
@@ -885,7 +903,9 @@ describe('SettingsSurface', () => {
   })
 
   it('notify page surfaces config projection failures instead of rendering missing thresholds', async () => {
-    apiMock.fetchDashboardConfig.mockRejectedValueOnce(new Error('config projection offline'))
+    apiMock.fetchDashboardConfig.mockReturnValueOnce(
+      Effect.fail(new Error('config projection offline')),
+    )
 
     render(html`<${SettingsSurface} />`, container)
 
@@ -1482,14 +1502,13 @@ describe('SettingsSurface', () => {
   it('log filter chips filter live rows from the ring', async () => {
     // 7 ring entries mapped to rows: tool(category/details or /masc_/)=4,
     // success(ok)=4, failure(fail)=2.
-    apiMock.fetchLogs.mockResolvedValue({
-      total: 7,
-      entries: [
+    apiMock.fetchLogs.mockReturnValue(Effect.succeed(makeLogsData([
         makeLogEntry({
           seq: 7,
           level: 'INFO',
           message: 'shell exec completed',
           category: 'tool',
+          hasExplicitCategory: true,
           details: { tool_name: 'shell.exec' },
         }),
         makeLogEntry({ seq: 6, level: 'INFO', message: 'masc_start 완료' }),
@@ -1498,8 +1517,7 @@ describe('SettingsSurface', () => {
         makeLogEntry({ seq: 3, level: 'ERROR', message: 'masc_trace_window 실패' }),
         makeLogEntry({ seq: 2, level: 'ERROR', message: 'restart failed (3/3)' }),
         makeLogEntry({ seq: 1, level: 'INFO', message: 'handoff 시작' }),
-      ],
-    })
+      ])))
 
     render(html`<${SettingsSurface} />`, container)
 
@@ -1672,9 +1690,9 @@ describe('settings read-surface helpers', () => {
   it('logEntryToSysRow maps a ring entry to [time, level, identity, message, status]', () => {
     const row = logEntryToSysRow(
       makeLogEntry({
-        ts: '2026-06-21T16:24:51Z',
+        timestamp: '2026-06-21T16:24:51Z',
         level: 'ERROR',
-        keeper_name: 'drifter',
+        keeperName: 'drifter',
         module: 'Keeper',
         message: 'masc_trace_window 실패',
       }),
@@ -1686,6 +1704,7 @@ describe('settings read-surface helpers', () => {
     const row = logEntryToSysRow(
       makeLogEntry({
         category: 'tool',
+        hasExplicitCategory: true,
         details: { tool_name: 'shell.exec' },
         message: 'shell exec completed',
       }),
@@ -1693,8 +1712,8 @@ describe('settings read-surface helpers', () => {
     expect(row[5]).toBe(true)
   })
 
-  it('logEntryToSysRow falls back to module then (root) for identity', () => {
-    expect(logEntryToSysRow(makeLogEntry({ keeper_name: null, module: 'Server' }))[2]).toBe('Server')
-    expect(logEntryToSysRow(makeLogEntry({ keeper_name: null, module: '' }))[2]).toBe('(root)')
+  it('logEntryToSysRow uses the normalized keeper identity', () => {
+    expect(logEntryToSysRow(makeLogEntry({ keeperName: 'system', module: 'Server' }))[2]).toBe('system')
+    expect(logEntryToSysRow(makeLogEntry({ keeperName: 'drifter', module: '' }))[2]).toBe('drifter')
   })
 })

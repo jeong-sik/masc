@@ -4,22 +4,32 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { Effect, Option } from 'effect'
 import {
   SETTINGS_ROUTE_SECTION_IDS,
   type SettingsRouteSectionId,
 } from '../config/navigation'
 import { navigate, route } from '../router'
-import { fetchDashboardConfig, fetchDashboardTools, fetchLogs, fetchRuntimeDefaults, fetchRuntimeProviders, fetchRuntimeResolved } from '../api/dashboard.js'
+import { fetchDashboardTools, fetchRuntimeDefaults, fetchRuntimeProviders, fetchRuntimeResolved } from '../api/dashboard.js'
 import type {
-  ConfigEntry,
-  DashboardConfigResponse,
   DashboardRuntimeProviderSnapshot,
   DashboardRuntimeProvidersResponse,
   DashboardToolInventoryItem,
-  LogEntry,
   RuntimeDefaultsResponse,
   RuntimeResolvedResponse,
 } from '../api/dashboard.js'
+import {
+  fetchDashboardConfig,
+  type ConfigEntry,
+  type DashboardConfig,
+  type DashboardConfigError,
+} from '../api/dashboard-config'
+import {
+  fetchLogs,
+  type LogEntry,
+  type LogsError,
+} from '../api/dashboard-logs'
+import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
 import {
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
@@ -64,6 +74,8 @@ import {
 } from '../notifications'
 import type { ComponentChildren } from 'preact'
 import { errorToString } from '../lib/format-string'
+import { createEffectResource } from '../lib/effect-resource'
+import { remotePrevious } from '../lib/remote-data'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import {
   runtimeCatalogDeclaredSpec,
@@ -78,6 +90,12 @@ type SectionId = SettingsRouteSectionId
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
 type RuntimeRoutingSaveState = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsControlKind = 'live-read' | 'live-write' | 'browser-local' | 'unsupported'
+
+const settingsConfigResource = createEffectResource<
+  DashboardHttp,
+  DashboardConfigError,
+  DashboardConfig
+>(dashboardRuntime)
 type RuntimeSelectOption = {
   readonly id: string
   readonly label: string
@@ -318,10 +336,16 @@ function logRowClock(ts: string): string {
 
 export function logEntryToSysRow(entry: LogEntry): SysLogRow {
   const level = entry.level.toLowerCase()
-  const identity = entry.keeper_name?.trim() || entry.module?.trim() || '(root)'
+  const identity = entry.keeperName
   const isTool = logDisplayKind(entry) === 'tool' || /masc_/.test(entry.message)
-  return [logRowClock(entry.ts), level, identity, entry.message, logRowStatus(entry.level), isTool]
+  return [logRowClock(entry.timestamp), level, identity, entry.message, logRowStatus(entry.level), isTool]
 }
+
+const settingsLogsResource = createEffectResource<
+  DashboardHttp,
+  LogsError,
+  readonly SysLogRow[]
+>(dashboardRuntime)
 
 function SetSeg({
   value,
@@ -751,29 +775,28 @@ function RuntimeMediaFailoverEditor({
   `
 }
 
-function configEntry(data: DashboardConfigResponse | null, env: string): ConfigEntry | null {
-  if (!data) return null
+function configEntry(data: DashboardConfig | undefined, env: string): ConfigEntry | undefined {
+  if (data === undefined) return undefined
   for (const entries of Object.values(data.categories)) {
     const found = entries.find(entry => entry.env === env)
     if (found) return found
   }
-  return null
+  return undefined
 }
 
-function configEntryDisplayValue(entry: ConfigEntry | null): string | null {
-  if (!entry) return null
-  return entry.value ?? entry.default
+function configEntryDisplayValue(entry: ConfigEntry | undefined): string | undefined {
+  return entry?.displayValue
 }
 
-function concreteConfigValue(entry: ConfigEntry | null): string | null {
+function concreteConfigValue(entry: ConfigEntry | undefined): string | undefined {
   const value = configEntryDisplayValue(entry)?.trim()
-  if (!value || /^\(.+\)$/.test(value)) return null
+  if (!value || /^\(.+\)$/.test(value)) return undefined
   return value
 }
 
-function formatConfigSource(entry: ConfigEntry | null): string {
+function formatConfigSource(entry: ConfigEntry | undefined): string {
   if (!entry) return 'missing'
-  return entry.source_detail ?? entry.source
+  return entry.sourceDetail
 }
 
 function endpointFromWindow(): string {
@@ -783,7 +806,7 @@ function endpointFromWindow(): string {
   return `${origin.replace(/\/$/, '')}/mcp`
 }
 
-function mcpEndpointFromConfig(config: DashboardConfigResponse | null): string {
+function mcpEndpointFromConfig(config: DashboardConfig | undefined): string {
   const mcpUrl = concreteConfigValue(configEntry(config, 'MASC_URL'))
   if (mcpUrl) return mcpUrl
   const httpBaseUrl = concreteConfigValue(configEntry(config, 'MASC_HTTP_BASE_URL'))
@@ -797,8 +820,8 @@ function mcpEndpointFromConfig(config: DashboardConfigResponse | null): string {
   return endpointFromWindow()
 }
 
-function formatThresholdPercent(value: string | null): string {
-  const parsed = value == null ? NaN : Number.parseFloat(value)
+function formatThresholdPercent(value: string | undefined): string {
+  const parsed = value === undefined ? NaN : Number.parseFloat(value)
   if (!Number.isFinite(parsed)) return value ?? '미수집'
   return `${Math.round(parsed * 100)}%`
 }
@@ -809,8 +832,8 @@ function ConfigTruthRow({
   fallback,
 }: {
   label: string
-  entry: ConfigEntry | null
-  fallback?: string | null
+  entry: ConfigEntry | undefined
+  fallback?: string
 }) {
   const value = configEntryDisplayValue(entry) ?? fallback ?? '미수집'
   return html`
@@ -829,7 +852,7 @@ function ThresholdTruthRow({
   value,
 }: {
   label: string
-  entry: ConfigEntry | null
+  entry: ConfigEntry | undefined
   value: string
 }) {
   return html`
@@ -999,38 +1022,42 @@ function LogFilter({
 
 function LogViewer() {
   const [filter, setFilter] = useState<LogFilter>('all')
-  const [allRows, setAllRows] = useState<SysLogRow[]>([])
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
   useEffect(() => {
-    let active = true
     let timer: ReturnType<typeof setInterval> | null = null
 
-    const tick = async () => {
-      try {
-        const resp = await fetchLogs({ limit: SETTINGS_LOG_LIMIT })
-        if (!active) return
-        const rows = [...resp.entries]
-          .sort((a, b) => b.seq - a.seq)
-          .map(logEntryToSysRow)
-        setAllRows(rows)
-        setStatus('ready')
-      } catch {
-        if (!active) return
-        // No fabricated rows on failure — surface the error state instead.
-        setStatus('error')
-      }
+    const tick = () => {
+      if (settingsLogsResource.state.value._tag === 'Loading') return
+      void settingsLogsResource.load(
+        fetchLogs({ limit: SETTINGS_LOG_LIMIT }).pipe(
+          Effect.map(resp => [...resp.entries]
+            .sort((a, b) => b.seq - a.seq)
+            .map(logEntryToSysRow)),
+        ),
+      )
     }
 
-    void tick()
-    timer = setInterval(() => { void tick() }, SETTINGS_LOG_POLL_MS)
+    settingsLogsResource.reset()
+    tick()
+    timer = setInterval(tick, SETTINGS_LOG_POLL_MS)
 
     return () => {
-      active = false
       if (timer) clearInterval(timer)
+      settingsLogsResource.cancel()
+      settingsLogsResource.reset()
     }
   }, [])
 
+  const resourceState = settingsLogsResource.state.value
+  const allRows = Option.getOrElse(
+    remotePrevious(resourceState),
+    () => [] as readonly SysLogRow[],
+  )
+  const status = resourceState._tag === 'Failure'
+    ? 'error'
+    : resourceState._tag === 'Success'
+      ? 'ready'
+      : 'loading'
   const rows = allRows.filter(r => {
     if (filter === 'all') return true
     if (filter === 'tool') return r[5]
@@ -1105,30 +1132,28 @@ export function SettingsSurface() {
   }
 
   // Server config projection — used by Paths, MCP and Notifications.
-  const [dashboardConfig, setDashboardConfig] = useState<DashboardConfigResponse | null>(null)
-  const [dashboardConfigStatus, setDashboardConfigStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [dashboardConfigError, setDashboardConfigError] = useState<string | null>(null)
-
   useEffect(() => {
-    let active = true
-    setDashboardConfigStatus('loading')
-    setDashboardConfigError(null)
-    void (async () => {
-      try {
-        const resp = await fetchDashboardConfig()
-        if (!active) return
-        setDashboardConfig(resp)
-        setDashboardConfigStatus('ready')
-        setDashboardConfigError(null)
-      } catch (err) {
-        if (!active) return
-        setDashboardConfig(null)
-        setDashboardConfigStatus('error')
-        setDashboardConfigError(err instanceof Error ? err.message : String(err))
-      }
-    })()
-    return () => { active = false }
+    settingsConfigResource.reset()
+    void settingsConfigResource.load(fetchDashboardConfig())
+    return () => {
+      settingsConfigResource.cancel()
+      settingsConfigResource.reset()
+    }
   }, [])
+
+  const dashboardConfigState = settingsConfigResource.state.value
+  const dashboardConfig = Option.getOrUndefined(
+    remotePrevious(dashboardConfigState),
+  )
+  const dashboardConfigStatus: 'loading' | 'ready' | 'error' =
+    dashboardConfigState._tag === 'Failure'
+      ? 'error'
+      : dashboardConfigState._tag === 'Success'
+        ? 'ready'
+        : 'loading'
+  const dashboardConfigError = dashboardConfigState._tag === 'Failure'
+    ? dashboardConfigState.error.message
+    : undefined
 
   // mcp — exposed tools come from the live capability registry (public_mcp surface)
   const [mcpTools, setMcpTools] = useState<string[]>([])

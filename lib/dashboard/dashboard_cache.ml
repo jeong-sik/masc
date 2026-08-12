@@ -603,10 +603,48 @@ let timeout_error_json ?timeout_kind ?(waiting = false) key timeout_sec =
       ("key", `String key);
     ]
 
+(* RFC-0372 Phase 5 — a bounded compute is still not a yielding compute.
+
+   Phases 1-4 bounded what one dashboard read returns, how many stores it
+   merges, and how long it may run. None of that changes *where* it runs.
+   Every HTTP connection is a fiber forked onto one domain
+   ([server_bootstrap_http.ml]), and Eio fibers switch only at await points.
+   [List.sort] and Yojson decoding contain none, so the domain stops for the
+   whole pure-compute stretch between two file reads: sibling fibers, including
+   [/health], do not run.
+
+   Measured against the live server on 2026-08-12, one telemetry read on an
+   otherwise idle process: [/health] median 10-12ms -> 458ms, peak 5137ms,
+   back to 14ms the instant the read returned. The control pushed 700x more
+   bytes through the same client from a different server and left [/health] at
+   17ms median / 48ms peak, so the stall is the server's, not the harness's.
+   The per-probe timeline degrades across the entire window rather than in
+   periodic spikes, which is the signature of non-yielding compute rather than
+   GC pauses.
+
+   [submit_or_inline] moves the work to a worker domain and turns the caller's
+   wait into an await point, so sibling fibers run. It is also the only
+   sanctioned offload here: [Eio_guard.run_in_systhread] leaves the work with
+   no Eio effect handler, which poisons the shared [dir_mu] and takes keeper
+   persistence down process-wide (see the note in
+   [server_routes_http_routes_provider_runs.ml], which already offloads its own
+   dashboard compute this way). Pool workers run inside [Eio.Switch.run], so
+   [Eio.Mutex.use_rw ~protect] resolves normally.
+
+   Safe to offload here because [compute] runs without holding the cache lock
+   (see the header note); the pool is the only thing the caller waits on.
+
+   Weight stays at the default 1.0. This compute is CPU-bound and occupying a
+   whole worker is the intent; RFC-0204 rejects *reclassifying* existing I/O
+   submissions to 1.0, which is a different change. Pool size then bounds how
+   many computes run at once, so no separate concurrency gate is added. *)
+let offloaded compute () = Executor_pool_ref.submit_or_inline compute
+
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
     timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec
   else
+    let compute = offloaded compute in
     try
       let value =
         if Eio_guard.is_ready () then

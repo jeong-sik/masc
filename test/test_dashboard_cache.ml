@@ -700,6 +700,47 @@ let test_runtime_git_probe_argv_disables_optional_locks () =
     [ "git"; "-C"; "/tmp/demo"; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
     (Runtime.git_rev_parse_short_probe_argv "/tmp/demo")
 
+(* RFC-0372 Phase 5 — the compute must leave the caller's domain.
+
+   HTTP connections are fibers on one domain, and a pure compute never yields,
+   so a dashboard read run inline stops every sibling fiber for its duration.
+   The fix routes it through the executor pool; this test asserts the routing
+   actually happened by observing which domain [compute] ran on.
+
+   The no-pool leg is the control, and it must observe the caller's own domain.
+   Without it, "compute ran on some domain" passes whether or not the offload
+   took effect — the assertion would hold on the unfixed code too. *)
+let test_compute_leaves_caller_domain ~clock ~sw ~dm () =
+  let caller_domain = (Domain.self () :> int) in
+  let observed = ref None in
+  let compute () =
+    observed := Some (Domain.self () :> int);
+    `String "value"
+  in
+  let run_on key =
+    observed := None;
+    ignore
+      (Dashboard_cache.get_or_compute_with_timeout key ~ttl:60.0 ~clock
+         ~timeout_sec:30.0 compute);
+    !observed
+  in
+  Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+    Alcotest.(check (option int))
+      "control: with no pool installed the compute stays on the caller domain"
+      (Some caller_domain)
+      (run_on "rfc0372-phase5-control"));
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    match run_on "rfc0372-phase5-offloaded" with
+    | None -> Alcotest.fail "compute did not run"
+    | Some d ->
+      Alcotest.(check bool)
+        (Printf.sprintf
+           "compute must run off the caller domain (caller=%d, compute=%d)"
+           caller_domain d)
+        true
+        (d <> caller_domain))
+
 (* -- Harness ---------------------------------------------------------------- *)
 
 let () =
@@ -715,6 +756,12 @@ let () =
         [
           test_case "nested get_or_compute" `Quick test_nested_no_deadlock;
           test_case "triple nesting" `Quick test_triple_nesting;
+        ] );
+      ( "offload",
+        [
+          test_case "compute leaves the caller domain" `Quick
+            (test_compute_leaves_caller_domain ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
         ] );
       ( "correctness",
         [
